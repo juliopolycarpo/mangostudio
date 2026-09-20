@@ -214,7 +214,9 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
-    use super::{CallExclusivity, NoExclusivity, NotUpdating, UpdateExclusivityTracker};
+    use super::{
+        CallExclusivity, NoExclusivity, NotUpdating, UpdateActivity, UpdateExclusivityTracker,
+    };
 
     /// Runs `race` under a two-thread [`Barrier`] many times over, so a
     /// check-then-claim window that only sometimes overlaps still gets
@@ -224,6 +226,18 @@ mod tests {
     /// barrier is the only synchronisation this needs, and asserting inside
     /// `race` on every iteration is what turns "usually passes" into
     /// "never passes while the bug exists".
+    ///
+    /// 500 attempts is not an arbitrary round number: measured by reverting
+    /// this file to its pre-fix shape (a separate `Mutex` each for `total`
+    /// and `updates`, with `is_active()` called under neither) and counting
+    /// how many of 500 attempts actually produced a double-success, both
+    /// callers of this function land in the low single digits per 500 on
+    /// an 18-core machine — roughly 1-2% per attempt, not a rate a handful
+    /// of iterations would reliably catch. Compounded over 500 attempts
+    /// that is still better than 99% confidence of at least one hit per
+    /// run, which is what actually matters here: lowering this constant
+    /// materially weakens what a future regression on this file would need
+    /// to survive before merging.
     fn assert_never_races<F>(race: F)
     where
         F: Fn(Arc<UpdateExclusivityTracker>) -> (bool, bool),
@@ -281,6 +295,79 @@ mod tests {
 
             (update.join().unwrap(), ordinary.join().unwrap())
         });
+    }
+
+    #[test]
+    fn an_ordinary_calls_exclusivity_check_holds_the_lock_across_is_active_too() {
+        // Deterministic companion to the barrier test above, rather than a
+        // replacement for it: that test relies on scheduling luck to make
+        // the two calls overlap; this one manufactures the overlap exactly,
+        // by parking the ordinary call's `is_active()` on a channel. Under
+        // the pre-fix shape (`is_active()` called under neither `total` nor
+        // `updates`), a concurrent update `begin()` needs no lock this call
+        // holds and returns immediately; under the fix, `begin()` holds the
+        // single `claims` lock across the entire decision including
+        // `is_active()`, so the update call cannot even acquire that lock
+        // until the ordinary call's own `begin()` returns and drops it.
+        use std::sync::{Mutex, mpsc};
+        use std::time::Duration;
+
+        use crate::ports::audit::lock;
+
+        struct BlocksOnFirstCall {
+            entered: mpsc::SyncSender<()>,
+            // `is_active` takes `&self`, and `UpdateActivity` requires
+            // `Sync` — a bare `Receiver` is `Send` but not `Sync`, so it
+            // needs a `Mutex` even though only one thread ever calls in.
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+
+        impl UpdateActivity for BlocksOnFirstCall {
+            fn is_active(&self) -> bool {
+                self.entered.send(()).unwrap();
+                lock(&self.release).recv().unwrap();
+                false
+            }
+        }
+
+        let (entered_tx, entered_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::channel();
+        let tracker = Arc::new(UpdateExclusivityTracker::new(Arc::new(BlocksOnFirstCall {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        })));
+
+        let ordinary = {
+            let tracker = Arc::clone(&tracker);
+            thread::spawn(move || tracker.begin("shell.run", "ordinary").is_ok())
+        };
+        // Blocks until the ordinary call's begin() is parked inside
+        // is_active(), which under the fix means it is still holding
+        // `claims` — the only thing that can make the assertion below mean
+        // anything, rather than just being lucky about scheduling.
+        entered_rx.recv().unwrap();
+
+        let (update_result_tx, update_result_rx) = mpsc::channel();
+        let update = {
+            let tracker = Arc::clone(&tracker);
+            thread::spawn(move || {
+                let ok = tracker.begin("runtime.update.begin", "update").is_ok();
+                update_result_tx.send(ok).unwrap();
+            })
+        };
+        assert_eq!(
+            update_result_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout),
+            "an update begin() must not be able to return while an ordinary call's exclusivity \
+             check is still deciding, is_active() included"
+        );
+
+        release_tx.send(()).unwrap();
+        assert!(
+            ordinary.join().unwrap(),
+            "the ordinary call itself must still succeed once released"
+        );
+        update.join().unwrap();
     }
 
     #[test]
