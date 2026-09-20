@@ -39,6 +39,7 @@ import {
   bootstrapServeToken,
   consentByInvocation,
   RUNTIME_SETUP_PENDING_MESSAGE,
+  RuntimeCredentialsRefusedError,
   readPairingToken,
   readRuntimeSlotConfig,
   readRuntimeSlotState,
@@ -569,7 +570,14 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
   }
 
   await writeRuntimeSlotConfig(PAIRED_SLOT, { hubUrl });
-  const { restricted } = await writePairingToken(PAIRED_SLOT, token);
+  let restricted: boolean;
+  try {
+    ({ restricted } = await writePairingToken(PAIRED_SLOT, token));
+  } catch (error) {
+    if (!(error instanceof RuntimeCredentialsRefusedError)) throw error;
+    log(error.message);
+    return 1;
+  }
   if (!restricted) {
     log(
       process.platform === 'win32'
@@ -644,7 +652,14 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
 
   await writeRuntimeSlotConfig(PAIRED_SLOT, { serveListen: listenRaw });
 
-  const resolved = await resolveServeToken(args.tokenSource);
+  let resolved: Awaited<ReturnType<typeof resolveServeToken>>;
+  try {
+    resolved = await resolveServeToken(args.tokenSource);
+  } catch (error) {
+    if (!(error instanceof RuntimeCredentialsRefusedError)) throw error;
+    log(error.message);
+    return 1;
+  }
   if (!resolved) {
     log(
       'No serve token. Pipe one in with --token -, set MANGOSTUDIO_RUNTIME_SERVE_TOKEN, or omit --token to generate one.'
