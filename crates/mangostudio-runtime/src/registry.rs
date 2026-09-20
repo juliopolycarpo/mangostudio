@@ -22,6 +22,7 @@ use mango_protocol::session::CallContext;
 use mangostudio_runtime_contract::catalog::{catalog, method};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use crate::panic::catch_panics;
 use crate::ports::audit::{Audit, AuditEntry, NoopAudit, Outcome};
@@ -168,41 +169,64 @@ impl Registry {
                 let validator = Arc::clone(&validator);
                 let audit = Arc::clone(&audit);
                 let clock = Arc::clone(&clock);
-                catch_panics(async move {
+                async move {
                     let started = clock.now();
-                    let outcome = handler(params, context).await;
-                    let recorded = match outcome {
-                        Ok(result) => match serde_json::to_value(result) {
-                            Ok(value) => match check_result(&method_name, &validator, &value) {
-                                Ok(()) => Ok(value),
+                    // Only the handler, its serialisation, and the result
+                    // check are inside this catch: a panic here becomes the
+                    // wire result. Recording is deliberately outside it —
+                    // see the two audit-parity notes below.
+                    let recorded: Result<Value, RemoteError> = catch_panics({
+                        let method_name = method_name.clone();
+                        async move {
+                            match handler(params, context).await {
+                                Ok(result) => match serde_json::to_value(result) {
+                                    Ok(value) => check_result(&method_name, &validator, &value)
+                                        .map(|()| value),
+                                    Err(error) => Err(RemoteError::new(
+                                        codes::INTERNAL,
+                                        format!(
+                                            "Result of \"{method_name}\" failed to serialise: \
+                                             {error}."
+                                        ),
+                                    )
+                                    .with_detail("method", method_name.clone())),
+                                },
                                 Err(error) => Err(error),
-                            },
-                            Err(error) => Err(RemoteError::new(
-                                codes::INTERNAL,
-                                format!(
-                                    "Result of \"{method_name}\" failed to serialise: {error}."
-                                ),
-                            )
-                            .with_detail("method", method_name.clone())),
-                        },
-                        Err(error) => Err(error),
-                    };
+                            }
+                        }
+                    })
+                    .await;
+
+                    // Always recorded, even when `recorded` above is itself
+                    // the panic case — a panicking handler is exactly the
+                    // outcome an operator most needs in the audit trail
+                    // (apps/runtime/src/consent-gate.ts's `gateHandlers`
+                    // records `outcome: "error"` for any unhandled throw).
                     let audit_outcome = if recorded.is_ok() {
                         Outcome::Ok
                     } else {
                         Outcome::Error
                     };
-                    audit
-                        .record(AuditEntry {
-                            method: method_name.clone(),
-                            outcome: audit_outcome,
-                            duration: clock.now().duration_since(started),
-                            capability: None,
-                            code: recorded.as_ref().err().map(|error| error.code.clone()),
-                        })
-                        .await;
+                    let entry = AuditEntry {
+                        method: method_name.clone(),
+                        outcome: audit_outcome,
+                        duration: clock.now().duration_since(started),
+                        capability: None,
+                        code: recorded.as_ref().err().map(|error| error.code.clone()),
+                    };
+                    // Isolated in its own catch: a panicking Audit sink must
+                    // never turn an already-computed `recorded` into
+                    // something else — that would break the port's own
+                    // documented "never fails" contract by letting a
+                    // logging failure change what the hub is told.
+                    let _ = catch_panics(async move {
+                        audit.record(entry).await;
+                        Ok::<(), RemoteError>(())
+                    })
+                    .await;
+
                     recorded
-                })
+                }
             },
         );
         self

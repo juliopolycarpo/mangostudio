@@ -172,27 +172,61 @@ impl Guard for AuthorizationGuard {
         capabilities: &'a [String],
         _context: &'a CallContext,
     ) -> Pin<Box<dyn Future<Output = Result<(), RemoteError>> + Send + 'a>> {
-        Box::pin(catch_panics(async move {
+        Box::pin(async move {
             let started = self.clock.now();
-            let missing = self
-                .authorization
-                .missing_capabilities(method, capabilities)
-                .await;
-            if missing.is_empty() {
-                return Ok(());
-            }
-            let error = consent_denial(method, &missing, &self.slot);
-            self.audit
-                .record(AuditEntry {
+            // Only the authorization check itself is inside this catch: a
+            // panic here becomes the wire result (INTERNAL), distinct from
+            // an ordinary denial (DENIED). Recording is deliberately
+            // outside it — see the two audit-parity notes on
+            // `Registry::implement`, which this mirrors.
+            let outcome: Result<(), RemoteError> = catch_panics(async move {
+                let missing = self
+                    .authorization
+                    .missing_capabilities(method, capabilities)
+                    .await;
+                if missing.is_empty() {
+                    Ok(())
+                } else {
+                    Err(consent_denial(method, &missing, &self.slot))
+                }
+            })
+            .await;
+
+            if let Err(error) = &outcome {
+                // A real denial carries `capability` in its details; a
+                // panic-turned-INTERNAL carries no details at all, so this
+                // stays `None` for that case without a separate branch.
+                let capability = error
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.get("capability"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let audit_outcome = if error.code == codes::DENIED {
+                    Outcome::Denied
+                } else {
+                    Outcome::Error
+                };
+                let entry = AuditEntry {
                     method: method.to_string(),
-                    outcome: Outcome::Denied,
+                    outcome: audit_outcome,
                     duration: self.clock.now().duration_since(started),
-                    capability: missing.first().cloned(),
+                    capability,
                     code: Some(error.code.clone()),
+                };
+                // Isolated in its own catch: a panicking Audit sink must
+                // never turn an already-computed denial/error into
+                // something else on the wire.
+                let audit = Arc::clone(&self.audit);
+                let _ = catch_panics(async move {
+                    audit.record(entry).await;
+                    Ok::<(), RemoteError>(())
                 })
                 .await;
-            Err(error)
-        }))
+            }
+
+            outcome
+        })
     }
 }
 

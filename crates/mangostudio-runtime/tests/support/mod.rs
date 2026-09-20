@@ -13,8 +13,10 @@ use mango_protocol::port::port_pair;
 use mango_protocol::session::{Session, SessionOptions};
 use serde_json::{Value, json};
 
+pub mod panicking_audit;
 pub mod recording_audit;
 
+pub use panicking_audit::PanickingAudit;
 pub use recording_audit::RecordingAudit;
 
 /// Bounds a future so a regression that hangs (rather than fails) still ends
