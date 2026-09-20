@@ -12,7 +12,10 @@
 //!   the same order `apps/runtime/src/consent-gate.ts`'s `gateHandlers`
 //!   records them.
 //! - [`clock`] — when something happened, for an audit entry's duration.
+//! - [`exclusivity`] — whether a call may run at all right now, independent
+//!   of capability consent, decided by what else is in flight.
 
 pub mod audit;
 pub mod authorization;
 pub mod clock;
+pub mod exclusivity;

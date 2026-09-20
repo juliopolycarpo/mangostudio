@@ -29,6 +29,7 @@ use serde_json::Value;
 use crate::panic::catch_panics;
 use crate::ports::audit::{Audit, AuditEntry, Outcome};
 use crate::ports::clock::Clock;
+use crate::ports::exclusivity::CallExclusivity;
 
 /// Decides which of a method's declared capabilities this machine has not
 /// granted.
@@ -132,31 +133,38 @@ pub fn consent_denial(method: &str, missing: &[String], slot: &str) -> RemoteErr
     error
 }
 
-/// The [`mango_protocol::contract::Guard`] this crate registers: asks
-/// [`Authorization`] which capabilities are missing, denies and records
-/// through [`Audit`] if any are, otherwise lets the call through unrecorded
-/// — [`crate::registry::Registry::implement`]'s own wrapper records the
-/// `ok`/`error` outcome once the handler (and this crate's result check)
-/// have settled.
+/// The [`mango_protocol::contract::Guard`] this crate registers: claims this
+/// call's [`CallExclusivity`] slot, asks [`Authorization`] which
+/// capabilities are missing, denies and records through [`Audit`] if any
+/// are, otherwise lets the call through unrecorded —
+/// [`crate::registry::Registry::implement`]'s own wrapper records the
+/// `ok`/`error` outcome, and releases the exclusivity claim, once the
+/// handler (and this crate's result check) have settled. See
+/// [`crate::ports::exclusivity`]'s module docs for why the claim and its
+/// release live in two different places.
 pub struct AuthorizationGuard {
     authorization: Arc<dyn Authorization>,
+    exclusivity: Arc<dyn CallExclusivity>,
     audit: Arc<dyn Audit>,
     clock: Arc<dyn Clock>,
     slot: String,
 }
 
 impl AuthorizationGuard {
-    /// Builds a guard that asks `authorization`, records a denial through
-    /// `audit`, and names `slot` in the refusal's remediation sentence.
+    /// Builds a guard that claims `exclusivity` before asking `authorization`,
+    /// records a denial (or an exclusivity refusal) through `audit`, and
+    /// names `slot` in a consent refusal's remediation sentence.
     #[must_use]
     pub fn new(
         authorization: Arc<dyn Authorization>,
+        exclusivity: Arc<dyn CallExclusivity>,
         audit: Arc<dyn Audit>,
         clock: Arc<dyn Clock>,
         slot: impl Into<String>,
     ) -> Self {
         Self {
             authorization,
+            exclusivity,
             audit,
             clock,
             slot: slot.into(),
@@ -170,27 +178,47 @@ impl Guard for AuthorizationGuard {
         method: &'a str,
         _params: &'a Value,
         capabilities: &'a [String],
-        _context: &'a CallContext,
+        context: &'a CallContext,
     ) -> Pin<Box<dyn Future<Output = Result<(), RemoteError>> + Send + 'a>> {
         Box::pin(async move {
             let started = self.clock.now();
-            // Only the authorization check itself is inside this catch: a
-            // panic here becomes the wire result (INTERNAL), distinct from
-            // an ordinary denial (DENIED). Recording is deliberately
-            // outside it — see the two audit-parity notes on
-            // `Registry::implement`, which this mirrors.
-            let outcome: Result<(), RemoteError> = catch_panics(async move {
-                let missing = self
-                    .authorization
-                    .missing_capabilities(method, capabilities)
+            let call_id = context.id();
+            // Checked, and claimed, before the authorization check itself —
+            // mirroring `consent-gate.ts`'s own ordering (exclusivity first,
+            // consent read second). A refusal here never reaches
+            // `Authorization` at all, and claims nothing for anyone to
+            // release.
+            let outcome: Result<(), RemoteError> = match self.exclusivity.begin(method, call_id) {
+                Err(refusal) => Err(refusal),
+                Ok(()) => {
+                    // Only the authorization check itself is inside this
+                    // catch: a panic here becomes the wire result
+                    // (INTERNAL), distinct from an ordinary denial (DENIED).
+                    // Recording is deliberately outside it — see the two
+                    // audit-parity notes on `Registry::implement`, which
+                    // this mirrors.
+                    let result = catch_panics(async move {
+                        let missing = self
+                            .authorization
+                            .missing_capabilities(method, capabilities)
+                            .await;
+                        if missing.is_empty() {
+                            Ok(())
+                        } else {
+                            Err(consent_denial(method, &missing, &self.slot))
+                        }
+                    })
                     .await;
-                if missing.is_empty() {
-                    Ok(())
-                } else {
-                    Err(consent_denial(method, &missing, &self.slot))
+                    if result.is_err() {
+                        // The handler this claim was for will never run —
+                        // `Registry::implement`'s wrapper, which releases a
+                        // successful claim, is never reached for a denial
+                        // (or a panic) the guard itself returns.
+                        self.exclusivity.end(call_id);
+                    }
+                    result
                 }
-            })
-            .await;
+            };
 
             if let Err(error) = &outcome {
                 // A real denial carries `capability` in its details; a
