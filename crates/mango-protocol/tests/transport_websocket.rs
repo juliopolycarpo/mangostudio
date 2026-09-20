@@ -352,6 +352,32 @@ async fn a_dialler_that_does_not_offer_the_subprotocol_is_closed_with_4400() {
     assert_eq!(code, Some(close_codes::PROTOCOL_ERROR));
 }
 
+/// `with_subprotocol_optional` is the one way to let a dialler like the one
+/// above through instead of refusing it — for an acceptor serving a peer
+/// built before `mango.v1` was mandatory (`serve.ts`'s own documented
+/// compatibility case).
+#[tokio::test]
+async fn with_subprotocol_optional_admits_a_dialler_that_offered_none() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("a bound address");
+    let dialling = tokio::spawn(async move {
+        tokio_tungstenite::connect_async(format!("ws://{address}/conformance")).await
+    });
+
+    let (socket, _peer) = listener.accept().await.expect("a dialler arrives");
+    let options = AcceptOptions::from(WebSocketOptions::default()).with_subprotocol_optional();
+    accept_websocket(socket, options, |_upgrade| Ok(()))
+        .await
+        .expect("subprotocol_optional must admit a peer that offered none at all");
+
+    dialling
+        .await
+        .expect("the dial task runs")
+        .expect("the upgrade itself succeeds");
+}
+
 #[tokio::test]
 async fn an_acceptor_that_selects_nothing_refuses_the_dial() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("a port");

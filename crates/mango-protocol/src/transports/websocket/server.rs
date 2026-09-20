@@ -41,19 +41,35 @@ use super::{WEBSOCKET_SUBPROTOCOL, WebSocketOptions, WebSocketPort, websocket_po
 ///     .with_allowed_origins(["https://app.example"]);
 /// assert_eq!(options.allowed_origins, ["https://app.example"]);
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AcceptOptions {
     /// How this connection chunks, reassembles and closes.
     pub socket: WebSocketOptions,
     /// Serialised origins a browser may dial from. Empty admits no browser.
     pub allowed_origins: Vec<String>,
+    /// Whether an upgrade that never offered `mango.v1` is refused with
+    /// `PROTOCOL_ERROR`. `true` by default, matching every native Mango
+    /// Protocol dialler, which always offers it — see
+    /// [`AcceptOptions::with_subprotocol_optional`] for the one acceptor
+    /// that must let an older peer through unlabelled instead.
+    subprotocol_required: bool,
+}
+
+impl Default for AcceptOptions {
+    fn default() -> Self {
+        Self {
+            socket: WebSocketOptions::default(),
+            allowed_origins: Vec::new(),
+            subprotocol_required: true,
+        }
+    }
 }
 
 impl From<WebSocketOptions> for AcceptOptions {
     fn from(socket: WebSocketOptions) -> Self {
         Self {
             socket,
-            allowed_origins: Vec::new(),
+            ..Self::default()
         }
     }
 }
@@ -77,6 +93,36 @@ impl AcceptOptions {
     {
         self.allowed_origins = allowed_origins.into_iter().map(Into::into).collect();
         self
+    }
+
+    /// Admits an upgrade that never offered `mango.v1`, rather than closing
+    /// it with `PROTOCOL_ERROR` — for an acceptor that must still admit a
+    /// peer built before the subprotocol was mandatory (`serve.ts`'s own
+    /// documented reasoning: an older hub's socket still gets to answer its
+    /// `hello` with a real close code instead of a bare HTTP refusal it has
+    /// no vocabulary for). The subprotocol is still echoed back whenever the
+    /// peer *does* offer it — this only removes the refusal for one that
+    /// offers none.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mango_protocol::transports::websocket::server::AcceptOptions;
+    ///
+    /// let options = AcceptOptions::default().with_subprotocol_optional();
+    /// assert!(!options.requires_subprotocol());
+    /// ```
+    #[must_use]
+    pub fn with_subprotocol_optional(mut self) -> Self {
+        self.subprotocol_required = false;
+        self
+    }
+
+    /// Whether this acceptor refuses an upgrade that never offered
+    /// `mango.v1`. See [`AcceptOptions::with_subprotocol_optional`].
+    #[must_use]
+    pub fn requires_subprotocol(&self) -> bool {
+        self.subprotocol_required
     }
 }
 
@@ -183,8 +229,9 @@ impl std::error::Error for AcceptError {}
 /// sees this side's identity.
 ///
 /// Two checks run before `authorize` ever does. The subprotocol is echoed only
-/// when it was offered, and a dialler that offered nothing is closed with
-/// `4400` rather than left on a socket neither side agrees about. An upgrade
+/// when it was offered; a dialler that offered nothing is closed with `4400`
+/// rather than left on a socket neither side agrees about, unless
+/// [`AcceptOptions::with_subprotocol_optional`] admits it instead. An upgrade
 /// carrying an `Origin` outside [`AcceptOptions::allowed_origins`] is closed
 /// with `4403`: the default list is empty, so a hub a browser is meant to dial
 /// must say which sites it serves.
@@ -266,7 +313,7 @@ where
         .map(|upgrade| upgrade.clone())
         .unwrap_or_default();
 
-    if !upgrade.offered_subprotocol {
+    if !upgrade.offered_subprotocol && options.subprotocol_required {
         close_with(
             stream,
             close_codes::PROTOCOL_ERROR,
