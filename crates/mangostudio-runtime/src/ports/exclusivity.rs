@@ -114,6 +114,27 @@ fn exclusivity_refusal(message: &str, reason: &str) -> RemoteError {
         .with_detail("reason", reason)
 }
 
+/// Every call a [`UpdateExclusivityTracker`] currently has claimed. A
+/// single lock covering both sets, not one each: `total` and `updates` are
+/// read together to decide whether a new claim may proceed, and inserted
+/// into together once it does, so the whole check-then-claim must be one
+/// critical section — two [`mango_protocol`]-dispatched calls checking and
+/// claiming under separate locks could both observe an empty set and both
+/// proceed, which is exactly the overlap this type exists to forbid.
+/// TypeScript never needed this: `consent-gate.ts`'s check and its
+/// `inFlight.add` run synchronously, with no `await` between them, so its
+/// own single-threaded event loop is the mutual exclusion. Rust's
+/// dispatcher runs every handler as its own concurrent task, so that
+/// guarantee does not carry over and has to be re-established with a real
+/// lock.
+#[derive(Default)]
+struct Claims {
+    /// Every call currently claimed, of either kind.
+    total: HashSet<String>,
+    /// The subset of `total` that is an update call.
+    updates: HashSet<String>,
+}
+
 /// The real [`CallExclusivity`]: an update call refuses while anything else
 /// is in flight, and an ordinary call refuses while an update call — or an
 /// update lifecycle outside any single call — is in flight.
@@ -136,10 +157,7 @@ fn exclusivity_refusal(message: &str, reason: &str) -> RemoteError {
 /// assert!(tracker.begin("runtime.update.begin", "2").is_ok());
 /// ```
 pub struct UpdateExclusivityTracker {
-    /// Every call currently claimed, of either kind.
-    total: Mutex<HashSet<String>>,
-    /// The subset of `total` that is an update call.
-    updates: Mutex<HashSet<String>>,
+    claims: Mutex<Claims>,
     update_active: Arc<dyn UpdateActivity>,
 }
 
@@ -149,8 +167,7 @@ impl UpdateExclusivityTracker {
     #[must_use]
     pub fn new(update_active: Arc<dyn UpdateActivity>) -> Self {
         Self {
-            total: Mutex::new(HashSet::new()),
-            updates: Mutex::new(HashSet::new()),
+            claims: Mutex::new(Claims::default()),
             update_active,
         }
     }
@@ -159,39 +176,112 @@ impl UpdateExclusivityTracker {
 impl CallExclusivity for UpdateExclusivityTracker {
     fn begin(&self, method: &str, call_id: &str) -> Result<(), RemoteError> {
         let is_update = method.starts_with(UPDATE_METHOD_PREFIX);
-        // Checked before claiming anything, matching `exclusivityRefusal`
-        // running before `consent-gate.ts` claims its own token — a refused
-        // call must leave no trace in either set for `end` to ever undo.
-        if is_update && !lock(&self.total).is_empty() {
+        // The whole decision — both checks and both inserts — runs under
+        // one guard, held for the entire call: releasing it between the
+        // check and the claim (or between the two sets' own locks) would
+        // reopen exactly the window described on `Claims` above. A refused
+        // call still leaves no trace in either set for `end` to ever undo,
+        // since the early returns happen before either `insert`.
+        let mut claims = lock(&self.claims);
+        if is_update && !claims.total.is_empty() {
             return Err(exclusivity_refusal(
                 "Runtime update refused while another call is in flight.",
                 "call_in_flight",
             ));
         }
-        if !is_update && (!lock(&self.updates).is_empty() || self.update_active.is_active()) {
+        if !is_update && (!claims.updates.is_empty() || self.update_active.is_active()) {
             return Err(exclusivity_refusal(
                 "Runtime call refused while a binary update is in progress.",
                 "update_in_progress",
             ));
         }
-        lock(&self.total).insert(call_id.to_string());
+        claims.total.insert(call_id.to_string());
         if is_update {
-            lock(&self.updates).insert(call_id.to_string());
+            claims.updates.insert(call_id.to_string());
         }
         Ok(())
     }
 
     fn end(&self, call_id: &str) {
-        lock(&self.total).remove(call_id);
-        lock(&self.updates).remove(call_id);
+        let mut claims = lock(&self.claims);
+        claims.total.remove(call_id);
+        claims.updates.remove(call_id);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
     use super::{CallExclusivity, NoExclusivity, NotUpdating, UpdateExclusivityTracker};
+
+    /// Runs `race` under a two-thread [`Barrier`] many times over, so a
+    /// check-then-claim window that only sometimes overlaps still gets
+    /// caught: a `Barrier` makes both threads call `begin` at essentially
+    /// the same instant, but a race that depends on exact scheduling is not
+    /// guaranteed to fire on any single attempt. Never a `sleep` — the
+    /// barrier is the only synchronisation this needs, and asserting inside
+    /// `race` on every iteration is what turns "usually passes" into
+    /// "never passes while the bug exists".
+    fn assert_never_races<F>(race: F)
+    where
+        F: Fn(Arc<UpdateExclusivityTracker>) -> (bool, bool),
+    {
+        for attempt in 0..500 {
+            let tracker = Arc::new(UpdateExclusivityTracker::new(Arc::new(NotUpdating)));
+            let (first_ok, second_ok) = race(tracker);
+            assert!(
+                first_ok ^ second_ok,
+                "attempt {attempt}: exactly one of two racing begin() calls must succeed, \
+                 got first={first_ok} second={second_ok}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_concurrent_update_begins_never_both_succeed() {
+        assert_never_races(|tracker| {
+            let barrier = Arc::new(Barrier::new(2));
+
+            let first = {
+                let tracker = Arc::clone(&tracker);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    tracker.begin("runtime.update.begin", "a").is_ok()
+                })
+            };
+            let second = thread::spawn(move || {
+                barrier.wait();
+                tracker.begin("runtime.update.begin", "b").is_ok()
+            });
+
+            (first.join().unwrap(), second.join().unwrap())
+        });
+    }
+
+    #[test]
+    fn a_concurrent_update_and_an_ordinary_call_never_both_succeed() {
+        assert_never_races(|tracker| {
+            let barrier = Arc::new(Barrier::new(2));
+
+            let update = {
+                let tracker = Arc::clone(&tracker);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    tracker.begin("runtime.update.begin", "a").is_ok()
+                })
+            };
+            let ordinary = thread::spawn(move || {
+                barrier.wait();
+                tracker.begin("shell.run", "b").is_ok()
+            });
+
+            (update.join().unwrap(), ordinary.join().unwrap())
+        });
+    }
 
     #[test]
     fn no_exclusivity_never_refuses_and_end_is_always_a_no_op() {
