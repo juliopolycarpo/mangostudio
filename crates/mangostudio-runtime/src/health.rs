@@ -105,7 +105,7 @@ async fn build_health_report(
     let resolved = resolve_runtime_slot_config(slot, state.stored.as_ref(), fallback_source);
 
     let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
-        detect_shells().await
+        detect_shells(path_override).await
     } else {
         Vec::new()
     };
@@ -179,7 +179,7 @@ pub(crate) async fn build_capability_manifest(
     let resolved = resolve_runtime_slot_config(slot, state.stored.as_ref(), fallback_source);
 
     let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
-        detect_shells().await
+        detect_shells(None).await
     } else {
         Vec::new()
     };
@@ -301,40 +301,121 @@ fn shell_path_candidates(kind: RuntimeShellKind) -> &'static [&'static str] {
     }
 }
 
+/// Bound on the `PATH` walk [`detect_shells`] performs. Named separately
+/// from [`GIT_PROBE_TIMEOUT`]: this is `stat` calls, not a spawned child,
+/// but the failure mode is the identical shape — a wedged `PATH` entry (a
+/// stale NFS mount, an unresponsive `/mnt/c` share when Windows itself is
+/// unresponsive, autofs) blocks a bare `std::fs::metadata` call
+/// indefinitely, and without a bound this walk sat on the hello-building
+/// path with none at all: measured on a 54-entry `PATH` with three misses
+/// (`zsh`, `pwsh`, `powershell`), this walk alone cost ~210ms of every
+/// connection's `hello.capabilities`, next to ~25ms for the (cached, timed)
+/// `git` child — dwarfing it, not the other way around.
+const SHELL_DETECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Every cached shell-detection answer, keyed on the exact `PATH` value it
+/// was computed against. A whole-string key, not a per-entry fingerprint
+/// the way [`git_probe_cache`] keys on one resolved binary's `mtime:size`:
+/// this walk only ever asks "does a name matching this shell exist
+/// somewhere on `PATH`", so a version-manager shim swapped in at an
+/// existing entry does not change the answer this cache holds, and does
+/// not need to invalidate it. A `PATH` that actually changes (an operator
+/// editing it, a new shell session) gets a fresh key and so a fresh walk.
+fn shell_detection_cache() -> &'static Mutex<HashMap<std::ffi::OsString, Vec<RuntimeShellKind>>> {
+    static CACHE: OnceLock<Mutex<HashMap<std::ffi::OsString, Vec<RuntimeShellKind>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Clears every cached shell-detection answer. Test-only, mirroring
+/// [`invalidate_git_probe_cache`]'s own doc comment on why a hook that only
+/// ever compiles under `#[cfg(test)]` cannot be a production "the operator
+/// changed `PATH`" one — and, like that function, gated on `unix` too:
+/// every caller is one of this module's `#[cfg(unix)]` shell-detection
+/// tests, so an unqualified `#[cfg(test)]` here reproduces the exact
+/// Windows dead-code failure `invalidate_git_probe_cache` itself once had.
+#[cfg(all(test, unix))]
+fn invalidate_shell_detection_cache() {
+    shell_detection_cache()
+        .lock()
+        .expect("the shell detection cache mutex is never poisoned")
+        .clear();
+}
+
 /// Every shell kind actually found on `PATH`, in [`RuntimeShellKind`]'s own
 /// declared order. A single [`run_blocking`] call walks `PATH` for all
 /// three at once — this is a handful of `stat` calls, not the kind of work
 /// worth three separate blocking-pool round trips.
-async fn detect_shells() -> Vec<RuntimeShellKind> {
-    run_blocking(|| {
-        [
-            RuntimeShellKind::Bash,
-            RuntimeShellKind::Zsh,
-            RuntimeShellKind::Powershell,
-        ]
-        .into_iter()
-        .filter(|kind| {
-            shell_path_candidates(*kind)
-                .iter()
-                .any(|name| which(name).is_some())
-        })
-        .collect()
-    })
-    .await
+///
+/// `path_override` mirrors [`probe_git`]'s own parameter: `None` reads the
+/// real environment, and tests point this at a synthetic `PATH` instead of
+/// mutating the real, process-wide one every test in this binary shares.
+///
+/// Only a *completed* walk is cached — mirrors [`probe_git`]'s own choice
+/// (see that function's doc comment): a walk this function gave up on at
+/// [`SHELL_DETECTION_TIMEOUT`] says nothing about what a clean walk would
+/// have found, and caching it would announce every shell permanently
+/// absent over one transient stall.
+async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeShellKind> {
+    let path_var = match path_override {
+        Some(value) => value.to_os_string(),
+        None => match std::env::var_os("PATH") {
+            Some(value) => value,
+            None => return Vec::new(),
+        },
+    };
+
+    if let Some(cached) = shell_detection_cache()
+        .lock()
+        .expect("the shell detection cache mutex is never poisoned")
+        .get(&path_var)
+    {
+        return cached.clone();
+    }
+
+    let walk = run_blocking({
+        let path_var = path_var.clone();
+        move || {
+            [
+                RuntimeShellKind::Bash,
+                RuntimeShellKind::Zsh,
+                RuntimeShellKind::Powershell,
+            ]
+            .into_iter()
+            .filter(|kind| {
+                shell_path_candidates(*kind)
+                    .iter()
+                    .any(|name| which_in(name, &path_var).is_some())
+            })
+            .collect::<Vec<_>>()
+        }
+    });
+
+    match tokio::time::timeout(SHELL_DETECTION_TIMEOUT, walk).await {
+        Ok(detected) => {
+            shell_detection_cache()
+                .lock()
+                .expect("the shell detection cache mutex is never poisoned")
+                .insert(path_var, detected.clone());
+            detected
+        }
+        // A wedged entry degrades this connection's manifest to "no shells
+        // detected" rather than never sending `hello` at all — matching
+        // `probe_git`'s own "an absent tool is not an error" contract, one
+        // level up: a `PATH` this function cannot finish walking in time is
+        // reported the same way a `PATH` with nothing on it would be.
+        Err(_elapsed) => Vec::new(),
+    }
 }
 
-/// Resolves `name` against `PATH`, checking (on Unix) that it is actually
-/// executable rather than merely present — mirrors `Bun.which`'s own check.
-/// On Windows, `<name>.exe` is tried alongside the bare name.
-fn which(name: &str) -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    which_in(name, &path_var)
-}
-
-/// [`which`], against an explicit `PATH` value rather than the real
-/// environment — the seam [`probe_git`]'s tests use to point this crate's
-/// own PATH walk at a temporary directory instead of mutating the real,
-/// process-wide `PATH` (which every test in this binary shares).
+/// Resolves `name` against an explicit `PATH` value, checking (on Unix)
+/// that it is actually executable rather than merely present — mirrors
+/// `Bun.which`'s own check. On Windows, `<name>.exe` is tried alongside the
+/// bare name. Never reads the real environment itself — both callers
+/// ([`detect_shells`] and [`probe_git`]) resolve `PATH` (or a test's
+/// override) once themselves, which is the seam their own tests use to
+/// point this walk at a temporary directory instead of mutating the real,
+/// process-wide `PATH` every test in this binary shares.
 fn which_in(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
     for dir in std::env::split_paths(path_var) {
         let candidate = dir.join(name);
@@ -532,11 +613,15 @@ mod tests {
     // fail-closed, `invalidate_git_probe_cache` itself) unused, which
     // `-D warnings` turns into a hard build failure rather than a lint note.
     #[cfg(unix)]
-    use super::{invalidate_git_probe_cache, probe_git};
+    use super::{
+        detect_shells, invalidate_git_probe_cache, invalidate_shell_detection_cache, probe_git,
+    };
     #[cfg(unix)]
     use crate::runtime_home::write_runtime_slot_config;
     #[cfg(unix)]
     use mango_protocol::error::codes;
+    #[cfg(unix)]
+    use mangostudio_runtime_contract::manifest::RuntimeShellKind;
     #[cfg(unix)]
     use std::path::Path;
 
@@ -560,6 +645,22 @@ mod tests {
         let path = dir.join("git");
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        (dir.clone(), dir.into_os_string())
+    }
+
+    /// A directory usable as a synthetic `PATH` entry, containing one
+    /// executable, empty script per name given — `detect_shells` never
+    /// runs it, only checks that it exists and is executable.
+    #[cfg(unix)]
+    fn fake_shells_on_path(dir_name: &str, names: &[&str]) -> (PathBuf, std::ffi::OsString) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = scratch_home(dir_name);
+        for name in names {
+            let path = dir.join(name);
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         (dir.clone(), dir.into_os_string())
     }
 
@@ -649,6 +750,47 @@ mod tests {
             .expect("a fast fake git must not be cancelled");
         assert!(availability.available);
         assert_eq!(availability.version.as_deref(), Some("9.9.9"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn detect_shells_finds_a_shell_present_on_a_synthetic_path() {
+        invalidate_shell_detection_cache();
+        let (_dir, path_var) = fake_shells_on_path("shells-found", &["bash"]);
+
+        let shells = detect_shells(Some(&path_var)).await;
+
+        assert_eq!(shells, vec![RuntimeShellKind::Bash]);
+    }
+
+    /// Regression test for the amplification blocker 2 exists to close:
+    /// `detect_shells` used to re-walk every `PATH` entry on every single
+    /// call (`build_health_report` per RPC, `build_capability_manifest`
+    /// per connection) with no cache at all — measured on a 54-entry `PATH`
+    /// with three misses, ~210ms of every connection's own handshake, more
+    /// than the (already cached, already timed) `git` child probe next to
+    /// it. Proven here the same way `probe_git`'s own cache tests are:
+    /// removing the fake shell after the first call, then asserting the
+    /// second call for the *same* `PATH` value still reports it present —
+    /// which only a served-from-cache answer could do, since a fresh walk
+    /// of this `PATH` would now find nothing.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn detect_shells_caches_by_the_exact_path_value() {
+        invalidate_shell_detection_cache();
+        let (dir, path_var) = fake_shells_on_path("shells-cache", &["bash"]);
+
+        let first = detect_shells(Some(&path_var)).await;
+        assert_eq!(first, vec![RuntimeShellKind::Bash]);
+
+        std::fs::remove_file(dir.join("bash")).unwrap();
+
+        let second = detect_shells(Some(&path_var)).await;
+        assert_eq!(
+            second,
+            vec![RuntimeShellKind::Bash],
+            "a repeated PATH value must be served from cache, not re-walked"
+        );
     }
 
     /// `allow.git = false` must never even resolve `git` on `PATH`: proven
