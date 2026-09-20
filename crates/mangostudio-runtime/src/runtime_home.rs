@@ -647,7 +647,16 @@ pub struct WriteOutcome {
 /// *creation* rather than tightened after the fact: `write_temp_file`'s own
 /// doc comment explains why a post-publish `chmod` would leave a window a
 /// pre-set `mode` does not.
-fn merge_write(
+///
+/// `pub(crate)`, not private: [`crate::consent::invocation`] needs to read,
+/// decide, and write `runtime.json` inside the *same* [`lock::with_slot_lock`]
+/// call — a decision taken from one read must publish from that read, never
+/// a second one that could observe a concurrent writer's change in between —
+/// so it calls this directly rather than going through
+/// [`write_runtime_slot_config`], which takes its own lock and would
+/// deadlock (the lock file has no re-entrant acquire) if called from inside
+/// a closure already holding it.
+pub(crate) fn merge_write(
     path: &Path,
     document: RuntimeHomeDocument,
     fixed: &[(&'static str, Value)],

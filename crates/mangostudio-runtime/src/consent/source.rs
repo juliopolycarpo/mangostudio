@@ -168,7 +168,12 @@ fn next_fingerprint(path: &Path) -> Option<String> {
 /// never consented to launching vendor processes, so its absence cannot be
 /// read as consent). No stored document at all keeps the slot default in
 /// full, `externalAgents` included.
-fn resolve_allow(slot: RuntimeSlot, stored: Option<&Value>) -> ResolvedCapabilityAllow {
+///
+/// `pub(crate)`: [`crate::consent::invocation`] resolves the same stored
+/// value it just decided `setup.state` from, inside the one lock scope that
+/// read it, rather than letting [`ConsentSource::refresh`] re-read the file
+/// a second time under no lock at all.
+pub(crate) fn resolve_allow(slot: RuntimeSlot, stored: Option<&Value>) -> ResolvedCapabilityAllow {
     let defaults = default_consent_for_slot(slot);
     let Some(stored) = stored else {
         return defaults;

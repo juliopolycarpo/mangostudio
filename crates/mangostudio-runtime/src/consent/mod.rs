@@ -12,7 +12,12 @@
 //! - [`authorization`] — the [`crate::ports::authorization::Authorization`]
 //!   this crate registers for real, once a slot's consent is being served
 //!   from disk rather than from a named fake.
+//! - [`invocation`] — consent for `stdio`/`serve`/`connect`, the entry
+//!   points a person or a hub starts directly rather than answering ahead of
+//!   time with `setup`. Mirrors `runtime-home.ts`'s `consentByInvocation` and
+//!   `cli.ts`'s `stdioConsent`.
 
 pub mod authorization;
+pub mod invocation;
 pub mod presets;
 pub mod source;
