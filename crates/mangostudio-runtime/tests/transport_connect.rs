@@ -23,14 +23,51 @@ fn hub_peer() -> PeerInfo {
     }
 }
 
+/// A monotonic counter plus the wall clock, not just `process::id()` and
+/// `line!()`: a reused pid across separate `cargo test` invocations sharing
+/// a persistent `/tmp` degrades a test to silently reusing another run's
+/// leftover directory rather than failing loudly.
+fn unique_suffix() -> u128 {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    nanos.wrapping_add(u128::from(count))
+}
+
 fn scratch_home(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "mango-transport-connect-test-{name}-{}-{}",
         std::process::id(),
-        line!()
+        unique_suffix()
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// A named log fake that actually records what it was told, rather than a
+/// closure that discards it — so a test can assert on the message a code
+/// path produces, not just that some path or other ran.
+#[derive(Clone, Default)]
+struct CollectingLog {
+    messages: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl CollectingLog {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn sink(&self) -> impl Fn(&str) + Send + Sync + 'static {
+        let messages = Arc::clone(&self.messages);
+        move |message: &str| messages.lock().unwrap().push(message.to_string())
+    }
+
+    fn messages(&self) -> Vec<String> {
+        self.messages.lock().unwrap().clone()
+    }
 }
 
 /// Accepts exactly one connection and closes it with `code` the instant the
@@ -99,6 +136,7 @@ async fn a_fatal_close_stops_the_loop_without_retrying() {
     let (slot, home) = create_definition_slot();
     let cancel = CancellationToken::new();
     let jitter = FixedJitter(0.5);
+    let log = CollectingLog::new();
     let outcome = tokio::time::timeout(
         Duration::from_secs(5),
         run(
@@ -111,7 +149,7 @@ async fn a_fatal_close_stops_the_loop_without_retrying() {
             },
             cancel,
             &jitter,
-            |_message| {},
+            log.sink(),
         ),
     )
     .await
@@ -124,6 +162,16 @@ async fn a_fatal_close_stops_the_loop_without_retrying() {
         other => panic!("expected Refused, got {other:?}"),
     }
     hub.await.unwrap();
+
+    let messages = log.messages();
+    assert!(
+        messages.iter().any(|m| m.starts_with("Connected to ")),
+        "the dial succeeded before the hub closed it, so a real connection was logged: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("Reconnecting")),
+        "a fatal close must not log a reconnect attempt it never makes: {messages:?}"
+    );
 }
 
 /// A transient refusal (the hub not accepting the TCP connection at all) is
@@ -144,6 +192,8 @@ async fn a_transient_refusal_is_retried_until_the_hub_accepts() {
     let cancel = CancellationToken::new();
     let cancel_for_run = cancel.clone();
     let jitter = FixedJitter(0.0); // the fastest end of the backoff window
+    let log = CollectingLog::new();
+    let log_for_run = log.clone();
     let run_handle = tokio::spawn(async move {
         run(
             ConnectConfig {
@@ -155,7 +205,7 @@ async fn a_transient_refusal_is_retried_until_the_hub_accepts() {
             },
             cancel_for_run,
             &jitter,
-            |_message| {},
+            log_for_run.sink(),
         )
         .await
     });
@@ -177,6 +227,20 @@ async fn a_transient_refusal_is_retried_until_the_hub_accepts() {
         .unwrap();
     assert_eq!(outcome, ConnectOutcome::Stopped);
     hub.await.unwrap();
+
+    let messages = log.messages();
+    let reconnect_lines = messages
+        .iter()
+        .filter(|m| m.contains("Reconnecting"))
+        .count();
+    assert_eq!(
+        reconnect_lines, 2,
+        "both refused dials must be logged as a reconnect, not silently swallowed: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.starts_with("Connected to ")),
+        "the accepted dial must be logged too, proving the retry actually reached the hub: {messages:?}"
+    );
 }
 
 /// Cancelling mid-connection releases the session (`RELEASED`) and returns
@@ -196,6 +260,8 @@ async fn cancellation_stops_the_loop_and_releases_the_session() {
     let cancel = CancellationToken::new();
     let cancel_for_run = cancel.clone();
     let jitter = FixedJitter(0.0);
+    let log = CollectingLog::new();
+    let log_for_run = log.clone();
     let run_handle = tokio::spawn(async move {
         run(
             ConnectConfig {
@@ -207,7 +273,7 @@ async fn cancellation_stops_the_loop_and_releases_the_session() {
             },
             cancel_for_run,
             &jitter,
-            |_message| {},
+            log_for_run.sink(),
         )
         .await
     });
@@ -227,4 +293,14 @@ async fn cancellation_stops_the_loop_and_releases_the_session() {
         .unwrap();
     assert_eq!(outcome, ConnectOutcome::Stopped);
     hub.await.unwrap();
+
+    let messages = log.messages();
+    assert!(
+        messages.iter().any(|m| m.starts_with("Connected to ")),
+        "the dial must be logged before cancellation tears it down: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("Reconnecting")),
+        "a clean cancellation is not a failure to reconnect from: {messages:?}"
+    );
 }
