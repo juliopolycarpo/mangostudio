@@ -140,7 +140,7 @@ find_checksum() {
   local asset_name="$2"
   local checksum filename rest
 
-  # Keep in lockstep with archive-assets.ts, verify-checksum.ts, cargo-shim,
+  # Keep in lockstep with archive-assets.ts, verify-checksum.ts, the Cargo launcher,
   # and dry-run-checksums.ts; see scripts/tests/support/SHA256SUMS.sample.
   while read -r checksum filename rest || [ -n "${checksum:-}" ]; do
     filename="${filename#\*}"

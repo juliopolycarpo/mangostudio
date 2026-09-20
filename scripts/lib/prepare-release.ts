@@ -1,6 +1,6 @@
 // Lockstep version bump used by scripts/release/prepare-release.ts. Rewrites
 // every manifest release-version.ts checks (workspace package.json files plus
-// the cargo-shim Cargo.toml/Cargo.lock) in two phases — transform everything,
+// the launcher manifest and its entry in the shared Cargo.lock) in two phases — transform everything,
 // then write — so a bad manifest fails before any file changes and a partial
 // bump is impossible.
 
@@ -10,14 +10,14 @@ import { join } from 'node:path';
 import { setCargoLockVersion, setCargoManifestVersion } from './cargo-version';
 import { ROOT_DIR } from './config';
 import {
-  CARGO_SHIM_CRATE,
-  CARGO_SHIM_LOCKFILE,
-  CARGO_SHIM_MANIFEST,
+  LAUNCHER_CRATE,
+  LAUNCHER_MANIFEST,
   LOCKSTEP_PACKAGES,
   normalizeVersion,
   readCargoLockVersion,
   readCargoManifestVersion,
   readPackageVersion,
+  WORKSPACE_CARGO_LOCKFILE,
 } from './release-version';
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -50,7 +50,7 @@ export function setPackageVersion(raw: string, version: string): string {
 }
 
 /** Bump every lockstep manifest (root + workspace package.json files, the
- * cargo-shim Cargo.toml, and its Cargo.lock) to `version`. Returns the
+ * launcher Cargo.toml, and its entry in the shared Cargo.lock) to `version`. Returns the
  * repo-relative paths written, in write order.
  * // Usage: bumpLockstepVersions('0.2.0') */
 export function bumpLockstepVersions(
@@ -67,22 +67,22 @@ export function bumpLockstepVersions(
     return { relativePath, path, content: setPackageVersion(readFileSync(path, 'utf8'), target) };
   });
 
-  const manifestPath = join(rootDir, CARGO_SHIM_MANIFEST);
-  const lockPath = join(rootDir, CARGO_SHIM_LOCKFILE);
+  const manifestPath = join(rootDir, LAUNCHER_MANIFEST);
+  const lockPath = join(rootDir, WORKSPACE_CARGO_LOCKFILE);
   // The release-version readers surface a missing file or section with their
   // established messages before the stampers transform the raw source.
   readCargoManifestVersion(manifestPath);
-  readCargoLockVersion(lockPath, CARGO_SHIM_CRATE);
+  readCargoLockVersion(lockPath, LAUNCHER_CRATE);
   writes.push(
     {
-      relativePath: CARGO_SHIM_MANIFEST,
+      relativePath: LAUNCHER_MANIFEST,
       path: manifestPath,
       content: setCargoManifestVersion(readFileSync(manifestPath, 'utf8'), target),
     },
     {
-      relativePath: CARGO_SHIM_LOCKFILE,
+      relativePath: WORKSPACE_CARGO_LOCKFILE,
       path: lockPath,
-      content: setCargoLockVersion(readFileSync(lockPath, 'utf8'), CARGO_SHIM_CRATE, target),
+      content: setCargoLockVersion(readFileSync(lockPath, 'utf8'), LAUNCHER_CRATE, target),
     }
   );
 

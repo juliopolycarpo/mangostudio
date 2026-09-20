@@ -71,32 +71,10 @@ updates:
           - minor
           - patch
 
-  - package-ecosystem: cargo
-    directory: /packages/cargo-shim
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:30"
-      timezone: UTC
-    commit-message:
-      prefix: chore(deps)
-    cooldown:
-      default-days: 3
-      semver-major-days: 7
-    labels:
-      - "type: dependencies"
-      - "area: cli"
-    groups:
-      cargo-minor-patch:
-        update-types:
-          - minor
-          - patch
-
-  # The Mango Protocol crate. Its workspace manifest and lockfile are at the
-  # repository root, and `crates/mango-protocol/fuzz` is a workspace of its own
-  # with its own Cargo.lock — a directory Dependabot only visits when named.
-  # Both are published or built with `--locked`, so a manifest bump without a
-  # lockfile refresh fails the release rather than the pull request.
+  # The root Cargo workspace owns the protocol crate and crates.io launcher.
+  # `crates/mango-protocol/fuzz` remains a workspace of its own with its own
+  # Cargo.lock, so Dependabot must visit it explicitly. Every published or CI
+  # build uses `--locked`.
   - package-ecosystem: cargo
     directories:
       - /
@@ -115,7 +93,7 @@ updates:
       - "type: dependencies"
       - "area: runtime"
     groups:
-      protocol-cargo-minor-patch:
+      cargo-minor-patch:
         update-types:
           - minor
           - patch

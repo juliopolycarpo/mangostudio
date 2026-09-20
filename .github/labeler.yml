@@ -30,7 +30,7 @@
           # "hub/runtime protocol".
           - "spec/**"
           - "packages/protocol/**"
-          - "crates/**"
+          - "crates/mango-protocol/**"
           - "scripts/protocol/**"
 
 "area: git":
@@ -156,7 +156,7 @@
           - "apps/api/src/server/**"
           - "apps/api/src/lib/server-state.ts"
           - "apps/api/src/lib/mango-paths.ts"
-          - "packages/cargo-shim/**"
+          - "crates/mangostudio-launcher/**"
 
 "area: i18n":
   - changed-files:
@@ -179,6 +179,8 @@
           - "tsconfig*.json"
           - "turbo.jsonc"
           - "cliff.toml"
+          - "Cargo.toml"
+          - "Cargo.lock"
           - "Dockerfile*"
           - ".dockerignore"
 
@@ -189,6 +191,7 @@
           - "*.md"
           - "apps/**/*.md"
           - "packages/**/*.md"
+          - "crates/**/*.md"
           - "scripts/**/*.md"
           - "LICENSE"
           - ".github/**/*.md"

@@ -58,7 +58,7 @@ irm https://github.com/juliopolycarpo/mangostudio/releases/latest/download/insta
 ```
 
 or use Scoop (see table above). The Cargo channel installs a
-[small launcher](packages/cargo-shim/README.md) that downloads the same
+[small launcher](crates/mangostudio-launcher/README.md) that downloads the same
 checksum-verified archive on first run.
 
 Both install scripts live in this repository (`scripts/install/`), ship as

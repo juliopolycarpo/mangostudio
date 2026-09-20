@@ -2,7 +2,7 @@
  * Who installed the running binary, and therefore who may replace it.
  *
  * Three signals, in precedence order: a launcher that announced itself through
- * `MANGOSTUDIO_LAUNCHER` (the npm wrapper and the cargo shim both write to the
+ * `MANGOSTUDIO_LAUNCHER` (the npm wrapper and the Cargo launcher both write to the
  * same dist root the shell installer uses, so the path alone cannot tell them
  * apart), the `install-origin.json` the install scripts write at the dist root,
  * and finally the shape of the executable's own path. Pure over an injected

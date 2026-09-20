@@ -119,7 +119,7 @@ function Save-Url([string]$Url, [string]$Path) {
 
 function Find-Checksum([string]$ManifestPath, [string]$AssetName) {
   foreach ($line in Get-Content $ManifestPath) {
-    # Keep in lockstep with archive-assets.ts, verify-checksum.ts, cargo-shim,
+    # Keep in lockstep with archive-assets.ts, verify-checksum.ts, the Cargo launcher,
     # and install.sh; see scripts/tests/support/SHA256SUMS.sample.
     if ($line -match '^([a-fA-F0-9]{64})\s+\*?(.+)$' -and $Matches[2] -eq $AssetName) {
       return $Matches[1].ToLowerInvariant()

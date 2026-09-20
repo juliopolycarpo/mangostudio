@@ -54,7 +54,7 @@ irm https://github.com/juliopolycarpo/mangostudio/releases/latest/download/insta
 ```
 
 ou use Scoop (veja a tabela acima). O canal Cargo instala um
-[launcher pequeno](../../packages/cargo-shim/README.md) que baixa o mesmo
+[launcher pequeno](../../crates/mangostudio-launcher/README.md) que baixa o mesmo
 arquivo verificado por checksum na primeira execução.
 
 Os dois scripts de instalação vivem neste repositório (`scripts/install/`), são

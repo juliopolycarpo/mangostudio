@@ -4,12 +4,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   assertVersionsInLockstep,
-  CARGO_SHIM_LOCKFILE,
-  CARGO_SHIM_MANIFEST,
   canaryCargoVersion,
   canaryReleaseVersion,
   collectVersionConsistency,
   isValidSemver,
+  LAUNCHER_MANIFEST,
   LOCKSTEP_PACKAGES,
   normalizeVersion,
   readCargoLockVersion,
@@ -17,6 +16,7 @@ import {
   readPackageVersion,
   resolveReleaseVersion,
   rootReleaseVersion,
+  WORKSPACE_CARGO_LOCKFILE,
 } from '../lib/release-version';
 
 // Named fake repo: writes package.json fixtures into an isolated temp dir so the
@@ -41,7 +41,7 @@ class TempRepo {
 
   writeCargoManifest(version: string): void {
     this.writeRaw(
-      CARGO_SHIM_MANIFEST,
+      LAUNCHER_MANIFEST,
       [
         '[package]',
         'name = "mangostudio"',
@@ -57,7 +57,7 @@ class TempRepo {
 
   writeCargoLock(version: string): void {
     this.writeRaw(
-      CARGO_SHIM_LOCKFILE,
+      WORKSPACE_CARGO_LOCKFILE,
       [
         'version = 4',
         '',
@@ -181,20 +181,25 @@ describe('resolveReleaseVersion', () => {
 });
 
 describe('readCargoManifestVersion', () => {
+  test('reads the launcher manifest and shared root lockfile', () => {
+    expect(LAUNCHER_MANIFEST).toBe('crates/mangostudio-launcher/Cargo.toml');
+    expect(WORKSPACE_CARGO_LOCKFILE).toBe('Cargo.lock');
+  });
+
   test('returns the [package] version, not dependency versions', () => {
     repo.writeCargoManifest('1.4.0');
-    expect(readCargoManifestVersion(join(repo.dir, CARGO_SHIM_MANIFEST))).toBe('1.4.0');
+    expect(readCargoManifestVersion(join(repo.dir, LAUNCHER_MANIFEST))).toBe('1.4.0');
   });
 
   test('throws when no [package] section carries a version', () => {
-    repo.writeRaw(CARGO_SHIM_MANIFEST, '[dependencies]\nureq = "3"\nversion = "9.9.9"\n');
-    expect(() => readCargoManifestVersion(join(repo.dir, CARGO_SHIM_MANIFEST))).toThrow(
+    repo.writeRaw(LAUNCHER_MANIFEST, '[dependencies]\nureq = "3"\nversion = "9.9.9"\n');
+    expect(() => readCargoManifestVersion(join(repo.dir, LAUNCHER_MANIFEST))).toThrow(
       /Missing "version" in \[package\]/
     );
   });
 
   test('throws when the manifest file is missing', () => {
-    expect(() => readCargoManifestVersion(join(repo.dir, CARGO_SHIM_MANIFEST))).toThrow(
+    expect(() => readCargoManifestVersion(join(repo.dir, LAUNCHER_MANIFEST))).toThrow(
       /Cannot read Cargo manifest/
     );
   });
@@ -203,20 +208,22 @@ describe('readCargoManifestVersion', () => {
 describe('readCargoLockVersion', () => {
   test('returns the version of the named crate among other packages', () => {
     repo.writeCargoLock('1.4.0');
-    expect(readCargoLockVersion(join(repo.dir, CARGO_SHIM_LOCKFILE), 'mangostudio')).toBe('1.4.0');
+    expect(readCargoLockVersion(join(repo.dir, WORKSPACE_CARGO_LOCKFILE), 'mangostudio')).toBe(
+      '1.4.0'
+    );
   });
 
   test('throws when the crate is not listed', () => {
     repo.writeCargoLock('1.4.0');
-    expect(() => readCargoLockVersion(join(repo.dir, CARGO_SHIM_LOCKFILE), 'missing')).toThrow(
+    expect(() => readCargoLockVersion(join(repo.dir, WORKSPACE_CARGO_LOCKFILE), 'missing')).toThrow(
       /does not list missing/
     );
   });
 
   test('throws when the lockfile is missing', () => {
-    expect(() => readCargoLockVersion(join(repo.dir, CARGO_SHIM_LOCKFILE), 'mangostudio')).toThrow(
-      /Cannot read Cargo lockfile/
-    );
+    expect(() =>
+      readCargoLockVersion(join(repo.dir, WORKSPACE_CARGO_LOCKFILE), 'mangostudio')
+    ).toThrow(/Cannot read Cargo lockfile/);
   });
 });
 
@@ -271,14 +278,14 @@ describe('collectVersionConsistency', () => {
     repo.seedLockstep('0.1.0');
     repo.writeCargoManifest('0.2.0');
     const result = collectVersionConsistency(repo.dir);
-    expect(result.mismatches).toEqual([{ path: CARGO_SHIM_MANIFEST, version: '0.2.0' }]);
+    expect(result.mismatches).toEqual([{ path: LAUNCHER_MANIFEST, version: '0.2.0' }]);
   });
 
   test('reports a Cargo.lock that missed the version bump', () => {
     repo.seedLockstep('0.2.0');
     repo.writeCargoLock('0.1.0');
     const result = collectVersionConsistency(repo.dir);
-    expect(result.mismatches).toEqual([{ path: CARGO_SHIM_LOCKFILE, version: '0.1.0' }]);
+    expect(result.mismatches).toEqual([{ path: WORKSPACE_CARGO_LOCKFILE, version: '0.1.0' }]);
   });
 });
 

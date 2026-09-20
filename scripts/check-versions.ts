@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Fail when the root package.json, workspace package.json files, or the
-// cargo-shim Cargo.toml/Cargo.lock versions have drifted. They must release in
+// launcher Cargo.toml and shared Cargo.lock versions have drifted. They must release in
 // lockstep so the binary, npm packages, crates.io launcher, and changelog all
 // carry the same version. Pass `--expect <version>` (used by the release
 // workflow) to also assert the committed version matches the pushed tag and
@@ -20,7 +20,7 @@ function printHelp(): never {
   console.log(`Usage: bun run check:versions [--expect <version>]
 
 Verifies the root and workspace package.json versions are identical, and that
-the cargo-shim Cargo.toml and Cargo.lock carry the same version.
+the launcher Cargo.toml and its shared Cargo.lock entry carry the same version.
 
 Flags:
   --expect <version>  Also require the root version to equal <version> (the tag)

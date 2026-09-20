@@ -26,15 +26,15 @@ export const LOCKSTEP_PACKAGES: readonly string[] = [
 ];
 
 /** The crates.io launcher manifest; its [package] version must match root. */
-export const CARGO_SHIM_MANIFEST = 'packages/cargo-shim/Cargo.toml';
+export const LAUNCHER_MANIFEST = 'crates/mangostudio-launcher/Cargo.toml';
 
-/** The launcher's committed lockfile. It records the crate's own version, and
- * the release job publishes with `--locked`, so a Cargo.toml bump without a
- * lockfile refresh must fail here instead of inside the release pipeline. */
-export const CARGO_SHIM_LOCKFILE = 'packages/cargo-shim/Cargo.lock';
+/** The shared workspace lockfile. It records the launcher's own version, and
+ * the release job publishes with `--locked`, so a launcher manifest bump
+ * without a matching lock entry must fail before the release pipeline. */
+export const WORKSPACE_CARGO_LOCKFILE = 'Cargo.lock';
 
 /** The crate name the lockstep check looks up inside Cargo.lock. */
-export const CARGO_SHIM_CRATE = 'mangostudio';
+export const LAUNCHER_CRATE = 'mangostudio';
 
 interface VersionEntry {
   /** Manifest path (package.json, Cargo.toml, or Cargo.lock) relative to the repo root. */
@@ -119,7 +119,7 @@ function readTextFile(path: string, label: string): string {
 
 /** Read the `[package]` version from a Cargo.toml without a TOML dependency.
  * Dependency tables also carry `version =` keys, so parsing is section-aware.
- * // Usage: readCargoManifestVersion('/repo/packages/cargo-shim/Cargo.toml') */
+ * // Usage: readCargoManifestVersion('/repo/crates/mangostudio-launcher/Cargo.toml') */
 export function readCargoManifestVersion(manifestPath: string): string {
   const raw = readTextFile(manifestPath, 'Cargo manifest');
   let inPackageSection = false;
@@ -139,7 +139,7 @@ export function readCargoManifestVersion(manifestPath: string): string {
 }
 
 /** Read one crate's resolved version from a Cargo.lock `[[package]]` entry.
- * // Usage: readCargoLockVersion('/repo/packages/cargo-shim/Cargo.lock', 'mangostudio') */
+ * // Usage: readCargoLockVersion('/repo/Cargo.lock', 'mangostudio') */
 export function readCargoLockVersion(lockfilePath: string, crateName: string): string {
   const raw = readTextFile(lockfilePath, 'Cargo lockfile');
   let inNamedPackage = false;
@@ -208,8 +208,8 @@ export function canaryCargoVersion(rootDir: string = ROOT_DIR): string {
   return version;
 }
 
-/** Read every lockstep manifest (package.json files plus the cargo-shim
- * Cargo.toml/Cargo.lock) and report versions that diverge from root.
+/** Read every application manifest plus the launcher's entry in the shared
+ * Cargo lockfile and report versions that diverge from root.
  * // Usage: collectVersionConsistency().mismatches */
 export function collectVersionConsistency(rootDir: string = ROOT_DIR): VersionConsistency {
   const entries: VersionEntry[] = [
@@ -218,12 +218,12 @@ export function collectVersionConsistency(rootDir: string = ROOT_DIR): VersionCo
       version: readPackageVersion(join(rootDir, relativePath)),
     })),
     {
-      path: CARGO_SHIM_MANIFEST,
-      version: readCargoManifestVersion(join(rootDir, CARGO_SHIM_MANIFEST)),
+      path: LAUNCHER_MANIFEST,
+      version: readCargoManifestVersion(join(rootDir, LAUNCHER_MANIFEST)),
     },
     {
-      path: CARGO_SHIM_LOCKFILE,
-      version: readCargoLockVersion(join(rootDir, CARGO_SHIM_LOCKFILE), CARGO_SHIM_CRATE),
+      path: WORKSPACE_CARGO_LOCKFILE,
+      version: readCargoLockVersion(join(rootDir, WORKSPACE_CARGO_LOCKFILE), LAUNCHER_CRATE),
     },
   ];
 
