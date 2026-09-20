@@ -20,6 +20,7 @@
 use std::io;
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 use windows_sys::Win32::System::SystemInformation::{
     ComputerNamePhysicalDnsHostname, GetComputerNameExW,
 };
@@ -64,8 +65,12 @@ pub(super) fn is_process_alive(pid: u32) -> bool {
     // SAFETY: `pid` is an arbitrary `u32` read back from a lock file, which
     // is exactly what `OpenProcess` is for — it validates the id itself and
     // returns a null handle rather than doing anything unsound with a bad
-    // one.
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    // one. `SYNCHRONIZE` is requested alongside the query right because
+    // `WaitForSingleObject` below needs it on the handle itself: without
+    // it the wait fails with `ERROR_ACCESS_DENIED` (surfaced as
+    // `WAIT_FAILED`, not `WAIT_OBJECT_0`), which the conservative branch
+    // below reads as "alive" regardless of the process's real state.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid) };
     if handle.is_null() {
         // `last_os_error` is a safe call; it reads the calling thread's
         // last-error slot, which `OpenProcess` just set.
