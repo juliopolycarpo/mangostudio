@@ -197,7 +197,7 @@ mod windows {
 
     use std::ffi::{OsString, c_void};
     use std::mem::{MaybeUninit, size_of};
-    use std::os::windows::ffi::OsStrExt as _;
+    use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
     use std::path::{Component, Path, PathBuf};
 
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};

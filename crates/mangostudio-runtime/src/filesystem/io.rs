@@ -6,7 +6,9 @@ use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use cap_fs_ext::{FollowSymlinks, MetadataExt as _, OpenOptionsFollowExt as _};
+#[cfg(not(windows))]
+use cap_fs_ext::MetadataExt as _;
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt as _};
 use cap_std::fs::{OpenOptions as CapOpenOptions, Permissions as CapPermissions};
 use mango_protocol::error::{RemoteError, codes};
 use sha2::{Digest, Sha256};
@@ -651,7 +653,8 @@ fn write_replacement_in_with_hook(
         .metadata()
         .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))?;
     let mtime = mtime(&metadata);
-    let identity = object_identity(&metadata);
+    let identity = object_identity(&file, &metadata)
+        .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))?;
     let expected_hash = hash_bytes(bytes);
     hook(ReplacementHookPhase::Prepared, temp_path);
     if !temporary_matches(dir, temp_path, identity, &expected_hash) {
@@ -695,7 +698,7 @@ fn temporary_matches(
         return false;
     };
     metadata.is_file()
-        && object_identity(&metadata) == expected_identity
+        && object_identity(&file, &metadata).is_ok_and(|identity| identity == expected_identity)
         && hash_open_file(&mut file).is_ok_and(|hash| hash == expected_hash)
 }
 
@@ -749,7 +752,7 @@ fn move_no_overwrite_bound_with_hooks(
             from.display()
         )));
     }
-    let source_identity = object_identity(&metadata);
+    let source_identity = object_identity(&source, &metadata).map_err(io_error)?;
     let source_hash = hash_open_file(&mut source)?;
     source.rewind().map_err(io_error)?;
     before_commit();
@@ -853,7 +856,9 @@ fn verify_moved_destination(
     let Ok(metadata) = file.metadata() else {
         return MoveVerification::Uncertain;
     };
-    if !metadata.is_file() || object_identity(&metadata) != expected_identity {
+    if !metadata.is_file()
+        || !object_identity(&file, &metadata).is_ok_and(|identity| identity == expected_identity)
+    {
         return MoveVerification::Uncertain;
     }
     let Ok(hash) = hash_open_file(&mut file) else {
@@ -1055,11 +1060,40 @@ fn atomic_rename_no_replace(
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
 
-fn object_identity(metadata: &Metadata) -> ObjectIdentity {
-    ObjectIdentity {
+#[cfg(not(windows))]
+fn object_identity(_: &File, metadata: &Metadata) -> std::io::Result<ObjectIdentity> {
+    Ok(ObjectIdentity {
         device: metadata.dev(),
         inode: metadata.ino(),
+    })
+}
+
+#[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "stable Rust does not expose Windows file identity from Metadata"
+)]
+fn object_identity(file: &File, _: &Metadata) -> std::io::Result<ObjectIdentity> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    // SAFETY: `file` owns a live handle and `information` points to writable,
+    // correctly aligned storage for the structure populated by the API.
+    let success =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
+    if success == 0 {
+        return Err(std::io::Error::last_os_error());
     }
+    // SAFETY: a successful call initialized every field in the structure.
+    let information = unsafe { information.assume_init() };
+    Ok(ObjectIdentity {
+        device: u64::from(information.dwVolumeSerialNumber),
+        inode: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
+    })
 }
 
 /// Removes a checked leaf through its verified parent directory.
@@ -1632,7 +1666,7 @@ mod tests {
         let root = 42_usize as HANDLE;
         let mut buffer = windows_rename_info(root, Path::new("target.txt")).unwrap();
         let info = buffer.storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
-        let expected: Vec<u16> = "target.txt".encode_wide().collect();
+        let expected: Vec<u16> = std::ffi::OsStr::new("target.txt").encode_wide().collect();
         // SAFETY: `windows_rename_info` returned initialized, aligned storage;
         // the expected slice length is the exact FileNameLength it encoded.
         unsafe {
