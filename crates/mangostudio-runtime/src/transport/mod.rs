@@ -295,6 +295,7 @@ mod tests {
         runtime_peer,
     };
     use crate::runtime_home::RuntimeSlot;
+    use crate::test_support::scratch_path;
 
     fn peer(role: &str) -> PeerInfo {
         PeerInfo {
@@ -436,11 +437,7 @@ mod tests {
 
     #[test]
     fn build_host_implements_exactly_runtime_health_the_workspace_and_probing_methods() {
-        let home = std::env::temp_dir().join(format!(
-            "mango-transport-build-host-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
+        let home = scratch_path("transport-build-host");
         let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
         assert_eq!(
             host.registry.implemented_methods(),

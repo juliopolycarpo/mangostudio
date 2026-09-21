@@ -764,20 +764,22 @@ fn parse_listen_address(value: &str) -> Option<SocketAddr> {
 mod tests {
     use super::{Invocation, TokenSource, parse, parse_listen_address, parse_token_source, run};
     use crate::config::MapEnv;
+    use crate::test_support::{ScratchDir, scratch_path};
 
     /// A scratch `MANGO_HOME` per test, so `run`'s own disk-touching paths
     /// (`consent_by_invocation`'s auto-grant among them) never read or write
     /// a real user's `~/.mango` — this crate denies `unsafe_code`, so a test
     /// here has no `std::env::set_var` escape hatch even if it wanted one;
     /// [`super::run`] takes an [`crate::config::EnvSource`] for exactly this
-    /// reason.
-    fn scratch_env(name: &str) -> MapEnv {
-        let home = std::env::temp_dir().join(format!(
-            "mango-cli-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        MapEnv::from([("MANGO_HOME", home.to_str().unwrap())])
+    /// reason. Uses [`scratch_path`], not [`crate::test_support::scratch_dir`]:
+    /// `run` itself must be the one to create `MANGO_HOME` on first use, the
+    /// same way a real invocation would find it absent. The returned
+    /// [`ScratchDir`] guard must stay bound in the caller for as long as the
+    /// env is in use — dropping it removes the directory.
+    fn scratch_env(name: &str) -> (ScratchDir, MapEnv) {
+        let home = scratch_path(name);
+        let env = MapEnv::from([("MANGO_HOME", home.to_str().unwrap())]);
+        (home, env)
     }
 
     #[test]
@@ -848,7 +850,7 @@ mod tests {
 
     #[test]
     fn version_and_help_still_exit_zero() {
-        let env = scratch_env("version-help");
+        let (_home, env) = scratch_env("version-help");
         assert_eq!(run(&["--version".to_string()], &env), 0);
         assert_eq!(run(&["--help".to_string()], &env), 0);
         assert_eq!(run(&[], &env), 0);
@@ -856,19 +858,19 @@ mod tests {
 
     #[test]
     fn an_unrecognised_top_level_command_exits_one() {
-        let env = scratch_env("unrecognised");
+        let (_home, env) = scratch_env("unrecognised");
         assert_eq!(run(&["--not-a-real-flag".to_string()], &env), 1);
     }
 
     #[test]
     fn setup_without_a_profile_exits_one() {
-        let env = scratch_env("setup-no-profile");
+        let (_home, env) = scratch_env("setup-no-profile");
         assert_eq!(run(&["setup".to_string()], &env), 1);
     }
 
     #[test]
     fn setup_with_an_invalid_profile_exits_one() {
-        let env = scratch_env("setup-invalid-profile");
+        let (_home, env) = scratch_env("setup-invalid-profile");
         assert_eq!(
             run(
                 &[
@@ -884,7 +886,7 @@ mod tests {
 
     #[test]
     fn setup_with_a_valid_profile_writes_it_and_exits_zero() {
-        let env = scratch_env("setup-valid-profile");
+        let (_home, env) = scratch_env("setup-valid-profile");
         assert_eq!(
             run(
                 &[
@@ -902,13 +904,13 @@ mod tests {
 
     #[test]
     fn serve_with_no_listen_address_and_nothing_stored_exits_one() {
-        let env = scratch_env("serve-no-listen");
+        let (_home, env) = scratch_env("serve-no-listen");
         assert_eq!(run(&["serve".to_string()], &env), 1);
     }
 
     #[test]
     fn connect_with_no_hub_url_and_nothing_stored_exits_one() {
-        let env = scratch_env("connect-no-hub");
+        let (_home, env) = scratch_env("connect-no-hub");
         assert_eq!(run(&["connect".to_string()], &env), 1);
     }
 
@@ -917,7 +919,7 @@ mod tests {
     /// setup-pending gate runs before either is even asked for.
     #[test]
     fn connect_refuses_a_slot_armed_pending_even_with_a_hub_and_token() {
-        let env = scratch_env("connect-pending");
+        let (_home, env) = scratch_env("connect-pending");
         let home = crate::config::RuntimeConfig::from_env(&env)
             .unwrap()
             .mango_home;
@@ -978,7 +980,7 @@ mod tests {
     #[test]
     fn connect_reports_and_exits_when_it_cannot_remember_the_hub_url() {
         let oversized_hub_url = format!("wss://hub.example/{}", "x".repeat(2048));
-        let env = scratch_env("connect-huburl-write-fails");
+        let (_home, env) = scratch_env("connect-huburl-write-fails");
         let home = crate::config::RuntimeConfig::from_env(&env)
             .unwrap()
             .mango_home;

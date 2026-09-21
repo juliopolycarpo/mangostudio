@@ -361,16 +361,7 @@ mod tests {
     use super::{FileAudit, HubIdentity};
     use crate::ports::audit::{Audit, AuditEntry, Outcome, lock};
     use crate::ports::wall_clock::FixedWallClock;
-
-    fn scratch_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-file-audit-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir;
 
     fn entry(method: &str, outcome: Outcome) -> AuditEntry {
         AuditEntry {

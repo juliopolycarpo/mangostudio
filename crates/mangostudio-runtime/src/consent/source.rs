@@ -202,24 +202,15 @@ mod tests {
 
     use super::ConsentSource;
     use crate::runtime_home::{RuntimeSlot, write_runtime_slot_config};
-
-    fn scratch_home(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-consent-source-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir as scratch_home;
 
     #[test]
     fn an_absent_file_takes_the_slots_default() {
         let home = scratch_home("absent-host");
-        let source = ConsentSource::new(RuntimeSlot::Host, home.clone());
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         assert!(source.refresh().shell, "host defaults to full");
 
-        let remote = ConsentSource::new(RuntimeSlot::Remote, home);
+        let remote = ConsentSource::new(RuntimeSlot::Remote, home.to_path_buf());
         assert!(!remote.refresh().shell, "remote defaults to none");
     }
 
@@ -240,7 +231,7 @@ mod tests {
         )
         .unwrap();
 
-        let source = ConsentSource::new(RuntimeSlot::Host, home);
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         let allow = source.refresh();
         assert!(allow.fs_read);
         assert!(!allow.shell);
@@ -249,7 +240,7 @@ mod tests {
     #[test]
     fn a_change_is_picked_up_without_reconnecting() {
         let home = scratch_home("live-update");
-        let source = ConsentSource::new(RuntimeSlot::Host, home.clone());
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         assert!(source.refresh().shell, "host starts fully consented");
 
         write_runtime_slot_config(
@@ -284,7 +275,7 @@ mod tests {
             &[("allow", Some(json!({ "shell": true })))],
         )
         .unwrap();
-        let source = ConsentSource::new(RuntimeSlot::Host, home.clone());
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         assert!(source.refresh().shell);
 
         // Removes read permission without touching mtime or size, so the
@@ -337,7 +328,7 @@ mod tests {
             &[("allow", Some(json!({ "shell": true, "fsRead": true })))],
         )
         .unwrap();
-        let source = ConsentSource::new(RuntimeSlot::Host, home.clone());
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         assert!(source.refresh().shell, "granted before revocation");
 
         // Forces the fingerprint to change (a genuinely different file
@@ -375,7 +366,7 @@ mod tests {
             &[("allow", Some(json!({ "shell": true })))],
         )
         .unwrap();
-        let source = ConsentSource::new(RuntimeSlot::Host, home.clone());
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         assert!(source.refresh().shell, "granted before revocation");
 
         let path = crate::runtime_home::slot_config_path(RuntimeSlot::Host, &home);
@@ -395,7 +386,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("runtime.json"), b"{ not json").unwrap();
 
-        let source = ConsentSource::new(RuntimeSlot::Host, home);
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         assert!(
             !source.refresh().shell,
             "malformed JSON must fail closed even though host defaults to full"
@@ -411,7 +402,7 @@ mod tests {
             &[("allow", Some(json!({ "shell": true })))],
         )
         .unwrap();
-        let source = ConsentSource::new(RuntimeSlot::Host, home);
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         let allow = source.refresh();
         assert!(allow.shell, "shell falls back to the slot default");
         assert!(

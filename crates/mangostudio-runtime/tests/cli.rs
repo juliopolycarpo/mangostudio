@@ -4,6 +4,10 @@
 
 use std::process::Command;
 
+mod support;
+
+use support::scratch::scratch_path;
+
 fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_mangostudio-runtime")
 }
@@ -50,26 +54,8 @@ fn an_unrecognised_argument_exits_non_zero() {
     assert!(!output.status.success());
 }
 
-/// A monotonic counter plus the wall clock, not just `process::id()` and
-/// `line!()`: a reused pid across separate `cargo test` invocations sharing
-/// a persistent `/tmp` degrades a test to silently reusing another run's
-/// leftover directory rather than failing loudly.
-fn unique_suffix() -> u128 {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    nanos.wrapping_add(u128::from(count))
-}
-
-fn scratch_mango_home(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "mango-runtime-binary-test-{name}-{}-{}",
-        std::process::id(),
-        unique_suffix()
-    ))
+fn scratch_mango_home(name: &str) -> support::scratch::ScratchDir {
+    scratch_path(&format!("runtime-binary-test-{name}"))
 }
 
 /// `connect` on a slot with no answer yet is the "invocation is consent"

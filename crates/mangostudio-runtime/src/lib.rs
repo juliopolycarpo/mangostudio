@@ -108,6 +108,8 @@ pub mod serve;
 pub mod setup;
 pub mod subprocess;
 pub mod supervisor;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod transport;
 pub mod workspace;
 pub mod workspace_methods;

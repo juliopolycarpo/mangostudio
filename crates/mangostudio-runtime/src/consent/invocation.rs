@@ -360,34 +360,7 @@ mod tests {
     use super::{consent_by_invocation, stdio_consent};
     use crate::ports::wall_clock::{FixedWallClock, SystemWallClock};
     use crate::runtime_home::{RuntimeSlot, read_runtime_slot_config, write_runtime_slot_config};
-
-    /// A monotonic counter plus the wall clock, not just `process::id()` and
-    /// `line!()`: two calls from the *same* line (a loop body, a helper
-    /// called twice in one test) collide on the old scheme, and so does a
-    /// reused pid across separate `cargo test` invocations sharing a
-    /// persistent `/tmp` — both degrade a test to silently reusing another
-    /// run's leftover directory rather than failing loudly. That is not
-    /// hypothetical here: [`a_concurrent_narrowing_write_never_loses_to_the_invocations_grant`]
-    /// calls this from inside a loop.
-    fn unique_suffix() -> u128 {
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        nanos.wrapping_add(u128::from(count))
-    }
-
-    fn scratch_home(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-consent-invocation-test-{name}-{}-{}",
-            std::process::id(),
-            unique_suffix()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir as scratch_home;
 
     #[test]
     fn a_never_before_seen_remote_slot_is_granted_full_and_recorded() {

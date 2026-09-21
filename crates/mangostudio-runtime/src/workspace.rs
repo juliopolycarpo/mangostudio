@@ -461,16 +461,7 @@ pub(crate) fn compare_directory_entry_names(left: &str, right: &str) -> std::cmp
 #[cfg(test)]
 mod tests {
     use super::{WorkspaceContainmentError, guard_mutation, resolve_contained_workspace_path};
-
-    fn scratch_root(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-workspace-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir as scratch_root;
 
     #[test]
     fn a_path_inside_the_root_resolves_to_its_relative_form() {

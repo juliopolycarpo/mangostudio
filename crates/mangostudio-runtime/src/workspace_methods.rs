@@ -452,17 +452,8 @@ mod tests {
         read_workspace_directory, validate_resolved_path, workdir_validation_error,
     };
     use crate::result_check::{check_result, compile_result_schema};
+    use crate::test_support::scratch_dir as scratch_root;
     use crate::workspace_path::WorkspacePathError;
-
-    fn scratch_root(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-workspace-methods-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
 
     /// `compare_directory_entry_names` itself only has indirect coverage
     /// through `read_workspace_directory`'s own listing tests elsewhere in

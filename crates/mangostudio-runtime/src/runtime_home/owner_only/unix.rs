@@ -20,14 +20,11 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
 
     use super::restrict_to_owner;
+    use crate::test_support::scratch_path;
 
     #[test]
     fn restricts_an_existing_file_to_owner_only() {
-        let path = std::env::temp_dir().join(format!(
-            "mango-owner-only-unix-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
+        let path = scratch_path("owner-only-unix-test");
         std::fs::write(&path, b"secret").unwrap();
         // Starts world-readable, which is exactly the loosely-permissioned
         // stale file this call has to tighten.
@@ -42,11 +39,7 @@ mod tests {
 
     #[test]
     fn reports_false_rather_than_erroring_for_a_missing_file() {
-        let path = std::env::temp_dir().join(format!(
-            "mango-owner-only-unix-missing-{}-{}",
-            std::process::id(),
-            line!()
-        ));
+        let path = scratch_path("owner-only-unix-missing");
         assert!(!restrict_to_owner(&path));
     }
 }

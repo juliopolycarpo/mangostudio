@@ -464,16 +464,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{ChildBudget, ChildRunError, run_bounded_child};
-
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-subprocess-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir;
 
     /// Writes an executable `sh` script at `dir/name` and returns its path.
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {

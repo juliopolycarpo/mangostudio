@@ -969,16 +969,7 @@ mod tests {
         slot_current_binary_path, slot_dir, slot_for_path, write_runtime_slot_config,
         write_runtime_slot_credentials,
     };
-
-    fn scratch_home(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-runtime-home-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir as scratch_home;
 
     #[test]
     fn resolve_runtime_source_tells_provisioned_from_bundled() {
@@ -1282,8 +1273,8 @@ mod tests {
     #[test]
     fn keeps_both_writers_fields_when_two_updates_race() {
         let home = scratch_home("race");
-        let home_a = home.clone();
-        let home_b = home.clone();
+        let home_a = home.to_path_buf();
+        let home_b = home.to_path_buf();
 
         let a = std::thread::spawn(move || {
             write_runtime_slot_config(

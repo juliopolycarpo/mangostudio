@@ -309,27 +309,7 @@ mod tests {
     #[cfg(unix)]
     use super::reclaim_if_abandoned;
     use super::{LockError, LockOwner, LockPolicy, create_lock_file, platform, with_slot_lock};
-
-    fn scratch_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-runtime-lock-test-{name}-{}-{}",
-            std::process::id(),
-            fastrand()
-        ));
-        std::fs::create_dir_all(&dir).expect("scratch dir creation");
-        dir
-    }
-
-    /// A cheap, dependency-free source of per-test uniqueness — this crate
-    /// takes no dependency on a random-number crate for test scaffolding
-    /// alone.
-    fn fastrand() -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::time::Instant::now().hash(&mut hasher);
-        std::thread::current().id().hash(&mut hasher);
-        hasher.finish()
-    }
+    use crate::test_support::scratch_dir;
 
     #[test]
     fn the_default_policy_matches_the_shared_protocol_constants() {

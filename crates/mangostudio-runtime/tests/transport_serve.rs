@@ -5,7 +5,6 @@
 //! this process a task and a file descriptor per connection.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,6 +16,10 @@ use mango_protocol::transports::websocket::client::{WebSocketConnectOptions, con
 use mangostudio_runtime::runtime_home::RuntimeSlot;
 use mangostudio_runtime::transport::serve::run;
 use tokio_util::sync::CancellationToken;
+
+mod support;
+
+use support::scratch::{ScratchDir, scratch_dir};
 
 const TOKEN: &str = "test-serve-token";
 
@@ -34,30 +37,8 @@ async fn bind_ephemeral() -> (SocketAddr, tokio::net::TcpListener) {
     (addr, listener)
 }
 
-/// A monotonic counter plus the wall clock, not just `process::id()` and
-/// `line!()`: two calls from the *same* line (a loop, a helper called twice
-/// in one test) collide on the old scheme, and so does a reused pid across
-/// separate `cargo test` invocations sharing a persistent `/tmp` — both
-/// degrade a test to silently reusing another run's leftover directory
-/// rather than failing loudly.
-fn unique_suffix() -> u128 {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
-    nanos.wrapping_add(u128::from(count))
-}
-
-fn scratch_home(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "mango-transport-serve-test-{name}-{}-{}",
-        std::process::id(),
-        unique_suffix()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn scratch_home(name: &str) -> ScratchDir {
+    scratch_dir(&format!("transport-serve-test-{name}"))
 }
 
 /// A named log fake that actually records what it was told, rather than a
@@ -119,7 +100,7 @@ async fn a_bad_credential_is_refused_without_damaging_a_later_authorized_dial() 
         listener,
         TOKEN.to_string(),
         RuntimeSlot::Remote,
-        home,
+        home.to_path_buf(),
         "0.0.0".to_string(),
         cancel.clone(),
         log.sink(),
@@ -151,7 +132,7 @@ async fn a_second_dial_supersedes_the_first() {
         listener,
         TOKEN.to_string(),
         RuntimeSlot::Remote,
-        home,
+        home.to_path_buf(),
         "0.0.0".to_string(),
         cancel.clone(),
         log.sink(),
@@ -192,7 +173,7 @@ async fn cancellation_releases_the_active_connection_before_run_returns() {
         listener,
         TOKEN.to_string(),
         RuntimeSlot::Remote,
-        home,
+        home.to_path_buf(),
         "0.0.0".to_string(),
         cancel.clone(),
         |_message| {},
@@ -230,7 +211,7 @@ async fn idle_peers_with_a_slot_still_free_do_not_block_an_authorized_dial() {
         listener,
         TOKEN.to_string(),
         RuntimeSlot::Remote,
-        home,
+        home.to_path_buf(),
         "0.0.0".to_string(),
         cancel.clone(),
         log.sink(),
@@ -280,7 +261,7 @@ async fn full_exhaustion_recovers_within_the_upgrade_timeout_not_forever() {
         listener,
         TOKEN.to_string(),
         RuntimeSlot::Remote,
-        home,
+        home.to_path_buf(),
         "0.0.0".to_string(),
         cancel.clone(),
         |_message| {},
@@ -334,7 +315,7 @@ async fn a_peer_past_the_pending_handshake_bound_is_dropped_before_spawning() {
         listener,
         TOKEN.to_string(),
         RuntimeSlot::Remote,
-        home,
+        home.to_path_buf(),
         "0.0.0".to_string(),
         cancel.clone(),
         |_message| {},
@@ -380,7 +361,7 @@ async fn get_health_answers_status_and_version_over_the_same_listener() {
         listener,
         TOKEN.to_string(),
         RuntimeSlot::Remote,
-        home,
+        home.to_path_buf(),
         "1.2.3".to_string(),
         cancel.clone(),
         |_message| {},

@@ -10,30 +10,16 @@ use mango_protocol::frame::PeerInfo;
 use mango_protocol::session::{Session, SessionOptions};
 use mango_protocol::transports::spawn::{SpawnOptions, sanitized_env, spawn_port};
 
+mod support;
+
+use support::scratch::{ScratchDir, scratch_path};
+
 fn binary_path() -> String {
     env!("CARGO_BIN_EXE_mangostudio-runtime").to_string()
 }
 
-/// A monotonic counter plus the wall clock, not just `process::id()` and
-/// `line!()`: a reused pid across separate `cargo test` invocations sharing
-/// a persistent `/tmp` degrades a test to silently reusing another run's
-/// leftover directory rather than failing loudly.
-fn unique_suffix() -> u128 {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    nanos.wrapping_add(u128::from(count))
-}
-
-fn scratch_home(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "mango-transport-stdio-spawn-test-{name}-{}-{}",
-        std::process::id(),
-        unique_suffix()
-    ))
+fn scratch_home(name: &str) -> ScratchDir {
+    scratch_path(&format!("transport-stdio-spawn-test-{name}"))
 }
 
 fn hub_peer() -> PeerInfo {

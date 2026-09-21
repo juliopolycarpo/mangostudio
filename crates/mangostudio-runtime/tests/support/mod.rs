@@ -19,6 +19,13 @@ pub mod panicking_authorization;
 pub mod partially_granting_authorization;
 pub mod recording_audit;
 
+// The library's own `#[cfg(test)] mod test_support` is invisible here: an
+// integration test binary links the library compiled *without* `cfg(test)`,
+// so this includes the same source file by path instead of reaching for
+// `mangostudio_runtime::test_support` (which does not exist in that build).
+#[path = "../../src/test_support.rs"]
+pub mod scratch;
+
 pub use granting_authorization::GrantingAuthorization;
 pub use panicking_audit::PanickingAudit;
 pub use panicking_authorization::PanickingAuthorization;

@@ -945,22 +945,13 @@ async fn handle_probe_agent_clis(
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     use mangostudio_runtime_contract::catalog::method;
 
     use super::*;
     use crate::result_check::{check_result, compile_result_schema};
-
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-probing-methods-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir;
 
     /// A directory usable as a synthetic `PATH` entry, holding one
     /// executable script that answers `--version`.

@@ -458,16 +458,7 @@ mod tests {
     use super::*;
     use crate::ports::wall_clock::FixedWallClock;
     use crate::runtime_home::read_runtime_slot_config;
-
-    fn scratch_home(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-setup-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir as scratch_home;
 
     #[test]
     fn parse_boolean_accepts_the_documented_synonyms_case_insensitively() {
