@@ -73,7 +73,7 @@
     "prepack": "bun ./build.ts"
   },
   "dependencies": {
-    "typebox": "1.3.13"
+    "typebox": "1.3.33"
   },
   "devDependencies": {
     "@types/bun": "^1.4.1",
