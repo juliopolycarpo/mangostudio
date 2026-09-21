@@ -989,6 +989,16 @@ mod tests {
     /// below — a served-from-cache second call cannot observe a changed
     /// count or a bumped version; a second *live* run of the script would
     /// show both.
+    ///
+    /// The `tr -d '[:space:]'` after `wc -l` is load-bearing: BSD `wc`
+    /// (macOS) right-justifies its count with leading spaces even when
+    /// reading from stdin via redirection, unlike GNU `wc` (Linux), which
+    /// prints a bare digit there — left unstripped, this fixture spliced
+    /// that padding straight into the reported version. `parse_git_version`'s
+    /// own `.trim()` only trims the outside of the string, exactly as it
+    /// must, so an embedded space this fixture baked in would survive
+    /// untouched; this is the fixture being tightened, never the parser
+    /// being loosened.
     #[cfg(unix)]
     #[tokio::test]
     async fn probe_git_cache_hit_never_invokes_the_binary_a_second_time() {
@@ -998,7 +1008,7 @@ mod tests {
         let (_git_dir, path_var) = fake_git(
             "probe-cache-hit-git",
             &format!(
-                "echo run >> {inv}\ncount=$(wc -l < {inv})\necho \"git version 9.9.$count\"",
+                "echo run >> {inv}\ncount=$(wc -l < {inv} | tr -d '[:space:]')\necho \"git version 9.9.$count\"",
                 inv = invocations.display()
             ),
         );

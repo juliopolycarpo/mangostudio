@@ -588,6 +588,19 @@ mod tests {
     /// not spawn the child a second time. The fake script appends to an
     /// invocation counter file on every real run; a served-from-cache
     /// second call cannot bump it.
+    ///
+    /// The `tr -d '[:space:]'` after `wc -l` is load-bearing, not
+    /// decorative: BSD `wc` (macOS) right-justifies its count with leading
+    /// spaces even when reading from stdin via redirection, unlike GNU
+    /// `wc` (Linux), which prints a bare digit there. Left unstripped,
+    /// `count` held e.g. `"       1"`; splicing that into `9.9.$count`
+    /// unquoted let the shell's own default word-splitting break it into
+    /// two words at the embedded whitespace, which `echo` then rejoined
+    /// with a single space — a real, observed `9.9. 1` on macOS CI, not a
+    /// parsing bug: `probe_binary_version`'s own `.trim()` only trims the
+    /// outside of a string, exactly as it must, so an embedded space
+    /// baked in by this fixture survives untouched. This is the fixture
+    /// being tightened, never the parser being loosened.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_cache_hit_never_invokes_the_binary_a_second_time() {
@@ -598,7 +611,7 @@ mod tests {
             &dir,
             "fake-version-cache",
             &format!(
-                "echo run >> {inv}\ncount=$(wc -l < {inv})\necho 9.9.$count",
+                "echo run >> {inv}\ncount=$(wc -l < {inv} | tr -d '[:space:]')\necho 9.9.$count",
                 inv = invocations.display()
             ),
         );
