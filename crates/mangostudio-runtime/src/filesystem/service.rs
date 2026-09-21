@@ -91,10 +91,7 @@ impl ResponseBudget {
         }
     }
 
-    fn preflight_snapshot(&self, mutation: &Mutation, result: &Value) -> Result<(), RemoteError> {
-        if !mutation.capture_snapshot {
-            return Ok(());
-        }
+    fn preflight_mutation(&self, result: &Value) -> Result<(), RemoteError> {
         preflight_response(result, &self.id, self.limit_bytes, "mutation")
     }
 
@@ -340,7 +337,7 @@ impl Service {
                 &expected_hash,
                 None,
             );
-            response.preflight_snapshot(&params.mutation, &result)?;
+            response.preflight_mutation(&result)?;
             let policy = self.compile_mutation_policy(
                 method,
                 &params.mutation,
@@ -467,7 +464,7 @@ impl Service {
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let expected_hash = hash_hex(&Sha256::digest(&updated));
             let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
-            response.preflight_snapshot(&params.mutation, &result)?;
+            response.preflight_mutation(&result)?;
             let policy = self.compile_mutation_policy(
                 "fs.edit-file",
                 &params.mutation,
@@ -516,7 +513,7 @@ impl Service {
             let expected_hash = hash_hex(&Sha256::digest(&updated));
             let replaced = end-start+1;
             let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
-            response.preflight_snapshot(&params.mutation, &result)?;
+            response.preflight_mutation(&result)?;
             let policy = self.compile_mutation_policy(
                 "fs.replace-range",
                 &params.mutation,
@@ -585,7 +582,7 @@ impl Service {
                 "absent",
                 None,
             );
-            response.preflight_snapshot(&params.mutation, &result)?;
+            response.preflight_mutation(&result)?;
             let policy = self.compile_mutation_policy(
                 "fs.delete-file",
                 &params.mutation,
@@ -659,7 +656,7 @@ impl Service {
                 &expected_hash,
                 Some(&params.resolved_to),
             );
-            response.preflight_snapshot(&params.mutation, &result)?;
+            response.preflight_mutation(&result)?;
             let policy = self.compile_mutation_policy(
                 "fs.move-file",
                 &params.mutation,
@@ -1268,6 +1265,29 @@ mod tests {
         assert_snapshot_frame_error(error);
         assert_eq!(std::fs::read_to_string(&move_path).unwrap(), original);
         assert!(!move_to.exists());
+    }
+
+    #[tokio::test]
+    async fn oversized_snapshot_free_mutation_response_refuses_before_commit() {
+        let (home, service) = fixture();
+        let path = home.join("write");
+        let input_path = format!("display/{}", "a".repeat(4_000));
+
+        let error = Arc::clone(&service)
+            .write(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputPath":input_path, "resolvedPath":path, "content":"new"
+                })),
+                true,
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_snapshot_frame_error(error);
+        assert!(!path.exists());
     }
 
     #[tokio::test]
