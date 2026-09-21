@@ -64,7 +64,9 @@ Useful docs:
   application version, while `[workspace.package].version` remains the protocol version.
 - Check Rust changes with `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,
-  `cargo test --workspace --all-targets --all-features --locked`, and
+  `cargo test --workspace --all-targets --all-features --locked`,
+  `cargo test --doc --workspace --all-features --locked` (`--all-targets` above excludes
+  doctests by definition), and
   `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked`. Protocol changes still
   run the separate protocol gates listed in `packages/protocol/AGENTS.md`.
 
