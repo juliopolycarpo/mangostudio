@@ -154,7 +154,16 @@ pub trait BinaryScanDeps: Send + Sync + 'static {
     /// This scan's platform, home directory and environment variables.
     fn path_env(&self) -> &PathEnv;
     /// Whether `path` exists on disk.
-    fn path_exists(&self, path: &str) -> bool;
+    ///
+    /// `async`, unlike the TypeScript original's synchronous `existsSync`:
+    /// a real host adapter answers this through a blocking-pool `stat`
+    /// (see `crate::blocking::run_blocking`'s own module docs on why a
+    /// bare filesystem call must never sit on an executor thread), which a
+    /// wave-one, fakes-only version of this trait had no reason to
+    /// distinguish from a synchronous in-memory lookup. Wave two's real
+    /// implementation is what forced the correction — see
+    /// `crate::probing::host`'s own module docs.
+    fn path_exists<'a>(&'a self, path: &'a str) -> BoxFuture<'a, bool>;
     /// Runs `binary` with `args`, waiting at most `timeout_ms`, and returns
     /// its version string, or `None` when it ran but produced nothing
     /// readable. See [`ProbeError`] for why a failure to even start counts
@@ -710,12 +719,21 @@ pub async fn scan_runtime(
     options: BinaryScanOptions,
 ) -> RuntimeScanResult {
     let path_env = deps.path_env().clone();
-    let mut candidates = iterate_binary_candidates(definition, &path_env, &options);
-    candidates.retain(|candidate| {
-        !candidate.requires_existence_check || deps.path_exists(&candidate.path)
-    });
-
+    // Computed before the existence-check pass below, not after: that pass
+    // is now real (possibly blocking-pool-routed) I/O per candidate, not a
+    // synchronous in-memory lookup, so a slow filesystem there must eat
+    // into this scan's own total budget rather than getting free time
+    // before the clock the probe phase is measured against even starts.
     let deadline = TokioInstant::now() + Duration::from_millis(options.total_timeout_ms);
+    let candidates = iterate_binary_candidates(definition, &path_env, &options);
+    let mut existence_checked = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        if !candidate.requires_existence_check || deps.path_exists(&candidate.path).await {
+            existence_checked.push(candidate);
+        }
+    }
+    let candidates = existence_checked;
+
     let candidates = Arc::new(candidates);
     let options = Arc::new(options);
     let probe_results = probe_candidates_bounded(
@@ -851,8 +869,9 @@ mod tests {
             &self.path_env
         }
 
-        fn path_exists(&self, path: &str) -> bool {
-            self.existing.contains(path)
+        fn path_exists<'a>(&'a self, path: &'a str) -> BoxFuture<'a, bool> {
+            let exists = self.existing.contains(path);
+            Box::pin(async move { exists })
         }
 
         fn probe_version<'a>(
