@@ -297,9 +297,9 @@ pub struct ConsumerVersionRequirement {
 
 /// A `major`/`minor`/`patch` floor, shared by [`MinimumRuntimeVersion`] and
 /// [`ConsumerVersionRequirement`] so
-/// [`crate::probing::detection::duplicate_analysis::is_below_floor`] can
-/// compare a parsed [`SemVer`] against either without duplicating the
-/// comparison.
+/// `crate::probing::detection::duplicate_analysis`'s private `is_below_floor`
+/// helper can compare a parsed [`SemVer`] against either without
+/// duplicating the comparison.
 pub trait VersionFloor {
     /// The floor's major version.
     fn major(&self) -> u32;

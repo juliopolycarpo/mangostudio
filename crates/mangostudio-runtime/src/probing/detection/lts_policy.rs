@@ -77,9 +77,8 @@ pub struct NodeReleaseSchedule {
 }
 
 /// Inputs [`classify_node_lts_status`] and
-/// [`crate::probing::detection::version_manager_support::toManagedVersions`]
-/// (Rust: `to_managed_versions`) need beyond the version and schedule
-/// themselves.
+/// [`crate::probing::detection::version_manager_support::to_managed_versions`]
+/// need beyond the version and schedule themselves.
 #[derive(Debug, Clone)]
 pub struct LtsPolicyOptions {
     /// The instant to classify against.
