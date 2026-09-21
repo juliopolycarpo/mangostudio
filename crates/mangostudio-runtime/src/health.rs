@@ -789,6 +789,7 @@ mod tests {
     #[cfg(unix)]
     use std::path::Path;
 
+    #[cfg(unix)]
     use crate::test_support::ScratchDir;
     use crate::test_support::scratch_dir as scratch_home;
 
