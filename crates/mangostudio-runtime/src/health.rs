@@ -337,7 +337,11 @@ fn resolve_source(mango_home: &Path) -> &'static str {
 /// Maps [`std::env::consts::OS`] to `process.platform`'s own spelling. See
 /// the module docs for why this crate reports Node's naming rather than
 /// Rust's.
-fn node_platform() -> &'static str {
+///
+/// `pub(crate)`: [`crate::probing::host`]'s real `PathEnv` builder reuses
+/// this exact mapping rather than a second one — the two subsystems must
+/// never disagree about what this host calls itself.
+pub(crate) fn node_platform() -> &'static str {
     match std::env::consts::OS {
         "linux" => "linux",
         "macos" => "darwin",

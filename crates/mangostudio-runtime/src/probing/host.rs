@@ -1,0 +1,855 @@
+//! The real, host-backed implementations of every trait
+//! `crate::probing::detection` and `crate::probing::locations` leave
+//! injected — the second and final wave for probing. Everything in
+//! `detection`/`locations` is pure logic behind a trait; this module is
+//! the one place that binds those traits to the machine this process
+//! actually runs on, mirroring `apps/runtime/src/services/probing/host-env.ts`
+//! exactly (see each item's own doc comment for its TypeScript
+//! counterpart).
+//!
+//! # Every blocking or subprocess call here is bounded
+//!
+//! - A bare filesystem call ([`std::fs::metadata`], `read_dir`,
+//!   `canonicalize`, `read_to_string`) never sits on an async fn's own
+//!   stack: it runs inside a [`crate::blocking::run_blocking`] closure,
+//!   the same rule [`crate::health`]'s `git` probe and
+//!   [`crate::workspace_methods`] already follow.
+//! - [`AuthSignalFs`] and [`LocationFsProbe`] are, by design,
+//!   *synchronous* traits (mirroring their TypeScript originals'
+//!   synchronous `statSync`/`accessSync`/`readdirSync` calls) — a real
+//!   implementation here is bare `std::fs`/`nix::unistd::access`, and it
+//!   is each *caller*'s job (in `crate::probing::methods`) to run the
+//!   whole synchronous probe inside one [`crate::blocking::run_blocking`]
+//!   closure, batching several sync checks per call the same way
+//!   `crate::health`'s own `detect_shells` batches its own three `stat`
+//!   walks into one blocking-pool round trip rather than three.
+//! - Every subprocess ([`crate::subprocess::run_bounded_child`]) is
+//!   bounded by a [`crate::subprocess::ChildBudget`] and races `cancel`
+//!   exactly like `crate::health`'s own `probe_git` does.
+//!
+//! # Memoization
+//!
+//! This module's own `probe_binary_version` caches by resolved candidate
+//! path plus `crate::consent::source::fingerprint_of`'s `mtime:size`
+//! fingerprint — the exact pattern `crate::health`'s own `probe_git` cache
+//! already established and this module deliberately does not reinvent.
+//! Every one of this crate's
+//! runtime and agent-CLI definitions shares one `version_args` spelling
+//! (`["--version"]`), so there is no case where the *same* resolved path
+//! could mean two different probe invocations — path plus fingerprint is
+//! the whole key. A caller-supplied `pathEnv` override changes which
+//! candidate paths are even generated upstream in
+//! [`crate::probing::detection::binary_scan::scan_runtime`]; it never
+//! changes what running an already-chosen path actually does, so it does
+//! not belong in this cache's key either.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use tokio_util::sync::CancellationToken;
+
+use super::detection::BoxFuture;
+use super::detection::auth_signal::{AuthSignalFs, AuthSignalStat};
+use super::detection::binary_scan::{BinaryScanDeps, ProbeError};
+use super::detection::nvm::NvmFileSystem;
+use super::detection::path_env::PathEnv;
+use super::detection::version_manager_support::ManagedVersionFileSystem;
+use super::detection::winget_ownership::{
+    NODE_LTS_WINGET_PACKAGE_ID, WingetOwnership, parse_winget_list_output, winget_list_argv,
+};
+use super::locations::{LocationFsProbe, LocationLayout};
+use crate::blocking::run_blocking;
+use crate::consent::source::fingerprint_of;
+use crate::subprocess::{ChildBudget, run_bounded_child};
+
+/// Builds a [`PathEnv`] for this host, mirroring
+/// `createRuntimePathEnv`/`withCanonicalPathKey` in `host-env.ts` exactly,
+/// including the Windows case-folding fix: `overrides` (the caller's
+/// `pathEnv.env`, when the `probing.*` params carried one) is merged over
+/// this process's own environment *before* the canonical-`PATH`-key pass
+/// runs, so an override that spells the key `Path` still ends up readable
+/// under the exact-cased `PATH` key every detector in this crate's port
+/// reads through [`PathEnv::env_var`].
+///
+/// Neither [`std::env::vars`] nor [`crate::runtime_home::home_dir`] touch
+/// the filesystem — both only read this process's own in-memory
+/// environment block — so, unlike every other adapter in this module,
+/// this one needs no [`run_blocking`] wrapper.
+pub(crate) fn build_runtime_path_env(overrides: Option<&HashMap<String, String>>) -> PathEnv {
+    let mut env: HashMap<String, String> = std::env::vars().collect();
+    if let Some(overrides) = overrides {
+        for (key, value) in overrides {
+            env.insert(key.clone(), value.clone());
+        }
+    }
+    PathEnv {
+        platform: crate::health::node_platform().to_string(),
+        home_dir: crate::runtime_home::home_dir()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        env: with_canonical_path_key(env),
+    }
+}
+
+/// Restores a canonical `PATH` key after the override merge above, mirroring
+/// `host-env.ts`'s `withCanonicalPathKey` and the real bug its own doc
+/// comment describes: Windows names the variable `Path`; every detector in
+/// this crate's port reads the exact key `PATH`, so a caller-supplied
+/// override (or this host's own [`std::env::vars`] on Windows) that only
+/// carries the differently-cased key must not leave `PATH` unset.
+fn with_canonical_path_key(mut env: HashMap<String, String>) -> HashMap<String, String> {
+    if env.contains_key("PATH") {
+        return env;
+    }
+    if let Some(key) = env
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case("path"))
+        .cloned()
+        && let Some(value) = env.get(&key).cloned()
+    {
+        env.insert("PATH".to_string(), value);
+    }
+    env
+}
+
+/// The real [`BinaryScanDeps`]: `PATH`/well-known-directory existence
+/// checks and symlink resolution through [`run_blocking`], version probes
+/// through [`crate::subprocess::run_bounded_child`], memoized by resolved
+/// path and fingerprint. Mirrors `createBinaryScanDeps`.
+pub(crate) struct RealBinaryScanDeps {
+    path_env: PathEnv,
+    cancel: CancellationToken,
+}
+
+impl RealBinaryScanDeps {
+    pub(crate) fn new(path_env: PathEnv, cancel: CancellationToken) -> Self {
+        Self { path_env, cancel }
+    }
+}
+
+impl BinaryScanDeps for RealBinaryScanDeps {
+    fn path_env(&self) -> &PathEnv {
+        &self.path_env
+    }
+
+    fn path_exists<'a>(&'a self, path: &'a str) -> BoxFuture<'a, bool> {
+        let path = path.to_string();
+        Box::pin(async move { run_blocking(move || Path::new(&path).exists()).await })
+    }
+
+    fn probe_version<'a>(
+        &'a self,
+        binary: &'a str,
+        args: &'a [String],
+        timeout_ms: u64,
+    ) -> BoxFuture<'a, Result<Option<String>, ProbeError>> {
+        let binary_path = binary.to_string();
+        let args = args.to_vec();
+        let cancel = self.cancel.clone();
+        Box::pin(async move { probe_binary_version(binary_path, args, timeout_ms, &cancel).await })
+    }
+
+    fn realpath<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<String, ()>> {
+        let path = path.to_string();
+        Box::pin(async move { run_blocking(move || canonicalize(&path)).await })
+    }
+}
+
+fn canonicalize(path: &str) -> Result<String, ()> {
+    std::fs::canonicalize(path)
+        .map(|resolved| resolved.to_string_lossy().into_owned())
+        .map_err(|_| ())
+}
+
+/// A `--version` line is a handful of bytes; this is generous enough for a
+/// verbose vendor CLI banner ahead of it while still being a small,
+/// bounded allocation regardless of what a runaway binary writes past it —
+/// [`crate::subprocess::read_capped`]'s own draining guarantees the excess
+/// is read and discarded, never buffered, so this cap only trims what
+/// this crate keeps, not what the child is allowed to write.
+const PROBE_MAX_STDOUT_BYTES: usize = 8 * 1024;
+/// Stderr is never parsed for a version; this only needs to be large
+/// enough that a diagnostic message does not itself trip a `SIGPIPE` on
+/// the child (see [`crate::subprocess`]'s own module docs on
+/// `read_capped`).
+const PROBE_MAX_STDERR_BYTES: usize = 1024;
+
+/// How much shorter than the pure layer's own `timeout_ms` this module's
+/// [`ChildBudget::deadline`] is set.
+///
+/// [`crate::probing::detection::binary_scan::probe_one_candidate`] already
+/// wraps this trait's whole `probe_version` future in its own
+/// `tokio::time::timeout(timeout_duration, …)`, using the *same*
+/// `timeout_duration` it hands this function as `timeout_ms` — so without
+/// a margin, this module's own [`run_bounded_child`] deadline and that
+/// outer timeout would race to fire at effectively the same instant. If
+/// the outer timeout wins that race, it drops this future mid-`.await`
+/// inside `run_bounded_child`'s own `tokio::select!`, which means the kill
+/// step in that function's body never runs — cleanup then falls back
+/// entirely to `tokio::process::Command::kill_on_drop`, the "best-effort,
+/// never the primary path" backstop `crate::subprocess`'s own module docs
+/// describe. Shaving a small, fixed margin off this module's own deadline
+/// makes it fire first deterministically, so `run_bounded_child` is always
+/// the one that kills and reaps the child.
+const PROBE_DEADLINE_MARGIN: Duration = Duration::from_millis(100);
+
+/// Every cached `probe_version` answer, keyed on the candidate path
+/// exactly as handed to this function — never a bare binary name, and
+/// never canonicalised (mirrors [`crate::health`]'s own `git_probe_cache`,
+/// which keys on `which_in`'s un-canonicalised, PATH-joined path for the
+/// identical reason: two `PATH` entries that alias the same real file
+/// through a symlink get two cache entries, which costs one redundant
+/// probe the first time each is seen and nothing after that — cheaper
+/// than a second `realpath` round trip on every single probe just to
+/// share a cache slot).
+/// One cache entry: the fingerprint a probe answered against, and the
+/// version string it produced (or `None`, when the binary ran but its
+/// output was empty). Factored out only so [`probe_version_cache`]'s own
+/// type stays under clippy's `type_complexity` threshold, not because
+/// anything else in this module needs to name it.
+type ProbeVersionCacheEntry = (String, Option<String>);
+
+fn probe_version_cache() -> &'static Mutex<HashMap<PathBuf, ProbeVersionCacheEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, ProbeVersionCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Clears every cached `probe_version` answer. Test-only, gated the same
+/// way [`crate::health`]'s `invalidate_git_probe_cache` is: every caller
+/// lives behind this crate's `#[cfg(unix)]` real-child tests, so an
+/// unqualified `#[cfg(test)]` here would be reported dead code on a
+/// Windows build under `-D warnings`.
+#[cfg(all(test, unix))]
+pub(crate) fn invalidate_probe_version_cache() {
+    probe_version_cache()
+        .lock()
+        .expect("the probe-version cache mutex is never poisoned")
+        .clear();
+}
+
+fn lookup_probe_cache(path: &Path, fingerprint: &str) -> Option<Option<String>> {
+    let cache = probe_version_cache()
+        .lock()
+        .expect("the probe-version cache mutex is never poisoned");
+    let (cached_fingerprint, value) = cache.get(path)?;
+    (cached_fingerprint == fingerprint).then(|| value.clone())
+}
+
+fn cache_probe_result(path: PathBuf, fingerprint: String, value: Option<String>) {
+    let mut cache = probe_version_cache()
+        .lock()
+        .expect("the probe-version cache mutex is never poisoned");
+    cache.insert(path, (fingerprint, value));
+}
+
+/// Probes `binary_path -- args`, memoized by resolved path and
+/// fingerprint. Only a probe that actually ran to a successful exit is
+/// cached — mirrors [`crate::health::probe_git`]'s own choice not to cache
+/// a timeout, a failed spawn, or even a *definite* non-zero exit: any of
+/// those says nothing durable enough about the next probe to be worth
+/// short-circuiting it.
+///
+/// # Errors
+/// [`ProbeError`] for every failure mode alike (timed out, cancelled,
+/// could not spawn) — see that type's own docs for why this trait has no
+/// finer-grained failure to report, and why that is fine: the pure layer
+/// above this function treats every [`ProbeError`] the same way a `null`
+/// TypeScript probe result is treated, as "ran, produced nothing".
+async fn probe_binary_version(
+    binary_path: String,
+    args: Vec<String>,
+    timeout_ms: u64,
+    cancel: &CancellationToken,
+) -> Result<Option<String>, ProbeError> {
+    let path_buf = PathBuf::from(&binary_path);
+    let fingerprint = run_blocking({
+        let path_buf = path_buf.clone();
+        move || {
+            std::fs::metadata(&path_buf)
+                .ok()
+                .map(|metadata| fingerprint_of(&metadata))
+        }
+    })
+    .await;
+
+    if let Some(cached) = fingerprint
+        .as_deref()
+        .and_then(|fingerprint| lookup_probe_cache(&path_buf, fingerprint))
+    {
+        return Ok(cached);
+    }
+
+    let deadline = Duration::from_millis(timeout_ms)
+        .saturating_sub(PROBE_DEADLINE_MARGIN)
+        .max(Duration::from_millis(1));
+    let budget = ChildBudget {
+        deadline,
+        max_stdout_bytes: PROBE_MAX_STDOUT_BYTES,
+        max_stderr_bytes: PROBE_MAX_STDERR_BYTES,
+    };
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+
+    match run_bounded_child(&path_buf, &arg_refs, None, budget, cancel).await {
+        Ok(outcome) if outcome.status_success => {
+            let text = String::from_utf8_lossy(&outcome.stdout).trim().to_string();
+            let value = if text.is_empty() { None } else { Some(text) };
+            if let Some(fingerprint) = fingerprint {
+                cache_probe_result(path_buf, fingerprint, value.clone());
+            }
+            Ok(value)
+        }
+        // Ran, but exited non-zero: mirrors `probeBinaryVersion`'s own
+        // `execFile` rejection path, which reads a non-zero exit the same
+        // as "produced nothing" rather than a hard failure. Not cached —
+        // see this function's own doc comment.
+        Ok(_) => Ok(None),
+        Err(_child_run_error) => Err(ProbeError),
+    }
+}
+
+/// The real filesystem seam nvm's and fnm's detectors share, plus nvm's
+/// own `read_file`. Mirrors `NODE_MANAGED_VERSION_FILE_SYSTEM`/
+/// `NODE_NVM_FILE_SYSTEM`.
+pub(crate) struct RealManagedVersionFs;
+
+impl ManagedVersionFileSystem for RealManagedVersionFs {
+    fn path_exists<'a>(&'a self, path: &'a str) -> BoxFuture<'a, bool> {
+        let path = path.to_string();
+        Box::pin(async move { run_blocking(move || Path::new(&path).exists()).await })
+    }
+
+    fn read_directory<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<Vec<String>, ()>> {
+        let path = path.to_string();
+        Box::pin(async move { run_blocking(move || read_directory_names(&path)).await })
+    }
+
+    fn realpath<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<String, ()>> {
+        let path = path.to_string();
+        Box::pin(async move { run_blocking(move || canonicalize(&path)).await })
+    }
+}
+
+fn read_directory_names(path: &str) -> Result<Vec<String>, ()> {
+    std::fs::read_dir(path).map_err(|_| ()).map(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect()
+    })
+}
+
+impl NvmFileSystem for RealManagedVersionFs {
+    fn read_file<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<String, ()>> {
+        let path = path.to_string();
+        Box::pin(async move {
+            run_blocking(move || std::fs::read_to_string(&path).map_err(|_| ())).await
+        })
+    }
+}
+
+/// The real, synchronous [`AuthSignalFs`]: [`std::fs::metadata`] for
+/// `stat`, and a bounded, `O_RDONLY`-only regular-file read for
+/// `read_file` — mirrors `NODE_AUTH_SIGNAL_FS`'s `statSync`/
+/// `readBoundedUtf8`.
+///
+/// Left synchronous on purpose (see this module's own docs): every caller
+/// in `crate::probing::methods` runs a whole auth/config-home probe (this
+/// plus [`locations::LocationFsProbe`], batched) inside one
+/// [`run_blocking`] closure, never this type's methods bare on an async
+/// fn's stack.
+pub(crate) struct RealAuthSignalFs;
+
+impl AuthSignalFs for RealAuthSignalFs {
+    fn stat(&self, path: &str) -> Result<AuthSignalStat, std::io::Error> {
+        let metadata = std::fs::metadata(path)?;
+        Ok(AuthSignalStat {
+            is_directory: metadata.is_dir(),
+            is_file: metadata.is_file(),
+        })
+    }
+
+    fn read_file(&self, path: &str, max_bytes: usize) -> Result<String, std::io::Error> {
+        use std::io::Read;
+        // This never returns more than `max_bytes` regardless of the real
+        // file's size — the privacy/size bound `probe_config_key`'s own
+        // module docs require — and never exposes anything past the
+        // `Result<String, io::Error>` this trait already commits to: no
+        // caller of this type ever logs or forwards the string itself,
+        // only the boolean `probe_config_key`/`probe_auth_file` derive
+        // from it.
+        let file = std::fs::File::open(path)?;
+        let mut limited = file.take(max_bytes as u64);
+        let mut buffer = String::new();
+        limited.read_to_string(&mut buffer)?;
+        Ok(buffer)
+    }
+}
+
+/// The real [`LocationFsProbe`]: existence/read/write access checks
+/// through `nix::unistd::access` on Unix (an ACL-aware permission check,
+/// not merely "the path exists"), and a filtered `read_dir` for
+/// `count_entries`. Mirrors `NODE_LOCATION_FS_PROBE`.
+///
+/// # Windows narrowing
+/// Unix's `access(2)` answers a real, ACL-aware permission question; this
+/// crate has no equivalent Windows API wired up (`crate::workspace_methods`'s
+/// `validate_resolved_path` narrows the identical class of check the same
+/// way, with the same caveat). `is_readable` there falls back to "the path
+/// could be stat-ed at all", and `is_writable` falls back to the
+/// read-only file attribute — narrower than a real access-control check,
+/// but never wrong in the direction that matters most (a location an ACL
+/// truly denies write to, but whose read-only attribute is unset, would
+/// be reported writable when it is not; this is a known, documented gap,
+/// not a silent one).
+pub(crate) struct RealLocationFsProbe;
+
+impl LocationFsProbe for RealLocationFsProbe {
+    fn exists(&self, path: &str) -> bool {
+        Path::new(path).exists()
+    }
+
+    fn is_writable(&self, path: &str) -> bool {
+        #[cfg(unix)]
+        {
+            nix::unistd::access(path, nix::unistd::AccessFlags::W_OK).is_ok()
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::metadata(path)
+                .map(|metadata| !metadata.permissions().readonly())
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_readable(&self, path: &str) -> bool {
+        #[cfg(unix)]
+        {
+            nix::unistd::access(path, nix::unistd::AccessFlags::R_OK).is_ok()
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::metadata(path).is_ok()
+        }
+    }
+
+    fn count_entries(&self, path: &str, layout: LocationLayout) -> Option<usize> {
+        let entries = std::fs::read_dir(path).ok()?;
+        let mut count = 0usize;
+        for entry in entries.filter_map(Result::ok) {
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let counted = if file_type.is_symlink() {
+                true
+            } else {
+                match layout {
+                    LocationLayout::DirectoryOfDirs => file_type.is_dir(),
+                    LocationLayout::DirectoryOfFiles => file_type.is_file(),
+                    LocationLayout::SingleFile => false,
+                }
+            };
+            if counted {
+                count += 1;
+            }
+        }
+        Some(count)
+    }
+}
+
+/// Above the caller's own per-candidate probe budget on purpose: `winget
+/// list` is slow, this runs once per `probing.runtimes` call rather than
+/// once per candidate, and a cancelled or timed-out probe answers
+/// [`WingetOwnership::Unknown`] instead of failing the whole call. Mirrors
+/// `host-env.ts`'s `WINGET_OWNERSHIP_TIMEOUT_MS` exactly, including its
+/// own reasoning: `8_000` sits comfortably under the hub's much larger
+/// overall deadline for a `probing.runtimes` request, so a slow `winget`
+/// degrades one signal on the response rather than delaying everything
+/// behind it.
+const WINGET_OWNERSHIP_TIMEOUT_MS: u64 = 8_000;
+
+/// A `winget list` capture is a short, fixed-width table for one exact
+/// package id — a few hundred bytes in practice. This is generous enough
+/// for a heavily localized header row while staying a small, bounded
+/// allocation.
+const WINGET_LIST_MAX_STDOUT_BYTES: usize = 16 * 1024;
+const WINGET_LIST_MAX_STDERR_BYTES: usize = 4 * 1024;
+
+/// Asks winget whether it owns [`NODE_LTS_WINGET_PACKAGE_ID`], mapping
+/// every failure — the binary missing (compiles and is at least attempted
+/// on every platform; only ever resolves on win32), a timeout, a
+/// cancellation, an unrecognized exit code — to
+/// [`WingetOwnership::Unknown`]. Mirrors `probeWingetOwnership` exactly,
+/// including spawning the bare `"winget"` name rather than a resolved
+/// path: `execFile('winget', …)` in the TypeScript original relies on the
+/// OS's own `PATH` search using *this process's real environment*, never
+/// a caller-supplied `pathEnv` override, and `tokio::process::Command`
+/// with no `env_clear`/`envs` call (this call passes `env: None`) resolves
+/// a bare program name through the identical OS search — so this
+/// deliberately does not thread the scan's own possibly-overridden
+/// `PathEnv` through this one call, matching the reference exactly.
+pub(crate) async fn probe_winget_ownership(cancel: &CancellationToken) -> WingetOwnership {
+    let args = winget_list_argv(NODE_LTS_WINGET_PACKAGE_ID);
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let budget = ChildBudget {
+        deadline: Duration::from_millis(WINGET_OWNERSHIP_TIMEOUT_MS),
+        max_stdout_bytes: WINGET_LIST_MAX_STDOUT_BYTES,
+        max_stderr_bytes: WINGET_LIST_MAX_STDERR_BYTES,
+    };
+    match run_bounded_child(Path::new("winget"), &arg_refs, None, budget, cancel).await {
+        Ok(outcome) => {
+            let stdout = String::from_utf8_lossy(&outcome.stdout).into_owned();
+            parse_winget_list_output(
+                &stdout,
+                outcome.exit_code.map(i64::from),
+                NODE_LTS_WINGET_PACKAGE_ID,
+            )
+        }
+        Err(_child_run_error) => WingetOwnership::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "mango-probing-host-test-{name}-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn with_canonical_path_key_folds_a_differently_cased_key() {
+        let mut env = HashMap::new();
+        env.insert("Path".to_string(), "C:\\Windows".to_string());
+        let folded = with_canonical_path_key(env);
+        assert_eq!(folded.get("PATH"), Some(&"C:\\Windows".to_string()));
+        assert_eq!(
+            folded.get("Path"),
+            Some(&"C:\\Windows".to_string()),
+            "the original key is kept alongside the canonical one, not renamed away"
+        );
+    }
+
+    #[test]
+    fn with_canonical_path_key_leaves_an_exact_path_key_untouched() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/usr/bin".to_string());
+        let folded = with_canonical_path_key(env);
+        assert_eq!(folded.get("PATH"), Some(&"/usr/bin".to_string()));
+    }
+
+    #[test]
+    fn build_runtime_path_env_reports_this_hosts_real_platform() {
+        let env = build_runtime_path_env(None);
+        assert_eq!(env.platform, crate::health::node_platform());
+    }
+
+    #[cfg(unix)]
+    fn fake_binary(dir: &Path, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_binary_version_reports_a_real_scripts_output() {
+        invalidate_probe_version_cache();
+        let dir = scratch_dir("probe-ok");
+        let script = fake_binary(&dir, "fake-version", "echo 9.9.9");
+        let cancel = CancellationToken::new();
+
+        let version = probe_binary_version(
+            script.to_string_lossy().into_owned(),
+            vec!["--version".to_string()],
+            2_000,
+            &cancel,
+        )
+        .await
+        .expect("a fast fake binary must not fail");
+        assert_eq!(version.as_deref(), Some("9.9.9"));
+    }
+
+    /// Mutation test 1: a second call for the same resolved binary must
+    /// not spawn the child a second time. The fake script appends to an
+    /// invocation counter file on every real run; a served-from-cache
+    /// second call cannot bump it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_cache_hit_never_invokes_the_binary_a_second_time() {
+        invalidate_probe_version_cache();
+        let dir = scratch_dir("probe-cache-hit");
+        let invocations = dir.join("invocations");
+        let script = fake_binary(
+            &dir,
+            "fake-version-cache",
+            &format!(
+                "echo run >> {inv}\ncount=$(wc -l < {inv})\necho 9.9.$count",
+                inv = invocations.display()
+            ),
+        );
+        let cancel = CancellationToken::new();
+
+        let first = probe_binary_version(
+            script.to_string_lossy().into_owned(),
+            vec!["--version".to_string()],
+            2_000,
+            &cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.as_deref(), Some("9.9.1"));
+
+        let second = probe_binary_version(
+            script.to_string_lossy().into_owned(),
+            vec!["--version".to_string()],
+            2_000,
+            &cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            second.as_deref(),
+            Some("9.9.1"),
+            "a repeated resolved path with an unchanged fingerprint must be served from cache"
+        );
+        let invocation_count = std::fs::read_to_string(&invocations)
+            .unwrap()
+            .lines()
+            .count();
+        assert_eq!(
+            invocation_count, 1,
+            "the fake binary must have run exactly once across both probes"
+        );
+    }
+
+    /// Mutation test 2: a fake binary that never exits must not be able to
+    /// keep `probe_binary_version` from returning within its own budget —
+    /// proven with a hard outer bound at ten times the probe's own
+    /// timeout, and by confirming the spawned child is actually gone
+    /// afterward, not merely that this call returned.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_hanging_binary_is_killed_within_its_own_timeout_not_left_running() {
+        invalidate_probe_version_cache();
+        let dir = scratch_dir("probe-deadline");
+        let pid_file = dir.join("pid");
+        let script = fake_binary(
+            &dir,
+            "fake-hangs",
+            &format!("echo $$ > {}\nsleep 5\n", pid_file.display()),
+        );
+        let cancel = CancellationToken::new();
+
+        let outcome = tokio::time::timeout(
+            Duration::from_millis(2_000),
+            probe_binary_version(
+                script.to_string_lossy().into_owned(),
+                vec!["--version".to_string()],
+                200,
+                &cancel,
+            ),
+        )
+        .await
+        .expect(
+            "probe_binary_version must return within ten times its own 200ms budget, not hang \
+             on a binary that never exits",
+        );
+        assert!(
+            outcome.is_err(),
+            "a probe that never answers must be reported as ProbeError"
+        );
+
+        for _ in 0..200 {
+            let pid_text = std::fs::read_to_string(&pid_file);
+            if let Ok(pid_text) = pid_text
+                && let Ok(pid) = pid_text.trim().parse::<i32>()
+                && matches!(
+                    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
+                    Err(nix::errno::Errno::ESRCH)
+                )
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the hanging binary must have been killed and reaped, not left running");
+    }
+
+    #[test]
+    fn real_auth_signal_fs_reports_presence_only_never_file_contents() {
+        let dir = scratch_dir("auth-fs");
+        let file = dir.join("secret.json");
+        std::fs::write(&file, b"{\"token\":\"do-not-leak\"}").unwrap();
+
+        let fs = RealAuthSignalFs;
+        let stat = fs.stat(file.to_string_lossy().as_ref()).unwrap();
+        assert!(stat.is_file);
+        assert!(!stat.is_directory);
+    }
+
+    #[test]
+    fn real_auth_signal_fs_read_file_is_bounded_by_max_bytes() {
+        let dir = scratch_dir("auth-fs-bound");
+        let file = dir.join("big.json");
+        std::fs::write(&file, "x".repeat(1_000)).unwrap();
+        let fs = RealAuthSignalFs;
+        let text = fs.read_file(file.to_string_lossy().as_ref(), 10).unwrap();
+        assert_eq!(text.len(), 10);
+    }
+
+    /// A permission failure must never be reported as "absent" — proven by
+    /// making the directory itself unreadable/unexecutable so `stat`
+    /// fails with `EACCES`, then confirming `AuthSignalFs::stat` surfaces
+    /// a real `io::Error` a caller can tell apart from `NotFound` (the
+    /// pure `auth_signal` layer's `is_missing_path_error` is what turns
+    /// that distinction into `Unknown` rather than a false "absent" — see
+    /// `crate::probing::detection::auth_signal`'s own tests for that half;
+    /// this test only pins that this adapter still reports a genuine
+    /// `PermissionDenied`, not a swallowed `NotFound`).
+    #[cfg(unix)]
+    #[test]
+    fn a_permission_failure_is_a_real_io_error_not_a_swallowed_not_found() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root ignores Unix permission bits entirely, so this regression
+        // guard cannot mean anything under it — skip rather than assert a
+        // false pass.
+        if nix::unistd::Uid::effective().is_root() {
+            return;
+        }
+        let dir = scratch_dir("auth-fs-denied");
+        let inner = dir.join("locked");
+        std::fs::create_dir(&inner).unwrap();
+        let file = inner.join("config.json");
+        std::fs::write(&file, b"{}").unwrap();
+        std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let fs = RealAuthSignalFs;
+        let error = fs
+            .stat(file.to_string_lossy().as_ref())
+            .expect_err("a locked parent directory must refuse stat, not silently succeed");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+
+        std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[test]
+    fn real_location_fs_probe_reflects_a_real_temp_directory() {
+        let dir = scratch_dir("location-fs");
+        std::fs::write(dir.join("a.md"), b"").unwrap();
+        std::fs::write(dir.join(".hidden.md"), b"").unwrap();
+        std::fs::create_dir(dir.join("subdir")).unwrap();
+
+        let probe = RealLocationFsProbe;
+        assert!(probe.exists(dir.to_string_lossy().as_ref()));
+        assert!(probe.is_readable(dir.to_string_lossy().as_ref()));
+        assert!(probe.is_writable(dir.to_string_lossy().as_ref()));
+
+        let files_only = probe
+            .count_entries(
+                dir.to_string_lossy().as_ref(),
+                LocationLayout::DirectoryOfFiles,
+            )
+            .unwrap();
+        assert_eq!(
+            files_only, 1,
+            "only a.md counts: dotfiles and directories are excluded"
+        );
+
+        let dirs_only = probe
+            .count_entries(
+                dir.to_string_lossy().as_ref(),
+                LocationLayout::DirectoryOfDirs,
+            )
+            .unwrap();
+        assert_eq!(dirs_only, 1, "only subdir counts");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_location_fs_probe_reports_false_for_a_real_read_only_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        if nix::unistd::Uid::effective().is_root() {
+            return;
+        }
+        let dir = scratch_dir("location-fs-readonly");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let probe = RealLocationFsProbe;
+        assert!(probe.exists(dir.to_string_lossy().as_ref()));
+        assert!(probe.is_readable(dir.to_string_lossy().as_ref()));
+        assert!(
+            !probe.is_writable(dir.to_string_lossy().as_ref()),
+            "a real read-only directory must not report writable"
+        );
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn probe_winget_ownership_is_attempted_through_run_bounded_child_and_never_hangs() {
+        // Cross-platform proof: on any host without a real `winget` binary
+        // on `PATH` (every CI runner but Windows), this exercises the
+        // `SpawnFailed` branch of `run_bounded_child` and must still
+        // resolve promptly to `Unknown` rather than hang — proving the
+        // call is genuinely attempted through the bounded child runner,
+        // not skipped. The real, positive parse path (`Owned`/`NotOwned`
+        // against actual `winget list` output) already has full coverage
+        // in `crate::probing::detection::winget_ownership`'s own pure
+        // tests; what is unverified outside an actual Windows host is
+        // only that the *subprocess* half — argv, budget, exit-code
+        // plumbing — behaves the same way there, which this crate has no
+        // way to exercise from this test suite.
+        let cancel = CancellationToken::new();
+        let outcome = tokio::time::timeout(Duration::from_secs(9), probe_winget_ownership(&cancel))
+            .await
+            .expect("probe_winget_ownership must resolve within its own bounded budget");
+        if cfg!(not(windows)) {
+            assert_eq!(outcome, WingetOwnership::Unknown);
+        }
+    }
+
+    /// A cancelled winget probe must resolve promptly to `Unknown` rather
+    /// than waiting out the full 8s budget.
+    #[tokio::test]
+    async fn probe_winget_ownership_is_cancellable() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let outcome = tokio::time::timeout(Duration::from_secs(2), probe_winget_ownership(&cancel))
+            .await
+            .expect("a pre-cancelled probe must resolve immediately");
+        assert_eq!(outcome, WingetOwnership::Unknown);
+    }
+
+    /// Regression guard for the deadline-margin arithmetic itself: a
+    /// caller-supplied `timeout_ms` smaller than the margin must still
+    /// produce a positive `ChildBudget::deadline`, never a panic from an
+    /// underflowing subtraction and never a zero-length budget that could
+    /// never let a child run at all.
+    #[test]
+    fn the_probe_deadline_margin_never_underflows_a_small_timeout() {
+        let counter = AtomicUsize::new(0);
+        for timeout_ms in [0u64, 1, 50, 99, 100, 101, 5_000] {
+            let deadline = Duration::from_millis(timeout_ms)
+                .saturating_sub(PROBE_DEADLINE_MARGIN)
+                .max(Duration::from_millis(1));
+            assert!(deadline >= Duration::from_millis(1));
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+        assert_eq!(counter.load(Ordering::Relaxed), 7);
+    }
+}

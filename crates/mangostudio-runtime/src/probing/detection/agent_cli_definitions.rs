@@ -8,6 +8,7 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 use super::binary_scan::RuntimeDefinition;
 use super::path_env::PathEnv;
@@ -20,7 +21,8 @@ use super::types::{RuntimeId, SemVer};
 /// TypeScript, so [`AgentCliDefinition`]'s own `Cli`/`SelfTarget` split is
 /// what keeps `mangostudio` from ever appearing where an external CLI is
 /// expected, instead of a second, narrower id type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum AgentTargetId {
     /// MangoStudio itself.
     Mangostudio,
@@ -75,6 +77,19 @@ pub enum AgentCliDefinition {
     /// MangoStudio itself — no runtime scan, no auth probe: it is the
     /// process running this code.
     SelfTarget,
+}
+
+impl AgentCliDefinition {
+    /// This definition's target id, for either variant — mirrors
+    /// `selectById`'s own `idOf` callback in `service.ts`, which reads
+    /// `definition.targetId` off either shape uniformly.
+    #[must_use]
+    pub fn target_id(&self) -> AgentTargetId {
+        match self {
+            AgentCliDefinition::Cli(cli) => cli.target_id,
+            AgentCliDefinition::SelfTarget => AgentTargetId::Mangostudio,
+        }
+    }
 }
 
 fn parse_version_match(raw: &str, pattern: &Regex) -> Option<SemVer> {
