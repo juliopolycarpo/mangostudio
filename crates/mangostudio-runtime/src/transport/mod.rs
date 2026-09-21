@@ -12,7 +12,8 @@
 //! Out of scope for every transport here, matching the crate's own current
 //! scope: every machine method group except `runtime.health` (see
 //! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
-//! and `probing.*` (see [`crate::probing`]) is unimplemented, so
+//! `probing.*` (see [`crate::probing`]), and `fs.*` (see
+//! [`crate::filesystem`]) is unimplemented, so
 //! [`crate::registry::Registry`] answers everything else with
 //! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
 //! module's own `hello_capabilities`, which shapes `crate::health`'s
@@ -107,7 +108,7 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
 /// session itself: a [`Registry`] implementing `runtime.health`, the
-/// `workspace.*` methods, and the `probing.*` methods (see [`build_host`]
+/// `workspace.*`, `probing.*`, and `fs.*` methods (see [`build_host`]
 /// for the full list; every other machine method group is out of scope, and
 /// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
 /// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
@@ -128,9 +129,8 @@ pub(crate) struct SessionHost {
 /// Builds one [`SessionHost`] for `slot` under `mango_home`, announcing
 /// `runtime_version` from `runtime.health`, and also implementing
 /// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
-/// and `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`
-/// — the only methods this crate implements today (see [`crate::health`],
-/// [`crate::workspace_methods`], and [`crate::probing`]).
+/// `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`,
+/// and the eleven filesystem methods. Other groups remain unsupported.
 ///
 /// Calls [`Registry::with_ports`], not
 /// [`Registry::with_ports_and_exclusivity`], so every connection this
@@ -167,6 +167,8 @@ pub(crate) fn build_host(
     let registry = crate::workspace_methods::register(registry);
     let registry = crate::probing::register(registry);
     let source = ConsentSource::new(slot, mango_home.to_path_buf());
+    let registry =
+        crate::filesystem::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
@@ -454,12 +456,23 @@ mod tests {
     }
 
     #[test]
-    fn build_host_implements_exactly_runtime_health_the_workspace_and_probing_methods() {
+    fn build_host_implements_exactly_health_workspace_probing_and_filesystem() {
         let home = scratch_path("transport-build-host");
         let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
         assert_eq!(
             host.registry.implemented_methods(),
             vec![
+                "fs.apply-patch",
+                "fs.create-file",
+                "fs.delete-file",
+                "fs.edit-file",
+                "fs.glob",
+                "fs.grep",
+                "fs.list-directory",
+                "fs.move-file",
+                "fs.read-file",
+                "fs.replace-range",
+                "fs.write-file",
                 "probing.agent-clis",
                 "probing.runtimes",
                 "probing.version-managers",

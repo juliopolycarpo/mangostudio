@@ -20,9 +20,13 @@ const capabilities = Object.fromEntries(
   ])
 ) as Readonly<Record<string, readonly string[] | undefined>>;
 
-function call(map: RuntimeHandlers, method: RuntimeMethod): Promise<unknown> {
+function call(
+  map: RuntimeHandlers,
+  method: RuntimeMethod,
+  params: Record<string, unknown> = {}
+): Promise<unknown> {
   const handle = map[method] as (params: unknown, context: { signal: AbortSignal }) => unknown;
-  return Promise.resolve(handle({}, { signal: new AbortController().signal }));
+  return Promise.resolve(handle(params, { signal: new AbortController().signal }));
 }
 
 describe('the contract capability table', () => {
@@ -128,6 +132,26 @@ describe('gateHandlers consent', () => {
 
     expect(await call(gated, 'library.scan')).toEqual({ ok: true });
     await expect(call(gated, 'library.apply')).rejects.toThrow(/has not granted fsWrite/);
+  });
+
+  it('requires read and checkpoint consent only when a mutation captures a snapshot', async () => {
+    const allow = {
+      ...RUNTIME_CONSENT_PRESETS.full,
+      fsRead: false,
+      checkpoints: false,
+    };
+    const gated = gate(allow, 'host');
+
+    expect(await call(gated, 'fs.move-file', { captureSnapshot: false })).toEqual({ ok: true });
+    const error = await call(gated, 'fs.move-file', { captureSnapshot: true }).catch(
+      (thrown: unknown) => thrown
+    );
+    expect(error).toBeInstanceOf(RemoteError);
+    expect((error as RemoteError).details).toMatchObject({
+      method: 'fs.move-file',
+      missing: ['fsRead', 'checkpoints'],
+      capability: 'fsRead',
+    });
   });
 
   it('refuses everything but health under the none profile', async () => {

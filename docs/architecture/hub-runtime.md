@@ -119,6 +119,11 @@ shell command kills its process group and stops reading the pipes at its timeout
 gives each file a wall-clock budget in a worker thread, because a regular expression the model
 supplied can hold the event loop and no signal can interrupt one.
 
+The Rust filesystem handlers run in the host's bounded blocking pool. Mutation locks remain
+owned by the blocking work even if the caller drops its future. Grep uses an embedded QuickJS
+`RegExp`, with its interrupt callback enforcing cancellation and the per-file budget during a
+match. This preserves JavaScript's UTF-16 regex semantics without starting a Bun process.
+
 ### Protocol evolution
 
 The contract grows without moving the wire under it — `RUNTIME_CONTRACT_VERSION` is

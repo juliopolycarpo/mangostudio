@@ -180,7 +180,11 @@ describe('Real Rust runtime qualification: paired connect', () => {
       const client = await hub.manager.getClient(TEST_USER.id, hub.environmentId);
       // `connect`, like `serve`, always answers as the `remote` slot.
       assertRustRuntimeHealthShape(await client.health(), { slot: 'remote' });
-      assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+      assertRustRuntimeFeatureCeiling(client.manifest, {
+        probing: true,
+        fsRead: true,
+        fsWrite: true,
+      });
       await assertRustRuntimeProbingMethods(client);
     },
     30_000

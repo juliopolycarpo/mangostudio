@@ -15,9 +15,11 @@
  * anyone can act on. So the method stays in the map and answers with the
  * capability it needed and the command that grants it.
  *
- * Which capabilities a method needs is the contract's own `capabilities` list,
- * so a new method without one is a compile error in the shared contract rather
- * than a silently ungoverned hole here.
+ * A method's base capabilities come from the contract's own `capabilities`
+ * list, so a new method without one is a compile error rather than a silently
+ * ungoverned hole. The validated `captureSnapshot` flag is the one conditional
+ * carve-out: returning file bytes also needs `fsRead`, and producing checkpoint
+ * material needs `checkpoints`.
  *
  * The allow set is re-read on every call through {@link RuntimeConsentSource},
  * so a mid-connection `setup` takes effect without reconnecting.
@@ -91,7 +93,7 @@ export function gateHandlers(handlers: RuntimeHandlers, deps: RuntimeGateDeps): 
       let recorded = false;
       try {
         const allow = await deps.consent.refresh();
-        const missing = missingCapabilities(method, allow);
+        const missing = missingCapabilities(method, allow, params);
         if (missing.length > 0) {
           const denial = consentDenial(method, missing, deps.consent.slot);
           record(deps.audit, method, 'denied', started, params, denial);
@@ -168,10 +170,27 @@ function consentDenial(method: string, missing: readonly string[], slot: Runtime
 /** Which of a method's capabilities this machine has not granted. */
 function missingCapabilities(
   method: RuntimeMethod,
-  allow: RuntimeCapabilityAllow
+  allow: RuntimeCapabilityAllow,
+  params: unknown
 ): readonly (keyof RuntimeCapabilityAllow)[] {
-  const required = RUNTIME_CONTRACT.definition.methods[method].capabilities;
-  return required.filter((capability) => !allow[capability]);
+  const required = new Set<keyof RuntimeCapabilityAllow>(
+    RUNTIME_CONTRACT.definition.methods[method].capabilities
+  );
+  if (capturesMutationSnapshot(params)) {
+    required.add('fsRead');
+    required.add('checkpoints');
+  }
+  return [...required].filter((capability) => !allow[capability]);
+}
+
+/** Snapshot-bearing mutations return file bytes and create checkpoint material. */
+function capturesMutationSnapshot(params: unknown): boolean {
+  return (
+    typeof params === 'object' &&
+    params !== null &&
+    'captureSnapshot' in params &&
+    params.captureSnapshot === true
+  );
 }
 
 /**

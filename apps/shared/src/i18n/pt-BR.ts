@@ -998,7 +998,7 @@ export const messages = {
         editFile: 'Permite que a IA substitua texto exato em arquivos lidos neste chat.',
         replaceRange: 'Permite que a IA substitua trechos de linhas em arquivos lidos neste chat.',
         applyPatch:
-          'Permite que a IA aplique alterações ancoradas por contexto em vários arquivos de texto de uma só vez.',
+          'Permite que a IA aplique alterações ancoradas por contexto em vários arquivos de texto de uma só vez. Os arquivos de destino devem permanecer graváveis exclusivamente pelo Mango durante a execução.',
         createFile:
           'Permite que a IA crie novos arquivos de texto sem sobrescrever caminhos existentes.',
         deleteFile: 'Permite que a IA exclua arquivos regulares lidos neste chat.',

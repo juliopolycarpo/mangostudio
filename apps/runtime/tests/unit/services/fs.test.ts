@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs
 import { stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { clearFileFreshness, PathAccessError } from '../../../src';
+import { clearFileFreshness, PathAccessError, RuntimeToolArgumentError } from '../../../src';
 import { runtimeFsService } from '../../../src/services/fs';
 import { writeRegularFileAtomic } from '../../../src/services/fs-utils';
 
@@ -227,6 +227,60 @@ describe('runtime filesystem path policy', () => {
       })
     ).rejects.toThrow(PathAccessError);
   });
+
+  it('rejects unpaired patch move fields before reading or mutating', async () => {
+    const source = join(root, 'source.txt');
+    const destination = join(root, 'destination.txt');
+    await Bun.write(source, 'unchanged\n');
+
+    for (const operation of [
+      {
+        type: 'update',
+        inputPath: 'source.txt',
+        resolvedPath: source,
+        moveTo: 'destination.txt',
+        hunks: [],
+      },
+      {
+        type: 'update',
+        inputPath: 'source.txt',
+        resolvedPath: source,
+        resolvedMoveTo: destination,
+        hunks: [],
+      },
+    ] as const) {
+      await expect(
+        runtimeFsService.applyPatch({
+          chatId: 'chat-move-pair',
+          captureSnapshot: true,
+          operations: [operation],
+        } as never)
+      ).rejects.toMatchObject({
+        name: RuntimeToolArgumentError.name,
+        message: expect.stringContaining('expected both fields or neither'),
+      });
+      expect(await Bun.file(source).text()).toBe('unchanged\n');
+      expect(existsSync(destination)).toBe(false);
+    }
+  });
+
+  it.skipIf(process.platform !== 'win32')(
+    'refuses a differently-cased missing denied root on Windows',
+    async () => {
+      const denied = join(root, 'Private');
+
+      await expect(
+        runtimeFsService.createFile({
+          chatId: 'chat-policy',
+          inputPath: 'private/new.txt',
+          resolvedPath: join(root, 'pRiVaTe', 'new.txt'),
+          content: 'planted',
+          captureSnapshot: false,
+          pathPolicy: { allowedRoots: [], deniedRoots: [denied], containmentRoot: root },
+        })
+      ).rejects.toThrow(PathAccessError);
+    }
+  );
 
   it('leaves calls without a policy unrestricted', async () => {
     const created = await runtimeFsService.createFile({

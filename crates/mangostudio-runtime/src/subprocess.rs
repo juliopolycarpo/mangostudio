@@ -656,7 +656,10 @@ mod tests {
         )
         .await
         .expect_err("cancellation must stop the child before its own deadline");
-        assert!(matches!(error, ChildRunError::Cancelled));
+        assert!(
+            matches!(error, ChildRunError::Cancelled),
+            "unexpected child error: {error:?}"
+        );
 
         assert_process_is_gone(&pid_file).await;
     }

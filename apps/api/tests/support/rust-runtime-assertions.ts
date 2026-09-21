@@ -83,30 +83,30 @@ export function assertRustRuntimeHealthShape(
 }
 
 /**
- * Pins the real Rust host's implementation ceiling while the foundation
- * intentionally implements only health, workspace, and probing methods.
+ * Pins the real Rust host's implemented methods and their consent gates.
  *
  * @example
- * assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+ * assertRustRuntimeFeatureCeiling(client.manifest, { probing: true, fsRead: true, fsWrite: true });
  */
 export function assertRustRuntimeFeatureCeiling(
   manifest: RuntimeCapabilityManifest,
-  expected: { readonly probing: boolean }
+  expected: { readonly probing: boolean; readonly fsRead: boolean; readonly fsWrite: boolean }
 ): void {
   expect(manifest.features).toEqual({
-    tools: expected.probing,
+    tools: expected.probing || expected.fsRead || expected.fsWrite,
     git: false,
     probing: expected.probing,
     mcp: false,
     library: false,
     checkpoints: false,
-    fsRead: false,
-    fsWrite: false,
+    fsRead: expected.fsRead,
+    fsWrite: expected.fsWrite,
     shell: false,
     update: false,
     externalAgents: false,
     toolchain: true,
   });
+  expect(manifest.enforcesPathPolicy).toBe(true);
 }
 
 /**
@@ -129,6 +129,97 @@ export async function assertRustRuntimeProbingMethods(client: RuntimeClient): Pr
       self: { version: 'qualification-test' },
     })
   ).toEqual({ statuses: [] });
+}
+
+/**
+ * Exercises every filesystem method through the Hub client in an isolated directory.
+ * @example
+ * await assertRustRuntimeFilesystemMethods(client, scratchDirectory);
+ */
+export async function assertRustRuntimeFilesystemMethods(
+  client: RuntimeClient,
+  directory: string
+): Promise<void> {
+  const path = join(directory, 'example.txt');
+  const moved = join(directory, 'moved.txt');
+  const pathPolicy = { allowedRoots: [directory], deniedRoots: [], containmentRoot: directory };
+  const common = { chatId: 'filesystem-qualification', captureSnapshot: true, pathPolicy };
+  const file = { ...common, inputPath: 'example.txt', resolvedPath: path };
+  const created = await client.fs.createFile({ ...file, content: 'one\r\ntwo\r\n' });
+  expect(created.result.bytesWritten).toBe(10);
+  expect(created.mutations[0]?.before).toEqual({ exists: false });
+  expect((await client.fs.readFile(file)).content).toBe('     1\tone\r\n     2\ttwo\r');
+  const edit = await client.fs.editFile({ ...file, oldString: 'one', newString: 'first' });
+  expect(edit.result.replacements).toBe(1);
+  expect(edit.mutations[0]?.before.contentBase64).toBe(
+    Buffer.from('one\r\ntwo\r\n').toString('base64')
+  );
+  await client.fs.replaceRange({ ...file, startLine: 2, endLine: 2, content: 'second\r' });
+  expect((await client.fs.readFile({ ...file, view: 'hex' })).content).toBe(
+    Buffer.from('first\r\nsecond\r\n').toString('hex')
+  );
+  await client.fs.writeFile({ ...file, content: 'final\n' });
+  expect(
+    (await client.fs.listDirectory({ inputPath: '.', resolvedPath: directory, pathPolicy })).entries
+  ).toEqual([{ name: 'example.txt', type: 'file' }]);
+  expect(
+    (
+      await client.fs.glob({
+        pattern: '*.txt',
+        cwd: directory,
+        maxResults: 10,
+        includeDotfiles: false,
+        absolute: false,
+        pathPolicy,
+      })
+    ).matches
+  ).toEqual(['example.txt']);
+  const grep = await client.fs.grep({
+    pattern: '(?<word>final)',
+    inputPath: 'example.txt',
+    resolvedPath: path,
+    caseInsensitive: false,
+    maxResults: 10,
+    maxMatchesPerFile: 10,
+    maxFileSizeBytes: 1024,
+    includeDotfiles: false,
+    pathPolicy,
+  });
+  expect(grep.matches).toEqual([{ file: path, line: 1, text: 'final' }]);
+  await client.fs.applyPatch({
+    ...common,
+    operations: [
+      {
+        type: 'update',
+        inputPath: 'example.txt',
+        resolvedPath: path,
+        hunks: [
+          {
+            lines: [
+              { type: 'delete', content: 'final', ending: '\n' },
+              { type: 'add', content: 'patched', ending: '\n' },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  expect((await client.fs.readFile(file)).content).toBe('     1\tpatched');
+  expect(
+    (
+      await client.fs.moveFile({
+        ...common,
+        inputFrom: 'example.txt',
+        inputTo: 'moved.txt',
+        resolvedFrom: path,
+        resolvedTo: moved,
+      })
+    ).result.moved
+  ).toBe(true);
+  expect(
+    (await client.fs.deleteFile({ ...common, inputPath: 'moved.txt', resolvedPath: moved })).result
+      .deleted
+  ).toBe(true);
 }
 
 /**

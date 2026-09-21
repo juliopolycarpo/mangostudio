@@ -174,14 +174,38 @@ every method it declares already has a real handler.
 `tools` formula (an `||` over eight of the ten capability-backed features, deliberately excluding
 `update` and `externalAgents`) and its unconditional `toolchain: true` (a schema fact about a
 spawn method's `params`, not a capability of its own, so advertising it grants nothing on its own)
-— and adds one more gate on top: every catalog method carrying the relevant capability must also
-be `Registry::classify`'d as `Implemented`. Fail-closed, so a capability nine methods carry and
-three implement is not advertised as available at all. With today's empty production registry,
-every capability-gated feature computes `false` regardless of `allow`, and only `toolchain` (which
-grants nothing by itself) stays `true` — this is the acceptance bar this crate's manifest exists to
-meet: an empty registry advertises essentially nothing.
+and adds an implementation gate. Every method backing a feature must be classified as
+`Implemented`. For `fsRead` and `fsWrite`, those are the matching `fs.*` and `workspace.*`
+methods. Snapshot and library methods also require filesystem consent, but their implementation
+gates belong to `checkpoints` and `library`. They do not suppress working filesystem tools.
+Other features require every catalog method carrying their capability.
+
+The production registry implements health, workspace, probing, and the eleven filesystem
+methods. An empty registry still advertises no capability-backed features, regardless of consent.
+Only the schema fact `toolchain` remains true.
 
 ## Where the TypeScript contract/dispatch tests live in Rust
+
+### Filesystem behavior
+
+The Hub still validates tool arguments and parses raw V4A text. Rust receives the catalog's
+structured parameters. These tests pin the host behavior; they do not replace the Hub's tool tests.
+
+| TypeScript assertion                                                                                    | Rust coverage                                                                                     |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `services/file-freshness.test.ts`: "accumulates sequential windows until they cover the file"           | `filesystem::freshness::tests::whole_and_sequential_window_reads_control_content_completeness`    |
+| `services/fs-utils.test.ts`: "rejects files larger than maxBytes before allocating content"             | `filesystem::io::tests::descriptor_read_bounds_observed_bytes_and_checks_cancellation`            |
+| `tools/edit-file-tool.test.ts`: "uses non-overlapping replaceAll semantics"                             | `filesystem::text::tests::literal_edit_retains_bytes_and_uses_nonoverlapping_matches`             |
+| `services/grep-budget.test.ts`: "returns from a catastrophic pattern and reports the file as truncated" | `filesystem::search::tests::unfinished_file_discards_its_partial_matches_but_keeps_earlier_files` |
+
+`rust-filesystem-search-compat.integration.test.ts` compares real Rust and TypeScript runtime
+results through Hub clients, including ordering, glob syntax, regex Unicode semantics, caps,
+and error types. `rust-runtime-qualification.integration.test.ts` exercises all eleven filesystem
+methods and mutation snapshots against the compiled binary. The qualification job runs both on
+Linux, macOS, and Windows. Windows-only junction tests and Unix non-UTF-8 identity tests live in
+`filesystem::policy::tests`.
+
+### Dispatcher behavior
 
 | TypeScript test (`packages/protocol/tests/`, `apps/runtime/`)                                        | Rust home                                                                                                                                                                                            |
 | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

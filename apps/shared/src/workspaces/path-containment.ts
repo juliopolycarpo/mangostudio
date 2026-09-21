@@ -1,17 +1,40 @@
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { dirname, parse, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { PathAccessError } from '../runtime-contract/service-errors';
 import { resolveWorkspacePath } from './path';
 
 /** Bounds symlink traversal, including chains whose final target exists. */
 const MAX_SYMLINK_HOPS = 32;
 
-/** True when `candidate` is `root` or a strict descendant (separator-safe). */
+/**
+ * True when an already-resolved `candidate` is `root` or a strict descendant.
+ * Exact component spelling is part of resolved filesystem identity: on
+ * Windows, `realpathSync` canonicalizes ordinary case-insensitive ancestors
+ * while preserving distinct names below a case-sensitive directory.
+ * // Usage: isPathPrefix('/workspace', '/workspace/src') === true
+ */
 export function isPathPrefix(root: string, candidate: string): boolean {
   if (candidate === root) {
     return true;
   }
   return candidate.startsWith(`${root}${sep}`);
+}
+
+/**
+ * Separator-safe prefix comparison for unresolved configured paths. Windows
+ * lexical paths use its normal case-folding rules; resolved paths must use
+ * {@link isPathPrefix} so case-sensitive directory identities stay distinct.
+ * // Usage: isLexicalPathPrefix('C:\\work', 'c:\\work\\src') === true
+ */
+export function isLexicalPathPrefix(root: string, candidate: string): boolean {
+  if (process.platform === 'win32') {
+    const remainder = relative(root, candidate);
+    return (
+      remainder === '' ||
+      (remainder !== '..' && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder))
+    );
+  }
+  return isPathPrefix(root, candidate);
 }
 
 export class WorkdirContainmentError extends Error {

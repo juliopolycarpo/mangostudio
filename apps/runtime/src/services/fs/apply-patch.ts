@@ -120,6 +120,7 @@ async function planOperation(
     return operation;
   }
 
+  if (operation.type === 'update') assertMoveFieldsPaired(operation);
   const source = await readFreshPatchTarget(operation.resolvedPath, chatId);
   if (operation.type === 'delete') {
     return { ...operation, source: source.bytes };
@@ -152,6 +153,19 @@ async function planOperation(
     hasContentChanges: operation.hunks.length > 0,
     lineNumbersValidThroughLine,
   };
+}
+
+function assertMoveFieldsPaired(
+  operation: Extract<RuntimePatchOperation, { type: 'update' }>
+): void {
+  const hasMoveTo = operation.moveTo !== undefined;
+  const hasResolvedMoveTo = operation.resolvedMoveTo !== undefined;
+  if (hasMoveTo === hasResolvedMoveTo) return;
+
+  throw new RuntimeToolArgumentError(
+    `Invalid move fields for "${operation.inputPath}": received moveTo=${hasMoveTo} and ` +
+      `resolvedMoveTo=${hasResolvedMoveTo}; expected both fields or neither.`
+  );
 }
 
 function assertNoPathConflicts(planned: readonly PlannedOperation[]): void {

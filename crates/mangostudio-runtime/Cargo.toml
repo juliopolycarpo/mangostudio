@@ -44,12 +44,19 @@ path = "src/main.rs"
 # via the launcher's own chain, at this exact version, so a direct dependency
 # on it adds no new version for `cargo deny`'s duplicate check to catch.
 base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+# Object-bound filesystem access for restricted path-policy operations. Version
+# 4.0.3 supports this workspace's Rust 1.97 MSRV on Linux, macOS, and Windows.
+cap-fs-ext = { version = "4.0.3", default-features = false, features = ["std"] }
+cap-std = { version = "4.0.3", default-features = false }
 # The CSPRNG behind `generate_serve_token` (see the `base64` comment above).
 # Already in the workspace graph at this exact version (ring 0.17's RNG shim
 # pins 0.2, rand 0.10 pins 0.4; this crate is the uncontested consumer of 0.3,
 # alongside jsonschema's `ahash` — see `deny.toml`), so this adds no new
 # version for `cargo deny`'s duplicate check to catch either.
 getrandom = { version = "0.3", default-features = false }
+# `fs.glob` uses its brace, character-class, and recursive-wildcard parser,
+# while this crate owns traversal, dotfile rules, ordering, and path policy.
+globset = { version = "0.4.19", default-features = false }
 jsonschema = { version = "0.56", default-features = false }
 # `websocket`: the `serve`/`connect` transports dial and accept over it.
 # `tokio` alone (the dispatcher's own dependency) has no socket of its own.
@@ -63,8 +70,12 @@ mangostudio-runtime-contract.workspace = true
 # masks with — hand-rolling that by hand would be the one place this crate
 # reinvents a well-tested wheel already sitting in its own build.
 regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
+# `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
+# code units, named captures, and an engine interrupt hook for its hard deadline.
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+sha2 = "0.11"
 # A normal dependency, not a dev one: `main.rs` builds its own multi-thread
 # runtime for `stdio`/`serve`/`connect` (never `#[tokio::main]` — the
 # consent/setup/token/lock work those subcommands do first is synchronous by
@@ -95,12 +106,18 @@ tokio = { version = "1.53", features = ["test-util"] }
 # TypeScript side. `hostname`: `gethostname()` for the lock body's `host` field. `fs`:
 # `access(2)` for `workspace.validate`'s read+execute directory check.
 nix = { version = "0.31", default-features = false, features = ["signal", "hostname", "user", "fs"] }
+# Restricted same-filesystem moves use renameat2/renameatx_np with NOREPLACE
+# through verified directory handles; cap-std only exposes replacing rename.
+# This exact version is already present transitively through cap-std.
+rustix = { version = "1.1", default-features = false, features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
 # Win32_Foundation: HANDLE, BOOL, CloseHandle, LocalFree, STILL_ACTIVE.
+# Win32_Globalization: case-insensitive, non-lossy filesystem path comparison.
 # Win32_Security(_Authorization): the owner-only DACL rewrite.
 # Win32_Storage_FileSystem: the FILE_GENERIC_* / DELETE access mask.
+# Wdk_Storage_FileSystem and Win32_System_IO: handle-relative no-replace rename.
 # Win32_System_SystemInformation: GetComputerNameExW, for the lock body's `host` field.
 # Win32_System_Threading: OpenProcess/OpenProcessToken/GetExitCodeProcess, for lock-holder
 # liveness and the owner-only module's own SID lookup.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Globalization", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading"] }
