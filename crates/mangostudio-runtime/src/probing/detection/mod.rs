@@ -36,6 +36,8 @@ use std::pin::Pin;
 /// because every trait in this module needs it.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+pub mod agent_cli_definitions;
+pub mod auth_signal;
 pub mod binary_scan;
 pub mod duplicate_analysis;
 pub mod fnm;
@@ -46,3 +48,4 @@ pub mod path_env;
 pub mod runtime_definitions;
 pub mod types;
 pub mod version_manager_support;
+pub mod winget_ownership;
