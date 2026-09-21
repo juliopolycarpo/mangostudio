@@ -746,13 +746,16 @@ fn write_replacement_in_with_hook(
             dir.remove_file(temp)
                 .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))
         };
-        let Some(identity) = matching_destination_identity_in(dir, leaf, expected.bytes)? else {
-            remove_owned_temp()?;
-            return Err(destination_changed_error(path));
-        };
-        if identity != expected.identity {
-            remove_owned_temp()?;
-            return Err(destination_changed_error(path));
+        match matching_destination_identity_in(dir, leaf, expected.bytes) {
+            Ok(Some(identity)) if identity == expected.identity => {}
+            Ok(_) => {
+                remove_owned_temp()?;
+                return Err(destination_changed_error(path));
+            }
+            Err(error) => {
+                remove_owned_temp()?;
+                return Err(error);
+            }
         }
     }
     dir.rename(temp, dir, leaf)
@@ -1853,6 +1856,50 @@ mod tests {
             .map(|entry| entry.unwrap().file_name())
             .collect::<Vec<_>>();
         assert_eq!(entries, [OsString::from("file")]);
+    }
+
+    #[test]
+    fn conditional_replacement_removes_its_temp_when_the_destination_disappears() {
+        let root = scratch_dir("fs-io-conditional-replacement-disappears");
+        let path = root.join("file");
+        std::fs::write(&path, b"before").unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        let parent = capability::verified_parent(&policy, &path, false).unwrap();
+
+        let error = parent
+            .with_parent(|dir, leaf| {
+                let temp = temporary_leaf(leaf)?;
+                write_replacement_in_with_hook(
+                    dir,
+                    leaf,
+                    &path,
+                    &temp,
+                    Replacement {
+                        bytes: b"ours",
+                        mode: None,
+                        expected: Some(ExpectedDestination {
+                            bytes: b"before",
+                            identity: matching_destination_identity_in(dir, leaf, b"before")?
+                                .expect("fixture destination matches"),
+                        }),
+                    },
+                    |phase, _| {
+                        if phase == ReplacementHookPhase::BeforePublish {
+                            std::fs::remove_file(&path).unwrap();
+                        }
+                    },
+                )
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, codes::INTERNAL);
+        assert!(!path.exists());
+        assert!(std::fs::read_dir(&root).unwrap().next().is_none());
     }
 
     #[cfg(windows)]
