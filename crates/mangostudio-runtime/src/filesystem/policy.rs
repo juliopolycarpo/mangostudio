@@ -74,6 +74,8 @@ impl CompiledPolicy {
         let Some(effective) = resolve_through_existing_ancestor(&absolute) else {
             return false;
         };
+        #[cfg(windows)]
+        let effective = normalize_windows_final_path(&effective);
         if !self.allowed.is_empty()
             && !self
                 .allowed
@@ -91,6 +93,66 @@ impl CompiledPolicy {
             .as_ref()
             .is_none_or(|root| is_prefix(&root.canonical, &effective))
     }
+
+    /// Checks a final, absolute path obtained from an already-open filesystem
+    /// object. Callers must first check the requested path with [`Self::check`]
+    /// so lexical deny rules still apply.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// policy.check(requested)?;
+    /// let file = open_once(requested)?;
+    /// policy.check_final_handle_path(requested, &path_from_file_handle(&file)?)?;
+    /// ```
+    pub(super) fn check_final_handle_path(
+        &self,
+        requested: &Path,
+        final_path: &Path,
+    ) -> Result<(), RemoteError> {
+        if self.allows_final_handle_path(final_path) {
+            return Ok(());
+        }
+        Err(RemoteError::new(
+            codes::INTERNAL,
+            format!(
+                "Path \"{}\" resolves outside the paths this chat may access on this environment.",
+                requested.display()
+            ),
+        )
+        .with_detail("kind", "path_access"))
+    }
+
+    pub(super) fn is_unrestricted(&self) -> bool {
+        self.allowed.is_empty() && self.denied.is_empty() && self.containment.is_none()
+    }
+
+    fn allows_final_handle_path(&self, path: &Path) -> bool {
+        if self.is_unrestricted() {
+            return true;
+        }
+        if !path.is_absolute() {
+            return false;
+        }
+        if !self.allowed.is_empty()
+            && !self
+                .allowed
+                .iter()
+                .any(|root| is_prefix(&root.canonical, path))
+        {
+            return false;
+        }
+        if self
+            .denied
+            .iter()
+            .any(|root| is_prefix(&root.canonical, path))
+        {
+            return false;
+        }
+        self.containment
+            .as_ref()
+            .is_none_or(|root| is_prefix(&root.canonical, path))
+    }
 }
 
 fn absolute(path: &Path) -> Result<PathBuf, RemoteError> {
@@ -105,7 +167,15 @@ fn absolute(path: &Path) -> Result<PathBuf, RemoteError> {
 fn compile_root(path: &Path) -> Result<Root, RemoteError> {
     let lexical = lexically_normalize(&absolute(path)?);
     let canonical = resolve_through_existing_ancestor(&lexical).unwrap_or_else(|| lexical.clone());
+    #[cfg(windows)]
+    let canonical = normalize_windows_final_path(&canonical);
     Ok(Root { lexical, canonical })
+}
+
+/// Normalizes final and canonical Windows paths to the same Win32 spelling.
+#[cfg(windows)]
+pub(super) fn normalize_windows_final_path(path: &Path) -> PathBuf {
+    windows::normalize_final_path(path)
 }
 
 pub(super) fn is_prefix(root: &Path, path: &Path) -> bool {
@@ -125,7 +195,7 @@ mod windows {
     )]
     #![deny(clippy::undocumented_unsafe_blocks)]
 
-    use std::ffi::c_void;
+    use std::ffi::{OsString, c_void};
     use std::mem::{MaybeUninit, size_of};
     use std::os::windows::ffi::OsStrExt as _;
     use std::path::{Component, Path, PathBuf};
@@ -143,6 +213,21 @@ mod windows {
     };
 
     const FILE_CS_FLAG_CASE_SENSITIVE_DIR: u32 = 1;
+
+    pub(super) fn normalize_final_path(path: &Path) -> PathBuf {
+        const VERBATIM: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+        const UNC: &[u16] = &[b'U' as u16, b'N' as u16, b'C' as u16, b'\\' as u16];
+        let path: Vec<u16> = path.as_os_str().encode_wide().collect();
+        let Some(rest) = path.strip_prefix(VERBATIM) else {
+            return PathBuf::from(OsString::from_wide(&path));
+        };
+        if let Some(unc) = rest.strip_prefix(UNC) {
+            let mut normal = vec![b'\\' as u16, b'\\' as u16];
+            normal.extend_from_slice(unc);
+            return PathBuf::from(OsString::from_wide(&normal));
+        }
+        PathBuf::from(OsString::from_wide(rest))
+    }
 
     struct OwnedHandle(HANDLE);
 
@@ -377,6 +462,37 @@ mod tests {
         .unwrap();
         assert!(policy.allows(&allowed.join("file")));
         assert!(!policy.allows(&refused.join("file")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalizes_verbatim_handle_and_canonical_paths_to_win32_spelling() {
+        assert_eq!(
+            normalize_windows_final_path(Path::new(r"\\?\C:\workspace\root")),
+            PathBuf::from(r"C:\workspace\root")
+        );
+        assert_eq!(
+            normalize_windows_final_path(Path::new(r"\\?\UNC\server\share\root")),
+            PathBuf::from(r"\\server\share\root")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalized_canonical_roots_authorize_existing_children() {
+        let dir = scratch_dir("filesystem-windows-canonical-policy");
+        let root = dir.join("root");
+        let child = root.join("existing.txt");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(&child, "contents").unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root],
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+
+        assert!(policy.allows(&child));
     }
 
     #[cfg(windows)]

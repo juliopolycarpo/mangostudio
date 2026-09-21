@@ -44,6 +44,10 @@ path = "src/main.rs"
 # via the launcher's own chain, at this exact version, so a direct dependency
 # on it adds no new version for `cargo deny`'s duplicate check to catch.
 base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+# Object-bound filesystem access for restricted path-policy operations. Version
+# 4.0.3 supports this workspace's Rust 1.97 MSRV on Linux, macOS, and Windows.
+cap-fs-ext = { version = "4.0.3", default-features = false, features = ["std"] }
+cap-std = { version = "4.0.3", default-features = false }
 # The CSPRNG behind `generate_serve_token` (see the `base64` comment above).
 # Already in the workspace graph at this exact version (ring 0.17's RNG shim
 # pins 0.2, rand 0.10 pins 0.4; this crate is the uncontested consumer of 0.3,
@@ -102,6 +106,10 @@ tokio = { version = "1.53", features = ["test-util"] }
 # TypeScript side. `hostname`: `gethostname()` for the lock body's `host` field. `fs`:
 # `access(2)` for `workspace.validate`'s read+execute directory check.
 nix = { version = "0.31", default-features = false, features = ["signal", "hostname", "user", "fs"] }
+# Restricted same-filesystem moves use renameat2/renameatx_np with NOREPLACE
+# through verified directory handles; cap-std only exposes replacing rename.
+# This exact version is already present transitively through cap-std.
+rustix = { version = "1.1", default-features = false, features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
 # Win32_Foundation: HANDLE, BOOL, CloseHandle, LocalFree, STILL_ACTIVE.

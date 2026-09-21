@@ -1,6 +1,7 @@
 //! Synchronous, bounded glob and grep operations for the runtime filesystem.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
@@ -15,8 +16,14 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use cap_fs_ext::DirExt as _;
+
+use super::capability::{
+    BoundDir, bind_opened_directory, open_directory_if_present, open_existing_file,
+    verify_opened_file,
+};
 use super::io::{check_cancel, io_error, path_error, read};
-use super::policy::PathPolicy;
+use super::policy::{CompiledPolicy, PathPolicy};
 use crate::workspace::lexically_normalize;
 
 const MAX_PATTERN_UTF16_UNITS: usize = 1_000;
@@ -84,8 +91,10 @@ pub(super) fn glob(params: GlobParams, cancel: &CancellationToken) -> Result<Val
     walk(
         &search.root,
         search.missing_root_is_empty,
+        &policy,
+        None,
         cancel,
-        |relative, absolute, is_directory| {
+        |relative, absolute, is_directory, _| {
             candidates += 1;
             if candidates > MAX_CANDIDATES {
                 truncated = true;
@@ -145,23 +154,56 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
     let policy = params.path_policy.compile()?;
     policy.check(&params.resolved_path)?;
     validate_regex(&params.pattern, params.case_insensitive)?;
-    let metadata = fs::metadata(&params.resolved_path)
-        .map_err(|error| path_error(format!("Cannot access \"{}\": {error}", params.input_path)))?;
+    let (metadata, restricted_file, mut restricted_directory) = if policy.is_unrestricted() {
+        (
+            Some(fs::metadata(&params.resolved_path).map_err(|error| {
+                path_error(format!("Cannot access \"{}\": {error}", params.input_path))
+            })?),
+            None,
+            None,
+        )
+    } else {
+        match open_directory_if_present(&policy, &params.resolved_path)? {
+            Some(directory) => (None, None, Some(directory)),
+            None => {
+                let file = open_existing_file(&policy, &params.resolved_path)?;
+                if !file.metadata().map_err(io_error)?.is_file() {
+                    return Err(path_error(format!(
+                        "Path \"{}\" is not a regular file or directory.",
+                        params.input_path
+                    )));
+                }
+                (None, Some(file), None)
+            }
+        }
+    };
     let mut matches = Vec::with_capacity(params.max_results.min(5_000));
     let mut files_scanned = 0usize;
     let mut truncated = false;
 
-    if metadata.is_file() {
+    if let Some(file) = restricted_file {
         files_scanned = 1;
-        truncated = scan_file(
-            &params.resolved_path,
+        truncated = scan_opened_file(
+            file,
             &params.resolved_path.to_string_lossy(),
             &params.pattern,
             &params,
             cancel,
             &mut matches,
         )?;
-    } else if metadata.is_dir() {
+    } else if metadata.as_ref().is_some_and(fs::Metadata::is_file) {
+        files_scanned = 1;
+        truncated = scan_file(
+            &params.resolved_path,
+            &params.resolved_path.to_string_lossy(),
+            &params.pattern,
+            &params,
+            &policy,
+            cancel,
+            &mut matches,
+        )?;
+    } else if restricted_directory.is_some() || metadata.as_ref().is_some_and(fs::Metadata::is_dir)
+    {
         let filter = params
             .glob
             .as_deref()
@@ -172,11 +214,16 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
         policy.check(&search.root)?;
         let file_matcher = compile_glob(filter, &params.resolved_path)?;
         let mut candidates = 0usize;
+        let opened_root = (search.root == params.resolved_path)
+            .then(|| restricted_directory.take())
+            .flatten();
         walk(
             &search.root,
             search.missing_root_is_empty,
+            &policy,
+            opened_root,
             cancel,
-            |relative, absolute, is_directory| {
+            |relative, absolute, is_directory, entry| {
                 candidates += 1;
                 if candidates > MAX_CANDIDATES {
                     truncated = true;
@@ -198,14 +245,30 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
                     return Ok(WalkControl::Continue);
                 }
                 files_scanned += 1;
-                if scan_file(
-                    absolute,
-                    &search.display_path(&match_path),
-                    &params.pattern,
-                    &params,
-                    cancel,
-                    &mut matches,
-                )? {
+                let incomplete = if let Some(entry) = entry {
+                    let Some(file) = open_candidate_file(&policy, absolute, entry)? else {
+                        return Ok(WalkControl::Continue);
+                    };
+                    scan_opened_file(
+                        file,
+                        &search.display_path(&match_path),
+                        &params.pattern,
+                        &params,
+                        cancel,
+                        &mut matches,
+                    )?
+                } else {
+                    scan_file(
+                        absolute,
+                        &search.display_path(&match_path),
+                        &params.pattern,
+                        &params,
+                        &policy,
+                        cancel,
+                        &mut matches,
+                    )?
+                };
+                if incomplete {
                     truncated = true;
                 }
                 if matches.len() >= params.max_results {
@@ -379,6 +442,7 @@ fn scan_file(
     display: &str,
     pattern: &str,
     params: &GrepParams,
+    policy: &CompiledPolicy,
     cancel: &CancellationToken,
     matches: &mut Vec<Value>,
 ) -> Result<bool, RemoteError> {
@@ -398,7 +462,7 @@ fn scan_file(
         }
         _ => return Ok(false),
     };
-    let observed = match read(absolute, metadata.len() as usize, cancel) {
+    let observed = match read(policy, absolute, metadata.len() as usize, cancel) {
         Ok(observed) => observed,
         // The file may disappear or become unreadable after metadata checked it.
         // Bun's scanner treats that as an empty completed scan, not a failed grep.
@@ -407,18 +471,85 @@ fn scan_file(
             return Ok(false);
         }
     };
-    if observed.bytes.iter().take(8 * 1024).any(|byte| *byte == 0) {
+    scan_bytes(observed.bytes, display, pattern, params, cancel, matches)
+}
+
+/// Scans a file that was opened relative to a verified directory capability.
+///
+/// The caller owns the policy check performed on the open handle; this helper
+/// deliberately never reconstructs the file's ambient path.
+fn scan_opened_file(
+    mut file: fs::File,
+    display: &str,
+    pattern: &str,
+    params: &GrepParams,
+    cancel: &CancellationToken,
+    matches: &mut Vec<Value>,
+) -> Result<bool, RemoteError> {
+    let allowance = params
+        .max_matches_per_file
+        .min(params.max_results.saturating_sub(matches.len()));
+    if allowance == 0 {
         return Ok(false);
     }
-    let content = String::from_utf8_lossy(&observed.bytes);
+    let metadata = match file.metadata() {
+        Ok(metadata)
+            if metadata.is_file()
+                && metadata.len() > 0
+                && metadata.len() <= params.max_file_size_bytes as u64 =>
+        {
+            metadata
+        }
+        _ => return Ok(false),
+    };
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut chunk = [0; 64 * 1024];
+    loop {
+        check_cancel(cancel)?;
+        let remaining = (params.max_file_size_bytes + 1 - bytes.len()).min(chunk.len());
+        if remaining == 0 {
+            break;
+        }
+        let count = match file.read(&mut chunk[..remaining]) {
+            Ok(count) => count,
+            // A candidate can be removed or become unreadable after it was
+            // enumerated. Bun treats that as an empty completed scan.
+            Err(_) => return Ok(false),
+        };
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+    }
+    if bytes.len() > params.max_file_size_bytes {
+        return Ok(false);
+    }
+    scan_bytes(bytes, display, pattern, params, cancel, matches)
+}
+
+fn scan_bytes(
+    bytes: Vec<u8>,
+    display: &str,
+    pattern: &str,
+    params: &GrepParams,
+    cancel: &CancellationToken,
+    matches: &mut Vec<Value>,
+) -> Result<bool, RemoteError> {
+    if bytes.iter().take(8 * 1024).any(|byte| *byte == 0) {
+        return Ok(false);
+    }
+    let content = String::from_utf8_lossy(&bytes);
     let regex = JavascriptRegex::new(
         pattern,
         params.case_insensitive,
         cancel.clone(),
-        quickjs_heap_limit(observed.bytes.len()),
+        quickjs_heap_limit(bytes.len()),
     )?;
     regex.start_file_budget(GREP_FILE_BUDGET);
     let matches_before_file = matches.len();
+    let allowance = params
+        .max_matches_per_file
+        .min(params.max_results.saturating_sub(matches.len()));
     let mut more_matches = false;
     let mut file_matches = 0usize;
     for (index, line) in content.split('\n').enumerate() {
@@ -584,8 +715,35 @@ enum WalkControl {
 fn walk(
     root: &Path,
     missing_root_is_empty: bool,
+    policy: &CompiledPolicy,
+    opened_root: Option<BoundDir>,
     cancel: &CancellationToken,
-    mut visit: impl FnMut(&Path, &Path, bool) -> Result<WalkControl, RemoteError>,
+    visit: impl FnMut(
+        &Path,
+        &Path,
+        bool,
+        Option<&cap_std::fs::DirEntry>,
+    ) -> Result<WalkControl, RemoteError>,
+) -> Result<(), RemoteError> {
+    if policy.is_unrestricted() {
+        walk_ambient(root, missing_root_is_empty, cancel, visit)
+    } else if let Some(opened_root) = opened_root {
+        walk_opened_capability(root, opened_root, policy, cancel, visit)
+    } else {
+        walk_capability(root, missing_root_is_empty, policy, cancel, visit)
+    }
+}
+
+fn walk_ambient(
+    root: &Path,
+    missing_root_is_empty: bool,
+    cancel: &CancellationToken,
+    mut visit: impl FnMut(
+        &Path,
+        &Path,
+        bool,
+        Option<&cap_std::fs::DirEntry>,
+    ) -> Result<WalkControl, RemoteError>,
 ) -> Result<(), RemoteError> {
     let mut directories = vec![PathBuf::new()];
     while let Some(relative_directory) = directories.pop() {
@@ -612,7 +770,7 @@ fn walk(
             let absolute = root.join(&relative);
             let is_directory = entry.file_type().map_err(io_error)?.is_dir();
             if matches!(
-                visit(&relative, &absolute, is_directory)?,
+                visit(&relative, &absolute, is_directory, None)?,
                 WalkControl::Stop
             ) {
                 return Ok(());
@@ -623,6 +781,151 @@ fn walk(
         }
     }
     Ok(())
+}
+
+fn walk_capability(
+    root: &Path,
+    missing_root_is_empty: bool,
+    policy: &CompiledPolicy,
+    cancel: &CancellationToken,
+    visit: impl FnMut(
+        &Path,
+        &Path,
+        bool,
+        Option<&cap_std::fs::DirEntry>,
+    ) -> Result<WalkControl, RemoteError>,
+) -> Result<(), RemoteError> {
+    walk_capability_with_hook(
+        root,
+        missing_root_is_empty,
+        policy,
+        cancel,
+        &NoopSearchHook,
+        visit,
+    )
+}
+
+trait SearchHook {
+    fn after_root_open(&self);
+}
+
+struct NoopSearchHook;
+
+impl SearchHook for NoopSearchHook {
+    fn after_root_open(&self) {}
+}
+
+fn walk_capability_with_hook(
+    root: &Path,
+    missing_root_is_empty: bool,
+    policy: &CompiledPolicy,
+    cancel: &CancellationToken,
+    hook: &dyn SearchHook,
+    visit: impl FnMut(
+        &Path,
+        &Path,
+        bool,
+        Option<&cap_std::fs::DirEntry>,
+    ) -> Result<WalkControl, RemoteError>,
+) -> Result<(), RemoteError> {
+    let root_path = root.to_path_buf();
+    let root = match open_directory_if_present(policy, root)? {
+        Some(root) => root,
+        None if missing_root_is_empty => return Ok(()),
+        None => return Err(io_error(std::io::Error::from(std::io::ErrorKind::NotFound))),
+    };
+    hook.after_root_open();
+    walk_opened_capability(&root_path, root, policy, cancel, visit)
+}
+
+fn walk_opened_capability(
+    root_path: &Path,
+    root: BoundDir,
+    policy: &CompiledPolicy,
+    cancel: &CancellationToken,
+    mut visit: impl FnMut(
+        &Path,
+        &Path,
+        bool,
+        Option<&cap_std::fs::DirEntry>,
+    ) -> Result<WalkControl, RemoteError>,
+) -> Result<(), RemoteError> {
+    let mut directories = vec![(root, PathBuf::new())];
+    while let Some((directory, relative_directory)) = directories.pop() {
+        check_cancel(cancel)?;
+        let control = match directory.with_dir(|directory| {
+            let entries = directory.entries().map_err(io_error)?;
+            for entry in entries {
+                check_cancel(cancel)?;
+                let entry = entry.map_err(io_error)?;
+                let relative = relative_directory.join(entry.file_name());
+                // Preserve the requested spelling for matching and display. The
+                // capability helpers validate the handle's final host path before
+                // it can be read or traversed.
+                let absolute = root_path.join(&relative);
+                let is_directory = entry.file_type().map_err(io_error)?.is_dir();
+                let allowed = policy.allows(&absolute);
+                if matches!(
+                    visit(
+                        &relative,
+                        &absolute,
+                        is_directory,
+                        (!is_directory && allowed).then_some(&entry)
+                    )?,
+                    WalkControl::Stop
+                ) {
+                    return Ok(WalkControl::Stop);
+                }
+                if is_directory && allowed {
+                    let child = directory
+                        .open_dir_nofollow(entry.file_name())
+                        .map_err(io_error)?;
+                    let child = bind_opened_directory(policy, &absolute, child)?;
+                    directories.push((child, relative));
+                }
+            }
+            Ok(WalkControl::Continue)
+        }) {
+            Ok(control) => control,
+            Err(error) if is_anchor_reopen_error(&error) => continue,
+            Err(error) => return Err(error),
+        };
+        if matches!(control, WalkControl::Stop) {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn is_anchor_reopen_error(error: &RemoteError) -> bool {
+    error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("anchorReopen"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn open_candidate_file(
+    policy: &CompiledPolicy,
+    path: &Path,
+    entry: &cap_std::fs::DirEntry,
+) -> Result<Option<fs::File>, RemoteError> {
+    let mut options = cap_std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt as _;
+
+        options.custom_flags(nix::libc::O_NONBLOCK);
+    }
+    let file = match entry.open_with(&options) {
+        Ok(file) => file,
+        // The file may disappear or become unreadable after it was
+        // enumerated. Bun treats that as an empty completed scan.
+        Err(_) => return Ok(None),
+    };
+    verify_opened_file(policy, path, file).map(Some)
 }
 
 fn slash_path(path: &Path) -> String {
@@ -960,6 +1263,132 @@ mod tests {
     }
 
     #[test]
+    fn restricted_glob_and_grep_keep_their_existing_result_shapes() {
+        let root = scratch_dir("filesystem-search-capability-results");
+        fs::write(root.join("match.txt"), "needle\n").unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            ..PathPolicy::default()
+        };
+
+        let mut glob_parameters = glob_params(&root, "*.txt");
+        glob_parameters.path_policy = policy.clone();
+        assert_eq!(
+            glob(glob_parameters, &token()).unwrap()["matches"],
+            json!(["match.txt"])
+        );
+
+        let mut grep_parameters = grep_params(&root, "needle");
+        grep_parameters.path_policy = policy;
+        assert_eq!(
+            grep(grep_parameters, &token()).unwrap()["matches"],
+            json!([{ "file": "match.txt", "line": 1, "text": "needle" }])
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricted_grep_rejects_non_regular_root_handles() {
+        use nix::sys::stat::Mode;
+        use nix::unistd::mkfifo;
+
+        let root = scratch_dir("filesystem-search-capability-fifo");
+        let fifo = root.join("input");
+        mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+        let mut parameters = grep_params(&fifo, "needle");
+        parameters.input_path = "input".to_string();
+        parameters.path_policy = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            ..PathPolicy::default()
+        };
+
+        assert_eq!(
+            grep(parameters, &token()).unwrap_err().message,
+            "Path \"input\" is not a regular file or directory."
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricted_grep_skips_unmatched_fifo_before_opening_candidates() {
+        use nix::sys::stat::Mode;
+        use nix::unistd::mkfifo;
+
+        let root = scratch_dir("filesystem-search-unmatched-fifo");
+        mkfifo(root.join("unmatched.fifo").as_path(), Mode::S_IRUSR).unwrap();
+        let mut parameters = grep_params(&root, "needle");
+        parameters.glob = Some("*.txt".to_owned());
+        parameters.path_policy = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            ..PathPolicy::default()
+        };
+
+        let result = grep(parameters, &token()).unwrap();
+
+        assert_eq!(result["matches"], json!([]));
+        assert_eq!(result["filesScanned"], 0);
+        assert_eq!(result["truncated"], false);
+    }
+
+    #[cfg(unix)]
+    struct SwapSearchRoot {
+        root: PathBuf,
+        parked: PathBuf,
+        replacement: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl SearchHook for SwapSearchRoot {
+        fn after_root_open(&self) {
+            use std::os::unix::fs::symlink;
+
+            fs::rename(&self.root, &self.parked).unwrap();
+            symlink(&self.replacement, &self.root).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricted_walk_never_reads_through_a_root_swapped_after_authorization() {
+        let sandbox = scratch_dir("filesystem-search-capability-swap");
+        let allowed = sandbox.join("allowed");
+        let root = allowed.join("workspace");
+        let parked = allowed.join("workspace-before-swap");
+        let outside = sandbox.join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(root.join("in-scope.txt"), "safe").unwrap();
+        fs::write(outside.join("in-scope.txt"), "leaked").unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![allowed],
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        let hook = SwapSearchRoot {
+            root: root.clone(),
+            parked,
+            replacement: outside,
+        };
+        let mut offered_file = false;
+
+        walk_capability_with_hook(
+            &root,
+            false,
+            &policy,
+            &token(),
+            &hook,
+            |_, _, is_directory, entry| {
+                offered_file |= !is_directory && entry.is_some();
+                Ok(WalkControl::Continue)
+            },
+        )
+        .unwrap();
+
+        assert!(!offered_file, "the replacement path must never be opened");
+    }
+
+    #[test]
     fn grep_regex_validation_uses_the_service_error_shape() {
         for pattern in ["(", &"a".repeat(MAX_PATTERN_UTF16_UNITS + 1)] {
             let error = validate_regex(pattern, false).unwrap_err();
@@ -1022,6 +1451,7 @@ mod tests {
                 "slow.txt",
                 &params.pattern,
                 &params,
+                &params.path_policy.compile().unwrap(),
                 &token(),
                 &mut matches
             )

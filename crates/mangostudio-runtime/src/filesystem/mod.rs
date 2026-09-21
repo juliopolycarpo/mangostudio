@@ -1,5 +1,6 @@
 //! Filesystem operations and their byte-preserving helpers.
 
+mod capability;
 pub mod freshness;
 mod io;
 mod params;

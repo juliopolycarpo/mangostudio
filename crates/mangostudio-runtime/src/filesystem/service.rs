@@ -14,10 +14,11 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
+use super::capability;
 use super::freshness::{Ledger, ObservedLineRange, PathLocks, ReadObservation};
 use super::io::{self, check_cancel, path_error};
 use super::params::*;
-use super::policy::PathPolicy;
+use super::policy::{CompiledPolicy, PathPolicy};
 use super::text;
 use crate::blocking::run_blocking;
 use crate::consent::source::ConsentSource;
@@ -42,19 +43,29 @@ pub(super) struct Service {
 }
 
 pub(super) trait MoveIo: Send + Sync {
-    fn move_no_overwrite(&self, from: &Path, to: &Path) -> Result<(), RemoteError>;
-    fn hash_file(&self, path: &Path) -> Result<String, RemoteError>;
+    fn move_no_overwrite(
+        &self,
+        policy: &CompiledPolicy,
+        from: &Path,
+        to: &Path,
+    ) -> Result<(), RemoteError>;
+    fn hash_file(&self, policy: &CompiledPolicy, path: &Path) -> Result<String, RemoteError>;
 }
 
 pub(super) struct NativeMoveIo;
 
 impl MoveIo for NativeMoveIo {
-    fn move_no_overwrite(&self, from: &Path, to: &Path) -> Result<(), RemoteError> {
-        io::move_no_overwrite(from, to)
+    fn move_no_overwrite(
+        &self,
+        policy: &CompiledPolicy,
+        from: &Path,
+        to: &Path,
+    ) -> Result<(), RemoteError> {
+        io::move_no_overwrite(policy, from, to)
     }
 
-    fn hash_file(&self, path: &Path) -> Result<String, RemoteError> {
-        io::hash_file(path)
+    fn hash_file(&self, policy: &CompiledPolicy, path: &Path) -> Result<String, RemoteError> {
+        io::hash_file(policy, path)
     }
 }
 
@@ -120,26 +131,22 @@ impl Service {
         ))
     }
 
-    pub(super) fn before_io(
-        &self,
-        method: &str,
-        policy: &Option<PathPolicy>,
-        paths: &[&Path],
-        cancel: &CancellationToken,
-    ) -> Result<(), RemoteError> {
-        self.before_io_with_snapshot(method, policy, paths, false, cancel)
-    }
-
-    /// Rechecks the method's base capabilities plus the conditional snapshot
-    /// capabilities immediately before filesystem access.
-    pub(super) fn before_mutation_io(
+    /// Re-authorizes and binds a mutation's paths to one policy compilation.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let policy = service.compile_mutation_policy("fs.apply-patch", mutation, paths, cancel)?;
+    /// io::write_atomic(&policy, path, bytes, false)?;
+    /// ```
+    pub(super) fn compile_mutation_policy(
         &self,
         method: &str,
         mutation: &Mutation,
         paths: &[&Path],
         cancel: &CancellationToken,
-    ) -> Result<(), RemoteError> {
-        self.before_io_with_snapshot(
+    ) -> Result<CompiledPolicy, RemoteError> {
+        self.compile_policy(
             method,
             &mutation.path_policy,
             paths,
@@ -148,21 +155,21 @@ impl Service {
         )
     }
 
-    fn before_io_with_snapshot(
+    fn compile_policy(
         &self,
         method: &str,
         policy: &Option<PathPolicy>,
         paths: &[&Path],
         capture_snapshot: bool,
         cancel: &CancellationToken,
-    ) -> Result<(), RemoteError> {
+    ) -> Result<CompiledPolicy, RemoteError> {
         check_cancel(cancel)?;
         self.authorize(method, capture_snapshot)?;
         let compiled = policy.clone().unwrap_or_default().compile()?;
         for path in paths {
             compiled.check(path)?;
         }
-        Ok(())
+        Ok(compiled)
     }
 
     async fn read(
@@ -190,10 +197,11 @@ impl Service {
         response: &ResponseBudget,
         cancel: &CancellationToken,
     ) -> Result<Value, RemoteError> {
-        self.before_io(
+        let policy = self.compile_policy(
             "fs.read-file",
             &params.path_policy,
             &[&params.resolved_path],
+            false,
             cancel,
         )?;
         let view = params.view.as_deref().unwrap_or("text");
@@ -203,7 +211,7 @@ impl Service {
         } else {
             READ_MAX_BYTES
         };
-        let observed = io::read(&params.resolved_path, max, cancel).map_err(|error| {
+        let observed = io::read(&policy, &params.resolved_path, max, cancel).map_err(|error| {
             if byte_view && error.details.as_ref().is_some_and(|details| details.get("limitBytes").is_some()) {
                 return path_error(format!("Cannot read \"{}\" as {view}: a byte view is limited to {BYTE_VIEW_MAX_BYTES} bytes because the whole result reaches the model, and it is not windowed. A text file can be read with view \"text\", which windows by line.", params.input_path))
                     .with_detail("limitBytes", BYTE_VIEW_MAX_BYTES);
@@ -291,12 +299,17 @@ impl Service {
             } else {
                 "fs.write-file"
             };
-            self.before_mutation_io(method, &params.mutation, &[&params.resolved_path], &cancel)?;
-            let exists = params.resolved_path.is_file();
+            let policy = self.compile_mutation_policy(
+                method,
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let exists = io::path_is_file(&policy, &params.resolved_path)?;
             let before = if exists && !exclusive && params.mutation.capture_snapshot {
-                let (size, _) = io::current_metadata(&params.resolved_path)?;
+                let (size, _) = io::current_metadata(&policy, &params.resolved_path)?;
                 snapshot_limit(&params.resolved_path, size as usize)?;
-                Some(io::read(&params.resolved_path, 8 * 1024 * 1024, &cancel)?)
+                Some(io::read(&policy, &params.resolved_path, 8 * 1024 * 1024, &cancel)?)
             } else {
                 None
             };
@@ -307,9 +320,9 @@ impl Service {
                 )?;
             }
             if exists && !exclusive {
-                self.assert_current(&params.mutation.chat_id, &params.resolved_path, &cancel)
+                self.assert_current(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
                     .map_err(|error| {
-                        io::explain_unread(&params.resolved_path, "overwrite", error)
+                        io::explain_unread(&policy, &params.resolved_path, "overwrite", error)
                     })?;
             }
             let expected_hash = hash_hex(&Sha256::digest(params.content.as_bytes()));
@@ -328,18 +341,25 @@ impl Service {
                 None,
             );
             response.preflight_snapshot(&params.mutation, &result)?;
-            self.before_mutation_io(method, &params.mutation, &[&params.resolved_path], &cancel)?;
+            let policy = self.compile_mutation_policy(
+                method,
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
             let mtime = if exclusive || !exists {
-                io::create_new(&params.resolved_path, params.content.as_bytes()).map_err(
+                io::create_new(&policy, &params.resolved_path, params.content.as_bytes()).map_err(
                     |error| {
-                        if error.kind() == std::io::ErrorKind::AlreadyExists {
-                            return occupied_path(&params, exclusive);
+                        if error.details.as_ref().is_some_and(|details| {
+                            details.get("alreadyExists").and_then(Value::as_bool) == Some(true)
+                        }) {
+                            return occupied_path(&policy, &params, exclusive);
                         }
-                        io::io_error(error)
+                        error
                     },
                 )?
             } else {
-                io::write_atomic(&params.resolved_path, params.content.as_bytes(), false)?
+                io::write_atomic(&policy, &params.resolved_path, params.content.as_bytes(), false)?
             };
             let hash = lock(&self.state.ledger).record_read(
                 &params.mutation.chat_id,
@@ -356,12 +376,13 @@ impl Service {
 
     pub(super) fn read_fresh(
         &self,
+        policy: &CompiledPolicy,
         chat: &str,
         path: &Path,
         cancel: &CancellationToken,
     ) -> Result<io::Observed, RemoteError> {
         let entry = lock(&self.state.ledger).complete_entry(chat, path)?;
-        let observed = io::read(path, entry.size as usize, cancel).map_err(|error| {
+        let observed = io::read(policy, path, entry.size as usize, cancel).map_err(|error| {
             if error.code == codes::CANCELLED {
                 return error;
             }
@@ -373,17 +394,18 @@ impl Service {
 
     fn assert_current(
         &self,
+        policy: &CompiledPolicy,
         chat: &str,
         path: &Path,
         cancel: &CancellationToken,
     ) -> Result<(), RemoteError> {
         lock(&self.state.ledger).complete_entry(chat, path)?;
-        if let Ok((size, mtime)) = io::current_metadata(path)
+        if let Ok((size, mtime)) = io::current_metadata(policy, path)
             && lock(&self.state.ledger).matches_metadata(chat, path, size, mtime)?
         {
             return Ok(());
         }
-        self.read_fresh(chat, path, cancel).map(|_| ())
+        self.read_fresh(policy, chat, path, cancel).map(|_| ())
     }
 
     async fn edit(
@@ -408,9 +430,15 @@ impl Service {
             .map_err(lock_error)?;
         run_blocking(move || {
             let _guards = guards;
-            self.before_mutation_io("fs.edit-file", &params.mutation, &[&params.resolved_path], &cancel)?;
-            let observed = self.read_fresh(&params.mutation.chat_id, &params.resolved_path, &cancel)
-                .map_err(|error| io::explain_unread(&params.resolved_path, "edit", error))?;
+            let policy = self.compile_mutation_policy(
+                "fs.edit-file",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let observed = self
+                .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
+                .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
             let (updated, count, first) = text::replace_matches(&observed.bytes, params.old_string.as_bytes(), params.new_string.as_bytes(), true);
             if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
             if count > 1 && !params.replace_all.unwrap_or(false) { return Err(argument(format!("Found {count} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."))); }
@@ -418,8 +446,13 @@ impl Service {
             let expected_hash = hash_hex(&Sha256::digest(&updated));
             let result = mutation_result(json!({"path":params.input_path,"replacements":count,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
             response.preflight_snapshot(&params.mutation, &result)?;
-            self.before_mutation_io("fs.edit-file", &params.mutation, &[&params.resolved_path], &cancel)?;
-            let mtime = io::write_atomic(&params.resolved_path, &updated, false)?;
+            let policy = self.compile_mutation_policy(
+                "fs.edit-file",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let mtime = io::write_atomic(&policy, &params.resolved_path, &updated, false)?;
             let changed_lines = params.old_string.bytes().filter(|byte| *byte == b'\n').count() != params.new_string.bytes().filter(|byte| *byte == b'\n').count();
             let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES };
             let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
@@ -442,9 +475,15 @@ impl Service {
             .map_err(lock_error)?;
         run_blocking(move || {
             let _guards = guards;
-            self.before_mutation_io("fs.replace-range", &params.mutation, &[&params.resolved_path], &cancel)?;
-            let observed = self.read_fresh(&params.mutation.chat_id, &params.resolved_path, &cancel)
-                .map_err(|error| io::explain_unread(&params.resolved_path, "edit", error))?;
+            let policy = self.compile_mutation_policy(
+                "fs.replace-range",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let observed = self
+                .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
+                .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
             lock(&self.state.ledger).assert_line_numbers(&params.mutation.chat_id, &params.resolved_path, params.end_line as u64)?;
             let total = text::total_lines(&observed.bytes);
             let start = positive_integer(params.start_line, "startLine")?;
@@ -456,8 +495,13 @@ impl Service {
             let replaced = end-start+1;
             let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
             response.preflight_snapshot(&params.mutation, &result)?;
-            self.before_mutation_io("fs.replace-range", &params.mutation, &[&params.resolved_path], &cancel)?;
-            let mtime = io::write_atomic(&params.resolved_path, &updated, false)?;
+            let policy = self.compile_mutation_policy(
+                "fs.replace-range",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let mtime = io::write_atomic(&policy, &params.resolved_path, &updated, false)?;
             let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES} else {(start-1) as u64};
             let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
             debug_assert_eq!(hash, expected_hash);
@@ -479,23 +523,35 @@ impl Service {
             .map_err(lock_error)?;
         run_blocking(move || {
             let _guards = guards;
-            self.before_mutation_io(
+            let policy = self.compile_mutation_policy(
                 "fs.delete-file",
                 &params.mutation,
                 &[&params.resolved_path],
                 &cancel,
             )?;
-            io::assert_regular(&params.resolved_path, "delete")?;
+            io::assert_regular(&policy, &params.resolved_path, "delete")?;
             let before = if params.mutation.capture_snapshot {
                 Some(
-                    self.read_fresh(&params.mutation.chat_id, &params.resolved_path, &cancel)
-                        .map_err(|error| {
-                            io::explain_unread(&params.resolved_path, "delete", error)
-                        })?,
+                    self.read_fresh(
+                        &policy,
+                        &params.mutation.chat_id,
+                        &params.resolved_path,
+                        &cancel,
+                    )
+                    .map_err(|error| {
+                        io::explain_unread(&policy, &params.resolved_path, "delete", error)
+                    })?,
                 )
             } else {
-                self.assert_current(&params.mutation.chat_id, &params.resolved_path, &cancel)
-                    .map_err(|error| io::explain_unread(&params.resolved_path, "delete", error))?;
+                self.assert_current(
+                    &policy,
+                    &params.mutation.chat_id,
+                    &params.resolved_path,
+                    &cancel,
+                )
+                .map_err(|error| {
+                    io::explain_unread(&policy, &params.resolved_path, "delete", error)
+                })?;
                 None
             };
             let result = mutation_result(
@@ -508,17 +564,19 @@ impl Service {
                 None,
             );
             response.preflight_snapshot(&params.mutation, &result)?;
-            self.before_mutation_io(
+            let policy = self.compile_mutation_policy(
                 "fs.delete-file",
                 &params.mutation,
                 &[&params.resolved_path],
                 &cancel,
             )?;
-            std::fs::remove_file(&params.resolved_path).map_err(|error| {
-                if error.kind() == std::io::ErrorKind::NotFound {
+            io::delete_file(&policy, &params.resolved_path).map_err(|error| {
+                if error.details.as_ref().is_some_and(|details| {
+                    details.get("notFound").and_then(Value::as_bool) == Some(true)
+                }) {
                     return super::freshness::stale_file_error(&params.resolved_path);
                 }
-                io::io_error(error)
+                error
             })?;
             lock(&self.state.ledger).forget(&params.mutation.chat_id, &params.resolved_path);
             Ok(result)
@@ -548,21 +606,26 @@ impl Service {
             .map_err(lock_error)?;
         run_blocking(move || {
             let _guards = guards;
-            self.before_mutation_io(
+            let policy = self.compile_mutation_policy(
                 "fs.move-file",
                 &params.mutation,
                 &[&params.resolved_from, &params.resolved_to],
                 &cancel,
             )?;
-            let metadata = io::assert_regular(&params.resolved_from, "move")?;
+            let metadata = io::assert_regular(&policy, &params.resolved_from, "move")?;
             let before = if params.mutation.capture_snapshot {
-                snapshot_limit(&params.resolved_from, metadata.len() as usize)?;
-                Some(io::read(&params.resolved_from, 8 * 1024 * 1024, &cancel)?)
+                snapshot_limit(&params.resolved_from, metadata.len as usize)?;
+                Some(io::read(
+                    &policy,
+                    &params.resolved_from,
+                    8 * 1024 * 1024,
+                    &cancel,
+                )?)
             } else {
                 None
             };
             let expected_hash = before.as_ref().map_or_else(
-                || io::hash_file(&params.resolved_from),
+                || io::hash_file(&policy, &params.resolved_from),
                 |observed| Ok(hash_hex(&Sha256::digest(&observed.bytes))),
             )?;
             let result = mutation_result(
@@ -575,15 +638,15 @@ impl Service {
                 Some(&params.resolved_to),
             );
             response.preflight_snapshot(&params.mutation, &result)?;
-            self.before_mutation_io(
+            let policy = self.compile_mutation_policy(
                 "fs.move-file",
                 &params.mutation,
                 &[&params.resolved_from, &params.resolved_to],
                 &cancel,
             )?;
             self.move_io
-                .move_no_overwrite(&params.resolved_from, &params.resolved_to)?;
-            let committed_hash = match self.move_io.hash_file(&params.resolved_to) {
+                .move_no_overwrite(&policy, &params.resolved_from, &params.resolved_to)?;
+            let committed_hash = match self.move_io.hash_file(&policy, &params.resolved_to) {
                 Ok(hash) => hash,
                 Err(cause) => {
                     let mut ledger = lock(&self.state.ledger);
@@ -627,39 +690,81 @@ impl Service {
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         run_blocking(move || {
-            self.before_io(
+            let policy = self.compile_policy(
                 "fs.list-directory",
                 &params.path_policy,
                 &[&params.resolved_path],
+                false,
                 &cancel,
             )?;
             let list_error = |error: std::io::Error| {
                 path_error(format!("Cannot list \"{}\": {error}", params.input_path))
             };
-            let entries = std::fs::read_dir(&params.resolved_path).map_err(list_error)?;
-            let entries: Result<Vec<Value>, RemoteError> = entries
-                .map(|entry| {
-                    check_cancel(&cancel)?;
-                    let entry = entry.map_err(list_error)?;
-                    let kind = if entry.file_type().map_err(list_error)?.is_dir() {
-                        "directory"
-                    } else {
-                        "file"
-                    };
-                    Ok(json!({"name":entry.file_name().to_string_lossy(),"type":kind}))
-                })
-                .collect();
-            Ok(json!({"path":params.input_path,"entries":entries?}))
+            let entries = if policy.is_unrestricted() {
+                list_unrestricted(&params.resolved_path, &cancel, &list_error)?
+            } else {
+                list_bound(&policy, &params.resolved_path, &cancel, &list_error)?
+            };
+            Ok(json!({"path":params.input_path,"entries":entries}))
         })
         .await
     }
 }
 
-fn occupied_path(params: &WriteParams, create: bool) -> RemoteError {
-    let metadata = std::fs::symlink_metadata(&params.resolved_path).ok();
+fn list_unrestricted(
+    path: &Path,
+    cancel: &CancellationToken,
+    list_error: &impl Fn(std::io::Error) -> RemoteError,
+) -> Result<Vec<Value>, RemoteError> {
+    std::fs::read_dir(path)
+        .map_err(list_error)?
+        .map(|entry| {
+            check_cancel(cancel)?;
+            let entry = entry.map_err(list_error)?;
+            let kind = if entry.file_type().map_err(list_error)?.is_dir() {
+                "directory"
+            } else {
+                "file"
+            };
+            Ok(json!({"name":entry.file_name().to_string_lossy(),"type":kind}))
+        })
+        .collect()
+}
+
+fn list_bound(
+    policy: &CompiledPolicy,
+    path: &Path,
+    cancel: &CancellationToken,
+    list_error: &impl Fn(std::io::Error) -> RemoteError,
+) -> Result<Vec<Value>, RemoteError> {
+    let directory = capability::open_directory(policy, path).map_err(|error| {
+        list_error(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            error.message,
+        ))
+    })?;
+    directory.with_dir(|dir| {
+        dir.entries()
+            .map_err(list_error)?
+            .map(|entry| {
+                check_cancel(cancel)?;
+                let entry = entry.map_err(list_error)?;
+                let kind = if entry.file_type().map_err(list_error)?.is_dir() {
+                    "directory"
+                } else {
+                    "file"
+                };
+                Ok(json!({"name":entry.file_name().to_string_lossy(),"type":kind}))
+            })
+            .collect()
+    })
+}
+
+fn occupied_path(policy: &CompiledPolicy, params: &WriteParams, create: bool) -> RemoteError {
     if !create {
-        if metadata.as_ref().is_some_and(std::fs::Metadata::is_file) {
+        if io::assert_regular(policy, &params.resolved_path, "write").is_ok() {
             return io::explain_unread(
+                policy,
                 &params.resolved_path,
                 "overwrite",
                 super::freshness::file_not_read_error(&params.resolved_path),
@@ -670,38 +775,7 @@ fn occupied_path(params: &WriteParams, create: bool) -> RemoteError {
             params.resolved_path.display()
         ));
     }
-    if metadata.as_ref().is_some_and(std::fs::Metadata::is_symlink) {
-        let target = std::fs::read_link(&params.resolved_path)
-            .ok()
-            .map_or_else(String::new, |target| {
-                format!(" to \"{}\"", target.display())
-            });
-        return path_error(format!(
-            "Cannot create \"{}\": it is a symbolic link{target}. Write to the link target instead.",
-            params.input_path
-        ));
-    }
-    if metadata.as_ref().is_some_and(|entry| !entry.is_file()) {
-        return path_error(format!(
-            "Cannot create \"{}\": the path exists and is not a regular file.",
-            params.input_path
-        ));
-    }
-    if metadata.is_some() {
-        return path_error(format!(
-            "\"{}\" already exists. Read it with read_file, then use edit_file for an exact text change, replace_range for a line change, or write_file to replace all content.",
-            params.input_path
-        ));
-    }
-    path_error(format!(
-        "Cannot create \"{}\": \"{}\" is not a directory.",
-        params.input_path,
-        params
-            .resolved_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .display()
-    ))
+    io::create_conflict_error(policy, &params.resolved_path, &params.input_path)
 }
 
 pub(super) fn argument(message: impl Into<String>) -> RemoteError {
@@ -915,24 +989,34 @@ mod tests {
     }
 
     impl MoveIo for ReplacingMoveIo {
-        fn move_no_overwrite(&self, from: &Path, to: &Path) -> Result<(), RemoteError> {
+        fn move_no_overwrite(
+            &self,
+            policy: &CompiledPolicy,
+            from: &Path,
+            to: &Path,
+        ) -> Result<(), RemoteError> {
             std::fs::write(from, &self.replacement).map_err(io::io_error)?;
-            io::move_no_overwrite(from, to)
+            io::move_no_overwrite(policy, from, to)
         }
 
-        fn hash_file(&self, path: &Path) -> Result<String, RemoteError> {
-            io::hash_file(path)
+        fn hash_file(&self, policy: &CompiledPolicy, path: &Path) -> Result<String, RemoteError> {
+            io::hash_file(policy, path)
         }
     }
 
     struct FailingHashMoveIo;
 
     impl MoveIo for FailingHashMoveIo {
-        fn move_no_overwrite(&self, from: &Path, to: &Path) -> Result<(), RemoteError> {
-            io::move_no_overwrite(from, to)
+        fn move_no_overwrite(
+            &self,
+            policy: &CompiledPolicy,
+            from: &Path,
+            to: &Path,
+        ) -> Result<(), RemoteError> {
+            io::move_no_overwrite(policy, from, to)
         }
 
-        fn hash_file(&self, path: &Path) -> Result<String, RemoteError> {
+        fn hash_file(&self, _: &CompiledPolicy, path: &Path) -> Result<String, RemoteError> {
             Err(path_error(format!(
                 "Cannot hash \"{}\": injected failure.",
                 path.display()
@@ -1423,7 +1507,7 @@ mod tests {
             "\"file\" already exists. Read it with read_file, then use edit_file for an exact text change, replace_range for a line change, or write_file to replace all content."
         );
         assert_eq!(std::fs::read_to_string(path).unwrap(), "existing");
-        let error = service
+        let error = Arc::clone(&service)
             .list(
                 decode(json!({"inputPath":"missing","resolvedPath":home.join("missing")})),
                 CancellationToken::new(),
@@ -1432,6 +1516,30 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error.details.as_ref().and_then(|d| d.get("kind")),
+            Some(&json!("path_access"))
+        );
+        assert!(error.message.starts_with("Cannot list \"missing\": "));
+
+        let error = service
+            .list(
+                decode(json!({
+                    "inputPath":"missing",
+                    "resolvedPath":home.join("missing"),
+                    "pathPolicy":{
+                        "allowedRoots":[home.to_path_buf()],
+                        "deniedRoots":[],
+                        "containmentRoot":null
+                    }
+                })),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error
+                .details
+                .as_ref()
+                .and_then(|details| details.get("kind")),
             Some(&json!("path_access"))
         );
         assert!(error.message.starts_with("Cannot list \"missing\": "));

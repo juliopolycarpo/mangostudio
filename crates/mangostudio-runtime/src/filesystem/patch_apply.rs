@@ -1,7 +1,6 @@
 //! Transaction-like application of structured filesystem patch operations.
 
 use std::{
-    fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -18,6 +17,7 @@ use super::{
     io,
     params::Mutation,
     patch::{self, V4aUpdateHunk},
+    policy::CompiledPolicy,
     service::{Service, argument, preflight_response},
 };
 use crate::{blocking::run_blocking, ports::audit::lock};
@@ -85,6 +85,16 @@ struct Revalidated {
     mtime_ms: f64,
 }
 
+trait CommitHook {
+    fn after_final_policy_check(&self);
+}
+
+struct NoopCommitHook;
+
+impl CommitHook for NoopCommitHook {
+    fn after_final_policy_check(&self) {}
+}
+
 /// Plans, revalidates, and commits a multi-file patch under every path lock.
 pub(super) async fn apply(
     service: Arc<Service>,
@@ -147,7 +157,7 @@ fn plan_operation(
     cancel: &CancellationToken,
 ) -> Result<PlannedOperation, RemoteError> {
     let paths = raw_operation_paths(operation);
-    service.before_mutation_io("fs.apply-patch", mutation, &paths, cancel)?;
+    let policy = service.compile_mutation_policy("fs.apply-patch", mutation, &paths, cancel)?;
     match operation {
         PatchOperation::Add {
             input_path,
@@ -155,7 +165,7 @@ fn plan_operation(
             content,
         } => {
             assert_text(content, input_path)?;
-            assert_destination_available(resolved_path, input_path)?;
+            io::assert_destination_available(&policy, resolved_path, input_path)?;
             Ok(PlannedOperation::Add {
                 input_path: input_path.clone(),
                 resolved_path: resolved_path.clone(),
@@ -167,7 +177,8 @@ fn plan_operation(
             resolved_path,
         } => {
             let source =
-                read_patch_target(service, &mutation.chat_id, resolved_path, cancel)?.bytes;
+                read_patch_target(service, &policy, &mutation.chat_id, resolved_path, cancel)?
+                    .bytes;
             if mutation.capture_snapshot {
                 super::service::snapshot_limit(resolved_path, source.len())?;
             }
@@ -191,7 +202,8 @@ fn plan_operation(
                     resolved_move_to.is_some()
                 )));
             }
-            let observed = read_patch_target(service, &mutation.chat_id, resolved_path, cancel)?;
+            let observed =
+                read_patch_target(service, &policy, &mutation.chat_id, resolved_path, cancel)?;
             if mutation.capture_snapshot {
                 super::service::snapshot_limit(resolved_path, observed.bytes.len())?;
             }
@@ -216,7 +228,11 @@ fn plan_operation(
                         "Source and move destination must be different paths.",
                     ));
                 }
-                assert_destination_available(destination, move_to.as_deref().unwrap_or_default())?;
+                io::assert_destination_available(
+                    &policy,
+                    destination,
+                    move_to.as_deref().unwrap_or_default(),
+                )?;
             }
             Ok(PlannedOperation::Update {
                 input_path: input_path.clone(),
@@ -249,9 +265,33 @@ fn commit_revalidated(
     revalidated: &[Option<Revalidated>],
     cancel: &CancellationToken,
 ) -> Result<Value, RemoteError> {
+    commit_revalidated_with_hook(
+        service,
+        params,
+        planned,
+        revalidated,
+        cancel,
+        &NoopCommitHook,
+    )
+}
+
+fn commit_revalidated_with_hook(
+    service: &Service,
+    params: &ApplyPatchParams,
+    planned: &[PlannedOperation],
+    revalidated: &[Option<Revalidated>],
+    cancel: &CancellationToken,
+    hook: &dyn CommitHook,
+) -> Result<Value, RemoteError> {
     let paths: Vec<_> = planned.iter().flat_map(operation_paths).collect();
     let borrowed_paths: Vec<_> = paths.iter().map(PathBuf::as_path).collect();
-    service.before_mutation_io("fs.apply-patch", &params.mutation, &borrowed_paths, cancel)?;
+    let policy = service.compile_mutation_policy(
+        "fs.apply-patch",
+        &params.mutation,
+        &borrowed_paths,
+        cancel,
+    )?;
+    hook.after_final_policy_check();
 
     let mut writes = vec![None; planned.len()];
     let mut move_hashes = vec![None; planned.len()];
@@ -262,13 +302,13 @@ fn commit_revalidated(
                 resolved_path,
                 content,
                 ..
-            } => io::write_atomic(resolved_path, content.as_bytes(), true),
+            } => io::write_atomic(&policy, resolved_path, content.as_bytes(), true),
             PlannedOperation::Update {
                 resolved_path,
                 content,
                 has_content_changes: true,
                 ..
-            } => io::write_atomic(resolved_path, content.as_bytes(), false),
+            } => io::write_atomic(&policy, resolved_path, content.as_bytes(), false),
             PlannedOperation::Delete { .. }
             | PlannedOperation::Update {
                 has_content_changes: false,
@@ -292,13 +332,13 @@ fn commit_revalidated(
         else {
             continue;
         };
-        if let Err(error) = io::move_no_overwrite(resolved_path, destination) {
+        if let Err(error) = io::move_no_overwrite(&policy, resolved_path, destination) {
             record_uncertain_move_paths(&mut changed_paths, resolved_path, destination, &error);
             return Err(commit_error(&changed_paths, error));
         }
         changed_paths.push(resolved_path.clone());
         changed_paths.push(destination.clone());
-        match io::hash_file(destination) {
+        match io::hash_file(&policy, destination) {
             Ok(hash) => move_hashes[index] = Some(hash),
             Err(error) => return Err(commit_error(&changed_paths, error)),
         }
@@ -307,11 +347,17 @@ fn commit_revalidated(
         let PlannedOperation::Delete { resolved_path, .. } = operation else {
             continue;
         };
-        if let Err(error) = fs::remove_file(resolved_path) {
-            let error = if error.kind() == std::io::ErrorKind::NotFound {
+        if let Err(error) = io::delete_file(&policy, resolved_path) {
+            let error = if error
+                .details
+                .as_ref()
+                .and_then(|details| details.get("notFound"))
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
                 super::freshness::stale_file_error(resolved_path)
             } else {
-                io::io_error(error)
+                error
             };
             return Err(commit_error(&changed_paths, error));
         }
@@ -353,8 +399,15 @@ fn revalidate_operations(
                 resolved_path,
                 ..
             } => service
-                .before_mutation_io("fs.apply-patch", &params.mutation, &[resolved_path], cancel)
-                .and_then(|()| assert_destination_available(resolved_path, input_path))
+                .compile_mutation_policy(
+                    "fs.apply-patch",
+                    &params.mutation,
+                    &[resolved_path],
+                    cancel,
+                )
+                .and_then(|policy| {
+                    io::assert_destination_available(&policy, resolved_path, input_path)
+                })
                 .map(|()| None),
             PlannedOperation::Delete {
                 input_path: _,
@@ -368,14 +421,20 @@ fn revalidate_operations(
                 ..
             } => {
                 let checked = service
-                    .before_mutation_io(
+                    .compile_mutation_policy(
                         "fs.apply-patch",
                         &params.mutation,
                         &[resolved_path],
                         cancel,
                     )
-                    .and_then(|()| {
-                        read_patch_target(service, &params.mutation.chat_id, resolved_path, cancel)
+                    .and_then(|policy| {
+                        read_patch_target(
+                            service,
+                            &policy,
+                            &params.mutation.chat_id,
+                            resolved_path,
+                            cancel,
+                        )
                     });
                 checked.and_then(|observed| {
                     if observed.bytes != *source {
@@ -387,13 +446,14 @@ fn revalidate_operations(
                         ..
                     } = operation
                     {
-                        service.before_mutation_io(
+                        let policy = service.compile_mutation_policy(
                             "fs.apply-patch",
                             &params.mutation,
                             &[destination],
                             cancel,
                         )?;
-                        assert_destination_available(
+                        io::assert_destination_available(
+                            &policy,
                             destination,
                             move_to.as_deref().unwrap_or_default(),
                         )?;
@@ -656,45 +716,15 @@ fn push_snapshot(
 
 fn read_patch_target(
     service: &Service,
+    policy: &CompiledPolicy,
     chat_id: &str,
     path: &Path,
     cancel: &CancellationToken,
 ) -> Result<super::io::Observed, RemoteError> {
-    io::assert_regular(path, "patch")?;
+    io::assert_regular(policy, path, "patch")?;
     service
-        .read_fresh(chat_id, path, cancel)
-        .map_err(|error| io::explain_unread(path, "patch", error))
-}
-
-fn assert_destination_available(path: &Path, input_path: &str) -> Result<(), RemoteError> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => {
-            return Err(io::path_error(format!(
-                "\"{input_path}\" already exists and cannot be overwritten."
-            )));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(io::io_error(error)),
-    }
-    let mut parent = path.parent().unwrap_or(Path::new("."));
-    loop {
-        match fs::symlink_metadata(parent) {
-            Ok(metadata) if metadata.is_dir() => return Ok(()),
-            Ok(_) => {
-                return Err(io::path_error(format!(
-                    "Cannot create \"{input_path}\": parent path \"{}\" is not a directory.",
-                    parent.display()
-                )));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(io::io_error(error)),
-        }
-        let next = parent.parent().unwrap_or(parent);
-        if next == parent {
-            return Ok(());
-        }
-        parent = next;
-    }
+        .read_fresh(policy, chat_id, path, cancel)
+        .map_err(|error| io::explain_unread(policy, path, "patch", error))
 }
 
 fn assert_text(content: &str, input_path: &str) -> Result<(), RemoteError> {
@@ -849,6 +879,7 @@ mod tests {
         consent::source::ConsentSource,
         filesystem::{
             freshness::{ObservedLineRange, ReadObservation},
+            policy::PathPolicy,
             service::{NativeMoveIo, State},
         },
         runtime_home::RuntimeSlot,
@@ -893,6 +924,20 @@ mod tests {
             f64::NAN,
             ReadObservation::WholeFile,
         );
+    }
+
+    #[cfg(unix)]
+    struct SwapAfterFinalPolicyCheck {
+        link: PathBuf,
+        replacement: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl CommitHook for SwapAfterFinalPolicyCheck {
+        fn after_final_policy_check(&self) {
+            fs::remove_file(&self.link).unwrap();
+            std::os::unix::fs::symlink(&self.replacement, &self.link).unwrap();
+        }
     }
 
     #[tokio::test]
@@ -1187,9 +1232,10 @@ mod tests {
         let cancel = CancellationToken::new();
         let planned = plan_operations(&service, &parameters, &cancel).unwrap();
         let revalidated = revalidate_operations(&service, &parameters, &planned, &cancel).unwrap();
-        io::move_no_overwrite(&source, &destination).unwrap();
+        let policy = PathPolicy::default().compile().unwrap();
+        io::move_no_overwrite(&policy, &source, &destination).unwrap();
         fs::write(&destination, "external\n").unwrap();
-        let committed_hash = io::hash_file(&destination).unwrap();
+        let committed_hash = io::hash_file(&policy, &destination).unwrap();
         let result = outcomes(
             &service,
             &parameters,
@@ -1335,6 +1381,54 @@ mod tests {
                 .unwrap_err();
         assert_eq!(error.details.unwrap()["kind"], "path_access");
         assert_eq!(fs::read_to_string(safe.join("file.txt")).unwrap(), "old\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn final_policy_check_cannot_be_raced_into_an_outside_patch_write() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let root = home.join("root");
+        let safe = root.join("safe");
+        let outside = home.join("outside");
+        fs::create_dir_all(&safe).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(safe.join("file.txt"), "old\n").unwrap();
+        fs::write(outside.join("file.txt"), "outside\n").unwrap();
+        let link = root.join("link");
+        symlink(&safe, &link).unwrap();
+        let path = link.join("file.txt");
+        mark_read(&service, &path);
+        let parameters = params(json!({
+            "chatId":"chat", "captureSnapshot":false,
+            "pathPolicy":{"allowedRoots":[],"deniedRoots":[],"containmentRoot":root},
+            "operations":[{"type":"update","inputPath":"link/file.txt","resolvedPath":path,"hunks":[{"lines":[{"type":"delete","content":"old","ending":"\n"},{"type":"add","content":"new","ending":"\n"}]}]}]
+        }));
+        let cancel = CancellationToken::new();
+        let planned = plan_operations(&service, &parameters, &cancel).unwrap();
+        let revalidated = revalidate_operations(&service, &parameters, &planned, &cancel).unwrap();
+        let hook = SwapAfterFinalPolicyCheck {
+            link: link.clone(),
+            replacement: outside.clone(),
+        };
+
+        let error = commit_revalidated_with_hook(
+            &service,
+            &parameters,
+            &planned,
+            &revalidated,
+            &cancel,
+            &hook,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["kind"], "path_access");
+        assert_eq!(fs::read_to_string(safe.join("file.txt")).unwrap(), "old\n");
+        assert_eq!(
+            fs::read_to_string(outside.join("file.txt")).unwrap(),
+            "outside\n"
+        );
     }
 
     #[test]
