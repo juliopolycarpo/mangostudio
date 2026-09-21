@@ -240,7 +240,7 @@ const MAX_SYMLINK_HOPS: u32 = 32;
 /// `None` also when not even the empty prefix can be canonicalized (a
 /// transient I/O error, most often) — never `Some` of a path this function
 /// could not actually verify against the filesystem.
-fn resolve_through_existing_ancestor(candidate: &Path) -> Option<PathBuf> {
+pub(crate) fn resolve_through_existing_ancestor(candidate: &Path) -> Option<PathBuf> {
     let (mut resolved, mut pending) = split_into_root_and_segments(candidate);
     let mut hops: u32 = 0;
 

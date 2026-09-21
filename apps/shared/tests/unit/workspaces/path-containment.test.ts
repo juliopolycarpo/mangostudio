@@ -33,6 +33,15 @@ describe('isPathPrefix', () => {
     expect(isPathPrefix('/tmp/project', '/tmp/project/src')).toBe(true);
     expect(isPathPrefix('/tmp/project', '/tmp/project-extra')).toBe(false);
   });
+
+  it.skipIf(process.platform !== 'win32')(
+    'matches Windows path components with filesystem case identity',
+    () => {
+      expect(isPathPrefix('C:\\Workspace', 'c:\\workspace\\nested')).toBe(true);
+      expect(isPathPrefix('C:\\Workspace', 'c:\\workspace-copy')).toBe(false);
+      expect(isPathPrefix('\\\\?\\C:\\Workspace', '\\\\?\\c:\\workspace\\nested')).toBe(true);
+    }
+  );
 });
 
 describe('isInside', () => {

@@ -228,6 +228,24 @@ describe('runtime filesystem path policy', () => {
     ).rejects.toThrow(PathAccessError);
   });
 
+  it.skipIf(process.platform !== 'win32')(
+    'refuses a differently-cased missing denied root on Windows',
+    async () => {
+      const denied = join(root, 'Private');
+
+      await expect(
+        runtimeFsService.createFile({
+          chatId: 'chat-policy',
+          inputPath: 'private/new.txt',
+          resolvedPath: join(root, 'pRiVaTe', 'new.txt'),
+          content: 'planted',
+          captureSnapshot: false,
+          pathPolicy: { allowedRoots: [], deniedRoots: [denied], containmentRoot: root },
+        })
+      ).rejects.toThrow(PathAccessError);
+    }
+  );
+
   it('leaves calls without a policy unrestricted', async () => {
     const created = await runtimeFsService.createFile({
       chatId: 'chat-policy',

@@ -69,6 +69,7 @@ import { insertTestUser } from '../../support/factories';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 import {
   assertRustRuntimeFeatureCeiling,
+  assertRustRuntimeFilesystemMethods,
   assertRustRuntimeHealthShape,
   assertRustRuntimeProbingMethods,
   assertRustRuntimeWorkspaceMethods,
@@ -172,6 +173,41 @@ describe('Real Rust runtime qualification', () => {
       },
       30_000
     );
+
+    it.skipIf(!binary.available)(
+      'filesystem methods round-trip over stdio',
+      async () => {
+        mangoHome = await scratchMangoHome('stdio-filesystem');
+        previousMangoHome = process.env.MANGO_HOME;
+        process.env.MANGO_HOME = mangoHome;
+        const connection = await spawnRuntimeChild({
+          environmentId: 'rust-stdio-filesystem',
+          launch: resolveRuntimeLaunchCommand(undefined, {
+            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+          }),
+          hubVersion: runtimeVersion,
+          onClosed: () => undefined,
+        });
+        const directory = await realpath(await scratchMangoHome('stdio-filesystem-dir'));
+        try {
+          const client = new RuntimeClient(
+            connection.hub,
+            () => undefined,
+            'rust-stdio-filesystem'
+          );
+          assertRustRuntimeFeatureCeiling(client.manifest, {
+            probing: true,
+            fsRead: true,
+            fsWrite: true,
+          });
+          await assertRustRuntimeFilesystemMethods(client, directory);
+        } finally {
+          await connection.close();
+          await cleanupMangoHome(directory);
+        }
+      },
+      30_000
+    );
   });
 
   describe('direct URL serve', () => {
@@ -238,7 +274,11 @@ describe('Real Rust runtime qualification', () => {
         const client = await manager.getClient(TEST_USER.id, 'rust-serve-box');
         // `serve`/`connect` both always answer as the `remote` slot.
         assertRustRuntimeHealthShape(await client.health(), { slot: 'remote' });
-        assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+        assertRustRuntimeFeatureCeiling(client.manifest, {
+          probing: true,
+          fsRead: true,
+          fsWrite: true,
+        });
         await assertRustRuntimeProbingMethods(client);
       },
       30_000
@@ -280,21 +320,37 @@ describe('Real Rust runtime qualification', () => {
         await connectUntilListening(() => service.connect(TEST_USER.id, 'rust-serve-refresh-box'));
 
         const client = await manager.getClient(TEST_USER.id, 'rust-serve-refresh-box');
-        assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+        assertRustRuntimeFeatureCeiling(client.manifest, {
+          probing: true,
+          fsRead: true,
+          fsWrite: true,
+        });
         const refreshed = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
         expect(refreshed.state).toBe('connected');
-        assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+        assertRustRuntimeFeatureCeiling(client.manifest, {
+          probing: true,
+          fsRead: true,
+          fsWrite: true,
+        });
 
         await setRustRuntimeProfile(mangoHome, 'none');
 
         const revoked = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
         expect(revoked.manifest?.allow).toEqual(RUNTIME_CONSENT_PRESETS.none);
-        assertRustRuntimeFeatureCeiling(client.manifest, { probing: false });
+        assertRustRuntimeFeatureCeiling(client.manifest, {
+          probing: false,
+          fsRead: false,
+          fsWrite: false,
+        });
 
         await setRustRuntimeProfile(mangoHome, 'full');
         const restored = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
         expect(restored.manifest?.allow).toEqual(RUNTIME_CONSENT_PRESETS.full);
-        assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+        assertRustRuntimeFeatureCeiling(client.manifest, {
+          probing: true,
+          fsRead: true,
+          fsWrite: true,
+        });
       },
       30_000
     );

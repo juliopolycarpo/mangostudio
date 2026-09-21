@@ -211,6 +211,7 @@ pub(crate) async fn build_capability_manifest(
     manifest.features = crate::manifest::build_features(registry, &allow, git.available);
     manifest.profile = Some(resolved.profile);
     manifest.allow = Some(allow);
+    manifest.enforces_path_policy = Some(true);
     manifest
 }
 

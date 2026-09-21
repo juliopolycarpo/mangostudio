@@ -13,8 +13,9 @@
 //! - [`registry`] — a registry of the methods this build actually
 //!   implements. `transport::build_host` (crate-private) populates a
 //!   production one from `health::register`, `workspace_methods::register`
-//!   and `probing::register` — `runtime.health`, the three `workspace.*`
-//!   methods, and the three `probing.*` methods; a bare [`registry::Registry::new`]
+//!   `probing::register`, and `filesystem::register`: `runtime.health`,
+//!   the three `workspace.*`, three `probing.*`, and eleven `fs.*` methods.
+//!   A bare [`registry::Registry::new`]
 //!   stays empty, which is what its own tests and doctest fill with named
 //!   fakes to prove the plumbing without a real filesystem or subprocess
 //!   underneath. A method the catalog declares but this registry has not
@@ -116,6 +117,7 @@ pub mod cli;
 pub mod config;
 pub mod consent;
 pub mod event_check;
+pub mod filesystem;
 pub mod health;
 pub mod manifest;
 pub mod panic;

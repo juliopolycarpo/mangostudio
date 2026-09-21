@@ -307,6 +307,9 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       'tests/integration/services/rust-runtime-qualification.integration.test.ts'
     );
     expect(qualificationBlock).toContain(
+      'tests/integration/services/rust-filesystem-search-compat.integration.test.ts'
+    );
+    expect(qualificationBlock).toContain(
       'tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts'
     );
   });

@@ -9,7 +9,7 @@
 //! has a real handler in that runtime. This crate adds exactly that gate:
 //! [`build_features`] mirrors `manifest.ts`'s allow→features formula field
 //! for field, then additionally requires every catalog method carrying the
-//! corresponding capability to be [`Registry::classify`]'d as
+//! corresponding feature to be [`Registry::classify`]'d as
 //! [`Classification::Implemented`] — fail-closed, so a feature backed by
 //! nine methods and implemented by three of them is not advertised at all.
 //! With an empty [`Registry`] (what this module's own tests build), every
@@ -17,7 +17,7 @@
 //! fail-closed floor this gate guarantees. The production registry
 //! `crate::transport::build_host` (crate-private) assembles only
 //! implements a subset of the catalog (`runtime.health`, `workspace.*`,
-//! `probing.*`), so the same gate keeps every feature backed by a method
+//! `probing.*`, `fs.*`), so the same gate keeps every feature backed by a method
 //! outside that subset unadvertised there too, not just in the empty case.
 //!
 //! `toolchain` is the one feature `manifest.ts` hardcodes to `true`
@@ -32,7 +32,7 @@ use mangostudio_runtime_contract::manifest::{RuntimeCapabilityAllow, RuntimeCapa
 
 use crate::registry::{Classification, Registry};
 
-/// Whether every catalog method requiring `capability` is implemented.
+/// Whether every method backing `capability`'s feature is implemented.
 ///
 /// `false` when the catalog carries no method for `capability` at all (a
 /// capability nothing backs is never "ready"), and `false` as soon as one
@@ -43,6 +43,14 @@ fn capability_ready(registry: &Registry, capability: &str) -> bool {
         .methods
         .iter()
         .filter(|declared| declared.capabilities.iter().any(|c| c == capability))
+        // Snapshot and library methods require filesystem consent, but their
+        // implementation gates belong to checkpoints and library. Requiring
+        // them here hides working filesystem tools until unrelated groups ship.
+        .filter(|declared| {
+            !matches!(capability, "fsRead" | "fsWrite")
+                || declared.name.starts_with("fs.")
+                || declared.name.starts_with("workspace.")
+        })
         .peekable();
     required.peek().is_some()
         && required.all(|declared| registry.classify(&declared.name) == Classification::Implemented)
@@ -264,5 +272,25 @@ mod tests {
             .implement("snapshot.revert", |_params: Value, _context| async move {
                 Ok::<_, mango_protocol::RemoteError>(json!({ "revertedFiles": 0 }))
             })
+    }
+
+    #[test]
+    fn filesystem_features_do_not_require_snapshot_or_library_implementations() {
+        let home = crate::test_support::scratch_dir("manifest-filesystem");
+        let registry = crate::filesystem::register(
+            crate::workspace_methods::register(Registry::new()),
+            crate::consent::source::ConsentSource::new(
+                crate::runtime_home::RuntimeSlot::Host,
+                home.to_path_buf(),
+            ),
+        );
+        let ready = build_features(&registry, &full_allow(), false);
+        assert!(ready.fs_read && ready.fs_write && ready.tools);
+        assert!(!ready.checkpoints && !ready.library);
+        let mut allow = full_allow();
+        allow.fs_read = false;
+        let denied = build_features(&registry, &allow, false);
+        assert!(!denied.fs_read);
+        assert!(denied.fs_write);
     }
 }

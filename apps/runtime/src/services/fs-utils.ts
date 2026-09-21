@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { constants as fsConstants, realpathSync, type Stats } from 'node:fs';
+import { constants as fsConstants, type Stats } from 'node:fs';
 import {
   access,
   chmod,
@@ -424,10 +424,10 @@ export function compileRuntimePathGuard(filter: RuntimePathFilter): (path: strin
 function compilePathRoot(root: string): CompiledPathRoot {
   const lexical = resolve(root);
   try {
-    return { lexical, canonical: realpathSync(lexical) };
+    return { lexical, canonical: resolvePathThroughExistingAncestor(lexical) };
   } catch {
-    // A configured root that does not exist yet still has a meaningful lexical
-    // prefix; falling back keeps the policy usable instead of throwing.
+    // An unresolvable configured root still has a meaningful lexical prefix;
+    // falling back keeps the policy fail-closed at candidate comparison time.
     return { lexical, canonical: lexical };
   }
 }

@@ -1,13 +1,24 @@
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { dirname, parse, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { PathAccessError } from '../runtime-contract/service-errors';
 import { resolveWorkspacePath } from './path';
 
 /** Bounds symlink traversal, including chains whose final target exists. */
 const MAX_SYMLINK_HOPS = 32;
 
-/** True when `candidate` is `root` or a strict descendant (separator-safe). */
+/**
+ * True when `candidate` is `root` or a strict descendant, using the host
+ * filesystem's case identity and component boundaries.
+ * // Usage: isPathPrefix('/workspace', '/workspace/src') === true
+ */
 export function isPathPrefix(root: string, candidate: string): boolean {
+  if (process.platform === 'win32') {
+    const remainder = relative(root, candidate);
+    return (
+      remainder === '' ||
+      (remainder !== '..' && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder))
+    );
+  }
   if (candidate === root) {
     return true;
   }

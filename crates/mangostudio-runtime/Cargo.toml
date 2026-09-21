@@ -50,6 +50,9 @@ base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 # alongside jsonschema's `ahash` — see `deny.toml`), so this adds no new
 # version for `cargo deny`'s duplicate check to catch either.
 getrandom = { version = "0.3", default-features = false }
+# `fs.glob` uses its brace, character-class, and recursive-wildcard parser,
+# while this crate owns traversal, dotfile rules, ordering, and path policy.
+globset = { version = "0.4.19", default-features = false }
 jsonschema = { version = "0.56", default-features = false }
 # `websocket`: the `serve`/`connect` transports dial and accept over it.
 # `tokio` alone (the dispatcher's own dependency) has no socket of its own.
@@ -63,8 +66,12 @@ mangostudio-runtime-contract.workspace = true
 # masks with — hand-rolling that by hand would be the one place this crate
 # reinvents a well-tested wheel already sitting in its own build.
 regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
+# `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
+# code units, named captures, and an engine interrupt hook for its hard deadline.
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+sha2 = "0.11"
 # A normal dependency, not a dev one: `main.rs` builds its own multi-thread
 # runtime for `stdio`/`serve`/`connect` (never `#[tokio::main]` — the
 # consent/setup/token/lock work those subcommands do first is synchronous by
@@ -98,9 +105,10 @@ nix = { version = "0.31", default-features = false, features = ["signal", "hostn
 
 [target.'cfg(windows)'.dependencies]
 # Win32_Foundation: HANDLE, BOOL, CloseHandle, LocalFree, STILL_ACTIVE.
+# Win32_Globalization: case-insensitive, non-lossy filesystem path comparison.
 # Win32_Security(_Authorization): the owner-only DACL rewrite.
 # Win32_Storage_FileSystem: the FILE_GENERIC_* / DELETE access mask.
 # Win32_System_SystemInformation: GetComputerNameExW, for the lock body's `host` field.
 # Win32_System_Threading: OpenProcess/OpenProcessToken/GetExitCodeProcess, for lock-holder
 # liveness and the owner-only module's own SID lookup.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
