@@ -100,6 +100,7 @@ pub mod health;
 pub mod manifest;
 pub mod panic;
 pub mod ports;
+pub mod probing;
 pub mod registry;
 pub mod result_check;
 pub mod runtime_home;
