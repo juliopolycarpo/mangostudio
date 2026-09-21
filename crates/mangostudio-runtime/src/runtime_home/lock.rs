@@ -163,7 +163,7 @@ pub fn with_slot_lock<T>(
                     .map_err(LockError::Io)?;
                 return Ok(run());
             }
-            Err(error) if is_lock_contended(&error) => {
+            Err(error) if is_lock_contended(&error, lock_path) => {
                 if reclaim_if_abandoned(lock_path, policy) {
                     continue;
                 }
@@ -183,18 +183,21 @@ pub fn with_slot_lock<T>(
 ///
 /// Windows can return `ERROR_ACCESS_DENIED` (5), rather than
 /// `ERROR_FILE_EXISTS`, while another handle to an exclusive-create lock is
-/// still being released. That is a transient contention result, so it must
-/// take the same poll-and-reclaim path as an ordinary existing lock.
-fn is_lock_contended(error: &io::Error) -> bool {
+/// still being released. When the lock path exists, that is a transient
+/// contention result and must take the same poll-and-reclaim path as an
+/// ordinary existing lock. An absent path with the same error is an ordinary
+/// I/O failure, such as an unwritable parent directory.
+fn is_lock_contended(error: &io::Error, lock_path: &Path) -> bool {
     if error.kind() == io::ErrorKind::AlreadyExists {
         return true;
     }
     #[cfg(windows)]
     {
-        error.raw_os_error() == Some(5) // ERROR_ACCESS_DENIED
+        error.raw_os_error() == Some(5) && lock_path.exists() // ERROR_ACCESS_DENIED
     }
     #[cfg(not(windows))]
     {
+        let _ = lock_path;
         false
     }
 }
@@ -356,15 +359,30 @@ mod tests {
 
     #[test]
     fn an_existing_lock_is_contended() {
+        let dir = scratch_dir("existing-lock");
+        let lock = dir.join("runtime.lock");
+        std::fs::write(&lock, b"owner").unwrap();
         let error = std::io::Error::from(std::io::ErrorKind::AlreadyExists);
-        assert!(is_lock_contended(&error));
+        assert!(is_lock_contended(&error, &lock));
     }
 
     #[cfg(windows)]
     #[test]
     fn windows_access_denied_while_creating_a_lock_is_contended() {
+        let dir = scratch_dir("access-denied-lock");
+        let lock = dir.join("runtime.lock");
+        std::fs::write(&lock, b"owner").unwrap();
         let error = std::io::Error::from_raw_os_error(5); // ERROR_ACCESS_DENIED
-        assert!(is_lock_contended(&error));
+        assert!(is_lock_contended(&error, &lock));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_access_denied_without_a_lock_is_not_contended() {
+        let dir = scratch_dir("access-denied-without-lock");
+        let lock = dir.join("runtime.lock");
+        let error = std::io::Error::from_raw_os_error(5); // ERROR_ACCESS_DENIED
+        assert!(!is_lock_contended(&error, &lock));
     }
 
     #[test]

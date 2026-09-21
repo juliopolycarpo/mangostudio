@@ -735,10 +735,23 @@ fn write_replacement_in_with_hook(
     }
     hook(ReplacementHookPhase::BeforePublish, temp_path);
     if let Some(expected) = expected {
+        let remove_owned_temp = || -> Result<(), RemoteError> {
+            if !temporary_matches(dir, temp_path, identity, &expected_hash) {
+                return Err(temporary_write_uncertain_error(
+                    path,
+                    temp_path,
+                    std::io::Error::from(std::io::ErrorKind::AlreadyExists),
+                ));
+            }
+            dir.remove_file(temp)
+                .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))
+        };
         let Some(identity) = matching_destination_identity_in(dir, leaf, expected.bytes)? else {
+            remove_owned_temp()?;
             return Err(destination_changed_error(path));
         };
         if identity != expected.identity {
+            remove_owned_temp()?;
             return Err(destination_changed_error(path));
         }
     }
@@ -1835,6 +1848,11 @@ mod tests {
 
         assert_eq!(error.details.unwrap()["kind"], "file_changed");
         assert_eq!(std::fs::read(&path).unwrap(), b"external");
+        let entries = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(entries, [OsString::from("file")]);
     }
 
     #[cfg(windows)]
