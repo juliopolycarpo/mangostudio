@@ -391,6 +391,27 @@ async fn handle_connection(
     // multi-hour session) must not keep holding this slot.
     drop(permit);
 
+    let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
+    let contract = Contract::from_catalog(catalog().clone())
+        .expect("the embedded catalog compiles into a contract");
+    // No request is in flight yet to cancel this against — a fresh token
+    // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
+    // `hello_capabilities`'s own doc comment.
+    //
+    // Built *before* admission below, not after: this used to run only
+    // once the previous connection had already been superseded, leaving
+    // the runtime connectionless for the whole cost of building it (a
+    // `PATH` walk, a `git` probe — measured around 200ms) for no reason.
+    // The previous connection can keep answering calls right up until
+    // this one is actually ready to take its place.
+    let capabilities = crate::transport::hello_capabilities(
+        context.slot,
+        &context.mango_home,
+        &host.registry,
+        &CancellationToken::new(),
+    )
+    .await;
+
     let (generation, previous) = match state.try_admit() {
         Admission::Admitted {
             generation,
@@ -412,19 +433,6 @@ async fn handle_connection(
         return;
     }
 
-    let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
-    let contract = Contract::from_catalog(catalog().clone())
-        .expect("the embedded catalog compiles into a contract");
-    // No request is in flight yet to cancel this against — a fresh token
-    // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
-    // `hello_capabilities`'s own doc comment.
-    let capabilities = crate::transport::hello_capabilities(
-        context.slot,
-        &context.mango_home,
-        &host.registry,
-        &CancellationToken::new(),
-    )
-    .await;
     // `SessionOptions::new`'s defaults already match `serve.ts`'s own
     // `HANDSHAKE_TIMEOUT_MS`/`LIVENESS_INTERVAL_MS` (15s/20s), so nothing is
     // overridden here — see `mango_protocol::session::{DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_LIVENESS_INTERVAL}`.

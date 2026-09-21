@@ -171,11 +171,20 @@ pub(crate) async fn hello_capabilities(
         crate::health::build_capability_manifest(slot, mango_home, registry, cancel).await;
     match serde_json::to_value(&manifest) {
         Ok(serde_json::Value::Object(map)) => map,
-        // `RuntimeCapabilityManifest` always serialises to an object; this
-        // arm exists only so a future change to that type cannot panic a
-        // live connection's handshake over a serialisation shape it no
-        // longer holds.
-        _ => serde_json::Map::new(),
+        // `RuntimeCapabilityManifest` derives `Serialize` on a plain struct
+        // and always serialises to an object — this arm is unreachable
+        // today. Deliberately `unreachable!`, not a silent `Map::new()`:
+        // the empty map that fallback produced is *exactly* the shape
+        // that made every hub refuse this connection before
+        // `hello_capabilities` existed (see this module's own doc comment
+        // on why an empty `hello.capabilities` is a `PROTOCOL_ERROR`, not
+        // a degraded-but-working connection) — silently reinstating that
+        // failure with no diagnostic would be worse than panicking loudly
+        // on the one change to this type that could ever reach it.
+        Ok(other) => {
+            unreachable!("RuntimeCapabilityManifest must serialise to a JSON object, got {other:?}")
+        }
+        Err(error) => unreachable!("RuntimeCapabilityManifest must always serialise: {error}"),
     }
 }
 
