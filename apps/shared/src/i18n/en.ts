@@ -994,7 +994,7 @@ export const messages: Messages = {
         editFile: 'Allows the AI to replace exact text in files read in this chat.',
         replaceRange: 'Allows the AI to replace line ranges in files read in this chat.',
         applyPatch:
-          'Allows the AI to apply context-anchored changes across multiple text files at once.',
+          'Allows the AI to apply context-anchored changes across multiple text files at once. Target files must remain exclusively writable by Mango while it runs.',
         createFile: 'Allows the AI to create new text files without overwriting existing paths.',
         deleteFile: 'Allows the AI to delete regular files it has read in this chat.',
         moveFile:

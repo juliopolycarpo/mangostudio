@@ -95,7 +95,10 @@ impl CommitHook for NoopCommitHook {
     fn after_final_policy_check(&self) {}
 }
 
-/// Plans, revalidates, and commits a multi-file patch under every path lock.
+/// Plans, revalidates, and commits a multi-file patch under every Mango path lock.
+///
+/// The lock set serializes Mango mutations only. The tool contract requires the
+/// calling environment to exclude unrelated writers until this operation finishes.
 pub(super) async fn apply(
     service: Arc<Service>,
     params: ApplyPatchParams,
@@ -308,7 +311,15 @@ fn commit_revalidated_with_hook(
                 content,
                 has_content_changes: true,
                 ..
-            } => io::write_atomic(&policy, resolved_path, content.as_bytes(), false),
+            } => io::write_atomic_if_unchanged(
+                &policy,
+                resolved_path,
+                &revalidated[index]
+                    .as_ref()
+                    .expect("updates are revalidated before commit")
+                    .bytes,
+                content.as_bytes(),
+            ),
             PlannedOperation::Delete { .. }
             | PlannedOperation::Update {
                 has_content_changes: false,
@@ -1290,6 +1301,44 @@ mod tests {
         let mut changed_paths = Vec::new();
         record_uncertain_move_paths(&mut changed_paths, &source, &destination, &error);
         assert_eq!(changed_paths, vec![source, destination]);
+    }
+
+    #[test]
+    fn refuses_a_later_patch_write_changed_after_revalidation() {
+        let (home, service) = fixture();
+        let first = home.join("first.txt");
+        let second = home.join("second.txt");
+        fs::write(&first, "one\n").unwrap();
+        fs::write(&second, "two\n").unwrap();
+        mark_read(&service, &first);
+        mark_read(&service, &second);
+        let parameters = params(json!({
+            "chatId":"chat", "captureSnapshot":false,
+            "operations":[
+                {"type":"update","inputPath":"first.txt","resolvedPath":first,"hunks":[{"lines":[{"type":"delete","content":"one","ending":"\n"},{"type":"add","content":"first","ending":"\n"}]}]},
+                {"type":"update","inputPath":"second.txt","resolvedPath":second,"hunks":[{"lines":[{"type":"delete","content":"two","ending":"\n"},{"type":"add","content":"second","ending":"\n"}]}]}
+            ]
+        }));
+        let cancel = CancellationToken::new();
+        let planned = plan_operations(&service, &parameters, &cancel).unwrap();
+        let revalidated = revalidate_operations(&service, &parameters, &planned, &cancel).unwrap();
+        fs::write(&second, "external\n").unwrap();
+
+        let error =
+            commit_revalidated(&service, &parameters, &planned, &revalidated, &cancel).unwrap_err();
+
+        assert_eq!(error.details.as_ref().unwrap()["kind"], "path_access");
+        assert!(
+            error
+                .message
+                .contains("file changed after patch revalidation")
+        );
+        assert_eq!(
+            error.details.as_ref().unwrap()["changedPaths"],
+            json!([first])
+        );
+        assert_eq!(fs::read_to_string(&first).unwrap(), "first\n");
+        assert_eq!(fs::read_to_string(&second).unwrap(), "external\n");
     }
 
     #[cfg(unix)]

@@ -80,18 +80,19 @@ impl CompiledPolicy {
             && !self
                 .allowed
                 .iter()
-                .any(|root| is_prefix(&root.canonical, &effective))
+                .any(|root| prefix_relation(&root.canonical, &effective) == Some(true))
         {
             return false;
         }
         if self.denied.iter().any(|root| {
-            is_prefix(&root.canonical, &effective) || is_prefix(&root.lexical, &absolute)
+            denied_prefix_relation(prefix_relation(&root.canonical, &effective))
+                || denied_prefix_relation(prefix_relation(&root.lexical, &absolute))
         }) {
             return false;
         }
         self.containment
             .as_ref()
-            .is_none_or(|root| is_prefix(&root.canonical, &effective))
+            .is_none_or(|root| prefix_relation(&root.canonical, &effective) == Some(true))
     }
 
     /// Checks a final, absolute path obtained from an already-open filesystem
@@ -138,20 +139,20 @@ impl CompiledPolicy {
             && !self
                 .allowed
                 .iter()
-                .any(|root| is_prefix(&root.canonical, path))
+                .any(|root| prefix_relation(&root.canonical, path) == Some(true))
         {
             return false;
         }
         if self
             .denied
             .iter()
-            .any(|root| is_prefix(&root.canonical, path))
+            .any(|root| denied_prefix_relation(prefix_relation(&root.canonical, path)))
         {
             return false;
         }
         self.containment
             .as_ref()
-            .is_none_or(|root| is_prefix(&root.canonical, path))
+            .is_none_or(|root| prefix_relation(&root.canonical, path) == Some(true))
     }
 }
 
@@ -179,12 +180,20 @@ pub(super) fn normalize_windows_final_path(path: &Path) -> PathBuf {
 }
 
 pub(super) fn is_prefix(root: &Path, path: &Path) -> bool {
+    prefix_relation(root, path) == Some(true)
+}
+
+fn denied_prefix_relation(relation: Option<bool>) -> bool {
+    relation != Some(false)
+}
+
+fn prefix_relation(root: &Path, path: &Path) -> Option<bool> {
     // Keep path identity as OsStr. Lossy display conversion must never grant access.
     #[cfg(windows)]
-    return windows::is_prefix(root, path);
+    return windows::prefix_relation(root, path);
 
     #[cfg(not(windows))]
-    path.starts_with(root)
+    Some(path.starts_with(root))
 }
 
 #[cfg(windows)]
@@ -214,6 +223,14 @@ mod windows {
 
     const FILE_CS_FLAG_CASE_SENSITIVE_DIR: u32 = 1;
 
+    #[derive(Debug, PartialEq, Eq)]
+    pub(super) enum MetadataRelation {
+        Directory,
+        Missing,
+        NotDirectory,
+        Indeterminate,
+    }
+
     pub(super) fn normalize_final_path(path: &Path) -> PathBuf {
         const VERBATIM: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
         const UNC: &[u16] = &[b'U' as u16, b'N' as u16, b'C' as u16, b'\\' as u16];
@@ -240,30 +257,26 @@ mod windows {
         }
     }
 
-    pub(super) fn is_prefix(root: &Path, path: &Path) -> bool {
+    pub(super) fn prefix_relation(root: &Path, path: &Path) -> Option<bool> {
         let mut candidate = path.components();
         let mut parent = PathBuf::new();
         let mut inherited_case_sensitive = None;
         for expected in root.components() {
             let Some(actual) = candidate.next() else {
-                return false;
+                return Some(false);
             };
             let equal = match (expected, actual) {
                 (Component::Normal(_), Component::Normal(_)) => {
-                    match std::fs::metadata(&parent) {
-                        Ok(metadata) if metadata.is_dir() => {
+                    match metadata_relation(std::fs::metadata(&parent)) {
+                        MetadataRelation::Directory => {
                             let Some(case_sensitive) = directory_is_case_sensitive(&parent) else {
-                                return false;
+                                return None;
                             };
                             inherited_case_sensitive = Some(case_sensitive);
                         }
-                        Ok(_) => return false,
-                        Err(error)
-                            if matches!(
-                                error.kind(),
-                                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-                            ) => {}
-                        Err(_) => return false,
+                        MetadataRelation::Missing => {}
+                        MetadataRelation::NotDirectory => return Some(false),
+                        MetadataRelation::Indeterminate => return None,
                     }
                     inherited_case_sensitive.is_some_and(|case_sensitive| {
                         if case_sensitive {
@@ -280,11 +293,29 @@ mod windows {
                 _ => false,
             };
             if !equal {
-                return false;
+                return Some(false);
             }
             parent.push(actual.as_os_str());
         }
-        true
+        Some(true)
+    }
+
+    pub(super) fn metadata_relation(
+        result: std::io::Result<std::fs::Metadata>,
+    ) -> MetadataRelation {
+        match result {
+            Ok(metadata) if metadata.is_dir() => MetadataRelation::Directory,
+            Ok(_) => MetadataRelation::NotDirectory,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                MetadataRelation::Missing
+            }
+            Err(_) => MetadataRelation::Indeterminate,
+        }
     }
 
     fn directory_is_case_sensitive(path: &Path) -> Option<bool> {
@@ -380,6 +411,13 @@ mod windows {
 mod tests {
     use super::*;
     use crate::test_support::scratch_dir;
+
+    #[test]
+    fn an_indeterminate_prefix_relation_fails_closed_for_denied_roots() {
+        assert!(denied_prefix_relation(None));
+        assert!(denied_prefix_relation(Some(true)));
+        assert!(!denied_prefix_relation(Some(false)));
+    }
 
     #[test]
     fn containment_accepts_missing_children_but_not_sibling_prefixes() {
@@ -493,6 +531,17 @@ mod tests {
         .unwrap();
 
         assert!(policy.allows(&child));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_metadata_errors_are_indeterminate_for_denied_roots() {
+        let relation = windows::metadata_relation(Err(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        )));
+
+        assert_eq!(relation, windows::MetadataRelation::Indeterminate);
+        assert!(denied_prefix_relation(None));
     }
 
     #[cfg(windows)]

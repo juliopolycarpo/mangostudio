@@ -40,6 +40,11 @@ struct ObjectIdentity {
     inode: u64,
 }
 
+struct ExpectedDestination<'a> {
+    bytes: &'a [u8],
+    identity: ObjectIdentity,
+}
+
 pub(super) fn path_error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "path_access")
 }
@@ -364,6 +369,50 @@ pub(super) fn write_atomic(
     })
 }
 
+/// Replaces a file only while its current bytes still match an observed state.
+///
+/// The caller must hold every Mango path lock for `path` and retain exclusive
+/// external write access until this function returns. Filesystems do not offer
+/// a portable conditional-replace primitive against an unrelated process;
+/// `fs.apply-patch` serializes Mango writers, while its public contract assigns
+/// exclusion of other writers to the calling environment.
+///
+/// # Example
+///
+/// ```ignore
+/// write_atomic_if_unchanged(&policy, path, before, after)?;
+/// ```
+pub(super) fn write_atomic_if_unchanged(
+    policy: &CompiledPolicy,
+    path: &Path,
+    expected: &[u8],
+    bytes: &[u8],
+) -> Result<f64, RemoteError> {
+    let parent = capability::verified_parent(policy, path, false)?;
+    parent.with_parent(|dir, leaf| {
+        let Some(identity) = matching_destination_identity_in(dir, leaf, expected)? else {
+            return Err(destination_changed_error(path));
+        };
+        let mode = inspect_destination_in(dir, leaf, path, || {})?;
+        let temp = temporary_leaf(leaf)?;
+        write_replacement_in_with_hook(
+            dir,
+            leaf,
+            path,
+            &temp,
+            Replacement {
+                bytes,
+                mode,
+                expected: Some(ExpectedDestination {
+                    bytes: expected,
+                    identity,
+                }),
+            },
+            |_, _| {},
+        )
+    })
+}
+
 fn write_atomic_unrestricted(
     path: &Path,
     bytes: &[u8],
@@ -523,7 +572,7 @@ fn write_exclusive_bound(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn inspect_destination_bound_after_metadata(
     parent: &VerifiedParent,
     path: &Path,
@@ -618,7 +667,18 @@ fn write_replacement_in(
     bytes: &[u8],
     mode: Option<CapPermissions>,
 ) -> Result<f64, RemoteError> {
-    write_replacement_in_with_hook(dir, leaf, path, temp, bytes, mode, |_, _| {})
+    write_replacement_in_with_hook(
+        dir,
+        leaf,
+        path,
+        temp,
+        Replacement {
+            bytes,
+            mode,
+            expected: None,
+        },
+        |_, _| {},
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -627,15 +687,25 @@ enum ReplacementHookPhase {
     BeforePublish,
 }
 
+struct Replacement<'a> {
+    bytes: &'a [u8],
+    mode: Option<CapPermissions>,
+    expected: Option<ExpectedDestination<'a>>,
+}
+
 fn write_replacement_in_with_hook(
     dir: &cap_std::fs::Dir,
     leaf: &Path,
     path: &Path,
     temp: &OsString,
-    bytes: &[u8],
-    mode: Option<CapPermissions>,
+    replacement: Replacement<'_>,
     mut hook: impl FnMut(ReplacementHookPhase, &Path),
 ) -> Result<f64, RemoteError> {
+    let Replacement {
+        bytes,
+        mode,
+        expected,
+    } = replacement;
     let mut file = dir
         .open_with(temp, CapOpenOptions::new().write(true).create_new(true))
         .map_err(io_error)?;
@@ -665,6 +735,14 @@ fn write_replacement_in_with_hook(
         ));
     }
     hook(ReplacementHookPhase::BeforePublish, temp_path);
+    if let Some(expected) = expected {
+        let Some(identity) = matching_destination_identity_in(dir, leaf, expected.bytes)? else {
+            return Err(destination_changed_error(path));
+        };
+        if identity != expected.identity {
+            return Err(destination_changed_error(path));
+        }
+    }
     dir.rename(temp, dir, leaf)
         .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))?;
     if !temporary_matches(dir, leaf, identity, &expected_hash) {
@@ -674,6 +752,41 @@ fn write_replacement_in_with_hook(
         ));
     }
     Ok(mtime)
+}
+
+fn matching_destination_identity_in(
+    dir: &cap_std::fs::Dir,
+    leaf: &Path,
+    expected: &[u8],
+) -> Result<Option<ObjectIdentity>, RemoteError> {
+    let mut options = CapOpenOptions::new();
+    options.read(true);
+    options.follow(FollowSymlinks::No);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt as _;
+        options.custom_flags(nix::libc::O_NONBLOCK);
+    }
+    let file = dir.open_with(leaf, &options).map_err(io_error)?.into_std();
+    let metadata = file.metadata().map_err(io_error)?;
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    let identity = object_identity(&file, &metadata).map_err(io_error)?;
+    let limit = expected.len().saturating_add(1) as u64;
+    let mut current = Vec::with_capacity(expected.len());
+    file.take(limit)
+        .read_to_end(&mut current)
+        .map_err(io_error)?;
+    Ok((current == expected).then_some(identity))
+}
+
+fn destination_changed_error(path: &Path) -> RemoteError {
+    path_error(format!(
+        "Cannot write \"{}\": the file changed after patch revalidation. Re-read it and retry the patch.",
+        path.display()
+    ))
+    .with_detail("kind", "file_changed")
 }
 
 fn temporary_matches(
@@ -958,7 +1071,7 @@ fn atomic_rename_no_replace(
 #[cfg(windows)]
 #[allow(
     unsafe_code,
-    reason = "Windows exposes handle-bound rename only through SetFileInformationByHandle"
+    reason = "Windows exposes handle-relative rename only through NtSetInformationFile"
 )]
 fn atomic_rename_no_replace(
     _: &cap_std::fs::Dir,
@@ -968,23 +1081,31 @@ fn atomic_rename_no_replace(
     source: &File,
 ) -> std::io::Result<()> {
     use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{FileRenameInfo, SetFileInformationByHandle};
+    use windows_sys::{
+        Wdk::Storage::FileSystem::{FileRenameInformation, NtSetInformationFile},
+        Win32::{Foundation::RtlNtStatusToDosError, System::IO::IO_STATUS_BLOCK},
+    };
 
     let destination_dir = to_dir.try_clone()?.into_std_file();
     let mut rename = windows_rename_info(destination_dir.as_raw_handle(), to_leaf)?;
-    // SAFETY: the source handle is live with DELETE access, and `rename`
-    // supplies initialized storage for a verified directory handle and
-    // relative destination leaf for the duration of the call.
-    let success = unsafe {
-        SetFileInformationByHandle(
+    let mut io_status = IO_STATUS_BLOCK::default();
+    // SAFETY: the live source handle has DELETE access; `rename` contains a
+    // valid, one-component relative target and its live destination directory
+    // handle; `io_status` is writable for the duration of this synchronous call.
+    let status = unsafe {
+        NtSetInformationFile(
             source.as_raw_handle(),
-            FileRenameInfo,
+            &mut io_status,
             rename.as_mut_ptr(),
             rename.len(),
+            FileRenameInformation,
         )
     };
-    if success == 0 {
-        return Err(std::io::Error::last_os_error());
+    if status < 0 {
+        // SAFETY: RtlNtStatusToDosError is a pure conversion of the NTSTATUS
+        // returned by the call above.
+        let code = unsafe { RtlNtStatusToDosError(status) };
+        return Err(std::io::Error::from_raw_os_error(code as i32));
     }
     Ok(())
 }
@@ -1026,8 +1147,11 @@ fn windows_rename_info(
         .len()
         .checked_mul(std::mem::size_of::<u16>())
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // NtSetInformationFile requires the fixed FILE_RENAME_INFO size plus the
+    // complete FileNameLength payload. Its one-element trailing array is part
+    // of Rust's `size_of`, so do not subtract that element here.
     let size = std::mem::size_of::<FILE_RENAME_INFO>()
-        .checked_add(filename_bytes - std::mem::size_of::<u16>())
+        .checked_add(filename_bytes)
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     let len =
         u32::try_from(size).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
@@ -1595,8 +1719,11 @@ mod tests {
                     leaf,
                     &path,
                     &temp,
-                    b"ours",
-                    None,
+                    Replacement {
+                        bytes: b"ours",
+                        mode: None,
+                        expected: None,
+                    },
                     |phase, temp| {
                         if phase == ReplacementHookPhase::Prepared {
                             let temp = root.join(temp);
@@ -1637,8 +1764,11 @@ mod tests {
                     leaf,
                     &path,
                     &temp,
-                    b"ours",
-                    None,
+                    Replacement {
+                        bytes: b"ours",
+                        mode: None,
+                        expected: None,
+                    },
                     |phase, _| {
                         if phase == ReplacementHookPhase::BeforePublish {
                             std::fs::write(&swapped_temp, b"external temporary").unwrap();
@@ -1650,6 +1780,50 @@ mod tests {
 
         assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
         assert_eq!(std::fs::read(&path).unwrap(), b"external temporary");
+    }
+
+    #[test]
+    fn conditional_replacement_preserves_a_destination_changed_before_publication() {
+        let root = scratch_dir("fs-io-conditional-replacement");
+        let path = root.join("file");
+        std::fs::write(&path, b"before").unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        let parent = capability::verified_parent(&policy, &path, false).unwrap();
+
+        let error = parent
+            .with_parent(|dir, leaf| {
+                let temp = temporary_leaf(leaf)?;
+                write_replacement_in_with_hook(
+                    dir,
+                    leaf,
+                    &path,
+                    &temp,
+                    Replacement {
+                        bytes: b"ours",
+                        mode: None,
+                        expected: Some(ExpectedDestination {
+                            bytes: b"before",
+                            identity: matching_destination_identity_in(dir, leaf, b"before")?
+                                .expect("fixture destination matches"),
+                        }),
+                    },
+                    |phase, _| {
+                        if phase == ReplacementHookPhase::BeforePublish {
+                            std::fs::remove_file(&path).unwrap();
+                            std::fs::write(&path, b"before").unwrap();
+                        }
+                    },
+                )
+            })
+            .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["kind"], "file_changed");
+        assert_eq!(std::fs::read(&path).unwrap(), b"before");
     }
 
     #[cfg(windows)]
@@ -1680,7 +1854,7 @@ mod tests {
         }
         assert_eq!(
             buffer.len() as usize,
-            std::mem::size_of::<FILE_RENAME_INFO>() + (expected.len() - 1) * 2
+            std::mem::size_of::<FILE_RENAME_INFO>() + expected.len() * 2
         );
         assert!(windows_rename_info(root, Path::new("nested/target.txt")).is_err());
     }

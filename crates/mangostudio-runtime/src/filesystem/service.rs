@@ -439,12 +439,34 @@ impl Service {
             let observed = self
                 .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
-            let (updated, count, first) = text::replace_matches(&observed.bytes, params.old_string.as_bytes(), params.new_string.as_bytes(), true);
+            let replace_all = params.replace_all.unwrap_or(false);
+            let count = text::count_matches_up_to(
+                &observed.bytes,
+                params.old_string.as_bytes(),
+                if replace_all { usize::MAX } else { 2 },
+            );
             if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
-            if count > 1 && !params.replace_all.unwrap_or(false) { return Err(argument(format!("Found {count} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."))); }
+            if count > 1 && !replace_all { return Err(argument(format!("Found at least {count} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."))); }
+            let replacement_count = if replace_all { count } else { 1 };
+            let projected_bytes = if params.new_string.len() >= params.old_string.len() {
+                params.new_string.len().checked_sub(params.old_string.len())
+                    .and_then(|growth| growth.checked_mul(replacement_count))
+                    .and_then(|growth| observed.bytes.len().checked_add(growth))
+            } else {
+                params.old_string.len().checked_sub(params.new_string.len())
+                    .and_then(|shrinkage| shrinkage.checked_mul(replacement_count))
+                    .and_then(|shrinkage| observed.bytes.len().checked_sub(shrinkage))
+            };
+            let Some(projected_bytes) = projected_bytes.filter(|size| *size <= READ_MAX_BYTES) else {
+                let received = projected_bytes.map_or_else(|| "an overflowing byte length".to_owned(), |size| format!("{size} bytes"));
+                return Err(argument(format!("Cannot edit \"{}\": the replacement would produce {received}; expected at most {READ_MAX_BYTES} bytes so the result remains readable by fs.read-file.", params.input_path)));
+            };
+            let (updated, replaced, first) = text::replace_matches(&observed.bytes, params.old_string.as_bytes(), params.new_string.as_bytes(), replace_all);
+            debug_assert_eq!(updated.len(), projected_bytes);
+            debug_assert_eq!(replaced, replacement_count);
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let expected_hash = hash_hex(&Sha256::digest(&updated));
-            let result = mutation_result(json!({"path":params.input_path,"replacements":count,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
+            let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
             response.preflight_snapshot(&params.mutation, &result)?;
             let policy = self.compile_mutation_policy(
                 "fs.edit-file",
@@ -1132,6 +1154,31 @@ mod tests {
         assert!(!to.exists());
         assert_eq!(deleted["mutations"][0]["afterHash"], "absent");
         assert_eq!(service.state.locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn edit_refuses_an_expansion_larger_than_the_read_limit_before_replacing() {
+        let (home, service) = fixture();
+        let path = home.join("large-edit");
+        let source = "a".repeat(1_000_000);
+        seed_and_read(&service, &path, source.as_bytes()).await;
+
+        let error = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId": "chat", "captureSnapshot": false,
+                    "inputPath": "large-edit", "resolvedPath": path,
+                    "oldString": "a", "newString": "01234567890", "replaceAll": true
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        assert!(error.message.contains("would produce 11000000 bytes"));
+        assert_eq!(std::fs::read(&path).unwrap(), source.as_bytes());
     }
 
     #[tokio::test]

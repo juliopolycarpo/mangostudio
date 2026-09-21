@@ -79,6 +79,30 @@ fn truncate_utf16(text: &str, max_units: usize) -> (&str, bool) {
     (text, false)
 }
 
+/// Counts non-overlapping byte matches, stopping at `limit`.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(count_matches_up_to(b"aaaa", b"aa", 2), 2);
+/// ```
+pub(super) fn count_matches_up_to(source: &[u8], needle: &[u8], limit: usize) -> usize {
+    assert!(!needle.is_empty(), "match needle must not be empty");
+    let mut cursor = 0;
+    let mut count = 0;
+    while count < limit {
+        let Some(relative) = source[cursor..]
+            .windows(needle.len())
+            .position(|part| part == needle)
+        else {
+            break;
+        };
+        count += 1;
+        cursor += relative + needle.len();
+    }
+    count
+}
+
 /// Replaces non-overlapping byte matches, retaining invalid UTF-8 and BOM bytes.
 pub(super) fn replace_matches(
     source: &[u8],
@@ -203,6 +227,9 @@ mod tests {
 
     #[test]
     fn literal_edit_retains_bytes_and_uses_nonoverlapping_matches() {
+        assert_eq!(count_matches_up_to(b"aaaa", b"aa", usize::MAX), 2);
+        assert_eq!(count_matches_up_to(b"aaaa", b"aa", 1), 1);
+        assert_eq!(count_matches_up_to(b"aaaa", b"z", 2), 0);
         assert_eq!(
             replace_matches(b"\xff\r\naaaa", b"aa", b"X", true),
             (b"\xff\r\nXX".to_vec(), 2, 2)

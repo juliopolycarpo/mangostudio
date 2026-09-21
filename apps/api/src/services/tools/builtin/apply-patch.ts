@@ -51,7 +51,9 @@ const definition = {
     '*** Delete File: path\n*** End Patch\n' +
     'Add-file lines require "+". Update lines require a leading space, "+", or "-". ' +
     'Move is optional and must immediately follow its Update header. Include enough unchanged ' +
-    'context to identify each hunk uniquely; line numbers are not used.',
+    'context to identify each hunk uniquely; line numbers are not used. Target files must remain ' +
+    'exclusively writable by Mango until this call completes; Mango serializes its own mutations ' +
+    'but cannot arbitrate unrelated processes.',
   parameters: {
     type: 'object',
     properties: {
