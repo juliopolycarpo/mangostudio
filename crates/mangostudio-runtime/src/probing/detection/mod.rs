@@ -37,6 +37,7 @@ use std::pin::Pin;
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub mod binary_scan;
+pub mod duplicate_analysis;
 pub mod fnm;
 pub mod lts_policy;
 pub mod node_release_schedule;
