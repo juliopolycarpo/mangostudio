@@ -107,26 +107,20 @@ async fn build_health_report(
     let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
     let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
 
-    let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
-        detect_shells(path_override).await
-    } else {
-        Vec::new()
-    };
-
-    let git = if resolved.allow.git {
-        match probe_git(path_override, cancel).await {
-            Ok(availability) => availability,
-            Err(GitProbeCancelled) => {
-                return Err(RemoteError::new(
-                    codes::CANCELLED,
-                    "runtime.health was cancelled while probing git",
-                ));
-            }
-        }
-    } else {
-        GitAvailability {
-            available: false,
-            version: None,
+    let (shells, git_probe) = collect_capability_probes(
+        resolved.allow.shell,
+        resolved.allow.git,
+        path_override,
+        cancel,
+    )
+    .await;
+    let git = match git_probe {
+        Ok(availability) => availability,
+        Err(GitProbeCancelled) => {
+            return Err(RemoteError::new(
+                codes::CANCELLED,
+                "runtime.health was cancelled while probing git",
+            ));
         }
     };
 
@@ -186,26 +180,9 @@ pub(crate) async fn build_capability_manifest(
     let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
     let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
 
-    let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
-        detect_shells(None).await
-    } else {
-        Vec::new()
-    };
-
-    let git = if resolved.allow.git {
-        match probe_git(None, cancel).await {
-            Ok(availability) => availability,
-            Err(GitProbeCancelled) => GitAvailability {
-                available: false,
-                version: None,
-            },
-        }
-    } else {
-        GitAvailability {
-            available: false,
-            version: None,
-        }
-    };
+    let (shells, git_probe) =
+        collect_capability_probes(resolved.allow.shell, resolved.allow.git, None, cancel).await;
+    let git = git_probe.unwrap_or_else(|GitProbeCancelled| unavailable_git());
 
     // Mirrors `build_health_report`'s own `unwrap_or_default()`: a `HOME`
     // this process cannot resolve is already reported as an empty
@@ -235,6 +212,60 @@ pub(crate) async fn build_capability_manifest(
     manifest.profile = Some(resolved.profile);
     manifest.allow = Some(allow);
     manifest
+}
+
+/// Collects the independent shell and git machine facts behind one shared
+/// seam for both `runtime.health` and `hello.capabilities`.
+///
+/// When both capabilities are granted their probes start together: both walk
+/// the same potentially slow `PATH`, but neither result depends on the
+/// other. Their outcomes remain separate so `runtime.health` can report a
+/// cancelled git child as `CANCELLED` while `hello.capabilities` retains its
+/// established degraded-git answer.
+async fn collect_capability_probes(
+    allow_shell: bool,
+    allow_git: bool,
+    path_override: Option<&std::ffi::OsStr>,
+    cancel: &CancellationToken,
+) -> (
+    Vec<RuntimeShellKind>,
+    Result<GitAvailability, GitProbeCancelled>,
+) {
+    match (allow_shell, allow_git) {
+        (true, true) => {
+            run_independent_probes(
+                detect_shells(path_override),
+                probe_git(path_override, cancel),
+            )
+            .await
+        }
+        (true, false) => (detect_shells(path_override).await, Ok(unavailable_git())),
+        (false, true) => (Vec::new(), probe_git(path_override, cancel).await),
+        (false, false) => (Vec::new(), Ok(unavailable_git())),
+    }
+}
+
+/// Runs two independent probe futures concurrently, keeping each result so
+/// callers can preserve their distinct cancellation policies.
+async fn run_independent_probes<S, G>(
+    shell_probe: S,
+    git_probe: G,
+) -> (
+    Vec<RuntimeShellKind>,
+    Result<GitAvailability, GitProbeCancelled>,
+)
+where
+    S: std::future::Future<Output = Vec<RuntimeShellKind>>,
+    G: std::future::Future<Output = Result<GitAvailability, GitProbeCancelled>>,
+{
+    tokio::join!(shell_probe, git_probe)
+}
+
+fn unavailable_git() -> GitAvailability {
+    GitAvailability {
+        available: false,
+        version: None,
+    }
 }
 
 /// [`crate::consent::presets::ResolvedCapabilityAllow`] (a fully-resolved,
@@ -764,7 +795,7 @@ mod tests {
 
     use super::{
         bounded_path_walk, build_capability_manifest, build_health_report, node_platform,
-        parse_git_version, read_slot_state_and_source,
+        parse_git_version, read_slot_state_and_source, run_independent_probes, unavailable_git,
     };
     use crate::blocking::{MAX_CONCURRENT_BLOCKING_TASKS, pool_saturation_test_lock, run_blocking};
     use crate::registry::Registry;
@@ -784,7 +815,6 @@ mod tests {
     use crate::runtime_home::write_runtime_slot_config;
     #[cfg(unix)]
     use mango_protocol::error::codes;
-    #[cfg(unix)]
     use mangostudio_runtime_contract::manifest::RuntimeShellKind;
     #[cfg(unix)]
     use std::path::Path;
@@ -1036,6 +1066,46 @@ mod tests {
             "a manifest this crate builds for `hello` must validate against the same schema the \
              hub checks it with: {wire}"
         );
+    }
+
+    /// Shell discovery and `git --version` do not depend on one another, but
+    /// both sit before `hello` during connection setup. Keeping them
+    /// concurrent is what bounds the cold path by the slower probe rather
+    /// than their sum.
+    ///
+    /// The paused clock makes the expected shape exact: two two-second
+    /// probes must settle after two seconds. A sequential composition leaves
+    /// the second probe unstarted then and fails the `is_finished` assertion.
+    #[tokio::test(start_paused = true)]
+    async fn independent_shell_and_git_probes_overlap() {
+        let probes = tokio::spawn(run_independent_probes(
+            async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                vec![RuntimeShellKind::Bash]
+            },
+            async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                Ok(unavailable_git())
+            },
+        ));
+
+        tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        assert!(
+            !probes.is_finished(),
+            "the two-second probes must not settle after one second"
+        );
+
+        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            probes.is_finished(),
+            "both probes must be in flight together, not take four seconds in sequence"
+        );
+
+        let (shells, git) = probes.await.expect("the probe task must not panic");
+        assert_eq!(shells, vec![RuntimeShellKind::Bash]);
+        assert!(!git.expect("the git probe must complete").available);
     }
 
     #[cfg(unix)]

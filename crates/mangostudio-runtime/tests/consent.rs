@@ -124,10 +124,11 @@ async fn granting_authorization_lets_a_capability_bearing_method_through() {
     assert_eq!(result["sessions"], json!([]));
 }
 
-/// `snapshot.capture` is the catalog's only method declaring two
-/// capabilities (`checkpoints` and `fsRead`), which makes it the one method
-/// that can prove the guard evaluates each capability independently rather
-/// than treating "some are granted" as "all are granted".
+/// `snapshot.capture` declares both `checkpoints` and `fsRead`, so it proves
+/// the guard evaluates each capability independently rather than treating
+/// "some are granted" as "all are granted". Other catalog methods now have
+/// multi-capability requirements too; this test needs one representative,
+/// not a brittle claim that this is the only one.
 #[tokio::test]
 async fn partially_granting_authorization_names_only_the_ungranted_capability() {
     let registry = Registry::new().implement(

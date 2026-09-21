@@ -16,8 +16,9 @@
  *
  * See `rust-runtime-qualification.integration.test.ts` for the stdio and
  * direct-URL-serve transports, and its own doc comment for the named
- * TS-to-Rust test inventory covering `runtime.health` and `workspace.*`.
- * This file adds one further inventory entry:
+ * TS-to-Rust test inventory covering `runtime.health`, `workspace.*`, and
+ * the typed `probing.*` request path. This file adds one further inventory
+ * entry:
  *
  * | Pure-TS runtime assertion | Now also covered by |
  * | --- | --- |
@@ -44,6 +45,7 @@ import { RuntimeConnectionManager } from '../../../src/services/runtime-client/r
 import { insertTestUser } from '../../support/factories';
 import {
   assertRustRuntimeHealthShape,
+  assertRustRuntimeProbingMethods,
   assertRustRuntimeWorkspaceMethods,
 } from '../../support/rust-runtime-assertions';
 import {
@@ -177,6 +179,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
       const client = await hub.manager.getClient(TEST_USER.id, hub.environmentId);
       // `connect`, like `serve`, always answers as the `remote` slot.
       assertRustRuntimeHealthShape(await client.health(), { slot: 'remote' });
+      await assertRustRuntimeProbingMethods(client);
     },
     30_000
   );

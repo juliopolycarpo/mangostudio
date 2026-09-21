@@ -41,6 +41,7 @@
  * | `apps/runtime/tests/unit/services/workdir-validation.test.ts` "rejects empty paths with WorkspacePathError" | same tests (validate thrown-error case) |
  * | `apps/runtime/tests/unit/services/workspace-resolve-contained.test.ts` "returns the root-relative path for a file inside the root" | same tests (resolve-contained success case) |
  * | `apps/runtime/tests/unit/services/workspace-resolve-contained.test.ts` "rejects the root itself, which is not a path within the root" (an escape) | same tests (resolve-contained error case) |
+ * | `apps/runtime/tests/unit/services/probing/toolchains.test.ts` typed `probing.*` request/result handling | the health tests over stdio and direct URL, through `assertRustRuntimeProbingMethods` |
  *
  * **Not yet replaced** — no Rust equivalent exists, per `health.rs`'s own
  * module doc: any TS assertion covering `gh`, `terminal`, or `externalAgents`
@@ -67,6 +68,7 @@ import { insertTestUser } from '../../support/factories';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 import {
   assertRustRuntimeHealthShape,
+  assertRustRuntimeProbingMethods,
   assertRustRuntimeWorkspaceMethods,
 } from '../../support/rust-runtime-assertions';
 import {
@@ -117,6 +119,7 @@ describe('Real Rust runtime qualification', () => {
           // launch: `resolve_runtime_slot_for_current_exe` never places it
           // inside any slot's managed install layout.
           assertRustRuntimeHealthShape(await client.health(), { slot: 'host' });
+          await assertRustRuntimeProbingMethods(client);
         } finally {
           await connection.close();
         }
@@ -216,6 +219,7 @@ describe('Real Rust runtime qualification', () => {
         const client = await manager.getClient(TEST_USER.id, 'rust-serve-box');
         // `serve`/`connect` both always answer as the `remote` slot.
         assertRustRuntimeHealthShape(await client.health(), { slot: 'remote' });
+        await assertRustRuntimeProbingMethods(client);
       },
       30_000
     );

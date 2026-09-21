@@ -185,7 +185,8 @@ fn serve_with_no_token_anywhere_generates_one_prints_it_once_and_persists_it() {
 /// `--token env`/`--token stdin` with nothing to read from that source must
 /// refuse outright — never falling back to generating one (that fallback
 /// is `EnvOrStored`-only) — and, just as importantly, must never have
-/// written `credentials.json` on the way to refusing.
+/// written `credentials.json` or recorded invocation consent on the way to
+/// refusing.
 #[test]
 fn an_empty_explicit_token_source_refuses_without_writing_credentials() {
     let home = scratch_mango_home("serve-empty-explicit-token-env");
@@ -203,6 +204,14 @@ fn an_empty_explicit_token_source_refuses_without_writing_credentials() {
             .join("credentials.json")
             .exists(),
         "an explicit --token env that found nothing must never write a generated credential"
+    );
+    assert!(
+        !home
+            .join("runtime")
+            .join("remote")
+            .join("runtime.json")
+            .exists(),
+        "an explicit --token env that found nothing must refuse before recording consent"
     );
 
     let home = scratch_mango_home("serve-empty-explicit-token-stdin");
@@ -225,6 +234,14 @@ fn an_empty_explicit_token_source_refuses_without_writing_credentials() {
             .join("credentials.json")
             .exists(),
         "an explicit --token stdin that found nothing must never write a generated credential"
+    );
+    assert!(
+        !home
+            .join("runtime")
+            .join("remote")
+            .join("runtime.json")
+            .exists(),
+        "an explicit --token stdin that found nothing must refuse before recording consent"
     );
 }
 

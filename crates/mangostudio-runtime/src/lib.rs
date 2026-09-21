@@ -82,7 +82,9 @@
 //! TypeScript-side byte format to match.)
 //!
 //! - [`config`] mirrors `apps/runtime/src/config.ts`: every environment
-//!   variable this host reads, parsed in one place.
+//!   variable that configures this host, parsed in one place. Machine
+//!   probing reads the environment at the bounded detection site that owns
+//!   the observation instead.
 //! - [`runtime_home`] mirrors `apps/runtime/src/runtime-home.ts` and
 //!   `apps/shared/src/runtime-home/paths.ts`: the `~/.mango/runtime/<slot>`
 //!   layout, slot resolution, and reading `runtime.json`/`credentials.json`

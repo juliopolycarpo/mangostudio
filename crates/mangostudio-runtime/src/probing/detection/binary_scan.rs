@@ -736,19 +736,39 @@ pub async fn scan_runtime(
     // every candidate after it is unresolved, exactly as if this scan's
     // own deadline had already passed before they were ever reached.
     let mut existence_checked = Vec::with_capacity(candidates.len());
-    for candidate in candidates {
+    let mut existence_failures = Vec::new();
+    let mut candidates = candidates.into_iter();
+    while let Some(candidate) = candidates.next() {
         if !candidate.requires_existence_check {
             existence_checked.push(candidate);
             continue;
         }
         let remaining = deadline.saturating_duration_since(TokioInstant::now());
         if remaining.is_zero() {
+            existence_failures.push(RuntimeScanFailure {
+                code: RuntimeFindingCode::ProbeTimeout,
+                path: candidate.path,
+            });
+            existence_failures.extend(candidates.map(|candidate| RuntimeScanFailure {
+                code: RuntimeFindingCode::ProbeTimeout,
+                path: candidate.path,
+            }));
             break;
         }
         match tokio::time::timeout(remaining, deps.path_exists(&candidate.path)).await {
             Ok(true) => existence_checked.push(candidate),
             Ok(false) => {}
-            Err(_elapsed) => break,
+            Err(_elapsed) => {
+                existence_failures.push(RuntimeScanFailure {
+                    code: RuntimeFindingCode::ProbeTimeout,
+                    path: candidate.path,
+                });
+                existence_failures.extend(candidates.map(|candidate| RuntimeScanFailure {
+                    code: RuntimeFindingCode::ProbeTimeout,
+                    path: candidate.path,
+                }));
+                break;
+            }
         }
     }
     let candidates = existence_checked;
@@ -766,7 +786,7 @@ pub async fn scan_runtime(
     .await;
 
     let mut installations = Vec::new();
-    let mut failures = Vec::new();
+    let mut failures = existence_failures;
     let mut first_path_by_realpath: HashMap<String, String> = HashMap::new();
     let mut has_effective_installation = false;
 
@@ -1329,6 +1349,15 @@ mod tests {
         assert!(
             result.installations.is_empty(),
             "a candidate this scan could never even confirm exists must not be reported installed"
+        );
+        assert_eq!(
+            result
+                .failures
+                .first()
+                .map(|failure| (&failure.code, failure.path.as_str())),
+            Some((&RuntimeFindingCode::ProbeTimeout, "/a/bin/node")),
+            "the candidate whose existence check consumed the deadline must be named as a \
+             timeout, not disappear and later collapse into a generic not-found finding"
         );
     }
 

@@ -168,6 +168,8 @@ describe('labeler coverage', () => {
     expect(runtimeSection).toContain('- "packages/protocol/**"');
     expect(runtimeSection).toContain('- "crates/mango-protocol/**"');
     expect(runtimeSection).toContain('- "scripts/protocol/**"');
+    expect(runtimeSection).toContain('- "crates/mangostudio-runtime-contract/**"');
+    expect(runtimeSection).toContain('- "crates/mangostudio-runtime/**"');
   });
 
   test('classifies the repository status feature as area: git', () => {

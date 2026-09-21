@@ -80,6 +80,28 @@ export function assertRustRuntimeHealthShape(
 }
 
 /**
+ * Exercises all three typed `probing.*` handlers over a real runtime
+ * connection without depending on the CI machine's installed tools. Empty
+ * selections still cross the full wire decoder; `latestByMajor` also proves
+ * the JSON string-keyed map reaches Rust's numeric-keyed handler type.
+ *
+ * @example
+ * await assertRustRuntimeProbingMethods(client);
+ */
+export async function assertRustRuntimeProbingMethods(client: RuntimeClient): Promise<void> {
+  expect(await client.probing.runtimes({ ids: [] })).toEqual({ statuses: [] });
+  expect(
+    await client.probing.versionManagers({ ids: [], latestByMajor: { '20': '20.19.5' } })
+  ).toEqual({ statuses: [] });
+  expect(
+    await client.probing.agentClis({
+      targetIds: [],
+      self: { version: 'qualification-test' },
+    })
+  ).toEqual({ statuses: [] });
+}
+
+/**
  * Runs one success and one error case each for `workspace.browse`,
  * `workspace.validate`, and `workspace.resolve-contained` against a real,
  * per-test temp directory — never the caller's real home — through

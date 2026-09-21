@@ -126,9 +126,12 @@ impl Registry {
     ///
     /// `P` and `R` need not match the method's declared schema exactly:
     /// [`mango_protocol::contract::Contract::serve`] validates the wire
-    /// `params` before `P` is ever decoded, and this registry validates the
-    /// serialised `R` before it is ever sent, so a type mismatch in either
-    /// direction is caught, never silently coerced.
+    /// `params` before this wrapper decodes `P`, and this registry validates
+    /// the serialised `R` before it is ever sent, so a type mismatch in
+    /// either direction is caught, never silently coerced. Decoding here,
+    /// rather than in `ContractHandlers`' typed registration, is essential:
+    /// it keeps a decode error or a custom `Deserialize` panic inside this
+    /// wrapper's redaction, audit, and exclusivity cleanup boundary.
     ///
     /// # Panics
     /// Panics if `method` is not declared by the embedded catalog. A
@@ -195,7 +198,11 @@ impl Registry {
         self.implemented.push(method_name.clone());
         self.handlers = self.handlers.on(
             method_name.clone(),
-            move |params: P, context: CallContext| {
+            // Register `Value`, not `P`: ContractHandlers otherwise decodes
+            // P synchronously before this closure constructs its future.
+            // That would bypass this wrapper's panic redaction, audit line,
+            // and unconditional exclusivity release.
+            move |params: Value, context: CallContext| {
                 let method_name = method_name.clone();
                 let handler = Arc::clone(&handler);
                 let validator = Arc::clone(&validator);
@@ -211,13 +218,24 @@ impl Registry {
                 let call_id = context.id().to_string();
                 async move {
                     let started = clock.now();
-                    // Only the handler, its serialisation, and the result
-                    // check are inside this catch: a panic here becomes the
-                    // wire result. Recording is deliberately outside it —
-                    // see the two audit-parity notes below.
+                    // Parameter decoding, the handler, its serialisation,
+                    // and the result check are inside this catch: a panic
+                    // here becomes the wire result. Recording is
+                    // deliberately outside it — see the two audit-parity
+                    // notes below.
                     let recorded: Result<Value, RemoteError> = catch_panics({
                         let method_name = method_name.clone();
                         async move {
+                            let params: P = serde_json::from_value(params).map_err(|error| {
+                                RemoteError::new(
+                                    codes::INTERNAL,
+                                    format!(
+                                        "Parameters of \"{method_name}\" passed their schema but failed \
+                                         to decode into the handler's Rust type: {error}."
+                                    ),
+                                )
+                                .with_detail("method", method_name.clone())
+                            })?;
                             match handler(params, context).await {
                                 Ok(result) => match serde_json::to_value(result) {
                                     Ok(value) => check_result(&method_name, &validator, &value)

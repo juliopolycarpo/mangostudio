@@ -11,12 +11,14 @@ use std::sync::Arc;
 
 use mango_protocol::contract::Contract;
 use mango_protocol::error::codes;
+use mangostudio_runtime::ports::audit::Outcome;
 use mangostudio_runtime::ports::authorization::DenyingAuthorization;
+use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::registry::Registry;
 use mangostudio_runtime_contract::catalog::catalog;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::json;
-use support::{health_result, open_pair, within};
+use support::{RecordingAudit, health_result, open_pair, within};
 
 /// `runtime.health`'s params schema declares no properties and no
 /// `additionalProperties: false`, so it accepts this extra field without
@@ -26,6 +28,132 @@ use support::{health_result, open_pair, within};
 struct HealthParams {
     #[serde(default, rename = "triggerPanic")]
     trigger_panic: bool,
+}
+
+/// Deliberately requires a property that `runtime.health`'s permissive
+/// params schema does not require. A schema-valid `{}` must therefore reach
+/// the registry's protected decode path and become its ordinary `INTERNAL`
+/// mismatch, rather than bypassing its audit and cleanup wrapper.
+#[derive(Debug, Deserialize)]
+struct IncompatibleHealthParams {
+    _required_by_rust_only: String,
+}
+
+/// A hostile `Deserialize` implementation: a panic here used to escape the
+/// registry wrapper because `ContractHandlers` decoded typed parameters
+/// before invoking it. Keep the sensitive text distinct from the handler
+/// panic below so this test proves the decode boundary itself is redacted.
+struct PanickingHealthParams;
+
+impl<'de> Deserialize<'de> for PanickingHealthParams {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        panic!("deserialize read /etc/shadow and token sk-secret-decode-canary");
+    }
+}
+
+#[tokio::test]
+async fn a_schema_valid_decode_failure_is_audited_as_internal() {
+    let audit = Arc::new(RecordingAudit::new());
+    let registry = Registry::with_ports(Arc::clone(&audit) as _, Arc::new(SystemClock)).implement(
+        "runtime.health",
+        |_params: IncompatibleHealthParams, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(health_result())
+        },
+    );
+
+    let (hub, runtime) = open_pair().await;
+    let contract =
+        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
+    let guard = mangostudio_runtime::serve::serve(
+        &contract,
+        &runtime,
+        registry,
+        Arc::new(DenyingAuthorization),
+        "host",
+    )
+    .expect("runtime.health is declared by the catalog");
+    guard.persist();
+
+    let error = within(
+        "the schema-valid decode failure",
+        hub.request("runtime.health", json!({})),
+    )
+    .await
+    .expect_err("a Rust parameter type that drifts from the schema becomes INTERNAL");
+    assert_eq!(error.code, codes::INTERNAL);
+    assert!(
+        error
+            .message
+            .contains("passed their schema but failed to decode into the handler's Rust type"),
+        "the decode failure keeps its specific diagnostic: {}",
+        error.message
+    );
+    assert_eq!(
+        error
+            .details
+            .as_ref()
+            .and_then(|details| details.get("method")),
+        Some(&json!("runtime.health"))
+    );
+
+    let entries = audit.entries();
+    assert_eq!(entries.len(), 1, "the decode failure must be audited once");
+    assert_eq!(entries[0].outcome, Outcome::Error);
+    assert_eq!(entries[0].code.as_deref(), Some(codes::INTERNAL));
+}
+
+#[tokio::test]
+async fn a_panicking_parameter_decode_is_redacted_and_audited() {
+    let audit = Arc::new(RecordingAudit::new());
+    let registry = Registry::with_ports(Arc::clone(&audit) as _, Arc::new(SystemClock)).implement(
+        "runtime.health",
+        |_params: PanickingHealthParams, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(health_result())
+        },
+    );
+
+    let (hub, runtime) = open_pair().await;
+    let contract =
+        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
+    let guard = mangostudio_runtime::serve::serve(
+        &contract,
+        &runtime,
+        registry,
+        Arc::new(DenyingAuthorization),
+        "host",
+    )
+    .expect("runtime.health is declared by the catalog");
+    guard.persist();
+
+    let error = within(
+        "the panicking parameter decode",
+        hub.request("runtime.health", json!({})),
+    )
+    .await
+    .expect_err("a deserializer panic becomes a redacted INTERNAL error");
+    assert_eq!(error.code, codes::INTERNAL);
+    assert!(
+        !error.message.contains("/etc/shadow"),
+        "leaked a path: {}",
+        error.message
+    );
+    assert!(
+        !error.message.contains("sk-secret-decode-canary"),
+        "leaked a token: {}",
+        error.message
+    );
+
+    let entries = audit.entries();
+    assert_eq!(
+        entries.len(),
+        1,
+        "a panicking deserializer must still be audited exactly once"
+    );
+    assert_eq!(entries[0].outcome, Outcome::Error);
+    assert_eq!(entries[0].code.as_deref(), Some(codes::INTERNAL));
 }
 
 #[tokio::test]

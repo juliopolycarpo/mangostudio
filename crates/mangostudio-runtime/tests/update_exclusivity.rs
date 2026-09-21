@@ -19,6 +19,7 @@ use mangostudio_runtime::ports::exclusivity::{NotUpdating, UpdateExclusivityTrac
 use mangostudio_runtime::registry::Registry;
 use mangostudio_runtime_contract::catalog::catalog;
 use mangostudio_runtime_contract::errors::RUNTIME_UPDATE_REFUSED;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use support::{GrantingAuthorization, health_result, open_pair, within};
 
@@ -70,6 +71,14 @@ impl Rendezvous {
 
 fn update_begin_params() -> Value {
     json!({ "version": "0.1.0", "digest": "sha256:deadbeef", "totalBytes": 0 })
+}
+
+/// `runtime.health` permits `{}` under its wire schema, but this deliberately
+/// drifting Rust type cannot decode it. The integration test below proves
+/// the registry wrapper still releases the guard's claim after that error.
+#[derive(Deserialize)]
+struct IncompatibleHealthParams {
+    _required_by_rust_only: String,
 }
 
 #[tokio::test]
@@ -223,4 +232,57 @@ async fn an_ordinary_call_refuses_while_an_update_call_is_genuinely_in_flight() 
     .await
     .expect("the update's claim was released when it settled");
     assert_eq!(accepted["slot"], json!("host"));
+}
+
+#[tokio::test]
+async fn a_decode_failure_releases_an_ordinary_claim_before_an_update_starts() {
+    let exclusivity = Arc::new(UpdateExclusivityTracker::new(Arc::new(NotUpdating)));
+    let registry = Registry::with_ports_and_exclusivity(
+        Arc::new(mangostudio_runtime::ports::audit::NoopAudit),
+        Arc::new(SystemClock),
+        exclusivity,
+    )
+    .implement(
+        "runtime.health",
+        |_params: IncompatibleHealthParams, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(health_result())
+        },
+    )
+    .implement(
+        "runtime.update.begin",
+        |_params: Value, _context| async move {
+            Ok::<_, mango_protocol::RemoteError>(
+                json!({ "sessionId": "s1", "maxChunkBytes": 1024 }),
+            )
+        },
+    );
+
+    let (hub, runtime) = open_pair().await;
+    let contract =
+        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
+    let guard = mangostudio_runtime::serve::serve(
+        &contract,
+        &runtime,
+        registry,
+        Arc::new(GrantingAuthorization),
+        "host",
+    )
+    .expect("both methods are declared by the catalog");
+    guard.persist();
+
+    let decode_error = within(
+        "the schema-valid decode failure",
+        hub.request("runtime.health", json!({})),
+    )
+    .await
+    .expect_err("the Rust-only required property cannot decode from an empty object");
+    assert_eq!(decode_error.code, mango_protocol::error::codes::INTERNAL);
+
+    let accepted = within(
+        "the update call after the failed ordinary decode",
+        hub.request("runtime.update.begin", update_begin_params()),
+    )
+    .await
+    .expect("a failed decode must release the ordinary call's exclusivity claim");
+    assert_eq!(accepted["sessionId"], json!("s1"));
 }

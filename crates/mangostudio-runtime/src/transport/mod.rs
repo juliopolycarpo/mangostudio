@@ -142,7 +142,9 @@ pub(crate) struct SessionHost {
 /// unserialised. Whichever change implements `runtime.update.*` must switch
 /// this call to [`Registry::with_ports_and_exclusivity`] with a real
 /// [`crate::ports::exclusivity::UpdateExclusivityTracker`] in the same
-/// change that adds the first update handler — not as a follow-up, since a
+/// change that adds the first update handler — and must keep typed parameter
+/// decoding inside [`Registry::implement`]'s wrapper, so its cleanup runs on
+/// a decode failure or a `Deserialize` panic — not as a follow-up, since a
 /// registry that implements an update method without that tracker installed
 /// is exactly the unguarded state this comment exists to prevent shipping
 /// unnoticed.

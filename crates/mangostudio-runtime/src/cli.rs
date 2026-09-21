@@ -383,15 +383,6 @@ fn run_stdio(env: &impl EnvSource) -> i32 {
     }
 }
 
-/// Known ordering gap, inherited from `cli.ts` rather than introduced here:
-/// [`consent_by_invocation`] runs (and, on a never-before-answered slot,
-/// writes `setup.state = configured, profile: full`) *before* token
-/// resolution below can still fail this invocation outright. A `serve` with
-/// no token anywhere and nothing stored refuses after already recording the
-/// grant — permanently converting a `pending` slot that, in the end, never
-/// served anything. `serve.ts`/`connect.ts` order it the same way, so this
-/// is a follow-up worth fixing in both hosts together, not a divergence to
-/// paper over unilaterally here.
 fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
     let Some(home) = mango_home_or_report(env) else {
         return 1;
@@ -426,6 +417,22 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         );
     }
 
+    // Resolve an explicitly named source before consent. A fresh remote
+    // slot records a full grant when the invocation itself is the consent;
+    // an empty `--token env` or `--token stdin` must not record that grant
+    // for an invocation that cannot serve anything. The default source is
+    // allowed to fall through to token generation, but generation stays
+    // after consent so an installer-armed pending slot does not gain a
+    // credential before its owner answers the setup gate.
+    let resolved_token = resolve_token(args.token_source, "serveToken", env);
+    if resolved_token.is_none() && args.token_source != TokenSource::EnvOrStored {
+        eprintln!(
+            "mangostudio-runtime: no serve token. Pipe one in with --token -, or set \
+             MANGOSTUDIO_RUNTIME_SERVE_TOKEN."
+        );
+        return 1;
+    }
+
     let consent = consent_by_invocation(RuntimeSlot::Remote, &home, VERSION, &SystemWallClock);
     if !consent.granted {
         if let Some(reason) = &consent.reason {
@@ -445,7 +452,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         );
     }
 
-    let token = match resolve_token(args.token_source, "serveToken", env) {
+    let token = match resolved_token {
         Some(token) => token,
         // Only the default source falls all the way through to generating
         // one: an explicit `--token stdin`/`--token env` that came back
@@ -469,13 +476,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
                 }
             }
         }
-        None => {
-            eprintln!(
-                "mangostudio-runtime: no serve token. Pipe one in with --token -, or set \
-                 MANGOSTUDIO_RUNTIME_SERVE_TOKEN."
-            );
-            return 1;
-        }
+        None => unreachable!("an explicit empty token source returned before consent"),
     };
 
     if let Err(error) = write_runtime_slot_config(
