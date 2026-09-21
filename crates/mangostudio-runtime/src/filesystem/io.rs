@@ -1815,7 +1815,7 @@ mod tests {
                     |phase, _| {
                         if phase == ReplacementHookPhase::BeforePublish {
                             std::fs::remove_file(&path).unwrap();
-                            std::fs::write(&path, b"before").unwrap();
+                            std::fs::write(&path, b"external").unwrap();
                         }
                     },
                 )
@@ -1823,7 +1823,7 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.details.unwrap()["kind"], "file_changed");
-        assert_eq!(std::fs::read(&path).unwrap(), b"before");
+        assert_eq!(std::fs::read(&path).unwrap(), b"external");
     }
 
     #[cfg(windows)]
