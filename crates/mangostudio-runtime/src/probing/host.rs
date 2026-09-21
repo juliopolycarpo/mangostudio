@@ -176,24 +176,12 @@ const PROBE_MAX_STDOUT_BYTES: usize = 8 * 1024;
 /// `read_capped`).
 const PROBE_MAX_STDERR_BYTES: usize = 1024;
 
-/// How much shorter than the pure layer's own `timeout_ms` this module's
-/// [`ChildBudget::deadline`] is set.
-///
-/// [`crate::probing::detection::binary_scan::probe_one_candidate`] already
-/// wraps this trait's whole `probe_version` future in its own
-/// `tokio::time::timeout(timeout_duration, …)`, using the *same*
-/// `timeout_duration` it hands this function as `timeout_ms` — so without
-/// a margin, this module's own [`run_bounded_child`] deadline and that
-/// outer timeout would race to fire at effectively the same instant. If
-/// the outer timeout wins that race, it drops this future mid-`.await`
-/// inside `run_bounded_child`'s own `tokio::select!`, which means the kill
-/// step in that function's body never runs — cleanup then falls back
-/// entirely to `tokio::process::Command::kill_on_drop`, the "best-effort,
-/// never the primary path" backstop `crate::subprocess`'s own module docs
-/// describe. Shaving a small, fixed margin off this module's own deadline
-/// makes it fire first deterministically, so `run_bounded_child` is always
-/// the one that kills and reaps the child.
-const PROBE_DEADLINE_MARGIN: Duration = Duration::from_millis(100);
+/// One cache entry: the fingerprint a probe answered against, and the
+/// version string it produced (or `None`, when the binary ran but its
+/// output was empty). Factored out only so [`probe_version_cache`]'s own
+/// type stays under clippy's `type_complexity` threshold, not because
+/// anything else in this module needs to name it.
+type ProbeVersionCacheEntry = (String, Option<String>);
 
 /// Every cached `probe_version` answer, keyed on the candidate path
 /// exactly as handed to this function — never a bare binary name, and
@@ -204,13 +192,6 @@ const PROBE_DEADLINE_MARGIN: Duration = Duration::from_millis(100);
 /// probe the first time each is seen and nothing after that — cheaper
 /// than a second `realpath` round trip on every single probe just to
 /// share a cache slot).
-/// One cache entry: the fingerprint a probe answered against, and the
-/// version string it produced (or `None`, when the binary ran but its
-/// output was empty). Factored out only so [`probe_version_cache`]'s own
-/// type stays under clippy's `type_complexity` threshold, not because
-/// anything else in this module needs to name it.
-type ProbeVersionCacheEntry = (String, Option<String>);
-
 fn probe_version_cache() -> &'static Mutex<HashMap<PathBuf, ProbeVersionCacheEntry>> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, ProbeVersionCacheEntry>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -229,6 +210,21 @@ pub(crate) fn invalidate_probe_version_cache() {
         .clear();
 }
 
+/// Serializes tests that call [`invalidate_probe_version_cache`]: that
+/// function clears the *whole*, process-wide [`probe_version_cache`]
+/// regardless of key, so two such tests running concurrently under Rust's
+/// default parallel test harness can wipe each other's cache entry
+/// between two probes of what each believes is its own, uniquely-named
+/// fake binary. Mirrors `crate::health`'s own `git_probe_test_lock`/
+/// `shell_detection_test_lock` and `crate::blocking::pool_saturation_test_lock`
+/// — the identical class of problem, once per process-wide test-only
+/// cache this crate has.
+#[cfg(all(test, unix))]
+pub(crate) fn probe_version_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 fn lookup_probe_cache(path: &Path, fingerprint: &str) -> Option<Option<String>> {
     let cache = probe_version_cache()
         .lock()
@@ -244,6 +240,41 @@ fn cache_probe_result(path: PathBuf, fingerprint: String, value: Option<String>)
     cache.insert(path, (fingerprint, value));
 }
 
+/// How much *longer* than the pure layer's own `timeout_ms` this module's
+/// own child-killing task is allowed to keep trying before it gives up.
+///
+/// Mirrors `host-env.ts`'s `VERSION_PROBE_GRACE_MS` and the exact reasoning
+/// in its own doc comment. [`crate::probing::detection::binary_scan::probe_one_candidate`]
+/// already races this trait's whole `probe_version` future against its own
+/// `tokio::time::timeout(timeout_duration, …)`, using the *same*
+/// `timeout_duration` it hands this function as `timeout_ms` — that outer
+/// race, not anything internal to this module, is what must be
+/// authoritative for *reporting* a timeout as `probe-timeout` rather than
+/// `not-executable`. An earlier draft of this function gave
+/// [`run_bounded_child`] a deadline *shorter* than `timeout_ms`
+/// specifically so it would win that race — which fixed which cleanup path
+/// ran, but broke reporting: a hanging `--version` that this module's own
+/// (shorter) deadline caught first resolved the *outer* race as `Ok(Err(ProbeError))`,
+/// not `Err(_elapsed)`, so the pure layer read it as "ran and produced
+/// nothing" and reported `not-executable` — precisely the misdiagnosis
+/// `VERSION_PROBE_GRACE_MS`'s own TypeScript comment exists to prevent
+/// (sending anyone who reads the finding to check file permissions on a
+/// binary that was merely slow).
+///
+/// The fix composes the two races the way TypeScript's own two independent
+/// timers do: [`probe_binary_version`] spawns [`run_bounded_child`] as its
+/// own detached [`tokio::spawn`] task, with a deadline *longer* than what
+/// the outer race uses. The outer race is then always the one that fires
+/// first when the child is genuinely too slow, and reports the timeout
+/// correctly. This module's own future — awaiting the spawned task's
+/// `JoinHandle` — can be dropped right there with no consequence, because
+/// the spawned task is not attached to it: it keeps running, independently
+/// of whether anything is still awaiting it, all the way to a real kill
+/// and a real reap — the exact guarantee `crate::subprocess`'s own module
+/// docs describe never relying on `tokio::process::Command::kill_on_drop`
+/// for.
+const PROBE_GRACE: Duration = Duration::from_millis(250);
+
 /// Probes `binary_path -- args`, memoized by resolved path and
 /// fingerprint. Only a probe that actually ran to a successful exit is
 /// cached — mirrors [`crate::health::probe_git`]'s own choice not to cache
@@ -256,7 +287,12 @@ fn cache_probe_result(path: PathBuf, fingerprint: String, value: Option<String>)
 /// could not spawn) — see that type's own docs for why this trait has no
 /// finer-grained failure to report, and why that is fine: the pure layer
 /// above this function treats every [`ProbeError`] the same way a `null`
-/// TypeScript probe result is treated, as "ran, produced nothing".
+/// TypeScript probe result is treated, as "ran, produced nothing". See
+/// [`PROBE_GRACE`]'s own doc comment for why this can never be reported as
+/// a false `not-executable` for a candidate that was merely slow: the
+/// *caller's* own outer timeout is what fires first in that case, well
+/// before this function's own detached task ever gets to return an error
+/// at all.
 async fn probe_binary_version(
     binary_path: String,
     args: Vec<String>,
@@ -281,18 +317,24 @@ async fn probe_binary_version(
         return Ok(cached);
     }
 
-    let deadline = Duration::from_millis(timeout_ms)
-        .saturating_sub(PROBE_DEADLINE_MARGIN)
-        .max(Duration::from_millis(1));
     let budget = ChildBudget {
-        deadline,
+        deadline: Duration::from_millis(timeout_ms) + PROBE_GRACE,
         max_stdout_bytes: PROBE_MAX_STDOUT_BYTES,
         max_stderr_bytes: PROBE_MAX_STDERR_BYTES,
     };
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let cancel = cancel.clone();
+    let spawned_path = path_buf.clone();
+    // Detached on purpose — see `PROBE_GRACE`'s own doc comment: this
+    // task's own kill-and-reap sequence must keep running to completion
+    // even if the caller's own outer race gives up on the future that
+    // awaits it below.
+    let handle = tokio::spawn(async move {
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_bounded_child(&spawned_path, &arg_refs, None, budget, &cancel).await
+    });
 
-    match run_bounded_child(&path_buf, &arg_refs, None, budget, cancel).await {
-        Ok(outcome) if outcome.status_success => {
+    match handle.await {
+        Ok(Ok(outcome)) if outcome.status_success => {
             let text = String::from_utf8_lossy(&outcome.stdout).trim().to_string();
             let value = if text.is_empty() { None } else { Some(text) };
             if let Some(fingerprint) = fingerprint {
@@ -304,8 +346,13 @@ async fn probe_binary_version(
         // `execFile` rejection path, which reads a non-zero exit the same
         // as "produced nothing" rather than a hard failure. Not cached —
         // see this function's own doc comment.
-        Ok(_) => Ok(None),
-        Err(_child_run_error) => Err(ProbeError),
+        Ok(Ok(_)) => Ok(None),
+        Ok(Err(_child_run_error)) => Err(ProbeError),
+        // The spawned task itself panicked, rather than `run_bounded_child`
+        // reporting an ordinary failure — treated the same opaque way as
+        // every other failure this trait can report; see `ProbeError`'s
+        // own docs for why no caller needs to tell these apart.
+        Err(_join_error) => Err(ProbeError),
     }
 }
 
@@ -379,11 +426,40 @@ impl AuthSignalFs for RealAuthSignalFs {
         // caller of this type ever logs or forwards the string itself,
         // only the boolean `probe_config_key`/`probe_auth_file` derive
         // from it.
-        let file = std::fs::File::open(path)?;
-        let mut limited = file.take(max_bytes as u64);
-        let mut buffer = String::new();
-        limited.read_to_string(&mut buffer)?;
-        Ok(buffer)
+        //
+        // `O_NOFOLLOW` on the open itself (Unix), not an `lstat` check
+        // before a plain `open` — mirrors `host-env.ts`'s `readBoundedUtf8`
+        // exactly: a config path whose *final* component is a symlink must
+        // fail the open outright, never silently redirect this bounded
+        // read to wherever it points. `fstat`-ing the resulting descriptor
+        // (not the path a second time) is what keeps that check racy-swap
+        // free, the same reason the TypeScript original fstats the open
+        // `fd` rather than `stat`-ing the path again.
+        #[cfg(unix)]
+        let mut file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits())
+                .open(path)?
+        };
+        #[cfg(not(unix))]
+        let mut file = std::fs::File::open(path)?;
+
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::other(format!("not a regular file: {path}")));
+        }
+
+        let mut limited = file.by_ref().take(max_bytes as u64);
+        let mut buffer = Vec::new();
+        limited.read_to_end(&mut buffer)?;
+        // Lossy-decodes rather than failing closed on a UTF-8 sequence cut
+        // exactly at the byte cap — matches Node's own `Buffer#toString('utf8')`
+        // in `readBoundedUtf8`, which substitutes the replacement character
+        // rather than throwing; `read_to_string`'s strict UTF-8 requirement
+        // would refuse a config file this read only truncated mid-character,
+        // not one that was ever actually malformed.
+        Ok(String::from_utf8_lossy(&buffer).into_owned())
     }
 }
 
@@ -515,8 +591,6 @@ pub(crate) async fn probe_winget_ownership(cancel: &CancellationToken) -> Winget
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use super::*;
 
     fn scratch_dir(name: &str) -> PathBuf {
@@ -568,6 +642,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn probe_binary_version_reports_a_real_scripts_output() {
+        let _exclusive = probe_version_test_lock().lock().await;
         invalidate_probe_version_cache();
         let dir = scratch_dir("probe-ok");
         let script = fake_binary(&dir, "fake-version", "echo 9.9.9");
@@ -604,6 +679,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_cache_hit_never_invokes_the_binary_a_second_time() {
+        let _exclusive = probe_version_test_lock().lock().await;
         invalidate_probe_version_cache();
         let dir = scratch_dir("probe-cache-hit");
         let invocations = dir.join("invocations");
@@ -658,6 +734,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_hanging_binary_is_killed_within_its_own_timeout_not_left_running() {
+        let _exclusive = probe_version_test_lock().lock().await;
         invalidate_probe_version_cache();
         let dir = scratch_dir("probe-deadline");
         let pid_file = dir.join("pid");
@@ -723,6 +800,34 @@ mod tests {
         let fs = RealAuthSignalFs;
         let text = fs.read_file(file.to_string_lossy().as_ref(), 10).unwrap();
         assert_eq!(text.len(), 10);
+    }
+
+    /// P2 regression test: mirrors `host-env.ts`'s own `readBoundedUtf8`,
+    /// which opens with `O_RDONLY | O_NOFOLLOW` specifically so a config
+    /// path whose *final* component is a symlink cannot redirect this
+    /// bounded read to wherever it points. A plain `File::open` follows
+    /// the symlink instead — no credential value ever escapes through
+    /// this trait's `Result<String, io::Error>` either way (only a
+    /// presence boolean derived from it does, further up the call chain),
+    /// but a caller asking this probe about one exact path must not have
+    /// its answer quietly computed from a different, symlinked-to file.
+    #[cfg(unix)]
+    #[test]
+    fn real_auth_signal_fs_read_file_refuses_a_final_component_symlink() {
+        let dir = scratch_dir("auth-fs-symlink");
+        let real = dir.join("real-secret.json");
+        std::fs::write(&real, "{\"token\":\"do-not-leak\"}").unwrap();
+        let link = dir.join("config.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let fs = RealAuthSignalFs;
+        let error = fs
+            .read_file(link.to_string_lossy().as_ref(), 4096)
+            .expect_err("a symlinked config path must refuse the read, not follow it");
+        assert!(
+            error.kind() != std::io::ErrorKind::NotFound,
+            "the path genuinely exists; refusing it must not read as 'absent': {error}"
+        );
     }
 
     /// A permission failure must never be reported as "absent" — proven by
@@ -848,21 +953,70 @@ mod tests {
         assert_eq!(outcome, WingetOwnership::Unknown);
     }
 
-    /// Regression guard for the deadline-margin arithmetic itself: a
-    /// caller-supplied `timeout_ms` smaller than the margin must still
-    /// produce a positive `ChildBudget::deadline`, never a panic from an
-    /// underflowing subtraction and never a zero-length budget that could
-    /// never let a child run at all.
-    #[test]
-    fn the_probe_deadline_margin_never_underflows_a_small_timeout() {
-        let counter = AtomicUsize::new(0);
-        for timeout_ms in [0u64, 1, 50, 99, 100, 101, 5_000] {
-            let deadline = Duration::from_millis(timeout_ms)
-                .saturating_sub(PROBE_DEADLINE_MARGIN)
-                .max(Duration::from_millis(1));
-            assert!(deadline >= Duration::from_millis(1));
-            counter.fetch_add(1, Ordering::Relaxed);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), 7);
+    /// Regression test for the P1 misdiagnosis [`PROBE_GRACE`] exists to
+    /// close: a candidate that is merely slow — not broken — must be
+    /// reported by the pure layer as a timeout, never as `not-executable`.
+    /// Reproduced exactly the way
+    /// `crate::probing::detection::binary_scan::probe_one_candidate`
+    /// composes this trait's `probe_version`: an outer `tokio::time::timeout`
+    /// using the *same* `timeout_ms` this function itself receives, racing
+    /// against a real fake binary that outlasts that outer bound but still
+    /// gets killed by this module's own (longer) internal deadline.
+    ///
+    /// Before this fix, `run_bounded_child`'s own deadline was *shorter*
+    /// than `timeout_ms`, so it always won this exact race and resolved
+    /// `probe_binary_version`'s future with `Err(ProbeError)` well before
+    /// this test's own outer timeout could ever fire — the outer race
+    /// would have observed `Ok(Err(ProbeError))`, not `Err(_elapsed)`,
+    /// which `probe_one_candidate` reads as "ran and produced nothing"
+    /// (`not-executable`) rather than "timed out" (`probe-timeout`).
+    ///
+    /// This test's own scope stops at the reporting fix — it deliberately
+    /// does not also poll for the child's eventual death, the way earlier
+    /// drafts did: `run_bounded_child`'s own kill-and-reap already has
+    /// exhaustive coverage in `crate::subprocess`'s own test module, and
+    /// [`a_hanging_binary_is_killed_within_its_own_timeout_not_left_running`]
+    /// just above already proves this module's own detached task reaches
+    /// a real kill and a real reap when driven to completion. Polling for
+    /// that a *second* time here, under this crate's full test suite,
+    /// means contending for [`crate::subprocess`]'s process-wide, capacity-4
+    /// child-process semaphore against however many other tests are
+    /// spawning real children at that exact moment — a real, observed
+    /// source of flakiness this test does not need to accept for a
+    /// property it is not the one proving.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_slow_but_eventually_killed_probe_is_reported_as_a_timeout_by_the_outer_race() {
+        let _exclusive = probe_version_test_lock().lock().await;
+        invalidate_probe_version_cache();
+        let dir = scratch_dir("probe-slow-not-broken");
+        let pid_file = dir.join("pid");
+        let script = fake_binary(
+            &dir,
+            "fake-slow",
+            &format!("echo $$ > {}\nsleep 5\n", pid_file.display()),
+        );
+        let cancel = CancellationToken::new();
+        let timeout_ms = 200u64;
+
+        // Mirrors `probe_one_candidate`'s own composition exactly: an outer
+        // race using the identical `timeout_ms` this function receives.
+        let outer = tokio::time::timeout(
+            Duration::from_millis(timeout_ms),
+            probe_binary_version(
+                script.to_string_lossy().into_owned(),
+                vec!["--version".to_string()],
+                timeout_ms,
+                &cancel,
+            ),
+        )
+        .await;
+
+        assert!(
+            outer.is_err(),
+            "the outer race must be the one that times out for a merely slow candidate, not \
+             resolve early with an Err this crate's own pure layer would misreport as \
+             not-executable"
+        );
     }
 }
