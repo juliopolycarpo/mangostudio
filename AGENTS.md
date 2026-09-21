@@ -39,11 +39,23 @@ Useful docs:
 - Shared contracts are schema-first: the TypeBox schema in `apps/shared/src/<module>/schemas.ts` is the single source of truth, and public types are derived with `Static<>`. Never hand-write a duplicate interface for a shape that already has a schema. `apps/shared/src/contracts/index.ts` is a compatibility barrel only — import from the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`) in new code.
 - API error responses must use `ApiErrorResponse` from `@mangostudio/shared/errors` or `SSEErrorEvent` from `@mangostudio/shared/streaming`. `ProblemDetails` (RFC 9457) is a third wire shape, but not a third thing to build: it is rendered from an `ApiErrorResponse` by the negotiation boundary in `apps/api/src/plugins/error-negotiation.ts` when the caller asks for `application/problem+json`. Never construct or return one from a route.
 - The Mango Protocol (`spec/`, `packages/protocol/`, `crates/mango-protocol/`, `docs/protocol/`, `scripts/protocol/`) is one wire contract on its own `protocol-v*` release line. Any change under those paths follows `packages/protocol/AGENTS.md` and runs `bun run protocol:check && bun run protocol:test` — the repository gate runs only its TypeScript half.
-- One parsing point per host, never scattered: hub environment parsing lives only in
+- One parsing point per host for *configuration* — the environment variables that select a mode,
+  a token, or a path the host trusts — never scattered: hub configuration parsing lives only in
   `apps/api/src/lib/config.ts`; the TypeScript runtime host's, only in
   `apps/runtime/src/config.ts`; the Rust runtime host's, only in
   `crates/mangostudio-runtime/src/config.rs`. Each host owns its own single parser — a second host
-  cannot route its environment through another host's module.
+  cannot route its configuration through another host's module.
+  Machine probing is a separate, legitimate carve-out: a detector describing what is actually on
+  this machine (`PATH`, `$HOME`, an already-collected environment snapshot) reads the process
+  environment directly, at the site that needs it, because that value is never configuration —
+  nothing selects or validates it ahead of time, and scattering the probing sites is the point (a
+  `PATH` walk lives with the walk it bounds). In the Rust host this is
+  `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks,
+  `crates/mangostudio-runtime/src/runtime_home.rs`'s `home_dir()` for slot resolution, and
+  `crates/mangostudio-runtime/src/probing/host.rs`'s environment snapshot for detection. A
+  `#[test]` in that crate (`config_boundary_test`) greps its own source tree for `env::var`/
+  `var_os`/`vars`/`home_dir` calls outside `config.rs` and asserts the result is exactly this
+  allowlist — a change that adds a fifth site fails the test, not a review comment.
 - Shared code must remain framework-agnostic. Shared code that reaches a Node builtin gets its
   own export subpath (`@mangostudio/shared/library/host`, `/process/host`) so the browser bundle
   never resolves it.
