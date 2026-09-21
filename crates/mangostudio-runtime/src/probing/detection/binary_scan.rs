@@ -726,10 +726,29 @@ pub async fn scan_runtime(
     // before the clock the probe phase is measured against even starts.
     let deadline = TokioInstant::now() + Duration::from_millis(options.total_timeout_ms);
     let candidates = iterate_binary_candidates(definition, &path_env, &options);
+    // Each existence check is individually raced against what remains of
+    // the scan's own `deadline` — not the whole pass wrapped in one
+    // `tokio::time::timeout`, which would discard every candidate already
+    // confirmed present the instant one later candidate's check outran the
+    // clock, rather than keeping that partial progress. A candidate whose
+    // own check cannot finish in time (a wedged well-known directory, the
+    // real host equivalent of a stale NFS mount) stops the pass there:
+    // every candidate after it is unresolved, exactly as if this scan's
+    // own deadline had already passed before they were ever reached.
     let mut existence_checked = Vec::with_capacity(candidates.len());
     for candidate in candidates {
-        if !candidate.requires_existence_check || deps.path_exists(&candidate.path).await {
+        if !candidate.requires_existence_check {
             existence_checked.push(candidate);
+            continue;
+        }
+        let remaining = deadline.saturating_duration_since(TokioInstant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, deps.path_exists(&candidate.path)).await {
+            Ok(true) => existence_checked.push(candidate),
+            Ok(false) => {}
+            Err(_elapsed) => break,
         }
     }
     let candidates = existence_checked;
@@ -855,6 +874,10 @@ mod tests {
         responses: HashMap<String, String>,
         /// Paths whose probe never resolves — for deadline tests.
         pending: HashSet<String>,
+        /// Paths whose `path_exists` call never resolves — for existence-
+        /// check deadline tests, mirroring `pending`'s own role for
+        /// `probe_version`.
+        pending_exists: HashSet<String>,
         realpath_map: HashMap<String, String>,
         /// Every path `probe_version` was actually invoked for, in call
         /// order — what the deadline mutation test inspects.
@@ -871,7 +894,13 @@ mod tests {
 
         fn path_exists<'a>(&'a self, path: &'a str) -> BoxFuture<'a, bool> {
             let exists = self.existing.contains(path);
-            Box::pin(async move { exists })
+            let pending = self.pending_exists.contains(path);
+            Box::pin(async move {
+                if pending {
+                    std::future::pending::<()>().await;
+                }
+                exists
+            })
         }
 
         fn probe_version<'a>(
@@ -1259,6 +1288,47 @@ mod tests {
                 .failures
                 .iter()
                 .all(|failure| failure.code == RuntimeFindingCode::ProbeTimeout)
+        );
+    }
+
+    /// A third caller of the same "unbounded walk on the hot path" pattern
+    /// `crate::health`'s `detect_shells`/`probe_git` both had to be fixed
+    /// for: the existence-check pass this function runs over every
+    /// candidate before any of them is ever probed used to have no bound
+    /// of its own at all — a real host's `BinaryScanDeps::path_exists`
+    /// wedged on one well-known directory (this crate's equivalent of a
+    /// stale NFS mount) would have hung the whole scan indefinitely,
+    /// before `probe_one_candidate`'s own, already-tested deadline guard
+    /// ever got a chance to run.
+    ///
+    /// A wedged existence check consumes what is left of the scan's own
+    /// `total_timeout_ms` before giving up on it — the identical "one
+    /// shared deadline governs the whole scan" contract
+    /// `probe_one_candidate`'s own deadline check already enforces for the
+    /// probe phase (see `never_probes_a_candidate_past_the_total_deadline`
+    /// just above), so a wedge here degrades exactly the way running out
+    /// of time mid-probe already does: bounded and reported as no
+    /// installation, never a hang. That also means nothing is left in the
+    /// budget to probe a candidate confirmed present *before* the wedge —
+    /// a real, accepted cost of sharing one deadline across both phases,
+    /// not a second gap this test claims to close.
+    #[tokio::test(start_paused = true)]
+    async fn the_existence_check_pass_never_hangs_on_a_candidate_that_cannot_resolve_in_time() {
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: linux_env("/a/bin"),
+            pending_exists: HashSet::from(["/a/bin/node".to_string()]),
+            ..Default::default()
+        });
+        let options = BinaryScanOptions {
+            total_timeout_ms: 100,
+            ..Default::default()
+        };
+
+        let result = scan_runtime(&node_definition(), deps, options).await;
+
+        assert!(
+            result.installations.is_empty(),
+            "a candidate this scan could never even confirm exists must not be reported installed"
         );
     }
 

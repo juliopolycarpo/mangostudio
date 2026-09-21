@@ -372,17 +372,52 @@ fn shell_path_candidates(kind: RuntimeShellKind) -> &'static [&'static str] {
     }
 }
 
-/// Bound on the `PATH` walk [`detect_shells`] performs. Named separately
-/// from [`GIT_PROBE_TIMEOUT`]: this is `stat` calls, not a spawned child,
-/// but the failure mode is the identical shape — a wedged `PATH` entry (a
-/// stale NFS mount, an unresponsive `/mnt/c` share when Windows itself is
-/// unresponsive, autofs) blocks a bare `std::fs::metadata` call
-/// indefinitely, and without a bound this walk sat on the hello-building
-/// path with none at all: measured on a 54-entry `PATH` with three misses
-/// (`zsh`, `pwsh`, `powershell`), this walk alone cost ~210ms of every
-/// connection's `hello.capabilities`, next to ~25ms for the (cached, timed)
-/// `git` child — dwarfing it, not the other way around.
-const SHELL_DETECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+/// Bound on the `which_in` `PATH` walk both [`detect_shells`] and
+/// [`probe_git`] perform. Named separately from [`GIT_PROBE_TIMEOUT`]: this
+/// is `stat` calls, not a spawned child, but the failure mode is the
+/// identical shape — a wedged `PATH` entry (a stale NFS mount, an
+/// unresponsive `/mnt/c` share when Windows itself is unresponsive, autofs)
+/// blocks a bare `std::fs::metadata` call indefinitely.
+///
+/// One constant, not two: both callers walk the identical `PATH` value
+/// through the identical `which_in` function on the identical hot path
+/// (`build_capability_manifest`, called once per connection before
+/// `hello` is ever sent) — a `PATH` entry wedged for one caller is wedged
+/// for the other, so there is no case where they would need to disagree
+/// on how long is too long. `detect_shells` was the first of the two
+/// bounded (measured on a 54-entry `PATH` with three misses — `zsh`,
+/// `pwsh`, `powershell` — this walk alone cost ~210ms of every
+/// connection's `hello.capabilities`, next to ~25ms for the (cached,
+/// timed) `git` child, dwarfing it, not the other way around);
+/// [`probe_git`]'s own identical `which_in("git", ..)` walk went unbounded
+/// for a whole further wave before this constant's rename made the gap
+/// obvious enough to close — see that function's own doc comment.
+const PATH_WALK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Races `walk` against [`PATH_WALK_TIMEOUT`], collapsing an elapsed
+/// timeout into `None` — the identical "found nothing within the bound"
+/// answer a walk that genuinely found nothing already produces, so
+/// [`probe_git`] never has to tell the two apart. [`detect_shells`] inlines
+/// this same composition itself, for its own batched, three-shell walk,
+/// rather than going through this generic helper — see that function's own
+/// call site.
+///
+/// A free function taking any `Future<Output = Option<T>>`, not a method
+/// on [`probe_git`] itself or a closure inline there, specifically so this
+/// module's own tests can race it against [`std::future::pending`]
+/// directly: proving the timeout composition fires is then a fully
+/// virtual-time, `#[tokio::test(start_paused = true)]` proof with no real
+/// filesystem, no real subprocess, and — unlike an earlier draft of this
+/// fix — no need to saturate this crate's real, process-wide blocking pool
+/// for the length of the whole timeout, which would have starved any
+/// other concurrently-running test's own, unrelated `run_blocking` calls
+/// for the same real seconds.
+async fn bounded_path_walk<T>(walk: impl std::future::Future<Output = Option<T>>) -> Option<T> {
+    tokio::time::timeout(PATH_WALK_TIMEOUT, walk)
+        .await
+        .ok()
+        .flatten()
+}
 
 /// Every cached shell-detection answer, keyed on the exact `PATH` value it
 /// was computed against. A whole-string key, not a per-entry fingerprint
@@ -413,6 +448,32 @@ fn invalidate_shell_detection_cache() {
         .clear();
 }
 
+/// Serializes tests that call [`invalidate_shell_detection_cache`]: that
+/// function clears the *whole*, process-wide [`shell_detection_cache`]
+/// regardless of key, so two such tests running concurrently under Rust's
+/// default parallel test harness can wipe each other's cache entry
+/// between their own two `detect_shells` calls — a real, observed,
+/// non-deterministic failure
+/// (`detect_shells_caches_by_the_exact_path_value` reporting `[]` instead
+/// of its own cached `[Bash]`), not a flake in the production code either
+/// test exercises. Mirrors [`crate::blocking::pool_saturation_test_lock`]'s
+/// own pattern for the identical class of problem on a different shared
+/// resource.
+#[cfg(all(test, unix))]
+fn shell_detection_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// The identical serialization [`shell_detection_test_lock`] gives shell-
+/// detection tests, for tests that call [`invalidate_git_probe_cache`]
+/// instead.
+#[cfg(all(test, unix))]
+fn git_probe_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Every shell kind actually found on `PATH`, in [`RuntimeShellKind`]'s own
 /// declared order. A single [`run_blocking`] call walks `PATH` for all
 /// three at once — this is a handful of `stat` calls, not the kind of work
@@ -424,7 +485,7 @@ fn invalidate_shell_detection_cache() {
 ///
 /// Only a *completed* walk is cached — mirrors [`probe_git`]'s own choice
 /// (see that function's doc comment): a walk this function gave up on at
-/// [`SHELL_DETECTION_TIMEOUT`] says nothing about what a clean walk would
+/// [`PATH_WALK_TIMEOUT`] says nothing about what a clean walk would
 /// have found, and caching it would announce every shell permanently
 /// absent over one transient stall.
 async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeShellKind> {
@@ -462,7 +523,7 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
         }
     });
 
-    match tokio::time::timeout(SHELL_DETECTION_TIMEOUT, walk).await {
+    match tokio::time::timeout(PATH_WALK_TIMEOUT, walk).await {
         Ok(detected) => {
             shell_detection_cache()
                 .lock()
@@ -591,12 +652,27 @@ async fn probe_git(
         });
     };
 
-    let Some(git_path) = run_blocking({
+    // Bounded by `PATH_WALK_TIMEOUT` via `bounded_path_walk`, matching
+    // `detect_shells`'s own identical `which_in` walk exactly — see that
+    // constant's own doc comment for why this walk went unbounded for a
+    // whole prior wave. Both `build_health_report` and
+    // `build_capability_manifest` await this before `hello` is ever sent;
+    // a wedged `PATH` entry here used to mean a handshake that never
+    // starts at all, repeated on every redial, not a degraded
+    // `git.available: false`.
+    let Some(git_path) = bounded_path_walk(run_blocking({
         let path_var = path_var.clone();
         move || which_in("git", &path_var)
-    })
+    }))
     .await
     else {
+        // Not found, or the walk itself could not finish in time — both
+        // collapse to the identical "git not available" answer, mirroring
+        // `detect_shells`'s own "an absent tool is not an error" contract:
+        // a wedged `PATH` entry must degrade this probe, never surface as
+        // a distinct "probe failed" shape, and never be cached (see
+        // `git_probe_cache`'s own doc comment on caching only a definite,
+        // successful answer).
         return Ok(GitAvailability {
             available: false,
             version: None,
@@ -688,8 +764,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        build_capability_manifest, build_health_report, node_platform, parse_git_version,
-        read_slot_state_and_source,
+        bounded_path_walk, build_capability_manifest, build_health_report, node_platform,
+        parse_git_version, read_slot_state_and_source,
     };
     use crate::blocking::{MAX_CONCURRENT_BLOCKING_TASKS, pool_saturation_test_lock, run_blocking};
     use crate::registry::Registry;
@@ -702,7 +778,8 @@ mod tests {
     // `-D warnings` turns into a hard build failure rather than a lint note.
     #[cfg(unix)]
     use super::{
-        detect_shells, invalidate_git_probe_cache, invalidate_shell_detection_cache, probe_git,
+        detect_shells, git_probe_test_lock, invalidate_git_probe_cache,
+        invalidate_shell_detection_cache, probe_git, shell_detection_test_lock,
     };
     #[cfg(unix)]
     use crate::runtime_home::write_runtime_slot_config;
@@ -969,6 +1046,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn probe_git_reports_a_working_fake_git() {
+        let _exclusive = git_probe_test_lock().lock().await;
         invalidate_git_probe_cache();
         let (_dir, path_var) = fake_git("probe-ok", "echo 'git version 9.9.9'");
         let cancel = CancellationToken::new();
@@ -1002,6 +1080,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn probe_git_cache_hit_never_invokes_the_binary_a_second_time() {
+        let _exclusive = git_probe_test_lock().lock().await;
         invalidate_git_probe_cache();
         let dir = scratch_home("probe-cache-hit");
         let invocations = dir.join("invocations");
@@ -1038,9 +1117,43 @@ mod tests {
         );
     }
 
+    /// Regression test for the `PATH_WALK_TIMEOUT` gap `probe_git` used to
+    /// have: `which_in("git", ..)` ran through `run_blocking` with no
+    /// timeout around it at all — `bounded_path_walk` is the fix, and this
+    /// races it against a walk that never resolves at all, the shape a
+    /// wedged `PATH` entry (a stale NFS mount, an unresponsive `/mnt/c`
+    /// share) produces in production.
+    ///
+    /// `start_paused = true`, not a saturated blocking pool: an earlier
+    /// draft of this test held every permit in this crate's real,
+    /// process-wide blocking pool for the full length of the timeout to
+    /// prove the same point, which — now that `probe_git`'s own walk
+    /// genuinely has a deadline — starved *other*, unrelated,
+    /// concurrently-running tests' ordinary `run_blocking` calls for those
+    /// same real seconds and made them spuriously report a timeout of
+    /// their own. `bounded_path_walk` takes any future, so this races it
+    /// against `std::future::pending()` directly instead: no real
+    /// filesystem, no real thread, no shared resource any other test could
+    /// contend on, and — under a paused clock — no real time elapsed at
+    /// all.
+    #[tokio::test(start_paused = true)]
+    async fn bounded_path_walk_reports_none_when_the_walk_never_resolves() {
+        let result: Option<()> = bounded_path_walk(std::future::pending()).await;
+        assert!(result.is_none());
+    }
+
+    /// The other half of the same composition: a walk that finishes well
+    /// within the bound must report exactly what it found, untouched.
+    #[tokio::test]
+    async fn bounded_path_walk_returns_the_walks_own_result_when_it_finishes_in_time() {
+        let result = bounded_path_walk(async { Some(42) }).await;
+        assert_eq!(result, Some(42));
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn detect_shells_finds_a_shell_present_on_a_synthetic_path() {
+        let _exclusive = shell_detection_test_lock().lock().await;
         invalidate_shell_detection_cache();
         let (_dir, path_var) = fake_shells_on_path("shells-found", &["bash"]);
 
@@ -1063,6 +1176,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn detect_shells_caches_by_the_exact_path_value() {
+        let _exclusive = shell_detection_test_lock().lock().await;
         invalidate_shell_detection_cache();
         let (dir, path_var) = fake_shells_on_path("shells-cache", &["bash"]);
 
@@ -1119,6 +1233,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_cancelled_probe_returns_promptly_and_reaps_its_child() {
+        let _exclusive = git_probe_test_lock().lock().await;
         invalidate_git_probe_cache();
         let home = scratch_home("cancel-home");
         let pid_dir = scratch_home("cancel-pid");
