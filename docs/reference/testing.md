@@ -1122,6 +1122,14 @@ installed and nothing is paid for.
 > `git --version` synchronously. Connect once per file instead; the checkpoint
 > suites are the worked example.
 
+> **`pgrep -f` matches its own command line.** A wait loop shaped like
+> `until ! pgrep -f "bun run test"; do sleep 1; done` never terminates when it
+> runs inside a `bash -c "..."` wrapper (a background watcher, a CI step) whose
+> own command line contains the same pattern — `pgrep -f` greps full command
+> lines, including the grepping process's. Capture the target's pid at launch
+> and poll `kill -0 "$pid"` instead, or run the command in the foreground and
+> skip the wait loop entirely.
+
 ## CI Artifact Retention
 
 CI artifacts fall into four retention classes; keep new uploads aligned with them:
