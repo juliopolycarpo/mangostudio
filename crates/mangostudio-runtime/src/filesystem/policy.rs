@@ -269,9 +269,7 @@ mod windows {
                 (Component::Normal(_), Component::Normal(_)) => {
                     match metadata_relation(std::fs::metadata(&parent)) {
                         MetadataRelation::Directory => {
-                            let Some(case_sensitive) = directory_is_case_sensitive(&parent) else {
-                                return None;
-                            };
+                            let case_sensitive = directory_is_case_sensitive(&parent)?;
                             inherited_case_sensitive = Some(case_sensitive);
                         }
                         MetadataRelation::Missing => {}
