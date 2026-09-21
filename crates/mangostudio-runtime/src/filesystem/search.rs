@@ -303,21 +303,39 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
     }))
 }
 
-struct PathGlob {
-    matcher: globset::GlobMatcher,
-    negated: bool,
-    depth: Option<usize>,
+enum PathGlob {
+    Whole {
+        matcher: globset::GlobMatcher,
+        negated: bool,
+        depth: Option<usize>,
+    },
+    LeadingNegation {
+        first_component: globset::GlobMatcher,
+        remainder: globset::GlobMatcher,
+    },
 }
 
 impl PathGlob {
     fn is_match(&self, path: &str) -> bool {
-        if self
-            .depth
-            .is_some_and(|depth| path.split('/').count() != depth)
-        {
-            return false;
+        match self {
+            Self::LeadingNegation {
+                first_component,
+                remainder,
+            } => {
+                let (first, remainder_path) = path.split_once('/').unwrap_or((path, ""));
+                !first_component.is_match(first) && remainder.is_match(remainder_path)
+            }
+            Self::Whole {
+                matcher,
+                negated,
+                depth,
+            } => {
+                if depth.is_some_and(|depth| path.split('/').count() != depth) {
+                    return false;
+                }
+                matcher.is_match(path) != *negated
+            }
         }
-        self.matcher.is_match(path) != self.negated
     }
 }
 
@@ -398,23 +416,35 @@ fn compile_glob(pattern: &str, cwd: &Path) -> Result<PathGlob, RemoteError> {
     let positive = pattern.trim_start_matches('!');
     let negated = (pattern.len() - positive.len()) % 2 == 1;
     let normalized = positive.trim_start_matches("./").trim_end_matches('/');
-    let mut builder = GlobBuilder::new(normalized);
-    builder
-        .literal_separator(true)
-        .backslash_escape(!cfg!(windows));
-    builder
-        .build()
-        .map(|glob| PathGlob {
-            matcher: glob.compile_matcher(),
-            negated,
-            depth: (negated && !normalized.contains("**")).then(|| normalized.split('/').count()),
-        })
-        .map_err(|error| {
-            path_error(format!(
-                "Cannot evaluate pattern \"{pattern}\" in \"{}\": {error}",
-                cwd.display()
-            ))
-        })
+    let compile = |value: &str| {
+        let mut builder = GlobBuilder::new(value);
+        builder
+            .literal_separator(true)
+            .backslash_escape(!cfg!(windows));
+        builder
+            .build()
+            .map(|glob| glob.compile_matcher())
+            .map_err(|error| {
+                path_error(format!(
+                    "Cannot evaluate pattern \"{pattern}\" in \"{}\": {error}",
+                    cwd.display()
+                ))
+            })
+    };
+    if negated
+        && !Path::new(normalized).is_absolute()
+        && let Some((first_component, remainder)) = normalized.split_once('/')
+    {
+        return Ok(PathGlob::LeadingNegation {
+            first_component: compile(first_component)?,
+            remainder: compile(remainder)?,
+        });
+    }
+    Ok(PathGlob::Whole {
+        matcher: compile(normalized)?,
+        negated,
+        depth: (negated && !normalized.contains("**")).then(|| normalized.split('/').count()),
+    })
 }
 
 fn validate_regex(pattern: &str, case_insensitive: bool) -> Result<(), RemoteError> {
@@ -1078,15 +1108,7 @@ mod tests {
                 )))
         );
         let result = glob(glob_params(&root, "!src/*.ts"), &token()).unwrap();
-        assert!(
-            result["matches"]
-                .as_array()
-                .unwrap()
-                .contains(&json!(format!(
-                    "other{}visible.md",
-                    std::path::MAIN_SEPARATOR
-                )))
-        );
+        assert_eq!(result["matches"], json!([]));
         let result = glob(glob_params(&root, "./*.txt"), &token()).unwrap();
         assert_eq!(
             result["matches"],
@@ -1112,6 +1134,36 @@ mod tests {
 
         let missing_cwd = root.join("missing");
         assert!(glob(glob_params(&missing_cwd, "*"), &token()).is_err());
+    }
+
+    #[test]
+    fn leading_glob_negation_applies_to_the_first_path_component() {
+        let root = scratch_dir("filesystem-search-leading-negation");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("other")).unwrap();
+        for path in [
+            "src/excluded.ts",
+            "src/readme.md",
+            "other/included.ts",
+            "other/readme.md",
+        ] {
+            fs::write(root.join(path), "needle\n").unwrap();
+        }
+        let included = format!("other{}included.ts", std::path::MAIN_SEPARATOR);
+
+        assert_eq!(
+            glob(glob_params(&root, "!src/*.ts"), &token()).unwrap()["matches"],
+            json!([included])
+        );
+
+        let mut parameters = grep_params(&root, "needle");
+        parameters.glob = Some("!src/*.ts".to_owned());
+        let result = grep(parameters, &token()).unwrap();
+        assert_eq!(result["filesScanned"], 1);
+        assert_eq!(
+            result["matches"],
+            json!([{ "file": included, "line": 1, "text": "needle" }])
+        );
     }
 
     #[test]
