@@ -39,6 +39,27 @@ export function capabilityManifestFromHealth(
     allow.library ||
     allow.checkpoints;
 
+  const allowedFeatures: RuntimeCapabilityManifest['features'] = {
+    tools,
+    git: allow.git && report.git.available,
+    probing: allow.probing,
+    mcp: allow.mcp,
+    library: allow.library,
+    checkpoints: allow.checkpoints,
+    fsRead: allow.fsRead,
+    fsWrite: allow.fsWrite,
+    // Consent, not availability — the same thing `hello` says. A machine that
+    // grants shell but has no bash/zsh/powershell is reported through the
+    // empty `shells` list, so a refresh cannot disagree with the handshake
+    // about whether the owner said yes.
+    shell: allow.shell,
+    update: allow.update,
+    // Unlike the older feature keys, missing consent is a refusal. A health
+    // report from a 1.0 peer must never be upgraded into permission to spawn
+    // a vendor process merely because the hub knows the newer key.
+    externalAgents: allow.externalAgents === true,
+  };
+
   return {
     platform: report.platform,
     arch: report.arch,
@@ -55,26 +76,7 @@ export function capabilityManifestFromHealth(
     // Same rule as `gh`: absent stays absent, so "too old to say" is never
     // rewritten as "said no".
     ...(report.terminal === undefined ? {} : { terminal: report.terminal }),
-    features: {
-      tools,
-      git: allow.git && report.git.available,
-      probing: allow.probing,
-      mcp: allow.mcp,
-      library: allow.library,
-      checkpoints: allow.checkpoints,
-      fsRead: allow.fsRead,
-      fsWrite: allow.fsWrite,
-      // Consent, not availability — the same thing `hello` says. A machine that
-      // grants shell but has no bash/zsh/powershell is reported through the
-      // empty `shells` list, so a refresh cannot disagree with the handshake
-      // about whether the owner said yes.
-      shell: allow.shell,
-      update: allow.update,
-      // Unlike the older feature keys, missing consent is a refusal. A health
-      // report from a 1.0 peer must never be upgraded into permission to spawn
-      // a vendor process merely because the hub knows the newer key.
-      externalAgents: allow.externalAgents === true,
-    },
+    features: applyImplementationCeiling(allowedFeatures, handshake?.features),
     ...(report.externalAgents?.targets.length
       ? { externalAgents: [...report.externalAgents.targets] }
       : {}),
@@ -92,5 +94,33 @@ export function capabilityManifestFromHealth(
       : { directoryHashDomain: handshake.directoryHashDomain }),
     profile: report.profile,
     allow,
+  };
+}
+
+function applyImplementationCeiling(
+  allowed: RuntimeCapabilityManifest['features'],
+  implemented?: RuntimeCapabilityManifest['features']
+): RuntimeCapabilityManifest['features'] {
+  if (!implemented) return allowed;
+
+  return {
+    tools: allowed.tools && implemented.tools,
+    git: allowed.git && implemented.git,
+    probing: allowed.probing && implemented.probing,
+    mcp: allowed.mcp && implemented.mcp,
+    library: allowed.library && implemented.library,
+    checkpoints: allowed.checkpoints && implemented.checkpoints,
+    // These keys predate explicit implementation gating. Absence means an
+    // older peer whose implementation is assumed, while an explicit false is
+    // an authoritative refusal from a newer peer such as the Rust runtime.
+    fsRead: allowed.fsRead && implemented.fsRead !== false,
+    fsWrite: allowed.fsWrite && implemented.fsWrite !== false,
+    shell: allowed.shell && implemented.shell !== false,
+    update: allowed.update && implemented.update !== false,
+    // Absence is fail-closed for privileged vendor-process hosting.
+    externalAgents: allowed.externalAgents && implemented.externalAgents === true,
+    // Toolchain support describes a request shape, not consent. Health cannot
+    // recompute it, so preserve exactly what the build announced in hello.
+    ...(implemented.toolchain === undefined ? {} : { toolchain: implemented.toolchain }),
   };
 }

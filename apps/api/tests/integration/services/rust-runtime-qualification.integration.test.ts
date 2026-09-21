@@ -52,6 +52,7 @@
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { realpath } from 'node:fs/promises';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { getDb } from '../../../src/db/database';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
@@ -67,6 +68,7 @@ import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-ru
 import { insertTestUser } from '../../support/factories';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 import {
+  assertRustRuntimeFeatureCeiling,
   assertRustRuntimeHealthShape,
   assertRustRuntimeProbingMethods,
   assertRustRuntimeWorkspaceMethods,
@@ -219,7 +221,71 @@ describe('Real Rust runtime qualification', () => {
         const client = await manager.getClient(TEST_USER.id, 'rust-serve-box');
         // `serve`/`connect` both always answer as the `remote` slot.
         assertRustRuntimeHealthShape(await client.health(), { slot: 'remote' });
+        assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
         await assertRustRuntimeProbingMethods(client);
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available)(
+      'preserves the implementation ceiling across health refresh and consent revocation',
+      async () => {
+        await insertTestUser(TEST_USER);
+        const store = new InMemorySecretStore();
+        setRuntimeTokenStoreForTests(store);
+        const token = 'rust-serve-qualification-refresh-token';
+        mangoHome = await scratchMangoHome('serve-refresh');
+        const port = reserveEphemeralPort();
+
+        child = Bun.spawn({
+          cmd: [binary.path, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
+          env: { ...process.env, MANGO_HOME: mangoHome, MANGOSTUDIO_RUNTIME_SERVE_TOKEN: token },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+
+        const repository = createEnvironmentRepository(getDb());
+        const manager = new RuntimeConnectionManager({
+          resolveEnvironment: async (userId, environmentId) =>
+            repository.find(userId, environmentId),
+          connectors: { http: connectHttpRuntime },
+        });
+        setRuntimeConnectionManagerForTests(manager);
+        const service = createEnvironmentService(repository, manager, () => undefined, store);
+
+        await service.create(TEST_USER.id, {
+          id: 'rust-serve-refresh-box',
+          name: 'Rust serve refresh box',
+          transportKind: 'http',
+          config: { baseUrl: `http://127.0.0.1:${port}` },
+          token,
+        });
+        await connectUntilListening(() => service.connect(TEST_USER.id, 'rust-serve-refresh-box'));
+
+        const client = await manager.getClient(TEST_USER.id, 'rust-serve-refresh-box');
+        assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+        const refreshed = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
+        expect(refreshed.state).toBe('connected');
+        assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+
+        const setup = Bun.spawn({
+          cmd: [binary.path, 'setup', '--slot', 'remote', '--profile', 'none'],
+          env: { ...process.env, MANGO_HOME: mangoHome },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        const [exitCode, stdout, stderr] = await Promise.all([
+          setup.exited,
+          new Response(setup.stdout).text(),
+          new Response(setup.stderr).text(),
+        ]);
+        expect(exitCode).toBe(0);
+        expect(stdout.trim()).toBe('Configured the remote runtime as none.');
+        expect(stderr).toBe('');
+
+        const revoked = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
+        expect(revoked.manifest?.allow).toEqual(RUNTIME_CONSENT_PRESETS.none);
+        assertRustRuntimeFeatureCeiling(client.manifest, { probing: false });
       },
       30_000
     );

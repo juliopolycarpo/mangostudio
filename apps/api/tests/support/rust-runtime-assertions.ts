@@ -20,6 +20,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 
@@ -75,8 +76,37 @@ export function assertRustRuntimeHealthShape(
   if (health.git.available) {
     expect(typeof health.git.version).toBe('string');
   }
-  expect(health.shells).toContain('bash');
+  const expectedShell =
+    process.platform === 'win32' ? 'powershell' : process.platform === 'darwin' ? 'zsh' : 'bash';
+  expect(health.shells).toContain(expectedShell);
   expect(health.lastError ?? null).toBeNull();
+}
+
+/**
+ * Pins the real Rust host's implementation ceiling while the foundation
+ * intentionally implements only health, workspace, and probing methods.
+ *
+ * @example
+ * assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
+ */
+export function assertRustRuntimeFeatureCeiling(
+  manifest: RuntimeCapabilityManifest,
+  expected: { readonly probing: boolean }
+): void {
+  expect(manifest.features).toEqual({
+    tools: expected.probing,
+    git: false,
+    probing: expected.probing,
+    mcp: false,
+    library: false,
+    checkpoints: false,
+    fsRead: false,
+    fsWrite: false,
+    shell: false,
+    update: false,
+    externalAgents: false,
+    toolchain: true,
+  });
 }
 
 /**

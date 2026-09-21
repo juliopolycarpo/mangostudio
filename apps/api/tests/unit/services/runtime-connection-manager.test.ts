@@ -1244,8 +1244,11 @@ describe('RuntimeConnectionManager', () => {
     await flushMicrotasks();
 
     expect(probe.calls()).toBe(1);
-    // The handshake said mcp was refused; the health report grants everything.
-    expect(manager.getStatus('user-1', 'devbox').manifest?.features.mcp).toBe(true);
+    // The health report grants everything, but the handshake said this build
+    // does not implement mcp. A refresh cannot upgrade that refusal.
+    expect(manager.getStatus('user-1', 'devbox').manifest?.features.mcp).toBe(false);
+    // This legacy handshake omitted newer optional fields, so the refreshed
+    // manifest still changes when health fills those backward-compatible keys.
     expect(publishes).toBe(1);
   });
 
