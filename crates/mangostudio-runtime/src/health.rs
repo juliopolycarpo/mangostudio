@@ -483,6 +483,17 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
 /// override) once themselves, which is the seam their own tests use to
 /// point this walk at a temporary directory instead of mutating the real,
 /// process-wide `PATH` every test in this binary shares.
+///
+/// Returns `dir.join(name)` as found, never canonicalised: two `PATH`
+/// entries that reach the same real file through a symlink or a `..`
+/// segment resolve to two different [`PathBuf`]s here, and so to two
+/// different [`git_probe_cache`] keys for what is, on disk, one binary. A
+/// changed `PATH` ordering that starts naming the same binary through its
+/// other spelling re-probes rather than reusing an already-cached answer —
+/// wasted work, not a correctness bug (the fresh probe still reports the
+/// truth), and one `PATH` layouts that reorder such entries are rare
+/// enough in practice that resolving every candidate has not been worth
+/// its own `std::fs::canonicalize` call on this walk's hot path.
 fn which_in(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
     for dir in std::env::split_paths(path_var) {
         let candidate = dir.join(name);
