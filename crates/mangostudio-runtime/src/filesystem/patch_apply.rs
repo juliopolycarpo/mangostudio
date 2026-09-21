@@ -101,7 +101,7 @@ pub(super) async fn apply(
     })
     .await?;
     assert_no_path_conflicts(&planned)?;
-    preflight_snapshot_response(&params, &planned, response_id, response_limit_bytes)?;
+    preflight_mutation_response(&params, &planned, response_id, response_limit_bytes)?;
     let paths = planned.iter().flat_map(operation_paths).collect::<Vec<_>>();
     let guards = service
         .state
@@ -550,15 +550,12 @@ fn outcomes(
     )
 }
 
-fn preflight_snapshot_response(
+fn preflight_mutation_response(
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
     response_id: String,
     response_limit_bytes: usize,
 ) -> Result<(), RemoteError> {
-    if !params.mutation.capture_snapshot {
-        return Ok(());
-    }
     const HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
     let mut files = Vec::with_capacity(planned.len());
     let mut mutations = Vec::with_capacity(planned.len());
@@ -1139,6 +1136,41 @@ mod tests {
         assert_eq!(error.details.as_ref().unwrap()["limitBytes"], 4_096);
         assert_eq!(fs::read(&first).unwrap(), vec![b'a'; 1_600]);
         assert_eq!(fs::read(&second).unwrap(), vec![b'b'; 1_600]);
+    }
+
+    #[tokio::test]
+    async fn rejects_an_aggregate_patch_result_past_the_frame_limit_before_mutating() {
+        let (home, service) = fixture();
+        let paths = (0..40)
+            .map(|index| home.join(format!("result-{index:02}-{}", "x".repeat(100))))
+            .collect::<Vec<_>>();
+        let operations = paths
+            .iter()
+            .map(|path| {
+                json!({
+                    "type":"add",
+                    "inputPath":path.file_name().and_then(|name| name.to_str()).unwrap(),
+                    "resolvedPath":path,
+                    "content":"new"
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let error = super::apply(
+            service,
+            params(json!({
+                "chatId":"chat", "captureSnapshot":false, "operations":operations
+            })),
+            CancellationToken::new(),
+            "small-frame".to_string(),
+            mango_protocol::codec::ndjson::MIN_MAX_FRAME_BYTES,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+        assert_eq!(error.details.as_ref().unwrap()["limitBytes"], 4_096);
+        assert!(paths.iter().all(|path| !path.exists()));
     }
 
     #[test]
