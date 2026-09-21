@@ -932,10 +932,30 @@ mod tests {
         // only that the *subprocess* half — argv, budget, exit-code
         // plumbing — behaves the same way there, which this crate has no
         // way to exercise from this test suite.
+        //
+        // The outer guard here is deliberately far wider than
+        // `WINGET_OWNERSHIP_TIMEOUT_MS` itself, not a tight latency bound:
+        // on real Windows CI, a real `winget list` can legitimately run
+        // right up against the full 8s budget before `run_bounded_child`
+        // gives up on it, and `crate::subprocess::REAP_TIMEOUT`'s own doc
+        // comment already reserves up to a further 2s past that for a
+        // real `TerminateProcess`-then-`wait` teardown to actually
+        // complete — this function's own documented contract is "at most
+        // `budget.deadline` plus a real OS's own process-teardown time",
+        // not "at most `budget.deadline`". A guard set to only
+        // `budget.deadline + 1s` (as this one originally was) leaves no
+        // room for that documented teardown allowance on top of ordinary
+        // process-spawn and CI-scheduling jitter, and fires before the
+        // real behavior underneath it ever gets a chance to — exactly the
+        // "guard narrower than the thing it guards" shape this plan has
+        // already found and fixed twice elsewhere. This guard exists only
+        // to catch a genuine, unbounded hang (the regression this test is
+        // actually for), never to assert or bound this call's latency.
         let cancel = CancellationToken::new();
-        let outcome = tokio::time::timeout(Duration::from_secs(9), probe_winget_ownership(&cancel))
-            .await
-            .expect("probe_winget_ownership must resolve within its own bounded budget");
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(20), probe_winget_ownership(&cancel))
+                .await
+                .expect("probe_winget_ownership must resolve within its own bounded budget");
         if cfg!(not(windows)) {
             assert_eq!(outcome, WingetOwnership::Unknown);
         }
