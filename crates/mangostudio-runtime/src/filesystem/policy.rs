@@ -225,7 +225,9 @@ mod tests {
         assert!(!policy.allows(&root.join("cycle/file")));
     }
 
-    #[cfg(unix)]
+    // macOS filesystems reject these deliberately invalid UTF-8 names before
+    // the path policy can observe them. Linux exercises the byte-path case.
+    #[cfg(target_os = "linux")]
     #[test]
     fn lossy_display_aliases_never_share_path_authority() {
         use std::os::unix::ffi::OsStringExt;
