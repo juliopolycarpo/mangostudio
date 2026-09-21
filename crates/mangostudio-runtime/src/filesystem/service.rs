@@ -37,14 +37,22 @@ pub(super) struct Service {
 }
 
 impl Service {
-    fn authorize(&self, method: &str) -> Result<(), RemoteError> {
+    fn authorize(&self, method: &str, capture_snapshot: bool) -> Result<(), RemoteError> {
         let allow = self.consent.refresh();
         let capabilities = mangostudio_runtime_contract::catalog::capabilities_of(method)
             .expect("filesystem handler belongs to the catalog");
-        let missing: Vec<String> = capabilities
-            .iter()
+        let mut required: Vec<&str> = capabilities.iter().map(String::as_str).collect();
+        if capture_snapshot {
+            for capability in ["fsRead", "checkpoints"] {
+                if !required.contains(&capability) {
+                    required.push(capability);
+                }
+            }
+        }
+        let missing: Vec<String> = required
+            .into_iter()
             .filter(|capability| !allow.is_granted(capability))
-            .cloned()
+            .map(str::to_owned)
             .collect();
         if missing.is_empty() {
             return Ok(());
@@ -63,8 +71,37 @@ impl Service {
         paths: &[&Path],
         cancel: &CancellationToken,
     ) -> Result<(), RemoteError> {
+        self.before_io_with_snapshot(method, policy, paths, false, cancel)
+    }
+
+    /// Rechecks the method's base capabilities plus the conditional snapshot
+    /// capabilities immediately before filesystem access.
+    pub(super) fn before_mutation_io(
+        &self,
+        method: &str,
+        mutation: &Mutation,
+        paths: &[&Path],
+        cancel: &CancellationToken,
+    ) -> Result<(), RemoteError> {
+        self.before_io_with_snapshot(
+            method,
+            &mutation.path_policy,
+            paths,
+            mutation.capture_snapshot,
+            cancel,
+        )
+    }
+
+    fn before_io_with_snapshot(
+        &self,
+        method: &str,
+        policy: &Option<PathPolicy>,
+        paths: &[&Path],
+        capture_snapshot: bool,
+        cancel: &CancellationToken,
+    ) -> Result<(), RemoteError> {
         check_cancel(cancel)?;
-        self.authorize(method)?;
+        self.authorize(method, capture_snapshot)?;
         let compiled = policy.clone().unwrap_or_default().compile()?;
         for path in paths {
             compiled.check(path)?;
@@ -181,12 +218,7 @@ impl Service {
             } else {
                 "fs.write-file"
             };
-            self.before_io(
-                method,
-                &params.mutation.path_policy,
-                &[&params.resolved_path],
-                &cancel,
-            )?;
+            self.before_mutation_io(method, &params.mutation, &[&params.resolved_path], &cancel)?;
             let exists = params.resolved_path.is_file();
             let before = if exists && !exclusive && params.mutation.capture_snapshot {
                 let (size, _) = io::current_metadata(&params.resolved_path)?;
@@ -207,12 +239,7 @@ impl Service {
                         io::explain_unread(&params.resolved_path, "overwrite", error)
                     })?;
             }
-            self.before_io(
-                method,
-                &params.mutation.path_policy,
-                &[&params.resolved_path],
-                &cancel,
-            )?;
+            self.before_mutation_io(method, &params.mutation, &[&params.resolved_path], &cancel)?;
             let mtime = if exclusive || !exists {
                 io::create_new(&params.resolved_path, params.content.as_bytes()).map_err(
                     |error| {
@@ -303,14 +330,14 @@ impl Service {
             .map_err(lock_error)?;
         run_blocking(move || {
             let _guards = guards;
-            self.before_io("fs.edit-file", &params.mutation.path_policy, &[&params.resolved_path], &cancel)?;
+            self.before_mutation_io("fs.edit-file", &params.mutation, &[&params.resolved_path], &cancel)?;
             let observed = self.read_fresh(&params.mutation.chat_id, &params.resolved_path, &cancel)
                 .map_err(|error| io::explain_unread(&params.resolved_path, "edit", error))?;
             let (updated, count, first) = text::replace_matches(&observed.bytes, params.old_string.as_bytes(), params.new_string.as_bytes(), true);
             if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
             if count > 1 && !params.replace_all.unwrap_or(false) { return Err(argument(format!("Found {count} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."))); }
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
-            self.before_io("fs.edit-file", &params.mutation.path_policy, &[&params.resolved_path], &cancel)?;
+            self.before_mutation_io("fs.edit-file", &params.mutation, &[&params.resolved_path], &cancel)?;
             let mtime = io::write_atomic(&params.resolved_path, &updated, false)?;
             let changed_lines = params.old_string.bytes().filter(|byte| *byte == b'\n').count() != params.new_string.bytes().filter(|byte| *byte == b'\n').count();
             let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES };
@@ -332,7 +359,7 @@ impl Service {
             .map_err(lock_error)?;
         run_blocking(move || {
             let _guards = guards;
-            self.before_io("fs.replace-range", &params.mutation.path_policy, &[&params.resolved_path], &cancel)?;
+            self.before_mutation_io("fs.replace-range", &params.mutation, &[&params.resolved_path], &cancel)?;
             let observed = self.read_fresh(&params.mutation.chat_id, &params.resolved_path, &cancel)
                 .map_err(|error| io::explain_unread(&params.resolved_path, "edit", error))?;
             lock(&self.state.ledger).assert_line_numbers(&params.mutation.chat_id, &params.resolved_path, params.end_line as u64)?;
@@ -342,7 +369,7 @@ impl Service {
             if start > end || end > total { return Err(argument(format!("Invalid line range {start}-{end} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",params.input_path))); }
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
-            self.before_io("fs.replace-range", &params.mutation.path_policy, &[&params.resolved_path], &cancel)?;
+            self.before_mutation_io("fs.replace-range", &params.mutation, &[&params.resolved_path], &cancel)?;
             let mtime = io::write_atomic(&params.resolved_path, &updated, false)?;
             let replaced = end-start+1;
             let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES} else {(start-1) as u64};
@@ -364,9 +391,9 @@ impl Service {
             .map_err(lock_error)?;
         run_blocking(move || {
             let _guards = guards;
-            self.before_io(
+            self.before_mutation_io(
                 "fs.delete-file",
-                &params.mutation.path_policy,
+                &params.mutation,
                 &[&params.resolved_path],
                 &cancel,
             )?;
@@ -383,9 +410,9 @@ impl Service {
                     .map_err(|error| io::explain_unread(&params.resolved_path, "delete", error))?;
                 None
             };
-            self.before_io(
+            self.before_mutation_io(
                 "fs.delete-file",
-                &params.mutation.path_policy,
+                &params.mutation,
                 &[&params.resolved_path],
                 &cancel,
             )?;
@@ -430,9 +457,9 @@ impl Service {
             .map_err(lock_error)?;
         run_blocking(move || {
             let _guards = guards;
-            self.before_io(
+            self.before_mutation_io(
                 "fs.move-file",
-                &params.mutation.path_policy,
+                &params.mutation,
                 &[&params.resolved_from, &params.resolved_to],
                 &cancel,
             )?;
@@ -443,9 +470,9 @@ impl Service {
             } else {
                 None
             };
-            self.before_io(
+            self.before_mutation_io(
                 "fs.move-file",
-                &params.mutation.path_policy,
+                &params.mutation,
                 &[&params.resolved_from, &params.resolved_to],
                 &cancel,
             )?;
@@ -658,7 +685,7 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
                 let cancel = ctx.cancel().clone();
                 run_blocking(move || {
                     check_cancel(&cancel)?;
-                    service.authorize("fs.glob")?;
+                    service.authorize("fs.glob", false)?;
                     super::search::glob(params, &cancel)
                 })
             },
@@ -670,7 +697,7 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
                 let cancel = ctx.cancel().clone();
                 run_blocking(move || {
                     check_cancel(&cancel)?;
-                    service.authorize("fs.grep")?;
+                    service.authorize("fs.grep", false)?;
                     super::search::grep(params, &cancel)
                 })
             },
@@ -951,7 +978,7 @@ mod tests {
         let (home, service) = fixture();
         let path = home.join("file");
         let cancel = CancellationToken::new();
-        service.authorize("fs.create-file").unwrap();
+        service.authorize("fs.create-file", false).unwrap();
         let guard = service
             .state
             .locks
@@ -977,5 +1004,56 @@ mod tests {
         assert_eq!(error.code, codes::DENIED);
         assert!(!path.exists());
         assert_eq!(service.state.locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn move_snapshot_requires_read_and_checkpoint_consent() {
+        let (home, service) = fixture();
+        let source = home.join("source");
+        let destination = home.join("destination");
+        std::fs::write(&source, b"private").unwrap();
+        crate::runtime_home::write_runtime_slot_config(
+            RuntimeSlot::Host,
+            &home,
+            &[(
+                "allow",
+                Some(json!({"fsWrite":true,"fsRead":false,"checkpoints":false})),
+            )],
+        )
+        .unwrap();
+
+        let error = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, codes::DENIED);
+        assert_eq!(
+            error.details.unwrap()["missing"],
+            json!(["fsRead", "checkpoints"])
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), b"private");
+        assert!(!destination.exists());
+
+        let moved = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved["mutations"], json!([]));
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"private");
     }
 }

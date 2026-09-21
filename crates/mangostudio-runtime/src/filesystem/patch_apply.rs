@@ -151,7 +151,7 @@ fn plan_operation(
     cancel: &CancellationToken,
 ) -> Result<PlannedOperation, RemoteError> {
     let paths = raw_operation_paths(operation);
-    service.before_io("fs.apply-patch", &mutation.path_policy, &paths, cancel)?;
+    service.before_mutation_io("fs.apply-patch", mutation, &paths, cancel)?;
     match operation {
         PatchOperation::Add {
             input_path,
@@ -255,12 +255,7 @@ fn commit_revalidated(
 ) -> Result<Value, RemoteError> {
     let paths: Vec<_> = planned.iter().flat_map(operation_paths).collect();
     let borrowed_paths: Vec<_> = paths.iter().map(PathBuf::as_path).collect();
-    service.before_io(
-        "fs.apply-patch",
-        &params.mutation.path_policy,
-        &borrowed_paths,
-        cancel,
-    )?;
+    service.before_mutation_io("fs.apply-patch", &params.mutation, &borrowed_paths, cancel)?;
 
     let mut writes = vec![None; planned.len()];
     let mut move_hashes = vec![None; planned.len()];
@@ -362,12 +357,7 @@ fn revalidate_operations(
                 resolved_path,
                 ..
             } => service
-                .before_io(
-                    "fs.apply-patch",
-                    &params.mutation.path_policy,
-                    &[resolved_path],
-                    cancel,
-                )
+                .before_mutation_io("fs.apply-patch", &params.mutation, &[resolved_path], cancel)
                 .and_then(|()| assert_destination_available(resolved_path, input_path))
                 .map(|()| None),
             PlannedOperation::Delete {
@@ -382,9 +372,9 @@ fn revalidate_operations(
                 ..
             } => {
                 let checked = service
-                    .before_io(
+                    .before_mutation_io(
                         "fs.apply-patch",
-                        &params.mutation.path_policy,
+                        &params.mutation,
                         &[resolved_path],
                         cancel,
                     )
@@ -401,9 +391,9 @@ fn revalidate_operations(
                         ..
                     } = operation
                     {
-                        service.before_io(
+                        service.before_mutation_io(
                             "fs.apply-patch",
-                            &params.mutation.path_policy,
+                            &params.mutation,
                             &[destination],
                             cancel,
                         )?;
