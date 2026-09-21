@@ -81,7 +81,12 @@ export async function readVersions(root = ROOT_DIR): Promise<ManifestVersion[]> 
       file: `Cargo.toml ([workspace.dependencies] ${crateName})`,
       version: workspaceDependencyVersion(cargo, crateName),
     })),
-    { file: MANIFESTS.cargoLock, version: lockedCrateVersion(lock) },
+    ...WORKSPACE_DEPENDENCY_CRATES.map((crateName) => ({
+      // The lockfile has one resolved entry per workspace dependency. Keep each one labeled so
+      // a stale path-dependency resolution identifies its crate rather than merely Cargo.lock.
+      file: `${MANIFESTS.cargoLock} (${crateName})`,
+      version: lockedCrateVersion(lock, crateName),
+    })),
   ];
 }
 
@@ -139,15 +144,31 @@ export function workspaceDependencyVersion(cargoToml: string, crateName: string)
 }
 
 /**
- * The version Cargo.lock records for the `mango-protocol` crate.
+ * The version Cargo.lock records for `crateName`.
  *
  * @example
- * lockedCrateVersion('[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n'); // '0.1.0'
+ * lockedCrateVersion(
+ *   '[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n',
+ *   'mango-protocol'
+ * ); // '0.1.0'
  */
-export function lockedCrateVersion(cargoLock: string): string {
-  const match = cargoLock.match(/name = "mango-protocol"\nversion = "([^"]+)"/);
-  if (!match?.[1]) throw new Error('Cargo.lock has no entry for mango-protocol.');
-  return match[1];
+export function lockedCrateVersion(cargoLock: string, crateName: string): string {
+  let inNamedPackage = false;
+  for (const line of cargoLock.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '[[package]]') {
+      inNamedPackage = false;
+      continue;
+    }
+    const name = trimmed.match(/^name\s*=\s*"([^"]+)"/);
+    if (name) {
+      inNamedPackage = name[1] === crateName;
+      continue;
+    }
+    const version = inNamedPackage ? trimmed.match(/^version\s*=\s*"([^"]+)"/) : null;
+    if (version?.[1]) return version[1];
+  }
+  throw new Error(`Cargo.lock has no entry for ${crateName}.`);
 }
 
 /**
@@ -170,12 +191,15 @@ export async function writeVersions(version: string, root = ROOT_DIR): Promise<v
   if (!VERSION_FIELD.test(text)) {
     throw new Error(`${MANIFESTS.protocolPackage} has no version field to rewrite.`);
   }
-  await Bun.write(path, text.replace(VERSION_FIELD, `$1"${version}"`));
+  const updatedPackage = text.replace(VERSION_FIELD, `$1"${version}"`);
 
   const cargoPath = `${root}/${MANIFESTS.cargoWorkspace}`;
   const cargo = await Bun.file(cargoPath).text();
   const [head, tail] = cargo.split(/^\[workspace\.package\]$/m);
   if (tail === undefined) throw new Error('Cargo.toml has no [workspace.package] section.');
+  if (!/^version = "[^"]+"$/m.test(tail)) {
+    throw new Error('Cargo.toml [workspace.package] has no version field to rewrite.');
+  }
   const nextTail = tail.replace(/^version = "[^"]+"$/m, `version = "${version}"`);
   let updated = `${head}[workspace.package]${nextTail}`;
 
@@ -189,5 +213,8 @@ export async function writeVersions(version: string, root = ROOT_DIR): Promise<v
     updated = updated.replace(dependencyPattern, `$1${version}$2`);
   }
 
+  // Validate and compute every rewrite before touching either manifest. Otherwise a missing later
+  // workspace dependency pin would leave the package manifest updated but Cargo.toml unchanged.
+  await Bun.write(path, updatedPackage);
   await Bun.write(cargoPath, updated);
 }

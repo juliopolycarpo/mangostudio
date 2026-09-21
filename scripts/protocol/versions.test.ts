@@ -20,7 +20,8 @@ const CARGO_TOML =
   'mango-protocol = { path = "crates/mango-protocol", version = "0.1.0" }\n' +
   'mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.1.0" }\n';
 const CARGO_LOCK =
-  '[[package]]\nname = "serde"\nversion = "1.0.0"\n\n[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n';
+  '[[package]]\nname = "serde"\nversion = "1.0.0"\n\n[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n\n' +
+  '[[package]]\nname = "mangostudio-runtime-contract"\nversion = "0.1.0"\n';
 
 /** A throwaway repository root holding the protocol's lockstep manifests. */
 class FakeRepository {
@@ -83,14 +84,16 @@ describe('workspaceVersion', () => {
 });
 
 describe('lockedCrateVersion', () => {
-  it('reads the mango-protocol entry', () => {
-    expect(lockedCrateVersion(CARGO_LOCK)).toBe('0.1.0');
+  it('reads each WORKSPACE_DEPENDENCY_CRATES entry', () => {
+    for (const crateName of WORKSPACE_DEPENDENCY_CRATES) {
+      expect(lockedCrateVersion(CARGO_LOCK, crateName)).toBe('0.1.0');
+    }
   });
 
   it('names the missing entry', () => {
-    expect(() => lockedCrateVersion('[[package]]\nname = "serde"\nversion = "1.0.0"\n')).toThrow(
-      'Cargo.lock has no entry for mango-protocol.'
-    );
+    expect(() =>
+      lockedCrateVersion('[[package]]\nname = "serde"\nversion = "1.0.0"\n', 'mango-protocol')
+    ).toThrow('Cargo.lock has no entry for mango-protocol.');
   });
 });
 
@@ -144,8 +147,24 @@ describe('readVersions', () => {
         file: 'Cargo.toml ([workspace.dependencies] mangostudio-runtime-contract)',
         version: '0.1.0',
       },
-      { file: 'Cargo.lock', version: '0.1.0' },
+      { file: 'Cargo.lock (mango-protocol)', version: '0.1.0' },
+      { file: 'Cargo.lock (mangostudio-runtime-contract)', version: '0.1.0' },
     ]);
+  });
+
+  it('names a mangostudio-runtime-contract lockfile drift', async () => {
+    await repo.write(
+      MANIFESTS.cargoLock,
+      CARGO_LOCK.replace(
+        'name = "mangostudio-runtime-contract"\nversion = "0.1.0"',
+        'name = "mangostudio-runtime-contract"\nversion = "0.2.0"'
+      )
+    );
+
+    const versions = await readVersions(repo.root);
+    expect(() => assertLockstep(versions)).toThrow(
+      'Cargo.lock (mangostudio-runtime-contract) has 0.2.0.'
+    );
   });
 
   it('ignores the application version at the repository root', async () => {
@@ -168,6 +187,7 @@ describe('writeVersions', () => {
       '0.2.0',
       '0.2.0',
       '0.2.0',
+      '0.1.0',
       '0.1.0',
     ]);
     expect(await repo.read(MANIFESTS.protocolPackage)).toContain('"typebox": "1.3.13"');
@@ -201,6 +221,7 @@ describe('writeVersions', () => {
       '0.1.0',
       '0.1.0',
       '0.1.0',
+      '0.1.0',
     ]);
   });
 
@@ -217,6 +238,20 @@ describe('writeVersions', () => {
     );
   });
 
+  it('leaves the package manifest unchanged when workspace.package has no version', async () => {
+    await repo.write(
+      MANIFESTS.cargoWorkspace,
+      '[workspace.package]\nedition = "2024"\n\n[workspace.dependencies]\n' +
+        'mango-protocol = { path = "crates/mango-protocol", version = "0.1.0" }\n' +
+        'mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.1.0" }\n'
+    );
+
+    await expect(writeVersions('0.2.0', repo.root)).rejects.toThrow(
+      'Cargo.toml [workspace.package] has no version field to rewrite.'
+    );
+    expect(await repo.read(MANIFESTS.protocolPackage)).toContain('"version": "0.1.0"');
+  });
+
   it('refuses a Cargo.toml without a workspace.dependencies mango-protocol entry', async () => {
     await repo.write(
       MANIFESTS.cargoWorkspace,
@@ -225,5 +260,18 @@ describe('writeVersions', () => {
     await expect(writeVersions('0.2.0', repo.root)).rejects.toThrow(
       'Cargo.toml has no mango-protocol entry under [workspace.dependencies].'
     );
+  });
+
+  it('leaves the package manifest unchanged when a later workspace dependency pin is missing', async () => {
+    await repo.write(
+      MANIFESTS.cargoWorkspace,
+      '[workspace.package]\nversion = "0.1.0"\n\n[workspace.dependencies]\n' +
+        'mango-protocol = { path = "crates/mango-protocol", version = "0.1.0" }\n'
+    );
+
+    await expect(writeVersions('0.2.0', repo.root)).rejects.toThrow(
+      'Cargo.toml has no mangostudio-runtime-contract entry under [workspace.dependencies].'
+    );
+    expect(await repo.read(MANIFESTS.protocolPackage)).toContain('"version": "0.1.0"');
   });
 });
