@@ -82,6 +82,23 @@ import {
 
 const binary = resolveRustRuntimeBinary();
 
+async function setRustRuntimeProfile(mangoHome: string, profile: 'full' | 'none'): Promise<void> {
+  const setup = Bun.spawn({
+    cmd: [binary.path, 'setup', '--slot', 'remote', '--profile', profile],
+    env: { ...process.env, MANGO_HOME: mangoHome },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    setup.exited,
+    new Response(setup.stdout).text(),
+    new Response(setup.stderr).text(),
+  ]);
+  expect(exitCode).toBe(0);
+  expect(stdout.trim()).toBe(`Configured the remote runtime as ${profile}.`);
+  expect(stderr).toBe('');
+}
+
 describe('Real Rust runtime qualification', () => {
   let runtimeVersion: string;
 
@@ -228,7 +245,7 @@ describe('Real Rust runtime qualification', () => {
     );
 
     it.skipIf(!binary.available)(
-      'preserves the implementation ceiling across health refresh and consent revocation',
+      'preserves the implementation ceiling across repeated consent changes',
       async () => {
         await insertTestUser(TEST_USER);
         const store = new InMemorySecretStore();
@@ -268,24 +285,16 @@ describe('Real Rust runtime qualification', () => {
         expect(refreshed.state).toBe('connected');
         assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
 
-        const setup = Bun.spawn({
-          cmd: [binary.path, 'setup', '--slot', 'remote', '--profile', 'none'],
-          env: { ...process.env, MANGO_HOME: mangoHome },
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
-        const [exitCode, stdout, stderr] = await Promise.all([
-          setup.exited,
-          new Response(setup.stdout).text(),
-          new Response(setup.stderr).text(),
-        ]);
-        expect(exitCode).toBe(0);
-        expect(stdout.trim()).toBe('Configured the remote runtime as none.');
-        expect(stderr).toBe('');
+        await setRustRuntimeProfile(mangoHome, 'none');
 
         const revoked = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
         expect(revoked.manifest?.allow).toEqual(RUNTIME_CONSENT_PRESETS.none);
         assertRustRuntimeFeatureCeiling(client.manifest, { probing: false });
+
+        await setRustRuntimeProfile(mangoHome, 'full');
+        const restored = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
+        expect(restored.manifest?.allow).toEqual(RUNTIME_CONSENT_PRESETS.full);
+        assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
       },
       30_000
     );

@@ -103,8 +103,7 @@ function applyImplementationCeiling(
 ): RuntimeCapabilityManifest['features'] {
   if (!implemented) return allowed;
 
-  return {
-    tools: allowed.tools && implemented.tools,
+  const effective = {
     git: allowed.git && implemented.git,
     probing: allowed.probing && implemented.probing,
     mcp: allowed.mcp && implemented.mcp,
@@ -122,5 +121,22 @@ function applyImplementationCeiling(
     // Toolchain support describes a request shape, not consent. Health cannot
     // recompute it, so preserve exactly what the build announced in hello.
     ...(implemented.toolchain === undefined ? {} : { toolchain: implemented.toolchain }),
+  } satisfies Omit<RuntimeCapabilityManifest['features'], 'tools'>;
+
+  return {
+    // This aggregate must describe at least one effective tool group. The
+    // permission and implementation operands can each be true for a different
+    // group, so intersecting their precomputed aggregates would be unsound.
+    tools: Boolean(
+      effective.git ||
+        effective.probing ||
+        effective.mcp ||
+        effective.library ||
+        effective.checkpoints ||
+        effective.fsRead ||
+        effective.fsWrite ||
+        effective.shell
+    ),
+    ...effective,
   };
 }

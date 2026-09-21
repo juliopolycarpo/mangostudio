@@ -190,6 +190,40 @@ describe('capabilityManifestFromHealth', () => {
     });
   });
 
+  it('derives tools from capabilities that are both allowed and implemented', () => {
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'custom',
+      allow: {
+        ...RUNTIME_CONSENT_PRESETS.none,
+        fsRead: true,
+      },
+    };
+    const handshake = {
+      ...capabilityManifestFromHealth(report),
+      features: {
+        tools: true,
+        git: false,
+        probing: true,
+        mcp: false,
+        library: false,
+        checkpoints: false,
+        fsRead: false,
+        fsWrite: false,
+        shell: false,
+        update: false,
+        externalAgents: false,
+        toolchain: true,
+      },
+    };
+
+    expect(capabilityManifestFromHealth(report, handshake).features).toMatchObject({
+      tools: false,
+      probing: false,
+      fsRead: false,
+    });
+  });
+
   it('does not infer adapter support or isolation from an older health report', () => {
     const { externalAgents: _externalAgents, ...oldAllow } = RUNTIME_CONSENT_PRESETS.readonly;
     const report: RuntimeHealthReport = {
