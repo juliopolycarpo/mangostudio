@@ -55,7 +55,9 @@ use crate::blocking::run_blocking;
 use crate::consent::config::resolve_runtime_slot_config;
 use crate::consent::source::fingerprint_of;
 use crate::registry::Registry;
-use crate::runtime_home::{RuntimeSlot, home_dir, read_runtime_slot_config, slot_for_path};
+use crate::runtime_home::{
+    RuntimeSlot, SlotFileState, home_dir, read_runtime_slot_config, slot_for_path,
+};
 use crate::subprocess::{ChildBudget, ChildRunError, run_bounded_child};
 
 /// Bound on the `git --version` probe. Matches `apps/runtime/src/manifest.ts`'s
@@ -100,8 +102,7 @@ async fn build_health_report(
     cancel: &CancellationToken,
     path_override: Option<&std::ffi::OsStr>,
 ) -> Result<Value, RemoteError> {
-    let state = read_runtime_slot_config(slot, mango_home);
-    let fallback_source = resolve_source(mango_home);
+    let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
     let resolved = resolve_runtime_slot_config(slot, state.stored.as_ref(), fallback_source);
 
     let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
@@ -174,8 +175,7 @@ pub(crate) async fn build_capability_manifest(
     registry: &Registry,
     cancel: &CancellationToken,
 ) -> RuntimeCapabilityManifest {
-    let state = read_runtime_slot_config(slot, mango_home);
-    let fallback_source = resolve_source(mango_home);
+    let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
     let resolved = resolve_runtime_slot_config(slot, state.stored.as_ref(), fallback_source);
 
     let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
@@ -251,6 +251,32 @@ fn wire_allow(
         update: resolved.update,
         external_agents: Some(resolved.external_agents),
     }
+}
+
+/// Reads `slot`'s stored `runtime.json` and resolves this executable's own
+/// `source` fallback, off the executor thread.
+///
+/// Both [`build_health_report`] and [`build_capability_manifest`] used to
+/// call [`read_runtime_slot_config`] and [`resolve_source`] bare — a
+/// synchronous `std::fs::read_to_string`, a JSON parse, and a full schema
+/// validation, followed by `std::env::current_exe()` — directly on the
+/// async task calling them, which is exactly the "synchronous filesystem
+/// call sitting on a Tokio executor thread" [`crate::blocking`]'s own
+/// module docs forbid: this crate introduced that bounded-blocking-pool
+/// module and then left its own first module bypassing it. One slow `stat`
+/// (a wedged config directory, a loaded disk) here stalls every other task
+/// this process is mid-way through, including the heartbeat loop.
+async fn read_slot_state_and_source(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+) -> (SlotFileState, &'static str) {
+    let mango_home = mango_home.to_path_buf();
+    run_blocking(move || {
+        let state = read_runtime_slot_config(slot, &mango_home);
+        let source = resolve_source(&mango_home);
+        (state, source)
+    })
+    .await
 }
 
 /// `"provisioned"` when the running executable sits inside `mango_home`'s
@@ -599,11 +625,17 @@ fn parse_git_version(output: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use mangostudio_runtime_contract::catalog::method;
     use tokio_util::sync::CancellationToken;
 
-    use super::{build_capability_manifest, build_health_report, node_platform, parse_git_version};
+    use super::{
+        build_capability_manifest, build_health_report, node_platform, parse_git_version,
+        read_slot_state_and_source,
+    };
+    use crate::blocking::{MAX_CONCURRENT_BLOCKING_TASKS, pool_saturation_test_lock, run_blocking};
     use crate::registry::Registry;
     use crate::result_check::{check_result, compile_result_schema};
     use crate::runtime_home::RuntimeSlot;
@@ -692,6 +724,85 @@ mod tests {
         assert_eq!(result["setup"]["state"], "configured");
         assert!(result["git"].get("available").is_some());
         assert!(result["lastError"].is_null());
+    }
+
+    /// Regression test for blocker 3: `read_slot_state_and_source` used to
+    /// call `read_runtime_slot_config` (a synchronous `read_to_string`, a
+    /// JSON parse, and a full schema validation) and `resolve_source` (a
+    /// `std::env::current_exe()` call) bare, directly on whatever task
+    /// called it — exactly the "synchronous filesystem call on a Tokio
+    /// executor thread" `crate::blocking`'s own module docs forbid, in the
+    /// very module that introduced the bounded blocking pool.
+    ///
+    /// Proven the same way `crate::blocking`'s own tests prove the pool's
+    /// bound: saturate every permit with ordinary `run_blocking` calls,
+    /// then show `read_slot_state_and_source` cannot proceed until one
+    /// frees. Bare synchronous code reaches no `.await` point at all and
+    /// would complete instantly regardless of how many permits are held —
+    /// only a call that genuinely routes through the same bounded pool can
+    /// queue behind it.
+    #[tokio::test]
+    async fn read_slot_state_and_source_queues_behind_a_saturated_blocking_pool() {
+        let _exclusive = pool_saturation_test_lock().lock().await;
+        let home = scratch_home("blocking-pool-routing");
+
+        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel::<usize>();
+        let mut held = Vec::new();
+        for i in 0..MAX_CONCURRENT_BLOCKING_TASKS {
+            let started_tx = started_tx.clone();
+            let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+            let handle = tokio::spawn(run_blocking(move || {
+                started_tx
+                    .send(i)
+                    .expect("the test still holds the receiver");
+                let _ = release_rx.recv();
+            }));
+            held.push((handle, release_tx));
+        }
+        drop(started_tx);
+        for _ in 0..MAX_CONCURRENT_BLOCKING_TASKS {
+            started_rx
+                .recv()
+                .await
+                .expect("every held task must signal that it started");
+        }
+
+        let target_ran = Arc::new(AtomicBool::new(false));
+        let target_ran_flag = Arc::clone(&target_ran);
+        let target = tokio::spawn(async move {
+            let _ = read_slot_state_and_source(RuntimeSlot::Host, &home).await;
+            target_ran_flag.store(true, Ordering::SeqCst);
+        });
+
+        for _ in 0..64 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !target_ran.load(Ordering::SeqCst),
+            "read_slot_state_and_source must queue behind a fully saturated blocking pool, \
+             which only holds if its filesystem read genuinely routes through run_blocking \
+             rather than running bare on the calling executor"
+        );
+
+        let (released_handle, released_tx) = held.remove(0);
+        released_tx
+            .send(())
+            .expect("the held closure is still waiting on this channel");
+        released_handle
+            .await
+            .expect("the released held task must complete cleanly");
+        target
+            .await
+            .expect("the target task must complete once a permit frees");
+        assert!(
+            target_ran.load(Ordering::SeqCst),
+            "read_slot_state_and_source must have actually run once a permit was available"
+        );
+
+        for (handle, release_tx) in held {
+            let _ = release_tx.send(());
+            handle.await.expect("every held task must complete cleanly");
+        }
     }
 
     /// Regression test for the handshake this manifest exists to unblock: a

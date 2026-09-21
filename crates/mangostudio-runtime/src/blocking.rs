@@ -110,31 +110,35 @@ where
     }
 }
 
+/// [`blocking_pool`]'s semaphore is one process-wide `static`, shared by
+/// every test in this crate's test binary regardless of which module's own
+/// Tokio runtime asks for it — Rust's default test harness runs test
+/// functions concurrently, so two tests that each try to saturate every
+/// permit at once would otherwise deadlock each other (each waiting on
+/// "started" signals the other's held tasks can never send, since there
+/// are not `2 * MAX_CONCURRENT_BLOCKING_TASKS` permits to go around). Any
+/// test in this crate that saturates the whole pool — this module's own,
+/// and [`crate::health`]'s proof that its slot-config read genuinely
+/// routes through this pool rather than running bare on the executor —
+/// holds this lock first, serialising just those tests against each other
+/// without affecting a test that calls [`run_blocking`] for one ordinary
+/// permit at a time. `pub(crate)`, not `pub`: this is test-only scaffolding
+/// shared across this crate's own test modules, never part of this
+/// module's public API.
+#[cfg(test)]
+pub(crate) fn pool_saturation_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, OnceLock};
 
-    use tokio::sync::{Mutex, mpsc};
+    use tokio::sync::mpsc;
 
-    use super::{MAX_CONCURRENT_BLOCKING_TASKS, run_blocking};
-
-    /// [`blocking_pool`](super::blocking_pool)'s semaphore is one process-wide
-    /// `static`, shared by every test in this binary regardless of which
-    /// test's own Tokio runtime asks for it — Rust's default test harness
-    /// runs test functions concurrently, so two tests that each try to
-    /// saturate every permit at once would otherwise deadlock each other
-    /// (each waiting on "started" signals the other's held tasks can never
-    /// send, since there are not `2 * MAX_CONCURRENT_BLOCKING_TASKS` permits
-    /// to go around). Every test below that saturates the whole pool holds
-    /// this lock first, serialising just those tests against each other
-    /// without affecting `a_successful_closure_returns_its_value` or any
-    /// other test elsewhere in the crate that calls `run_blocking` for one
-    /// ordinary permit at a time.
-    fn pool_saturation_test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
+    use super::{MAX_CONCURRENT_BLOCKING_TASKS, pool_saturation_test_lock, run_blocking};
 
     #[tokio::test]
     async fn a_successful_closure_returns_its_value() {
