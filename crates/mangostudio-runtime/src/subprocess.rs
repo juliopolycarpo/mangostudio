@@ -284,6 +284,18 @@ async fn spawn(
         if let Some(env) = env {
             command.env_clear().envs(env);
         }
+        // Puts this child in its own process group (pgid == its own pid),
+        // separate from this runtime's group. `kill_and_reap` below relies
+        // on that: a plain shell wrapper that backgrounds a descendant
+        // (`sleep 20 &`, a credential helper, a shim's own hook) never
+        // calls `setpgid` itself, so that descendant inherits this same
+        // group and a single `killpg` reaches it too — without this, only
+        // the direct child died and the descendant kept running as an
+        // orphan. Unix-only: Windows has no process-group equivalent here,
+        // so `kill_and_reap`'s Windows path is unchanged (direct child
+        // only), a pre-existing limitation this does not widen.
+        #[cfg(unix)]
+        command.process_group(0);
         command.spawn()
     })
     .await
@@ -296,7 +308,7 @@ async fn spawn(
 /// diagnostic channel (see `crate::transport::stdio`'s own module docs for
 /// why stdout is never used for this).
 async fn kill_and_reap(child: &mut Child) {
-    if let Err(error) = child.start_kill() {
+    if let Err(error) = kill_child_and_its_group(child) {
         eprintln!("mangostudio-runtime: could not signal a bounded child to stop: {error}");
         return;
     }
@@ -312,6 +324,35 @@ async fn kill_and_reap(child: &mut Child) {
             );
         }
     }
+}
+
+/// Signals `child` to stop. On Unix, kills its whole process group (see
+/// [`spawn`]'s `process_group(0)`), reaching any descendant the child
+/// backgrounded and never gave its own group — a plain `kill(child_pid)`
+/// only ever reached the direct child, leaving such a descendant running
+/// as an orphan after this call returned. Windows has no process-group
+/// equivalent here, so that platform keeps killing the direct child only,
+/// same as before this function existed.
+#[cfg(unix)]
+fn kill_child_and_its_group(child: &mut Child) -> std::io::Result<()> {
+    let Some(pid) = child.id() else {
+        // Already exited and reaped; nothing left to signal.
+        return Ok(());
+    };
+    // A negative pid is POSIX kill(2)'s own spelling for "the whole
+    // process group named by this pgid", not "this one process".
+    match nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(-(pid as i32)),
+        nix::sys::signal::Signal::SIGKILL,
+    ) {
+        Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
+        Err(errno) => Err(std::io::Error::from(errno)),
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_child_and_its_group(child: &mut Child) -> std::io::Result<()> {
+    child.start_kill()
 }
 
 /// Reads `reader` up to `max_bytes`, returning what was read and whether
@@ -446,7 +487,7 @@ mod tests {
         .expect_err("a script sleeping past its deadline must time out");
         assert!(matches!(error, ChildRunError::TimedOut));
 
-        assert_process_is_gone(&pid_file);
+        assert_process_is_gone(&pid_file).await;
     }
 
     /// Regression test for the reader-join half of the deadline: the direct
@@ -488,6 +529,45 @@ mod tests {
         );
     }
 
+    /// Regression test for `kill_and_reap` killing only the direct child:
+    /// a script that backgrounds a descendant before sleeping past its own
+    /// deadline used to leave that descendant running as an orphan after
+    /// `run_bounded_child` returned `TimedOut` — `child.start_kill()`
+    /// signals exactly one pid, and a plain `sleep &` never calls
+    /// `setpgid` itself, so it shared the child's process group with
+    /// nothing there to reach it. `spawn`'s `process_group(0)` plus
+    /// `kill_and_reap`'s group-wide `kill(-pid, SIGKILL)` now reaches both.
+    #[tokio::test]
+    async fn a_backgrounded_descendant_that_never_touches_the_pipe_is_still_killed() {
+        let dir = scratch_dir("orphan-process");
+        let parent_pid_file = dir.join("parent-pid");
+        let descendant_pid_file = dir.join("descendant-pid");
+        let sh = script(
+            &dir,
+            "backgrounds-and-sleeps.sh",
+            &format!(
+                "echo $$ > {}\nsleep 5 & echo $! > {}\nsleep 5\n",
+                parent_pid_file.display(),
+                descendant_pid_file.display()
+            ),
+        );
+        let cancel = CancellationToken::new();
+
+        let error = run_bounded_child(
+            &sh,
+            &[],
+            None::<&HashMap<String, String>>,
+            budget(Duration::from_millis(300)),
+            &cancel,
+        )
+        .await
+        .expect_err("a script sleeping past its deadline must time out");
+        assert!(matches!(error, ChildRunError::TimedOut));
+
+        assert_process_is_gone(&parent_pid_file).await;
+        assert_process_is_gone(&descendant_pid_file).await;
+    }
+
     /// The same proof as the deadline test, but for cooperative
     /// cancellation fired from a concurrent task after the child has
     /// already started.
@@ -519,7 +599,7 @@ mod tests {
         .expect_err("cancellation must stop the child before its own deadline");
         assert!(matches!(error, ChildRunError::Cancelled));
 
-        assert_process_is_gone(&pid_file);
+        assert_process_is_gone(&pid_file).await;
     }
 
     /// Stdout past `max_stdout_bytes` is capped, and the outcome says so.
@@ -603,14 +683,28 @@ mod tests {
         panic!("{} was never created", path.display());
     }
 
-    fn assert_process_is_gone(pid_file: &Path) {
+    /// Asserts `pid_file`'s pid is no longer live, polling briefly rather
+    /// than checking once: a direct child this function itself `wait()`ed
+    /// on is reaped synchronously, but a backgrounded descendant that
+    /// outlived its own parent is reparented to an init/subreaper process
+    /// and only actually reaped (leaving zombie state, where `kill(pid,
+    /// 0)` still reports it as live) whenever that new parent gets around
+    /// to it — a real delay this assertion must tolerate, not a flake to
+    /// paper over with a longer single wait.
+    async fn assert_process_is_gone(pid_file: &Path) {
         let pid_text = std::fs::read_to_string(pid_file)
             .unwrap_or_else(|error| panic!("{} was never written: {error}", pid_file.display()));
         let pid: i32 = pid_text.trim().parse().expect("a pid is an integer");
-        let result = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None);
-        assert!(
-            matches!(result, Err(nix::errno::Errno::ESRCH)),
-            "the child's pid must no longer be live, got {result:?}"
+        for _ in 0..200 {
+            let result = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None);
+            if matches!(result, Err(nix::errno::Errno::ESRCH)) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "pid {pid} from {} must no longer be live",
+            pid_file.display()
         );
     }
 }
