@@ -33,6 +33,7 @@ const MUTATED_ENV_KEYS = [
   'NO_UPDATE_NOTIFIER',
   'DO_NOT_TRACK',
   'CI',
+  'MANGOSTUDIO_RUNTIME_BINARY',
 ];
 
 let envSnapshot: Record<string, string | undefined> = {};
@@ -139,6 +140,20 @@ describe('buildDetachedEnv', () => {
     expect(env.NO_UPDATE_NOTIFIER).toBe('1');
     expect(env.DO_NOT_TRACK).toBe('1');
     expect(env.CI).toBe('true');
+  });
+
+  it('forwards the runtime binary override, so a detached child honors it too', () => {
+    // getRuntimeBinaryOverride (runtime-paths.ts) reads MANGOSTUDIO_RUNTIME_BINARY
+    // directly from process.env on every stdio launch. Before this, an
+    // operator exporting it and then running `serve -d` (or restarting an
+    // already-running hub, which re-execs through this same env builder) saw
+    // the override apply in the foreground CLI process and silently stop
+    // applying in the detached hub that actually spawns runtime children.
+    process.env.MANGOSTUDIO_RUNTIME_BINARY = '/opt/mangostudio/mangostudio-runtime';
+
+    const env = buildDetachedEnv('localhost', 3001, '/tmp/server.log');
+
+    expect(env.MANGOSTUDIO_RUNTIME_BINARY).toBe('/opt/mangostudio/mangostudio-runtime');
   });
 
   it('preserves diagnostic log toggle when set to 0', () => {
