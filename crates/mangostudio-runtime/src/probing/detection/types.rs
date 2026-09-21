@@ -168,14 +168,12 @@ pub enum RuntimeHealth {
 /// What a [`RuntimeFinding`] or [`crate::probing::detection::version_manager_support`]
 /// finding is about.
 ///
-/// This wave ports [`crate::probing::detection::duplicate_analysis`] and
-/// [`crate::probing::detection::version_manager_support`] only, so only the
-/// codes those two modules can actually raise are represented as reachable
-/// from this crate's port today. The remaining variants belong to the wire
-/// schema's agent-CLI and install-recipe findings (`cli-not-installed`,
-/// `config-home-missing`, `not-authenticated`, `location-unwritable`,
-/// `prerequisite-missing`) — kept here so this enum stays a faithful mirror
-/// of `RuntimeFindingCodeSchema` for whichever later change raises them.
+/// `crate::probing::methods` (the `probing.agent-clis` handler) now raises
+/// `CliNotInstalled`/`ConfigHomeMissing`/`NotAuthenticated`/`LocationUnwritable`
+/// for real. `PrerequisiteMissing` alone is still unreached: it belongs to
+/// the install-recipe service, which no plan has ported yet — kept here so
+/// this enum stays a faithful mirror of `RuntimeFindingCodeSchema` for
+/// whichever later change raises it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeFindingCode {
@@ -204,19 +202,19 @@ pub enum RuntimeFindingCode {
     ManagedButNotOnPath,
     /// A candidate's probe never finished before the scan's deadline.
     ProbeTimeout,
-    /// Reserved for the agent-CLI status service: the CLI itself is not
-    /// installed.
+    /// Raised by `probing.agent-clis`, mapped from a plain `NotFound` scan
+    /// finding: the CLI itself is not installed.
     CliNotInstalled,
-    /// Reserved for the agent-CLI status service: its config home does not
-    /// exist.
+    /// Raised by `probing.agent-clis`: an installed CLI's config home does
+    /// not exist.
     ConfigHomeMissing,
-    /// Reserved for the agent-CLI status service: no credential signal was
-    /// found.
+    /// Raised by `probing.agent-clis`: no credential signal was found for
+    /// an installed CLI with an existing config home.
     NotAuthenticated,
     /// A candidate ran but its output did not parse as a version.
     VersionProbeFailed,
-    /// Reserved for the library-location service: a location exists but is
-    /// not writable.
+    /// Raised by `probing.agent-clis`, from its own `locations` carve-out:
+    /// a read-write location exists but is not writable.
     LocationUnwritable,
     /// Reserved for the install-recipe service: a recipe this machine would
     /// offer needs a tool that is not there.

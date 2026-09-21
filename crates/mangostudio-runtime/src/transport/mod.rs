@@ -11,9 +11,10 @@
 //!
 //! Out of scope for every transport here, matching the crate's own current
 //! scope: every machine method group except `runtime.health` (see
-//! [`crate::health`]) and `workspace.*` (see [`crate::workspace_methods`])
-//! is unimplemented, so [`crate::registry::Registry`] answers everything
-//! else with `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
+//! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
+//! and `probing.*` (see [`crate::probing`]) is unimplemented, so
+//! [`crate::registry::Registry`] answers everything else with
+//! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
 //! module's own `hello_capabilities`, which shapes `crate::health`'s
 //! `build_capability_manifest` into the `Map` `hello` carries — without it, a
 //! hub refuses every
@@ -125,9 +126,10 @@ pub(crate) struct SessionHost {
 
 /// Builds one [`SessionHost`] for `slot` under `mango_home`, announcing
 /// `runtime_version` from `runtime.health`, and also implementing
-/// `workspace.browse`, `workspace.validate`, and
-/// `workspace.resolve-contained` — the only methods this crate implements
-/// today (see [`crate::health`] and [`crate::workspace_methods`]).
+/// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
+/// and `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`
+/// — the only methods this crate implements today (see [`crate::health`],
+/// [`crate::workspace_methods`], and [`crate::probing`]).
 pub(crate) fn build_host(
     slot: RuntimeSlot,
     mango_home: &Path,
@@ -145,6 +147,7 @@ pub(crate) fn build_host(
         runtime_version.to_string(),
     );
     let registry = crate::workspace_methods::register(registry);
+    let registry = crate::probing::register(registry);
     let source = ConsentSource::new(slot, mango_home.to_path_buf());
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
@@ -432,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn build_host_implements_exactly_runtime_health_and_the_workspace_methods() {
+    fn build_host_implements_exactly_runtime_health_the_workspace_and_probing_methods() {
         let home = std::env::temp_dir().join(format!(
             "mango-transport-build-host-test-{}-{}",
             std::process::id(),
@@ -442,6 +445,9 @@ mod tests {
         assert_eq!(
             host.registry.implemented_methods(),
             vec![
+                "probing.agent-clis",
+                "probing.runtimes",
+                "probing.version-managers",
                 "runtime.health",
                 "workspace.browse",
                 "workspace.resolve-contained",

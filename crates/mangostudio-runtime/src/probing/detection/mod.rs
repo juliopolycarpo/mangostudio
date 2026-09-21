@@ -10,9 +10,9 @@
 //! without touching a real disk — this crate keeps that shape, as a Rust
 //! trait per TypeScript "deps" interface: [`binary_scan::BinaryScanDeps`],
 //! [`version_manager_support::ManagedVersionFileSystem`],
-//! [`nvm::NvmFileSystem`], [`auth_signal::AuthSignalFs`]. A later change
-//! implements each trait against real I/O; this one implements them against
-//! named fakes, in this module's own tests.
+//! [`nvm::NvmFileSystem`], [`auth_signal::AuthSignalFs`]. Each module's own
+//! tests still exercise these traits against named fakes; the real,
+//! host-backed implementations live in [`crate::probing::host`].
 //!
 //! # Why `Arc<dyn Trait>`, not a borrowed reference
 //!
