@@ -851,7 +851,19 @@ mod tests {
         })
         .await
         .unwrap();
-        assert_eq!(result["relativePath"], "src/main.rs");
+        // `resolve_contained_workspace_path` returns a `PathBuf` component
+        // (`real_path.strip_prefix(&real_root)`), which renders with this
+        // platform's own separator — mirrors `workspace.ts`'s own
+        // `relative(realRoot, realPath)` (Node's `path.relative`), which
+        // answers backslash-separated paths on Windows too. The catalog
+        // types `relativePath` as a bare string with no separator
+        // constraint, so a native-separator assertion here is the correct
+        // one, not a normalized-to-forward-slash literal.
+        let expected = PathBuf::from("src").join("main.rs");
+        assert_eq!(
+            result["relativePath"],
+            expected.to_string_lossy().into_owned()
+        );
     }
 
     #[tokio::test]
