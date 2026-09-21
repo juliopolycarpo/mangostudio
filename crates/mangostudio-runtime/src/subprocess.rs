@@ -315,12 +315,21 @@ async fn kill_and_reap(child: &mut Child) {
 }
 
 /// Reads `reader` up to `max_bytes`, returning what was read and whether
-/// more was actually available past the cap.
+/// more was actually available past the cap. Every byte past the cap is
+/// genuinely read and discarded, matching [`ChildBudget`]'s own doc
+/// comment — this function used to stop after a single one-byte
+/// truncation probe, dropping `reader` (and so closing this process's end
+/// of the pipe) while the child could still have more to write.
 ///
-/// Truncation is detected by reading one byte past the cap after filling
-/// it, rather than inferring it from a short final read — a reader that
-/// fills the buffer exactly on its last chunk is not truncated, and this
-/// is the only way to tell the two apart.
+/// That mattered: a child that writes again after this end of the pipe
+/// closes gets `SIGPIPE` on that write, which reports as a failed exit
+/// status regardless of what the child would otherwise have said — a
+/// `git --version` wrapper that prints past the cap was silently reported
+/// as "git not installed" this way, not because it failed, but because
+/// this function stopped listening to it. Bounded by this call's own
+/// caller ([`run_bounded_child`]'s reader join races the deadline
+/// remaining after the child itself exits), not by anything here — a
+/// child that never stops writing still cannot hang the overall call.
 async fn read_capped<R>(mut reader: R, max_bytes: usize) -> (Vec<u8>, bool)
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -340,8 +349,15 @@ where
             }
         }
     }
-    let mut probe = [0u8; 1];
-    let truncated = matches!(reader.read(&mut probe).await, Ok(read) if read > 0);
+    let mut discard = [0u8; 8192];
+    let mut truncated = false;
+    loop {
+        match reader.read(&mut discard).await {
+            Ok(0) => break,
+            Ok(_) => truncated = true,
+            Err(_) => break,
+        }
+    }
     (buffer, truncated)
 }
 
@@ -529,6 +545,47 @@ mod tests {
         .expect("head must exit successfully");
 
         assert_eq!(outcome.stdout.len(), 1_000);
+        assert!(outcome.stdout_truncated);
+    }
+
+    /// Regression test: a child that writes well past the cap in *many
+    /// small writes* — mirroring a verbose CLI wrapper's line-buffered
+    /// output, unlike `stdout_past_the_cap_is_truncated` above's single
+    /// `yes | head` pipeline, which hands the whole capped byte count to
+    /// the kernel through one write on the writing end and so never
+    /// exercised this — must still be observed exiting successfully.
+    /// `read_capped` used to stop reading (and drop its end of the pipe)
+    /// the instant the cap filled; a script that wrote again afterward got
+    /// `SIGPIPE` on that write, which reported as a failed exit status for
+    /// a child that never actually failed.
+    #[tokio::test]
+    async fn a_child_writing_past_the_cap_in_many_small_writes_still_exits_successfully() {
+        let dir = scratch_dir("verbose-writer");
+        let sh = script(
+            &dir,
+            "verbose.sh",
+            "i=0; while [ $i -lt 200 ]; do printf 'line %03d of output past the cap\\n' \"$i\"; \
+             i=$((i+1)); done",
+        );
+        let cancel = CancellationToken::new();
+        let mut small_budget = budget(Duration::from_secs(5));
+        small_budget.max_stdout_bytes = 128;
+
+        let outcome = run_bounded_child(
+            &sh,
+            &[],
+            None::<&HashMap<String, String>>,
+            small_budget,
+            &cancel,
+        )
+        .await
+        .expect("a verbose script writing past the cap must still be observed exiting");
+
+        assert!(
+            outcome.status_success,
+            "the child must exit successfully even though its output was capped past this \
+             function's own buffer, not fail with SIGPIPE on a later write"
+        );
         assert!(outcome.stdout_truncated);
     }
 
