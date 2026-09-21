@@ -116,7 +116,11 @@ pub(super) fn glob(params: GlobParams, cancel: &CancellationToken) -> Result<Val
         matches.push(if params.absolute || absolute_pattern {
             absolute.to_string_lossy().into_owned()
         } else if params.pattern.starts_with("./") {
-            format!("./{}", relative.to_string_lossy())
+            format!(
+                ".{}{}",
+                std::path::MAIN_SEPARATOR,
+                relative.to_string_lossy()
+            )
         } else {
             relative.to_string_lossy().into_owned()
         });
@@ -630,6 +634,11 @@ mod tests {
         assert_eq!(result["matches"], json!(native_order));
         let result = glob(glob_params(&root, "**/.dot.ts"), &token()).unwrap();
         assert_eq!(result["matches"], json!(["src/.dot.ts"]));
+        let result = glob(glob_params(&root, "./*.txt"), &token()).unwrap();
+        assert_eq!(
+            result["matches"],
+            json!([format!(".{}a.txt", std::path::MAIN_SEPARATOR)])
+        );
     }
 
     #[test]
