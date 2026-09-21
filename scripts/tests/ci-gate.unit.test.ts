@@ -293,11 +293,16 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     // runtime check inside the suite that cannot tell "an unrelated lane"
     // from "this job, misconfigured" apart.
     const qualificationBlock = extractJobBlock(workflow, 'real-binary-qualification');
+    const binarySupport = readText('apps/api/tests/support/rust-runtime-binary.ts');
 
+    expect(qualificationBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(qualificationBlock).toContain(`runs-on: ${EXPR} matrix.os }}`);
     expect(qualificationBlock).toContain('cargo build -p mangostudio-runtime --locked');
     expect(qualificationBlock).toContain(
-      `MANGOSTUDIO_RUNTIME_BINARY: ${EXPR} github.workspace }}/target/debug/mangostudio-runtime`
+      `MANGOSTUDIO_RUNTIME_BINARY: ${EXPR} github.workspace }}/${EXPR} matrix.runtime-binary }}`
     );
+    expect(qualificationBlock).toContain('runtime-binary: target/debug/mangostudio-runtime.exe');
+    expect(binarySupport).toContain("process.platform === 'win32' ? 'mangostudio-runtime.exe'");
     expect(qualificationBlock).toContain(
       'tests/integration/services/rust-runtime-qualification.integration.test.ts'
     );

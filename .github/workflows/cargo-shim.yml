@@ -250,11 +250,22 @@ jobs:
     # or dials the TypeScript in-process runtime instead. Targets the two
     # qualification files directly rather than the whole apps/api suite,
     # which does not need a Rust binary at all.
-    name: Real-binary qualification
+    name: Real-binary qualification (${{ matrix.os }})
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            runtime-binary: target/debug/mangostudio-runtime
+          - os: macos-latest
+            runtime-binary: target/debug/mangostudio-runtime
+          - os: windows-latest
+            runtime-binary: target/debug/mangostudio-runtime.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -275,7 +286,7 @@ jobs:
       - name: Qualify the real binary over stdio, serve, and connect
         working-directory: apps/api
         env:
-          MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/target/debug/mangostudio-runtime
+          MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/${{ matrix.runtime-binary }}
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
         run: >
           bun test --timeout 15000

@@ -27,7 +27,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const FALLBACK_DEBUG_BINARY = join(import.meta.dir, '../../../../target/debug/mangostudio-runtime');
+const FALLBACK_DEBUG_BINARY = join(
+  import.meta.dir,
+  '../../../../target/debug',
+  process.platform === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime'
+);
 
 export interface RustRuntimeBinary {
   readonly path: string;
