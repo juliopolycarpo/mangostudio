@@ -29,8 +29,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mango_protocol::contract::Contract;
 use mango_protocol::frame::PeerInfo;
-use mango_protocol::session::{EventInput, Session};
+use mango_protocol::port::Port;
+use mango_protocol::session::{EventInput, Session, SessionClosure, SessionOptions};
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::authorization::ConsentAuthorization;
@@ -219,6 +221,54 @@ pub(crate) async fn heartbeat_loop(
             }
         }
     }
+}
+
+/// Opens a session over `port`, registers `registry`'s contract handlers on
+/// it, and only then spawns its driver — in that order, always. Shared by
+/// all three transports (`stdio::run`, `serve::handle_connection`,
+/// `connect::run_one_connection`), which used to each write this sequence
+/// out by hand; this repository's own rule against duplicating shared logic
+/// covers exactly this shape.
+///
+/// The ordering is load-bearing, not stylistic: [`Session::open`] never
+/// starts the returned driver on its own, so nothing can poll it — and so
+/// nothing can dispatch a single incoming frame — before this function's
+/// own `tokio::spawn` call, several lines *after* [`crate::serve::serve`]
+/// has already registered every handler `contract` declares. The bug this
+/// closes used the opposite order (`Session::spawn`, which starts the
+/// driver the instant it returns): a hub that sent its first request
+/// immediately after the handshake could race ahead of registration and
+/// see `METHOD_UNSUPPORTED` for a method the peer genuinely implements —
+/// observed reliably across the real qualification suite's `serve` and
+/// `connect` transports
+/// (`apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts`
+/// and its `-connect` sibling) before this fix, and not reproduced since.
+/// It is not independently covered by a Rust-level unit test in this
+/// crate: a from-scratch reproduction attempt using a real `Session` over
+/// a real TCP loopback pair, matching the shape of `mango_protocol`'s
+/// existing session tests, did not reproduce the race against the
+/// pre-fix ordering under either the default (current-thread) or a
+/// `multi_thread` `#[tokio::test]` runtime — the window is narrow enough
+/// that only the real, cross-process latency the qualification suite's
+/// own separate hub and runtime processes introduce made it observable.
+/// The ordering here is correct by construction (no `.await` point exists
+/// between `Session::open` and the `tokio::spawn` call below that could
+/// let anything else run in between), which is what this function's own
+/// structure — not a dynamic test — is what actually proves it.
+pub(crate) fn start_session<P: Port>(
+    port: P,
+    options: SessionOptions,
+    contract: &Contract,
+    registry: Registry,
+    authorization: Arc<dyn Authorization>,
+    slot: &str,
+) -> (Session, tokio::task::JoinHandle<SessionClosure>) {
+    let (session, driver) = Session::open(port, options);
+    let guard = crate::serve::serve(contract, &session, registry, authorization, slot)
+        .expect("an empty registry always matches the embedded catalog");
+    guard.persist();
+    let driver_handle = tokio::spawn(driver.run());
+    (session, driver_handle)
 }
 
 #[cfg(test)]

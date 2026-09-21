@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use mango_protocol::close::close_codes;
 use mango_protocol::contract::Contract;
-use mango_protocol::session::{Session, SessionClosure, SessionOptions};
+use mango_protocol::session::{SessionClosure, SessionOptions};
 use mango_protocol::transports::deadline::ConnectDeadline;
 use mango_protocol::transports::websocket::client::{WebSocketConnectOptions, connect_websocket};
 use mangostudio_runtime_contract::catalog::catalog;
@@ -267,20 +267,17 @@ async fn run_one_connection(
     let options = SessionOptions::new(runtime_peer(&config.runtime_version))
         .with_handshake_timeout(HANDSHAKE_TIMEOUT)
         .with_capabilities(capabilities);
-    // `Session::open`, never `Session::spawn`: see the identical comment in
-    // `transport::serve::handle_connection` for the handler-registration
-    // race this ordering closes.
-    let (session, driver) = Session::open(port, options);
-    let guard = crate::serve::serve(
+    // `crate::transport::start_session`, never `Session::spawn` directly:
+    // see that function's own doc comment for the handler-registration
+    // race its ordering closes.
+    let (session, driver_handle) = crate::transport::start_session(
+        port,
+        options,
         &contract,
-        &session,
         host.registry,
         host.authorization,
         config.slot.as_str(),
-    )
-    .expect("an empty registry always matches the embedded catalog");
-    guard.persist();
-    let driver_handle = tokio::spawn(driver.run());
+    );
 
     // Owns exactly one job: if `cancel` fires while the connection below is
     // still being awaited, close it. Terminates on its own the moment

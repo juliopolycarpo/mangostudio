@@ -432,25 +432,17 @@ async fn handle_connection(
         SessionOptions::new(runtime_peer(&context.runtime_version)).with_capabilities(capabilities);
     debug_assert_eq!(options.handshake_timeout, DEFAULT_HANDSHAKE_TIMEOUT);
     debug_assert_eq!(options.liveness_interval, Some(DEFAULT_LIVENESS_INTERVAL));
-    // `Session::open`, never `Session::spawn`: the latter starts the
-    // driver — and so starts dispatching whatever the peer sends — the
-    // instant it returns, which raced ahead of `crate::serve::serve`'s own
-    // registration below often enough to answer a hub's very first
-    // `runtime.health` with `METHOD_UNSUPPORTED` (observed against the real
-    // compiled binary, not merely theoretical). Registering the contract on
-    // `session` *before* the driver ever runs, mirroring `stdio::run`'s
-    // identical ordering, closes the window instead of narrowing it.
-    let (session, driver) = Session::open(port, options);
-    let guard = crate::serve::serve(
+    // `crate::transport::start_session`, never `Session::spawn` directly:
+    // see that function's own doc comment for the handler-registration
+    // race its ordering closes.
+    let (session, driver_handle) = crate::transport::start_session(
+        port,
+        options,
         &contract,
-        &session,
         host.registry,
         host.authorization,
         context.slot.as_str(),
-    )
-    .expect("an empty registry always matches the embedded catalog");
-    guard.persist();
-    let driver_handle = tokio::spawn(driver.run());
+    );
 
     let (released_tx, released_rx) = oneshot::channel();
     let published = state.publish(
