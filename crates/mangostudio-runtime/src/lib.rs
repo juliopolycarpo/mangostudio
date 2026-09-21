@@ -34,12 +34,16 @@
 //!   put the raw panic payload on the wire, verbatim and unredacted.
 //! - [`ports`] — small, named, fail-closed seams (`Authorization`, `Audit`,
 //!   `Clock`, `CallExclusivity`). Every default still refuses or does
-//!   nothing, but each seam now also has a real production adapter: [`consent`]'s
-//!   [`consent::authorization::ConsentAuthorization`] for `Authorization`,
-//!   [`audit::FileAudit`] for `Audit`, and `ports::clock::SystemClock` /
-//!   `ports::exclusivity::UpdateExclusivityTracker` for the other two —
-//!   `transport::build_host` (crate-private) wires the first pair into
-//!   every real connection.
+//!   nothing, but three of the four now also have a real production
+//!   adapter that `transport::build_host` (crate-private) wires into every
+//!   real connection: [`consent`]'s [`consent::authorization::ConsentAuthorization`]
+//!   for `Authorization`, [`audit::FileAudit`] for `Audit`, and
+//!   `ports::clock::SystemClock` for `Clock`. `CallExclusivity` is the
+//!   exception: `build_host` calls `Registry::with_ports`, which fixes it
+//!   at `ports::exclusivity::NoExclusivity`, so `ports::exclusivity::UpdateExclusivityTracker`
+//!   exists and is tested but is not installed anywhere production runs —
+//!   see that function's own doc comment for why, and what has to change
+//!   before that stops being true.
 //! - [`consent`] — the real [`ports::authorization::Authorization`]: what
 //!   `runtime.json` grants, re-read on every call.
 //! - [`manifest`] — builds the `hello.capabilities` manifest this runtime

@@ -131,6 +131,21 @@ pub(crate) struct SessionHost {
 /// and `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`
 /// — the only methods this crate implements today (see [`crate::health`],
 /// [`crate::workspace_methods`], and [`crate::probing`]).
+///
+/// Calls [`Registry::with_ports`], not
+/// [`Registry::with_ports_and_exclusivity`], so every connection this
+/// builds enforces [`crate::ports::exclusivity::NoExclusivity`] — not
+/// [`crate::ports::exclusivity::UpdateExclusivityTracker`]. That is correct
+/// *today* only because no `runtime.update.*` method exists yet, so there
+/// is nothing for update-versus-ordinary exclusivity to serialise; it is a
+/// gap left by scope, not a considered choice to leave update calls
+/// unserialised. Whichever change implements `runtime.update.*` must switch
+/// this call to [`Registry::with_ports_and_exclusivity`] with a real
+/// [`crate::ports::exclusivity::UpdateExclusivityTracker`] in the same
+/// change that adds the first update handler — not as a follow-up, since a
+/// registry that implements an update method without that tracker installed
+/// is exactly the unguarded state this comment exists to prevent shipping
+/// unnoticed.
 pub(crate) fn build_host(
     slot: RuntimeSlot,
     mango_home: &Path,
