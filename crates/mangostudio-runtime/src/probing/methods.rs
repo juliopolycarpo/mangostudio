@@ -972,8 +972,43 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 
+    /// A `PATH` override plus every well-known-directory escape hatch this
+    /// crate's five [`RuntimeDefinition`]s can read, all pointed at
+    /// directories that do not exist.
+    ///
+    /// `well_known_git_directories`/`well_known_winget_directories` read
+    /// `ProgramFiles`/`LOCALAPPDATA` on win32 only, but those two variables
+    /// are real on every Windows CI runner — GitHub's own `windows-latest`
+    /// image ships Git for Windows at exactly
+    /// `%ProgramFiles%\Git\cmd\git.exe`, the path
+    /// `well_known_git_directories` builds. A test that overrides `PATH`
+    /// alone still finds that real install through the well-known-directory
+    /// scan, which never looks at `PATH` at all — the exact leak this
+    /// crate's own `home_dir` (never overridable) already causes for
+    /// `well_known_bun_directories`'s `BUN_INSTALL` fallback, reproduced
+    /// here through a different, Windows-only environment variable rather
+    /// than `home_dir` itself. Blanking every one of these keys is what
+    /// actually isolates a test from whatever the host happens to have
+    /// installed, on every platform this crate's own gate runs on.
     fn params_with_path(path_dir: &Path) -> HashMap<String, String> {
-        HashMap::from([("PATH".to_string(), path_dir.to_string_lossy().into_owned())])
+        let missing = |name: &str| {
+            path_dir
+                .join(format!("no-such-{name}"))
+                .to_string_lossy()
+                .into_owned()
+        };
+        HashMap::from([
+            ("PATH".to_string(), path_dir.to_string_lossy().into_owned()),
+            ("BUN_INSTALL".to_string(), missing("bun-install")),
+            ("NVM_SYMLINK".to_string(), missing("nvm-symlink")),
+            ("FNM_DIR".to_string(), missing("fnm-dir")),
+            ("ProgramFiles".to_string(), missing("program-files")),
+            (
+                "ProgramFiles(x86)".to_string(),
+                missing("program-files-x86"),
+            ),
+            ("LOCALAPPDATA".to_string(), missing("localappdata")),
+        ])
     }
 
     #[cfg(unix)]
@@ -981,22 +1016,14 @@ mod tests {
     async fn probe_runtimes_finds_a_real_fake_bun_on_a_synthetic_path() {
         let dir = scratch_dir("runtimes-bun");
         fake_binary_on_path(&dir, "bun", "1.2.3");
-        let mut env = params_with_path(&dir);
-        // `well_known_bun_directories` falls back to this *host's own real*
-        // `~/.bun/bin` when `BUN_INSTALL` is unset — `PathEnv::home_dir` is
-        // never overridable through `pathEnv.env` (mirrors
-        // `createRuntimePathEnv`'s own `homedir()` call), so without this,
-        // a developer machine with a real Bun install under `~/.bun` would
-        // report a second, differently-versioned installation and turn
-        // this test's own `health: "ok"` assertion into a flake. Pointing
-        // `BUN_INSTALL` at a directory that does not exist keeps this test
-        // deterministic regardless of the host it runs on.
-        env.insert(
-            "BUN_INSTALL".to_string(),
-            dir.join("no-such-bun-install")
-                .to_string_lossy()
-                .into_owned(),
-        );
+        // `params_with_path` already blanks `BUN_INSTALL` (see its own doc
+        // comment): without that, `well_known_bun_directories`'s fallback
+        // to this *host's own real* `~/.bun/bin` — `PathEnv::home_dir` is
+        // never overridable through `pathEnv.env` — could report a second,
+        // differently-versioned installation on a developer machine with a
+        // real Bun install, turning this test's own `health: "ok"`
+        // assertion into a flake.
+        let env = params_with_path(&dir);
         let params = ProbeRuntimesParams {
             ids: Some(vec![RuntimeId::Bun]),
             path_env: Some(PathEnvOverride { env: Some(env) }),
