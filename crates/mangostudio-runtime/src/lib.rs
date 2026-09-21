@@ -11,13 +11,18 @@
 //! second dispatcher. What it adds on top:
 //!
 //! - [`registry`] — a registry of the methods this build actually
-//!   implements. Empty in production for now (method implementations are a
-//!   later change); tests fill it with named fakes to prove the plumbing.
-//!   A method the catalog declares but this registry has not implemented is
-//!   *not* registered at all, so `mango_protocol::session::dispatch`'s own
-//!   no-handler branch answers it with `METHOD_UNSUPPORTED` — byte-identical
-//!   to a method the catalog does not know at all. This crate never invents
-//!   a second wire code for "known but unimplemented".
+//!   implements. `transport::build_host` (crate-private) populates a
+//!   production one from `health::register`, `workspace_methods::register`
+//!   and `probing::register` — `runtime.health`, the three `workspace.*`
+//!   methods, and the three `probing.*` methods; a bare [`registry::Registry::new`]
+//!   stays empty, which is what its own tests and doctest fill with named
+//!   fakes to prove the plumbing without a real filesystem or subprocess
+//!   underneath. A method the catalog declares but this registry has not
+//!   implemented is *not* registered at all, so
+//!   `mango_protocol::session::dispatch`'s own no-handler branch answers it
+//!   with `METHOD_UNSUPPORTED` — byte-identical to a method the catalog does
+//!   not know at all. This crate never invents a second wire code for
+//!   "known but unimplemented".
 //! - [`result_check`] — validates a handler's result against the contract
 //!   before it is serialised, from *inside* the audit-recording wrapper
 //!   rather than via [`mango_protocol::contract::ServeOptions::validate_results`].
@@ -28,9 +33,13 @@
 //!   before it can reach `mango_protocol`'s dispatcher, which would otherwise
 //!   put the raw panic payload on the wire, verbatim and unredacted.
 //! - [`ports`] — small, named, fail-closed seams (`Authorization`, `Audit`,
-//!   `Clock`, `CallExclusivity`) that a later change implements for real.
-//!   Every default refuses or does nothing; none of them ever grants or
-//!   fabricates an outcome.
+//!   `Clock`, `CallExclusivity`). Every default still refuses or does
+//!   nothing, but each seam now also has a real production adapter: [`consent`]'s
+//!   [`consent::authorization::ConsentAuthorization`] for `Authorization`,
+//!   [`audit::FileAudit`] for `Audit`, and `ports::clock::SystemClock` /
+//!   `ports::exclusivity::UpdateExclusivityTracker` for the other two —
+//!   `transport::build_host` (crate-private) wires the first pair into
+//!   every real connection.
 //! - [`consent`] — the real [`ports::authorization::Authorization`]: what
 //!   `runtime.json` grants, re-read on every call.
 //! - [`manifest`] — builds the `hello.capabilities` manifest this runtime
@@ -59,9 +68,14 @@
 //! # Runtime home
 //!
 //! `apps/runtime` is the TypeScript runtime host; this crate is the
-//! foundation of its Rust rewrite. It owns exactly four things, each
-//! mirroring one TypeScript module so the two hosts agree on-disk without
-//! either side reading the other's language:
+//! foundation of its Rust rewrite. Its on-disk half — the pieces that must
+//! agree byte-for-byte with what `apps/runtime` reads and writes — owns
+//! exactly four things, each mirroring one TypeScript module so the two
+//! hosts agree on-disk without either side reading the other's language.
+//! (The crate as a whole is considerably larger: 22 modules spanning
+//! dispatch, consent, workspace, probing, subprocess handling and this
+//! on-disk layer — the four below are only the part that has a
+//! TypeScript-side byte format to match.)
 //!
 //! - [`config`] mirrors `apps/runtime/src/config.ts`: every environment
 //!   variable this host reads, parsed in one place.

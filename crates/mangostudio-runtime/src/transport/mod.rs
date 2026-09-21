@@ -106,10 +106,11 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 }
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
-/// session itself: a [`Registry`] implementing only `runtime.health` (every
-/// other machine method group is out of scope; the catalog's `rpc.discover`
-/// answer and `METHOD_UNSUPPORTED` cover the rest) recording through a
-/// real, on-disk [`crate::audit::FileAudit`],
+/// session itself: a [`Registry`] implementing `runtime.health`, the
+/// `workspace.*` methods, and the `probing.*` methods (see [`build_host`]
+/// for the full list; every other machine method group is out of scope, and
+/// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
+/// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
 /// and the real [`ConsentAuthorization`] reading `slot`'s `runtime.json`
 /// fresh on every call.
 ///
@@ -277,7 +278,7 @@ pub(crate) fn start_session<P: Port>(
 ) -> (Session, tokio::task::JoinHandle<SessionClosure>) {
     let (session, driver) = Session::open(port, options);
     let guard = crate::serve::serve(contract, &session, registry, authorization, slot)
-        .expect("an empty registry always matches the embedded catalog");
+        .expect("Registry::implement already panics on a catalog mismatch at registration time");
     guard.persist();
     let driver_handle = tokio::spawn(driver.run());
     (session, driver_handle)

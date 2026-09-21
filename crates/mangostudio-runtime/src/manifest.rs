@@ -12,10 +12,13 @@
 //! corresponding capability to be [`Registry::classify`]'d as
 //! [`Classification::Implemented`] — fail-closed, so a feature backed by
 //! nine methods and implemented by three of them is not advertised at all.
-//! With an empty [`Registry`], every capability-gated feature computes
-//! `false` regardless of `allow`, which is this crate's whole acceptance
-//! bar for this change: an empty registry must advertise essentially
-//! nothing.
+//! With an empty [`Registry`] (what this module's own tests build), every
+//! capability-gated feature computes `false` regardless of `allow` — the
+//! fail-closed floor this gate guarantees. The production registry
+//! `crate::transport::build_host` (crate-private) assembles only
+//! implements a subset of the catalog (`runtime.health`, `workspace.*`,
+//! `probing.*`), so the same gate keeps every feature backed by a method
+//! outside that subset unadvertised there too, not just in the empty case.
 //!
 //! `toolchain` is the one feature `manifest.ts` hardcodes to `true`
 //! unconditionally, because it names a *shape* a spawn method's `params`
