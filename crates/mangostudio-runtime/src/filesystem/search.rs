@@ -624,7 +624,17 @@ mod tests {
             fs::write(root.join(path), content).unwrap();
         }
         let result = glob(glob_params(&root, "**/*.ts"), &token()).unwrap();
-        assert_eq!(result["matches"], json!(["src/a.ts", "src/nested/b.ts"]));
+        assert_eq!(
+            result["matches"],
+            json!([
+                format!("src{}a.ts", std::path::MAIN_SEPARATOR),
+                format!(
+                    "src{}nested{}b.ts",
+                    std::path::MAIN_SEPARATOR,
+                    std::path::MAIN_SEPARATOR
+                )
+            ])
+        );
         let result = glob(glob_params(&root, "*.{txt,md}"), &token()).unwrap();
         let native_order: Vec<_> = fs::read_dir(&root)
             .unwrap()
@@ -633,7 +643,10 @@ mod tests {
             .collect();
         assert_eq!(result["matches"], json!(native_order));
         let result = glob(glob_params(&root, "**/.dot.ts"), &token()).unwrap();
-        assert_eq!(result["matches"], json!(["src/.dot.ts"]));
+        assert_eq!(
+            result["matches"],
+            json!([format!("src{}.dot.ts", std::path::MAIN_SEPARATOR)])
+        );
         let result = glob(glob_params(&root, "./*.txt"), &token()).unwrap();
         assert_eq!(
             result["matches"],
