@@ -9,7 +9,18 @@
 //! uniqueness rested entirely on `name` — two tests in the same module
 //! passing the same name raced for the same directory, and cargo runs a
 //! module's tests on separate threads by default. This module replaces all
-//! of those copies with one, built on a process-wide atomic counter instead.
+//! of those copies with one.
+//!
+//! Uniqueness is process id, wall-clock nanoseconds, and a per-process
+//! atomic counter folded together — not pid-plus-counter alone. A few of
+//! the copies this module replaces (`consent/invocation.rs`,
+//! `tests/cli.rs`, the three `tests/transport_*.rs` files) already carried
+//! a nanosecond component in their own `unique_suffix()`, because pid alone
+//! is not unique across a process that was killed, aborted, or reused a pid
+//! a later run reissues; the counter alone restarts at zero on every new
+//! process, so two processes started in the same instant could still agree
+//! on the first path they mint. Consolidating onto this module must not
+//! lose the entropy those copies already had.
 //!
 //! This whole module is `#[cfg(test)]`, so it is invisible to `cargo doc`
 //! and `cargo test --doc` the same as every other test helper — its own
@@ -26,9 +37,28 @@ use std::ffi::OsStr;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-/// A directory under [`std::env::temp_dir`], unique for the lifetime of the
-/// current process, removed recursively when this value is dropped.
+/// A value unique within this process and, via the wall-clock component,
+/// overwhelmingly likely to be unique across processes too — unlike a bare
+/// atomic counter, which restarts at zero every time a new process starts,
+/// or a bare pid, which a later process can reuse once this one exits.
+/// Folding a counter into the nanosecond reading (rather than trusting the
+/// clock alone) also covers a platform whose `SystemTime` resolution is
+/// coarser than a nanosecond, where two calls in quick succession could
+/// otherwise read the same instant.
+fn unique_suffix() -> u128 {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("the system clock reads after the Unix epoch")
+        .as_nanos();
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    nanos.wrapping_add(u128::from(count))
+}
+
+/// A directory under [`std::env::temp_dir`], unique across processes (see
+/// [`unique_suffix`]), removed recursively when this value is dropped.
 ///
 /// Derefs to [`Path`], so `dir.join("sub")`, `&*dir`, and passing `&dir`
 /// wherever `AsRef<Path>` is expected all work without unwrapping.
@@ -43,22 +73,57 @@ impl ScratchDir {
     /// is the right constructor — [`ScratchDir::created`] would race the
     /// very thing under test. The directory is still removed on drop, on the
     /// chance something did create it in the meantime.
+    ///
+    /// # Panics
+    /// If the path already exists. [`unique_suffix`] makes this vanishingly
+    /// unlikely from a genuine collision, so a hit here almost certainly
+    /// means a previous run of this same helper leaked its directory (a
+    /// killed process, an aborted test, a directory a permission change
+    /// left undeletable) — surfacing that loudly matters more here than
+    /// almost anywhere else in this module, since a caller of
+    /// [`scratch_path`] specifically depends on the path starting absent.
     pub fn new(prefix: &str) -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        Self::at_suffix(prefix, unique_suffix())
+    }
+
+    /// [`ScratchDir::new`], with the uniqueness value supplied by the
+    /// caller instead of drawn from [`unique_suffix`] — the seam this
+    /// module's own tests use to force two calls onto the same path
+    /// deterministically, which a real [`unique_suffix`] value cannot do by
+    /// design.
+    fn at_suffix(prefix: &str, suffix: u128) -> Self {
         let path =
-            std::env::temp_dir().join(format!("mango-{prefix}-{}-{unique}", std::process::id()));
+            std::env::temp_dir().join(format!("mango-{prefix}-{}-{suffix}", std::process::id()));
+        assert!(
+            !path.exists(),
+            "scratch path {path:?} already exists — expected: absent | found: present. A \
+             previous process most likely leaked it (killed, aborted, or left an undeletable \
+             directory behind); remove it by hand and investigate before trusting this run."
+        );
         Self(path)
     }
 
-    /// Allocates a unique path under `prefix` and creates it (and any
-    /// missing parents) immediately.
+    /// Allocates a unique path under `prefix` and creates it immediately.
+    ///
+    /// Uses [`std::fs::create_dir`], not `create_dir_all`: the parent
+    /// ([`std::env::temp_dir`]) always exists, so the only thing a
+    /// recursive create would additionally paper over is the leaf itself
+    /// already being there — silently reusing whatever a leaked prior run
+    /// left inside it. This fails instead, for the same reason
+    /// [`ScratchDir::new`] asserts the path is absent first.
     ///
     /// # Panics
-    /// If the directory cannot be created.
+    /// If the directory cannot be created, including because it already
+    /// exists.
     pub fn created(prefix: &str) -> Self {
         let dir = Self::new(prefix);
-        std::fs::create_dir_all(&dir.0).expect("scratch dir creation");
+        std::fs::create_dir(&dir.0).unwrap_or_else(|error| {
+            panic!(
+                "scratch dir creation at {:?} failed: {error} (expected: none of this path \
+                 existed yet, so create_dir should not observe an existing directory or file)",
+                dir.0
+            )
+        });
         dir
     }
 
@@ -122,7 +187,7 @@ pub fn scratch_path(prefix: &str) -> ScratchDir {
 
 #[cfg(test)]
 mod tests {
-    use super::{scratch_dir, scratch_path};
+    use super::{ScratchDir, scratch_dir, scratch_path};
 
     #[test]
     fn scratch_dir_creates_the_directory_immediately() {
@@ -150,5 +215,29 @@ mod tests {
             dir.path().to_path_buf()
         };
         assert!(!path.exists());
+    }
+
+    /// Regression: `ScratchDir::new` (and by extension `created`, which
+    /// calls it first) must refuse a path that is already there rather than
+    /// silently handing it out — that silence is exactly what let a leaked
+    /// directory from a killed or aborted prior run masquerade as a fresh
+    /// one. `at_suffix` is the only way to force this deterministically: a
+    /// real `unique_suffix()` value is designed never to repeat.
+    #[test]
+    fn new_refuses_a_path_that_already_exists() {
+        let prefix = "test-scratch-dir-collision";
+        let suffix = 424_242_424_242_424_242_424_242u128;
+        let path =
+            std::env::temp_dir().join(format!("mango-{prefix}-{}-{suffix}", std::process::id()));
+        std::fs::create_dir_all(&path).expect("seed the collision directory");
+
+        let result = std::panic::catch_unwind(|| ScratchDir::at_suffix(prefix, suffix));
+
+        std::fs::remove_dir_all(&path).ok();
+        assert!(
+            result.is_err(),
+            "expected: ScratchDir::new to panic on an already-existing path | found: it \
+             returned Ok, silently handing out a path a previous run may have leaked"
+        );
     }
 }
