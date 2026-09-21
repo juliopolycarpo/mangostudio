@@ -104,6 +104,38 @@ function fakeConnection(
   };
 }
 
+/**
+ * A connector whose first call stalls indefinitely (released only by the
+ * test, via the returned `release`) and whose every later call resolves
+ * immediately with `fresh` — the shape a "does a stale attempt lose to a
+ * newer one" test needs: attempt A must still be pending when attempt B is
+ * made, and only the test controls when A's handshake finally answers.
+ */
+function stalledThenFreshConnector(fresh: ManagedRuntimeConnection): {
+  connector: RuntimeEnvironmentConnector;
+  signals: AbortSignal[];
+  release: (connection: ManagedRuntimeConnection) => void;
+} {
+  const signals: AbortSignal[] = [];
+  let release: (connection: ManagedRuntimeConnection) => void = () => undefined;
+  let attempts = 0;
+  const connector: RuntimeEnvironmentConnector = (_definition, _onUnavailable, context) => {
+    attempts += 1;
+    signals.push(context.signal);
+    if (attempts === 1) {
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    return Promise.resolve(fresh);
+  };
+  return {
+    connector,
+    signals,
+    release: (connection) => release(connection),
+  };
+}
+
 afterEach(() => {
   setRuntimeConnectionManagerForTests(undefined);
   setSystemTime();
@@ -331,11 +363,15 @@ describe('RuntimeConnectionManager', () => {
     expect(await manager.getClient('user-1', 'devbox')).toBe(secondClient);
   });
 
-  it('does not let a cancelled attempt publish its connection over a newer one', async () => {
-    // Attempt A's handshake is held open by the test — a genuinely deferred
-    // connector, not a timing race — so it can be released only after attempt
-    // B has already published, proving the late arrival is discarded rather
-    // than assumed to lose a race it never actually ran.
+  it('discards a superseded attempt that resolves after its signal was aborted', async () => {
+    // Disconnecting attempt A aborts its context signal, but the connector
+    // below never actually honors that signal — it stays pending and later
+    // resolves for real, exactly as a connector that ignores cancellation
+    // would. Attempt A's handshake is held open by the test — a genuinely
+    // deferred connector, not a timing race — so it can be released only
+    // after attempt B has already published, proving the late arrival is
+    // discarded on its own merits (superseded), not merely assumed to lose
+    // a race it never actually ran.
     const closedStale: string[] = [];
     const staleConnection: ManagedRuntimeConnection = {
       client: { manifest: TEST_MANIFEST } as RuntimeClient,
@@ -344,23 +380,10 @@ describe('RuntimeConnectionManager', () => {
       },
     };
     const fresh = fakeConnection(() => undefined);
-    const signals: AbortSignal[] = [];
-    let releaseStale: ((connection: ManagedRuntimeConnection) => void) | undefined;
-    let attempts = 0;
+    const { connector, signals, release } = stalledThenFreshConnector(fresh);
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
-      connectors: {
-        stdio: (_definition, _onUnavailable, context) => {
-          attempts += 1;
-          signals.push(context.signal);
-          if (attempts === 1) {
-            return new Promise((resolve) => {
-              releaseStale = resolve;
-            });
-          }
-          return Promise.resolve(fresh);
-        },
-      },
+      connectors: { stdio: connector },
     });
 
     // Attempt A starts, then the caller gives up on it before it handshakes —
@@ -376,7 +399,7 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
 
     // A's handshake finally answers, after B has already published.
-    releaseStale?.(staleConnection);
+    release(staleConnection);
     await expect(staleAttempt).rejects.toThrow('Runtime connection was closed.');
 
     expect(closedStale).toEqual(['closed']);
