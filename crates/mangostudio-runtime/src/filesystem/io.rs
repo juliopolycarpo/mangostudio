@@ -1482,6 +1482,76 @@ mod tests {
         assert!(!destination.exists());
     }
 
+    #[cfg(target_os = "linux")]
+    struct CrossDeviceFixture {
+        source_root: crate::test_support::ScratchDir,
+        destination_root: PathBuf,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl CrossDeviceFixture {
+        fn new() -> Option<Self> {
+            let source_root = scratch_dir("cross-device-move");
+            let destination_root = Path::new("/dev/shm").join(source_root.file_name().unwrap());
+            if let Err(error) = fs::create_dir(&destination_root) {
+                eprintln!("cross-device fixture unavailable: {error}");
+                return None;
+            }
+            let fixture = Self {
+                source_root,
+                destination_root,
+            };
+            if fs::metadata(&*fixture.source_root).unwrap().dev()
+                == fs::metadata(&fixture.destination_root).unwrap().dev()
+            {
+                eprintln!("cross-device fixture unavailable: temp and /dev/shm share a device");
+                return None;
+            }
+            Some(fixture)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for CrossDeviceFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.destination_root);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cross_device_move_preserves_bytes_mode_and_exclusive_destination() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(fixture) = CrossDeviceFixture::new() else {
+            return;
+        };
+        let from = fixture.source_root.join("source");
+        let to = fixture.destination_root.join("destination");
+        fs::write(&from, b"cross-device bytes").unwrap();
+        fs::set_permissions(&from, fs::Permissions::from_mode(0o640)).unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![
+                fixture.source_root.to_path_buf(),
+                fixture.destination_root.clone(),
+            ],
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        move_no_overwrite(&policy, &from, &to).unwrap();
+        assert!(!from.exists());
+        assert_eq!(fs::read(&to).unwrap(), b"cross-device bytes");
+        assert_eq!(
+            fs::metadata(&to).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert_eq!(fs::read_dir(&*fixture.source_root).unwrap().count(), 0);
+        fs::write(&from, b"second source").unwrap();
+        assert!(move_no_overwrite(&policy, &from, &to).is_err());
+        assert_eq!(fs::read(&from).unwrap(), b"second source");
+        assert_eq!(fs::read(&to).unwrap(), b"cross-device bytes");
+    }
+
     #[test]
     fn atomic_replacement_and_exclusive_creation_preserve_contents() {
         let dir = scratch_dir("fs-io-write");
