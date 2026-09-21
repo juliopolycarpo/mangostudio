@@ -891,7 +891,7 @@ mod tests {
         filesystem::{
             freshness::{ObservedLineRange, ReadObservation},
             policy::PathPolicy,
-            service::{NativeMoveIo, State},
+            service::{NativeMoveIo, NativeWriteIo, State},
         },
         runtime_home::RuntimeSlot,
         test_support::{ScratchDir, scratch_dir},
@@ -903,6 +903,7 @@ mod tests {
             state: Arc::new(State::default()),
             consent: ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
             move_io: Arc::new(NativeMoveIo),
+            write_io: Arc::new(NativeWriteIo),
         });
         (home, service)
     }
@@ -1328,11 +1329,7 @@ mod tests {
             commit_revalidated(&service, &parameters, &planned, &revalidated, &cancel).unwrap_err();
 
         assert_eq!(error.details.as_ref().unwrap()["kind"], "path_access");
-        assert!(
-            error
-                .message
-                .contains("file changed after patch revalidation")
-        );
+        assert!(error.message.contains("file changed after revalidation"));
         assert_eq!(
             error.details.as_ref().unwrap()["changedPaths"],
             json!([first])

@@ -371,11 +371,10 @@ pub(super) fn write_atomic(
 
 /// Replaces a file only while its current bytes still match an observed state.
 ///
-/// The caller must hold every Mango path lock for `path` and retain exclusive
-/// external write access until this function returns. Filesystems do not offer
-/// a portable conditional-replace primitive against an unrelated process;
-/// `fs.apply-patch` serializes Mango writers, while its public contract assigns
-/// exclusion of other writers to the calling environment.
+/// The caller must hold every Mango path lock for `path`. The final identity
+/// and byte check rejects changes observed after preparation, although no
+/// portable filesystem primitive can exclude a separate writer after that
+/// final check and before publication.
 ///
 /// # Example
 ///
@@ -783,7 +782,7 @@ fn matching_destination_identity_in(
 
 fn destination_changed_error(path: &Path) -> RemoteError {
     path_error(format!(
-        "Cannot write \"{}\": the file changed after patch revalidation. Re-read it and retry the patch.",
+        "Cannot write \"{}\": the file changed after revalidation. Re-read it and retry the write.",
         path.display()
     ))
     .with_detail("kind", "file_changed")

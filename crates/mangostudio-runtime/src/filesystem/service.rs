@@ -40,6 +40,7 @@ pub(super) struct Service {
     pub(super) state: Arc<State>,
     pub(super) consent: ConsentSource,
     pub(super) move_io: Arc<dyn MoveIo>,
+    pub(super) write_io: Arc<dyn WriteIo>,
 }
 
 pub(super) trait MoveIo: Send + Sync {
@@ -66,6 +67,30 @@ impl MoveIo for NativeMoveIo {
 
     fn hash_file(&self, policy: &CompiledPolicy, path: &Path) -> Result<String, RemoteError> {
         io::hash_file(policy, path)
+    }
+}
+
+pub(super) trait WriteIo: Send + Sync {
+    fn write_atomic_if_unchanged(
+        &self,
+        policy: &CompiledPolicy,
+        path: &Path,
+        expected: &[u8],
+        bytes: &[u8],
+    ) -> Result<f64, RemoteError>;
+}
+
+pub(super) struct NativeWriteIo;
+
+impl WriteIo for NativeWriteIo {
+    fn write_atomic_if_unchanged(
+        &self,
+        policy: &CompiledPolicy,
+        path: &Path,
+        expected: &[u8],
+        bytes: &[u8],
+    ) -> Result<f64, RemoteError> {
+        io::write_atomic_if_unchanged(policy, path, expected, bytes)
     }
 }
 
@@ -303,24 +328,26 @@ impl Service {
                 &cancel,
             )?;
             let exists = io::path_is_file(&policy, &params.resolved_path)?;
-            let before = if exists && !exclusive && params.mutation.capture_snapshot {
-                let (size, _) = io::current_metadata(&policy, &params.resolved_path)?;
-                snapshot_limit(&params.resolved_path, size as usize)?;
-                Some(io::read(&policy, &params.resolved_path, 8 * 1024 * 1024, &cancel)?)
+            let observed = if exists && !exclusive {
+                Some(
+                    self.read_fresh(
+                        &policy,
+                        &params.mutation.chat_id,
+                        &params.resolved_path,
+                        &cancel,
+                    )
+                    .map_err(|error| {
+                        io::explain_unread(&policy, &params.resolved_path, "overwrite", error)
+                    })?,
+                )
             } else {
                 None
             };
             if params.mutation.capture_snapshot {
                 snapshot_limit(
                     &params.resolved_path,
-                    before.as_ref().map_or(0, |value| value.bytes.len()),
+                    observed.as_ref().map_or(0, |value| value.bytes.len()),
                 )?;
-            }
-            if exists && !exclusive {
-                self.assert_current(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
-                    .map_err(|error| {
-                        io::explain_unread(&policy, &params.resolved_path, "overwrite", error)
-                    })?;
             }
             let expected_hash = hash_hex(&Sha256::digest(params.content.as_bytes()));
             let mut result =
@@ -333,7 +360,7 @@ impl Service {
                 &params.mutation,
                 &params.resolved_path,
                 if exists { "edit" } else { "create" },
-                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                observed.as_ref().map(|observed| observed.bytes.as_slice()),
                 &expected_hash,
                 None,
             );
@@ -356,7 +383,15 @@ impl Service {
                     },
                 )?
             } else {
-                io::write_atomic(&policy, &params.resolved_path, params.content.as_bytes(), false)?
+                self.write_io.write_atomic_if_unchanged(
+                    &policy,
+                    &params.resolved_path,
+                    &observed
+                        .as_ref()
+                        .expect("existing overwrite retained its observed state")
+                        .bytes,
+                    params.content.as_bytes(),
+                )?
             };
             let hash = lock(&self.state.ledger).record_read(
                 &params.mutation.chat_id,
@@ -471,7 +506,12 @@ impl Service {
                 &[&params.resolved_path],
                 &cancel,
             )?;
-            let mtime = io::write_atomic(&policy, &params.resolved_path, &updated, false)?;
+            let mtime = self.write_io.write_atomic_if_unchanged(
+                &policy,
+                &params.resolved_path,
+                &observed.bytes,
+                &updated,
+            )?;
             let changed_lines = params.old_string.bytes().filter(|byte| *byte == b'\n').count() != params.new_string.bytes().filter(|byte| *byte == b'\n').count();
             let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES };
             let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
@@ -520,7 +560,12 @@ impl Service {
                 &[&params.resolved_path],
                 &cancel,
             )?;
-            let mtime = io::write_atomic(&policy, &params.resolved_path, &updated, false)?;
+            let mtime = self.write_io.write_atomic_if_unchanged(
+                &policy,
+                &params.resolved_path,
+                &observed.bytes,
+                &updated,
+            )?;
             let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES} else {(start-1) as u64};
             let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
             debug_assert_eq!(hash, expected_hash);
@@ -903,6 +948,7 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
         state: Arc::clone(STATE.get_or_init(|| Arc::new(State::default()))),
         consent,
         move_io: Arc::new(NativeMoveIo),
+        write_io: Arc::new(NativeWriteIo),
     });
     let read = Arc::clone(&service);
     let write = Arc::clone(&service);
@@ -990,15 +1036,27 @@ mod tests {
     use crate::test_support::{ScratchDir, scratch_dir};
 
     fn fixture() -> (ScratchDir, Arc<Service>) {
-        fixture_with_move_io(Arc::new(NativeMoveIo))
+        fixture_with_io(Arc::new(NativeMoveIo), Arc::new(NativeWriteIo))
     }
 
     fn fixture_with_move_io(move_io: Arc<dyn MoveIo>) -> (ScratchDir, Arc<Service>) {
+        fixture_with_io(move_io, Arc::new(NativeWriteIo))
+    }
+
+    fn fixture_with_write_io(write_io: Arc<dyn WriteIo>) -> (ScratchDir, Arc<Service>) {
+        fixture_with_io(Arc::new(NativeMoveIo), write_io)
+    }
+
+    fn fixture_with_io(
+        move_io: Arc<dyn MoveIo>,
+        write_io: Arc<dyn WriteIo>,
+    ) -> (ScratchDir, Arc<Service>) {
         let home = scratch_dir("filesystem-service");
         let service = Arc::new(Service {
             state: Arc::new(State::default()),
             consent: ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
             move_io,
+            write_io,
         });
         (home, service)
     }
@@ -1040,6 +1098,23 @@ mod tests {
                 "Cannot hash \"{}\": injected failure.",
                 path.display()
             )))
+        }
+    }
+
+    struct ReplacingWriteIo {
+        replacement: Vec<u8>,
+    }
+
+    impl WriteIo for ReplacingWriteIo {
+        fn write_atomic_if_unchanged(
+            &self,
+            policy: &CompiledPolicy,
+            path: &Path,
+            expected: &[u8],
+            bytes: &[u8],
+        ) -> Result<f64, RemoteError> {
+            std::fs::write(path, &self.replacement).map_err(io::io_error)?;
+            io::write_atomic_if_unchanged(policy, path, expected, bytes)
         }
     }
 
@@ -1479,6 +1554,63 @@ mod tests {
             .unwrap_err();
         assert_eq!(stale.details.unwrap()["kind"], "stale_file");
         assert_eq!(std::fs::read(&path).unwrap(), b"external");
+    }
+
+    #[tokio::test]
+    async fn standalone_writes_refuse_post_read_external_changes() {
+        let replacement = b"external\n".to_vec();
+        let (home, service) = fixture_with_write_io(Arc::new(ReplacingWriteIo {
+            replacement: replacement.clone(),
+        }));
+        let cancel = CancellationToken::new();
+
+        let write_path = home.join("write");
+        seed_and_read(&service, &write_path, b"before\n").await;
+        let error = Arc::clone(&service)
+            .write(
+                write_params(&write_path, "replacement\n"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "file_changed");
+        assert_eq!(std::fs::read(&write_path).unwrap(), replacement);
+
+        let edit_path = home.join("edit");
+        seed_and_read(&service, &edit_path, b"before\n").await;
+        let error = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputPath":"edit", "resolvedPath":edit_path,
+                    "oldString":"before", "newString":"replacement"
+                })),
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "file_changed");
+        assert_eq!(std::fs::read(&edit_path).unwrap(), replacement);
+
+        let range_path = home.join("range");
+        seed_and_read(&service, &range_path, b"before\n").await;
+        let error = Arc::clone(&service)
+            .replace_range(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputPath":"range", "resolvedPath":range_path,
+                    "startLine":1, "endLine":1, "content":"replacement"
+                })),
+                ResponseBudget::unbounded(),
+                cancel,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "file_changed");
+        assert_eq!(std::fs::read(&range_path).unwrap(), replacement);
     }
 
     #[tokio::test]
