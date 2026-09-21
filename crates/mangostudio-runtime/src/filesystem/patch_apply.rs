@@ -7,7 +7,11 @@ use std::{
 };
 
 use base64::Engine;
-use mango_protocol::error::{RemoteError, codes};
+use mango_protocol::{
+    Frame,
+    error::{RemoteError, codes},
+    frame::Response,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -90,6 +94,8 @@ pub(super) async fn apply(
     service: Arc<Service>,
     params: ApplyPatchParams,
     cancel: CancellationToken,
+    response_id: String,
+    response_limit_bytes: usize,
 ) -> Result<Value, RemoteError> {
     let plan_params = params.clone();
     let planned = run_blocking({
@@ -99,6 +105,7 @@ pub(super) async fn apply(
     })
     .await?;
     assert_no_path_conflicts(&planned)?;
+    preflight_snapshot_response(&params, &planned, response_id, response_limit_bytes)?;
     let paths = planned.iter().flat_map(operation_paths).collect::<Vec<_>>();
     let guards = service
         .state
@@ -162,11 +169,18 @@ fn plan_operation(
         PatchOperation::Delete {
             input_path,
             resolved_path,
-        } => Ok(PlannedOperation::Delete {
-            input_path: input_path.clone(),
-            resolved_path: resolved_path.clone(),
-            source: read_patch_target(service, &mutation.chat_id, resolved_path, cancel)?.bytes,
-        }),
+        } => {
+            let source =
+                read_patch_target(service, &mutation.chat_id, resolved_path, cancel)?.bytes;
+            if mutation.capture_snapshot {
+                super::service::snapshot_limit(resolved_path, source.len())?;
+            }
+            Ok(PlannedOperation::Delete {
+                input_path: input_path.clone(),
+                resolved_path: resolved_path.clone(),
+                source,
+            })
+        }
         PatchOperation::Update {
             input_path,
             resolved_path,
@@ -175,6 +189,9 @@ fn plan_operation(
             hunks,
         } => {
             let observed = read_patch_target(service, &mutation.chat_id, resolved_path, cancel)?;
+            if mutation.capture_snapshot {
+                super::service::snapshot_limit(resolved_path, observed.bytes.len())?;
+            }
             let source = std::str::from_utf8(&observed.bytes).map_err(|_| {
                 io::path_error(format!(
                     "Cannot patch \"{input_path}\": the file is not valid UTF-8 text."
@@ -239,6 +256,7 @@ fn commit_revalidated(
     )?;
 
     let mut writes = vec![None; planned.len()];
+    let mut move_hashes = vec![None; planned.len()];
     let mut changed_paths = Vec::new();
     for (index, operation) in planned.iter().enumerate() {
         let result = match operation {
@@ -267,7 +285,7 @@ fn commit_revalidated(
             Err(error) => return Err(commit_error(&changed_paths, error)),
         }
     }
-    for operation in planned {
+    for (index, operation) in planned.iter().enumerate() {
         let PlannedOperation::Update {
             resolved_path,
             resolved_move_to: Some(destination),
@@ -277,9 +295,15 @@ fn commit_revalidated(
             continue;
         };
         if let Err(error) = io::move_no_overwrite(resolved_path, destination) {
+            record_uncertain_move_paths(&mut changed_paths, resolved_path, destination, &error);
             return Err(commit_error(&changed_paths, error));
         }
+        changed_paths.push(resolved_path.clone());
         changed_paths.push(destination.clone());
+        match io::hash_file(destination) {
+            Ok(hash) => move_hashes[index] = Some(hash),
+            Err(error) => return Err(commit_error(&changed_paths, error)),
+        }
     }
     for operation in planned {
         let PlannedOperation::Delete { resolved_path, .. } = operation else {
@@ -295,7 +319,25 @@ fn commit_revalidated(
         }
         changed_paths.push(resolved_path.clone());
     }
-    outcomes(service, params, planned, revalidated, &writes)
+    outcomes(service, params, planned, revalidated, &writes, &move_hashes)
+}
+
+fn record_uncertain_move_paths(
+    changed_paths: &mut Vec<PathBuf>,
+    source: &Path,
+    destination: &Path,
+    error: &RemoteError,
+) {
+    let changed = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("pathsMayHaveChanged"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    if changed {
+        changed_paths.push(source.to_path_buf());
+        changed_paths.push(destination.to_path_buf());
+    }
 }
 
 fn revalidate_operations(
@@ -394,6 +436,7 @@ fn outcomes(
     planned: &[PlannedOperation],
     revalidated: &[Option<Revalidated>],
     writes: &[Option<f64>],
+    move_hashes: &[Option<String>],
 ) -> Result<Value, RemoteError> {
     let mut files = Vec::with_capacity(planned.len());
     let mut mutations = Vec::new();
@@ -489,7 +532,9 @@ fn outcomes(
                         "move",
                         Some(&current.bytes),
                         Some(target),
-                        &sha256,
+                        move_hashes[index]
+                            .as_deref()
+                            .expect("committed move has a destination hash"),
                     );
                 } else {
                     files.push(json!({"path":input_path,"op":"update","sha256":sha256}));
@@ -510,6 +555,111 @@ fn outcomes(
     Ok(
         json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations}),
     )
+}
+
+fn preflight_snapshot_response(
+    params: &ApplyPatchParams,
+    planned: &[PlannedOperation],
+    response_id: String,
+    response_limit_bytes: usize,
+) -> Result<(), RemoteError> {
+    if !params.mutation.capture_snapshot {
+        return Ok(());
+    }
+    const HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+    let mut files = Vec::with_capacity(planned.len());
+    let mut mutations = Vec::with_capacity(planned.len());
+    for operation in planned {
+        match operation {
+            PlannedOperation::Add {
+                input_path,
+                resolved_path,
+                ..
+            } => {
+                files.push(json!({"path":input_path,"op":"add","sha256":HASH}));
+                push_snapshot(
+                    &mut mutations,
+                    params,
+                    resolved_path,
+                    "create",
+                    None,
+                    None,
+                    HASH,
+                );
+            }
+            PlannedOperation::Delete {
+                input_path,
+                resolved_path,
+                source,
+            } => {
+                files.push(json!({"path":input_path,"op":"delete"}));
+                push_snapshot(
+                    &mut mutations,
+                    params,
+                    resolved_path,
+                    "delete",
+                    Some(source),
+                    None,
+                    "absent",
+                );
+            }
+            PlannedOperation::Update {
+                input_path,
+                resolved_path,
+                move_to,
+                resolved_move_to,
+                source,
+                ..
+            } => {
+                if let Some(moved_to) = move_to {
+                    files.push(
+                        json!({"path":input_path,"op":"move","movedTo":moved_to,"sha256":HASH}),
+                    );
+                    push_snapshot(
+                        &mut mutations,
+                        params,
+                        resolved_path,
+                        "move",
+                        Some(source),
+                        resolved_move_to.as_deref(),
+                        HASH,
+                    );
+                } else {
+                    files.push(json!({"path":input_path,"op":"update","sha256":HASH}));
+                    push_snapshot(
+                        &mut mutations,
+                        params,
+                        resolved_path,
+                        "edit",
+                        Some(source),
+                        None,
+                        HASH,
+                    );
+                }
+            }
+        }
+    }
+    let count = files.len();
+    let result = json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations});
+    let frame = Frame::Res(Response {
+        id: response_id,
+        result,
+    });
+    let size = serde_json::to_vec(&frame)
+        .expect("a filesystem patch response always serializes")
+        .len();
+    if size <= response_limit_bytes {
+        return Ok(());
+    }
+    Err(RemoteError::new(
+        codes::FRAME_TOO_LARGE,
+        format!(
+            "Cannot checkpoint patch response: it is {size} bytes, but the negotiated frame limit is {response_limit_bytes} bytes. Split the patch into smaller calls or disable snapshot capture."
+        ),
+    )
+    .with_detail("kind", "snapshot_too_large")
+    .with_detail("sizeBytes", size)
+    .with_detail("limitBytes", response_limit_bytes))
 }
 
 fn push_snapshot(
@@ -580,15 +730,20 @@ fn assert_text(content: &str, input_path: &str) -> Result<(), RemoteError> {
 }
 
 fn assert_no_path_conflicts(planned: &[PlannedOperation]) -> Result<(), RemoteError> {
-    let mut owners = std::collections::HashMap::new();
+    let mut owners: Vec<(PathBuf, String)> = Vec::new();
     let mut failures = Vec::new();
     for operation in planned {
         let description = describe_planned(operation);
         for path in operation_paths(operation) {
-            if let Some(owner) = owners.get(&path) {
+            let effective = crate::workspace::resolve_through_existing_ancestor(&path)
+                .unwrap_or_else(|| path.clone());
+            if let Some((_, owner)) = owners.iter().find(|(owned, _)| {
+                super::policy::is_prefix(owned, &effective)
+                    || super::policy::is_prefix(&effective, owned)
+            }) {
                 failures.push(format!("{description}: path conflicts with {owner}."));
             } else {
-                owners.insert(path, description.clone());
+                owners.push((effective, description.clone()));
             }
         }
     }
@@ -741,6 +896,21 @@ mod tests {
         serde_json::from_value(value).expect("valid apply-patch parameters")
     }
 
+    async fn apply(
+        service: Arc<Service>,
+        params: ApplyPatchParams,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        super::apply(
+            service,
+            params,
+            cancel,
+            "test-request".to_string(),
+            mango_protocol::codec::ndjson::DEFAULT_MAX_FRAME_BYTES,
+        )
+        .await
+    }
+
     fn mark_read(service: &Service, path: &Path) {
         let bytes = fs::read(path).expect("fixture file exists");
         lock(&service.state.ledger).record_read(
@@ -857,6 +1027,188 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code, codes::CANCELLED);
         assert_eq!(service.state.locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn rejects_ancestor_conflicts_in_either_order_before_any_write() {
+        for reverse in [false, true] {
+            let (home, service) = fixture();
+            let parent = home.join("parent");
+            let child = parent.join("child.txt");
+            let mut operations = vec![
+                json!({"type":"add","inputPath":"parent","resolvedPath":parent,"content":"parent"}),
+                json!({"type":"add","inputPath":"parent/child.txt","resolvedPath":child,"content":"child"}),
+            ];
+            if reverse {
+                operations.reverse();
+            }
+            let error = apply(
+                Arc::clone(&service),
+                params(json!({"chatId":"chat","captureSnapshot":false,"operations":operations})),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+            assert!(!parent.exists());
+            assert!(!child.exists());
+        }
+
+        let (home, service) = fixture();
+        let first = home.join("name");
+        let second = home.join("name-longer");
+        apply(
+            service,
+            params(
+                json!({"chatId":"chat","captureSnapshot":false,"operations":[
+                    {"type":"add","inputPath":"name","resolvedPath":first,"content":"one"},
+                    {"type":"add","inputPath":"name-longer","resolvedPath":second,"content":"two"}
+                ]}),
+            ),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(fs::read_to_string(first).unwrap(), "one");
+        assert_eq!(fs::read_to_string(second).unwrap(), "two");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_patch_conflicts_reached_through_symlinked_parents() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let real = home.join("real");
+        let alias = home.join("alias");
+        fs::create_dir(&real).unwrap();
+        symlink(&real, &alias).unwrap();
+        let aliased = alias.join("file.txt");
+        let direct = real.join("file.txt");
+        fs::write(&direct, "unchanged\n").unwrap();
+        mark_read(&service, &aliased);
+        mark_read(&service, &direct);
+        let error = apply(
+            service,
+            params(
+                json!({"chatId":"chat","captureSnapshot":false,"operations":[
+                    {"type":"delete","inputPath":"alias/file.txt","resolvedPath":aliased},
+                    {"type":"delete","inputPath":"real/file.txt","resolvedPath":direct}
+                ]}),
+            ),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        assert_eq!(
+            fs::read_to_string(real.join("file.txt")).unwrap(),
+            "unchanged\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_an_aggregate_snapshot_past_the_frame_limit_before_mutating() {
+        let (home, service) = fixture();
+        let first = home.join("first.txt");
+        let second = home.join("second.txt");
+        fs::write(&first, vec![b'a'; 1_600]).unwrap();
+        fs::write(&second, vec![b'b'; 1_600]).unwrap();
+        mark_read(&service, &first);
+        mark_read(&service, &second);
+        let error = super::apply(
+            service,
+            params(json!({"chatId":"chat","captureSnapshot":true,"operations":[
+                {"type":"delete","inputPath":"first.txt","resolvedPath":first},
+                {"type":"delete","inputPath":"second.txt","resolvedPath":second}
+            ]})),
+            CancellationToken::new(),
+            "small-frame".to_string(),
+            mango_protocol::codec::ndjson::MIN_MAX_FRAME_BYTES,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+        assert_eq!(
+            error.details.as_ref().unwrap()["kind"],
+            "snapshot_too_large"
+        );
+        assert_eq!(error.details.as_ref().unwrap()["limitBytes"], 4_096);
+        assert_eq!(fs::read(&first).unwrap(), vec![b'a'; 1_600]);
+        assert_eq!(fs::read(&second).unwrap(), vec![b'b'; 1_600]);
+    }
+
+    #[test]
+    fn move_snapshot_uses_the_committed_destination_hash() {
+        let (home, service) = fixture();
+        let source = home.join("source.txt");
+        let destination = home.join("destination.txt");
+        fs::write(&source, "source\n").unwrap();
+        mark_read(&service, &source);
+        let parameters = params(json!({
+            "chatId":"chat", "captureSnapshot":true,
+            "operations":[{"type":"update","inputPath":"source.txt","resolvedPath":source,"moveTo":"destination.txt","resolvedMoveTo":destination,"hunks":[]}]
+        }));
+        let cancel = CancellationToken::new();
+        let planned = plan_operations(&service, &parameters, &cancel).unwrap();
+        let revalidated = revalidate_operations(&service, &parameters, &planned, &cancel).unwrap();
+        io::move_no_overwrite(&source, &destination).unwrap();
+        fs::write(&destination, "external\n").unwrap();
+        let committed_hash = io::hash_file(&destination).unwrap();
+        let result = outcomes(
+            &service,
+            &parameters,
+            &planned,
+            &revalidated,
+            &[None],
+            &[Some(committed_hash.clone())],
+        )
+        .unwrap();
+        assert_eq!(result["mutations"][0]["afterHash"], committed_hash);
+        assert_ne!(result["result"]["files"][0]["sha256"], committed_hash);
+    }
+
+    #[test]
+    fn reports_both_move_paths_when_a_later_move_fails() {
+        let (home, service) = fixture();
+        let first = home.join("first.txt");
+        let first_to = home.join("first-to.txt");
+        let second = home.join("second.txt");
+        let second_to = home.join("second-to.txt");
+        fs::write(&first, "one\n").unwrap();
+        fs::write(&second, "two\n").unwrap();
+        mark_read(&service, &first);
+        mark_read(&service, &second);
+        let parameters = params(json!({
+            "chatId":"chat", "captureSnapshot":false,
+            "operations":[
+                {"type":"update","inputPath":"first.txt","resolvedPath":first,"moveTo":"first-to.txt","resolvedMoveTo":first_to,"hunks":[]},
+                {"type":"update","inputPath":"second.txt","resolvedPath":second,"moveTo":"second-to.txt","resolvedMoveTo":second_to,"hunks":[]}
+            ]
+        }));
+        let cancel = CancellationToken::new();
+        let planned = plan_operations(&service, &parameters, &cancel).unwrap();
+        let revalidated = revalidate_operations(&service, &parameters, &planned, &cancel).unwrap();
+        fs::write(&second_to, "external\n").unwrap();
+        let error =
+            commit_revalidated(&service, &parameters, &planned, &revalidated, &cancel).unwrap_err();
+        assert_eq!(
+            error.details.unwrap()["changedPaths"],
+            json!([first, first_to])
+        );
+        assert!(!first.exists());
+        assert_eq!(fs::read_to_string(first_to).unwrap(), "one\n");
+        assert_eq!(fs::read_to_string(second).unwrap(), "two\n");
+    }
+
+    #[test]
+    fn reports_both_move_paths_when_publication_may_have_partially_failed() {
+        let source = PathBuf::from("source.txt");
+        let destination = PathBuf::from("destination.txt");
+        let error = io::path_error("partial move").with_detail("pathsMayHaveChanged", true);
+        let mut changed_paths = Vec::new();
+        record_uncertain_move_paths(&mut changed_paths, &source, &destination, &error);
+        assert_eq!(changed_paths, vec![source, destination]);
     }
 
     #[cfg(unix)]

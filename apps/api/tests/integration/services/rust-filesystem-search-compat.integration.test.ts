@@ -35,12 +35,16 @@ describe.skipIf(!binary.available)('Rust filesystem search matches the TypeScrip
     directory = join(await realpath(home), 'fixtures');
     await mkdir(join(directory, 'nested'), { recursive: true });
     await mkdir(join(directory, '.hidden'));
+    await mkdir(join(directory, '..', 'outside'));
     await writeFile(join(directory, 'a.txt'), 'foofoo\r\nFOO\n😀\n');
     await writeFile(join(directory, 'b.ts'), 'é １２ _ 1\nfoo\n');
     await writeFile(join(directory, 'nested', 'c.txt'), '\ufefffoo\nhit\nhit\n');
     await writeFile(join(directory, '.hidden', 'secret.txt'), 'foo\n');
+    await writeFile(join(directory, '.hidden', '.secret.txt'), 'foo\n');
     await writeFile(join(directory, '.dot.txt'), 'foo\n');
     await writeFile(join(directory, 'binary.txt'), Buffer.from('foo\0'));
+    await writeFile(join(directory, '..', 'outside', 'parent.txt'), 'foo\n');
+    if (process.platform !== 'win32') await writeFile(join(directory, 'a*b.txt'), 'foo\n');
     rustConnection = await spawnRuntimeChild({
       environmentId: 'rust-search-compat',
       launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
@@ -80,6 +84,10 @@ describe.skipIf(!binary.available)('Rust filesystem search matches the TypeScrip
       'nested',
       'nested/',
       '!*.ts',
+      '../outside/*.txt',
+      'missing/*.txt',
+      'a.txt/*',
+      ...(process.platform === 'win32' ? [] : ['a\\*b.txt']),
       join(directory, '*.txt'),
     ]) {
       for (const [includeDotfiles, maxResults, absolute] of [
@@ -107,6 +115,30 @@ describe.skipIf(!binary.available)('Rust filesystem search matches the TypeScrip
       }
     }
     expect(mismatches).toEqual([]);
+  });
+
+  it('agrees on per-component dot rules and parent or escaped grep filters', async () => {
+    for (const glob of [
+      '.hidden/*',
+      '../outside/*.txt',
+      './*.txt',
+      'missing/*.txt',
+      'a.txt/*',
+      ...(process.platform === 'win32' ? [] : ['a\\*b.txt']),
+    ]) {
+      const params = {
+        pattern: 'foo',
+        inputPath: '.',
+        resolvedPath: directory,
+        glob,
+        caseInsensitive: false,
+        maxResults: 100,
+        maxMatchesPerFile: 10,
+        maxFileSizeBytes: 1024,
+        includeDotfiles: false,
+      };
+      expect(await rust.fs.grep(params)).toEqual(await typescript.fs.grep(params));
+    }
   });
 
   it('agrees on ECMAScript UTF-16, captures, lookbehind, boundaries, and file caps', async () => {

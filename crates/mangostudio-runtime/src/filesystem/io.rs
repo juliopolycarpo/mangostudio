@@ -320,9 +320,7 @@ pub(super) fn move_no_overwrite(from: &Path, to: &Path) -> Result<(), RemoteErro
     fs::create_dir_all(to.parent().unwrap_or(Path::new("."))).map_err(io_error)?;
     match fs::hard_link(from, to) {
         Ok(()) => {}
-        Err(error) if link_unsupported(&error) => {
-            copy_exclusive(from, to, metadata.permissions()).map_err(io_error)?
-        }
+        Err(error) if link_unsupported(&error) => copy_exclusive(from, to, metadata.permissions())?,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(path_error(format!(
                 "\"{}\" already exists. Choose a different destination.",
@@ -333,15 +331,20 @@ pub(super) fn move_no_overwrite(from: &Path, to: &Path) -> Result<(), RemoteErro
     }
     if let Err(error) = fs::remove_file(from) {
         if fs::remove_file(to).is_err() {
-            return Err(path_error(format!(
-                "Could not complete the move from \"{}\" to \"{}\", and cleanup also failed. Both paths may exist.",
-                from.display(),
-                to.display()
-            )));
+            return Err(incomplete_move_error(from, to));
         }
         return Err(io_error(error));
     }
     Ok(())
+}
+
+fn incomplete_move_error(from: &Path, to: &Path) -> RemoteError {
+    path_error(format!(
+        "Could not complete the move from \"{}\" to \"{}\", and cleanup also failed. Both paths may exist.",
+        from.display(),
+        to.display()
+    ))
+    .with_detail("pathsMayHaveChanged", true)
 }
 
 fn link_unsupported(error: &std::io::Error) -> bool {
@@ -354,25 +357,42 @@ fn link_unsupported(error: &std::io::Error) -> bool {
     )
 }
 
-fn copy_exclusive(from: &Path, to: &Path, permissions: fs::Permissions) -> std::io::Result<()> {
-    let mut source = open_read(from)?;
-    if !source.metadata()?.is_file() {
-        return Err(std::io::Error::new(
+fn copy_exclusive(from: &Path, to: &Path, permissions: fs::Permissions) -> Result<(), RemoteError> {
+    let mut source = open_read(from).map_err(io_error)?;
+    if !source.metadata().map_err(io_error)?.is_file() {
+        return Err(io_error(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!(
                 "Cannot move \"{}\": expected a regular file.",
                 from.display()
             ),
-        ));
+        )));
     }
-    let mut destination = OpenOptions::new().write(true).create_new(true).open(to)?;
+    let mut destination = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(to)
+        .map_err(io_error)?;
     let result = std::io::copy(&mut source, &mut destination)
-        .and_then(|_| destination.set_permissions(permissions));
+        .and_then(|_| destination.set_permissions(permissions))
+        .map(|_| ());
     drop(destination);
-    if result.is_err() {
-        let _ = fs::remove_file(to);
+    finish_exclusive_copy(from, to, result, |path| fs::remove_file(path))
+}
+
+fn finish_exclusive_copy(
+    from: &Path,
+    to: &Path,
+    result: std::io::Result<()>,
+    cleanup: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Result<(), RemoteError> {
+    let Err(error) = result else {
+        return Ok(());
+    };
+    if cleanup(to).is_err() {
+        return Err(incomplete_move_error(from, to));
     }
-    result
+    Err(io_error(error))
 }
 
 #[cfg(test)]
@@ -485,15 +505,15 @@ mod tests {
                 .contains("not a regular file")
         );
         let destination = dir.join("copy");
-        assert_eq!(
+        assert!(
             copy_exclusive(
                 &path,
                 &destination,
                 fs::metadata(&path).unwrap().permissions()
             )
             .unwrap_err()
-            .kind(),
-            std::io::ErrorKind::InvalidInput
+            .message
+            .contains("expected a regular file")
         );
         assert!(!destination.exists());
     }
@@ -547,6 +567,20 @@ mod tests {
         assert!(link_unsupported(&std::io::Error::from(
             std::io::ErrorKind::CrossesDevices
         )));
+        let incomplete = incomplete_move_error(&from, &to);
+        assert_eq!(incomplete.details.unwrap()["pathsMayHaveChanged"], true);
+
+        fn cleanup_refused(_: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        }
+        let incomplete = finish_exclusive_copy(
+            &from,
+            &to,
+            Err(std::io::Error::from(std::io::ErrorKind::WriteZero)),
+            cleanup_refused,
+        )
+        .unwrap_err();
+        assert_eq!(incomplete.details.unwrap()["pathsMayHaveChanged"], true);
     }
 
     #[cfg(unix)]

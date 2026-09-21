@@ -17,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::io::{check_cancel, io_error, path_error, read};
 use super::policy::PathPolicy;
+use crate::workspace::lexically_normalize;
 
 const MAX_PATTERN_UTF16_UNITS: usize = 1_000;
 const MAX_CANDIDATES: usize = 100_000;
@@ -71,61 +72,56 @@ fn deserialize_size<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<usiz
 /// Finds files and directories matching Bun's path-oriented glob subset.
 pub(super) fn glob(params: GlobParams, cancel: &CancellationToken) -> Result<Value, RemoteError> {
     check_cancel(cancel)?;
-    let absolute_pattern = Path::new(params.pattern.trim_start_matches('!')).is_absolute();
-    let scan_root = if absolute_pattern {
-        absolute_glob_root(params.pattern.trim_start_matches('!'))
-    } else {
-        params.cwd.clone()
-    };
+    let search = search_root(&params.pattern, &params.cwd);
     let policy = params.path_policy.compile()?;
     policy.check(&params.cwd)?;
-    policy.check(&scan_root)?;
+    policy.check(&search.root)?;
     let matcher = compile_glob(&params.pattern, &params.cwd)?;
     let mut matches = Vec::with_capacity(params.max_results.min(5_000));
     let mut truncated = false;
     let mut candidates = 0;
 
-    walk(&scan_root, cancel, |relative, absolute, is_directory| {
-        candidates += 1;
-        if candidates > MAX_CANDIDATES {
-            truncated = true;
-            return Ok(WalkControl::Stop);
-        }
-        if !params.include_dotfiles
-            && hidden_path(relative)
-            && !pattern_names_hidden(params.pattern.trim_start_matches("./"))
-        {
-            return Ok(WalkControl::Continue);
-        }
-        let relative_text = slash_path(if absolute_pattern { absolute } else { relative });
-        if !matcher.is_match(&relative_text)
-            || (params.pattern.ends_with('/') && !is_directory)
-            || (is_directory
-                && params.pattern.ends_with("/**")
-                && relative_text == params.pattern.trim_end_matches("/**"))
-        {
-            return Ok(WalkControl::Continue);
-        }
-        if !policy.allows(absolute) {
-            return Ok(WalkControl::Continue);
-        }
-        if matches.len() >= params.max_results {
-            truncated = true;
-            return Ok(WalkControl::Stop);
-        }
-        matches.push(if params.absolute || absolute_pattern {
-            absolute.to_string_lossy().into_owned()
-        } else if params.pattern.starts_with("./") {
-            format!(
-                ".{}{}",
-                std::path::MAIN_SEPARATOR,
-                relative.to_string_lossy()
-            )
-        } else {
-            relative.to_string_lossy().into_owned()
-        });
-        Ok(WalkControl::Continue)
-    })
+    walk(
+        &search.root,
+        search.missing_root_is_empty,
+        cancel,
+        |relative, absolute, is_directory| {
+            candidates += 1;
+            if candidates > MAX_CANDIDATES {
+                truncated = true;
+                return Ok(WalkControl::Stop);
+            }
+            let match_path = if search.absolute {
+                absolute.to_path_buf()
+            } else {
+                search.prefix.join(relative)
+            };
+            let relative_text = slash_path(&match_path);
+            if !matcher.is_match(&relative_text)
+                || (!params.include_dotfiles
+                    && !dot_components_allowed(&params.pattern, &relative_text))
+                || (params.pattern.ends_with('/') && !is_directory)
+                || (is_directory
+                    && params.pattern.ends_with("/**")
+                    && relative_text == params.pattern.trim_end_matches("/**"))
+            {
+                return Ok(WalkControl::Continue);
+            }
+            if !policy.allows(absolute) {
+                return Ok(WalkControl::Continue);
+            }
+            if matches.len() >= params.max_results {
+                truncated = true;
+                return Ok(WalkControl::Stop);
+            }
+            matches.push(if params.absolute || search.absolute {
+                absolute.to_string_lossy().into_owned()
+            } else {
+                search.display_path(&match_path)
+            });
+            Ok(WalkControl::Continue)
+        },
+    )
     .map_err(|error| {
         if error.code == codes::CANCELLED || error.details.is_some() {
             return error;
@@ -172,10 +168,13 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("**/*");
+        let search = search_root(filter, &params.resolved_path);
+        policy.check(&search.root)?;
         let file_matcher = compile_glob(filter, &params.resolved_path)?;
         let mut candidates = 0usize;
         walk(
-            &params.resolved_path,
+            &search.root,
+            search.missing_root_is_empty,
             cancel,
             |relative, absolute, is_directory| {
                 candidates += 1;
@@ -183,21 +182,25 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
                     truncated = true;
                     return Ok(WalkControl::Stop);
                 }
-                if is_directory
-                    || (!params.include_dotfiles
-                        && hidden_path(relative)
-                        && !pattern_names_hidden(filter))
-                {
+                if is_directory {
                     return Ok(WalkControl::Continue);
                 }
-                let relative_text = slash_path(relative);
-                if !file_matcher.is_match(&relative_text) || !policy.allows(absolute) {
+                let match_path = if search.absolute {
+                    absolute.to_path_buf()
+                } else {
+                    search.prefix.join(relative)
+                };
+                let relative_text = slash_path(&match_path);
+                if !file_matcher.is_match(&relative_text)
+                    || (!params.include_dotfiles && !dot_components_allowed(filter, &relative_text))
+                    || !policy.allows(absolute)
+                {
                     return Ok(WalkControl::Continue);
                 }
                 files_scanned += 1;
                 if scan_file(
                     absolute,
-                    &relative.to_string_lossy(),
+                    &search.display_path(&match_path),
                     &params.pattern,
                     &params,
                     cancel,
@@ -255,20 +258,77 @@ impl PathGlob {
     }
 }
 
-fn absolute_glob_root(pattern: &str) -> PathBuf {
-    let path = Path::new(pattern);
-    let mut root = PathBuf::new();
-    for component in path.components() {
-        if component
-            .as_os_str()
-            .to_string_lossy()
-            .contains(['*', '?', '[', '{'])
-        {
-            return root;
+struct SearchRoot {
+    root: PathBuf,
+    prefix: PathBuf,
+    absolute: bool,
+    explicit_current: bool,
+    missing_root_is_empty: bool,
+}
+
+impl SearchRoot {
+    fn display_path(&self, path: &Path) -> String {
+        if self.explicit_current && !self.absolute {
+            return format!(".{}{}", std::path::MAIN_SEPARATOR, path.to_string_lossy());
         }
-        root.push(component);
+        path.to_string_lossy().into_owned()
     }
-    root.parent().unwrap_or(path).to_path_buf()
+}
+
+fn search_root(pattern: &str, cwd: &Path) -> SearchRoot {
+    let positive = pattern.trim_start_matches('!');
+    let negated = (pattern.len() - positive.len()) % 2 == 1;
+    let positive = positive.trim_end_matches('/');
+    let explicit_current = positive.starts_with("./");
+    let positive = positive.strip_prefix("./").unwrap_or(positive);
+    let path = Path::new(positive);
+    let absolute = path.is_absolute();
+    let mut prefix = PathBuf::new();
+    let mut found_wildcard = false;
+    for component in path.components() {
+        if component_has_glob(component.as_os_str().to_string_lossy().as_ref()) {
+            found_wildcard = true;
+            break;
+        }
+        prefix.push(component);
+    }
+    // A relative negative pattern matches entries outside its positive fixed
+    // prefix, so it must retain the caller's original scan root.
+    if negated && !absolute {
+        prefix.clear();
+        found_wildcard = true;
+    }
+    if !found_wildcard {
+        prefix = prefix.parent().unwrap_or(Path::new("")).to_path_buf();
+    }
+    let root = if absolute {
+        lexically_normalize(&prefix)
+    } else {
+        lexically_normalize(&cwd.join(&prefix))
+    };
+    SearchRoot {
+        root,
+        missing_root_is_empty: !prefix.as_os_str().is_empty(),
+        prefix,
+        absolute,
+        explicit_current,
+    }
+}
+
+fn component_has_glob(component: &str) -> bool {
+    let mut escaped = false;
+    for character in component.chars() {
+        #[cfg(not(windows))]
+        if !escaped && character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if !escaped && matches!(character, '*' | '?' | '[' | '{') {
+            return true;
+        }
+        escaped = false;
+    }
+    false
 }
 
 fn compile_glob(pattern: &str, cwd: &Path) -> Result<PathGlob, RemoteError> {
@@ -276,7 +336,9 @@ fn compile_glob(pattern: &str, cwd: &Path) -> Result<PathGlob, RemoteError> {
     let negated = (pattern.len() - positive.len()) % 2 == 1;
     let normalized = positive.trim_start_matches("./").trim_end_matches('/');
     let mut builder = GlobBuilder::new(normalized);
-    builder.literal_separator(true).backslash_escape(false);
+    builder
+        .literal_separator(true)
+        .backslash_escape(!cfg!(windows));
     builder
         .build()
         .map(|glob| PathGlob {
@@ -521,6 +583,7 @@ enum WalkControl {
 
 fn walk(
     root: &Path,
+    missing_root_is_empty: bool,
     cancel: &CancellationToken,
     mut visit: impl FnMut(&Path, &Path, bool) -> Result<WalkControl, RemoteError>,
 ) -> Result<(), RemoteError> {
@@ -528,7 +591,20 @@ fn walk(
     while let Some(relative_directory) = directories.pop() {
         check_cancel(cancel)?;
         let absolute_directory = root.join(&relative_directory);
-        let entries = fs::read_dir(&absolute_directory).map_err(io_error)?;
+        let entries = match fs::read_dir(&absolute_directory) {
+            Ok(entries) => entries,
+            Err(error)
+                if missing_root_is_empty
+                    && relative_directory.as_os_str().is_empty()
+                    && matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) =>
+            {
+                return Ok(());
+            }
+            Err(error) => return Err(io_error(error)),
+        };
         for entry in entries {
             check_cancel(cancel)?;
             let entry = entry.map_err(io_error)?;
@@ -554,13 +630,37 @@ fn slash_path(path: &Path) -> String {
         .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
-fn hidden_path(path: &Path) -> bool {
-    path.components()
-        .any(|part| part.as_os_str().to_string_lossy().starts_with('.'))
-}
-
-fn pattern_names_hidden(pattern: &str) -> bool {
-    pattern.split('/').any(|part| part.starts_with('.'))
+fn dot_components_allowed(pattern: &str, path: &str) -> bool {
+    let positive = pattern.trim_start_matches('!').trim_end_matches('/');
+    let positive = positive.strip_prefix("./").unwrap_or(positive);
+    let pattern_components: Vec<_> = positive
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
+    let path_components: Vec<_> = path.split('/').filter(|part| !part.is_empty()).collect();
+    let mut previous = vec![false; path_components.len() + 1];
+    previous[0] = true;
+    for component in pattern_components {
+        let mut current = vec![false; path_components.len() + 1];
+        if component == "**" {
+            current.clone_from(&previous);
+            for index in 0..path_components.len() {
+                if current[index] && !path_components[index].starts_with('.') {
+                    current[index + 1] = true;
+                }
+            }
+        } else {
+            for index in 0..path_components.len() {
+                if previous[index]
+                    && (!path_components[index].starts_with('.') || component.starts_with('.'))
+                {
+                    current[index + 1] = true;
+                }
+            }
+        }
+        previous = current;
+    }
+    previous[path_components.len()]
 }
 
 #[cfg(test)]
@@ -613,6 +713,8 @@ mod tests {
     fn glob_uses_bun_style_braces_recursive_patterns_dotfiles_and_native_order() {
         let root = scratch_dir("filesystem-search-glob");
         fs::create_dir_all(root.join("src/nested")).unwrap();
+        fs::create_dir_all(root.join(".hidden")).unwrap();
+        fs::create_dir_all(root.join("other")).unwrap();
         for (path, content) in [
             ("a.txt", "a"),
             ("b.md", "b"),
@@ -620,6 +722,10 @@ mod tests {
             ("src/a.ts", "a"),
             ("src/.dot.ts", "d"),
             ("src/nested/b.ts", "b"),
+            ("other/visible.md", "v"),
+            (".hidden/visible.ts", "v"),
+            (".hidden/.secret.ts", "s"),
+            (".hidden/.dot.ts", "d"),
         ] {
             fs::write(root.join(path), content).unwrap();
         }
@@ -647,11 +753,101 @@ mod tests {
             result["matches"],
             json!([format!("src{}.dot.ts", std::path::MAIN_SEPARATOR)])
         );
+        let result = glob(glob_params(&root, ".hidden/*"), &token()).unwrap();
+        assert_eq!(
+            result["matches"],
+            json!([format!(".hidden{}visible.ts", std::path::MAIN_SEPARATOR)])
+        );
+        let mut params = glob_params(&root, "**/*.ts");
+        params.include_dotfiles = true;
+        let result = glob(params, &token()).unwrap();
+        assert!(
+            result["matches"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(format!(
+                    ".hidden{}.secret.ts",
+                    std::path::MAIN_SEPARATOR
+                )))
+        );
+        let result = glob(glob_params(&root, "!src/*.ts"), &token()).unwrap();
+        assert!(
+            result["matches"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(format!(
+                    "other{}visible.md",
+                    std::path::MAIN_SEPARATOR
+                )))
+        );
         let result = glob(glob_params(&root, "./*.txt"), &token()).unwrap();
         assert_eq!(
             result["matches"],
             json!([format!(".{}a.txt", std::path::MAIN_SEPARATOR)])
         );
+        let result = glob(glob_params(&root, "./src/*.ts"), &token()).unwrap();
+        assert_eq!(
+            result["matches"],
+            json!([format!(
+                ".{}src{}a.ts",
+                std::path::MAIN_SEPARATOR,
+                std::path::MAIN_SEPARATOR
+            )])
+        );
+        assert_eq!(
+            glob(glob_params(&root, "missing/*.txt"), &token()).unwrap()["matches"],
+            json!([])
+        );
+        assert_eq!(
+            glob(glob_params(&root, "a.txt/*"), &token()).unwrap()["matches"],
+            json!([])
+        );
+
+        let missing_cwd = root.join("missing");
+        assert!(glob(glob_params(&missing_cwd, "*"), &token()).is_err());
+    }
+
+    #[test]
+    fn relative_parent_globs_scan_and_authorize_the_fixed_prefix() {
+        let root = scratch_dir("filesystem-search-parent-prefix");
+        let cwd = root.join("inside");
+        let outside = root.join("outside");
+        fs::create_dir(&cwd).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("match.txt"), "needle\n").unwrap();
+        let expected = Path::new("..").join("outside").join("match.txt");
+
+        let result = glob(glob_params(&cwd, "../outside/*.txt"), &token()).unwrap();
+        assert_eq!(result["matches"], json!([expected]));
+
+        let mut grep_parameters = grep_params(&cwd, "needle");
+        grep_parameters.glob = Some("../outside/*.txt".to_string());
+        let result = grep(grep_parameters, &token()).unwrap();
+        assert_eq!(result["matches"][0]["file"], json!(expected));
+
+        let mut denied = glob_params(&cwd, "../outside/*.txt");
+        denied.path_policy.allowed_roots = vec![cwd];
+        assert_eq!(
+            glob(denied, &token()).unwrap_err().details.unwrap()["kind"],
+            "path_access"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn escaped_glob_metacharacters_match_literal_names_for_glob_and_grep() {
+        let root = scratch_dir("filesystem-search-escaped-glob");
+        fs::write(root.join("a*b.txt"), "needle\n").unwrap();
+        fs::write(root.join("axb.txt"), "needle\n").unwrap();
+
+        let result = glob(glob_params(&root, r"a\*b.txt"), &token()).unwrap();
+        assert_eq!(result["matches"], json!(["a*b.txt"]));
+
+        let mut grep_parameters = grep_params(&root, "needle");
+        grep_parameters.glob = Some(r"a\*b.txt".to_string());
+        let result = grep(grep_parameters, &token()).unwrap();
+        assert_eq!(result["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(result["matches"][0]["file"], "a*b.txt");
     }
 
     #[test]
@@ -677,6 +873,27 @@ mod tests {
             result["matches"],
             json!([{ "file": "sample.txt", "line": 4, "text": "" }])
         );
+    }
+
+    #[test]
+    fn grep_preserves_explicit_current_paths_and_empty_fixed_prefixes() {
+        let root = scratch_dir("filesystem-search-grep-prefix");
+        fs::write(root.join("sample.txt"), "needle\n").unwrap();
+        let mut params = grep_params(&root, "needle");
+        params.glob = Some("./*.txt".to_string());
+        let result = grep(params, &token()).unwrap();
+        assert_eq!(
+            result["matches"][0]["file"],
+            format!(".{}sample.txt", std::path::MAIN_SEPARATOR)
+        );
+
+        for filter in ["missing/*.txt", "sample.txt/*"] {
+            let mut params = grep_params(&root, "needle");
+            params.glob = Some(filter.to_string());
+            let result = grep(params, &token()).unwrap();
+            assert_eq!(result["matches"], json!([]));
+            assert_eq!(result["filesScanned"], 0);
+        }
     }
 
     #[test]

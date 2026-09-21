@@ -108,7 +108,7 @@ fn compile_root(path: &Path) -> Result<Root, RemoteError> {
     Ok(Root { lexical, canonical })
 }
 
-fn is_prefix(root: &Path, path: &Path) -> bool {
+pub(super) fn is_prefix(root: &Path, path: &Path) -> bool {
     // Keep path identity as OsStr. Lossy display conversion must never grant access.
     #[cfg(windows)]
     return windows::is_prefix(root, path);
@@ -121,22 +121,154 @@ fn is_prefix(root: &Path, path: &Path) -> bool {
 mod windows {
     #![allow(
         unsafe_code,
-        reason = "CompareStringOrdinal is the Windows API for case-insensitive path identity; the single call is documented"
+        reason = "Windows path identity requires documented handle metadata and ordinal comparison APIs"
     )]
     #![deny(clippy::undocumented_unsafe_blocks)]
 
+    use std::ffi::c_void;
+    use std::mem::{MaybeUninit, size_of};
     use std::os::windows::ffi::OsStrExt as _;
-    use std::path::Path;
+    use std::path::{Component, Path, PathBuf};
 
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_CASE_SENSITIVE_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileCaseSensitiveInfo,
+        GetFileInformationByHandleEx, OPEN_EXISTING,
+    };
+    #[cfg(test)]
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_WRITE_ATTRIBUTES, SetFileInformationByHandle,
+    };
+
+    const FILE_CS_FLAG_CASE_SENSITIVE_DIR: u32 = 1;
+
+    struct OwnedHandle(HANDLE);
+
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            // SAFETY: this wrapper is constructed only from a live, owned handle.
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
 
     pub(super) fn is_prefix(root: &Path, path: &Path) -> bool {
         let mut candidate = path.components();
-        root.components().all(|expected| {
-            candidate
-                .next()
-                .is_some_and(|actual| components_equal(expected.as_os_str(), actual.as_os_str()))
-        })
+        let mut parent = PathBuf::new();
+        let mut inherited_case_sensitive = None;
+        for expected in root.components() {
+            let Some(actual) = candidate.next() else {
+                return false;
+            };
+            let equal = match (expected, actual) {
+                (Component::Normal(_), Component::Normal(_)) => {
+                    match std::fs::metadata(&parent) {
+                        Ok(metadata) if metadata.is_dir() => {
+                            let Some(case_sensitive) = directory_is_case_sensitive(&parent) else {
+                                return false;
+                            };
+                            inherited_case_sensitive = Some(case_sensitive);
+                        }
+                        Ok(_) => return false,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                            ) => {}
+                        Err(_) => return false,
+                    }
+                    inherited_case_sensitive.is_some_and(|case_sensitive| {
+                        if case_sensitive {
+                            expected.as_os_str() == actual.as_os_str()
+                        } else {
+                            components_equal(expected.as_os_str(), actual.as_os_str())
+                        }
+                    })
+                }
+                (Component::Prefix(_), Component::Prefix(_))
+                | (Component::RootDir, Component::RootDir) => {
+                    components_equal(expected.as_os_str(), actual.as_os_str())
+                }
+                _ => false,
+            };
+            if !equal {
+                return false;
+            }
+            parent.push(actual.as_os_str());
+        }
+        true
+    }
+
+    fn directory_is_case_sensitive(path: &Path) -> Option<bool> {
+        let handle = open_directory(path, FILE_READ_ATTRIBUTES)?;
+        let mut info = MaybeUninit::<FILE_CASE_SENSITIVE_INFO>::uninit();
+        // SAFETY: `info` points to writable storage of exactly the size passed,
+        // and `handle` remains live until after the call.
+        let succeeded = unsafe {
+            GetFileInformationByHandleEx(
+                handle.0,
+                FileCaseSensitiveInfo,
+                info.as_mut_ptr().cast::<c_void>(),
+                size_of::<FILE_CASE_SENSITIVE_INFO>() as u32,
+            )
+        };
+        if succeeded == 0 {
+            return None;
+        }
+        // SAFETY: a successful call initialized the complete fixed-size structure.
+        let info = unsafe { info.assume_init() };
+        Some(info.Flags & FILE_CS_FLAG_CASE_SENSITIVE_DIR != 0)
+    }
+
+    fn open_directory(path: &Path, access: u32) -> Option<OwnedHandle> {
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if wide.contains(&0) {
+            return None;
+        }
+        wide.push(0);
+        // SAFETY: `wide` is NUL-terminated and remains alive for the call; null
+        // security/template handles request the documented defaults.
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        Some(OwnedHandle(handle))
+    }
+
+    #[cfg(test)]
+    pub(super) fn enable_case_sensitivity(path: &Path) -> std::io::Result<()> {
+        let handle = open_directory(path, FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES)
+            .ok_or_else(std::io::Error::last_os_error)?;
+        let info = FILE_CASE_SENSITIVE_INFO {
+            Flags: FILE_CS_FLAG_CASE_SENSITIVE_DIR,
+        };
+        // SAFETY: `info` is a fully initialized fixed-size structure and the
+        // owned directory handle stays live for the call.
+        let succeeded = unsafe {
+            SetFileInformationByHandle(
+                handle.0,
+                FileCaseSensitiveInfo,
+                std::ptr::from_ref(&info).cast::<c_void>(),
+                size_of::<FILE_CASE_SENSITIVE_INFO>() as u32,
+            )
+        };
+        if succeeded == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     fn components_equal(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> bool {
@@ -275,6 +407,28 @@ mod tests {
         .unwrap();
         assert!(policy.allows(&first.join("file")));
         assert!(!policy.allows(&second.join("file")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn preserves_case_sensitive_directory_identity_for_existing_and_missing_paths() {
+        let dir = scratch_dir("filesystem-windows-sensitive-policy");
+        let sensitive = dir.join("sensitive");
+        std::fs::create_dir(&sensitive).unwrap();
+        windows::enable_case_sensitivity(&sensitive)
+            .expect("the Windows test volume supports per-directory case sensitivity");
+        let root = sensitive.join("Root");
+        std::fs::create_dir(&root).unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.clone()],
+            containment_root: Some(root.clone()),
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+
+        assert!(policy.allows(&root.join("missing/deeper/file")));
+        assert!(!policy.allows(&sensitive.join("root/missing/deeper/file")));
     }
 
     #[cfg(windows)]

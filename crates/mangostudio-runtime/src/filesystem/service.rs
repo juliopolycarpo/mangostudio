@@ -556,7 +556,7 @@ pub(super) fn argument(message: impl Into<String>) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
-fn snapshot_limit(path: &Path, size: usize) -> Result<(), RemoteError> {
+pub(super) fn snapshot_limit(path: &Path, size: usize) -> Result<(), RemoteError> {
     const MAX: usize = 8 * 1024 * 1024;
     if size <= MAX {
         return Ok(());
@@ -676,7 +676,15 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
             },
         )
         .implement("fs.apply-patch", move |params, ctx: CallContext| {
-            super::patch_apply::apply(Arc::clone(&service), params, ctx.cancel().clone())
+            let response_id = ctx.id().to_string();
+            let response_limit_bytes = ctx.session().send_limit_bytes();
+            super::patch_apply::apply(
+                Arc::clone(&service),
+                params,
+                ctx.cancel().clone(),
+                response_id,
+                response_limit_bytes,
+            )
         })
 }
 
