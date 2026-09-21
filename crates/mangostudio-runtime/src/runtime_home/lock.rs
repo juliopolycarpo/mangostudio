@@ -163,7 +163,7 @@ pub fn with_slot_lock<T>(
                     .map_err(LockError::Io)?;
                 return Ok(run());
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            Err(error) if is_lock_contended(&error) => {
                 if reclaim_if_abandoned(lock_path, policy) {
                     continue;
                 }
@@ -176,6 +176,26 @@ pub fn with_slot_lock<T>(
             }
             Err(error) => return Err(LockError::Io(error)),
         }
+    }
+}
+
+/// Whether an error says another process still owns the lock path.
+///
+/// Windows can return `ERROR_ACCESS_DENIED` (5), rather than
+/// `ERROR_FILE_EXISTS`, while another handle to an exclusive-create lock is
+/// still being released. That is a transient contention result, so it must
+/// take the same poll-and-reclaim path as an ordinary existing lock.
+fn is_lock_contended(error: &io::Error) -> bool {
+    if error.kind() == io::ErrorKind::AlreadyExists {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        error.raw_os_error() == Some(5) // ERROR_ACCESS_DENIED
+    }
+    #[cfg(not(windows))]
+    {
+        false
     }
 }
 
@@ -317,7 +337,10 @@ mod tests {
 
     #[cfg(unix)]
     use super::reclaim_if_abandoned;
-    use super::{LockError, LockOwner, LockPolicy, create_lock_file, platform, with_slot_lock};
+    use super::{
+        LockError, LockOwner, LockPolicy, create_lock_file, is_lock_contended, platform,
+        with_slot_lock,
+    };
     use crate::test_support::scratch_dir;
 
     #[test]
@@ -329,6 +352,19 @@ mod tests {
         assert_eq!(policy.poll_interval, Duration::from_millis(25));
         assert_eq!(policy.timeout, Duration::from_secs(5));
         assert_eq!(policy.stale_after, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn an_existing_lock_is_contended() {
+        let error = std::io::Error::from(std::io::ErrorKind::AlreadyExists);
+        assert!(is_lock_contended(&error));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_access_denied_while_creating_a_lock_is_contended() {
+        let error = std::io::Error::from_raw_os_error(5); // ERROR_ACCESS_DENIED
+        assert!(is_lock_contended(&error));
     }
 
     #[test]
