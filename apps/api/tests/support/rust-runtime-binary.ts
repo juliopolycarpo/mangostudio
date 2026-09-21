@@ -8,7 +8,10 @@
  * `cargo build -p mangostudio-runtime` followed by the workspace's own test
  * command exercises the same suite locally. An explicit env var pointing at a
  * binary that does not exist is a broken CI job, not a reason to skip
- * quietly — only the fallback path is missing-tolerant.
+ * quietly — only the fallback path is missing-tolerant, and only outside
+ * CI: a CI job that reaches this fallback (the env var this suite expects
+ * was never set) is itself the broken job, and must fail loudly rather than
+ * report a silent, all-green 0-tests-ran skip for a gate that never ran.
  */
 
 import { existsSync } from 'node:fs';
@@ -42,7 +45,18 @@ export function resolveRustRuntimeBinary(): RustRuntimeBinary {
     }
     return { path: configured, available: true };
   }
-  return { path: FALLBACK_DEBUG_BINARY, available: existsSync(FALLBACK_DEBUG_BINARY) };
+  const fallbackExists = existsSync(FALLBACK_DEBUG_BINARY);
+  if (!fallbackExists && process.env.CI) {
+    throw new Error(
+      'Running in CI with MANGOSTUDIO_RUNTIME_BINARY unset and no ' +
+        `${FALLBACK_DEBUG_BINARY} fallback either — this job never built the Rust runtime, ` +
+        'so the qualification suite would silently skip every test and report a false-green ' +
+        'result instead of running the gate it exists for. Set MANGOSTUDIO_RUNTIME_BINARY to ' +
+        'the binary this job built, or build the workspace default with ' +
+        '"cargo build -p mangostudio-runtime --locked".'
+    );
+  }
+  return { path: FALLBACK_DEBUG_BINARY, available: fallbackExists };
 }
 
 /**
