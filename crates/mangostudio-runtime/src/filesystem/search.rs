@@ -631,6 +631,10 @@ fn slash_path(path: &Path) -> String {
 }
 
 fn dot_components_allowed(pattern: &str, path: &str) -> bool {
+    #[cfg(windows)]
+    let pattern = pattern.replace('\\', "/");
+    #[cfg(windows)]
+    let pattern = pattern.as_str();
     let positive = pattern.trim_start_matches('!').trim_end_matches('/');
     let positive = positive.strip_prefix("./").unwrap_or(positive);
     let pattern_components: Vec<_> = positive
@@ -894,6 +898,15 @@ mod tests {
             assert_eq!(result["matches"], json!([]));
             assert_eq!(result["filesScanned"], 0);
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn dot_rules_accept_native_absolute_windows_patterns() {
+        assert!(dot_components_allowed(
+            r"C:\workspace\*.txt",
+            "C:/workspace/file.txt"
+        ));
     }
 
     #[test]
