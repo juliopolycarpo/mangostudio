@@ -965,6 +965,54 @@ mod tests {
         assert_eq!(availability.version.as_deref(), Some("9.9.9"));
     }
 
+    /// [`git_probe_cache`]'s doc comment on [`detect_shells_caches_by_the_exact_path_value`]
+    /// claims `probe_git` has "its own cache tests" proven the same way; no
+    /// such test actually existed. This is that test: the fake `git` here
+    /// appends to a counter file on every real invocation and reports a
+    /// version derived from that count, while its own script file (and so
+    /// its `mtime:size` fingerprint) never changes between the two probes
+    /// below — a served-from-cache second call cannot observe a changed
+    /// count or a bumped version; a second *live* run of the script would
+    /// show both.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_git_cache_hit_never_invokes_the_binary_a_second_time() {
+        invalidate_git_probe_cache();
+        let dir = scratch_home("probe-cache-hit");
+        let invocations = dir.join("invocations");
+        let (_git_dir, path_var) = fake_git(
+            "probe-cache-hit-git",
+            &format!(
+                "echo run >> {inv}\ncount=$(wc -l < {inv})\necho \"git version 9.9.$count\"",
+                inv = invocations.display()
+            ),
+        );
+        let cancel = CancellationToken::new();
+
+        let first = probe_git(Some(&path_var), &cancel)
+            .await
+            .expect("a fast fake git must not be cancelled");
+        assert_eq!(first.version.as_deref(), Some("9.9.1"));
+
+        let second = probe_git(Some(&path_var), &cancel)
+            .await
+            .expect("a fast fake git must not be cancelled");
+        assert_eq!(
+            second.version.as_deref(),
+            Some("9.9.1"),
+            "a repeated resolved path and unchanged fingerprint must be served from cache, not \
+             re-probed"
+        );
+        let invocation_count = std::fs::read_to_string(&invocations)
+            .unwrap()
+            .lines()
+            .count();
+        assert_eq!(
+            invocation_count, 1,
+            "the fake git binary must have run exactly once across both probes"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn detect_shells_finds_a_shell_present_on_a_synthetic_path() {
