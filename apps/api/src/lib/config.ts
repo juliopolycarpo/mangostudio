@@ -399,6 +399,21 @@ export function getRuntimeHomeMangoDir(env: NodeJS.ProcessEnv = process.env): st
   return override && override.length > 0 ? override : getHomeMangoDir();
 }
 
+/**
+ * Explicit override for the runtime binary a stdio launch spawns.
+ *
+ * Takes priority over every other source `resolveRuntimeLaunchCommand` tries —
+ * the per-environment `binaryPath`, the sibling binary next to a standalone
+ * install, and the Bun/TS fallback in a source checkout — because naming a
+ * specific build is what someone reaches for when none of those is the binary
+ * they mean to run.
+ */
+// Usage: getRuntimeBinaryOverride() // → "/opt/mangostudio/mangostudio-runtime"
+export function getRuntimeBinaryOverride(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const override = env.MANGOSTUDIO_RUNTIME_BINARY?.trim();
+  return override && override.length > 0 ? override : undefined;
+}
+
 /** What a build reports when no release stamped a version into it. */
 const DEVELOPMENT_VERSION = 'dev';
 

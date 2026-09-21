@@ -25,6 +25,15 @@ on:
       - "apps/runtime/src/config.ts"
       - "apps/runtime/scripts/generate-home-fixtures.ts"
       - "apps/runtime/package.json"
+      - "apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts"
+      - "apps/api/tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts"
+      - "apps/api/tests/support/rust-runtime-binary.ts"
+      - "apps/api/tests/support/rust-runtime-assertions.ts"
+      - "apps/api/src/services/runtime-client/**"
+      - "apps/api/src/lib/runtime-paths.ts"
+      - "apps/api/src/modules/environments/http/runtime-socket-routes.ts"
+      - "apps/api/src/modules/environments/application/runtime-pairing-service.ts"
+      - "apps/api/src/modules/environments/infrastructure/runtime-pairing-repository.ts"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
@@ -80,8 +89,18 @@ jobs:
           # `runtime-home-fixture-freshness`: a TypeScript-only PR touching
           # only those must still run this workflow, or that job's own
           # regenerate-and-diff step never runs and ts-home goes stale
-          # silently — the same gap the job itself exists to close.
-          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
+          # silently — the same gap the job itself exists to close. The
+          # qualification suite's own test and support files feed
+          # `real-binary-qualification` the identical way. So does the hub
+          # code that job's own tests actually exercise
+          # (apps/api/src/services/runtime-client/, the local-launch path
+          # in runtime-paths.ts, the paired-connect accept route, and the
+          # pairing service/repository it depends on) -- without these, a
+          # change that broke spawnRuntimeChild's cancellation path, say,
+          # touches none of the paths above, rust evaluates false, the job
+          # is skipped and allowed to be, and Gate reports green having
+          # exercised none of it.
+          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|apps/api/tests/integration/services/rust-runtime-qualification\.integration\.test\.ts$|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
@@ -207,11 +226,57 @@ jobs:
           git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-home
           git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-home
 
+  real-binary-qualification:
+    # Proves the hub's own real code actually talks to the real compiled
+    # mangostudio-runtime binary over its three transports (stdio, direct-URL
+    # serve, paired connect) — every other apps/api integration test spawns
+    # or dials the TypeScript in-process runtime instead. Targets the two
+    # qualification files directly rather than the whole apps/api suite,
+    # which does not need a Rust binary at all.
+    name: Real-binary qualification
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - run: cargo build -p mangostudio-runtime --locked
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - name: Qualify the real binary over stdio, serve, and connect
+        working-directory: apps/api
+        env:
+          MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/target/debug/mangostudio-runtime
+          MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
+        run: >
+          bun test --timeout 15000
+          tests/integration/services/rust-runtime-qualification.integration.test.ts
+          tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts
+
   gate:
     # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only
     # after the changes job proves the pull request has no Rust workspace diff.
     name: Gate
-    needs: [changes, workspace, launcher-msrv, fuzz-workspace, runtime-home-fixture-freshness]
+    needs: [
+      changes,
+      workspace,
+      launcher-msrv,
+      fuzz-workspace,
+      runtime-home-fixture-freshness,
+      real-binary-qualification,
+    ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -229,6 +294,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness real-binary-qualification' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

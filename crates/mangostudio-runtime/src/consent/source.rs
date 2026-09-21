@@ -35,7 +35,10 @@ use crate::runtime_home::{RuntimeSlot, read_runtime_slot_config, slot_config_pat
 /// are never compared to each other — this is a process-local cache key,
 /// not a value written anywhere, so its exact formatting does not need to
 /// match TypeScript's byte for byte.
-fn fingerprint_of(metadata: &std::fs::Metadata) -> String {
+///
+/// `pub(crate)`: [`crate::health`]'s `git` probe cache keys on this same
+/// shape, reusing it rather than inventing a second fingerprint format.
+pub(crate) fn fingerprint_of(metadata: &std::fs::Metadata) -> String {
     let mtime_millis = metadata
         .modified()
         .ok()

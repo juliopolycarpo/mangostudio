@@ -358,12 +358,21 @@ fn split_into_root_and_segments(
 }
 
 /// Collapses `.` and `..` components in `path` without touching the
-/// filesystem. Only ever called on a path whose existing prefix is already
-/// canonical (see [`resolve_through_existing_ancestor`]) — a `..` that pops
-/// past that prefix is not a bug to guard against, it is exactly the escape
-/// [`resolve_contained_workspace_path`] exists to catch, so this function
-/// lets it pop freely rather than clamping at some artificial floor.
-fn lexically_normalize(path: &Path) -> PathBuf {
+/// filesystem. Two call sites, both fine with the same "pop freely, no
+/// floor" behaviour below: [`resolve_through_existing_ancestor`] calls this
+/// only on a path whose existing prefix is already canonical, where a `..`
+/// popping past that prefix is not a bug to guard against — it is exactly
+/// the escape [`resolve_contained_workspace_path`] exists to catch, so
+/// letting it pop freely (rather than clamping at some artificial floor) is
+/// what makes the escape visible. `crate::workspace_path`'s
+/// `resolve_workspace_path` calls this too, for the unrelated reason that,
+/// on Unix, [`std::path::absolute`] does not fold `..` on its own (only `.`
+/// and empty components) — there, this is plain Node-`path.resolve()`-style
+/// lexical resolution with no containment question in play at all. On
+/// Windows, `std::path::absolute` already folds `..` itself (via
+/// `GetFullPathNameW`), so this second pass is a harmless no-op rather than
+/// a second, disagreeing normalisation.
+pub(crate) fn lexically_normalize(path: &Path) -> PathBuf {
     let mut stack: Vec<std::path::Component<'_>> = Vec::new();
     for component in path.components() {
         match component {
@@ -486,20 +495,28 @@ pub fn list_directory_bounded(dir: &Path) -> std::io::Result<BoundedListing> {
     // Sorted before truncating, so the cap drops a stable, name-ordered tail
     // rather than an arbitrary subset of whatever order `read_dir` happened
     // to yield — mirrors `browseWorkspace`'s own case-insensitive-then-
-    // case-sensitive sort, though with a plain lowercase fold rather than
-    // `Intl.Collator`'s locale-aware one: this crate has no ICU collation
-    // dependency to reach for, so the two orderings can diverge on
-    // locale-specific rules (e.g. some accented letters), while still
-    // agreeing on plain ASCII and case-only differences.
-    entries.sort_by(|left, right| {
-        left.name
-            .to_lowercase()
-            .cmp(&right.name.to_lowercase())
-            .then_with(|| left.name.cmp(&right.name))
-    });
+    // case-sensitive sort.
+    entries.sort_by(|left, right| compare_directory_entry_names(&left.name, &right.name));
     let truncated = entries.len() > MAX_WORKSPACE_DIRECTORY_ENTRIES;
     entries.truncate(MAX_WORKSPACE_DIRECTORY_ENTRIES);
     Ok(BoundedListing { entries, truncated })
+}
+
+/// Case-insensitive, then case-sensitive, ordering for a directory entry
+/// name — mirrors `browseWorkspace`'s own `Intl.Collator`-based sort, though
+/// with a plain lowercase fold rather than the collator's locale-aware one:
+/// this crate has no ICU collation dependency to reach for, so the two
+/// orderings can diverge on locale-specific rules (e.g. some accented
+/// letters), while still agreeing on plain ASCII and case-only differences.
+///
+/// Shared by [`list_directory_bounded`] and `crate::workspace_methods`'s own
+/// `workspace.browse` listing (which cannot reuse `list_directory_bounded`
+/// itself — see that module's docs for why) so the two listings can never
+/// order entries differently.
+pub(crate) fn compare_directory_entry_names(left: &str, right: &str) -> std::cmp::Ordering {
+    left.to_lowercase()
+        .cmp(&right.to_lowercase())
+        .then_with(|| left.cmp(right))
 }
 
 #[cfg(test)]

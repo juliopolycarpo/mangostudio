@@ -280,7 +280,29 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness' || '' }}`
+      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness real-binary-qualification' || '' }}`
+    );
+  });
+
+  test('the real-binary-qualification job builds and points at the binary its own suite requires', () => {
+    // apps/api/tests/support/rust-runtime-binary.ts's fallback stays quiet
+    // when MANGOSTUDIO_RUNTIME_BINARY is unset (the ordinary test.yml lane
+    // never sets it and never builds Rust, on purpose) -- so the one place
+    // that can catch this job forgetting to build the binary or wire the
+    // override is this static check on the job definition itself, not a
+    // runtime check inside the suite that cannot tell "an unrelated lane"
+    // from "this job, misconfigured" apart.
+    const qualificationBlock = extractJobBlock(workflow, 'real-binary-qualification');
+
+    expect(qualificationBlock).toContain('cargo build -p mangostudio-runtime --locked');
+    expect(qualificationBlock).toContain(
+      `MANGOSTUDIO_RUNTIME_BINARY: ${EXPR} github.workspace }}/target/debug/mangostudio-runtime`
+    );
+    expect(qualificationBlock).toContain(
+      'tests/integration/services/rust-runtime-qualification.integration.test.ts'
+    );
+    expect(qualificationBlock).toContain(
+      'tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts'
     );
   });
 });

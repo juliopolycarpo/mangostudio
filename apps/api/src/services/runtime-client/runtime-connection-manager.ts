@@ -19,6 +19,7 @@ import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { getDb } from '../../db/database';
 import { getVersion } from '../../lib/config';
+import { createDiagnosticLogger } from '../../lib/logger';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
   type EnvironmentStateTransitionRecorder,
@@ -123,10 +124,11 @@ export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
  * also the reason {@link RuntimeConnectionManager.connectInteractive} stops
  * waiting — a WSL provision is not the phase that wakes it, so that connect
  * still waits it out; see {@link connectWslRuntime}. A connector that only
- * spawns a process can ignore `signal` entirely; the spawn is bounded by its
- * own handshake timeout. A connector that neither watches the signal nor
- * spawns anything — the in-process one — is bounded by the manager instead;
- * see {@link CONNECT_DEADLINE_MS}.
+ * spawns a process — `stdio` and `wsl` both do — threads `signal` into
+ * `spawnRuntimeChild`, which terminates the child the moment it fires instead
+ * of waiting out its own handshake timeout. A connector that neither watches
+ * the signal nor spawns anything — the in-process one — is bounded by the
+ * manager instead; see {@link CONNECT_DEADLINE_MS}.
  */
 export interface RuntimeConnectContext {
   readonly report: (phase: RuntimeConnectPhase) => void;
@@ -1336,17 +1338,32 @@ export function createLocalRuntimeConnector(
   };
 }
 
+/** Where a stdio launch reports which of its four sources chose the binary. */
+const stdioLaunchLogger = createDiagnosticLogger('runtime-stdio');
+
 async function connectStdioRuntime(
   definition: RuntimeEnvironmentDefinition,
-  onUnavailable: () => void
+  onUnavailable: () => void,
+  context: RuntimeConnectContext
 ): Promise<ManagedRuntimeConnection> {
   const config = environmentConfigFor('stdio', definition.config);
+  const launch = resolveRuntimeLaunchCommand(config.binaryPath);
+  // Which source won is otherwise only inferable from the resolved command
+  // itself — a sibling binary and a `binaryPath` override can name the same
+  // path, and the fallback shares its interpreter with an override that
+  // happens to point at Bun.
+  stdioLaunchLogger.info('launch_selected', {
+    environmentId: definition.id,
+    source: launch.source,
+    command: launch.command,
+  });
   const connection = await spawnRuntimeChild({
     environmentId: definition.id,
-    launch: resolveRuntimeLaunchCommand(config.binaryPath),
+    launch,
     ...(config.cwd ? { cwd: config.cwd } : {}),
     hubVersion: getVersion(),
     onClosed: onUnavailable,
+    signal: context.signal,
   });
   return {
     // Both signals are wired on purpose and `#markUnavailable` is idempotent, so
@@ -1399,6 +1416,10 @@ export async function connectWslRuntime(
         ? `WSL could not be started at "${wslExecutable.path}". Install WSL, or set MANGO_WSL_EXE to the wsl.exe path if it is installed somewhere else.`
         : undefined,
     onClosed: onUnavailable,
+    // The provision above already watches `signal`; without it here too, a
+    // cancel that lands after the distribution is ready would still run the
+    // runtime spawn and handshake to completion before being discarded.
+    signal: context?.signal,
   });
   return {
     client: new RuntimeClient(connection.hub, onUnavailable, definition.id),

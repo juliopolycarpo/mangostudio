@@ -196,6 +196,60 @@ mod tests {
         );
     }
 
+    /// The gate this whole module exists for, now observable for real:
+    /// with `crate::probing::register` implementing all three
+    /// `probing.*` methods, `features.probing` still needs `allow.probing`
+    /// granted — an implemented capability is not a granted one.
+    #[test]
+    fn probing_flips_true_only_when_all_three_methods_are_implemented_and_allowed() {
+        let registry = crate::probing::register(Registry::new());
+
+        let allowed = build_features(&registry, &full_allow(), true);
+        assert!(
+            allowed.probing,
+            "all three probing.* methods are implemented and allow.probing is granted"
+        );
+
+        let mut denied_allow = full_allow();
+        denied_allow.probing = false;
+        let denied = build_features(&registry, &denied_allow, true);
+        assert!(
+            !denied.probing,
+            "a consent denial must still suppress probing even though every method is implemented"
+        );
+    }
+
+    /// A partially-implemented `probing` (two of its three methods, built
+    /// directly rather than through `crate::probing::register` so this
+    /// test does not depend on that module's own internals) must not be
+    /// advertised — the same "every required method, or none of it" rule
+    /// `a_partially_implemented_capability_stays_false` already pins for
+    /// `checkpoints`. This is also this crate's mutation guard for
+    /// `probing_flips_true_only_when_all_three_methods_are_implemented_and_allowed`:
+    /// removing one of `crate::probing::methods::register`'s three
+    /// `.implement(...)` calls turns that other test's own `allowed.probing`
+    /// assertion red, by the identical mechanism this test exercises
+    /// directly.
+    #[test]
+    fn probing_stays_false_if_only_two_of_its_three_methods_are_implemented() {
+        let registry = Registry::new()
+            .implement("probing.runtimes", |_params: Value, _context| async move {
+                Ok::<_, mango_protocol::RemoteError>(json!({ "statuses": [] }))
+            })
+            .implement(
+                "probing.version-managers",
+                |_params: Value, _context| async move {
+                    Ok::<_, mango_protocol::RemoteError>(json!({ "statuses": [] }))
+                },
+            );
+        // "probing.agent-clis" deliberately left unimplemented.
+        let features = build_features(&registry, &full_allow(), true);
+        assert!(
+            !features.probing,
+            "a partially-implemented capability (2 of 3 probing.* methods) must not be advertised"
+        );
+    }
+
     fn implement_all_checkpoints_methods() -> Registry {
         Registry::new()
             .implement("snapshot.capture", |_params: Value, _context| async move {

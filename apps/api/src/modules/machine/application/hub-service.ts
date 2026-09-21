@@ -64,6 +64,13 @@ const SERVICE_ENV_ALLOWLIST: readonly string[] = [
   // diagnostic logging off the moment the hub handed over.
   'VERSION',
   'MANGOSTUDIO_DIAGNOSTIC_LOGS',
+  // getRuntimeBinaryOverride (runtime-paths.ts) reads this directly from
+  // process.env on every stdio launch, exactly as DETACH_ENV_ALLOWLIST's own
+  // comment describes for a detached child — an operator who exports it
+  // before `service install` means the installed unit to honor it too, not
+  // silently fall back to the sibling binary or Bun the moment the hub hands
+  // over to the service manager.
+  'MANGOSTUDIO_RUNTIME_BINARY',
   'PATH',
   'MANGO_HOME',
   'TZ',

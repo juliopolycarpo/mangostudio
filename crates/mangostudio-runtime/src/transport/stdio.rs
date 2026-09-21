@@ -11,14 +11,15 @@ use std::time::Duration;
 
 use mango_protocol::close::close_codes;
 use mango_protocol::contract::Contract;
-use mango_protocol::session::{Session, SessionOptions};
+use mango_protocol::session::SessionOptions;
 use mango_protocol::transports::stdio::stdio_port;
 use mangostudio_runtime_contract::catalog::catalog;
+use tokio_util::sync::CancellationToken;
 
 use crate::consent::invocation::stdio_consent;
 use crate::runtime_home::resolve_runtime_slot_for_current_exe;
 use crate::supervisor::{ShutdownSignals, join_owned};
-use crate::transport::{build_host, runtime_peer};
+use crate::transport::{build_host, hello_capabilities, runtime_peer, start_session};
 
 /// Shorter than [`mango_protocol::session::DEFAULT_HANDSHAKE_TIMEOUT`]: a
 /// launcher that reached this process over a pipe it just opened is either
@@ -49,25 +50,27 @@ pub async fn run(runtime_version: &str, mango_home: &std::path::Path) -> std::io
         return Ok(1);
     }
 
-    let host = build_host(slot, mango_home);
+    let host = build_host(slot, mango_home, runtime_version);
     let contract = Contract::from_catalog(catalog().clone()).expect(
         "the embedded catalog compiles into a contract; a change to the catalog that broke this \
          would already fail mangostudio-runtime-contract's own build",
     );
+    // No request is in flight yet to cancel this against — a fresh token
+    // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
+    // `hello_capabilities`'s own doc comment.
+    let capabilities =
+        hello_capabilities(slot, mango_home, &host.registry, &CancellationToken::new()).await;
     let options = SessionOptions::new(runtime_peer(runtime_version))
-        .with_handshake_timeout(STDIO_HANDSHAKE_TIMEOUT);
-    let (session, driver) = Session::open(stdio_port(), options);
-    let guard = crate::serve::serve(
+        .with_handshake_timeout(STDIO_HANDSHAKE_TIMEOUT)
+        .with_capabilities(capabilities);
+    let (session, mut driver_handle) = start_session(
+        stdio_port(),
+        options,
         &contract,
-        &session,
         host.registry,
         host.authorization,
         slot.as_str(),
-    )
-    .expect("an empty registry always matches the embedded catalog");
-    guard.persist();
-
-    let mut driver_handle = tokio::spawn(driver.run());
+    );
 
     // A signal races the driver to completion: a peer that closes on its
     // own first must not wait for a signal that may never come, and a

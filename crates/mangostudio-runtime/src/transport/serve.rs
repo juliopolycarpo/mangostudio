@@ -391,6 +391,27 @@ async fn handle_connection(
     // multi-hour session) must not keep holding this slot.
     drop(permit);
 
+    let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
+    let contract = Contract::from_catalog(catalog().clone())
+        .expect("the embedded catalog compiles into a contract");
+    // No request is in flight yet to cancel this against — a fresh token
+    // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
+    // `hello_capabilities`'s own doc comment.
+    //
+    // Built *before* admission below, not after: this used to run only
+    // once the previous connection had already been superseded, leaving
+    // the runtime connectionless for the whole cost of building it (a
+    // `PATH` walk, a `git` probe — measured around 200ms) for no reason.
+    // The previous connection can keep answering calls right up until
+    // this one is actually ready to take its place.
+    let capabilities = crate::transport::hello_capabilities(
+        context.slot,
+        &context.mango_home,
+        &host.registry,
+        &CancellationToken::new(),
+    )
+    .await;
+
     let (generation, previous) = match state.try_admit() {
         Admission::Admitted {
             generation,
@@ -412,25 +433,24 @@ async fn handle_connection(
         return;
     }
 
-    let host = build_host(context.slot, &context.mango_home);
-    let contract = Contract::from_catalog(catalog().clone())
-        .expect("the embedded catalog compiles into a contract");
     // `SessionOptions::new`'s defaults already match `serve.ts`'s own
     // `HANDSHAKE_TIMEOUT_MS`/`LIVENESS_INTERVAL_MS` (15s/20s), so nothing is
     // overridden here — see `mango_protocol::session::{DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_LIVENESS_INTERVAL}`.
-    let options = SessionOptions::new(runtime_peer(&context.runtime_version));
+    let options =
+        SessionOptions::new(runtime_peer(&context.runtime_version)).with_capabilities(capabilities);
     debug_assert_eq!(options.handshake_timeout, DEFAULT_HANDSHAKE_TIMEOUT);
     debug_assert_eq!(options.liveness_interval, Some(DEFAULT_LIVENESS_INTERVAL));
-    let (session, driver_handle) = Session::spawn(port, options);
-    let guard = crate::serve::serve(
+    // `crate::transport::start_session`, never `Session::spawn` directly:
+    // see that function's own doc comment for the handler-registration
+    // race its ordering closes.
+    let (session, driver_handle) = crate::transport::start_session(
+        port,
+        options,
         &contract,
-        &session,
         host.registry,
         host.authorization,
         context.slot.as_str(),
-    )
-    .expect("an empty registry always matches the embedded catalog");
-    guard.persist();
+    );
 
     let (released_tx, released_rx) = oneshot::channel();
     let published = state.publish(

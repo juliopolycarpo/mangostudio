@@ -10,11 +10,17 @@
 //! literally.
 //!
 //! Out of scope for every transport here, matching the crate's own current
-//! scope: no machine method groups (an empty [`crate::registry::Registry`]
-//! answers every catalog method with `METHOD_UNSUPPORTED`), so
-//! `hello.capabilities` is left empty rather than wired to
-//! [`crate::manifest::build_features`] — there is nothing yet for that
-//! manifest to describe.
+//! scope: every machine method group except `runtime.health` (see
+//! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
+//! and `probing.*` (see [`crate::probing`]) is unimplemented, so
+//! [`crate::registry::Registry`] answers everything else with
+//! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
+//! module's own `hello_capabilities`, which shapes `crate::health`'s
+//! `build_capability_manifest` into the `Map` `hello` carries — without it, a
+//! hub refuses every
+//! connection outright (`manifestOf` in `hub-session.ts` closes with
+//! `PROTOCOL_ERROR` on an empty object), so this is not optional scaffolding
+//! for a later plan the way the rest of this module's method-group gap is.
 
 pub mod connect;
 pub mod serve;
@@ -24,8 +30,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mango_protocol::contract::Contract;
 use mango_protocol::frame::PeerInfo;
-use mango_protocol::session::{EventInput, Session};
+use mango_protocol::port::Port;
+use mango_protocol::session::{EventInput, Session, SessionClosure, SessionOptions};
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::authorization::ConsentAuthorization;
@@ -98,9 +106,10 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 }
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
-/// session itself: an empty [`Registry`] (methods are out of scope; the
-/// catalog's `rpc.discover` answer and `METHOD_UNSUPPORTED` are all this
-/// serves) recording through a real, on-disk [`crate::audit::FileAudit`],
+/// session itself: a [`Registry`] implementing only `runtime.health` (every
+/// other machine method group is out of scope; the catalog's `rpc.discover`
+/// answer and `METHOD_UNSUPPORTED` cover the rest) recording through a
+/// real, on-disk [`crate::audit::FileAudit`],
 /// and the real [`ConsentAuthorization`] reading `slot`'s `runtime.json`
 /// fresh on every call.
 ///
@@ -115,18 +124,70 @@ pub(crate) struct SessionHost {
     pub authorization: Arc<dyn Authorization>,
 }
 
-/// Builds one [`SessionHost`] for `slot` under `mango_home`.
-pub(crate) fn build_host(slot: RuntimeSlot, mango_home: &Path) -> SessionHost {
+/// Builds one [`SessionHost`] for `slot` under `mango_home`, announcing
+/// `runtime_version` from `runtime.health`, and also implementing
+/// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
+/// and `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`
+/// — the only methods this crate implements today (see [`crate::health`],
+/// [`crate::workspace_methods`], and [`crate::probing`]).
+pub(crate) fn build_host(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    runtime_version: &str,
+) -> SessionHost {
     let audit: Arc<dyn Audit> = Arc::new(crate::audit::FileAudit::new(
         slot_audit_log_path(slot, mango_home),
         Arc::new(SystemWallClock),
     ));
     let registry = Registry::with_ports(Arc::clone(&audit), Arc::new(SystemClock));
+    let registry = crate::health::register(
+        registry,
+        slot,
+        mango_home.to_path_buf(),
+        runtime_version.to_string(),
+    );
+    let registry = crate::workspace_methods::register(registry);
+    let registry = crate::probing::register(registry);
     let source = ConsentSource::new(slot, mango_home.to_path_buf());
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
         authorization,
+    }
+}
+
+/// [`crate::health::build_capability_manifest`], shaped as the `Map`
+/// [`mango_protocol::session::SessionOptions::with_capabilities`] wants.
+///
+/// `registry` is `host.registry` from the very [`SessionHost`] this
+/// session is about to serve: [`crate::manifest::build_features`] gates
+/// each feature on whether *this* registry actually implements every
+/// method that capability requires, so a manifest built against any other
+/// registry could announce a feature this connection cannot back.
+pub(crate) async fn hello_capabilities(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    registry: &Registry,
+    cancel: &CancellationToken,
+) -> serde_json::Map<String, serde_json::Value> {
+    let manifest =
+        crate::health::build_capability_manifest(slot, mango_home, registry, cancel).await;
+    match serde_json::to_value(&manifest) {
+        Ok(serde_json::Value::Object(map)) => map,
+        // `RuntimeCapabilityManifest` derives `Serialize` on a plain struct
+        // and always serialises to an object — this arm is unreachable
+        // today. Deliberately `unreachable!`, not a silent `Map::new()`:
+        // the empty map that fallback produced is *exactly* the shape
+        // that made every hub refuse this connection before
+        // `hello_capabilities` existed (see this module's own doc comment
+        // on why an empty `hello.capabilities` is a `PROTOCOL_ERROR`, not
+        // a degraded-but-working connection) — silently reinstating that
+        // failure with no diagnostic would be worse than panicking loudly
+        // on the one change to this type that could ever reach it.
+        Ok(other) => {
+            unreachable!("RuntimeCapabilityManifest must serialise to a JSON object, got {other:?}")
+        }
+        Err(error) => unreachable!("RuntimeCapabilityManifest must always serialise: {error}"),
     }
 }
 
@@ -172,6 +233,54 @@ pub(crate) async fn heartbeat_loop(
             }
         }
     }
+}
+
+/// Opens a session over `port`, registers `registry`'s contract handlers on
+/// it, and only then spawns its driver — in that order, always. Shared by
+/// all three transports (`stdio::run`, `serve::handle_connection`,
+/// `connect::run_one_connection`), which used to each write this sequence
+/// out by hand; this repository's own rule against duplicating shared logic
+/// covers exactly this shape.
+///
+/// The ordering is load-bearing, not stylistic: [`Session::open`] never
+/// starts the returned driver on its own, so nothing can poll it — and so
+/// nothing can dispatch a single incoming frame — before this function's
+/// own `tokio::spawn` call, several lines *after* [`crate::serve::serve`]
+/// has already registered every handler `contract` declares. The bug this
+/// closes used the opposite order (`Session::spawn`, which starts the
+/// driver the instant it returns): a hub that sent its first request
+/// immediately after the handshake could race ahead of registration and
+/// see `METHOD_UNSUPPORTED` for a method the peer genuinely implements —
+/// observed reliably across the real qualification suite's `serve` and
+/// `connect` transports
+/// (`apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts`
+/// and its `-connect` sibling) before this fix, and not reproduced since.
+/// It is not independently covered by a Rust-level unit test in this
+/// crate: a from-scratch reproduction attempt using a real `Session` over
+/// a real TCP loopback pair, matching the shape of `mango_protocol`'s
+/// existing session tests, did not reproduce the race against the
+/// pre-fix ordering under either the default (current-thread) or a
+/// `multi_thread` `#[tokio::test]` runtime — the window is narrow enough
+/// that only the real, cross-process latency the qualification suite's
+/// own separate hub and runtime processes introduce made it observable.
+/// The ordering here is correct by construction (no `.await` point exists
+/// between `Session::open` and the `tokio::spawn` call below that could
+/// let anything else run in between), which is what this function's own
+/// structure — not a dynamic test — is what actually proves it.
+pub(crate) fn start_session<P: Port>(
+    port: P,
+    options: SessionOptions,
+    contract: &Contract,
+    registry: Registry,
+    authorization: Arc<dyn Authorization>,
+    slot: &str,
+) -> (Session, tokio::task::JoinHandle<SessionClosure>) {
+    let (session, driver) = Session::open(port, options);
+    let guard = crate::serve::serve(contract, &session, registry, authorization, slot)
+        .expect("an empty registry always matches the embedded catalog");
+    guard.persist();
+    let driver_handle = tokio::spawn(driver.run());
+    (session, driver_handle)
 }
 
 #[cfg(test)]
@@ -326,13 +435,25 @@ mod tests {
     }
 
     #[test]
-    fn build_host_produces_an_empty_registry_every_call() {
+    fn build_host_implements_exactly_runtime_health_the_workspace_and_probing_methods() {
         let home = std::env::temp_dir().join(format!(
             "mango-transport-build-host-test-{}-{}",
             std::process::id(),
             line!()
         ));
-        let host = build_host(RuntimeSlot::Host, &home);
-        assert!(host.registry.implemented_methods().is_empty());
+        let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
+        assert_eq!(
+            host.registry.implemented_methods(),
+            vec![
+                "probing.agent-clis",
+                "probing.runtimes",
+                "probing.version-managers",
+                "runtime.health",
+                "workspace.browse",
+                "workspace.resolve-contained",
+                "workspace.validate",
+            ],
+            "nothing else must be implemented yet"
+        );
     }
 }
