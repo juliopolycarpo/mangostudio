@@ -168,6 +168,14 @@ pub async fn run_bounded_child(
     let mut child = spawn(program, args, env)
         .await
         .map_err(ChildRunError::SpawnFailed)?;
+    // `Child::id()` returns `None` once the child has been polled to
+    // completion, so this is the only point that can still name the
+    // process group the drained-reader-join branch below needs to reach
+    // after the direct child has already exited. Unix-only: that branch's
+    // own use of it is `#[cfg(unix)]`, so an unused binding on Windows
+    // would otherwise fail `-D warnings`.
+    #[cfg(unix)]
+    let child_pid = child.id();
     let stdout = child.stdout.take().expect("stdout was requested as piped");
     let stderr = child.stderr.take().expect("stderr was requested as piped");
     let mut stdout_reader = tokio::spawn(read_capped(stdout, budget.max_stdout_bytes));
@@ -245,6 +253,21 @@ pub async fn run_bounded_child(
                     // teardown runs).
                     stdout_reader.abort();
                     stderr_reader.abort();
+                    // The direct child (`status`, above) has already
+                    // exited, but whatever is still writing past the
+                    // deadline is a descendant it backgrounded — killing
+                    // its process group is the only way to actually stop
+                    // it, since there is no longer a live `Child` for
+                    // `kill_and_reap` to signal.
+                    #[cfg(unix)]
+                    if let Some(pid) = child_pid
+                        && let Err(kill_error) = kill_process_group(pid)
+                    {
+                        eprintln!(
+                            "mangostudio-runtime: could not signal a bounded child's process \
+                             group to stop after the child itself already exited: {kill_error}"
+                        );
+                    }
                     Err(error)
                 }
             }
@@ -326,19 +349,18 @@ async fn kill_and_reap(child: &mut Child) {
     }
 }
 
-/// Signals `child` to stop. On Unix, kills its whole process group (see
-/// [`spawn`]'s `process_group(0)`), reaching any descendant the child
-/// backgrounded and never gave its own group — a plain `kill(child_pid)`
-/// only ever reached the direct child, leaving such a descendant running
-/// as an orphan after this call returned. Windows has no process-group
-/// equivalent here, so that platform keeps killing the direct child only,
-/// same as before this function existed.
+/// Kills the whole process group named by `pid` (see [`spawn`]'s
+/// `process_group(0)`, which makes a bounded child's own pgid equal to its
+/// pid). Reaches any descendant the child backgrounded and never gave its
+/// own group — a plain `kill(pid)` only ever reached the direct process.
+///
+/// Safe to call after the group's leader has already exited: a process
+/// group is not torn down until every member has exited, and the kernel
+/// does not reuse a pid that still names a live process group, so `-pid`
+/// keeps naming the same group for as long as any descendant in it
+/// survives the leader.
 #[cfg(unix)]
-fn kill_child_and_its_group(child: &mut Child) -> std::io::Result<()> {
-    let Some(pid) = child.id() else {
-        // Already exited and reaped; nothing left to signal.
-        return Ok(());
-    };
+fn kill_process_group(pid: u32) -> std::io::Result<()> {
     // A negative pid is POSIX kill(2)'s own spelling for "the whole
     // process group named by this pgid", not "this one process".
     match nix::sys::signal::kill(
@@ -348,6 +370,20 @@ fn kill_child_and_its_group(child: &mut Child) -> std::io::Result<()> {
         Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
         Err(errno) => Err(std::io::Error::from(errno)),
     }
+}
+
+/// Signals `child` to stop. On Unix, kills its whole process group via
+/// [`kill_process_group`]. Process-group killing is not implemented here
+/// for Windows (which has its own mechanism, Job Objects, this module does
+/// not use), so that platform keeps killing the direct child only, same as
+/// before this function existed.
+#[cfg(unix)]
+fn kill_child_and_its_group(child: &mut Child) -> std::io::Result<()> {
+    let Some(pid) = child.id() else {
+        // Already exited and reaped; nothing left to signal.
+        return Ok(());
+    };
+    kill_process_group(pid)
 }
 
 #[cfg(not(unix))]
@@ -500,10 +536,25 @@ mod tests {
     /// had not returned after 8 seconds (this test's own 2-second bound is
     /// what actually catches that, not the assertion on the error variant
     /// alone).
+    ///
+    /// Also proves the descendant itself is killed, not merely that this
+    /// call stops waiting on it: the direct child has already exited by the
+    /// time the reader join times out, so there is no live `Child` left for
+    /// `kill_and_reap` to signal — only `child_pid`, captured before the
+    /// child was ever awaited, can still name the process group the
+    /// descendant shares with it.
     #[tokio::test]
     async fn a_backgrounded_descendant_holding_the_pipe_does_not_hang_the_call() {
         let dir = scratch_dir("orphan-pipe");
-        let sh = script(&dir, "orphan.sh", "sleep 20 & printf ok; exit 0");
+        let descendant_pid_file = dir.join("descendant-pid");
+        let sh = script(
+            &dir,
+            "orphan.sh",
+            &format!(
+                "sleep 20 & echo $! > {}\nprintf ok\nexit 0\n",
+                descendant_pid_file.display()
+            ),
+        );
         let cancel = CancellationToken::new();
 
         let result = tokio::time::timeout(
@@ -527,6 +578,7 @@ mod tests {
             "the direct child exited cleanly, but draining its output still overran the \
              budget — expected TimedOut, got {result:?}"
         );
+        assert_process_is_gone(&descendant_pid_file).await;
     }
 
     /// Regression test for `kill_and_reap` killing only the direct child:
