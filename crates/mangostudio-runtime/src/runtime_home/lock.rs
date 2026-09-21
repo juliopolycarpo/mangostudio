@@ -145,17 +145,21 @@ pub fn with_slot_lock<T>(
 
     loop {
         match create_lock_file(lock_path) {
-            Ok(()) => {
-                let _guard = LockGuard { path: lock_path };
+            Ok(file) => {
+                let mut guard = LockGuard {
+                    path: lock_path,
+                    file: Some(file),
+                };
                 let body = serde_json::to_vec(&LockOwner {
                     pid: Some(std::process::id()),
                     host: platform::hostname().ok(),
                 })
                 .expect("LockOwner has no field that can fail to serialise");
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .open(lock_path)
-                    .and_then(|mut file| file.write_all(&body))
+                guard
+                    .file
+                    .as_mut()
+                    .expect("the lock guard retains its creation handle")
+                    .write_all(&body)
                     .map_err(LockError::Io)?;
                 return Ok(run());
             }
@@ -176,13 +180,18 @@ pub fn with_slot_lock<T>(
 }
 
 /// Releases the lock on drop, so every early return above — including a
-/// write failure and a panic inside `run` — still unlinks the file.
+/// write failure and a panic inside `run` — still closes and unlinks the file.
 struct LockGuard<'a> {
     path: &'a Path,
+    file: Option<std::fs::File>,
 }
 
 impl Drop for LockGuard<'_> {
     fn drop(&mut self) {
+        // The TypeScript implementation closes its `wx` handle before
+        // unlinking. Windows otherwise rejects the unlink while the owner
+        // handle remains live.
+        drop(self.file.take());
         let _ = std::fs::remove_file(self.path);
     }
 }
@@ -202,7 +211,7 @@ impl Drop for LockGuard<'_> {
 /// holder's lock can then never be reclaimed by that other-account
 /// process, only time out at `policy.timeout` forever. Off-design for the
 /// per-account `~/.mango` this protocol assumes; noted rather than fixed.
-fn create_lock_file(path: &Path) -> io::Result<()> {
+fn create_lock_file(path: &Path) -> io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -210,7 +219,7 @@ fn create_lock_file(path: &Path) -> io::Result<()> {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    options.open(path).map(drop)
+    options.open(path)
 }
 
 /// Removes a lock whose owner is provably gone, and says whether it did.
