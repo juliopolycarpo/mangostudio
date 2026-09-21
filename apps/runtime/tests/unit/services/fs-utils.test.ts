@@ -4,10 +4,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readFileWithObservedMtime } from '../../../src/services/fs-utils';
+import { compileRuntimePathGuard, readFileWithObservedMtime } from '../../../src/services/fs-utils';
 
 let tempDir: string;
 
@@ -84,6 +84,47 @@ describe('readFileWithObservedMtime', () => {
 
       expect(bytes.byteLength).toBeGreaterThan(0);
       expect(new TextDecoder().decode(bytes)).toContain('Name:');
+    }
+  );
+});
+
+describe('compileRuntimePathGuard', () => {
+  it('uses a resolved denied root identity instead of its lexical prefix', async () => {
+    const denied = join(tempDir, 'denied');
+    const permitted = join(tempDir, 'permitted');
+    mkdirSync(denied);
+    mkdirSync(permitted);
+    await Bun.write(join(denied, 'secret.txt'), 'secret');
+    await Bun.write(join(permitted, 'visible.txt'), 'visible');
+    symlinkSync(permitted, join(denied, 'outside'));
+
+    const allows = compileRuntimePathGuard({ allowedRoots: [], deniedRoots: [denied] });
+
+    expect(allows(join(denied, 'secret.txt'))).toBe(false);
+    expect(allows(join(denied, 'outside', 'visible.txt'))).toBe(true);
+  });
+
+  it.skipIf(process.platform !== 'win32')(
+    'does not deny a case-sensitive sibling of a resolved denied root',
+    async () => {
+      const sensitive = join(tempDir, 'sensitive');
+      mkdirSync(sensitive);
+      const result = Bun.spawnSync({
+        cmd: ['fsutil', 'file', 'setCaseSensitiveInfo', sensitive, 'enable'],
+        stdout: 'ignore',
+        stderr: 'pipe',
+      });
+      expect(result.exitCode).toBe(0);
+
+      const denied = join(sensitive, 'Private');
+      const permitted = join(sensitive, 'private');
+      mkdirSync(denied);
+      mkdirSync(permitted);
+      await Bun.write(join(permitted, 'visible.txt'), 'visible');
+
+      const allows = compileRuntimePathGuard({ allowedRoots: [], deniedRoots: [denied] });
+
+      expect(allows(join(permitted, 'visible.txt'))).toBe(true);
     }
   );
 });

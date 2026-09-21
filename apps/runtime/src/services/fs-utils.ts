@@ -374,6 +374,7 @@ function isLinkUnsupported(error: unknown): boolean {
 interface CompiledPathRoot {
   readonly lexical: string;
   readonly canonical: string;
+  readonly canonicalized: boolean;
 }
 
 /**
@@ -383,9 +384,11 @@ interface CompiledPathRoot {
  *
  * Allow and deny are matched against the link-resolved candidate, not its
  * lexical form: a symlink inside an allowed root that points at a denied one
- * would otherwise pass both prefix tests and hand back the denied file. Deny
- * additionally keeps the lexical test so a root that cannot be canonicalized
- * still blocks its literal prefix.
+ * would otherwise pass both prefix tests and hand back the denied file. A
+ * denied root that cannot be canonicalized additionally keeps a lexical test,
+ * so its literal prefix remains fail-closed. Canonical roots use filesystem
+ * identity only; Windows lexical comparison folds names that can be distinct
+ * below a case-sensitive directory.
  * // Usage: const allows = compileRuntimePathGuard(params); allows(candidate)
  */
 export function compileRuntimePathGuard(filter: RuntimePathFilter): (path: string) => boolean {
@@ -413,7 +416,8 @@ export function compileRuntimePathGuard(filter: RuntimePathFilter): (path: strin
     if (
       deniedRoots.some(
         (root) =>
-          isPathPrefix(root.canonical, effective) || isLexicalPathPrefix(root.lexical, absolute)
+          isPathPrefix(root.canonical, effective) ||
+          (!root.canonicalized && isLexicalPathPrefix(root.lexical, absolute))
       )
     ) {
       return false;
@@ -426,10 +430,14 @@ export function compileRuntimePathGuard(filter: RuntimePathFilter): (path: strin
 function compilePathRoot(root: string): CompiledPathRoot {
   const lexical = resolve(root);
   try {
-    return { lexical, canonical: resolvePathThroughExistingAncestor(lexical) };
+    return {
+      lexical,
+      canonical: resolvePathThroughExistingAncestor(lexical),
+      canonicalized: true,
+    };
   } catch {
     // An unresolvable configured root still has a meaningful lexical prefix;
     // falling back keeps the policy fail-closed at candidate comparison time.
-    return { lexical, canonical: lexical };
+    return { lexical, canonical: lexical, canonicalized: false };
   }
 }
