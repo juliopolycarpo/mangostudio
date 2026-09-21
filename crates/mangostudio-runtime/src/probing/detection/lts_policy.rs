@@ -569,16 +569,20 @@ mod tests {
     }
 
     /// Mutation test 1: break the `lts-outdated-patch` vs `current-lts`
-    /// split by comparing in the wrong direction. Pre-fix failure this
-    /// mutation produces, pasted verbatim from a local run with the
-    /// comparison flipped to `.is_gt()`:
+    /// split by comparing in the wrong direction. With the comparison
+    /// flipped to `.is_gt()`, this test's second assertion goes red — the
+    /// pre-fix failure, pasted verbatim from a local run:
     ///
     /// ```text
-    /// thread 'probing::detection::lts_policy::tests::the_newest_patch_of_the_active_lts_line_is_current_lts' panicked at crates/mangostudio-runtime/src/probing/detection/lts_policy.rs:...:
+    /// thread 'probing::detection::lts_policy::tests::mutation_guard_current_lts_vs_outdated_patch_is_a_strict_less_than' panicked at crates/mangostudio-runtime/src/probing/detection/lts_policy.rs:591:9:
     /// assertion `left == right` failed
-    ///   left: LtsOutdatedPatch
-    ///  right: CurrentLts
+    ///   left: CurrentLts
+    ///  right: LtsOutdatedPatch
     /// ```
+    ///
+    /// The same mutation also turns two other tests red for the same
+    /// reason: `an_early_patch_of_the_active_lts_line_is_outdated_not_current`
+    /// and `a_live_probed_latest_can_move_current_lts_to_outdated_patch`.
     #[test]
     fn mutation_guard_current_lts_vs_outdated_patch_is_a_strict_less_than() {
         // 24.18.0 is schedule()'s own `latest` for major 24: exactly equal,

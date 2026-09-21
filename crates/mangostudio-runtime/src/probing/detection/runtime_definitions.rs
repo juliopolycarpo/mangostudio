@@ -86,6 +86,14 @@ fn present(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.trim().is_empty())
 }
 
+/// The same truthiness `LOCALAPPDATA ? … : []`/`ProgramFiles ? … : []`
+/// check in the TypeScript source: non-empty, but not trimmed first —
+/// distinct from `present`, which the node well-known-directories list
+/// above needs because its own final filter trims.
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.is_empty())
+}
+
 /// The well-known Node directories to search beyond `PATH`.
 #[must_use]
 pub fn well_known_node_directories(env: &PathEnv) -> Vec<String> {
@@ -142,7 +150,7 @@ fn well_known_bun_directories(env: &PathEnv) -> Vec<String> {
 fn well_known_fnm_directories(env: &PathEnv) -> Vec<String> {
     let mut dirs = Vec::new();
     if env.is_windows()
-        && let Some(localappdata) = env.env_var("LOCALAPPDATA")
+        && let Some(localappdata) = non_empty(env.env_var("LOCALAPPDATA"))
     {
         // winget's fnm manifest links here.
         dirs.push(join_path(
@@ -158,7 +166,7 @@ fn well_known_git_directories(env: &PathEnv) -> Vec<String> {
     if !env.is_windows() {
         return Vec::new();
     }
-    match env.env_var("ProgramFiles") {
+    match non_empty(env.env_var("ProgramFiles")) {
         Some(program_files) => vec![join_path("win32", &[program_files, "Git", "cmd"])],
         None => Vec::new(),
     }
@@ -168,7 +176,7 @@ fn well_known_winget_directories(env: &PathEnv) -> Vec<String> {
     if !env.is_windows() {
         return Vec::new();
     }
-    match env.env_var("LOCALAPPDATA") {
+    match non_empty(env.env_var("LOCALAPPDATA")) {
         Some(localappdata) => vec![join_path(
             "win32",
             &[localappdata, "Microsoft", "WindowsApps"],
@@ -390,6 +398,23 @@ mod tests {
             vec!["C:\\Program Files\\Git\\cmd".to_string()]
         );
         assert!((GIT_RUNTIME_DEFINITION.well_known_dirs)(&posix_env()).is_empty());
+    }
+
+    /// An empty (but present) `ProgramFiles`/`LOCALAPPDATA` must read the
+    /// same as an absent one — matching the TypeScript source's own
+    /// `ProgramFiles ? … : []` truthiness check, not "the key exists".
+    #[test]
+    fn an_empty_env_var_is_treated_as_absent_for_git_and_winget_and_fnms_winget_link() {
+        let mut env = win32_env();
+        env.env.insert("ProgramFiles".to_string(), String::new());
+        env.env.insert("LOCALAPPDATA".to_string(), String::new());
+        assert!((GIT_RUNTIME_DEFINITION.well_known_dirs)(&env).is_empty());
+        assert!((WINGET_RUNTIME_DEFINITION.well_known_dirs)(&env).is_empty());
+        assert!(
+            !(FNM_RUNTIME_DEFINITION.well_known_dirs)(&env)
+                .iter()
+                .any(|dir| dir.contains("WinGet"))
+        );
     }
 
     #[test]

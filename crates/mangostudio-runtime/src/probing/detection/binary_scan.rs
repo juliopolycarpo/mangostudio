@@ -841,6 +841,9 @@ mod tests {
         /// Every path `probe_version` was actually invoked for, in call
         /// order — what the deadline mutation test inspects.
         calls: Arc<StdMutex<Vec<String>>>,
+        /// Every `timeout_ms` this fake actually received, in call order —
+        /// what the probe-budget-by-platform tests inspect.
+        timeouts_seen: Arc<StdMutex<Vec<u64>>>,
     }
 
     impl BinaryScanDeps for FakeBinaryScanDeps {
@@ -856,12 +859,16 @@ mod tests {
             &'a self,
             binary: &'a str,
             _args: &'a [String],
-            _timeout_ms: u64,
+            timeout_ms: u64,
         ) -> BoxFuture<'a, Result<Option<String>, ProbeError>> {
             self.calls
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(binary.to_string());
+            self.timeouts_seen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(timeout_ms);
             let pending = self.pending.contains(binary);
             let response = self.responses.get(binary).cloned();
             Box::pin(async move {
@@ -1190,8 +1197,8 @@ mod tests {
     /// with that guard removed:
     ///
     /// ```text
-    /// thread 'probing::detection::binary_scan::tests::never_probes_a_candidate_past_the_total_deadline' panicked at crates/mangostudio-runtime/src/probing/detection/binary_scan.rs:...:
-    /// assertion `left == right` failed
+    /// thread 'probing::detection::binary_scan::tests::never_probes_a_candidate_past_the_total_deadline' panicked at crates/mangostudio-runtime/src/probing/detection/binary_scan.rs:1216:9:
+    /// assertion `left == right` failed: candidates after the deadline must never be probed at all
     ///   left: 3
     ///  right: 1
     /// ```
@@ -1233,6 +1240,136 @@ mod tests {
                 .failures
                 .iter()
                 .all(|failure| failure.code == RuntimeFindingCode::ProbeTimeout)
+        );
+    }
+
+    // `start_paused` keeps the clock still between computing the deadline
+    // and calling the probe, so `remaining` never ticks down by a real
+    // millisecond and these exact-value assertions stay deterministic.
+    #[tokio::test(start_paused = true)]
+    async fn gives_a_windows_shim_the_larger_platform_default_timeout() {
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: PathEnv {
+                platform: "win32".to_string(),
+                home_dir: "C:\\Users\\tester".to_string(),
+                env: env(&[("PATH", "C:\\tools"), ("PATHEXT", ".CMD")]),
+            },
+            existing: HashSet::from(["C:\\tools\\node.cmd".to_string()]),
+            responses: HashMap::from([("C:\\tools\\node.cmd".to_string(), "v22.13.0".to_string())]),
+            ..Default::default()
+        });
+        let timeouts = Arc::clone(&deps.timeouts_seen);
+
+        scan_runtime(&node_definition(), deps, BinaryScanOptions::default()).await;
+
+        assert_eq!(*timeouts.lock().unwrap(), vec![5_000]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn keeps_the_tighter_linux_default_timeout() {
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: linux_env("/usr/bin"),
+            existing: HashSet::from(["/usr/bin/node".to_string()]),
+            responses: HashMap::from([("/usr/bin/node".to_string(), "v22.13.0".to_string())]),
+            ..Default::default()
+        });
+        let timeouts = Arc::clone(&deps.timeouts_seen);
+
+        scan_runtime(&node_definition(), deps, BinaryScanOptions::default()).await;
+
+        assert_eq!(*timeouts.lock().unwrap(), vec![2_000]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_explicit_probe_timeout_overrides_the_platform_default() {
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: PathEnv {
+                platform: "win32".to_string(),
+                home_dir: "C:\\Users\\tester".to_string(),
+                env: env(&[("PATH", "C:\\tools"), ("PATHEXT", ".CMD")]),
+            },
+            existing: HashSet::from(["C:\\tools\\node.cmd".to_string()]),
+            responses: HashMap::from([("C:\\tools\\node.cmd".to_string(), "v22.13.0".to_string())]),
+            ..Default::default()
+        });
+        let timeouts = Arc::clone(&deps.timeouts_seen);
+        let options = BinaryScanOptions {
+            probe_timeout_ms: Some(750),
+            ..Default::default()
+        };
+
+        scan_runtime(&node_definition(), deps, options).await;
+
+        assert_eq!(*timeouts.lock().unwrap(), vec![750]);
+    }
+
+    #[tokio::test]
+    async fn a_definition_that_keeps_unparsed_versions_still_reports_an_installation() {
+        let mut definition = node_definition();
+        definition.keep_unparsed_version = true;
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: linux_env("/usr/bin"),
+            existing: HashSet::from(["/usr/bin/node".to_string()]),
+            responses: HashMap::from([("/usr/bin/node".to_string(), "not-a-version".to_string())]),
+            ..Default::default()
+        });
+
+        let result = scan_runtime(&definition, deps, BinaryScanOptions::default()).await;
+
+        assert_eq!(result.installations.len(), 1);
+        assert_eq!(result.installations[0].version, None);
+        assert!(result.failures.is_empty());
+    }
+
+    #[tokio::test]
+    async fn without_keep_unparsed_version_an_unreadable_output_is_a_failure_not_an_installation() {
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: linux_env("/usr/bin"),
+            existing: HashSet::from(["/usr/bin/node".to_string()]),
+            responses: HashMap::from([("/usr/bin/node".to_string(), "not-a-version".to_string())]),
+            ..Default::default()
+        });
+
+        let result = scan_runtime(&node_definition(), deps, BinaryScanOptions::default()).await;
+
+        assert!(result.installations.is_empty());
+        assert!(
+            result
+                .failures
+                .iter()
+                .any(|failure| failure.code == RuntimeFindingCode::NotExecutable)
+        );
+    }
+
+    /// Proves `max_concurrency` actually bounds *how many* candidates are
+    /// in flight at once, not just the deadline math: with two pending
+    /// (never-resolving) candidates and `max_concurrency: 2`, both must
+    /// have been probed — a concurrency of `1` would leave the second one
+    /// unprobed until the first timed out.
+    #[tokio::test(start_paused = true)]
+    async fn max_concurrency_of_two_probes_two_candidates_before_either_can_time_out() {
+        let calls = Arc::new(StdMutex::new(Vec::new()));
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: linux_env("/a/bin:/b/bin"),
+            existing: HashSet::from(["/a/bin/node".to_string(), "/b/bin/node".to_string()]),
+            pending: HashSet::from(["/a/bin/node".to_string(), "/b/bin/node".to_string()]),
+            calls: Arc::clone(&calls),
+            ..Default::default()
+        });
+        let options = BinaryScanOptions {
+            max_concurrency: 2,
+            total_timeout_ms: 100,
+            probe_timeout_ms: Some(100),
+            ..Default::default()
+        };
+
+        scan_runtime(&node_definition(), deps, options).await;
+
+        let mut probed = calls.lock().unwrap().clone();
+        probed.sort();
+        assert_eq!(
+            probed,
+            vec!["/a/bin/node".to_string(), "/b/bin/node".to_string()]
         );
     }
 }
