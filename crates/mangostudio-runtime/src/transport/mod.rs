@@ -193,7 +193,14 @@ pub(crate) async fn hello_capabilities(
     let manifest =
         crate::health::build_capability_manifest(slot, mango_home, registry, cancel).await;
     match serde_json::to_value(&manifest) {
-        Ok(serde_json::Value::Object(map)) => map,
+        Ok(serde_json::Value::Object(mut map)) => {
+            let catalog = mangostudio_runtime_contract::catalog::catalog();
+            map.insert(
+                "contracts".to_owned(),
+                serde_json::json!({ &catalog.name: &catalog.version }),
+            );
+            map
+        }
         // `RuntimeCapabilityManifest` derives `Serialize` on a plain struct
         // and always serialises to an object — this arm is unreachable
         // today. Deliberately `unreachable!`, not a silent `Map::new()`:
@@ -445,6 +452,25 @@ mod tests {
                 .is_err(),
             "no further heartbeat once the loop has been cancelled"
         );
+    }
+
+    #[tokio::test]
+    async fn hello_announces_the_embedded_runtime_contract_version() {
+        let home = crate::test_support::scratch_dir("transport-contract-metadata");
+        let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
+        let capabilities = super::hello_capabilities(
+            RuntimeSlot::Host,
+            &home,
+            &host.registry,
+            &CancellationToken::new(),
+        )
+        .await;
+        let catalog = mangostudio_runtime_contract::catalog::catalog();
+        assert_eq!(
+            capabilities.get("contracts"),
+            Some(&serde_json::json!({ &catalog.name: &catalog.version }))
+        );
+        assert_eq!(capabilities["enforcesPathPolicy"], true);
     }
 
     #[test]
