@@ -1166,8 +1166,10 @@ Add a runtime operation as one coherent change:
    capabilities it needs. A row without a capability list is a compile error, and so is a
    capability the consent file cannot grant. The answer is a *set*: a method that both reads
    a domain and causes effects names both capabilities, or the profile that refuses the
-   second still runs it. The gate decides on the method's list and never on its params, so a
-   read/write split has to be two methods.
+   second still runs it. The method's list defines the base requirements. Filesystem mutations
+   with `captureSnapshot: true` additionally require `fsRead` and `checkpoints`, since their
+   response includes the previous file bytes. The Rust host rechecks that consent under the
+   mutation lock before committing effects. Other read/write splits need separate methods.
 3. Register the handler in `apps/runtime/src/registry.ts` — the map is typed by the contract,
    so a missing one is a compile error there rather than a method that answers
    `METHOD_UNSUPPORTED` at runtime — and keep host effects inside `apps/runtime/src/services/`.

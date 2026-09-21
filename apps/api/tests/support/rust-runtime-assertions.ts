@@ -16,7 +16,7 @@
  */
 
 import { expect } from 'bun:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
@@ -86,19 +86,24 @@ export function assertRustRuntimeHealthShape(
  * Pins the real Rust host's implemented methods and their consent gates.
  *
  * @example
- * assertRustRuntimeFeatureCeiling(client.manifest, { probing: true, fsRead: true, fsWrite: true });
+ * assertRustRuntimeFeatureCeiling(client.manifest, { probing: true, fsRead: true, fsWrite: true, checkpoints: true });
  */
 export function assertRustRuntimeFeatureCeiling(
   manifest: RuntimeCapabilityManifest,
-  expected: { readonly probing: boolean; readonly fsRead: boolean; readonly fsWrite: boolean }
+  expected: {
+    readonly probing: boolean;
+    readonly fsRead: boolean;
+    readonly fsWrite: boolean;
+    readonly checkpoints: boolean;
+  }
 ): void {
   expect(manifest.features).toEqual({
-    tools: expected.probing || expected.fsRead || expected.fsWrite,
+    tools: expected.probing || expected.fsRead || expected.fsWrite || expected.checkpoints,
     git: false,
     probing: expected.probing,
     mcp: false,
     library: false,
-    checkpoints: false,
+    checkpoints: expected.checkpoints,
     fsRead: expected.fsRead,
     fsWrite: expected.fsWrite,
     shell: false,
@@ -291,4 +296,41 @@ export async function assertRustRuntimeWorkspaceMethods(
     client.workspace.resolveContained({ root: workspaceDir, path: '../escape' })
   )) as RemoteError;
   expect(escaped.details).toMatchObject({ kind: 'workspace_containment' });
+}
+
+/**
+ * Exercises checkpoint capture, hashing and idempotent restore over the production client.
+ *
+ * @example
+ * await assertRustRuntimeSnapshotMethods(client, workspaceDir);
+ */
+export async function assertRustRuntimeSnapshotMethods(
+  client: RuntimeClient,
+  workspaceDir: string
+): Promise<void> {
+  const path = join(workspaceDir, 'snapshot-roundtrip.bin');
+  const before = Buffer.from([0, 255, 13, 10, 239, 187, 191]);
+  const beforeHash = new Bun.CryptoHasher('sha256').update(before).digest('hex');
+  expect(await client.snapshot.capture({ path })).toEqual({ exists: false });
+  expect(await client.snapshot.hash({ path })).toEqual({ hash: null });
+  await writeFile(path, before);
+  expect(await client.snapshot.capture({ path })).toEqual({
+    exists: true,
+    contentBase64: before.toString('base64'),
+    hash: beforeHash,
+  });
+  expect(await client.snapshot.hash({ path })).toEqual({ hash: beforeHash });
+  const after = Buffer.from('changed bytes');
+  const afterHash = new Bun.CryptoHasher('sha256').update(after).digest('hex');
+  await writeFile(path, after);
+  const revert = {
+    chatId: 'snapshot-qualification',
+    containmentRoot: workspaceDir,
+    expected: [{ path, afterHash, revertedHash: beforeHash }],
+    operations: [{ type: 'restore' as const, path, contentBase64: before.toString('base64') }],
+  };
+  expect(await client.snapshot.revert(revert)).toEqual({ revertedFiles: 1 });
+  expect(await readFile(path)).toEqual(before);
+  expect(await client.snapshot.revert(revert)).toEqual({ revertedFiles: 1 });
+  expect(await client.snapshot.hash({ path })).toEqual({ hash: beforeHash });
 }
