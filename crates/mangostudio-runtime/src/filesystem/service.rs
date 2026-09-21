@@ -38,6 +38,24 @@ pub(super) struct State {
 pub(super) struct Service {
     pub(super) state: Arc<State>,
     pub(super) consent: ConsentSource,
+    pub(super) move_io: Arc<dyn MoveIo>,
+}
+
+pub(super) trait MoveIo: Send + Sync {
+    fn move_no_overwrite(&self, from: &Path, to: &Path) -> Result<(), RemoteError>;
+    fn hash_file(&self, path: &Path) -> Result<String, RemoteError>;
+}
+
+pub(super) struct NativeMoveIo;
+
+impl MoveIo for NativeMoveIo {
+    fn move_no_overwrite(&self, from: &Path, to: &Path) -> Result<(), RemoteError> {
+        io::move_no_overwrite(from, to)
+    }
+
+    fn hash_file(&self, path: &Path) -> Result<String, RemoteError> {
+        io::hash_file(path)
+    }
 }
 
 #[derive(Clone)]
@@ -67,6 +85,10 @@ impl ResponseBudget {
             return Ok(());
         }
         preflight_response(result, &self.id, self.limit_bytes, "mutation")
+    }
+
+    fn preflight_read(&self, result: &Value) -> Result<(), RemoteError> {
+        preflight_response(result, &self.id, self.limit_bytes, "read")
     }
 }
 
@@ -146,14 +168,26 @@ impl Service {
     async fn read(
         self: Arc<Self>,
         params: ReadParams,
+        response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        run_blocking(move || self.read_sync(params, &cancel)).await
+        let guards = self
+            .state
+            .locks
+            .acquire(vec![params.resolved_path.clone()], &cancel)
+            .await
+            .map_err(lock_error)?;
+        run_blocking(move || {
+            let _guards = guards;
+            self.read_sync(params, &response, &cancel)
+        })
+        .await
     }
 
     fn read_sync(
         &self,
         params: ReadParams,
+        response: &ResponseBudget,
         cancel: &CancellationToken,
     ) -> Result<Value, RemoteError> {
         self.before_io(
@@ -182,16 +216,18 @@ impl Service {
             } else {
                 base64::engine::general_purpose::STANDARD.encode(&observed.bytes)
             };
-            let hash = lock(&self.state.ledger).record_read(
+            let hash = hash_hex(&Sha256::digest(&observed.bytes));
+            let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
+            response.preflight_read(&result)?;
+            let recorded_hash = lock(&self.state.ledger).record_read(
                 &params.chat_id,
                 &params.resolved_path,
                 &observed.bytes,
                 observed.mtime_ms,
                 ReadObservation::ByteView,
             );
-            return Ok(
-                json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view}),
-            );
+            debug_assert_eq!(recorded_hash, hash);
+            return Ok(result);
         }
         if text::looks_binary(&observed.bytes) {
             return Err(path_error(format!(
@@ -217,7 +253,10 @@ impl Service {
         } else {
             text::format_window(&observed.bytes, start, maximum)
         };
-        let hash = lock(&self.state.ledger).record_read(
+        let hash = hash_hex(&Sha256::digest(&observed.bytes));
+        let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
+        response.preflight_read(&result)?;
+        let recorded_hash = lock(&self.state.ledger).record_read(
             &params.chat_id,
             &params.resolved_path,
             &observed.bytes,
@@ -228,9 +267,8 @@ impl Service {
                 total_lines: total as u64,
             }),
         );
-        Ok(
-            json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated}),
-        )
+        debug_assert_eq!(recorded_hash, hash);
+        Ok(result)
     }
 
     async fn write(
@@ -543,15 +581,42 @@ impl Service {
                 &[&params.resolved_from, &params.resolved_to],
                 &cancel,
             )?;
-            io::move_no_overwrite(&params.resolved_from, &params.resolved_to)?;
-            lock(&self.state.ledger).rekey(
-                &params.mutation.chat_id,
+            self.move_io
+                .move_no_overwrite(&params.resolved_from, &params.resolved_to)?;
+            let committed_hash = match self.move_io.hash_file(&params.resolved_to) {
+                Ok(hash) => hash,
+                Err(cause) => {
+                    let mut ledger = lock(&self.state.ledger);
+                    ledger.forget(&params.mutation.chat_id, &params.resolved_from);
+                    ledger.forget(&params.mutation.chat_id, &params.resolved_to);
+                    return Err(committed_move_error(
+                        &params.resolved_from,
+                        &params.resolved_to,
+                        cause,
+                    ));
+                }
+            };
+            let mut ledger = lock(&self.state.ledger);
+            if committed_hash == expected_hash {
+                ledger.rekey(
+                    &params.mutation.chat_id,
+                    &params.resolved_from,
+                    &params.resolved_to,
+                );
+            } else {
+                ledger.forget(&params.mutation.chat_id, &params.resolved_from);
+                ledger.forget(&params.mutation.chat_id, &params.resolved_to);
+            }
+            drop(ledger);
+            Ok(mutation_result(
+                json!({"from":params.input_from,"to":params.input_to,"moved":true}),
+                &params.mutation,
                 &params.resolved_from,
-                &params.resolved_to,
-            );
-            let hash = io::hash_file(&params.resolved_to)?;
-            debug_assert_eq!(hash, expected_hash);
-            Ok(result)
+                "move",
+                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                &committed_hash,
+                Some(&params.resolved_to),
+            ))
         })
         .await
     }
@@ -664,6 +729,16 @@ pub(super) fn lock_error(_: super::freshness::PathLockError) -> RemoteError {
     RemoteError::new(codes::CANCELLED, "Filesystem operation cancelled")
 }
 
+fn committed_move_error(from: &Path, to: &Path, cause: RemoteError) -> RemoteError {
+    path_error(format!(
+        "Move committed, but the destination hash could not be verified. Inspect \"{}\" and \"{}\" before retrying. Cause: {}",
+        from.display(),
+        to.display(),
+        cause.message
+    ))
+    .with_detail("changedPaths", json!([from, to]))
+}
+
 fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
     if value < 1.0 || value.fract() != 0.0 || value > ALL_LINES as f64 {
         return Err(argument(format!(
@@ -693,10 +768,15 @@ pub(super) fn preflight_response(
     if size <= response_limit_bytes {
         return Ok(());
     }
+    let guidance = if subject == "read" {
+        "Read a smaller text window or choose a more compact view."
+    } else {
+        "Split the operation into smaller calls or disable snapshot capture."
+    };
     Err(RemoteError::new(
         codes::FRAME_TOO_LARGE,
         format!(
-            "Cannot checkpoint {subject} response: it is {size} bytes, but the negotiated frame limit is {response_limit_bytes} bytes. Split the operation into smaller calls or disable snapshot capture."
+            "Cannot return {subject} response: it is {size} bytes, but the negotiated frame limit is {response_limit_bytes} bytes. {guidance}"
         ),
     )
     .with_detail("kind", "snapshot_too_large")
@@ -729,6 +809,7 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
     let service = Arc::new(Service {
         state: Arc::clone(STATE.get_or_init(|| Arc::new(State::default()))),
         consent,
+        move_io: Arc::new(NativeMoveIo),
     });
     let read = Arc::clone(&service);
     let write = Arc::clone(&service);
@@ -742,7 +823,8 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
     let grep = Arc::clone(&service);
     registry
         .implement("fs.read-file", move |params, ctx: CallContext| {
-            Arc::clone(&read).read(params, ctx.cancel().clone())
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&read).read(params, response, ctx.cancel().clone())
         })
         .implement("fs.write-file", move |params, ctx: CallContext| {
             let response = ResponseBudget::from_context(&ctx);
@@ -815,12 +897,47 @@ mod tests {
     use crate::test_support::{ScratchDir, scratch_dir};
 
     fn fixture() -> (ScratchDir, Arc<Service>) {
+        fixture_with_move_io(Arc::new(NativeMoveIo))
+    }
+
+    fn fixture_with_move_io(move_io: Arc<dyn MoveIo>) -> (ScratchDir, Arc<Service>) {
         let home = scratch_dir("filesystem-service");
         let service = Arc::new(Service {
             state: Arc::new(State::default()),
             consent: ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
+            move_io,
         });
         (home, service)
+    }
+
+    struct ReplacingMoveIo {
+        replacement: Vec<u8>,
+    }
+
+    impl MoveIo for ReplacingMoveIo {
+        fn move_no_overwrite(&self, from: &Path, to: &Path) -> Result<(), RemoteError> {
+            std::fs::write(from, &self.replacement).map_err(io::io_error)?;
+            io::move_no_overwrite(from, to)
+        }
+
+        fn hash_file(&self, path: &Path) -> Result<String, RemoteError> {
+            io::hash_file(path)
+        }
+    }
+
+    struct FailingHashMoveIo;
+
+    impl MoveIo for FailingHashMoveIo {
+        fn move_no_overwrite(&self, from: &Path, to: &Path) -> Result<(), RemoteError> {
+            io::move_no_overwrite(from, to)
+        }
+
+        fn hash_file(&self, path: &Path) -> Result<String, RemoteError> {
+            Err(path_error(format!(
+                "Cannot hash \"{}\": injected failure.",
+                path.display()
+            )))
+        }
     }
 
     fn decode<T: serde::de::DeserializeOwned>(value: Value) -> T {
@@ -847,7 +964,11 @@ mod tests {
     async fn seed_and_read(service: &Arc<Service>, path: &Path, content: &[u8]) {
         std::fs::write(path, content).unwrap();
         Arc::clone(service)
-            .read(read_params(path), CancellationToken::new())
+            .read(
+                read_params(path),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
             .await
             .unwrap();
     }
@@ -884,7 +1005,11 @@ mod tests {
         assert_schema("fs.create-file", &created);
         assert_eq!(created["mutations"][0]["before"], json!({"exists":false}));
         let read = Arc::clone(&service)
-            .read(read_params(&path), cancel.clone())
+            .read(
+                read_params(&path),
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
             .await
             .unwrap();
         assert_schema("fs.read-file", &read);
@@ -1015,6 +1140,143 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oversized_read_responses_do_not_grant_freshness() {
+        let (home, service) = fixture();
+        for (name, view, content) in [
+            ("text", None, "a\n".repeat(2_000).into_bytes()),
+            ("bytes", Some("base64"), vec![b'a'; 4_096]),
+        ] {
+            let path = home.join(name);
+            std::fs::write(&path, &content).unwrap();
+            let mut params = read_params(&path);
+            params.input_path = name.to_owned();
+            params.view = view.map(str::to_owned);
+
+            let error = Arc::clone(&service)
+                .read(params, constrained_response(), CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+
+            let mut write = write_params(&path, "replacement");
+            write.input_path = name.to_owned();
+            let error = Arc::clone(&service)
+                .write(
+                    write,
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.details.unwrap()["kind"], "file_not_read");
+            assert_eq!(std::fs::read(&path).unwrap(), content);
+        }
+        assert!(lock(&service.state.ledger).is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_waits_for_the_path_lock_before_recording_freshness() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::write(&path, b"old\n").unwrap();
+        let held = service
+            .state
+            .locks
+            .acquire(vec![path.clone()], &CancellationToken::new())
+            .await
+            .unwrap();
+        let pending_service = Arc::clone(&service);
+        let pending_path = path.clone();
+        let pending = tokio::spawn(async move {
+            pending_service
+                .read(
+                    read_params(&pending_path),
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!pending.is_finished());
+
+        std::fs::write(&path, b"new\n").unwrap();
+        drop(held);
+        let result = pending.await.unwrap().unwrap();
+        assert_eq!(result["content"], "     1\tnew");
+
+        Arc::clone(&service)
+            .write(
+                write_params(&path, "replacement"),
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+    }
+
+    #[tokio::test]
+    async fn move_snapshot_uses_the_committed_destination_hash() {
+        let replacement = b"external\n".to_vec();
+        let (home, service) = fixture_with_move_io(Arc::new(ReplacingMoveIo {
+            replacement: replacement.clone(),
+        }));
+        let source = home.join("source");
+        let destination = home.join("destination");
+        seed_and_read(&service, &source, b"original\n").await;
+
+        let result = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let committed_hash = hash_hex(&Sha256::digest(&replacement));
+        assert_eq!(std::fs::read(&destination).unwrap(), replacement);
+        assert_eq!(result["mutations"][0]["afterHash"], committed_hash);
+        assert!(lock(&service.state.ledger).is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_post_move_hash_reports_changed_paths_and_forgets_freshness() {
+        let (home, service) = fixture_with_move_io(Arc::new(FailingHashMoveIo));
+        let source = home.join("source");
+        let destination = home.join("destination");
+        seed_and_read(&service, &source, b"original\n").await;
+
+        let error = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.message.starts_with("Move committed, but"));
+        assert_eq!(
+            error.details.unwrap()["changedPaths"],
+            json!([source, destination])
+        );
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"original\n");
+        assert!(lock(&service.state.ledger).is_empty());
+    }
+
+    #[tokio::test]
     async fn partial_reads_and_external_changes_refuse_overwrite() {
         let (home, service) = fixture();
         let path = home.join("file");
@@ -1033,7 +1295,7 @@ mod tests {
         let mut params = read_params(&path);
         params.max_lines = Some(1.0);
         Arc::clone(&service)
-            .read(params, cancel.clone())
+            .read(params, ResponseBudget::unbounded(), cancel.clone())
             .await
             .unwrap();
         let partial = Arc::clone(&service)
@@ -1047,7 +1309,11 @@ mod tests {
             .unwrap_err();
         assert_eq!(partial.details.unwrap()["kind"], "partial_read");
         Arc::clone(&service)
-            .read(read_params(&path), cancel.clone())
+            .read(
+                read_params(&path),
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
             .await
             .unwrap();
         std::fs::write(&path, b"external").unwrap();
@@ -1071,14 +1337,18 @@ mod tests {
         std::fs::write(&path, b"\0abc").unwrap();
         let cancel = CancellationToken::new();
         let binary = Arc::clone(&service)
-            .read(read_params(&path), cancel.clone())
+            .read(
+                read_params(&path),
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
             .await
             .unwrap_err();
         assert_eq!(binary.details.unwrap()["kind"], "path_access");
         let mut params = read_params(&path);
         params.view = Some("hex".into());
         let read = Arc::clone(&service)
-            .read(params, cancel.clone())
+            .read(params, ResponseBudget::unbounded(), cancel.clone())
             .await
             .unwrap();
         assert_eq!(read["content"], "00616263");
@@ -1178,7 +1448,11 @@ mod tests {
         let mut params = read_params(&path);
         params.view = Some("base64".into());
         let error = Arc::clone(&service)
-            .read(params, CancellationToken::new())
+            .read(
+                params,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
             .await
             .unwrap_err();
         assert_eq!(

@@ -852,7 +852,7 @@ mod tests {
         consent::source::ConsentSource,
         filesystem::{
             freshness::{ObservedLineRange, ReadObservation},
-            service::State,
+            service::{NativeMoveIo, State},
         },
         runtime_home::RuntimeSlot,
         test_support::{ScratchDir, scratch_dir},
@@ -863,6 +863,7 @@ mod tests {
         let service = Arc::new(Service {
             state: Arc::new(State::default()),
             consent: ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
+            move_io: Arc::new(NativeMoveIo),
         });
         (home, service)
     }
