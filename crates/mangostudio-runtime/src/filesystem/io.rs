@@ -1611,7 +1611,7 @@ mod tests {
         .compile()
         .unwrap();
 
-        let error = move_no_overwrite_bound_with_hooks(
+        let result = move_no_overwrite_bound_with_hooks(
             &policy,
             &source,
             &destination,
@@ -1620,15 +1620,26 @@ mod tests {
                 std::fs::write(&source, b"external replacement").unwrap();
             },
             || {},
-        )
-        .unwrap_err();
-
-        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
-        assert!(!source.exists());
-        assert_eq!(
-            std::fs::read(&destination).unwrap(),
-            b"external replacement"
         );
+
+        #[cfg(windows)]
+        {
+            // Windows renames the opened source handle, so the external
+            // replacement remains at its original name.
+            result.unwrap();
+            assert_eq!(std::fs::read(&source).unwrap(), b"external replacement");
+            assert_eq!(std::fs::read(&destination).unwrap(), b"before");
+        }
+        #[cfg(not(windows))]
+        {
+            let error = result.unwrap_err();
+            assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+            assert!(!source.exists());
+            assert_eq!(
+                std::fs::read(&destination).unwrap(),
+                b"external replacement"
+            );
+        }
     }
 
     #[test]
