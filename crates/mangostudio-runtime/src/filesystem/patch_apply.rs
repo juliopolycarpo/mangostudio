@@ -188,6 +188,13 @@ fn plan_operation(
             resolved_move_to,
             hunks,
         } => {
+            if move_to.is_some() != resolved_move_to.is_some() {
+                return Err(argument(format!(
+                    "Invalid move fields for \"{input_path}\": received moveTo={} and resolvedMoveTo={}; expected both fields or neither.",
+                    move_to.is_some(),
+                    resolved_move_to.is_some()
+                )));
+            }
             let observed = read_patch_target(service, &mutation.chat_id, resolved_path, cancel)?;
             if mutation.capture_snapshot {
                 super::service::snapshot_limit(resolved_path, observed.bytes.len())?;
@@ -959,6 +966,33 @@ mod tests {
         assert_eq!(result["result"]["summary"], "4 files changed");
         assert_eq!(result["mutations"].as_array().unwrap().len(), 4);
         assert_eq!(result["mutations"][2]["afterHash"], "absent");
+    }
+
+    #[tokio::test]
+    async fn rejects_unpaired_move_fields_before_reading_or_mutating() {
+        let (home, service) = fixture();
+        let source = home.join("source.txt");
+        let destination = home.join("destination.txt");
+        fs::write(&source, "unchanged\n").unwrap();
+
+        for operation in [
+            json!({"type":"update","inputPath":"source.txt","resolvedPath":source,"moveTo":"destination.txt","hunks":[]}),
+            json!({"type":"update","inputPath":"source.txt","resolvedPath":source,"resolvedMoveTo":destination,"hunks":[]}),
+        ] {
+            let error = apply(
+                Arc::clone(&service),
+                params(json!({
+                    "chatId":"chat", "captureSnapshot":true, "operations":[operation]
+                })),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+            assert!(error.message.contains("expected both fields or neither"));
+            assert_eq!(fs::read_to_string(&source).unwrap(), "unchanged\n");
+            assert!(!destination.exists());
+        }
     }
 
     #[tokio::test]

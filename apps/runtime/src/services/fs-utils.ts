@@ -20,6 +20,7 @@ import {
   READ_FILE_MAX_BYTES,
 } from '@mangostudio/shared/runtime-contract';
 import {
+  isLexicalPathPrefix,
   isPathPrefix,
   resolvePathThroughExistingAncestor,
 } from '@mangostudio/shared/workspaces/host';
@@ -411,7 +412,8 @@ export function compileRuntimePathGuard(filter: RuntimePathFilter): (path: strin
     }
     if (
       deniedRoots.some(
-        (root) => isPathPrefix(root.canonical, effective) || isPathPrefix(root.lexical, absolute)
+        (root) =>
+          isPathPrefix(root.canonical, effective) || isLexicalPathPrefix(root.lexical, absolute)
       )
     ) {
       return false;

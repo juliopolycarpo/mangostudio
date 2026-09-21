@@ -1428,93 +1428,188 @@
                   }
                 },
                 {
-                  "type": "object",
-                  "required": [
-                    "type",
-                    "inputPath",
-                    "resolvedPath",
-                    "hunks"
-                  ],
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "const": "update"
-                    },
-                    "inputPath": {
-                      "type": "string"
-                    },
-                    "resolvedPath": {
-                      "type": "string"
-                    },
-                    "moveTo": {
-                      "type": "string"
-                    },
-                    "resolvedMoveTo": {
-                      "type": "string"
-                    },
-                    "hunks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "lines"
-                        ],
-                        "properties": {
-                          "marker": {
-                            "type": "string"
-                          },
-                          "lines": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "required": [
-                                "type",
-                                "content",
-                                "ending"
-                              ],
-                              "properties": {
-                                "type": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "const": "context"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "inputPath",
+                        "resolvedPath",
+                        "hunks"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "update"
+                        },
+                        "inputPath": {
+                          "type": "string"
+                        },
+                        "resolvedPath": {
+                          "type": "string"
+                        },
+                        "hunks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "lines"
+                            ],
+                            "properties": {
+                              "marker": {
+                                "type": "string"
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "content",
+                                    "ending"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "context"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "add"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "delete"
+                                        }
+                                      ]
                                     },
-                                    {
-                                      "type": "string",
-                                      "const": "add"
+                                    "content": {
+                                      "type": "string"
                                     },
-                                    {
-                                      "type": "string",
-                                      "const": "delete"
+                                    "ending": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": ""
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "\n"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "\r\n"
+                                        }
+                                      ]
                                     }
-                                  ]
-                                },
-                                "content": {
-                                  "type": "string"
-                                },
-                                "ending": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "const": ""
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "\n"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "\r\n"
-                                    }
-                                  ]
+                                  }
                                 }
                               }
                             }
                           }
+                        },
+                        "moveTo": {
+                          "not": {}
+                        },
+                        "resolvedMoveTo": {
+                          "not": {}
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "inputPath",
+                        "resolvedPath",
+                        "hunks",
+                        "moveTo",
+                        "resolvedMoveTo"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "update"
+                        },
+                        "inputPath": {
+                          "type": "string"
+                        },
+                        "resolvedPath": {
+                          "type": "string"
+                        },
+                        "hunks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "lines"
+                            ],
+                            "properties": {
+                              "marker": {
+                                "type": "string"
+                              },
+                              "lines": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "type",
+                                    "content",
+                                    "ending"
+                                  ],
+                                  "properties": {
+                                    "type": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "context"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "add"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "delete"
+                                        }
+                                      ]
+                                    },
+                                    "content": {
+                                      "type": "string"
+                                    },
+                                    "ending": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": ""
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "\n"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "\r\n"
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "moveTo": {
+                          "type": "string"
+                        },
+                        "resolvedMoveTo": {
+                          "type": "string"
                         }
                       }
                     }
-                  }
+                  ]
                 }
               ]
             }

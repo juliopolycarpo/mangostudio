@@ -131,6 +131,34 @@ describe('RUNTIME_CONTRACT', () => {
     ).not.toThrow();
   });
 
+  it('requires patch move display and resolved paths as a pair', () => {
+    const update = {
+      type: 'update',
+      inputPath: 'old.txt',
+      resolvedPath: '/repo/old.txt',
+      hunks: [],
+    };
+    const params = (operation: Record<string, unknown>) => ({
+      chatId: 'chat-1',
+      captureSnapshot: false,
+      operations: [{ ...update, ...operation }],
+    });
+
+    expect(() => RUNTIME_CONTRACT.assertParams('fs.apply-patch', params({}))).not.toThrow();
+    expect(() =>
+      RUNTIME_CONTRACT.assertParams(
+        'fs.apply-patch',
+        params({ moveTo: 'new.txt', resolvedMoveTo: '/repo/new.txt' })
+      )
+    ).not.toThrow();
+    expect(() =>
+      RUNTIME_CONTRACT.assertParams('fs.apply-patch', params({ moveTo: 'new.txt' }))
+    ).toThrow(/do not match the contract/);
+    expect(() =>
+      RUNTIME_CONTRACT.assertParams('fs.apply-patch', params({ resolvedMoveTo: '/repo/new.txt' }))
+    ).toThrow(/do not match the contract/);
+  });
+
   it('leaves a hub-computed number unbounded, and bounds the one already asserted', () => {
     // `assertTerminalSize` in the runtime already refuses these, so the schema
     // replaces a hand-written check rather than inventing a new rejection.

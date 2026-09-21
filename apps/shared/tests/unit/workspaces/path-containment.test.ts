@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import {
   assertInsideWorkdir,
   isInside,
+  isLexicalPathPrefix,
   isPathPrefix,
   resolvePathForContainment,
   WorkdirContainmentError,
@@ -34,12 +35,21 @@ describe('isPathPrefix', () => {
     expect(isPathPrefix('/tmp/project', '/tmp/project-extra')).toBe(false);
   });
 
+  it.skipIf(process.platform !== 'win32')('keeps resolved Windows component case exact', () => {
+    expect(isPathPrefix('C:\\Workspace', 'C:\\Workspace\\nested')).toBe(true);
+    expect(isPathPrefix('C:\\Workspace', 'c:\\workspace\\nested')).toBe(false);
+    expect(isPathPrefix('\\\\?\\C:\\Workspace', '\\\\?\\C:\\Workspace\\nested')).toBe(true);
+    expect(isPathPrefix('C:\\Workspace', 'C:\\Workspace-copy')).toBe(false);
+  });
+
   it.skipIf(process.platform !== 'win32')(
-    'matches Windows path components with filesystem case identity',
+    'folds unresolved Windows paths without weakening resolved identity',
     () => {
-      expect(isPathPrefix('C:\\Workspace', 'c:\\workspace\\nested')).toBe(true);
-      expect(isPathPrefix('C:\\Workspace', 'c:\\workspace-copy')).toBe(false);
-      expect(isPathPrefix('\\\\?\\C:\\Workspace', '\\\\?\\c:\\workspace\\nested')).toBe(true);
+      expect(isLexicalPathPrefix('C:\\Workspace', 'c:\\workspace\\nested')).toBe(true);
+      expect(isLexicalPathPrefix('C:\\Workspace', 'c:\\workspace-copy')).toBe(false);
+      expect(isLexicalPathPrefix('\\\\?\\C:\\Workspace', '\\\\?\\c:\\workspace\\nested')).toBe(
+        true
+      );
     }
   );
 });

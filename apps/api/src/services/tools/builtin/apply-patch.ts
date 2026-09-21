@@ -145,17 +145,17 @@ function resolveOperation(
       resolvedPath,
     };
   }
-  return {
-    type: 'update',
+  const update = {
+    type: 'update' as const,
     inputPath: operation.path,
     resolvedPath,
-    ...(operation.moveTo
-      ? {
-          moveTo: operation.moveTo,
-          resolvedMoveTo: resolveAndValidatePath(operation.moveTo, validationOptions),
-        }
-      : {}),
     hunks: operation.hunks,
+  };
+  if (!operation.moveTo) return update;
+  return {
+    ...update,
+    moveTo: operation.moveTo,
+    resolvedMoveTo: resolveAndValidatePath(operation.moveTo, validationOptions),
   };
 }
 
