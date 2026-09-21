@@ -16,18 +16,18 @@ use mangostudio_runtime::runtime_home::{
 };
 use serde_json::json;
 
+mod support;
+
+use support::scratch::{ScratchDir, scratch_path};
+
 fn fixture_home() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts-home")
 }
 
 /// Recursively copies the committed fixture into a scratch directory, so a
 /// test that writes through it never mutates what is checked in.
-fn copy_fixture_into_scratch(name: &str) -> PathBuf {
-    let scratch = std::env::temp_dir().join(format!(
-        "mango-ts-compat-{name}-{}-{}",
-        std::process::id(),
-        line!()
-    ));
+fn copy_fixture_into_scratch(name: &str) -> ScratchDir {
+    let scratch = scratch_path(&format!("ts-compat-{name}"));
     copy_dir_recursive(&fixture_home(), &scratch).expect("copying the committed fixture");
     scratch
 }

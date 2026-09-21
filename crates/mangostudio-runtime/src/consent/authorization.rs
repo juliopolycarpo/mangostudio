@@ -82,21 +82,13 @@ mod tests {
     use crate::consent::source::ConsentSource;
     use crate::ports::authorization::Authorization;
     use crate::runtime_home::{RuntimeSlot, write_runtime_slot_config};
-
-    fn scratch_home(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-consent-authorization-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir as scratch_home;
 
     #[tokio::test]
     async fn a_fully_granted_capability_is_never_reported_missing() {
         let home = scratch_home("granted");
-        let authorization = ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home));
+        let authorization =
+            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()));
         let missing = authorization
             .missing_capabilities("terminal.list", &["shell".to_string()])
             .await;
@@ -107,7 +99,7 @@ mod tests {
     async fn an_ungranted_capability_is_reported_missing() {
         let home = scratch_home("denied");
         let authorization =
-            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Remote, home));
+            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Remote, home.to_path_buf()));
         let missing = authorization
             .missing_capabilities("terminal.list", &["shell".to_string()])
             .await;
@@ -126,7 +118,8 @@ mod tests {
             )],
         )
         .unwrap();
-        let authorization = ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home));
+        let authorization =
+            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()));
         let missing = authorization
             .missing_capabilities(
                 "snapshot.capture",
@@ -140,7 +133,7 @@ mod tests {
     async fn a_zero_capability_method_is_never_missing_anything() {
         let home = scratch_home("zero-capability");
         let authorization =
-            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Remote, home));
+            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Remote, home.to_path_buf()));
         let missing = authorization
             .missing_capabilities("runtime.health", &[])
             .await;
@@ -151,7 +144,7 @@ mod tests {
     async fn consent_is_re_read_on_every_call() {
         let home = scratch_home("re-read");
         let authorization =
-            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home.clone()));
+            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()));
         assert!(
             authorization
                 .missing_capabilities("terminal.list", &["shell".to_string()])

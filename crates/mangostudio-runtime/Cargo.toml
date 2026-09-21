@@ -1,14 +1,14 @@
 [package]
 name = "mangostudio-runtime"
 # Lockstep with the root `package.json` and `crates/mangostudio-launcher`, not
-# with `[workspace.package].version` (the protocol version): the release
-# archive ships this binary alongside `mangostudio`/`mangostudio-runtime` built
-# from the same tag (see the launcher's own `binstall` metadata), and a hub's
-# `requireMatchingRelease` check compares this against the app release, never
-# the protocol version. `scripts/lib/release-version.ts`'s `APP_VERSIONED_CRATES`
-# enforces this lockstep (via `bun run check:versions`) and
-# `bumpLockstepVersions` bumps it on release — this manifest's version is
-# never hand-maintained.
+# with `[workspace.package].version` (the protocol version): neither
+# `scripts/build.ts` nor `distribution-build.yml` builds or ships this binary
+# today, but `scripts/lib/release-version.ts`'s `APP_VERSIONED_CRATES` version-locks
+# it to the app release regardless (via `bun run check:versions`, bumped by
+# `bumpLockstepVersions` on release — this manifest's version is never
+# hand-maintained), so that when it does ship, a hub's `requireMatchingRelease`
+# check already has a version to compare it against, never the protocol
+# version.
 version = "0.1.1"
 authors.workspace = true
 categories = ["command-line-utilities", "network-programming", "filesystem", "os"]

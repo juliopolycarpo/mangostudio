@@ -756,7 +756,6 @@ fn parse_git_version(output: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -790,34 +789,29 @@ mod tests {
     #[cfg(unix)]
     use std::path::Path;
 
-    fn scratch_home(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-health-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    #[cfg(unix)]
+    use crate::test_support::ScratchDir;
+    use crate::test_support::scratch_dir as scratch_home;
 
     /// A directory usable as a synthetic `PATH` entry, containing one
     /// executable script named `git`.
     #[cfg(unix)]
-    fn fake_git(name: &str, body: &str) -> (PathBuf, std::ffi::OsString) {
+    fn fake_git(name: &str, body: &str) -> (ScratchDir, std::ffi::OsString) {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = scratch_home(name);
         let path = dir.join("git");
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
-        (dir.clone(), dir.into_os_string())
+        let path_var = dir.as_os_str().to_os_string();
+        (dir, path_var)
     }
 
     /// A directory usable as a synthetic `PATH` entry, containing one
     /// executable, empty script per name given — `detect_shells` never
     /// runs it, only checks that it exists and is executable.
     #[cfg(unix)]
-    fn fake_shells_on_path(dir_name: &str, names: &[&str]) -> (PathBuf, std::ffi::OsString) {
+    fn fake_shells_on_path(dir_name: &str, names: &[&str]) -> (ScratchDir, std::ffi::OsString) {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = scratch_home(dir_name);
@@ -826,7 +820,8 @@ mod tests {
             std::fs::write(&path, "#!/bin/sh\n").unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
-        (dir.clone(), dir.into_os_string())
+        let path_var = dir.as_os_str().to_os_string();
+        (dir, path_var)
     }
 
     #[test]

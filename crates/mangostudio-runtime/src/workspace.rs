@@ -440,68 +440,6 @@ pub fn guard_mutation<T>(
     Ok(execute())
 }
 
-/// One directory entry's bare name, and whether it is itself a directory —
-/// exactly what a bounded listing needs to answer, nothing a later method's
-/// own richer shape (size, mtime, symlink target) should be guessed at here.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DirectoryEntry {
-    /// The entry's file name, not a full path.
-    pub name: String,
-    /// Whether this entry is itself a directory.
-    pub is_directory: bool,
-}
-
-/// A directory's entries, capped at [`MAX_WORKSPACE_DIRECTORY_ENTRIES`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoundedListing {
-    /// At most [`MAX_WORKSPACE_DIRECTORY_ENTRIES`] entries.
-    pub entries: Vec<DirectoryEntry>,
-    /// Whether `dir` actually held more entries than [`BoundedListing::entries`] carries.
-    pub truncated: bool,
-}
-
-/// Lists `dir`'s entries, capped at [`MAX_WORKSPACE_DIRECTORY_ENTRIES`] —
-/// the containment-agnostic half of `browseWorkspace`; a caller that must
-/// stay inside a workspace root calls
-/// [`resolve_contained_workspace_path`] on `dir` itself first.
-///
-/// # Errors
-/// Whatever [`std::fs::read_dir`] itself reports (`dir` missing, not a
-/// directory, unreadable).
-///
-/// # Example
-///
-/// ```
-/// use mangostudio_runtime::workspace::list_directory_bounded;
-///
-/// let dir = std::env::temp_dir().join("mango-list-directory-doctest");
-/// std::fs::create_dir_all(dir.join("sub")).unwrap();
-/// std::fs::write(dir.join("file.txt"), b"").unwrap();
-///
-/// let listing = list_directory_bounded(&dir).unwrap();
-/// assert!(!listing.truncated);
-/// assert_eq!(listing.entries.len(), 2);
-/// ```
-pub fn list_directory_bounded(dir: &Path) -> std::io::Result<BoundedListing> {
-    let mut entries = Vec::new();
-    for item in std::fs::read_dir(dir)? {
-        let item = item?;
-        let is_directory = item.file_type().is_ok_and(|kind| kind.is_dir());
-        entries.push(DirectoryEntry {
-            name: item.file_name().to_string_lossy().into_owned(),
-            is_directory,
-        });
-    }
-    // Sorted before truncating, so the cap drops a stable, name-ordered tail
-    // rather than an arbitrary subset of whatever order `read_dir` happened
-    // to yield — mirrors `browseWorkspace`'s own case-insensitive-then-
-    // case-sensitive sort.
-    entries.sort_by(|left, right| compare_directory_entry_names(&left.name, &right.name));
-    let truncated = entries.len() > MAX_WORKSPACE_DIRECTORY_ENTRIES;
-    entries.truncate(MAX_WORKSPACE_DIRECTORY_ENTRIES);
-    Ok(BoundedListing { entries, truncated })
-}
-
 /// Case-insensitive, then case-sensitive, ordering for a directory entry
 /// name — mirrors `browseWorkspace`'s own `Intl.Collator`-based sort, though
 /// with a plain lowercase fold rather than the collator's locale-aware one:
@@ -509,10 +447,11 @@ pub fn list_directory_bounded(dir: &Path) -> std::io::Result<BoundedListing> {
 /// orderings can diverge on locale-specific rules (e.g. some accented
 /// letters), while still agreeing on plain ASCII and case-only differences.
 ///
-/// Shared by [`list_directory_bounded`] and `crate::workspace_methods`'s own
-/// `workspace.browse` listing (which cannot reuse `list_directory_bounded`
-/// itself — see that module's docs for why) so the two listings can never
-/// order entries differently.
+/// Shared with `crate::workspace_methods`'s own `workspace.browse` listing
+/// so the two can never order entries differently — see
+/// [`crate::workspace_methods::read_workspace_directory`] for why that
+/// listing builds its own filter-then-sort-then-cap pipeline instead of
+/// calling into this module for the whole thing.
 pub(crate) fn compare_directory_entry_names(left: &str, right: &str) -> std::cmp::Ordering {
     left.to_lowercase()
         .cmp(&right.to_lowercase())
@@ -521,20 +460,8 @@ pub(crate) fn compare_directory_entry_names(left: &str, right: &str) -> std::cmp
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        WorkspaceContainmentError, guard_mutation, list_directory_bounded,
-        resolve_contained_workspace_path,
-    };
-
-    fn scratch_root(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-workspace-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use super::{WorkspaceContainmentError, guard_mutation, resolve_contained_workspace_path};
+    use crate::test_support::scratch_dir as scratch_root;
 
     #[test]
     fn a_path_inside_the_root_resolves_to_its_relative_form() {
@@ -851,56 +778,6 @@ mod tests {
             result,
             Err(WorkspaceContainmentError::RootUnavailable { .. })
         ));
-    }
-
-    #[test]
-    fn a_directory_listing_reports_every_entry_when_under_the_cap() {
-        let dir = scratch_root("listing-small");
-        std::fs::write(dir.join("one.txt"), b"").unwrap();
-        std::fs::create_dir(dir.join("two")).unwrap();
-        let listing = list_directory_bounded(&dir).unwrap();
-        assert!(!listing.truncated);
-        assert_eq!(listing.entries.len(), 2);
-        assert!(
-            listing
-                .entries
-                .iter()
-                .any(|entry| entry.name == "two" && entry.is_directory)
-        );
-    }
-
-    /// A cap that truncates an unsorted listing drops an arbitrary tail
-    /// (whatever order `read_dir` happened to yield), which is not even
-    /// stable across two calls on the same directory. Sorting first makes
-    /// "which entries survive the cap" a name-ordered, reproducible answer.
-    #[test]
-    fn a_directory_listing_is_sorted_case_insensitively_before_being_bounded() {
-        let dir = scratch_root("listing-sorted");
-        for name in ["banana", "Apple", "cherry", "apple2"] {
-            std::fs::write(dir.join(name), b"").unwrap();
-        }
-        let listing = list_directory_bounded(&dir).unwrap();
-        let names: Vec<&str> = listing
-            .entries
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect();
-        assert_eq!(names, vec!["Apple", "apple2", "banana", "cherry"]);
-    }
-
-    #[test]
-    fn a_directory_listing_truncates_past_the_cap() {
-        let dir = scratch_root("listing-large");
-        // One more than the cap, so exactly one entry must be omitted.
-        for index in 0..(super::MAX_WORKSPACE_DIRECTORY_ENTRIES + 1) {
-            std::fs::write(dir.join(format!("file-{index}.txt")), b"").unwrap();
-        }
-        let listing = list_directory_bounded(&dir).unwrap();
-        assert!(listing.truncated);
-        assert_eq!(
-            listing.entries.len(),
-            super::MAX_WORKSPACE_DIRECTORY_ENTRIES
-        );
     }
 
     // Windows path shapes this crate's other tests never exercise, since

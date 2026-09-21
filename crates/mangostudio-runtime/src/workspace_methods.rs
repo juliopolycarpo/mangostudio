@@ -8,30 +8,6 @@
 //! Mirrors `apps/runtime/src/services/workspace.ts`'s `browseWorkspace`,
 //! `resolveContainedWorkspacePath`, and `validateWorkdir` — see that file
 //! for the algorithmic source of truth every choice below cites.
-//!
-//! # `workspace.browse` cannot reuse [`crate::workspace::list_directory_bounded`]
-//!
-//! `list_directory_bounded` sorts and *then* caps at
-//! [`crate::workspace::MAX_WORKSPACE_DIRECTORY_ENTRIES`], which is correct
-//! for a caller that wants every entry. `browseWorkspace` wants directories
-//! only, and filtering that cap's *output* down to directories would
-//! silently under-report and mis-set `truncated`: a directory holding 6000
-//! plain files and 100 subdirectories would have every one of its 100
-//! subdirectories sorted after most of those files by name in the worst
-//! case, so a cap-then-filter pipeline could return far fewer than 100
-//! directories (or none) while still reporting `truncated: true` — wrong on
-//! both counts, since the real, unfiltered directory count is only 100,
-//! comfortably under the cap. `read_workspace_directory` below instead
-//! filters to directories first, then sorts, then caps — reusing only
-//! `crate::workspace::compare_directory_entry_names`, the one piece of
-//! `list_directory_bounded`'s policy this listing must not diverge from.
-//!
-//! It also cannot reuse [`crate::workspace::DirectoryEntry`]'s `is_directory`
-//! flag: that flag is `symlink`-unaware (an `lstat` answer), where
-//! `browseWorkspace`'s own `isDirectoryEntry` follows a symlink to see what
-//! it actually points at. `read_workspace_directory` does that itself,
-//! costing an extra `stat` only for an entry that is actually a symlink —
-//! an ordinary file or directory costs no more syscalls than `lstat` alone.
 
 use std::path::{Path, PathBuf};
 
@@ -96,8 +72,8 @@ struct ResolveContainedParams {
 /// `workspace.browse({ path? })`: a bounded, directories-only listing of
 /// `path` (the caller's home directory when omitted), plus enough about the
 /// host filesystem (`home`, `roots`, `separator`) for a caller to build a
-/// picker on top of it. See the module docs for why this cannot delegate
-/// its listing to [`crate::workspace::list_directory_bounded`].
+/// picker on top of it. See [`read_workspace_directory`] for the listing
+/// itself.
 async fn build_browse_result(params: BrowseParams) -> Result<Value, RemoteError> {
     let input_path = match params.path {
         Some(path) => path,
@@ -158,8 +134,26 @@ struct BrowseEntry {
 /// Lists `dir`'s directory entries only — following a symlink to see what it
 /// actually points at, mirroring `isDirectoryEntry` — sorted by
 /// [`compare_directory_entry_names`] and capped at
-/// [`MAX_WORKSPACE_DIRECTORY_ENTRIES`] *after* filtering. See the module
-/// docs for why filtering must happen before the cap, not after.
+/// [`MAX_WORKSPACE_DIRECTORY_ENTRIES`] *after* filtering.
+///
+/// Filtering must happen before the sort-and-cap, not after: capping first
+/// and filtering the cap's *output* down to directories would silently
+/// under-report and mis-set `truncated`. A directory holding 6000 plain
+/// files and 100 subdirectories would have every one of its 100
+/// subdirectories sorted after most of those files by name in the worst
+/// case, so a cap-then-filter pipeline could return far fewer than 100
+/// directories (or none) while still reporting `truncated: true` — wrong on
+/// both counts, since the real, unfiltered directory count is only 100,
+/// comfortably under the cap. Filtering first, then sorting, then capping
+/// avoids that regardless of how files and directories happen to interleave
+/// in `read_dir`'s own order.
+///
+/// This also cannot reuse an `lstat`-based `is_directory` flag: that answer
+/// is `symlink`-unaware, where `browseWorkspace`'s own `isDirectoryEntry`
+/// follows a symlink to see what it actually points at. This function does
+/// that itself, costing an extra `stat` only for an entry that is actually a
+/// symlink — an ordinary file or directory costs no more syscalls than
+/// `lstat` alone.
 fn read_workspace_directory(dir: &Path) -> std::io::Result<(Vec<BrowseEntry>, bool)> {
     let mut entries = Vec::new();
     for item in std::fs::read_dir(dir)? {
@@ -458,23 +452,13 @@ mod tests {
         read_workspace_directory, validate_resolved_path, workdir_validation_error,
     };
     use crate::result_check::{check_result, compile_result_schema};
+    use crate::test_support::scratch_dir as scratch_root;
     use crate::workspace_path::WorkspacePathError;
-
-    fn scratch_root(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-workspace-methods-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
 
     /// `compare_directory_entry_names` itself only has indirect coverage
     /// through `read_workspace_directory`'s own listing tests elsewhere in
-    /// this module (and `workspace.rs`'s equivalent tests for
-    /// `list_directory_bounded`) — this pins its own two-level ordering
-    /// directly: case-insensitive first, case-sensitive as the tiebreak.
+    /// this module — this pins its own two-level ordering directly:
+    /// case-insensitive first, case-sensitive as the tiebreak.
     #[test]
     fn compares_case_insensitively_then_falls_back_to_case_sensitive_order() {
         assert_eq!(
@@ -610,19 +594,18 @@ mod tests {
     }
 
     /// A cap that truncates an unfiltered listing (files included) would
-    /// drop directories that belong well under the cap — the exact bug the
-    /// module docs describe reusing `list_directory_bounded` would
-    /// reintroduce. More plain files than the cap, but only two real
-    /// directories: both directories must still come back, untruncated.
+    /// drop directories that belong well under the cap — the exact bug
+    /// [`read_workspace_directory`]'s own docs describe a cap-then-filter
+    /// pipeline reintroducing. More plain files than the cap, but only two
+    /// real directories: both directories must still come back, untruncated.
     #[test]
     fn filtering_happens_before_the_cap_not_after() {
         let dir = scratch_root("filter-before-cap");
         // One more plain file than the cap, named so every one of them
         // sorts *before* "zz-dir": a cap-then-filter pipeline (sort, cap at
-        // MAX_WORKSPACE_DIRECTORY_ENTRIES, then keep only directories —
-        // what reusing `list_directory_bounded` would do) sorts "zz-dir"
-        // last, the cap trims it as the one entry over the limit, and the
-        // result reports `truncated: true` even though the real,
+        // MAX_WORKSPACE_DIRECTORY_ENTRIES, then keep only directories) sorts
+        // "zz-dir" last, the cap trims it as the one entry over the limit,
+        // and the result reports `truncated: true` even though the real,
         // unfiltered directory count here is 1. Filtering to directories
         // *before* sorting and capping (what this function actually does)
         // must return "zz-dir", untruncated.

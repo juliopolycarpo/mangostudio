@@ -15,6 +15,10 @@ use mangostudio_runtime::transport::connect::{ConnectConfig, ConnectOutcome, Fix
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
+mod support;
+
+use support::scratch::{ScratchDir, scratch_dir};
+
 fn hub_peer() -> PeerInfo {
     PeerInfo {
         name: "test-hub".into(),
@@ -23,28 +27,8 @@ fn hub_peer() -> PeerInfo {
     }
 }
 
-/// A monotonic counter plus the wall clock, not just `process::id()` and
-/// `line!()`: a reused pid across separate `cargo test` invocations sharing
-/// a persistent `/tmp` degrades a test to silently reusing another run's
-/// leftover directory rather than failing loudly.
-fn unique_suffix() -> u128 {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    nanos.wrapping_add(u128::from(count))
-}
-
-fn scratch_home(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "mango-transport-connect-test-{name}-{}-{}",
-        std::process::id(),
-        unique_suffix()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn scratch_home(name: &str) -> ScratchDir {
+    scratch_dir(&format!("transport-connect-test-{name}"))
 }
 
 /// A named log fake that actually records what it was told, rather than a
@@ -119,7 +103,7 @@ async fn fake_hub_retrying_then_accepting(
     session.closed().await;
 }
 
-fn create_definition_slot() -> (RuntimeSlot, std::path::PathBuf) {
+fn create_definition_slot() -> (RuntimeSlot, ScratchDir) {
     (RuntimeSlot::Remote, scratch_home("connect"))
 }
 
@@ -144,7 +128,7 @@ async fn a_fatal_close_stops_the_loop_without_retrying() {
                 hub_url: format!("ws://{addr}/"),
                 token: "irrelevant-token".to_string(),
                 slot,
-                mango_home: home,
+                mango_home: home.to_path_buf(),
                 runtime_version: "0.0.0".to_string(),
             },
             cancel,
@@ -200,7 +184,7 @@ async fn a_transient_refusal_is_retried_until_the_hub_accepts() {
                 hub_url: format!("ws://{addr}/"),
                 token: "irrelevant-token".to_string(),
                 slot,
-                mango_home: home,
+                mango_home: home.to_path_buf(),
                 runtime_version: "0.0.0".to_string(),
             },
             cancel_for_run,
@@ -268,7 +252,7 @@ async fn cancellation_stops_the_loop_and_releases_the_session() {
                 hub_url: format!("ws://{addr}/"),
                 token: "irrelevant-token".to_string(),
                 slot,
-                mango_home: home,
+                mango_home: home.to_path_buf(),
                 runtime_version: "0.0.0".to_string(),
             },
             cancel_for_run,

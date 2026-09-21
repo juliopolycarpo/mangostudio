@@ -1,8 +1,12 @@
 //! The set of methods this build actually implements.
 //!
-//! Empty in production for now — method implementations are a later change.
-//! [`Registry::implement`] is the seam that change fills in; this crate
-//! proves the seam works with named fakes in its own tests.
+//! A bare [`Registry::new`] is empty; `crate::transport::build_host`
+//! (crate-private) fills a production one through [`Registry::implement`]
+//! via `crate::health::register`, `crate::workspace_methods::register` and
+//! `crate::probing::register` — `runtime.health`, the `workspace.*`
+//! methods, and the `probing.*` methods. This crate's own tests reach for
+//! the same [`Registry::implement`] seam with named fakes, to prove the
+//! dispatch plumbing without a real filesystem or subprocess underneath.
 //!
 //! A method the embedded catalog declares but this registry has not
 //! implemented is simply never registered on the underlying

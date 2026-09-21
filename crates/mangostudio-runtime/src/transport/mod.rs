@@ -106,10 +106,11 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 }
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
-/// session itself: a [`Registry`] implementing only `runtime.health` (every
-/// other machine method group is out of scope; the catalog's `rpc.discover`
-/// answer and `METHOD_UNSUPPORTED` cover the rest) recording through a
-/// real, on-disk [`crate::audit::FileAudit`],
+/// session itself: a [`Registry`] implementing `runtime.health`, the
+/// `workspace.*` methods, and the `probing.*` methods (see [`build_host`]
+/// for the full list; every other machine method group is out of scope, and
+/// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
+/// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
 /// and the real [`ConsentAuthorization`] reading `slot`'s `runtime.json`
 /// fresh on every call.
 ///
@@ -130,6 +131,21 @@ pub(crate) struct SessionHost {
 /// and `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`
 /// — the only methods this crate implements today (see [`crate::health`],
 /// [`crate::workspace_methods`], and [`crate::probing`]).
+///
+/// Calls [`Registry::with_ports`], not
+/// [`Registry::with_ports_and_exclusivity`], so every connection this
+/// builds enforces [`crate::ports::exclusivity::NoExclusivity`] — not
+/// [`crate::ports::exclusivity::UpdateExclusivityTracker`]. That is correct
+/// *today* only because no `runtime.update.*` method exists yet, so there
+/// is nothing for update-versus-ordinary exclusivity to serialise; it is a
+/// gap left by scope, not a considered choice to leave update calls
+/// unserialised. Whichever change implements `runtime.update.*` must switch
+/// this call to [`Registry::with_ports_and_exclusivity`] with a real
+/// [`crate::ports::exclusivity::UpdateExclusivityTracker`] in the same
+/// change that adds the first update handler — not as a follow-up, since a
+/// registry that implements an update method without that tracker installed
+/// is exactly the unguarded state this comment exists to prevent shipping
+/// unnoticed.
 pub(crate) fn build_host(
     slot: RuntimeSlot,
     mango_home: &Path,
@@ -277,7 +293,7 @@ pub(crate) fn start_session<P: Port>(
 ) -> (Session, tokio::task::JoinHandle<SessionClosure>) {
     let (session, driver) = Session::open(port, options);
     let guard = crate::serve::serve(contract, &session, registry, authorization, slot)
-        .expect("an empty registry always matches the embedded catalog");
+        .expect("Registry::implement already panics on a catalog mismatch at registration time");
     guard.persist();
     let driver_handle = tokio::spawn(driver.run());
     (session, driver_handle)
@@ -295,6 +311,7 @@ mod tests {
         runtime_peer,
     };
     use crate::runtime_home::RuntimeSlot;
+    use crate::test_support::scratch_path;
 
     fn peer(role: &str) -> PeerInfo {
         PeerInfo {
@@ -436,11 +453,7 @@ mod tests {
 
     #[test]
     fn build_host_implements_exactly_runtime_health_the_workspace_and_probing_methods() {
-        let home = std::env::temp_dir().join(format!(
-            "mango-transport-build-host-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
+        let home = scratch_path("transport-build-host");
         let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
         assert_eq!(
             host.registry.implemented_methods(),

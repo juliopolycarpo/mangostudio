@@ -272,16 +272,7 @@ mod tests {
         is_transient_windows_sharing_violation, rename_with_retry, write_new_file,
         write_new_file_with,
     };
-
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-runtime-atomic-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir;
 
     /// A `restrict` stub that panics if it is ever called — every test that
     /// passes `None` for `mode` uses this, so a write that restricted a

@@ -132,6 +132,23 @@ jobs:
 
       - run: cargo test --workspace --all-targets --all-features --locked
 
+      # `--all-targets` above excludes doctests by definition, and the doc
+      # comments across this workspace (`mangostudio-runtime`,
+      # `mangostudio-runtime-contract`) carry runnable examples of their
+      # own. `protocol-ci.yml` runs both of these for the protocol crate,
+      # but only when its own path filter fires, so a runtime-only PR needs
+      # its own copy of the gate. Ubuntu-only: this checks the doc
+      # comments compile and run, not a platform-specific behaviour.
+      - name: Run doctests
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --doc --workspace --all-features --locked
+
+      - name: Build API docs (deny warnings)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo doc --no-deps --workspace --all-features --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - run: cargo build --workspace --locked
 
   launcher-msrv:

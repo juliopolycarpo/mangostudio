@@ -233,14 +233,11 @@ pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::restrict_to_owner;
+    use crate::test_support::scratch_path;
 
     #[test]
     fn restricts_an_existing_file_this_process_owns() {
-        let path = std::env::temp_dir().join(format!(
-            "mango-owner-only-windows-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
+        let path = scratch_path("owner-only-windows-test");
         std::fs::write(&path, b"secret").unwrap();
 
         assert!(restrict_to_owner(&path).is_ok());
@@ -250,11 +247,7 @@ mod tests {
 
     #[test]
     fn reports_an_error_rather_than_panicking_for_a_missing_file() {
-        let path = std::env::temp_dir().join(format!(
-            "mango-owner-only-windows-missing-{}-{}",
-            std::process::id(),
-            line!()
-        ));
+        let path = scratch_path("owner-only-windows-missing");
         assert!(restrict_to_owner(&path).is_err());
     }
 }

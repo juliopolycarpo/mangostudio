@@ -56,7 +56,7 @@ use crate::registry::Registry;
 ///     Arc::new(DenyingAuthorization),
 ///     "host",
 /// )
-/// .expect("an empty registry always serves");
+/// .expect("Registry::implement already panics on a catalog mismatch at registration time");
 /// guard.persist();
 /// # }
 /// ```

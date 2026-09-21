@@ -592,16 +592,7 @@ pub(crate) async fn probe_winget_ownership(cancel: &CancellationToken) -> Winget
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-probing-host-test-{name}-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_support::scratch_dir;
 
     #[test]
     fn with_canonical_path_key_folds_a_differently_cased_key() {
