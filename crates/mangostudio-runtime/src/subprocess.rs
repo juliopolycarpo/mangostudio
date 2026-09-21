@@ -93,6 +93,21 @@ pub enum ChildRunError {
 pub struct ChildOutcome {
     /// Whether the child's own exit status reports success.
     pub status_success: bool,
+    /// The child's raw exit code, when the platform can report one.
+    ///
+    /// `None` when the child was terminated by a signal rather than
+    /// exiting on its own (Unix only — `kill_and_reap`'s own `SIGKILL`
+    /// path lands here, but that path never reaches this struct at all,
+    /// since a killed child is reported as [`ChildRunError::TimedOut`] or
+    /// [`ChildRunError::Cancelled`] instead). [`std::process::ExitStatus::code`]
+    /// is already portable: on Unix it is the low byte of the exit status
+    /// (`0`–`255`); on Windows it is the full 32-bit exit code as a signed
+    /// `i32`, which is what lets a caller distinguish `winget`'s own
+    /// negative "no packages found" code from an ordinary non-zero
+    /// failure — `status_success` alone cannot tell those apart, and
+    /// `crate::probing::host`'s winget ownership probe is the first
+    /// caller that needs to.
+    pub exit_code: Option<i32>,
     /// Stdout, capped at [`ChildBudget::max_stdout_bytes`].
     pub stdout: Vec<u8>,
     /// Stderr, capped at [`ChildBudget::max_stderr_bytes`].
@@ -238,6 +253,7 @@ pub async fn run_bounded_child(
                         stderr_result.expect("the stderr reader task must not panic");
                     Ok(ChildOutcome {
                         status_success: status.success(),
+                        exit_code: status.code(),
                         stdout,
                         stderr,
                         stdout_truncated,
