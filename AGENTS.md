@@ -52,10 +52,13 @@ Useful docs:
   `PATH` walk lives with the walk it bounds). In the Rust host this is
   `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks,
   `crates/mangostudio-runtime/src/runtime_home.rs`'s `home_dir()` for slot resolution, and
-  `crates/mangostudio-runtime/src/probing/host.rs`'s environment snapshot for detection. A
-  `#[test]` in that crate (`config_boundary_test`) greps its own source tree for `env::var`/
-  `var_os`/`vars`/`home_dir` calls outside `config.rs` and asserts the result is exactly this
-  allowlist — a change that adds a fifth site fails the test, not a review comment.
+  `crates/mangostudio-runtime/src/probing/host.rs`'s environment snapshot for detection.
+  `crates/mangostudio-runtime/tests/config_boundary.rs` greps its own source tree for `env::var`/
+  `var_os`/`vars`/`home_dir` calls outside `config.rs` and pins each one's exact call text
+  (literal argument included) and occurrence count — not just which file it is in, since a file
+  already on the list can otherwise grow a fourth call, or swap an allowed call's literal for a
+  different one, without the test noticing. A change that adds a fifth site, or a third read in
+  an already-listed file, fails the test, not a review comment.
 - Shared code must remain framework-agnostic. Shared code that reaches a Node builtin gets its
   own export subpath (`@mangostudio/shared/library/host`, `/process/host`) so the browser bundle
   never resolves it.
