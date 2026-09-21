@@ -7,11 +7,7 @@ use std::{
 };
 
 use base64::Engine;
-use mango_protocol::{
-    Frame,
-    error::{RemoteError, codes},
-    frame::Response,
-};
+use mango_protocol::error::{RemoteError, codes};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -22,7 +18,7 @@ use super::{
     io,
     params::Mutation,
     patch::{self, V4aUpdateHunk},
-    service::{Service, argument},
+    service::{Service, argument, preflight_response},
 };
 use crate::{blocking::run_blocking, ports::audit::lock};
 
@@ -638,25 +634,7 @@ fn preflight_snapshot_response(
     }
     let count = files.len();
     let result = json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations});
-    let frame = Frame::Res(Response {
-        id: response_id,
-        result,
-    });
-    let size = serde_json::to_vec(&frame)
-        .expect("a filesystem patch response always serializes")
-        .len();
-    if size <= response_limit_bytes {
-        return Ok(());
-    }
-    Err(RemoteError::new(
-        codes::FRAME_TOO_LARGE,
-        format!(
-            "Cannot checkpoint patch response: it is {size} bytes, but the negotiated frame limit is {response_limit_bytes} bytes. Split the patch into smaller calls or disable snapshot capture."
-        ),
-    )
-    .with_detail("kind", "snapshot_too_large")
-    .with_detail("sizeBytes", size)
-    .with_detail("limitBytes", response_limit_bytes))
+    preflight_response(&result, &response_id, response_limit_bytes, "patch")
 }
 
 fn push_snapshot(

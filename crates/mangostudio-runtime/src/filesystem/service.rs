@@ -4,8 +4,12 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use base64::Engine;
-use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
+use mango_protocol::{
+    Frame,
+    error::{RemoteError, codes},
+    frame::Response,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
@@ -34,6 +38,36 @@ pub(super) struct State {
 pub(super) struct Service {
     pub(super) state: Arc<State>,
     pub(super) consent: ConsentSource,
+}
+
+#[derive(Clone)]
+struct ResponseBudget {
+    id: String,
+    limit_bytes: usize,
+}
+
+impl ResponseBudget {
+    fn from_context(context: &CallContext) -> Self {
+        Self {
+            id: context.id().to_owned(),
+            limit_bytes: context.session().send_limit_bytes(),
+        }
+    }
+
+    #[cfg(test)]
+    fn unbounded() -> Self {
+        Self {
+            id: "test-response".to_owned(),
+            limit_bytes: usize::MAX,
+        }
+    }
+
+    fn preflight_snapshot(&self, mutation: &Mutation, result: &Value) -> Result<(), RemoteError> {
+        if !mutation.capture_snapshot {
+            return Ok(());
+        }
+        preflight_response(result, &self.id, self.limit_bytes, "mutation")
+    }
 }
 
 impl Service {
@@ -203,6 +237,7 @@ impl Service {
         self: Arc<Self>,
         params: WriteParams,
         exclusive: bool,
+        response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         let guards = self
@@ -239,6 +274,22 @@ impl Service {
                         io::explain_unread(&params.resolved_path, "overwrite", error)
                     })?;
             }
+            let expected_hash = hash_hex(&Sha256::digest(params.content.as_bytes()));
+            let mut result =
+                json!({"path":params.input_path,"bytesWritten":params.content.len(),"sha256":expected_hash});
+            if !exclusive {
+                result["created"] = json!(!exists);
+            }
+            let result = mutation_result(
+                result,
+                &params.mutation,
+                &params.resolved_path,
+                if exists { "edit" } else { "create" },
+                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                &expected_hash,
+                None,
+            );
+            response.preflight_snapshot(&params.mutation, &result)?;
             self.before_mutation_io(method, &params.mutation, &[&params.resolved_path], &cancel)?;
             let mtime = if exclusive || !exists {
                 io::create_new(&params.resolved_path, params.content.as_bytes()).map_err(
@@ -259,20 +310,8 @@ impl Service {
                 mtime,
                 ReadObservation::WholeFile,
             );
-            let mut result =
-                json!({"path":params.input_path,"bytesWritten":params.content.len(),"sha256":hash});
-            if !exclusive {
-                result["created"] = json!(!exists);
-            }
-            Ok(mutation_result(
-                result,
-                &params.mutation,
-                &params.resolved_path,
-                if exists { "edit" } else { "create" },
-                before.as_ref().map(|observed| observed.bytes.as_slice()),
-                &hash,
-                None,
-            ))
+            debug_assert_eq!(hash, expected_hash);
+            Ok(result)
         })
         .await
     }
@@ -312,6 +351,7 @@ impl Service {
     async fn edit(
         self: Arc<Self>,
         params: EditParams,
+        response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         if params.old_string.is_empty() {
@@ -337,18 +377,23 @@ impl Service {
             if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
             if count > 1 && !params.replace_all.unwrap_or(false) { return Err(argument(format!("Found {count} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."))); }
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
+            let expected_hash = hash_hex(&Sha256::digest(&updated));
+            let result = mutation_result(json!({"path":params.input_path,"replacements":count,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
+            response.preflight_snapshot(&params.mutation, &result)?;
             self.before_mutation_io("fs.edit-file", &params.mutation, &[&params.resolved_path], &cancel)?;
             let mtime = io::write_atomic(&params.resolved_path, &updated, false)?;
             let changed_lines = params.old_string.bytes().filter(|byte| *byte == b'\n').count() != params.new_string.bytes().filter(|byte| *byte == b'\n').count();
             let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES };
             let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
-            Ok(mutation_result(json!({"path":params.input_path,"replacements":count,"firstChangedLine":first,"sha256":hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&hash,None))
+            debug_assert_eq!(hash, expected_hash);
+            Ok(result)
         }).await
     }
 
     async fn replace_range(
         self: Arc<Self>,
         params: RangeParams,
+        response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         let guards = self
@@ -369,18 +414,23 @@ impl Service {
             if start > end || end > total { return Err(argument(format!("Invalid line range {start}-{end} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",params.input_path))); }
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
+            let expected_hash = hash_hex(&Sha256::digest(&updated));
+            let replaced = end-start+1;
+            let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
+            response.preflight_snapshot(&params.mutation, &result)?;
             self.before_mutation_io("fs.replace-range", &params.mutation, &[&params.resolved_path], &cancel)?;
             let mtime = io::write_atomic(&params.resolved_path, &updated, false)?;
-            let replaced = end-start+1;
             let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES} else {(start-1) as u64};
             let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
-            Ok(mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),&hash,None))
+            debug_assert_eq!(hash, expected_hash);
+            Ok(result)
         }).await
     }
 
     async fn delete(
         self: Arc<Self>,
         params: DeleteParams,
+        response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         let guards = self
@@ -410,6 +460,16 @@ impl Service {
                     .map_err(|error| io::explain_unread(&params.resolved_path, "delete", error))?;
                 None
             };
+            let result = mutation_result(
+                json!({"path":params.input_path,"deleted":true}),
+                &params.mutation,
+                &params.resolved_path,
+                "delete",
+                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                "absent",
+                None,
+            );
+            response.preflight_snapshot(&params.mutation, &result)?;
             self.before_mutation_io(
                 "fs.delete-file",
                 &params.mutation,
@@ -423,15 +483,7 @@ impl Service {
                 io::io_error(error)
             })?;
             lock(&self.state.ledger).forget(&params.mutation.chat_id, &params.resolved_path);
-            Ok(mutation_result(
-                json!({"path":params.input_path,"deleted":true}),
-                &params.mutation,
-                &params.resolved_path,
-                "delete",
-                before.as_ref().map(|observed| observed.bytes.as_slice()),
-                "absent",
-                None,
-            ))
+            Ok(result)
         })
         .await
     }
@@ -439,6 +491,7 @@ impl Service {
     async fn move_file(
         self: Arc<Self>,
         params: MoveParams,
+        response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         if params.resolved_from == params.resolved_to {
@@ -470,6 +523,20 @@ impl Service {
             } else {
                 None
             };
+            let expected_hash = before.as_ref().map_or_else(
+                || io::hash_file(&params.resolved_from),
+                |observed| Ok(hash_hex(&Sha256::digest(&observed.bytes))),
+            )?;
+            let result = mutation_result(
+                json!({"from":params.input_from,"to":params.input_to,"moved":true}),
+                &params.mutation,
+                &params.resolved_from,
+                "move",
+                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                &expected_hash,
+                Some(&params.resolved_to),
+            );
+            response.preflight_snapshot(&params.mutation, &result)?;
             self.before_mutation_io(
                 "fs.move-file",
                 &params.mutation,
@@ -483,15 +550,8 @@ impl Service {
                 &params.resolved_to,
             );
             let hash = io::hash_file(&params.resolved_to)?;
-            Ok(mutation_result(
-                json!({"from":params.input_from,"to":params.input_to,"moved":true}),
-                &params.mutation,
-                &params.resolved_from,
-                "move",
-                before.as_ref().map(|observed| observed.bytes.as_slice()),
-                &hash,
-                Some(&params.resolved_to),
-            ))
+            debug_assert_eq!(hash, expected_hash);
+            Ok(result)
         })
         .await
     }
@@ -617,6 +677,33 @@ fn hash_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+pub(super) fn preflight_response(
+    result: &Value,
+    response_id: &str,
+    response_limit_bytes: usize,
+    subject: &str,
+) -> Result<(), RemoteError> {
+    let frame = Frame::Res(Response {
+        id: response_id.to_owned(),
+        result: result.clone(),
+    });
+    let size = serde_json::to_vec(&frame)
+        .expect("a filesystem mutation response always serializes")
+        .len();
+    if size <= response_limit_bytes {
+        return Ok(());
+    }
+    Err(RemoteError::new(
+        codes::FRAME_TOO_LARGE,
+        format!(
+            "Cannot checkpoint {subject} response: it is {size} bytes, but the negotiated frame limit is {response_limit_bytes} bytes. Split the operation into smaller calls or disable snapshot capture."
+        ),
+    )
+    .with_detail("kind", "snapshot_too_large")
+    .with_detail("sizeBytes", size)
+    .with_detail("limitBytes", response_limit_bytes))
+}
+
 pub(super) fn mutation_result(
     result: Value,
     params: &Mutation,
@@ -658,22 +745,28 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
             Arc::clone(&read).read(params, ctx.cancel().clone())
         })
         .implement("fs.write-file", move |params, ctx: CallContext| {
-            Arc::clone(&write).write(params, false, ctx.cancel().clone())
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&write).write(params, false, response, ctx.cancel().clone())
         })
         .implement("fs.create-file", move |params, ctx: CallContext| {
-            Arc::clone(&create).write(params, true, ctx.cancel().clone())
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&create).write(params, true, response, ctx.cancel().clone())
         })
         .implement("fs.edit-file", move |params, ctx: CallContext| {
-            Arc::clone(&edit).edit(params, ctx.cancel().clone())
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&edit).edit(params, response, ctx.cancel().clone())
         })
         .implement("fs.replace-range", move |params, ctx: CallContext| {
-            Arc::clone(&range).replace_range(params, ctx.cancel().clone())
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&range).replace_range(params, response, ctx.cancel().clone())
         })
         .implement("fs.delete-file", move |params, ctx: CallContext| {
-            Arc::clone(&delete).delete(params, ctx.cancel().clone())
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&delete).delete(params, response, ctx.cancel().clone())
         })
         .implement("fs.move-file", move |params, ctx: CallContext| {
-            Arc::clone(&move_file).move_file(params, ctx.cancel().clone())
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&move_file).move_file(params, response, ctx.cancel().clone())
         })
         .implement("fs.list-directory", move |params, ctx: CallContext| {
             Arc::clone(&list).list(params, ctx.cancel().clone())
@@ -744,6 +837,26 @@ mod tests {
         )
     }
 
+    fn constrained_response() -> ResponseBudget {
+        ResponseBudget {
+            id: "response".to_owned(),
+            limit_bytes: 4096,
+        }
+    }
+
+    async fn seed_and_read(service: &Arc<Service>, path: &Path, content: &[u8]) {
+        std::fs::write(path, content).unwrap();
+        Arc::clone(service)
+            .read(read_params(path), CancellationToken::new())
+            .await
+            .unwrap();
+    }
+
+    fn assert_snapshot_frame_error(error: RemoteError) {
+        assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+        assert_eq!(error.details.unwrap()["kind"], "snapshot_too_large");
+    }
+
     fn assert_schema(method: &str, result: &Value) {
         let schema = &mangostudio_runtime_contract::catalog::method(method)
             .unwrap()
@@ -760,7 +873,12 @@ mod tests {
         let path = home.join("file");
         let cancel = CancellationToken::new();
         let created = Arc::clone(&service)
-            .write(write_params(&path, "one\ntwo\n"), true, cancel.clone())
+            .write(
+                write_params(&path, "one\ntwo\n"),
+                true,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
             .await
             .unwrap();
         assert_schema("fs.create-file", &created);
@@ -771,14 +889,19 @@ mod tests {
             .unwrap();
         assert_schema("fs.read-file", &read);
         assert_eq!(read["content"], "     1\tone\n     2\ttwo");
-        let edited=Arc::clone(&service).edit(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"oldString":"one","newString":"first","captureSnapshot":true})),cancel.clone()).await.unwrap();
+        let edited=Arc::clone(&service).edit(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"oldString":"one","newString":"first","captureSnapshot":true})),ResponseBudget::unbounded(),cancel.clone()).await.unwrap();
         assert_schema("fs.edit-file", &edited);
         assert_eq!(edited["result"]["firstChangedLine"], 1);
-        let replaced=Arc::clone(&service).replace_range(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"startLine":2,"endLine":2,"content":"second","captureSnapshot":true})),cancel.clone()).await.unwrap();
+        let replaced=Arc::clone(&service).replace_range(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"startLine":2,"endLine":2,"content":"second","captureSnapshot":true})),ResponseBudget::unbounded(),cancel.clone()).await.unwrap();
         assert_schema("fs.replace-range", &replaced);
         assert_eq!(std::fs::read(&path).unwrap(), b"first\nsecond\n");
         let written = Arc::clone(&service)
-            .write(write_params(&path, "whole"), false, cancel.clone())
+            .write(
+                write_params(&path, "whole"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
             .await
             .unwrap();
         assert_schema("fs.write-file", &written);
@@ -793,13 +916,102 @@ mod tests {
         assert_schema("fs.list-directory", &listed);
         assert_eq!(listed["entries"], json!([{"name":"file","type":"file"}]));
         let to = home.join("moved");
-        let moved=Arc::clone(&service).move_file(decode(json!({"chatId":"chat","captureSnapshot":true,"inputFrom":"file","inputTo":"moved","resolvedFrom":path,"resolvedTo":to})),cancel.clone()).await.unwrap();
+        let moved=Arc::clone(&service).move_file(decode(json!({"chatId":"chat","captureSnapshot":true,"inputFrom":"file","inputTo":"moved","resolvedFrom":path,"resolvedTo":to})),ResponseBudget::unbounded(),cancel.clone()).await.unwrap();
         assert_schema("fs.move-file", &moved);
-        let deleted=Arc::clone(&service).delete(decode(json!({"chatId":"chat","captureSnapshot":true,"inputPath":"moved","resolvedPath":to})),cancel).await.unwrap();
+        let deleted=Arc::clone(&service).delete(decode(json!({"chatId":"chat","captureSnapshot":true,"inputPath":"moved","resolvedPath":to})),ResponseBudget::unbounded(),cancel).await.unwrap();
         assert_schema("fs.delete-file", &deleted);
         assert!(!to.exists());
         assert_eq!(deleted["mutations"][0]["afterHash"], "absent");
         assert_eq!(service.state.locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn oversized_snapshot_responses_refuse_every_mutation_before_commit() {
+        let (home, service) = fixture();
+        let original = format!("{}needle", "a".repeat(4096));
+
+        let write_path = home.join("write");
+        seed_and_read(&service, &write_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .write(
+                write_params(&write_path, "replacement"),
+                false,
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&write_path).unwrap(), original);
+
+        let edit_path = home.join("edit");
+        seed_and_read(&service, &edit_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"edit", "resolvedPath":edit_path,
+                    "oldString":"needle", "newString":"thread"
+                })),
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&edit_path).unwrap(), original);
+
+        let range_path = home.join("range");
+        seed_and_read(&service, &range_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .replace_range(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"range", "resolvedPath":range_path,
+                    "startLine":1, "endLine":1, "content":"replacement"
+                })),
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&range_path).unwrap(), original);
+
+        let delete_path = home.join("delete");
+        seed_and_read(&service, &delete_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .delete(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"delete", "resolvedPath":delete_path
+                })),
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&delete_path).unwrap(), original);
+
+        let move_path = home.join("move");
+        let move_to = home.join("moved");
+        seed_and_read(&service, &move_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"move", "inputTo":"moved",
+                    "resolvedFrom":move_path, "resolvedTo":move_to
+                })),
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&move_path).unwrap(), original);
+        assert!(!move_to.exists());
     }
 
     #[tokio::test]
@@ -809,7 +1021,12 @@ mod tests {
         std::fs::write(&path, b"one\ntwo\n").unwrap();
         let cancel = CancellationToken::new();
         let unread = Arc::clone(&service)
-            .write(write_params(&path, "oops"), false, cancel.clone())
+            .write(
+                write_params(&path, "oops"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
             .await
             .unwrap_err();
         assert_eq!(unread.details.unwrap()["kind"], "file_not_read");
@@ -820,7 +1037,12 @@ mod tests {
             .await
             .unwrap();
         let partial = Arc::clone(&service)
-            .write(write_params(&path, "oops"), false, cancel.clone())
+            .write(
+                write_params(&path, "oops"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
             .await
             .unwrap_err();
         assert_eq!(partial.details.unwrap()["kind"], "partial_read");
@@ -830,7 +1052,12 @@ mod tests {
             .unwrap();
         std::fs::write(&path, b"external").unwrap();
         let stale = Arc::clone(&service)
-            .write(write_params(&path, "oops"), false, cancel)
+            .write(
+                write_params(&path, "oops"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel,
+            )
             .await
             .unwrap_err();
         assert_eq!(stale.details.unwrap()["kind"], "stale_file");
@@ -855,10 +1082,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(read["content"], "00616263");
-        let error=Arc::clone(&service).replace_range(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"startLine":1,"endLine":1,"content":"text","captureSnapshot":false})),cancel.clone()).await.unwrap_err();
+        let error=Arc::clone(&service).replace_range(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"startLine":1,"endLine":1,"content":"text","captureSnapshot":false})),ResponseBudget::unbounded(),cancel.clone()).await.unwrap_err();
         assert_eq!(error.details.unwrap()["kind"], "unobserved_line_numbers");
         Arc::clone(&service)
-            .write(write_params(&path, "text"), false, cancel)
+            .write(
+                write_params(&path, "text"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel,
+            )
             .await
             .unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"text");
@@ -871,7 +1103,12 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel();
         let error = Arc::clone(&service)
-            .write(write_params(&path, "oops"), true, cancel)
+            .write(
+                write_params(&path, "oops"),
+                true,
+                ResponseBudget::unbounded(),
+                cancel,
+            )
             .await
             .unwrap_err();
         assert_eq!(error.code, codes::CANCELLED);
@@ -881,7 +1118,12 @@ mod tests {
             ..PathPolicy::default()
         });
         let error = Arc::clone(&service)
-            .write(params, true, CancellationToken::new())
+            .write(
+                params,
+                true,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
             .await
             .unwrap_err();
         assert_eq!(error.details.unwrap()["kind"], "path_access");
@@ -894,7 +1136,12 @@ mod tests {
         let path = home.join("file");
         std::fs::write(&path, "existing").unwrap();
         let error = Arc::clone(&service)
-            .write(write_params(&path, "oops"), true, CancellationToken::new())
+            .write(
+                write_params(&path, "oops"),
+                true,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
             .await
             .unwrap_err();
         assert_eq!(
@@ -950,10 +1197,15 @@ mod tests {
         let path = home.join("file");
         let cancel = CancellationToken::new();
         Arc::clone(&service)
-            .write(write_params(&path, "delete me"), true, cancel.clone())
+            .write(
+                write_params(&path, "delete me"),
+                true,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
             .await
             .unwrap();
-        let result = Arc::clone(&service).delete(decode(json!({"chatId":"chat","captureSnapshot":false,"inputPath":"file","resolvedPath":path})), cancel).await.unwrap();
+        let result = Arc::clone(&service).delete(decode(json!({"chatId":"chat","captureSnapshot":false,"inputPath":"file","resolvedPath":path})), ResponseBudget::unbounded(), cancel).await.unwrap();
         assert_schema("fs.delete-file", &result);
         assert_eq!(result["mutations"], json!([]));
         assert!(!path.exists());
@@ -985,7 +1237,12 @@ mod tests {
             .acquire(vec![path.clone()], &cancel)
             .await
             .unwrap();
-        let pending = Arc::clone(&service).write(write_params(&path, "refused"), true, cancel);
+        let pending = Arc::clone(&service).write(
+            write_params(&path, "refused"),
+            true,
+            ResponseBudget::unbounded(),
+            cancel,
+        );
         tokio::pin!(pending);
         assert!(
             std::future::poll_fn(|cx| std::task::Poll::Ready(
@@ -1029,6 +1286,7 @@ mod tests {
                     "inputFrom":"source", "inputTo":"destination",
                     "resolvedFrom":source, "resolvedTo":destination
                 })),
+                ResponseBudget::unbounded(),
                 CancellationToken::new(),
             )
             .await
@@ -1048,6 +1306,7 @@ mod tests {
                     "inputFrom":"source", "inputTo":"destination",
                     "resolvedFrom":source, "resolvedTo":destination
                 })),
+                ResponseBudget::unbounded(),
                 CancellationToken::new(),
             )
             .await
