@@ -1623,11 +1623,12 @@ mod tests {
 
         #[cfg(windows)]
         {
-            // Windows renames the opened source handle, so the external
-            // replacement remains at its original name.
-            result.unwrap();
+            // Windows cannot rename the unlinked source handle. It reports an
+            // indeterminate failure instead of moving the external replacement.
+            let error = result.unwrap_err();
+            assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
             assert_eq!(std::fs::read(&source).unwrap(), b"external replacement");
-            assert_eq!(std::fs::read(&destination).unwrap(), b"before");
+            assert!(!destination.exists());
         }
         #[cfg(not(windows))]
         {
