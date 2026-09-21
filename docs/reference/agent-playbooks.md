@@ -842,7 +842,15 @@ rather than restating them: `crates/mangostudio-runtime-contract/`, its behaviou
 typed dispatcher, fail-closed ports, and panic isolation are covered in
 [runtime-dispatcher.md](../architecture/runtime-dispatcher.md). Its binary target shares a name
 with the existing Bun-compiled `mangostudio-runtime` execution host from the "Config, Runtime, And
-Standalone Build" section above; that document explains why the two do not collide today.
+Standalone Build" section above. The two do not collide today because the Rust binary is not part
+of that build at all: `scripts/build.ts` and `distribution-build.yml` never build or ship it, and a
+release archive cannot carry two files both named `mangostudio-runtime` if they did. The hub only
+ever reaches it through an explicit opt-in — the `MANGOSTUDIO_RUNTIME_BINARY` environment override
+or a per-environment `binaryPath` (see `apps/api/src/lib/runtime-paths.ts`) — never through the
+sibling-binary resolution the Bun host uses by default. `scripts/lib/release-version.ts`'s
+`APP_VERSIONED_CRATES` version-locks the crate to the app release regardless, so that when it does
+ship, `requireMatchingRelease` (`apps/api/src/services/runtime-client/spawn-runtime-child.ts`)
+already has a version to check it against.
 
 ## Out-Of-Process Environments (stdio, WSL, paired WebSocket, Direct URL)
 
