@@ -44,6 +44,7 @@ import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/r
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestUser } from '../../support/factories';
 import {
+  assertRustRuntimeFeatureCeiling,
   assertRustRuntimeHealthShape,
   assertRustRuntimeProbingMethods,
   assertRustRuntimeWorkspaceMethods,
@@ -179,6 +180,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
       const client = await hub.manager.getClient(TEST_USER.id, hub.environmentId);
       // `connect`, like `serve`, always answers as the `remote` slot.
       assertRustRuntimeHealthShape(await client.health(), { slot: 'remote' });
+      assertRustRuntimeFeatureCeiling(client.manifest, { probing: true });
       await assertRustRuntimeProbingMethods(client);
     },
     30_000

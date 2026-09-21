@@ -13,6 +13,7 @@ import {
 import {
   type HubExternalAgentIsolation,
   narrowRuntimeErrorCode,
+  type RuntimeCapabilityManifest,
   type RuntimeErrorCode,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
@@ -196,6 +197,8 @@ interface RuntimeConnectionEntry {
   /** Known once a definition resolved; decides whether a backoff applies. */
   transportKind?: EnvironmentTransportKind;
   connection?: ManagedRuntimeConnection;
+  /** Immutable build ceiling and handshake-only facts for the live connection. */
+  announcedManifest?: RuntimeCapabilityManifest;
   connecting?: Promise<RuntimeClient>;
   /** Consecutive failures since the last connection that proved itself. */
   failureCount: number;
@@ -617,6 +620,7 @@ export class RuntimeConnectionManager {
           throw unavailable('Runtime connection was closed.');
         }
         entry.connection = connection;
+        entry.announcedManifest = connection.client.manifest;
         entry.connectedAtMs = Date.now();
         entry.manifestReadAtMs = entry.connectedAtMs;
         // The failure count is not cleared here: a handshake only shows the
@@ -781,6 +785,7 @@ export class RuntimeConnectionManager {
     }
 
     entry.connection = connection;
+    entry.announcedManifest = connection.client.manifest;
     entry.connectedAtMs = Date.now();
     entry.manifestReadAtMs = entry.connectedAtMs;
     entry.failureCount = 0;
@@ -1049,7 +1054,9 @@ export class RuntimeConnectionManager {
     }
     entry.health = health;
     entry.healthReadAtMs = entry.manifestReadAtMs;
-    client.replaceManifest(capabilityManifestFromHealth(health, client.manifest));
+    client.replaceManifest(
+      capabilityManifestFromHealth(health, entry.announcedManifest ?? client.manifest)
+    );
     const manifest = client.manifest;
     const changed = !Value.Equal(entry.status.manifest, manifest);
     // A peer that withdrew this consent has already closed its vendor sessions,

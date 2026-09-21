@@ -147,6 +147,83 @@ describe('capabilityManifestFromHealth', () => {
     expect(refreshed.directoryHashDomain).toBeUndefined();
   });
 
+  it('keeps the handshake implementation ceiling while applying later consent changes', () => {
+    const fullReport: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: RUNTIME_CONSENT_PRESETS.full,
+    };
+    const handshake = {
+      ...capabilityManifestFromHealth(fullReport),
+      features: {
+        tools: true,
+        git: false,
+        probing: true,
+        mcp: false,
+        library: false,
+        checkpoints: false,
+        fsRead: false,
+        fsWrite: false,
+        shell: false,
+        update: false,
+        externalAgents: false,
+        toolchain: true,
+      },
+    };
+
+    expect(capabilityManifestFromHealth(fullReport, handshake).features).toEqual(
+      handshake.features
+    );
+
+    const revoked = capabilityManifestFromHealth(
+      {
+        ...fullReport,
+        profile: 'none',
+        allow: RUNTIME_CONSENT_PRESETS.none,
+      },
+      handshake
+    );
+    expect(revoked.features).toEqual({
+      ...handshake.features,
+      tools: false,
+      probing: false,
+    });
+  });
+
+  it('derives tools from capabilities that are both allowed and implemented', () => {
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'custom',
+      allow: {
+        ...RUNTIME_CONSENT_PRESETS.none,
+        fsRead: true,
+      },
+    };
+    const handshake = {
+      ...capabilityManifestFromHealth(report),
+      features: {
+        tools: true,
+        git: false,
+        probing: true,
+        mcp: false,
+        library: false,
+        checkpoints: false,
+        fsRead: false,
+        fsWrite: false,
+        shell: false,
+        update: false,
+        externalAgents: false,
+        toolchain: true,
+      },
+    };
+
+    expect(capabilityManifestFromHealth(report, handshake).features).toMatchObject({
+      tools: false,
+      probing: false,
+      fsRead: false,
+    });
+  });
+
   it('does not infer adapter support or isolation from an older health report', () => {
     const { externalAgents: _externalAgents, ...oldAllow } = RUNTIME_CONSENT_PRESETS.readonly;
     const report: RuntimeHealthReport = {
