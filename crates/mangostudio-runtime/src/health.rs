@@ -46,13 +46,15 @@ use std::sync::{Mutex, OnceLock};
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
 use mangostudio_runtime_contract::manifest::{
-    GitAvailability, PathStyle, RuntimeCapabilityAllow, RuntimeCapabilityManifest, RuntimeShellKind,
+    GitAvailability, ManifestProfile, PathStyle, RuntimeCapabilityAllow, RuntimeCapabilityManifest,
+    RuntimeShellKind,
 };
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::blocking::run_blocking;
-use crate::consent::config::resolve_runtime_slot_config;
+use crate::consent::config::{ResolvedRuntimeSlotConfig, resolve_runtime_slot_config};
+use crate::consent::presets::consent_preset;
 use crate::consent::source::fingerprint_of;
 use crate::registry::Registry;
 use crate::runtime_home::{
@@ -103,7 +105,7 @@ async fn build_health_report(
     path_override: Option<&std::ffi::OsStr>,
 ) -> Result<Value, RemoteError> {
     let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
-    let resolved = resolve_runtime_slot_config(slot, state.stored.as_ref(), fallback_source);
+    let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
 
     let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
         detect_shells(path_override).await
@@ -140,7 +142,13 @@ async fn build_health_report(
     Ok(json!({
         "schemaVersion": resolved.schema_version,
         "slot": resolved.slot,
-        "source": resolved.source,
+        // The live executable's own source, never `resolved.source` (a
+        // stored label from whenever `runtime.json` was last written) —
+        // mirrors `collectRuntimeHealth`'s own `resolveRuntimeSource(env)`
+        // call, which independently recomputes this rather than trusting
+        // `config.source`. A binary replaced out from under a stale config
+        // must describe itself, not the install that is no longer running.
+        "source": fallback_source,
         "runtimeVersion": runtime_version,
         "version": resolved.version,
         "binaryPath": binary_path,
@@ -176,7 +184,7 @@ pub(crate) async fn build_capability_manifest(
     cancel: &CancellationToken,
 ) -> RuntimeCapabilityManifest {
     let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
-    let resolved = resolve_runtime_slot_config(slot, state.stored.as_ref(), fallback_source);
+    let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
 
     let shells: Vec<RuntimeShellKind> = if resolved.allow.shell {
         detect_shells(None).await
@@ -277,6 +285,39 @@ async fn read_slot_state_and_source(
         (state, source)
     })
     .await
+}
+
+/// [`resolve_runtime_slot_config`], with one further rule the generic
+/// resolver does not — and, mirroring `resolveRuntimeSlotConfig`'s own
+/// TypeScript twin, must not — apply itself: an unreadable, malformed, or
+/// schema-invalid `runtime.json` denies every capability, the same `none`
+/// preset [`crate::consent::source::ConsentSource::refresh`] already
+/// applies to the exact same read failure for the exact same file.
+///
+/// Mirrors `apps/runtime/src/health.ts`'s `collectRuntimeHealth`
+/// (`denyEverything`): "an unreadable config is an unknown answer, and an
+/// unknown answer is never yes. Reporting the [slot] default here would
+/// advertise capabilities every gated call refuses." Before this, a
+/// corrupted `host`/`wsl` config (whose slot default is `full`) made this
+/// crate's own `runtime.health` report — and `hello.capabilities`, since
+/// both callers share this resolution — claim capabilities the real
+/// authorization gate was already refusing, and let `detect_shells`/
+/// `probe_git` run for a slot the config layer could not actually vouch
+/// for.
+fn resolve_slot_config_fail_closed(
+    slot: RuntimeSlot,
+    state: &SlotFileState,
+    fallback_source: &str,
+) -> ResolvedRuntimeSlotConfig {
+    let resolved = resolve_runtime_slot_config(slot, state.stored.as_ref(), fallback_source);
+    if state.error.is_none() {
+        return resolved;
+    }
+    ResolvedRuntimeSlotConfig {
+        allow: consent_preset(ManifestProfile::None),
+        profile: ManifestProfile::None,
+        ..resolved
+    }
 }
 
 /// `"provisioned"` when the running executable sits inside `mango_home`'s
@@ -724,6 +765,67 @@ mod tests {
         assert_eq!(result["setup"]["state"], "configured");
         assert!(result["git"].get("available").is_some());
         assert!(result["lastError"].is_null());
+    }
+
+    /// Regression test: an unreadable, malformed `runtime.json` used to
+    /// leave `allow`/`profile` at the slot's own default (`full`, for a
+    /// `host` slot) rather than denying everything, even though the report
+    /// also carries `lastError` naming the read failure right next to it.
+    /// Mirrors `apps/runtime/src/health.ts`'s `collectRuntimeHealth`
+    /// (`denyEverything`), and the fail-closed rule
+    /// `crate::consent::source::ConsentSource::refresh` already applies to
+    /// the identical read failure on the identical file — reporting the
+    /// slot default here advertised capabilities the real authorization
+    /// gate was already refusing.
+    #[tokio::test]
+    async fn a_malformed_config_denies_everything_even_on_a_slot_that_defaults_to_full() {
+        let home = scratch_home("malformed-fail-closed");
+        let dir = crate::runtime_home::slot_dir(RuntimeSlot::Host, &home);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("runtime.json"), b"{ not json").unwrap();
+        let cancel = CancellationToken::new();
+
+        let result = build_health_report(RuntimeSlot::Host, &home, "9.9.9", &cancel, None)
+            .await
+            .expect("an unreadable config must still answer, not fail the whole call");
+
+        assert!(
+            result["lastError"].is_string(),
+            "the read failure must still be named"
+        );
+        assert_eq!(result["profile"], "none");
+        assert!(!result["allow"]["shell"].as_bool().unwrap());
+        assert!(!result["allow"]["git"].as_bool().unwrap());
+        assert!(
+            result["shells"].as_array().unwrap().is_empty(),
+            "a denied shell capability must not even be probed for"
+        );
+    }
+
+    /// Regression test: `source` used to report whatever `runtime.json`
+    /// last recorded, even when the executable actually answering is not
+    /// the one that wrote it. Mirrors `collectRuntimeHealth`'s own
+    /// `resolveRuntimeSource(env)` call, which never reads `config.source`
+    /// for this field either.
+    #[tokio::test]
+    async fn source_reports_the_running_binary_not_a_stale_stored_label() {
+        let home = scratch_home("source-freshness");
+        crate::runtime_home::write_runtime_slot_config(
+            RuntimeSlot::Host,
+            &home,
+            &[("source", Some(serde_json::json!("provisioned")))],
+        )
+        .unwrap();
+        let cancel = CancellationToken::new();
+
+        let result = build_health_report(RuntimeSlot::Host, &home, "9.9.9", &cancel, None)
+            .await
+            .expect("a stored source label must not fail the call");
+
+        // The test binary running this assertion is never inside `home`'s
+        // slot layout, so the live answer is "bundled" — the opposite of
+        // the stale "provisioned" label just stored above.
+        assert_eq!(result["source"], "bundled");
     }
 
     /// Regression test for blocker 3: `read_slot_state_and_source` used to
