@@ -121,6 +121,48 @@ describe('terminal HTTP routes with a fake runtime', () => {
     routes = createTerminalRoutes(service);
   });
 
+  it('admits only one of two concurrent POST requests at a one-session cap', async () => {
+    const user = await insertTestUser();
+    let releaseOpen!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    client = new FakeTerminalRuntimeClient({ gateFirstOpen: () => gate });
+    service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(client),
+      isIdentityAttested: () => true,
+    });
+    const app = authedApp(createTerminalRoutes(service), user);
+    const calledOpen = client.waitForCall('open');
+    const first = app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    await calledOpen;
+
+    const availability = await app.handle(
+      jsonRequest(`/terminals/availability?environmentId=${LOCAL_ENVIRONMENT_ID}`, 'GET')
+    );
+    expect((await availability.json()) as TerminalAvailability).toMatchObject({
+      available: false,
+      reason: 'limit',
+      openSessions: 1,
+    });
+    const second = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { code: string }).code).toBe(ERROR_CODES.TERMINAL_LIMIT);
+    releaseOpen();
+    expect((await first).status).toBe(201);
+    expect(client.calls.open).toHaveLength(1);
+  });
+
   it('defaults cwd to the chat workdir and stamps MANGOSTUDIO_CHAT_ID', async () => {
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
@@ -203,6 +245,22 @@ describe('terminal HTTP routes with a fake runtime', () => {
       jsonRequest(`/terminals/availability?environmentId=${LOCAL_ENVIRONMENT_ID}`, 'GET')
     );
     expect(((await available.json()) as TerminalAvailability).available).toBe(true);
+  });
+
+  it('lists a detached exit from the runtime before reporting session status', async () => {
+    const user = await insertTestUser();
+    const app = authedApp(routes, user);
+    const opened = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    const { session } = (await opened.json()) as TerminalSessionResponse;
+    client.setSessionExit(session.id, 4);
+
+    const listed = await app.handle(jsonRequest('/terminals', 'GET'));
+    expect(listed.status).toBe(200);
+    expect((await listed.json()) as { sessions: unknown[] }).toMatchObject({
+      sessions: [{ id: session.id, status: 'exited', exit: { exitCode: 4, signal: null } }],
+    });
   });
 });
 

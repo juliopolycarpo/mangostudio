@@ -16,6 +16,7 @@ import type {
   RuntimeTerminalOpenResult,
   RuntimeTerminalOutputEvent,
   RuntimeTerminalResizeParams,
+  RuntimeTerminalSessionSummary,
   RuntimeTerminalWriteParams,
 } from '@mangostudio/shared/runtime-contract';
 import type {
@@ -48,6 +49,10 @@ export interface FakeTerminalRuntimeClientOptions {
   readonly attachResult?: Partial<RuntimeTerminalAttachResult>;
   /** Awaited before the *first* `terminal.attach` call resolves; later calls are immediate. */
   readonly gateFirstAttach?: () => Promise<unknown>;
+  /** Awaited before the first open resolves, after recording its request. */
+  readonly gateFirstOpen?: () => Promise<unknown>;
+  readonly failFirstOpen?: Error;
+  readonly gateFirstList?: () => Promise<unknown>;
   /** Awaited before the *first* `terminal.detach` call resolves; later calls are immediate. */
   readonly gateFirstDetach?: () => Promise<unknown>;
   /** Awaited before the *first* `terminal.write` call resolves; later calls are immediate. */
@@ -90,6 +95,10 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     readonly resolve: () => void;
   }>();
   #gateFirstAttach: (() => Promise<unknown>) | undefined;
+  #gateFirstOpen: (() => Promise<unknown>) | undefined;
+  #failFirstOpen: Error | undefined;
+  #gateFirstList: (() => Promise<unknown>) | undefined;
+  readonly #sessions = new Map<string, RuntimeTerminalSessionSummary>();
   #gateFirstDetach: (() => Promise<unknown>) | undefined;
   #gateFirstWrite: (() => Promise<unknown>) | undefined;
   #outputWithAttachResponse: readonly RuntimeTerminalOutputEvent[] | undefined;
@@ -99,6 +108,9 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     this.#openResult = options.openResult ?? {};
     this.#attachResult = options.attachResult ?? {};
     this.#gateFirstAttach = options.gateFirstAttach;
+    this.#gateFirstOpen = options.gateFirstOpen;
+    this.#failFirstOpen = options.failFirstOpen;
+    this.#gateFirstList = options.gateFirstList;
     this.#gateFirstDetach = options.gateFirstDetach;
     this.#gateFirstWrite = options.gateFirstWrite;
     this.#outputWithAttachResponse = options.outputWithFirstAttachResponse;
@@ -130,15 +142,31 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
   }
 
   readonly terminal: TerminalRuntimeTerminalClient = {
-    open: (params) => {
+    open: async (params) => {
       this.#record('open', params);
-      return Promise.resolve({
+      const gate = this.#gateFirstOpen;
+      this.#gateFirstOpen = undefined;
+      if (gate) await gate();
+      const failure = this.#failFirstOpen;
+      this.#failFirstOpen = undefined;
+      if (failure) throw failure;
+      const result = {
         sessionId: params.sessionId,
         shell: params.shell ?? 'bash',
         cwd: params.cwd ?? '/home/tester',
         pid: 4242,
         ...this.#openResult,
+      };
+      this.#sessions.set(params.sessionId, {
+        ...result,
+        cols: params.cols,
+        rows: params.rows,
+        status: 'running',
+        exitCode: null,
+        signal: null,
+        attached: false,
       });
+      return result;
     },
     attach: async (params) => {
       this.#record('attach', params);
@@ -191,9 +219,16 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     },
     close: (params) => {
       this.#record('close', params);
+      this.#sessions.delete(params.sessionId);
       return Promise.resolve({ ok: true as const });
     },
-    list: () => Promise.resolve({ sessions: [] }),
+    list: async () => {
+      const sessions = [...this.#sessions.values()].map((session) => ({ ...session }));
+      const gate = this.#gateFirstList;
+      this.#gateFirstList = undefined;
+      if (gate) await gate();
+      return { sessions };
+    },
     onOutput: (sessionId, listener) => {
       let listeners = this.#outputListeners.get(sessionId);
       if (!listeners) {
@@ -218,5 +253,11 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
   /** Simulates this connection dropping — what `RuntimeClient.onClose` fires on. */
   fireClose(): void {
     for (const listener of [...this.#closeListeners]) listener();
+  }
+
+  /** Changes the state returned by terminal.list without emitting a viewer event. */
+  setSessionExit(sessionId: string, exitCode: number): void {
+    const session = this.#sessions.get(sessionId);
+    if (session) this.#sessions.set(sessionId, { ...session, status: 'exited', exitCode });
   }
 }

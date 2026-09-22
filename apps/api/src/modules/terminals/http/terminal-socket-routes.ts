@@ -128,12 +128,18 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     const endWithExit = (exit: TerminalExit): void => {
       service.recordExit(state.sessionId, exit);
       relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
-      socket.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
+      relay.closeAfterDrain(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
     };
 
     const viewer: TerminalSessionViewer = {
       pushNotice: (notice) => relay.push(encodeTerminalServerMessage({ type: 'notice', notice })),
-      close: (code, reason) => socket.raw.close(code, reason),
+      close: (code, reason) => {
+        if (code === TERMINAL_SOCKET_CLOSE_CODES.REPLACED) {
+          socket.raw.close(code, reason);
+        } else {
+          relay.closeAfterDrain(code, reason);
+        }
+      },
     };
     state.viewer = viewer;
     // A second upgrade for the same session takes over: the previous viewer is

@@ -34,6 +34,35 @@ class FakeSocket {
   }
 }
 
+/** Deterministic timer for the relay's bounded final-output drain. */
+class FakeClock {
+  now = 0;
+  readonly timers = new Map<number, { at: number; run: () => void }>();
+  nextId = 0;
+
+  schedule(run: () => void, delay: number): number {
+    const id = ++this.nextId;
+    this.timers.set(id, { at: this.now + delay, run });
+    return id;
+  }
+
+  cancel(id: number): void {
+    this.timers.delete(id);
+  }
+
+  advance(ms: number): void {
+    const end = this.now + ms;
+    while (true) {
+      const next = [...this.timers].sort((a, b) => a[1].at - b[1].at)[0];
+      if (!next || next[1].at > end) break;
+      this.now = next[1].at;
+      this.timers.delete(next[0]);
+      next[1].run();
+    }
+    this.now = end;
+  }
+}
+
 function bytes(length: number, fill = 1): Uint8Array {
   return new Uint8Array(length).fill(fill);
 }
@@ -52,6 +81,51 @@ function relayDepsFor(
 }
 
 describe('createTerminalSocketRelay', () => {
+  test('delays close until queued output, exit, and the socket buffer all drain', () => {
+    const socket = new FakeSocket();
+    const clock = new FakeClock();
+    socket.bufferedAmount = 9;
+    const relay = createTerminalSocketRelay(
+      relayDepsFor(socket, {
+        highWaterBytes: 10,
+        now: () => clock.now,
+        schedule: (run, delay) => clock.schedule(run, delay),
+        cancelScheduled: (id) => clock.cancel(id as number),
+      })
+    );
+    relay.push(bytes(2, 1));
+    relay.push(bytes(2, 2));
+    relay.closeAfterDrain(1001, 'Session exited');
+    expect(socket.closed).toBeNull();
+    socket.bufferedAmount = 0;
+    relay.drain();
+    expect(socket.sent).toEqual([bytes(2, 1), bytes(2, 2)]);
+    expect(socket.closed).toEqual({ code: 1001, reason: 'Session exited' });
+    expect(clock.timers.size).toBe(0);
+  });
+
+  test('closes after a fixed deadline when a viewer never drains', () => {
+    const socket = new FakeSocket();
+    const clock = new FakeClock();
+    socket.bufferedAmount = 10;
+    const relay = createTerminalSocketRelay(
+      relayDepsFor(socket, {
+        highWaterBytes: 10,
+        closeDeadlineMs: 50,
+        closePollMs: 10,
+        now: () => clock.now,
+        schedule: (run, delay) => clock.schedule(run, delay),
+        cancelScheduled: (id) => clock.cancel(id as number),
+      })
+    );
+    relay.push(bytes(2));
+    relay.closeAfterDrain(1001, 'Session exited');
+    clock.advance(49);
+    expect(socket.closed).toBeNull();
+    clock.advance(1);
+    expect(socket.closed).toEqual({ code: 1001, reason: 'Session exited' });
+    expect(clock.timers.size).toBe(0);
+  });
   test('sends a frame immediately when there is room under the high-water mark', () => {
     const socket = new FakeSocket();
     const relay = createTerminalSocketRelay(relayDepsFor(socket, { highWaterBytes: 1_000 }));

@@ -80,7 +80,11 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
         query: TerminalListQuerySchema,
         response: { 200: TerminalListResponseSchema },
       },
-      ({ query, user }) => ({ sessions: service.list(user?.id ?? '', query) })
+      async ({ query, user }) => {
+        const userId = user?.id ?? '';
+        await service.reconcile(userId);
+        return { sessions: service.list(userId, query) };
+      }
     )
     .post(
       '/terminals',
@@ -93,9 +97,9 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
           409: ApiErrorResponseSchema,
         },
       },
-      async ({ body, set, user }) => {
+      async ({ body, request, set, user }) => {
         try {
-          const session = await service.open(user?.id ?? '', body);
+          const session = await service.open(user?.id ?? '', body, request.signal);
           set.status = 201;
           return { session };
         } catch (error) {

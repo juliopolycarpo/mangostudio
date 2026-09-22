@@ -28,6 +28,14 @@ const ENVIRONMENT_ID = 'workshop';
 const USER_ID = 'user-1';
 const OTHER_USER_ID = 'user-2';
 
+function barrier(): { promise: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
 function defaultConfig(overrides: Partial<TerminalConfig> = {}): TerminalConfig {
   return {
     enabled: true,
@@ -91,6 +99,163 @@ function createHarness(options: HarnessOptions = {}): Harness {
 }
 
 describe('terminalSessionService.open', () => {
+  test('reserves a seat before resolving chat or opening the runtime PTY', async () => {
+    const gate = barrier();
+    const { service, client } = createHarness({
+      config: { maxSessionsPerUser: 1 },
+      resolveChat: async () => {
+        await gate.promise;
+        return { ok: true, chatId: 'chat-1', workdir: '/repo' };
+      },
+    });
+    const first = service.open(USER_ID, { environmentId: ENVIRONMENT_ID, chatId: 'chat-1' });
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(1);
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
+      TerminalLimitError
+    );
+    gate.release();
+    await first;
+    expect(client.calls.open).toHaveLength(1);
+  });
+
+  test('an aborted late open closes its PTY and frees its reservation once', async () => {
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({ gateFirstOpen: () => gate.promise });
+    const { service } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+    const request = new AbortController();
+    const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID }, request.signal);
+    await client.waitForCall('open');
+    request.abort();
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(1);
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
+      TerminalLimitError
+    );
+    gate.release();
+    await expect(opening).rejects.toBeDefined();
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+    expect(client.calls.close).toEqual([{ sessionId: client.calls.open[0]?.sessionId }]);
+    expect(service.list(USER_ID)).toHaveLength(0);
+    await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+  });
+
+  test('abort before the runtime call frees capacity without waiting for chat resolution', async () => {
+    const gate = barrier();
+    const { service, client } = createHarness({
+      config: { maxSessionsPerUser: 1 },
+      resolveChat: async () => {
+        await gate.promise;
+        return { ok: true, chatId: 'chat-1', workdir: '/repo' };
+      },
+    });
+    const request = new AbortController();
+    const opening = service.open(
+      USER_ID,
+      { environmentId: ENVIRONMENT_ID, chatId: 'chat-1' },
+      request.signal
+    );
+    request.abort();
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+    gate.release();
+    await expect(opening).rejects.toBeDefined();
+    expect(client.calls.open).toHaveLength(0);
+  });
+
+  test('open failure and runtime loss release pending ownership', async () => {
+    const failed = createHarness({
+      client: new FakeTerminalRuntimeClient({ failFirstOpen: new Error('open failed') }),
+      config: { maxSessionsPerUser: 1 },
+    });
+    await expect(failed.service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toThrow(
+      'open failed'
+    );
+    expect((await failed.service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({ gateFirstOpen: () => gate.promise });
+    const { service } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+    const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    await client.waitForCall('open');
+    client.fireClose();
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+    gate.release();
+    await expect(opening).rejects.toBeDefined();
+    expect(client.calls.close).toHaveLength(1);
+    expect(service.list(USER_ID)).toHaveLength(0);
+  });
+
+  test('shutdown cancels and closes a late open before releasing ownership', async () => {
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({ gateFirstOpen: () => gate.promise });
+    const { service } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+    const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    await client.waitForCall('open');
+    await service.closeAll();
+    gate.release();
+    await expect(opening).rejects.toBeDefined();
+    expect(client.calls.close).toEqual([{ sessionId: client.calls.open[0]?.sessionId }]);
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
+      TerminalUnavailableError
+    );
+  });
+
+  test('reconciles detached exits at the cap without evicting running sessions', async () => {
+    const { service, client } = createHarness({ config: { maxSessionsPerUser: 2 } });
+    const exited = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    const running = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    client.setSessionExit(exited.id, 7);
+
+    const availability = await service.availability(USER_ID, ENVIRONMENT_ID);
+    expect(availability.openSessions).toBe(1);
+    expect(service.list(USER_ID)).toEqual([
+      expect.objectContaining({
+        id: exited.id,
+        status: 'exited',
+        exit: { exitCode: 7, signal: null },
+      }),
+      expect.objectContaining({ id: running.id, status: 'running' }),
+    ]);
+    await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+  });
+
+  test('a stale runtime list reply cannot retire a session opened after its snapshot', async () => {
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({ gateFirstList: () => gate.promise });
+    const { service } = createHarness({ client, config: { maxSessionsPerUser: 2 } });
+    const older = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    const listing = service.availability(USER_ID, ENVIRONMENT_ID);
+    await service.close(USER_ID, older.id);
+    const opened = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    gate.release();
+    await listing;
+    expect(service.list(USER_ID)).toEqual([
+      expect.objectContaining({ id: opened.id, status: 'running' }),
+    ]);
+  });
+
+  test('reconnecting while an old client open is pending does not duplicate ownership', async () => {
+    const gate = barrier();
+    const oldClient = new FakeTerminalRuntimeClient({ gateFirstOpen: () => gate.promise });
+    const newClient = new FakeTerminalRuntimeClient();
+    let currentClient = oldClient;
+    let id = 0;
+    const service = createTerminalSessionService({
+      getConfig: () => defaultConfig({ maxSessionsPerUser: 1 }),
+      getRuntimeClient: () => Promise.resolve(currentClient),
+      isIdentityAttested: () => true,
+      randomId: () => `reconnect-${++id}`,
+    });
+    const oldOpen = service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    await oldClient.waitForCall('open');
+    oldClient.fireClose();
+    currentClient = newClient;
+    const current = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    gate.release();
+    await expect(oldOpen).rejects.toBeDefined();
+    expect(oldClient.calls.close).toEqual([{ sessionId: oldClient.calls.open[0]?.sessionId }]);
+    expect(service.list(USER_ID)).toEqual([expect.objectContaining({ id: current.id })]);
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(1);
+  });
   test('refuses when terminals are disabled on the hub', async () => {
     const { service } = createHarness({ config: { enabled: false } });
 
