@@ -311,7 +311,7 @@ struct Pipe {
 }
 
 fn create_pipe(parent_reads: bool) -> io::Result<Pipe> {
-    let mut attributes = inheritable_attributes();
+    let attributes = inheritable_attributes();
     let mut read = ptr::null_mut();
     let mut write = ptr::null_mut();
     // SAFETY: output pointers and SECURITY_ATTRIBUTES are valid for this call. Both handles are
@@ -332,7 +332,7 @@ fn create_pipe(parent_reads: bool) -> io::Result<Pipe> {
 
 fn null_stdin() -> io::Result<Handle> {
     let name = [u16::from(b'N'), u16::from(b'U'), u16::from(b'L'), 0];
-    let mut attributes = inheritable_attributes();
+    let attributes = inheritable_attributes();
     // SAFETY: `name` is NUL-terminated and the supplied security attributes make the child
     // endpoint inheritable. The exact attribute handle list limits inheritance to this handle.
     let handle = unsafe {
