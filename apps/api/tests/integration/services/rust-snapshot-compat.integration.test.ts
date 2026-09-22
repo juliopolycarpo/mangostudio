@@ -36,6 +36,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { RemoteError } from '@mangostudio/protocol';
+import { rejectionOf } from '@mangostudio/protocol/testing';
 import {
   PathAccessError,
   RUNTIME_ABSENT_HASH,
@@ -96,24 +97,14 @@ function base64Of(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64');
 }
 
-async function remoteError(call: () => Promise<unknown>): Promise<RemoteError> {
-  try {
-    await call();
-  } catch (error) {
-    expect(error).toBeInstanceOf(RemoteError);
-    return error as RemoteError;
-  }
-  throw new Error('Expected the runtime call to fail.');
-}
-
-async function runtimeError(call: () => Promise<unknown>): Promise<Error> {
-  try {
-    await call();
-  } catch (error) {
-    expect(error).toBeInstanceOf(Error);
-    return error as Error;
-  }
-  throw new Error('Expected the runtime call to fail.');
+/** Awaits `call`'s rejection and asserts the reason is a `type`. */
+async function rejectionFrom<T extends Error>(
+  type: abstract new (...args: never[]) => T,
+  call: () => Promise<unknown>
+): Promise<T> {
+  const reason = await rejectionOf(call());
+  expect(reason).toBeInstanceOf(type);
+  return reason as T;
 }
 
 async function assertBytes(path: string, expected: Uint8Array): Promise<void> {
@@ -346,12 +337,12 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     const sizeBytes = SNAPSHOT_MAX_BYTES + 1;
     await writeFile(path, new Uint8Array(sizeBytes));
 
-    const expected = await remoteError(() => typescript.snapshot.capture({ path }));
+    const expected = await rejectionFrom(RemoteError, () => typescript.snapshot.capture({ path }));
     expect(expected).toMatchObject({
       code: 'INTERNAL',
       details: { kind: 'snapshot_too_large', resolvedPath: path, sizeBytes },
     });
-    const actual = await remoteError(() => rust.snapshot.capture({ path }));
+    const actual = await rejectionFrom(RemoteError, () => rust.snapshot.capture({ path }));
     expect(actual).toEqual(expected);
   });
 
@@ -436,7 +427,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       };
       try {
         await chmod(paths.destinationRoot, 0o555);
-        const error = await runtimeError(() => client.snapshot.revert(params));
+        const error = await rejectionFrom(Error, () => client.snapshot.revert(params));
         expect(error.message).toMatch(/permission denied|EACCES/i);
         await assertBytes(movedTo, bytes);
         expect(await client.snapshot.capture({ path })).toEqual({ exists: false });
@@ -463,7 +454,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       const movedTo = join(paths.destinationRoot, 'moved.txt');
       await writeFile(path, occupiedBytes);
       await writeFile(movedTo, movedBytes);
-      const error = await runtimeError(() =>
+      const error = await rejectionFrom(Error, () =>
         client.snapshot.revert({
           chatId: 'cross-device-collision',
           expected: [
@@ -573,7 +564,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     async function assertMoveErrors(client: RuntimeClient, root: string): Promise<void> {
       const missingSource = join(root, 'missing-source.txt');
       const missingDestination = join(root, 'missing-destination.txt');
-      const missingError = await runtimeError(() =>
+      const missingError = await rejectionFrom(Error, () =>
         client.snapshot.revert({
           chatId: 'snapshot-missing-move',
           expected: [
@@ -608,7 +599,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
         writeFile(collisionPath, collisionBytes),
         writeFile(destinationPath, movedBytes),
       ]);
-      const collisionError = await runtimeError(() =>
+      const collisionError = await rejectionFrom(Error, () =>
         client.snapshot.revert({
           chatId: 'snapshot-move-collision',
           expected: [
@@ -666,7 +657,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       const afterBytes = Buffer.from('after\n');
       await Promise.all([writeFile(restoredPath, beforeBytes), writeFile(pendingPath, afterBytes)]);
 
-      const error = await runtimeError(() =>
+      const error = await rejectionFrom(Error, () =>
         client.snapshot.revert({
           chatId: 'snapshot-mixed-conflict',
           expected: [
@@ -713,9 +704,9 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       operations: [{ type: 'create' as const, path: escapedPath }],
     };
 
-    const expected = await runtimeError(() => typescript.snapshot.revert(params));
+    const expected = await rejectionFrom(Error, () => typescript.snapshot.revert(params));
     expect(expected).toBeInstanceOf(PathAccessError);
-    const actual = await runtimeError(() => rust.snapshot.revert(params));
+    const actual = await rejectionFrom(Error, () => rust.snapshot.revert(params));
     expect(actual).toEqual(expected);
     await expect(Bun.file(escapedPath).exists()).resolves.toBe(false);
   });

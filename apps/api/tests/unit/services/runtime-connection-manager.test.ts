@@ -373,12 +373,9 @@ describe('RuntimeConnectionManager', () => {
     // discarded on its own merits (superseded), not merely assumed to lose
     // a race it never actually ran.
     const closedStale: string[] = [];
-    const staleConnection: ManagedRuntimeConnection = {
-      client: { manifest: TEST_MANIFEST } as RuntimeClient,
-      close: () => {
-        closedStale.push('closed');
-      },
-    };
+    const staleConnection = fakeConnection(() => {
+      closedStale.push('closed');
+    });
     const fresh = fakeConnection(() => undefined);
     const { connector, signals, release } = stalledThenFreshConnector(fresh);
     const manager = new RuntimeConnectionManager({

@@ -12,9 +12,9 @@
  *
  * The fallback's own tolerance is deliberate, including in CI: the ordinary
  * `bun run test` lane (`.github/workflows/test.yml`) runs every apps/api
- * test, including these two qualification files, without ever building Rust
- * or setting this override — that lane has no Rust binary and is not
- * supposed to. Only `cargo-shim.yml`'s dedicated `real-binary-qualification`
+ * test, including the `rust-*` qualification and compat files, without ever
+ * building Rust or setting this override — that lane has no Rust binary and
+ * is not supposed to. Only `cargo-shim.yml`'s dedicated `real-binary-qualification`
  * job builds the binary and must set the override; that job's own workflow
  * definition is asserted in `ci-gate.unit.test.ts`, which is where "this job
  * forgot to wire it" actually gets caught — not here, where the check cannot

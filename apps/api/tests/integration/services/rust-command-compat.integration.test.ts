@@ -108,9 +108,13 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
       timeoutMs: 2000,
       maxOutputBytes: 4096,
     };
-    const expected = await typescript.shell.run(params);
+    // Both runtimes wait out the same timeout, so run them side by side.
+    const [expected, actual] = await Promise.all([
+      typescript.shell.run(params),
+      rust.shell.run(params),
+    ]);
     expect(expected.termination).toEqual({ kind: 'timed_out' });
-    expect(semanticShell(await rust.shell.run(params))).toEqual(semanticShell(expected));
+    expect(semanticShell(actual)).toEqual(semanticShell(expected));
   }, 10_000);
 
   it.skipIf(process.platform === 'win32')(
@@ -123,10 +127,13 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
         timeoutMs: 2000,
         maxOutputBytes: 4096,
       };
-      const expected = await typescript.shell.run(params);
+      const [expected, actual] = await Promise.all([
+        typescript.shell.run(params),
+        rust.shell.run(params),
+      ]);
       expect(expected.truncated).toBe(false);
       expect(expected.termination).toEqual({ kind: 'timed_out' });
-      expect(semanticShell(await rust.shell.run(params))).toEqual(semanticShell(expected));
+      expect(semanticShell(actual)).toEqual(semanticShell(expected));
     },
     10_000
   );
