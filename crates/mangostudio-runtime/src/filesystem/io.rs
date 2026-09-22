@@ -331,7 +331,7 @@ fn hash_open_file(file: &mut File) -> Result<String, RemoteError> {
         }
         hasher.update(&chunk[..count]);
     }
-    Ok(hash_hex(&hasher.finalize()))
+    Ok(hex(&hasher.finalize()))
 }
 
 fn hash_reader_cancellable(
@@ -349,15 +349,36 @@ fn hash_reader_cancellable(
         }
         hasher.update(&chunk[..count]);
     }
-    Ok(hash_hex(&hasher.finalize()))
+    Ok(hex(&hasher.finalize()))
 }
 
-fn hash_bytes(bytes: &[u8]) -> String {
-    hash_hex(&Sha256::digest(bytes))
+/// Returns the lowercase hex SHA-256 digest every filesystem result and
+/// freshness entry uses to name file content.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(sha256_hex(b"").len(), 64);
+/// ```
+pub(super) fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
 }
 
-fn hash_hex(hash: &[u8]) -> String {
-    hash.iter().map(|byte| format!("{byte:02x}")).collect()
+/// Encodes bytes as lowercase hexadecimal, two digits per byte.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(hex(&[0x00, 0xab, 0xff]), "00abff");
+/// ```
+pub(super) fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        encoded.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 pub(super) fn assert_regular(
@@ -579,7 +600,7 @@ fn temporary_name() -> Result<OsString, RemoteError> {
     let mut random = [0; 8];
     getrandom::fill(&mut random)
         .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))?;
-    let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    let suffix = hex(&random);
     Ok(OsString::from(format!(".mango-{suffix}.tmp")))
 }
 
@@ -803,7 +824,7 @@ fn write_replacement_in_with_hook(
     let mtime = mtime(&metadata);
     let identity = object_identity(&file, &metadata)
         .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))?;
-    let expected_hash = hash_bytes(bytes);
+    let expected_hash = sha256_hex(bytes);
     hook(ReplacementHookPhase::Prepared, temp_path);
     if !temporary_matches(dir, temp_path, identity, &expected_hash) {
         return Err(temporary_write_uncertain_error(
@@ -2254,6 +2275,24 @@ mod tests {
         }
         .compile()
         .unwrap()
+    }
+
+    #[test]
+    fn hex_encodes_every_byte_as_two_lowercase_digits() {
+        assert_eq!(hex(&[]), "");
+        assert_eq!(hex(&[0x00, 0x0f, 0xab, 0xff]), "000fabff");
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_digests() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     struct ForcedCopyFailure {

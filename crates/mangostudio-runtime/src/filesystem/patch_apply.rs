@@ -9,7 +9,6 @@ use base64::Engine;
 use mango_protocol::error::{RemoteError, codes};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use super::{
@@ -717,7 +716,7 @@ fn push_snapshot(
     if !params.mutation.capture_snapshot {
         return;
     }
-    let before = before.map_or_else(|| json!({"exists":false}), |bytes| json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":hash(bytes)}));
+    let before = before.map_or_else(|| json!({"exists":false}), |bytes| json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":io::sha256_hex(bytes)}));
     let mut snapshot = json!({"path":path,"op":op,"before":before,"afterHash":after_hash});
     if let Some(destination) = moved_to {
         snapshot["movedTo"] = json!(destination);
@@ -820,13 +819,6 @@ fn commit_error(changed_paths: &[PathBuf], cause: RemoteError) -> RemoteError {
         error = error.with_detail("changedPaths", json!(unique));
     }
     error
-}
-
-fn hash(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 impl PlannedOperation {

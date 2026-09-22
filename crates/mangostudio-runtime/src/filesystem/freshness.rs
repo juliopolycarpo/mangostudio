@@ -12,7 +12,6 @@ use std::{
 
 use mango_protocol::error::{RemoteError, codes};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
@@ -124,7 +123,7 @@ impl Ledger {
         observed_mtime_ms: f64,
         observation: ReadObservation,
     ) -> String {
-        let sha256 = hash_content(content);
+        let sha256 = super::io::sha256_hex(content);
         let covered_through_line = match observation {
             ReadObservation::Window(range) => self.extend_coverage(chat_id, path, &sha256, range),
             ReadObservation::WholeFile | ReadObservation::ByteView => ALL_LINES_VALID,
@@ -173,7 +172,7 @@ impl Ledger {
             Some(LineNumbers::ValidThrough(through_line)) => through_line,
             Some(LineNumbers::Unobserved) | None => ALL_LINES_VALID,
         };
-        let sha256 = hash_content(content);
+        let sha256 = super::io::sha256_hex(content);
         self.store(
             chat_id,
             path.to_path_buf(),
@@ -224,7 +223,7 @@ impl Ledger {
         content: &[u8],
     ) -> Result<(), RemoteError> {
         let entry = self.complete_entry(chat_id, path)?;
-        if entry.size != content.len() as u64 || entry.sha256 != hash_content(content) {
+        if entry.size != content.len() as u64 || entry.sha256 != super::io::sha256_hex(content) {
             return Err(stale_file_error(path));
         }
         self.touch(chat_id, path);
@@ -448,16 +447,6 @@ impl Ledger {
             }
         }
     }
-}
-
-fn hash_content(content: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content);
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 fn service_error(kind: &'static str, message: String, path: &Path) -> RemoteError {

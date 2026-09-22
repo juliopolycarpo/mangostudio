@@ -11,7 +11,6 @@ use mango_protocol::{
     frame::Response,
 };
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use super::capability;
@@ -263,11 +262,11 @@ impl Service {
         })?;
         if byte_view {
             let content = if view == "hex" {
-                hash_hex(&observed.bytes)
+                io::hex(&observed.bytes)
             } else {
                 base64::engine::general_purpose::STANDARD.encode(&observed.bytes)
             };
-            let hash = hash_hex(&Sha256::digest(&observed.bytes));
+            let hash = io::sha256_hex(&observed.bytes);
             let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
             response.preflight_read(&result)?;
             let recorded_hash = lock(&self.state.ledger).record_read(
@@ -304,7 +303,7 @@ impl Service {
         } else {
             text::format_window(&observed.bytes, start, maximum)
         };
-        let hash = hash_hex(&Sha256::digest(&observed.bytes));
+        let hash = io::sha256_hex(&observed.bytes);
         let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
         response.preflight_read(&result)?;
         let recorded_hash = lock(&self.state.ledger).record_read(
@@ -370,7 +369,7 @@ impl Service {
                     observed.as_ref().map_or(0, |value| value.bytes.len() as u64),
                 )?;
             }
-            let expected_hash = hash_hex(&Sha256::digest(params.content.as_bytes()));
+            let expected_hash = io::sha256_hex(params.content.as_bytes());
             let mut result =
                 json!({"path":params.input_path,"bytesWritten":params.content.len(),"sha256":expected_hash});
             if !exclusive {
@@ -518,7 +517,7 @@ impl Service {
             debug_assert_eq!(updated.len(), projected_bytes);
             debug_assert_eq!(replaced, replacement_count);
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
-            let expected_hash = hash_hex(&Sha256::digest(&updated));
+            let expected_hash = io::sha256_hex(&updated);
             let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
             response.preflight_mutation(&result)?;
             let policy = self.compile_mutation_policy(
@@ -571,7 +570,7 @@ impl Service {
             if start > end || end > total { return Err(argument(format!("Invalid line range {start}-{end} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",params.input_path))); }
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
-            let expected_hash = hash_hex(&Sha256::digest(&updated));
+            let expected_hash = io::sha256_hex(&updated);
             let replaced = end-start+1;
             let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
             response.preflight_mutation(&result)?;
@@ -711,7 +710,7 @@ impl Service {
             };
             let expected_hash = before.as_ref().map_or_else(
                 || io::hash_file(&policy, &params.resolved_from),
-                |observed| Ok(hash_hex(&Sha256::digest(&observed.bytes))),
+                |observed| Ok(io::sha256_hex(&observed.bytes)),
             )?;
             let result = mutation_result(
                 json!({"from":params.input_from,"to":params.input_to,"moved":true}),
@@ -907,10 +906,6 @@ fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
     Ok(value as usize)
 }
 
-fn hash_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 pub(super) fn preflight_response(
     result: &Value,
     response_id: &str,
@@ -955,7 +950,7 @@ pub(super) fn mutation_result(
     if !params.capture_snapshot {
         return json!({"result":result,"mutations":[]});
     }
-    let before = before.map_or_else(||json!({"exists":false}),|bytes|json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":hash_hex(&Sha256::digest(bytes))}));
+    let before = before.map_or_else(||json!({"exists":false}),|bytes|json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":io::sha256_hex(bytes)}));
     let mut snapshot = json!({"path":path,"op":op,"before":before,"afterHash":hash});
     if let Some(to) = moved_to {
         snapshot["movedTo"] = json!(to);
@@ -1488,7 +1483,7 @@ mod tests {
             .await
             .unwrap();
 
-        let committed_hash = hash_hex(&Sha256::digest(&replacement));
+        let committed_hash = io::sha256_hex(&replacement);
         assert_eq!(std::fs::read(&destination).unwrap(), replacement);
         assert_eq!(result["mutations"][0]["afterHash"], committed_hash);
         assert!(lock(&service.state.ledger).is_empty());

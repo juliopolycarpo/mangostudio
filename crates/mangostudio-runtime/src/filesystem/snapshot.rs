@@ -6,7 +6,6 @@ use std::sync::Arc;
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use super::freshness::ReadObservation;
@@ -293,7 +292,7 @@ fn before_snapshot(bytes: &[u8]) -> Value {
     json!({
         "exists":true,
         "contentBase64":base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes),
-        "hash":hash_bytes(bytes),
+        "hash":io::sha256_hex(bytes),
     })
 }
 
@@ -436,13 +435,6 @@ fn snapshot_conflict(path: &Path) -> RemoteError {
     .with_detail("resolvedPath", path.display().to_string())
 }
 
-fn hash_bytes(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
 /// Decodes the permissive `Buffer.from(value, "base64")` subset used by the
 /// TypeScript runtime: each UTF-16 code unit is truncated to its low byte,
 /// ASCII noise is ignored, both alphabets are accepted, and the first padding
@@ -493,6 +485,7 @@ mod tests {
 
     use super::*;
     use crate::consent::source::ConsentSource;
+    use crate::filesystem::io::sha256_hex as hash_bytes;
     use crate::filesystem::service::{NativeMoveIo, NativeWriteIo, State, WriteIo};
     use crate::runtime_home::{RuntimeSlot, write_runtime_slot_config};
     use crate::test_support::{ScratchDir, scratch_dir};
