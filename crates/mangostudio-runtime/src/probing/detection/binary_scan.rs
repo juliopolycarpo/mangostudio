@@ -351,7 +351,7 @@ fn iterate_binary_candidates(
     }
 
     let names = binary_candidate_names(definition, &path_env.platform, &path_env.env);
-    let list_separator = if path_env.is_windows() { ';' } else { ':' };
+    let list_separator = path_env.path_list_separator();
     let path_value = path_env.env_var("PATH").unwrap_or("");
     let mut seen = HashSet::new();
 
@@ -427,10 +427,7 @@ pub fn windows_default_fnm_dir(path_env: &PathEnv) -> Option<String> {
     if !path_env.is_windows() {
         return None;
     }
-    let appdata = path_env.env_var("APPDATA")?.trim();
-    if appdata.is_empty() {
-        return None;
-    }
+    let appdata = path_env.non_blank_var("APPDATA")?;
     Some(join_path("win32", &[appdata, "fnm"]))
 }
 

@@ -105,11 +105,7 @@ fn node_binary_path(root: &str, version_dir: &str, platform: &str) -> String {
 /// ```
 #[must_use]
 pub fn fnm_root_candidates(path_env: &PathEnv) -> Vec<String> {
-    let configured_root = path_env
-        .env_var("FNM_DIR")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
+    let configured_root = path_env.non_blank_var("FNM_DIR").map(str::to_string);
     let platform_default = if path_env.is_windows() {
         windows_default_fnm_dir(path_env)
     } else if path_env.platform == "darwin" {

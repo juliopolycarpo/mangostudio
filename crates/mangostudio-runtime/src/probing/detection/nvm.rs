@@ -58,9 +58,24 @@ struct NvmAliasCache {
 /// and the runtime's spawn-env refuses to join a rejected value onto
 /// `$NVM_DIR/alias` — so the rule that decides which aliases exist and the
 /// rule that decides which are safe to read are one. This port only needs
-/// the alias-cache half.
-static SAFE_NVM_ALIAS_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_.*/-]+$").expect("a fixed, hand-checked pattern"));
+/// the alias-cache half here; `crate::commands::toolchain` owns the
+/// spawn-env half and layers its own `..` rejection on top.
+///
+/// Equivalent to TypeScript's `/^[a-zA-Z0-9_.*/-]+$/`: non-empty, and
+/// every byte an ASCII letter or digit or one of `_ . * / -`.
+///
+/// # Example
+///
+/// ```ignore
+/// assert!(is_safe_nvm_alias("lts/iron"));
+/// assert!(!is_safe_nvm_alias("lts iron"));
+/// ```
+pub(crate) fn is_safe_nvm_alias(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_.*/-".contains(&byte))
+}
 
 static NVM_VERSION_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"["']--version["']\s*\|\s*["']-v["'][\s\S]{0,160}?nvm_echo\s+["']([^"']+)["']"#)
@@ -86,10 +101,7 @@ async fn resolve_nvm_root(fs: &dyn NvmFileSystem, path_env: &PathEnv) -> Option<
         return None;
     }
 
-    let configured_root = path_env
-        .env_var("NVM_DIR")
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    let configured_root = path_env.non_blank_var("NVM_DIR");
     let default_root = join_path(&path_env.platform, &[&path_env.home_dir, ".nvm"]);
     let mut candidates = Vec::new();
     if let Some(configured_root) = configured_root {
@@ -115,7 +127,7 @@ async fn read_nvm_alias_cache(root: &str, fs: &dyn NvmFileSystem, platform: &str
     let mut latest_by_major = BTreeMap::new();
 
     for alias_name in list_optional_directory(fs, &alias_root).await {
-        if !SAFE_NVM_ALIAS_PATTERN.is_match(&alias_name) {
+        if !is_safe_nvm_alias(&alias_name) {
             continue;
         }
         let Some(value) =
@@ -133,7 +145,7 @@ async fn read_nvm_alias_cache(root: &str, fs: &dyn NvmFileSystem, platform: &str
                 prefer_newer_version(&mut latest_by_major, &version);
             }
             None => {
-                if SAFE_NVM_ALIAS_PATTERN.is_match(value) {
+                if is_safe_nvm_alias(value) {
                     pointers.insert(alias_name.to_lowercase(), value.to_lowercase());
                 }
             }
@@ -318,6 +330,19 @@ mod tests {
     use std::collections::HashMap as StdHashMap;
 
     use super::*;
+
+    #[test]
+    fn a_safe_nvm_alias_is_non_empty_and_uses_only_the_allowed_characters() {
+        for alias in ["default", "lts/iron", "lts/*", "v22.13.0", "my_alias-2"] {
+            assert!(is_safe_nvm_alias(alias), "expected {alias:?} to be safe");
+        }
+        for alias in ["", "lts iron", "a;b", "é", "line\n"] {
+            assert!(
+                !is_safe_nvm_alias(alias),
+                "expected {alias:?} to be rejected"
+            );
+        }
+    }
 
     /// A named fake nvm root laid out as `{files, directories}` maps —
     /// configurable per test rather than an inline closure, matching this
