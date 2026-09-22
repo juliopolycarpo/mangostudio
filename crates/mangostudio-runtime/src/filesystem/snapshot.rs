@@ -60,14 +60,14 @@ impl Service {
                 self.compile_policy("snapshot.capture", &None, &[&params.path], false, &cancel)?;
             if !io::path_is_file(&policy, &params.path)? {
                 let result = json!({"exists":false});
-                response.preflight_snapshot(&result)?;
+                let result = response.preflight_snapshot(result)?;
                 return Ok(result);
             }
             let (size, _) = io::current_metadata(&policy, &params.path)?;
             snapshot_limit(&params.path, size)?;
             let observed = io::read(&policy, &params.path, SNAPSHOT_MAX_BYTES, &cancel)?;
             let result = before_json(Some(&observed.bytes));
-            response.preflight_snapshot(&result)?;
+            let result = response.preflight_snapshot(result)?;
             Ok(result)
         })
         .await
@@ -177,7 +177,7 @@ impl Service {
                 .collect::<std::collections::HashSet<_>>()
                 .len();
             let result = json!({"revertedFiles":reverted_files});
-            response.preflight_snapshot(&result)?;
+            let result = response.preflight_snapshot(result)?;
             // Expected-state hashing can take long enough for permission or a
             // containment path to change. Repeat both checks immediately
             // before the first possible mutation while the whole path set is

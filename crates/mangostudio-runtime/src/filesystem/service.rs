@@ -132,15 +132,15 @@ impl ResponseBudget {
         }
     }
 
-    fn preflight_mutation(&self, result: &Value) -> Result<(), RemoteError> {
+    fn preflight_mutation(&self, result: Value) -> Result<Value, RemoteError> {
         preflight_response(result, &self.id, self.limit_bytes, "mutation")
     }
 
-    fn preflight_read(&self, result: &Value) -> Result<(), RemoteError> {
+    fn preflight_read(&self, result: Value) -> Result<Value, RemoteError> {
         preflight_response(result, &self.id, self.limit_bytes, "read")
     }
 
-    pub(super) fn preflight_snapshot(&self, result: &Value) -> Result<(), RemoteError> {
+    pub(super) fn preflight_snapshot(&self, result: Value) -> Result<Value, RemoteError> {
         preflight_response(result, &self.id, self.limit_bytes, "snapshot")
     }
 }
@@ -268,7 +268,7 @@ impl Service {
             };
             let hash = io::sha256_hex(&observed.bytes);
             let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
-            response.preflight_read(&result)?;
+            let result = response.preflight_read(result)?;
             let recorded_hash = lock(&self.state.ledger).record_read(
                 &params.chat_id,
                 &params.resolved_path,
@@ -305,7 +305,7 @@ impl Service {
         };
         let hash = io::sha256_hex(&observed.bytes);
         let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
-        response.preflight_read(&result)?;
+        let result = response.preflight_read(result)?;
         let recorded_hash = lock(&self.state.ledger).record_read(
             &params.chat_id,
             &params.resolved_path,
@@ -384,7 +384,7 @@ impl Service {
                 &expected_hash,
                 None,
             );
-            response.preflight_mutation(&result)?;
+            let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 method,
                 &params.mutation,
@@ -519,7 +519,7 @@ impl Service {
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let expected_hash = io::sha256_hex(&updated);
             let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
-            response.preflight_mutation(&result)?;
+            let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.edit-file",
                 &params.mutation,
@@ -573,7 +573,7 @@ impl Service {
             let expected_hash = io::sha256_hex(&updated);
             let replaced = end-start+1;
             let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
-            response.preflight_mutation(&result)?;
+            let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.replace-range",
                 &params.mutation,
@@ -647,7 +647,7 @@ impl Service {
                 "absent",
                 None,
             );
-            response.preflight_mutation(&result)?;
+            let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.delete-file",
                 &params.mutation,
@@ -721,7 +721,7 @@ impl Service {
                 &expected_hash,
                 Some(&params.resolved_to),
             );
-            response.preflight_mutation(&result)?;
+            response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.move-file",
                 &params.mutation,
@@ -904,21 +904,30 @@ fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
     Ok(value as usize)
 }
 
+/// Refuses a result whose response frame would exceed the negotiated limit,
+/// returning the result unchanged when it fits.
+///
+/// # Example
+///
+/// ```ignore
+/// let result = preflight_response(result, "request-id", limit_bytes, "read")?;
+/// ```
 pub(super) fn preflight_response(
-    result: &Value,
+    result: Value,
     response_id: &str,
     response_limit_bytes: usize,
     subject: &str,
-) -> Result<(), RemoteError> {
+) -> Result<Value, RemoteError> {
     let frame = Frame::Res(Response {
         id: response_id.to_owned(),
-        result: result.clone(),
+        result,
     });
-    let size = serde_json::to_vec(&frame)
-        .expect("a filesystem mutation response always serializes")
-        .len();
+    let size = serialized_len(&frame);
     if size <= response_limit_bytes {
-        return Ok(());
+        let Frame::Res(Response { result, .. }) = frame else {
+            unreachable!("the frame was built as a response");
+        };
+        return Ok(result);
     }
     let guidance = if subject == "read" {
         "Read a smaller text window or choose a more compact view."
@@ -934,6 +943,27 @@ pub(super) fn preflight_response(
     .with_detail("kind", "snapshot_too_large")
     .with_detail("sizeBytes", size)
     .with_detail("limitBytes", response_limit_bytes))
+}
+
+/// Counts the bytes `serde_json::to_vec` would produce without buffering them.
+fn serialized_len(frame: &Frame) -> usize {
+    struct ByteCount(usize);
+
+    impl std::io::Write for ByteCount {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut count = ByteCount(0);
+    serde_json::to_writer(&mut count, frame)
+        .expect("a filesystem mutation response always serializes");
+    count.0
 }
 
 pub(super) fn mutation_result(
@@ -1213,6 +1243,29 @@ mod tests {
             crate::result_check::compile_result_schema(schema).is_valid(result),
             "{method}: {result}"
         );
+    }
+
+    #[test]
+    fn serialized_len_counts_the_bytes_to_vec_would_produce() {
+        let frame = Frame::Res(Response {
+            id: "request-\u{e9}".to_owned(),
+            result: json!({"content":"line \"one\"\n\u{1f600}","size":12,"nested":[1.5,null,true]}),
+        });
+        assert_eq!(
+            serialized_len(&frame),
+            serde_json::to_vec(&frame).unwrap().len()
+        );
+    }
+
+    #[test]
+    fn preflight_response_returns_a_fitting_result_unchanged() {
+        let result = json!({"path":"file","deleted":true});
+        assert_eq!(
+            preflight_response(result.clone(), "id", usize::MAX, "mutation").unwrap(),
+            result
+        );
+        let error = preflight_response(result, "id", 8, "mutation").unwrap_err();
+        assert_eq!(error.code, codes::FRAME_TOO_LARGE);
     }
 
     #[test]

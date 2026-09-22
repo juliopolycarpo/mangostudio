@@ -691,7 +691,7 @@ fn preflight_mutation_response(
     }
     let count = files.len();
     let result = json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations});
-    preflight_response(&result, &response_id, response_limit_bytes, "patch")
+    preflight_response(result, &response_id, response_limit_bytes, "patch").map(drop)
 }
 
 fn push_snapshot(
