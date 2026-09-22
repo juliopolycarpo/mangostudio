@@ -805,12 +805,8 @@ fn list_unrestricted(
         .map(|entry| {
             check_cancel(cancel)?;
             let entry = entry.map_err(list_error)?;
-            let kind = if entry.file_type().map_err(list_error)?.is_dir() {
-                "directory"
-            } else {
-                "file"
-            };
-            Ok(json!({"name":entry.file_name().to_string_lossy(),"type":kind}))
+            let is_dir = entry.file_type().map_err(list_error)?.is_dir();
+            Ok(entry_json(&entry.file_name(), is_dir))
         })
         .collect()
 }
@@ -833,15 +829,17 @@ fn list_bound(
             .map(|entry| {
                 check_cancel(cancel)?;
                 let entry = entry.map_err(list_error)?;
-                let kind = if entry.file_type().map_err(list_error)?.is_dir() {
-                    "directory"
-                } else {
-                    "file"
-                };
-                Ok(json!({"name":entry.file_name().to_string_lossy(),"type":kind}))
+                let is_dir = entry.file_type().map_err(list_error)?.is_dir();
+                Ok(entry_json(&entry.file_name(), is_dir))
             })
             .collect()
     })
+}
+
+/// Builds one `fs.list-directory` entry.
+fn entry_json(name: &std::ffi::OsStr, is_dir: bool) -> Value {
+    let kind = if is_dir { "directory" } else { "file" };
+    json!({"name":name.to_string_lossy(),"type":kind})
 }
 
 fn occupied_path(policy: &CompiledPolicy, params: &WriteParams, create: bool) -> RemoteError {
@@ -1180,6 +1178,18 @@ mod tests {
         assert!(
             crate::result_check::compile_result_schema(schema).is_valid(result),
             "{method}: {result}"
+        );
+    }
+
+    #[test]
+    fn entry_json_names_directories_and_files() {
+        assert_eq!(
+            entry_json(std::ffi::OsStr::new("src"), true),
+            json!({"name":"src","type":"directory"})
+        );
+        assert_eq!(
+            entry_json(std::ffi::OsStr::new("main.rs"), false),
+            json!({"name":"main.rs","type":"file"})
         );
     }
 
