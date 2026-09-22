@@ -45,8 +45,10 @@ import { RuntimeConnectionManager } from '../../../src/services/runtime-client/r
 import { insertTestUser } from '../../support/factories';
 import {
   assertRustRuntimeFeatureCeiling,
+  assertRustRuntimeFilesystemMethods,
   assertRustRuntimeHealthShape,
   assertRustRuntimeProbingMethods,
+  assertRustRuntimeSnapshotMethods,
   assertRustRuntimeWorkspaceMethods,
 } from '../../support/rust-runtime-assertions';
 import {
@@ -184,6 +186,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
         probing: true,
         fsRead: true,
         fsWrite: true,
+        checkpoints: true,
       });
       await assertRustRuntimeProbingMethods(client);
     },
@@ -191,7 +194,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
   );
 
   it.skipIf(!binary.available)(
-    'workspace methods round-trip over a paired real runtime connection',
+    'workspace, filesystem and snapshot methods round-trip over a paired real runtime connection',
     async () => {
       hub = await startHub('rust-connect-qualification-workspace');
       mangoHome = await scratchMangoHome('connect-workspace');
@@ -207,7 +210,9 @@ describe('Real Rust runtime qualification: paired connect', () => {
       const client = await hub.manager.getClient(TEST_USER.id, hub.environmentId);
 
       const dir = await realpath(await scratchMangoHome('connect-workspace-dir'));
+      await assertRustRuntimeFilesystemMethods(client, dir);
       await assertRustRuntimeWorkspaceMethods(client, dir);
+      await assertRustRuntimeSnapshotMethods(client, dir);
       await cleanupMangoHome(dir);
     },
     30_000

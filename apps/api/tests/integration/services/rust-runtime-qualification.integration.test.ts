@@ -72,6 +72,7 @@ import {
   assertRustRuntimeFilesystemMethods,
   assertRustRuntimeHealthShape,
   assertRustRuntimeProbingMethods,
+  assertRustRuntimeSnapshotMethods,
   assertRustRuntimeWorkspaceMethods,
 } from '../../support/rust-runtime-assertions';
 import {
@@ -148,7 +149,7 @@ describe('Real Rust runtime qualification', () => {
     );
 
     it.skipIf(!binary.available)(
-      'workspace methods round-trip over stdio',
+      'workspace, filesystem and snapshot methods round-trip over stdio',
       async () => {
         mangoHome = await scratchMangoHome('stdio-workspace');
         previousMangoHome = process.env.MANGO_HOME;
@@ -165,7 +166,9 @@ describe('Real Rust runtime qualification', () => {
         try {
           const client = new RuntimeClient(connection.hub, () => undefined, 'rust-stdio');
           const dir = await realpath(await scratchMangoHome('stdio-workspace-dir'));
+          await assertRustRuntimeFilesystemMethods(client, dir);
           await assertRustRuntimeWorkspaceMethods(client, dir);
+          await assertRustRuntimeSnapshotMethods(client, dir);
           await cleanupMangoHome(dir);
         } finally {
           await connection.close();
@@ -199,6 +202,7 @@ describe('Real Rust runtime qualification', () => {
             probing: true,
             fsRead: true,
             fsWrite: true,
+            checkpoints: true,
           });
           await assertRustRuntimeFilesystemMethods(client, directory);
         } finally {
@@ -278,6 +282,7 @@ describe('Real Rust runtime qualification', () => {
           probing: true,
           fsRead: true,
           fsWrite: true,
+          checkpoints: true,
         });
         await assertRustRuntimeProbingMethods(client);
       },
@@ -324,6 +329,7 @@ describe('Real Rust runtime qualification', () => {
           probing: true,
           fsRead: true,
           fsWrite: true,
+          checkpoints: true,
         });
         const refreshed = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
         expect(refreshed.state).toBe('connected');
@@ -331,6 +337,7 @@ describe('Real Rust runtime qualification', () => {
           probing: true,
           fsRead: true,
           fsWrite: true,
+          checkpoints: true,
         });
 
         await setRustRuntimeProfile(mangoHome, 'none');
@@ -341,6 +348,7 @@ describe('Real Rust runtime qualification', () => {
           probing: false,
           fsRead: false,
           fsWrite: false,
+          checkpoints: false,
         });
 
         await setRustRuntimeProfile(mangoHome, 'full');
@@ -350,13 +358,14 @@ describe('Real Rust runtime qualification', () => {
           probing: true,
           fsRead: true,
           fsWrite: true,
+          checkpoints: true,
         });
       },
       30_000
     );
 
     it.skipIf(!binary.available)(
-      'workspace methods round-trip over a direct URL serve connection',
+      'workspace, filesystem and snapshot methods round-trip over a direct URL serve connection',
       async () => {
         await insertTestUser(TEST_USER);
         const store = new InMemorySecretStore();
@@ -394,7 +403,9 @@ describe('Real Rust runtime qualification', () => {
         const client = await manager.getClient(TEST_USER.id, 'rust-serve-workspace-box');
 
         const dir = await realpath(await scratchMangoHome('serve-workspace-dir'));
+        await assertRustRuntimeFilesystemMethods(client, dir);
         await assertRustRuntimeWorkspaceMethods(client, dir);
+        await assertRustRuntimeSnapshotMethods(client, dir);
         await cleanupMangoHome(dir);
       },
       30_000

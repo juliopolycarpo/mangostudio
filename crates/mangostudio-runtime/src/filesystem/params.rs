@@ -87,3 +87,51 @@ pub(super) struct ListParams {
     pub resolved_path: PathBuf,
     pub path_policy: Option<PathPolicy>,
 }
+
+#[derive(Deserialize)]
+pub(super) struct SnapshotCaptureParams {
+    pub path: PathBuf,
+}
+
+#[derive(Deserialize)]
+pub(super) struct SnapshotHashParams {
+    pub path: PathBuf,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SnapshotRevertParams {
+    pub chat_id: String,
+    pub containment_root: Option<PathBuf>,
+    pub expected: Vec<SnapshotExpectedPath>,
+    pub operations: Vec<SnapshotRevertOperation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SnapshotExpectedPath {
+    pub path: PathBuf,
+    pub after_hash: String,
+    pub reverted_hash: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(super) enum SnapshotRevertOperation {
+    Create {
+        path: PathBuf,
+    },
+    Restore {
+        path: PathBuf,
+        content_base64: String,
+    },
+    Move {
+        path: PathBuf,
+        moved_to: PathBuf,
+        content_base64: String,
+    },
+}

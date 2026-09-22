@@ -2,9 +2,9 @@
 //!
 //! A bare [`Registry::new`] is empty; `crate::transport::build_host`
 //! (crate-private) fills a production one through [`Registry::implement`]
-//! via `crate::health::register`, `crate::workspace_methods::register` and
-//! `crate::probing::register` — `runtime.health`, the `workspace.*`
-//! methods, and the `probing.*` methods. This crate's own tests reach for
+//! via the health, workspace, probing, and filesystem registration functions.
+//! The filesystem registration includes the three `snapshot.*` methods.
+//! This crate's own tests reach for
 //! the same [`Registry::implement`] seam with named fakes, to prove the
 //! dispatch plumbing without a real filesystem or subprocess underneath.
 //!

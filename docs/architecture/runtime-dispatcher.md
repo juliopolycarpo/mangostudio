@@ -180,9 +180,10 @@ methods. Snapshot and library methods also require filesystem consent, but their
 gates belong to `checkpoints` and `library`. They do not suppress working filesystem tools.
 Other features require every catalog method carrying their capability.
 
-The production registry implements health, workspace, probing, and the eleven filesystem
-methods. An empty registry still advertises no capability-backed features, regardless of consent.
-Only the schema fact `toolchain` remains true.
+The production registry implements health, workspace, probing, the eleven filesystem
+methods, and `snapshot.capture`, `snapshot.hash`, and `snapshot.revert`. An empty registry still advertises no capability-backed features, regardless of consent.
+Only the schema fact `toolchain` remains true. The hello capabilities also announce the
+embedded catalog name and version in `contracts`, matching the TypeScript runtime.
 
 ## Where the TypeScript contract/dispatch tests live in Rust
 
@@ -201,9 +202,32 @@ structured parameters. These tests pin the host behavior; they do not replace th
 `rust-filesystem-search-compat.integration.test.ts` compares real Rust and TypeScript runtime
 results through Hub clients, including ordering, glob syntax, regex Unicode semantics, caps,
 and error types. `rust-runtime-qualification.integration.test.ts` exercises all eleven filesystem
-methods and mutation snapshots against the compiled binary. The qualification job runs both on
-Linux, macOS, and Windows. Windows-only junction tests and Unix non-UTF-8 identity tests live in
+methods and snapshot capture/hash/revert against the compiled binary over stdio and direct URL
+serve. Its paired-connect sibling runs the same assertions through the Hub connection manager.
+The qualification job runs these suites on Linux, macOS, and Windows. Windows-only junction tests and Unix non-UTF-8 identity tests live in
 `filesystem::policy::tests`.
+
+### Snapshot behavior
+
+The three snapshot methods share the filesystem path locks and freshness ledger. Capture
+encodes raw bytes up to 8 MiB; hash reads incrementally; revert checks expected hashes before
+replaying the supplied reverse operations. Rust rechecks consent and containment after hashing,
+under the same locks, before the first mutation. Once replay starts, cancellation does not
+interrupt its remaining operations. A dropped caller also cannot release a running worker's locks.
+
+| TypeScript assertion                                                                               | Rust coverage (`filesystem::snapshot::tests`)                        |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `services/snapshot.test.ts`: rejects a file past the snapshot limit                                | `capture_enforces_the_eight_mebibyte_limit_and_preflights_its_frame` |
+| `services/snapshot.test.ts`: rejects an escape when containmentRoot is set                         | `revert_uses_the_typescript_containment_error_for_a_symlink_escape`  |
+| `services/cancellation.test.ts`: refuses an already-reverted retry cancelled during its final hash | `a_cancel_during_the_final_hash_refuses_an_already_reverted_retry`   |
+| `services/cancellation.test.ts`: finishes every revert operation after cancellation during replay  | `cancellation_after_the_first_replay_operation_completes_the_replay` |
+
+`rust-snapshot-compat.integration.test.ts` compares the production Rust and TypeScript hosts
+through Hub clients: binary capture, missing files, size errors, reverse replay, freshness,
+retry conflicts, permissive base64 decoding, move collisions, and symlink or junction containment.
+It also exercises cross-device moves on Linux when the test filesystem provides two devices,
+including long filenames and retrying after source-removal permissions are restored.
+The runtime qualification job includes this suite on Linux, macOS, and Windows.
 
 ### Dispatcher behavior
 

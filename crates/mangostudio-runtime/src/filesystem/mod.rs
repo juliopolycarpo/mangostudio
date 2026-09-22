@@ -9,6 +9,7 @@ mod patch_apply;
 mod policy;
 mod search;
 mod service;
+mod snapshot;
 mod text;
 
 pub(crate) use service::register;
