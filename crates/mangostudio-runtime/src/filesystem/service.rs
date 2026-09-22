@@ -1,6 +1,6 @@
 //! Filesystem handlers, sharing process-wide freshness and mutation locks.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use base64::Engine;
@@ -222,14 +222,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             self.read_sync(params, &response, &cancel)
         })
         .await
@@ -328,14 +323,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let method = if exclusive {
                 "fs.create-file"
             } else {
@@ -475,14 +465,9 @@ impl Service {
         if params.old_string == params.new_string {
             return Err(argument("oldString and newString must be different."));
         }
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy = self.compile_mutation_policy(
                 "fs.edit-file",
                 &params.mutation,
@@ -547,14 +532,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy = self.compile_mutation_policy(
                 "fs.replace-range",
                 &params.mutation,
@@ -600,14 +580,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy = self.compile_mutation_policy(
                 "fs.delete-file",
                 &params.mutation,
@@ -680,17 +655,9 @@ impl Service {
                 "Source and destination must be different paths.",
             ));
         }
-        let guards = self
-            .state
-            .locks
-            .acquire(
-                vec![params.resolved_from.clone(), params.resolved_to.clone()],
-                &cancel,
-            )
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_from.clone(), params.resolved_to.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy = self.compile_mutation_policy(
                 "fs.move-file",
                 &params.mutation,
@@ -882,8 +849,40 @@ pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> 
     .with_detail("sizeBytes", size))
 }
 
-pub(super) fn lock_error(_: super::freshness::PathLockError) -> RemoteError {
+fn lock_error(_: super::freshness::PathLockError) -> RemoteError {
     RemoteError::new(codes::CANCELLED, "Filesystem operation cancelled")
+}
+
+/// Acquires the path locks for `paths`, then runs `work` on the blocking pool
+/// while its worker owns the guards.
+///
+/// Cancellation while waiting for a lock reports the standard cancelled
+/// error. The guards stay held until `work` returns even if the awaiting task
+/// is dropped.
+///
+/// # Example
+///
+/// ```ignore
+/// let locks = self.state.locks.clone();
+/// run_locked(locks, vec![path], cancel.clone(), move || {
+///     self.read_sync(params, &response, &cancel)
+/// })
+/// .await
+/// ```
+pub(super) async fn run_locked<T, F>(
+    locks: PathLocks,
+    paths: Vec<PathBuf>,
+    cancel: CancellationToken,
+    work: F,
+) -> Result<T, RemoteError>
+where
+    F: FnOnce() -> Result<T, RemoteError> + Send + 'static,
+    T: Send + 'static,
+{
+    locks
+        .with_blocking_locks(paths, &cancel, work)
+        .await
+        .map_err(lock_error)?
 }
 
 fn committed_move_error(from: &Path, to: &Path, cause: RemoteError) -> RemoteError {
@@ -1244,6 +1243,40 @@ mod tests {
             crate::result_check::compile_result_schema(schema).is_valid(result),
             "{method}: {result}"
         );
+    }
+
+    #[tokio::test]
+    async fn run_locked_runs_work_under_the_lock_and_releases_it() {
+        let locks = PathLocks::default();
+        let path = PathBuf::from("/workspace/run-locked");
+        let observed = locks.clone();
+        let value = run_locked(
+            locks.clone(),
+            vec![path],
+            CancellationToken::new(),
+            move || Ok(observed.active_paths()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(value, 1, "work must run while its path lock is held");
+        assert_eq!(locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn run_locked_reports_cancellation_before_work_runs() {
+        let locks = PathLocks::default();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let error = run_locked(
+            locks,
+            vec![PathBuf::from("/workspace/cancelled")],
+            cancel,
+            || -> Result<(), RemoteError> { panic!("work must not run after cancellation") },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
+        assert_eq!(error.message, "Filesystem operation cancelled");
     }
 
     #[test]

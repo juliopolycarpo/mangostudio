@@ -16,7 +16,7 @@ use super::{
     params::Mutation,
     patch::{self, V4aUpdateHunk},
     policy::CompiledPolicy,
-    service::{Service, argument, preflight_response, snapshot_record},
+    service::{Service, argument, preflight_response, run_locked, snapshot_record},
 };
 use crate::{blocking::run_blocking, ports::audit::lock};
 
@@ -108,15 +108,8 @@ pub(super) async fn apply(
     assert_no_path_conflicts(&planned)?;
     preflight_mutation_response(&params, &planned, response_id, response_limit_bytes)?;
     let paths = planned.iter().flat_map(operation_paths).collect::<Vec<_>>();
-    let guards = service
-        .state
-        .locks
-        .acquire(paths, &cancel)
-        .await
-        .map_err(|_| RemoteError::new(codes::CANCELLED, "Filesystem operation cancelled"))?;
-
-    run_blocking(move || {
-        let _guards = guards;
+    let locks = service.state.locks.clone();
+    run_locked(locks, paths, cancel.clone(), move || {
         commit_operations(&service, &params, &planned, &cancel)
     })
     .await

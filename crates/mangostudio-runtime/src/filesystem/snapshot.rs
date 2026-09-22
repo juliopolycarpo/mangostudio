@@ -15,8 +15,7 @@ use super::params::{
     SnapshotRevertParams,
 };
 use super::policy::PathPolicy;
-use super::service::{ResponseBudget, Service, before_json, lock_error, snapshot_limit};
-use crate::blocking::run_blocking;
+use super::service::{ResponseBudget, Service, before_json, run_locked, snapshot_limit};
 use crate::ports::audit::lock;
 use crate::registry::Registry;
 
@@ -48,14 +47,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy =
                 self.compile_policy("snapshot.capture", &None, &[&params.path], false, &cancel)?;
             if !io::path_is_file(&policy, &params.path)? {
@@ -78,14 +72,9 @@ impl Service {
         params: SnapshotHashParams,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy =
                 self.compile_policy("snapshot.hash", &None, &[&params.path], false, &cancel)?;
             let hash = io::hash_file_if_present_cancellable(&policy, &params.path, &cancel)?;
@@ -141,14 +130,8 @@ impl Service {
             .containment_root
             .filter(|root| !root.as_os_str().is_empty());
         let paths = revert_paths(&params);
-        let guards = self
-            .state
-            .locks
-            .acquire(paths, &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let requested_policy = PathPolicy {
                 containment_root: params.containment_root.clone(),
                 ..PathPolicy::default()
