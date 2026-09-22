@@ -196,10 +196,11 @@ fn cwd_revalidation_rejects_removed_or_non_directory_paths() {
 #[test]
 fn duration_and_response_budgets_are_checked_without_unbounded_allocations() {
     assert_eq!(duration(1.5).unwrap(), Duration::from_micros(1500));
-    let mut invalid = vec![0.0, -1.0, f64::NAN, f64::INFINITY];
-    #[cfg(unix)]
-    invalid.push(1.0e22);
-    for value in invalid {
+    let platform_overflow = if cfg!(unix) { vec![1.0e22] } else { Vec::new() };
+    for value in [0.0, -1.0, f64::NAN, f64::INFINITY]
+        .into_iter()
+        .chain(platform_overflow)
+    {
         let error = duration(value).unwrap_err();
         assert_eq!(error.details.unwrap()["kind"], "tool_argument");
         assert!(error.message.contains("timeoutMs="));
