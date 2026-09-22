@@ -1089,45 +1089,49 @@ impl ProcessCapture {
     }
 }
 
+/// Reads one child pipe to EOF, keeping at most `max_bytes` and draining the rest.
+///
+/// The kept buffer grows with the output a child actually produced instead of being allocated
+/// at the cap: `shell.run` asks for 8 MiB per stream, which a cap-sized allocation would hold
+/// for the whole call on every invocation — both streams, four children at a time — however
+/// little the child printed.
 async fn read_capped<R>(mut reader: R, max_bytes: usize, stop: CancellationToken) -> ProcessCapture
 where
     R: AsyncRead + Unpin,
 {
-    let mut bytes = vec![0; max_bytes];
-    let mut filled = 0;
+    let mut bytes = Vec::new();
     let mut truncated = false;
-    let mut discard = [0; 8192];
+    let mut chunk = [0u8; 8192];
     loop {
-        let read = if filled < max_bytes {
-            tokio::select! {
-                () = stop.cancelled() => {
-                    bytes.truncate(filled);
-                    return ProcessCapture { bytes, truncated, incomplete: true };
-                },
-                result = reader.read(&mut bytes[filled..]) => result,
-            }
+        // Past the cap the pipe still has to be drained, so the whole chunk is read and thrown
+        // away. Reading into a zero-length window instead would report `Ok(0)` and be taken for
+        // EOF, leaving the child's remaining output unread.
+        let capturing = bytes.len() < max_bytes;
+        let window = if capturing {
+            (max_bytes - bytes.len()).min(chunk.len())
         } else {
+            chunk.len()
+        };
+        let read = {
+            let buffer = &mut chunk[..window];
             tokio::select! {
                 () = stop.cancelled() => {
-                    bytes.truncate(filled);
                     return ProcessCapture { bytes, truncated, incomplete: true };
                 },
-                result = reader.read(&mut discard) => result,
+                result = reader.read(buffer) => result,
             }
         };
         match read {
             Ok(0) => {
-                bytes.truncate(filled);
                 return ProcessCapture {
                     bytes,
                     truncated,
                     incomplete: false,
                 };
             }
-            Ok(read) if filled < max_bytes => filled += read,
+            Ok(read) if capturing => bytes.extend_from_slice(&chunk[..read]),
             Ok(_) => truncated = true,
             Err(_) => {
-                bytes.truncate(filled);
                 return ProcessCapture {
                     bytes,
                     truncated,
@@ -1221,6 +1225,61 @@ fn signal_name(number: i32) -> &'static str {
         13 => "SIGPIPE",
         15 => "SIGTERM",
         _ => "UNKNOWN",
+    }
+}
+
+/// Cap edges for [`read_capped`], which the launched-child tests only reach indirectly.
+/// Unlike the supervisor tests below, these need no process and run on every platform.
+#[cfg(test)]
+mod capped_reads {
+    use tokio_util::sync::CancellationToken;
+
+    use super::read_capped;
+
+    #[tokio::test]
+    async fn output_matching_the_cap_exactly_is_kept_whole_and_not_truncated() {
+        let capture = read_capped(&b"12345678"[..], 8, CancellationToken::new()).await;
+
+        assert_eq!(
+            (
+                capture.bytes.as_slice(),
+                capture.truncated,
+                capture.incomplete
+            ),
+            (&b"12345678"[..], false, false),
+            "expected the whole output kept and no truncation at the cap | received a capture \
+             the cap reshaped"
+        );
+    }
+
+    #[tokio::test]
+    async fn output_past_the_cap_keeps_the_prefix_and_drains_the_rest() {
+        let source = vec![b'x'; 20_000];
+
+        let capture = read_capped(source.as_slice(), 10_000, CancellationToken::new()).await;
+
+        assert_eq!(
+            (capture.bytes.len(), capture.truncated, capture.incomplete),
+            (10_000, true, false),
+            "expected the cap-sized prefix kept, truncation reported and the pipe drained to \
+             EOF | received a capture that stopped early"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zero_cap_keeps_nothing_and_still_reaches_eof() {
+        let capture = read_capped(&b"discarded"[..], 0, CancellationToken::new()).await;
+
+        assert_eq!(
+            (
+                capture.bytes.as_slice(),
+                capture.truncated,
+                capture.incomplete
+            ),
+            (&b""[..], true, false),
+            "expected nothing kept, truncation reported and EOF reached | received a capture \
+             that mistook the zero cap for end of output"
+        );
     }
 }
 
