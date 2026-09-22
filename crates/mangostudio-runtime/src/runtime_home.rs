@@ -493,6 +493,13 @@ pub struct SlotFileState {
     pub error: Option<SlotFileError>,
 }
 
+impl SlotFileState {
+    /// The stored document's top-level string at `key`, if there is one.
+    pub(crate) fn stored_string(&self, key: &str) -> Option<String> {
+        self.stored.as_ref()?.get(key)?.as_str().map(str::to_string)
+    }
+}
+
 /// What was on disk at a path, before any schema opinion is formed about
 /// it — the one read [`read_schema_checked`] and [`credentials_write_gate`]
 /// must each perform exactly once and agree on, so a credentials write
@@ -1571,5 +1578,23 @@ mod tests {
             .stored
             .expect("bootstrap_serve_token must have written credentials.json");
         assert_eq!(stored["serveToken"], json!(token));
+    }
+
+    #[test]
+    fn stored_string_reads_only_a_top_level_string() {
+        let state = super::SlotFileState {
+            stored: Some(serde_json::json!({ "hubUrl": "wss://hub", "schemaVersion": 1 })),
+            error: None,
+        };
+        assert_eq!(state.stored_string("hubUrl").as_deref(), Some("wss://hub"));
+        assert_eq!(
+            state.stored_string("schemaVersion"),
+            None,
+            "a number is not a string"
+        );
+        assert_eq!(
+            super::SlotFileState::default().stored_string("hubUrl"),
+            None
+        );
     }
 }

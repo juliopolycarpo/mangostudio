@@ -384,13 +384,8 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         return 1;
     };
 
-    let stored = read_runtime_slot_config(RuntimeSlot::Remote, &home);
-    let stored_listen = stored
-        .stored
-        .as_ref()
-        .and_then(|value| value.get("serveListen"))
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
+    let stored_listen =
+        read_runtime_slot_config(RuntimeSlot::Remote, &home).stored_string("serveListen");
     let Some(raw_listen) = args.listen.clone().or(stored_listen) else {
         eprintln!(
             "mangostudio-runtime: no listen address. Pass --listen <host:port>, or run serve \
@@ -429,23 +424,8 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         return 1;
     }
 
-    let consent = consent_by_invocation(RuntimeSlot::Remote, &home, VERSION, &SystemWallClock);
-    if !consent.granted {
-        if let Some(reason) = &consent.reason {
-            eprintln!("mangostudio-runtime: {reason}");
-        }
-        eprintln!(
-            "mangostudio-runtime: {}",
-            crate::consent::invocation::setup_pending_message()
-        );
+    if !remote_invocation_consent(&home) {
         return 1;
-    }
-    if consent.recorded {
-        eprintln!(
-            "mangostudio-runtime: recorded full permissions for this machine. Run \"{}\" to \
-             narrow them.",
-            setup_command(Some(RuntimeSlot::Remote))
-        );
     }
 
     let token = match resolved_token {
@@ -541,13 +521,7 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         return 1;
     };
 
-    let stored = read_runtime_slot_config(RuntimeSlot::Remote, &home);
-    let stored_hub = stored
-        .stored
-        .as_ref()
-        .and_then(|value| value.get("hubUrl"))
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
+    let stored_hub = read_runtime_slot_config(RuntimeSlot::Remote, &home).stored_string("hubUrl");
     let Some(hub_url) = args.hub.clone().or(stored_hub) else {
         eprintln!(
             "mangostudio-runtime: no hub URL. Pass --hub <url>; the pairing card in \
@@ -570,23 +544,8 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         return 1;
     };
 
-    let consent = consent_by_invocation(RuntimeSlot::Remote, &home, VERSION, &SystemWallClock);
-    if !consent.granted {
-        if let Some(reason) = &consent.reason {
-            eprintln!("mangostudio-runtime: {reason}");
-        }
-        eprintln!(
-            "mangostudio-runtime: {}",
-            crate::consent::invocation::setup_pending_message()
-        );
+    if !remote_invocation_consent(&home) {
         return 1;
-    }
-    if consent.recorded {
-        eprintln!(
-            "mangostudio-runtime: recorded full permissions for this machine. Run \"{}\" to \
-             narrow them.",
-            setup_command(Some(RuntimeSlot::Remote))
-        );
     }
 
     if let Err(error) = write_runtime_slot_config(
@@ -665,6 +624,31 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
     })
 }
 
+/// The remote slot's "invocation is consent" gate shared by `serve` and
+/// `connect`: reports a refusal or a freshly recorded grant on stderr and
+/// returns whether this invocation may serve.
+fn remote_invocation_consent(home: &std::path::Path) -> bool {
+    let consent = consent_by_invocation(RuntimeSlot::Remote, home, VERSION, &SystemWallClock);
+    if !consent.granted {
+        if let Some(reason) = &consent.reason {
+            eprintln!("mangostudio-runtime: {reason}");
+        }
+        eprintln!(
+            "mangostudio-runtime: {}",
+            crate::consent::invocation::setup_pending_message()
+        );
+        return false;
+    }
+    if consent.recorded {
+        eprintln!(
+            "mangostudio-runtime: recorded full permissions for this machine. Run \"{}\" to \
+             narrow them.",
+            setup_command(Some(RuntimeSlot::Remote))
+        );
+    }
+    true
+}
+
 /// Resolves a bearer credential per [`TokenSource`]: `Stdin` reads one
 /// trimmed line, `Env` reads only the environment variable, and the default
 /// falls back to `credentials.json`'s `field` when the environment is
@@ -689,31 +673,22 @@ fn resolve_token(source: TokenSource, field: &str, env: &impl EnvSource) -> Opti
             let trimmed = buffer.trim();
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         }
-        TokenSource::Env => {
-            let config = RuntimeConfig::from_env(env).ok()?;
-            if field == "serveToken" {
-                config.serve_token
-            } else {
-                config.pairing_token
-            }
-        }
-        TokenSource::EnvOrStored => {
+        TokenSource::Env | TokenSource::EnvOrStored => {
             let config = RuntimeConfig::from_env(env).ok()?;
             let from_env = if field == "serveToken" {
                 config.serve_token
             } else {
                 config.pairing_token
             };
+            if source == TokenSource::Env {
+                return from_env;
+            }
             from_env.or_else(|| {
-                let home = config.mango_home;
-                let state =
-                    crate::runtime_home::read_runtime_slot_credentials(RuntimeSlot::Remote, &home);
-                state
-                    .stored
-                    .as_ref()
-                    .and_then(|value| value.get(field))
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
+                crate::runtime_home::read_runtime_slot_credentials(
+                    RuntimeSlot::Remote,
+                    &config.mango_home,
+                )
+                .stored_string(field)
             })
         }
     }
