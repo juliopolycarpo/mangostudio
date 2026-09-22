@@ -316,7 +316,7 @@ fn create_pipe(parent_reads: bool) -> io::Result<Pipe> {
     let mut write = ptr::null_mut();
     // SAFETY: output pointers and SECURITY_ATTRIBUTES are valid for this call. Both handles are
     // immediately adopted, then only the child endpoint is retained in the attribute handle list.
-    if unsafe { CreatePipe(&mut read, &mut write, &mut attributes, 0) } == 0 {
+    if unsafe { CreatePipe(&mut read, &mut write, &attributes, 0) } == 0 {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: successful CreatePipe returns exactly two owned handles.
@@ -340,7 +340,7 @@ fn null_stdin() -> io::Result<Handle> {
             name.as_ptr(),
             GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
-            &mut attributes,
+            &attributes,
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL,
             ptr::null_mut(),
@@ -551,11 +551,7 @@ fn wait_for_job_empty(job: &Handle) -> io::Result<()> {
         let required_words = usize::try_from(required)
             .map_err(|_| io::Error::other("Windows Job process list size does not fit usize"))?
             .div_ceil(size_of::<usize>());
-        let next_len = words
-            .len()
-            .checked_mul(2)
-            .unwrap_or(usize::MAX)
-            .max(required_words);
+        let next_len = words.len().saturating_mul(2).max(required_words);
         if next_len <= words.len() {
             return Err(io::Error::other("Windows Job process list is too large"));
         }
