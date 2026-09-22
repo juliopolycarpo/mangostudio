@@ -435,7 +435,7 @@ pub(super) fn write_atomic(
     }
     parent.with_parent(|dir, leaf| {
         let mode = inspect_destination_in(dir, leaf, path, || {})?;
-        let temp = temporary_leaf(leaf)?;
+        let temp = temporary_name()?;
         write_replacement_in(dir, leaf, path, &temp, bytes, mode)
     })
 }
@@ -464,7 +464,7 @@ pub(super) fn write_atomic_if_unchanged(
             return Err(destination_changed_error(path));
         };
         let mode = inspect_destination_in(dir, leaf, path, || {})?;
-        let temp = temporary_leaf(leaf)?;
+        let temp = temporary_name()?;
         write_replacement_in_with_hook(
             dir,
             leaf,
@@ -577,25 +577,15 @@ fn inspect_destination(path: &Path) -> Result<Option<fs::Permissions>, RemoteErr
 }
 
 fn temporary_path(path: &Path) -> Result<PathBuf, RemoteError> {
-    let mut random = [0; 8];
-    getrandom::fill(&mut random)
-        .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))?;
-    let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-    let mut name = std::ffi::OsString::from(".");
-    name.push(path.file_name().unwrap_or_default());
-    name.push(format!(".{suffix}.tmp"));
-    Ok(path.with_file_name(name))
+    Ok(path.with_file_name(temporary_name()?))
 }
 
-fn temporary_leaf(leaf: &Path) -> Result<OsString, RemoteError> {
+fn temporary_name() -> Result<OsString, RemoteError> {
     let mut random = [0; 8];
     getrandom::fill(&mut random)
         .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))?;
     let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-    let mut name = OsString::from(".");
-    name.push(leaf.as_os_str());
-    name.push(format!(".{suffix}.tmp"));
-    Ok(name)
+    Ok(OsString::from(format!(".mango-{suffix}.tmp")))
 }
 
 fn write_replacement(
@@ -1050,6 +1040,14 @@ struct MovePaths<'a> {
 }
 
 trait MoveCopyHooks {
+    fn destination_temporary_name(&mut self) -> Result<OsString, RemoteError> {
+        temporary_name()
+    }
+
+    fn source_temporary_name(&mut self) -> Result<OsString, RemoteError> {
+        temporary_name()
+    }
+
     fn before_copy(&mut self, _: &Path) -> std::io::Result<()> {
         Ok(())
     }
@@ -1060,7 +1058,9 @@ trait MoveCopyHooks {
 
     fn after_publish(&mut self, _: &Path) {}
 
-    fn before_source_stage(&mut self, _: &Path) {}
+    fn before_source_stage(&mut self, _: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
 
     fn after_source_stage(&mut self, _: &Path) {}
 
@@ -1150,13 +1150,46 @@ fn copy_move_no_overwrite(
     {
         return Err(copied_source_uncertain_error(from, to));
     }
-    hooks.before_source_stage(from);
-    let tombstone = from_parent.with_parent(|_, leaf| temporary_leaf(leaf))?;
+    if let Err(cause) = hooks.before_source_stage(from) {
+        return Err(recover_published_copy_after_source_stage_failure(
+            from_parent,
+            to_parent,
+            source,
+            &prepared,
+            from,
+            to,
+            cause,
+        ));
+    }
+    let tombstone = match hooks.source_temporary_name() {
+        Ok(tombstone) => tombstone,
+        Err(cause) => {
+            return Err(recover_published_copy_after_source_stage_failure(
+                from_parent,
+                to_parent,
+                source,
+                &prepared,
+                from,
+                to,
+                cause,
+            ));
+        }
+    };
     let tombstone_path = from.with_file_name(&tombstone);
-    from_parent.with_parent(|dir, leaf| {
+    if let Err(cause) = from_parent.with_parent(|dir, leaf| {
         atomic_rename_no_replace(dir, leaf, dir, Path::new(&tombstone), &source.file)
-            .map_err(|cause| copied_source_stage_error(from, to, &tombstone_path, cause))
-    })?;
+            .map_err(io_error)
+    }) {
+        return Err(recover_published_copy_after_source_stage_failure(
+            from_parent,
+            to_parent,
+            source,
+            &prepared,
+            from,
+            to,
+            cause,
+        ));
+    }
     hooks.after_source_stage(&tombstone_path);
     if !named_file_matches(to_parent, prepared.identity, &source.hash) {
         return Err(staged_destination_uncertain_error(
@@ -1201,11 +1234,11 @@ fn copy_source_to_temporary(
     to: &Path,
     hooks: &mut impl MoveCopyHooks,
 ) -> Result<PreparedMoveCopy, RemoteError> {
-    to_parent.with_parent(|dir, leaf| {
-        let temporary = temporary_leaf(leaf)?;
+    to_parent.with_parent(|dir, _| {
+        let temporary = hooks.destination_temporary_name()?;
         let temporary_path = to.with_file_name(&temporary);
         let mut file = open_move_temporary(dir, &temporary)
-            .map_err(|cause| copy_temporary_uncertain_error(from, to, &temporary_path, cause))?;
+            .map_err(|cause| copy_temporary_create_error(from, to, &temporary_path, cause))?;
         hooks
             .before_copy(&temporary_path)
             .map_err(|cause| copy_temporary_uncertain_error(from, to, &temporary_path, cause))?;
@@ -1344,6 +1377,58 @@ fn remove_owned_move_temporary(
     })
 }
 
+/// Removes the published destination only while the retained descriptor and
+/// both names still identify the captured source bytes.
+///
+/// The caller uses this after source staging could not begin. It leaves the
+/// published destination in place whenever either name became uncertain.
+fn remove_published_copy_if_verified(
+    from_parent: &VerifiedParent,
+    to_parent: &VerifiedParent,
+    source: &mut MoveSource,
+    prepared: &PreparedMoveCopy,
+) -> bool {
+    if !retained_source_matches(source)
+        || !named_file_matches(from_parent, source.identity, &source.hash)
+    {
+        return false;
+    }
+    to_parent
+        .with_parent(|dir, leaf| {
+            if !temporary_matches(dir, leaf, prepared.identity, &source.hash) {
+                return Ok(false);
+            }
+            dir.remove_file(leaf).map(|()| true).map_err(io_error)
+        })
+        .unwrap_or(false)
+}
+
+fn recover_published_copy_after_source_stage_failure(
+    from_parent: &VerifiedParent,
+    to_parent: &VerifiedParent,
+    source: &mut MoveSource,
+    prepared: &PreparedMoveCopy,
+    from: &Path,
+    to: &Path,
+    cause: impl std::fmt::Display,
+) -> RemoteError {
+    if remove_published_copy_if_verified(from_parent, to_parent, source, prepared) {
+        return path_error(format!(
+            "Copied move from \"{}\" to \"{}\" could not stage the source. The verified destination was removed; the source remains in place. Cause: {cause}",
+            from.display(),
+            to.display(),
+        ))
+        .with_detail("pathsMayHaveChanged", true);
+    }
+
+    path_error(format!(
+        "Copied move from \"{}\" to \"{}\" could not stage the source. The copied destination was retained because source or destination ownership could not be proved. Inspect both paths before retrying. Cause: {cause}",
+        from.display(),
+        to.display(),
+    ))
+    .with_detail("pathsMayHaveChanged", true)
+}
+
 fn copy_source_changed_error(from: &Path, to: &Path) -> RemoteError {
     path_error(format!(
         "Could not copy \"{}\" to \"{}\": the retained source changed before the cross-device move began. Both paths were left in place.",
@@ -1366,6 +1451,20 @@ fn copy_temporary_uncertain_error(
         temporary.display()
     ))
     .with_detail("pathsMayHaveChanged", true)
+}
+
+fn copy_temporary_create_error(
+    from: &Path,
+    to: &Path,
+    temporary: &Path,
+    cause: std::io::Error,
+) -> RemoteError {
+    path_error(format!(
+        "Could not create temporary destination \"{}\" while copying \"{}\" to \"{}\" across filesystems. No temporary copy was created. Cause: {cause}",
+        temporary.display(),
+        from.display(),
+        to.display(),
+    ))
 }
 
 fn copy_publish_error(from: &Path, to: &Path, cause: std::io::Error) -> RemoteError {
@@ -1398,21 +1497,6 @@ fn copied_source_uncertain_error(from: &Path, to: &Path) -> RemoteError {
 fn staged_source_uncertain_error(from: &Path, to: &Path, tombstone: &Path) -> RemoteError {
     path_error(format!(
         "Copied move from \"{}\" to \"{}\" staged source recovery at \"{}\", but that path no longer identifies the captured source. It was retained; inspect all paths before retrying.",
-        from.display(),
-        to.display(),
-        tombstone.display()
-    ))
-    .with_detail("pathsMayHaveChanged", true)
-}
-
-fn copied_source_stage_error(
-    from: &Path,
-    to: &Path,
-    tombstone: &Path,
-    cause: std::io::Error,
-) -> RemoteError {
-    path_error(format!(
-        "Copied move from \"{}\" to \"{}\" published the destination, but could not stage the source at \"{}\" for verified removal. The source was retained; inspect both paths before retrying. Cause: {cause}",
         from.display(),
         to.display(),
         tombstone.display()
@@ -1939,6 +2023,60 @@ mod tests {
         }
     }
 
+    struct ForcedSourceStageFailure;
+
+    impl MoveCopyHooks for ForcedSourceStageFailure {
+        fn before_source_stage(&mut self, _: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::other("forced source stage failure"))
+        }
+    }
+
+    struct DestinationSwapBeforeSourceStageFailure {
+        destination: PathBuf,
+    }
+
+    impl MoveCopyHooks for DestinationSwapBeforeSourceStageFailure {
+        fn before_source_stage(&mut self, _: &Path) -> std::io::Result<()> {
+            fs::remove_file(&self.destination).unwrap();
+            fs::write(&self.destination, b"external destination").unwrap();
+            Err(std::io::Error::other("forced source stage failure"))
+        }
+    }
+
+    struct SourceStageNameFailure;
+
+    impl MoveCopyHooks for SourceStageNameFailure {
+        fn source_temporary_name(&mut self) -> Result<OsString, RemoteError> {
+            Err(RemoteError::new(
+                codes::INTERNAL,
+                "forced source tombstone name failure",
+            ))
+        }
+    }
+
+    struct OccupiedDestinationTemporary {
+        temporary: OsString,
+    }
+
+    impl MoveCopyHooks for OccupiedDestinationTemporary {
+        fn destination_temporary_name(&mut self) -> Result<OsString, RemoteError> {
+            Ok(self.temporary.clone())
+        }
+    }
+
+    #[cfg(not(windows))]
+    struct SourceParentRenamedBeforeSourceStage {
+        source_parent: PathBuf,
+        relocated_parent: PathBuf,
+    }
+
+    #[cfg(not(windows))]
+    impl MoveCopyHooks for SourceParentRenamedBeforeSourceStage {
+        fn before_source_stage(&mut self, _: &Path) -> std::io::Result<()> {
+            fs::rename(&self.source_parent, &self.relocated_parent)
+        }
+    }
+
     struct DestinationSwapDuringSourceStage {
         destination: PathBuf,
         tombstone: Option<PathBuf>,
@@ -1959,9 +2097,10 @@ mod tests {
 
     #[cfg(not(windows))]
     impl MoveCopyHooks for SourceSwapBeforeStage {
-        fn before_source_stage(&mut self, source: &Path) {
+        fn before_source_stage(&mut self, source: &Path) -> std::io::Result<()> {
             fs::remove_file(source).unwrap();
             fs::write(source, b"external source").unwrap();
+            Ok(())
         }
 
         fn after_source_stage(&mut self, tombstone: &Path) {
@@ -2289,6 +2428,207 @@ mod tests {
         assert_eq!(fs::read(&destination).unwrap(), b"copied bytes");
     }
 
+    #[cfg(not(windows))]
+    #[test]
+    fn copy_move_uses_bounded_temporary_names_for_a_234_byte_source_leaf() {
+        let root = scratch_dir("fs-io-copy-move-long-source-leaf");
+        let source = root.join("s".repeat(234));
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+
+        copy_move_no_overwrite_bound_with_hooks(
+            &policy,
+            &source,
+            &destination,
+            &mut NoopMoveCopyHooks,
+        )
+        .unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(fs::read(&destination).unwrap(), b"captured source");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn copy_move_rolls_back_a_long_source_stage_failure_and_allows_a_retry() {
+        let root = scratch_dir("fs-io-copy-move-long-source-stage-failure");
+        let source = root.join("s".repeat(234));
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+
+        let error = copy_move_no_overwrite_bound_with_hooks(
+            &policy,
+            &source,
+            &destination,
+            &mut ForcedSourceStageFailure,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert_eq!(fs::read(&source).unwrap(), b"captured source");
+        assert!(!destination.exists());
+
+        copy_move_no_overwrite_bound_with_hooks(
+            &policy,
+            &source,
+            &destination,
+            &mut NoopMoveCopyHooks,
+        )
+        .unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read(&destination).unwrap(), b"captured source");
+    }
+
+    #[test]
+    fn copy_move_rolls_back_a_verified_destination_when_source_stage_hook_fails() {
+        let root = scratch_dir("fs-io-copy-move-source-stage-failure");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+
+        let error = copy_move_no_overwrite_bound_with_hooks(
+            &policy,
+            &source,
+            &destination,
+            &mut ForcedSourceStageFailure,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert_eq!(fs::read(&source).unwrap(), b"captured source");
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn copy_move_keeps_a_destination_replaced_before_source_stage_failure() {
+        let root = scratch_dir("fs-io-copy-move-source-stage-ownership-uncertain");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+        let mut hooks = DestinationSwapBeforeSourceStageFailure {
+            destination: destination.clone(),
+        };
+
+        let error =
+            copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
+                .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert_eq!(fs::read(&source).unwrap(), b"captured source");
+        assert_eq!(fs::read(&destination).unwrap(), b"external destination");
+    }
+
+    #[test]
+    fn copy_move_rolls_back_a_verified_destination_when_tombstone_generation_fails() {
+        let root = scratch_dir("fs-io-copy-move-source-stage-name-failure");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+
+        let error = copy_move_no_overwrite_bound_with_hooks(
+            &policy,
+            &source,
+            &destination,
+            &mut SourceStageNameFailure,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert_eq!(fs::read(&source).unwrap(), b"captured source");
+        assert!(!destination.exists());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn copy_move_reports_both_paths_when_the_source_parent_cannot_be_reopened() {
+        let root = scratch_dir("fs-io-copy-move-source-parent-reopen");
+        let source_parent = root.join("source-parent");
+        let relocated_parent = root.join("relocated-parent");
+        fs::create_dir(&source_parent).unwrap();
+        let source = source_parent.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+        let mut hooks = SourceParentRenamedBeforeSourceStage {
+            source_parent,
+            relocated_parent: relocated_parent.clone(),
+        };
+
+        let error =
+            copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
+                .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert_eq!(
+            fs::read(relocated_parent.join("source")).unwrap(),
+            b"captured source"
+        );
+        assert_eq!(fs::read(&destination).unwrap(), b"captured source");
+    }
+
+    #[test]
+    fn copy_move_does_not_report_an_uncreated_temporary_as_recovery_data() {
+        let root = scratch_dir("fs-io-copy-move-temporary-collision");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        let temporary = OsString::from("occupied-temporary");
+        fs::write(&source, b"captured source").unwrap();
+        fs::write(root.join(&temporary), b"external temporary").unwrap();
+        let policy = copy_fallback_policy(&root);
+        let mut hooks = OccupiedDestinationTemporary {
+            temporary: temporary.clone(),
+        };
+
+        let error =
+            copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
+                .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["kind"], "path_access");
+        assert!(
+            error
+                .message
+                .contains(&root.join(&temporary).display().to_string())
+        );
+        assert!(!error.message.contains("left in place"));
+        assert_eq!(fs::read(&source).unwrap(), b"captured source");
+        assert!(!destination.exists());
+        assert_eq!(
+            fs::read(root.join(&temporary)).unwrap(),
+            b"external temporary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_path_keeps_a_non_utf8_parent_and_uses_a_bounded_leaf() {
+        use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+
+        let parent = PathBuf::from(OsString::from_vec(b"parent-\xff".to_vec()));
+        let path = parent.join("s".repeat(234));
+        let temporary = temporary_path(&path).unwrap();
+
+        assert_eq!(
+            temporary.parent().unwrap().as_os_str().as_bytes(),
+            parent.as_os_str().as_bytes()
+        );
+        assert!(temporary.file_name().unwrap().as_bytes().len() < 255);
+    }
+
     #[cfg(unix)]
     #[test]
     fn copy_move_creates_a_private_temp_before_streaming_and_restores_source_mode() {
@@ -2376,7 +2716,7 @@ mod tests {
 
         parent
             .with_parent(|dir, leaf| {
-                let temporary = temporary_leaf(leaf)?;
+                let temporary = temporary_name()?;
                 write_replacement_in_with_hook(
                     dir,
                     leaf,
@@ -2408,7 +2748,7 @@ mod tests {
         let new_capture = BeforeWriteModeCapture::new(&root);
         new_parent
             .with_parent(|dir, leaf| {
-                let temporary = temporary_leaf(leaf)?;
+                let temporary = temporary_name()?;
                 write_replacement_in_with_hook(
                     dir,
                     leaf,
@@ -2826,7 +3166,7 @@ mod tests {
 
         let error = parent
             .with_parent(|dir, leaf| {
-                let temp = temporary_leaf(leaf)?;
+                let temp = temporary_name()?;
                 write_replacement_in_with_hook(
                     dir,
                     leaf,
@@ -2870,7 +3210,7 @@ mod tests {
 
         let error = parent
             .with_parent(|dir, leaf| {
-                let temp = temporary_leaf(leaf)?;
+                let temp = temporary_name()?;
                 let swapped_temp = root.join(&temp);
                 write_replacement_in_with_hook(
                     dir,
@@ -2910,7 +3250,7 @@ mod tests {
 
         let error = parent
             .with_parent(|dir, leaf| {
-                let temp = temporary_leaf(leaf)?;
+                let temp = temporary_name()?;
                 write_replacement_in_with_hook(
                     dir,
                     leaf,
@@ -2959,7 +3299,7 @@ mod tests {
 
         let error = parent
             .with_parent(|dir, leaf| {
-                let temp = temporary_leaf(leaf)?;
+                let temp = temporary_name()?;
                 write_replacement_in_with_hook(
                     dir,
                     leaf,
