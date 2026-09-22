@@ -27,9 +27,10 @@
 //! public domain —
 //! <http://howardhinnant.github.io/date_algorithms.html#days_from_civil>.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use super::types::LtsStatus;
+use crate::ports::wall_clock::epoch_millis;
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1_000;
 
@@ -182,9 +183,7 @@ fn end_of_day_ms(value: &str) -> Option<i64> {
 }
 
 fn now_ms(now: SystemTime) -> i64 {
-    now.duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
+    i64::try_from(epoch_millis(now)).unwrap_or(i64::MAX)
 }
 
 /// Whether `schedule` is too old to trust its own dates, unless
