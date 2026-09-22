@@ -437,10 +437,11 @@ impl Ledger {
                 .flat_map(|(chat, entries)| {
                     entries
                         .iter()
-                        .map(move |(path, entry)| (chat.clone(), path.clone(), entry.lru_tick))
+                        .map(move |(path, entry)| (chat, path, entry.lru_tick))
                 })
-                .min_by_key(|(_, _, tick)| *tick);
-            if let Some((chat, path, _)) = oldest {
+                .min_by_key(|(_, _, tick)| *tick)
+                .map(|(chat, path, _)| (chat.clone(), path.clone()));
+            if let Some((chat, path)) = oldest {
                 self.forget(&chat, &path);
             } else {
                 break;
