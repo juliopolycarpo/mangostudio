@@ -5,11 +5,9 @@
 //! this process a task and a file descriptor per connection.
 
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mango_protocol::close::close_codes;
-use mango_protocol::frame::PeerInfo;
 use mango_protocol::session::{Session, SessionOptions, SessionState};
 use mango_protocol::transports::deadline::ConnectDeadline;
 use mango_protocol::transports::websocket::client::{WebSocketConnectOptions, connect_websocket};
@@ -19,17 +17,10 @@ use tokio_util::sync::CancellationToken;
 
 mod support;
 
+use support::CollectingLog;
 use support::scratch::{ScratchDir, scratch_dir};
 
 const TOKEN: &str = "test-serve-token";
-
-fn hub_peer() -> PeerInfo {
-    PeerInfo {
-        name: "test-hub".into(),
-        version: "0.0.0".into(),
-        role: "hub".into(),
-    }
-}
 
 async fn bind_ephemeral() -> (SocketAddr, tokio::net::TcpListener) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -41,29 +32,6 @@ fn scratch_home(name: &str) -> ScratchDir {
     scratch_dir(&format!("transport-serve-test-{name}"))
 }
 
-/// A named log fake that actually records what it was told, rather than a
-/// closure that discards it — so a test can assert on the message a code
-/// path produces, not just that some path or other ran.
-#[derive(Clone, Default)]
-struct CollectingLog {
-    messages: Arc<Mutex<Vec<String>>>,
-}
-
-impl CollectingLog {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn sink(&self) -> impl Fn(&str) + Send + Sync + 'static {
-        let messages = Arc::clone(&self.messages);
-        move |message: &str| messages.lock().unwrap().push(message.to_string())
-    }
-
-    fn messages(&self) -> Vec<String> {
-        self.messages.lock().unwrap().clone()
-    }
-}
-
 async fn dial(addr: SocketAddr, bearer: Option<&str>) -> Result<Session, u16> {
     let url = format!("ws://{addr}/");
     let mut options = WebSocketConnectOptions::default();
@@ -73,7 +41,8 @@ async fn dial(addr: SocketAddr, bearer: Option<&str>) -> Result<Session, u16> {
     let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
     match connect_websocket(&url, &options, &deadline).await {
         Ok(port) => {
-            let (session, _driver) = Session::spawn(port, SessionOptions::new(hub_peer()));
+            let (session, _driver) =
+                Session::spawn(port, SessionOptions::new(support::peer("hub")));
             match session.ready().await {
                 Ok(_) => Ok(session),
                 Err(_) => {

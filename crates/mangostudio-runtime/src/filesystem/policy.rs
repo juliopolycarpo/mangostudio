@@ -54,18 +54,11 @@ impl CompiledPolicy {
         if self.allows(path) {
             return Ok(());
         }
-        Err(RemoteError::new(
-            codes::INTERNAL,
-            format!(
-                "Path \"{}\" resolves outside the paths this chat may access on this environment.",
-                path.display()
-            ),
-        )
-        .with_detail("kind", "path_access"))
+        Err(outside_policy_error(path))
     }
 
     pub fn allows(&self, path: &Path) -> bool {
-        if self.allowed.is_empty() && self.denied.is_empty() && self.containment.is_none() {
+        if self.is_unrestricted() {
             return true;
         }
         let Ok(absolute) = absolute(path) else {
@@ -76,23 +69,13 @@ impl CompiledPolicy {
         };
         #[cfg(windows)]
         let effective = normalize_windows_final_path(&effective);
-        if !self.allowed.is_empty()
+        // A lexical deny root also refuses a requested spelling that only
+        // resolves elsewhere; the canonical checks cover the resolved path.
+        self.admits_canonical(&effective)
             && !self
-                .allowed
+                .denied
                 .iter()
-                .any(|root| prefix_relation(&root.canonical, &effective) == Some(true))
-        {
-            return false;
-        }
-        if self.denied.iter().any(|root| {
-            denied_prefix_relation(prefix_relation(&root.canonical, &effective))
-                || denied_prefix_relation(prefix_relation(&root.lexical, &absolute))
-        }) {
-            return false;
-        }
-        self.containment
-            .as_ref()
-            .is_none_or(|root| prefix_relation(&root.canonical, &effective) == Some(true))
+                .any(|root| denied_prefix_relation(prefix_relation(&root.lexical, &absolute)))
     }
 
     /// Checks a final, absolute path obtained from an already-open filesystem
@@ -114,14 +97,7 @@ impl CompiledPolicy {
         if self.allows_final_handle_path(final_path) {
             return Ok(());
         }
-        Err(RemoteError::new(
-            codes::INTERNAL,
-            format!(
-                "Path \"{}\" resolves outside the paths this chat may access on this environment.",
-                requested.display()
-            ),
-        )
-        .with_detail("kind", "path_access"))
+        Err(outside_policy_error(requested))
     }
 
     pub(super) fn is_unrestricted(&self) -> bool {
@@ -132,9 +108,12 @@ impl CompiledPolicy {
         if self.is_unrestricted() {
             return true;
         }
-        if !path.is_absolute() {
-            return false;
-        }
+        path.is_absolute() && self.admits_canonical(path)
+    }
+
+    /// Applies the allowed, canonical-denied, and containment roots to a path
+    /// already resolved to its real location.
+    fn admits_canonical(&self, path: &Path) -> bool {
         if !self.allowed.is_empty()
             && !self
                 .allowed
@@ -156,13 +135,32 @@ impl CompiledPolicy {
     }
 }
 
-fn absolute(path: &Path) -> Result<PathBuf, RemoteError> {
+fn outside_policy_error(path: &Path) -> RemoteError {
+    RemoteError::new(
+        codes::INTERNAL,
+        format!(
+            "Path \"{}\" resolves outside the paths this chat may access on this environment.",
+            path.display()
+        ),
+    )
+    .with_detail("kind", "path_access")
+}
+
+/// Joins a relative path onto the process working directory, leaving `..`
+/// and `.` components for the caller to resolve.
+///
+/// # Example
+///
+/// ```ignore
+/// let target = lexically_normalize(&absolute(requested)?);
+/// ```
+pub(super) fn absolute(path: &Path) -> Result<PathBuf, RemoteError> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());
     }
     std::env::current_dir()
         .map(|cwd| cwd.join(path))
-        .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))
+        .map_err(super::io::io_error)
 }
 
 fn compile_root(path: &Path) -> Result<Root, RemoteError> {

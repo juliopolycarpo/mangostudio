@@ -30,14 +30,6 @@ name = "mangostudio-runtime"
 path = "src/main.rs"
 
 [dependencies]
-# The `tokio` feature is what brings in `Contract`/`ContractHandlers`/`Guard`/
-# `Session` — this crate's whole reason to exist is serving a contract over a
-# session, so it is a normal dependency, not optional.
-# This crate's own contact point with `jsonschema`, matching both
-# `mango-protocol`'s and `mangostudio-runtime-contract`'s compile options
-# exactly (draft 2020-12, offline, format assertions on): the result-check
-# gate has to run the same validator the peer contract crate embeds, with an
-# instance-path pointer neither of those crates exposes publicly.
 # `serve`'s token bootstrap (`generate_serve_token`, mirroring `runtime-home.ts`'s
 # `bootstrapServeToken`): base64url-encodes the 32 bytes `getrandom` (below)
 # draws from the operating system's CSPRNG. Already in the dependency graph
@@ -57,7 +49,15 @@ getrandom = { version = "0.3", default-features = false }
 # `fs.glob` uses its brace, character-class, and recursive-wildcard parser,
 # while this crate owns traversal, dotfile rules, ordering, and path policy.
 globset = { version = "0.4.19", default-features = false }
+# This crate's own contact point with `jsonschema`, matching both
+# `mango-protocol`'s and `mangostudio-runtime-contract`'s compile options
+# exactly (draft 2020-12, offline, format assertions on): the result-check
+# gate has to run the same validator the peer contract crate embeds, with an
+# instance-path pointer neither of those crates exposes publicly.
 jsonschema = { version = "0.56", default-features = false }
+# The `tokio` feature is what brings in `Contract`/`ContractHandlers`/`Guard`/
+# `Session` — this crate's whole reason to exist is serving a contract over a
+# session, so it is a normal dependency, not optional.
 # `websocket`: the `serve`/`connect` transports dial and accept over it.
 # `tokio` alone (the dispatcher's own dependency) has no socket of its own.
 mango-protocol = { workspace = true, features = ["tokio", "websocket"] }
@@ -65,10 +65,9 @@ mangostudio-runtime-contract.workspace = true
 # Already pulled in transitively by `jsonschema`'s own `pattern` keyword
 # support, so a direct dependency costs nothing new in the dependency graph
 # (`cargo deny`'s `multiple-versions = "deny"` would catch it otherwise).
-# This crate's own use is the audit log's credential-shape redaction, which
-# needs the same fixed set of patterns `apps/runtime/src/audit-log.ts`
-# masks with — hand-rolling that by hand would be the one place this crate
-# reinvents a well-tested wheel already sitting in its own build.
+# This crate uses it for version and output parsing in `probing` and
+# `commands`, and for the audit log's credential-shape redaction, which needs
+# the same fixed set of patterns `apps/runtime/src/audit-log.ts` masks with.
 regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
 # `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
 # code units, named captures, and an engine interrupt hook for its hard deadline.

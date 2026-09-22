@@ -7,29 +7,17 @@ mod support;
 
 use std::sync::Arc;
 
-use mango_protocol::contract::Contract;
 use mango_protocol::error::codes;
 use mangostudio_runtime::ports::authorization::DenyingAuthorization;
 use mangostudio_runtime::registry::Registry;
 use mangostudio_runtime_contract::catalog::catalog;
 use serde_json::json;
-use support::{open_pair, within};
+use support::{serve_pair, within};
 
 #[tokio::test]
 async fn an_unknown_method_and_a_known_unimplemented_method_answer_byte_identical_errors() {
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
     let registry = Registry::new(); // implements nothing
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("an empty registry always serves");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let unknown = within(
         "a method no catalog declares",
@@ -66,19 +54,8 @@ async fn an_unknown_method_and_a_known_unimplemented_method_answer_byte_identica
 
 #[tokio::test]
 async fn rpc_discover_still_answers_the_full_catalog_with_an_empty_registry() {
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
     let registry = Registry::new();
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("an empty registry always serves");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let discovered = within("rpc.discover", hub.request("rpc.discover", json!({})))
         .await

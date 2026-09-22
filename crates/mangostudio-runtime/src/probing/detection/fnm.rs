@@ -38,7 +38,7 @@ pub struct FnmDetectionOptions<'a> {
     pub latest_by_major: BTreeMap<u32, String>,
     /// Whether [`FnmDetectionOptions::latest_by_major`] came from a live
     /// probe recent enough to excuse a stale bundled schedule.
-    pub live_data_available: Option<bool>,
+    pub live_data_available: bool,
     /// `fnm --version` output, already parsed to `major.minor.patch`.
     /// Reused from the runtime's own fnm scan — the same one
     /// `probing.runtimes` runs — rather than spawning `fnm --version` a
@@ -105,11 +105,7 @@ fn node_binary_path(root: &str, version_dir: &str, platform: &str) -> String {
 /// ```
 #[must_use]
 pub fn fnm_root_candidates(path_env: &PathEnv) -> Vec<String> {
-    let configured_root = path_env
-        .env_var("FNM_DIR")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
+    let configured_root = path_env.non_blank_var("FNM_DIR").map(str::to_string);
     let platform_default = if path_env.is_windows() {
         windows_default_fnm_dir(path_env)
     } else if path_env.platform == "darwin" {
@@ -330,7 +326,7 @@ mod tests {
             schedule,
             current_node_path: None,
             latest_by_major: BTreeMap::new(),
-            live_data_available: None,
+            live_data_available: false,
             manager_version: Some("1.38.1".to_string()),
         }
     }

@@ -1,6 +1,13 @@
-//! One place a path is decided to be inside a workspace root or not —
-//! shared by whichever later lane adds filesystem, process, or terminal
-//! methods, so none of them ever supplies a second authorization policy.
+//! One place a path is decided to be inside a workspace root or not, for
+//! the `workspace.*` methods, plus the symlink-aware resolution
+//! (`resolve_through_existing_ancestor`) and lexical normalization
+//! (`lexically_normalize`) the filesystem path policy builds on.
+//!
+//! The `fs.*` methods do not authorize through this module's root check.
+//! They evaluate a wire path policy (`crate::filesystem::policy`),
+//! recompile it under their path locks immediately before each mutation,
+//! and bind the operation to verified directory handles
+//! (`crate::filesystem::capability`).
 //!
 //! Mirrors `apps/runtime/src/services/workspace.ts` and
 //! `apps/runtime/src/services/fs-path-policy.ts`. The hub's own containment
@@ -15,12 +22,12 @@
 //! # Two checks, not one
 //!
 //! [`resolve_contained_workspace_path`] answers "is this path inside the
-//! root, right now". [`guard_mutation`] is the second, *later* check every
-//! mutating operation needs on top of it: a request-time answer can go
-//! stale by the time a write actually happens (a symlink swapped in
-//! between the two), so a caller that mutates re-runs the same
-//! containment decision immediately before the mutation, never relying on
-//! an earlier answer alone. Both draw on the same
+//! root, right now". [`guard_mutation`] is the second, *later* check a
+//! mutation authorized by that root check needs on top of it: a
+//! request-time answer can go stale by the time a write actually happens
+//! (a symlink swapped in between the two), so such a caller re-runs the
+//! same containment decision immediately before the mutation, never
+//! relying on an earlier answer alone. Both draw on the same
 //! [`resolve_contained_workspace_path`] — there is no second policy to
 //! keep in sync, only two different moments to apply the one policy at.
 
@@ -392,10 +399,11 @@ pub(crate) fn lexically_normalize(path: &Path) -> PathBuf {
 }
 
 /// Re-runs [`resolve_contained_workspace_path`] for every path `targets`
-/// names, immediately before calling `execute` — the re-check every
-/// mutating operation needs on top of whatever containment check already
-/// passed at request time. See the module docs for why this is the same
-/// policy applied a second time, not a second policy.
+/// names, immediately before calling `execute` — the re-check a mutation
+/// authorized by workspace-root containment needs on top of whatever
+/// containment check already passed at request time. See the module docs
+/// for why this is the same policy applied a second time, not a second
+/// policy.
 ///
 /// # Errors
 /// The first [`WorkspaceContainmentError`] any of `targets` produces;
@@ -452,16 +460,51 @@ pub fn guard_mutation<T>(
 /// [`crate::workspace_methods::read_workspace_directory`] for why that
 /// listing builds its own filter-then-sort-then-cap pipeline instead of
 /// calling into this module for the whole thing.
+///
+/// ASCII-only pairs compare their folded bytes without allocating:
+/// `str::to_lowercase` folds ASCII byte for byte, so both paths order alike.
 pub(crate) fn compare_directory_entry_names(left: &str, right: &str) -> std::cmp::Ordering {
-    left.to_lowercase()
-        .cmp(&right.to_lowercase())
-        .then_with(|| left.cmp(right))
+    let folded = if left.is_ascii() && right.is_ascii() {
+        left.bytes()
+            .map(|byte| byte.to_ascii_lowercase())
+            .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+    } else {
+        left.to_lowercase().cmp(&right.to_lowercase())
+    };
+    folded.then_with(|| left.cmp(right))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkspaceContainmentError, guard_mutation, resolve_contained_workspace_path};
+    use super::{
+        WorkspaceContainmentError, compare_directory_entry_names, guard_mutation,
+        resolve_contained_workspace_path,
+    };
     use crate::test_support::scratch_dir as scratch_root;
+
+    /// Pins the allocation-free ASCII path and the Unicode fallback to the
+    /// plain `to_lowercase` ordering, including context-sensitive final sigma
+    /// and multi-character lowercase mappings.
+    #[test]
+    fn entry_name_order_matches_a_full_lowercase_fold() {
+        let names = [
+            "apple", "Apple", "APPLE", "banana", "Banana", "_x", "a-b", "a_b", "Zeta", "zeta1",
+            "ΣA", "σa", "ΟΔΟΣ", "οδος", "İx", "ix", "Äb", "äa", "a", "",
+        ];
+        for left in names {
+            for right in names {
+                let expected = left
+                    .to_lowercase()
+                    .cmp(&right.to_lowercase())
+                    .then_with(|| left.cmp(right));
+                assert_eq!(
+                    compare_directory_entry_names(left, right),
+                    expected,
+                    "order of {left:?} vs {right:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn a_path_inside_the_root_resolves_to_its_relative_form() {

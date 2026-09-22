@@ -12,6 +12,7 @@ mod read_cache;
 use crate::probing::detection::{
     fnm::{fnm_default_alias_bin_dir, fnm_root_candidates},
     lts_policy::{normalize_node_version, parse_exact_node_version},
+    nvm::is_safe_nvm_alias,
     path_env::{PathEnv, dirname_path, join_path},
     runtime_definitions::well_known_node_directories,
     version_manager_support::normalized_managed_path,
@@ -160,7 +161,7 @@ pub fn build(
         .flatten()
         .filter_map(|value| value.manager.as_ref())
     {
-        if configured(host, key).is_none() {
+        if host.non_blank_var(key).is_none() {
             env.insert((*key).into(), value.clone());
         }
     }
@@ -172,7 +173,7 @@ pub fn build(
         .find(|key| key.eq_ignore_ascii_case("PATH"))
         .cloned()
         .unwrap_or_else(|| if host.is_windows() { "Path" } else { "PATH" }.into());
-    let separator = if host.is_windows() { ";" } else { ":" };
+    let separator = host.path_list_separator();
     let mut path = dirs.join(separator);
     if let Some(existing) = env.get(&key).filter(|value| !value.is_empty()) {
         path.push_str(separator);
@@ -180,13 +181,6 @@ pub fn build(
     }
     env.insert(key, path);
     env
-}
-
-fn configured<'a>(host: &'a PathEnv, key: &str) -> Option<&'a str> {
-    host.env
-        .get(key)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
 }
 
 fn resolve(host: &PathEnv, runtime: &str, choice: &str, fs: &dyn ToolchainFs) -> Option<Resolved> {
@@ -199,7 +193,8 @@ fn resolve(host: &PathEnv, runtime: &str, choice: &str, fs: &dyn ToolchainFs) ->
     if runtime == "node" {
         return auto_node(host, fs);
     }
-    let root = configured(host, "BUN_INSTALL")
+    let root = host
+        .non_blank_var("BUN_INSTALL")
         .map(str::to_owned)
         .unwrap_or_else(|| join_path(&host.platform, &[&host.home_dir, ".bun"]));
     managed(
@@ -230,7 +225,10 @@ fn managed(
     }
     Some(Resolved {
         dir,
-        manager: configured(host, key).is_none().then(|| (key, root.into())),
+        manager: host
+            .non_blank_var(key)
+            .is_none()
+            .then(|| (key, root.into())),
     })
 }
 
@@ -262,7 +260,7 @@ fn auto_node(host: &PathEnv, fs: &dyn ToolchainFs) -> Option<Resolved> {
         .map(|(_, value)| value.as_str())
         .unwrap_or("");
     let inherited: HashSet<_> = inherited
-        .split(if host.is_windows() { ';' } else { ':' })
+        .split(host.path_list_separator())
         .map(|entry| normalized_managed_path(entry.trim(), &host.platform))
         .collect();
     if candidates
@@ -278,7 +276,8 @@ fn auto_node(host: &PathEnv, fs: &dyn ToolchainFs) -> Option<Resolved> {
 }
 
 fn auto_nvm(host: &PathEnv, fs: &dyn ToolchainFs) -> Option<Resolved> {
-    let root = configured(host, "NVM_DIR")
+    let root = host
+        .non_blank_var("NVM_DIR")
         .map(str::to_owned)
         .unwrap_or_else(|| join_path("linux", &[&host.home_dir, ".nvm"]));
     let version = nvm_default(fs, &root)?;
@@ -309,11 +308,7 @@ fn nvm_default(fs: &dyn ToolchainFs, root: &str) -> Option<String> {
 }
 
 fn safe_alias(alias: &str) -> bool {
-    !alias.is_empty()
-        && !alias.split('/').any(|part| part == "..")
-        && alias
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"_.*/-".contains(&byte))
+    is_safe_nvm_alias(alias) && !alias.split('/').any(|part| part == "..")
 }
 
 fn newest(fs: &dyn ToolchainFs, root: &str, selector: &str) -> Option<String> {
@@ -348,7 +343,7 @@ fn newest(fs: &dyn ToolchainFs, root: &str, selector: &str) -> Option<String> {
                 .all(|(wanted, actual)| *wanted == actual)
         })
         .max()
-        .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch))
+        .map(|version| version.to_string())
 }
 
 #[cfg(test)]

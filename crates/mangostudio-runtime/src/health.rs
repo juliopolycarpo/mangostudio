@@ -38,7 +38,6 @@
 //!   unchanged, noted at each call site.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
@@ -53,6 +52,7 @@ use crate::blocking::run_blocking;
 use crate::consent::config::{ResolvedRuntimeSlotConfig, resolve_runtime_slot_config};
 use crate::consent::presets::consent_preset;
 use crate::file_identity::fingerprint;
+use crate::probe_cache::ProbeCache;
 use crate::registry::Registry;
 use crate::runtime_home::{
     RuntimeSlot, SlotFileState, home_dir, read_runtime_slot_config, slot_for_path,
@@ -101,18 +101,14 @@ async fn build_health_report(
     cancel: &CancellationToken,
     path_override: Option<&std::ffi::OsStr>,
 ) -> Result<Value, RemoteError> {
-    let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
-    let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
-
-    let ((shells, git_probe), gh_probe) = tokio::join!(
-        collect_capability_probes(
-            resolved.allow.shell,
-            resolved.allow.git,
-            path_override,
-            cancel
-        ),
-        probe_gh(resolved.allow.git, path_override, cancel),
-    );
+    let CapabilitySnapshot {
+        state,
+        fallback_source,
+        resolved,
+        shells,
+        git: git_probe,
+        gh: gh_probe,
+    } = collect_capability_snapshot(slot, mango_home, path_override, cancel).await;
     let gh = gh_probe.map_err(|_| {
         RemoteError::new(
             codes::CANCELLED,
@@ -183,13 +179,13 @@ pub(crate) async fn build_capability_manifest(
     registry: &Registry,
     cancel: &CancellationToken,
 ) -> RuntimeCapabilityManifest {
-    let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
-    let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
-
-    let ((shells, git_probe), gh_probe) = tokio::join!(
-        collect_capability_probes(resolved.allow.shell, resolved.allow.git, None, cancel),
-        probe_gh(resolved.allow.git, None, cancel),
-    );
+    let CapabilitySnapshot {
+        resolved,
+        shells,
+        git: git_probe,
+        gh: gh_probe,
+        ..
+    } = collect_capability_snapshot(slot, mango_home, None, cancel).await;
     let git = git_probe.unwrap_or_else(|GitProbeCancelled| unavailable_git());
 
     // Mirrors `build_health_report`'s own `unwrap_or_default()`: a `HOME`
@@ -224,6 +220,56 @@ pub(crate) async fn build_capability_manifest(
     manifest
 }
 
+/// Everything `runtime.health` and `hello.capabilities` both derive from:
+/// `slot`'s stored config (resolved fail-closed) and the shell, git, and gh
+/// probes it gates. Each probe keeps its own outcome so the two callers can
+/// apply their different cancellation policies.
+struct CapabilitySnapshot {
+    state: SlotFileState,
+    fallback_source: &'static str,
+    resolved: ResolvedRuntimeSlotConfig,
+    shells: Vec<RuntimeShellKind>,
+    git: Result<GitAvailability, GitProbeCancelled>,
+    gh: Result<GitAvailability, GitProbeCancelled>,
+}
+
+/// Reads and resolves `slot`'s config, then runs every probe it allows
+/// concurrently — the shared setup of [`build_health_report`] and
+/// [`build_capability_manifest`].
+///
+/// # Example
+///
+/// ```ignore
+/// let snapshot = collect_capability_snapshot(slot, &mango_home, None, &cancel).await;
+/// let git = snapshot.git.unwrap_or_else(|GitProbeCancelled| unavailable_git());
+/// ```
+async fn collect_capability_snapshot(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    path_override: Option<&std::ffi::OsStr>,
+    cancel: &CancellationToken,
+) -> CapabilitySnapshot {
+    let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
+    let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
+    let ((shells, git), gh) = tokio::join!(
+        collect_capability_probes(
+            resolved.allow.shell,
+            resolved.allow.git,
+            path_override,
+            cancel
+        ),
+        probe_gh(resolved.allow.git, path_override, cancel),
+    );
+    CapabilitySnapshot {
+        state,
+        fallback_source,
+        resolved,
+        shells,
+        git,
+        gh,
+    }
+}
+
 /// Collects the independent shell and git machine facts behind one shared
 /// seam for both `runtime.health` and `hello.capabilities`.
 ///
@@ -241,18 +287,21 @@ async fn collect_capability_probes(
     Vec<RuntimeShellKind>,
     Result<GitAvailability, GitProbeCancelled>,
 ) {
-    match (allow_shell, allow_git) {
-        (true, true) => {
-            run_independent_probes(
-                detect_shells(path_override),
-                probe_git(path_override, cancel),
-            )
-            .await
+    let shells = async {
+        if allow_shell {
+            detect_shells(path_override).await
+        } else {
+            Vec::new()
         }
-        (true, false) => (detect_shells(path_override).await, Ok(unavailable_git())),
-        (false, true) => (Vec::new(), probe_git(path_override, cancel).await),
-        (false, false) => (Vec::new(), Ok(unavailable_git())),
-    }
+    };
+    let git = async {
+        if allow_git {
+            probe_git(path_override, cancel).await
+        } else {
+            Ok(unavailable_git())
+        }
+    };
+    run_independent_probes(shells, git).await
 }
 
 /// Runs two independent probe futures concurrently, keeping each result so
@@ -463,7 +512,7 @@ async fn bounded_path_walk<T>(walk: impl std::future::Future<Output = Option<T>>
 /// Serializes tests that clear the process-wide Git probe cache.
 #[cfg(all(test, unix))]
 fn git_probe_test_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
@@ -524,7 +573,7 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
 /// Returns `dir.join(name)` as found, never canonicalised: two `PATH`
 /// entries that reach the same real file through a symlink or a `..`
 /// segment resolve to two different [`PathBuf`]s here, and so to two
-/// different [`git_probe_cache`] keys for what is, on disk, one binary. A
+/// different [`GIT_PROBE_CACHE`] keys for what is, on disk, one binary. A
 /// changed `PATH` ordering that starts naming the same binary through its
 /// other spelling re-probes rather than reusing an already-cached answer —
 /// wasted work, not a correctness bug (the fresh probe still reports the
@@ -577,11 +626,7 @@ struct GitProbeCancelled;
 /// [`crate::file_identity::fingerprint`]'s object identity and high-resolution metadata fingerprint
 /// format rather than inventing a second one, keyed alongside the path so
 /// a rebuilt binary at the same path also re-probes.
-fn git_probe_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<GitAvailability>> {
-    static CACHE: OnceLock<Mutex<crate::probe_cache::ProbeCache<GitAvailability>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(Default::default()))
-}
+static GIT_PROBE_CACHE: ProbeCache<GitAvailability> = ProbeCache::new();
 
 /// Clears every cached `git` probe result. Test-only: every caller lives in
 /// this module's `#[cfg(unix)]` git-probe tests, each of which wants a clean
@@ -591,10 +636,7 @@ fn git_probe_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<GitAvailab
 /// non-`#[cfg(test)]` entry point.
 #[cfg(all(test, unix))]
 fn invalidate_git_probe_cache() {
-    git_probe_cache()
-        .lock()
-        .expect("the git probe cache mutex is never poisoned")
-        .clear();
+    GIT_PROBE_CACHE.clear();
 }
 
 /// Probes `git --version`, memoised by resolved path and fingerprint.
@@ -638,10 +680,7 @@ async fn probe_cli(
         None => std::env::var_os("PATH"),
     };
     let Some(path_var) = path_var else {
-        return Ok(GitAvailability {
-            available: false,
-            version: None,
-        });
+        return Ok(unavailable_git());
     };
 
     // Bounded by `PATH_WALK_TIMEOUT` via `bounded_path_walk`, matching
@@ -663,12 +702,9 @@ async fn probe_cli(
         // `detect_shells`'s own "an absent tool is not an error" contract:
         // a wedged `PATH` entry must degrade this probe, never surface as
         // a distinct "probe failed" shape, and never be cached (see
-        // `git_probe_cache`'s own doc comment on caching only a definite,
+        // `GIT_PROBE_CACHE`'s own doc comment on caching only a definite,
         // successful answer).
-        return Ok(GitAvailability {
-            available: false,
-            version: None,
-        });
+        return Ok(unavailable_git());
     };
 
     let fingerprint = run_blocking({
@@ -679,7 +715,7 @@ async fn probe_cli(
 
     if let Some(cached) = fingerprint
         .as_deref()
-        .and_then(|key| lookup_git_cache(&git_path, key))
+        .and_then(|key| GIT_PROBE_CACHE.get(&git_path, key))
     {
         return Ok(cached);
     }
@@ -702,34 +738,17 @@ async fn probe_cli(
                 version,
             };
             if let Some(fingerprint) = fingerprint {
-                cache_git_result(git_path, fingerprint, availability.clone());
+                GIT_PROBE_CACHE.insert(git_path, fingerprint, availability.clone());
             }
             Ok(availability)
         }
-        Ok(_) => Ok(GitAvailability {
-            available: false,
-            version: None,
-        }),
         Err(ChildRunError::Cancelled) => Err(GitProbeCancelled),
-        Err(ChildRunError::TimedOut | ChildRunError::SpawnFailed(_)) => Ok(GitAvailability {
-            available: false,
-            version: None,
-        }),
+        // A non-zero exit, a timeout and a failed spawn all say only "not
+        // usable right now" — never cached, never an error.
+        Ok(_) | Err(ChildRunError::TimedOut | ChildRunError::SpawnFailed(_)) => {
+            Ok(unavailable_git())
+        }
     }
-}
-
-fn lookup_git_cache(path: &Path, fingerprint: &str) -> Option<GitAvailability> {
-    let cache = git_probe_cache()
-        .lock()
-        .expect("the git probe cache mutex is never poisoned");
-    cache.get(path, fingerprint)
-}
-
-fn cache_git_result(path: PathBuf, fingerprint: String, availability: GitAvailability) {
-    let mut cache = git_probe_cache()
-        .lock()
-        .expect("the git probe cache mutex is never poisoned");
-    cache.insert(path, fingerprint, availability);
 }
 
 /// `git version 2.51.0` becomes `Some("2.51.0")`. Mirrors

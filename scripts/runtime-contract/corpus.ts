@@ -195,12 +195,7 @@ export function objectShapeOf(schema: TSchema, seed: unknown): ObjectShape | nul
 
 /** A value of a different JSON type than `value`, for the "wrong type" mutation. */
 function wrongTypeReplacement(value: unknown): unknown {
-  if (typeof value === 'string') return 12_345;
-  if (typeof value === 'number') return 'wrong-type';
-  if (typeof value === 'boolean') return 'wrong-type';
-  if (Array.isArray(value)) return 'wrong-type';
-  if (value !== null && typeof value === 'object') return 'wrong-type';
-  return 'wrong-type';
+  return typeof value === 'string' ? 12_345 : 'wrong-type';
 }
 
 /** The declared numeric bounds of a property schema, or `null` when it has none. */
@@ -339,17 +334,15 @@ export function buildFixturesForSubject(subject: CorpusSubject, schema: TSchema)
 
   const shape = objectShapeOf(schema, seed);
   if (!shape || !isRecord(seed)) return fixtures;
+  const add = (mutation: CorpusMutation, value: unknown): void => {
+    fixtures.push({ subject, mutation, value, expect: verdictOf(schema, value) });
+  };
 
   for (const requiredKey of shape.required) {
     if (!(requiredKey in seed)) continue;
     const mutated = { ...seed };
     delete mutated[requiredKey];
-    fixtures.push({
-      subject,
-      mutation: `drop:${requiredKey}`,
-      value: mutated,
-      expect: verdictOf(schema, mutated),
-    });
+    add(`drop:${requiredKey}`, mutated);
   }
 
   for (const [propertyKey, propertySchema] of Object.entries(shape.properties)) {
@@ -357,68 +350,38 @@ export function buildFixturesForSubject(subject: CorpusSubject, schema: TSchema)
     const currentValue = seed[propertyKey];
 
     const wrongTyped = { ...seed, [propertyKey]: wrongTypeReplacement(currentValue) };
-    fixtures.push({
-      subject,
-      mutation: `wrongType:${propertyKey}`,
-      value: wrongTyped,
-      expect: verdictOf(schema, wrongTyped),
-    });
+    add(`wrongType:${propertyKey}`, wrongTyped);
 
     const bounds = numericBoundsOf(propertySchema);
     if (bounds && typeof currentValue === 'number') {
       const outOfRange =
         bounds.minimum !== undefined ? bounds.minimum - 1 : (bounds.maximum ?? 0) + 1;
       const mutated = { ...seed, [propertyKey]: outOfRange };
-      fixtures.push({
-        subject,
-        mutation: `outOfRange:${propertyKey}`,
-        value: mutated,
-        expect: verdictOf(schema, mutated),
-      });
+      add(`outOfRange:${propertyKey}`, mutated);
     }
 
     const constValues = constValuesOf(propertySchema);
     if (constValues) {
       const mutated = { ...seed, [propertyKey]: outsideConstValues(constValues) };
-      fixtures.push({
-        subject,
-        mutation: `wrongConst:${propertyKey}`,
-        value: mutated,
-        expect: verdictOf(schema, mutated),
-      });
+      add(`wrongConst:${propertyKey}`, mutated);
     }
 
     const lengthBounds = stringLengthBoundsOf(propertySchema);
     if (lengthBounds && typeof currentValue === 'string') {
       if (lengthBounds.minLength !== undefined && lengthBounds.minLength > 0) {
         const tooShort = { ...seed, [propertyKey]: 'a'.repeat(lengthBounds.minLength - 1) };
-        fixtures.push({
-          subject,
-          mutation: `tooShort:${propertyKey}`,
-          value: tooShort,
-          expect: verdictOf(schema, tooShort),
-        });
+        add(`tooShort:${propertyKey}`, tooShort);
       }
       if (lengthBounds.maxLength !== undefined) {
         const tooLong = { ...seed, [propertyKey]: 'a'.repeat(lengthBounds.maxLength + 1) };
-        fixtures.push({
-          subject,
-          mutation: `tooLong:${propertyKey}`,
-          value: tooLong,
-          expect: verdictOf(schema, tooLong),
-        });
+        add(`tooLong:${propertyKey}`, tooLong);
       }
     }
 
     const pattern = patternOf(propertySchema);
     if (pattern && typeof currentValue === 'string') {
       const badPattern = { ...seed, [propertyKey]: outsidePattern(pattern) };
-      fixtures.push({
-        subject,
-        mutation: `badPattern:${propertyKey}`,
-        value: badPattern,
-        expect: verdictOf(schema, badPattern),
-      });
+      add(`badPattern:${propertyKey}`, badPattern);
     }
 
     const arrayShape = arrayShapeOf(propertySchema);
@@ -433,43 +396,23 @@ export function buildFixturesForSubject(subject: CorpusSubject, schema: TSchema)
       ) {
         const oneItem = createSeed(arrayShape.items);
         const dupItems = { ...seed, [propertyKey]: [oneItem, oneItem] };
-        fixtures.push({
-          subject,
-          mutation: `dupItems:${propertyKey}`,
-          value: dupItems,
-          expect: verdictOf(schema, dupItems),
-        });
+        add(`dupItems:${propertyKey}`, dupItems);
       }
       if (arrayShape.maxItems !== undefined && !arrayShape.uniqueItems) {
         const overflow = Array.from({ length: arrayShape.maxItems + 1 }, () =>
           createSeed(arrayShape.items)
         );
         const tooManyItems = { ...seed, [propertyKey]: overflow };
-        fixtures.push({
-          subject,
-          mutation: `tooManyItems:${propertyKey}`,
-          value: tooManyItems,
-          expect: verdictOf(schema, tooManyItems),
-        });
+        add(`tooManyItems:${propertyKey}`, tooManyItems);
       }
     }
 
     const nullValue = { ...seed, [propertyKey]: null };
-    fixtures.push({
-      subject,
-      mutation: `nullValue:${propertyKey}`,
-      value: nullValue,
-      expect: verdictOf(schema, nullValue),
-    });
+    add(`nullValue:${propertyKey}`, nullValue);
   }
 
   const withExtra = { ...seed, __unexpected_extra_field__: 'unexpected-value' };
-  fixtures.push({
-    subject,
-    mutation: 'extraProperty',
-    value: withExtra,
-    expect: verdictOf(schema, withExtra),
-  });
+  add('extraProperty', withExtra);
 
   return fixtures;
 }

@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
@@ -44,12 +44,13 @@ use super::detection::runtime_definitions::{
 use super::detection::types::{
     AgentAuthSignal, ConsumerVersionRequirement, MinimumRuntimeVersion, RuntimeFinding,
     RuntimeFindingCode, RuntimeHealth, RuntimeId, RuntimeInstallation, RuntimeOrigin,
-    RuntimeStatus, VersionManagerId,
+    RuntimeStatus, VersionManagerId, VersionManagerStatus, finding_params, wire_str,
 };
 use super::detection::version_manager_support::ManagedVersionFileSystem;
 use super::detection::winget_ownership::{WingetOwnership, mark_winget_owned_node_installations};
 use super::host;
 use super::locations::{self, LocationStatus};
+use crate::ports::wall_clock::epoch_millis;
 use crate::registry::Registry;
 
 /// Registers `probing.runtimes`, `probing.version-managers`, and
@@ -145,25 +146,11 @@ struct ProbeAgentClisParams {
 // --- Shared helpers -----------------------------------------------------
 
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0)
-        .try_into()
-        .unwrap_or(u64::MAX)
+    epoch_millis(SystemTime::now())
 }
 
 fn cancelled_error(method: &str) -> RemoteError {
     RemoteError::new(codes::CANCELLED, format!("{method} was cancelled"))
-}
-
-/// `T`'s wire (serialised) string form — used only to name an id in an
-/// error message, never to build a wire result.
-fn wire_str<T: Serialize>(value: &T) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_default()
 }
 
 /// Mirrors `RuntimeToolArgumentError`'s own wire shape exactly
@@ -197,15 +184,6 @@ fn build_binary_scan_options(budget: &Option<ProbeBudget>) -> BinaryScanOptions 
         }
     }
     options
-}
-
-fn params_map(pairs: &[(&str, String)]) -> Option<BTreeMap<String, String>> {
-    Some(
-        pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_string(), value.clone()))
-            .collect(),
-    )
 }
 
 // --- probing.runtimes -----------------------------------------------
@@ -263,12 +241,12 @@ async fn handle_probe_runtimes(
     params: ProbeRuntimesParams,
     cancel: CancellationToken,
 ) -> Result<Value, RemoteError> {
-    let path_env = host::build_runtime_path_env(
+    let path_env = Arc::new(host::build_runtime_path_env(
         params
             .path_env
             .as_ref()
             .and_then(|override_| override_.env.as_ref()),
-    );
+    ));
     let definitions = select_runtime_definitions(params.ids.as_deref())?;
 
     let needs_winget = path_env.platform == "win32"
@@ -280,7 +258,7 @@ async fn handle_probe_runtimes(
         tokio::task::JoinSet::new();
     for (index, definition) in definitions.iter().copied().enumerate() {
         let deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
-            path_env.clone(),
+            Arc::clone(&path_env),
             cancel.clone(),
         ));
         let options = build_binary_scan_options(&params.budget);
@@ -384,11 +362,7 @@ fn formatted_manager_version(
     definition: &RuntimeDefinition,
 ) -> Option<String> {
     let raw = status?.effective.as_ref()?.version.as_deref()?;
-    let parsed = (definition.parse_version)(raw)?;
-    Some(format!(
-        "{}.{}.{}",
-        parsed.major, parsed.minor, parsed.patch
-    ))
+    (definition.parse_version)(raw).map(|parsed| parsed.to_string())
 }
 
 /// Builds the `probing.version-managers` result, mirroring
@@ -411,32 +385,31 @@ async fn handle_probe_version_managers(
         return Ok(json!({ "statuses": Vec::<Value>::new() }));
     }
 
-    let path_env = host::build_runtime_path_env(
+    let path_env = Arc::new(host::build_runtime_path_env(
         params
             .path_env
             .as_ref()
             .and_then(|override_| override_.env.as_ref()),
-    );
+    ));
 
     let node_deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
-        path_env.clone(),
+        Arc::clone(&path_env),
         cancel.clone(),
     ));
     let node_options = build_binary_scan_options(&params.budget);
     let node_scan_future = scan_runtime(&NODE_RUNTIME_DEFINITION, node_deps, node_options);
 
     let needs_fnm = wanted.contains(&VersionManagerId::Fnm);
-    let fnm_deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
-        path_env.clone(),
-        cancel.clone(),
-    ));
-    let fnm_options = build_binary_scan_options(&params.budget);
     let fnm_scan_future = async {
-        if needs_fnm {
-            Some(scan_runtime(&FNM_RUNTIME_DEFINITION, fnm_deps, fnm_options).await)
-        } else {
-            None
+        if !needs_fnm {
+            return None;
         }
+        let fnm_deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
+            Arc::clone(&path_env),
+            cancel.clone(),
+        ));
+        let fnm_options = build_binary_scan_options(&params.budget);
+        Some(scan_runtime(&FNM_RUNTIME_DEFINITION, fnm_deps, fnm_options).await)
     };
 
     let (node_scan, fnm_scan) = tokio::join!(node_scan_future, fnm_scan_future);
@@ -477,58 +450,63 @@ async fn handle_probe_version_managers(
             .map(|effective| effective.path.clone())
     };
 
-    let latest_by_major_provided = params.latest_by_major.is_some();
+    let live_data_available = params.latest_by_major.is_some();
     let latest_by_major: BTreeMap<u32, String> = params
         .latest_by_major
         .unwrap_or_default()
         .into_iter()
         .collect();
-    let live_data_available = latest_by_major_provided.then_some(true);
     let now = SystemTime::now();
 
-    let mut statuses = Vec::with_capacity(wanted.len());
-    for id in &wanted {
-        match id {
-            VersionManagerId::Nvm => {
-                let fs: Arc<dyn NvmFileSystem> = Arc::new(host::RealManagedVersionFs);
-                let status = detect_nvm(
-                    fs,
-                    &path_env,
-                    NvmDetectionOptions {
-                        now,
-                        schedule: &NODE_RELEASE_SCHEDULE,
-                        current_node_path: current_node_path_for(VersionManagerId::Nvm),
-                        latest_by_major: latest_by_major.clone(),
-                        live_data_available,
-                    },
-                )
-                .await;
-                statuses.push(status);
-            }
-            VersionManagerId::Fnm => {
-                let fs: Arc<dyn ManagedVersionFileSystem> = Arc::new(host::RealManagedVersionFs);
-                let manager_version =
-                    formatted_manager_version(fnm_runtime_status.as_ref(), &FNM_RUNTIME_DEFINITION);
-                let status = detect_fnm(
-                    fs,
-                    &path_env,
-                    FnmDetectionOptions {
-                        now,
-                        schedule: &NODE_RELEASE_SCHEDULE,
-                        current_node_path: current_node_path_for(VersionManagerId::Fnm),
-                        latest_by_major: latest_by_major.clone(),
-                        live_data_available,
-                        manager_version,
-                    },
-                )
-                .await;
-                statuses.push(status);
-            }
-            VersionManagerId::Volta => {
-                unreachable!("volta is filtered out of `wanted` before this loop runs")
-            }
+    // The two detectors share no state, so they run concurrently; each is
+    // skipped outright when no requested id names it.
+    let nvm_future = async {
+        if !wanted.contains(&VersionManagerId::Nvm) {
+            return None;
         }
-    }
+        let fs: Arc<dyn NvmFileSystem> = Arc::new(host::RealManagedVersionFs);
+        let options = NvmDetectionOptions {
+            now,
+            schedule: &NODE_RELEASE_SCHEDULE,
+            current_node_path: current_node_path_for(VersionManagerId::Nvm),
+            latest_by_major: latest_by_major.clone(),
+            live_data_available,
+        };
+        Some(detect_nvm(fs, &path_env, options).await)
+    };
+    let fnm_future = async {
+        if !needs_fnm {
+            return None;
+        }
+        let fs: Arc<dyn ManagedVersionFileSystem> = Arc::new(host::RealManagedVersionFs);
+        let options = FnmDetectionOptions {
+            now,
+            schedule: &NODE_RELEASE_SCHEDULE,
+            current_node_path: current_node_path_for(VersionManagerId::Fnm),
+            latest_by_major: latest_by_major.clone(),
+            live_data_available,
+            manager_version: formatted_manager_version(
+                fnm_runtime_status.as_ref(),
+                &FNM_RUNTIME_DEFINITION,
+            ),
+        };
+        Some(detect_fnm(fs, &path_env, options).await)
+    };
+    let (nvm_status, fnm_status) = tokio::join!(nvm_future, fnm_future);
+
+    // One entry per requested id, in request order — a repeated id repeats
+    // its status, exactly as when each id was detected on its own.
+    let statuses: Vec<VersionManagerStatus> = wanted
+        .iter()
+        .map(|id| match id {
+            VersionManagerId::Nvm => nvm_status.clone(),
+            VersionManagerId::Fnm => fnm_status.clone(),
+            VersionManagerId::Volta => {
+                unreachable!("volta is filtered out of `wanted` before this runs")
+            }
+        })
+        .map(|status| status.expect("every requested manager was detected above"))
+        .collect();
 
     Ok(json!({ "statuses": statuses }))
 }
@@ -586,50 +564,28 @@ fn resolve_config_home(target_id: AgentTargetId, env: &PathEnv) -> String {
     }
 }
 
-/// How one [`ExternalAgentCliDefinition`]'s sign-in state is probed, with
-/// its auth path already resolved — split from
-/// [`AgentAuthDefinition`] so the (blocking) path join happens once,
-/// outside the `run_blocking` closure [`run_auth_probe`] runs inside.
-enum AuthProbeSpec {
-    File {
-        path: String,
-        unknown_when_missing: bool,
-    },
-    ConfigKey {
-        path: String,
-        key: &'static str,
-    },
-}
-
-fn auth_probe_spec(
-    cli: &ExternalAgentCliDefinition,
+/// Probes one agent CLI's sign-in state under `config_home` the way its
+/// [`AgentAuthDefinition`] says to. Blocking: runs inside the same
+/// `run_blocking` closure as the config-home existence check.
+fn probe_agent_auth(
+    auth: AgentAuthDefinition,
     config_home: &str,
     platform: &str,
-) -> AuthProbeSpec {
-    match cli.auth {
+) -> AuthSignalResult {
+    match auth {
         AgentAuthDefinition::File {
             file_name,
             unknown_when_missing,
-        } => AuthProbeSpec::File {
-            path: join_path(platform, &[config_home, file_name]),
+        } => probe_auth_file(
+            &join_path(platform, &[config_home, file_name]),
             unknown_when_missing,
-        },
-        AgentAuthDefinition::ConfigKey { file_name, key } => AuthProbeSpec::ConfigKey {
-            path: join_path(platform, &[config_home, file_name]),
+            &host::RealAuthSignalFs,
+        ),
+        AgentAuthDefinition::ConfigKey { file_name, key } => probe_config_key(
+            &join_path(platform, &[config_home, file_name]),
             key,
-        },
-    }
-}
-
-fn run_auth_probe(spec: &AuthProbeSpec) -> AuthSignalResult {
-    match spec {
-        AuthProbeSpec::File {
-            path,
-            unknown_when_missing,
-        } => probe_auth_file(path, *unknown_when_missing, &host::RealAuthSignalFs),
-        AuthProbeSpec::ConfigKey { path, key } => {
-            probe_config_key(path, key, &host::RealAuthSignalFs)
-        }
+            &host::RealAuthSignalFs,
+        ),
     }
 }
 
@@ -648,7 +604,7 @@ fn map_runtime_findings(
             if finding.code == RuntimeFindingCode::NotFound {
                 RuntimeFinding {
                     code: RuntimeFindingCode::CliNotInstalled,
-                    params: params_map(&[("targetId", wire_str(&target_id))]),
+                    params: finding_params(&[("targetId", wire_str(&target_id))]),
                     severity: None,
                 }
             } else {
@@ -680,7 +636,7 @@ fn append_location_findings(findings: &mut Vec<RuntimeFinding>, locations: &[Loc
         }
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::LocationUnwritable,
-            params: params_map(&[
+            params: finding_params(&[
                 ("locationId", location.id.to_string()),
                 ("path", path.clone()),
             ]),
@@ -719,7 +675,10 @@ fn health_for_agent(base_health: RuntimeHealth, findings: &[RuntimeFinding]) -> 
 /// route that reaches this method is already behind `requireAuth`, so
 /// `authenticated`/`authSignal` are always `true`/`session` — this
 /// process only ever answers on behalf of a signed-in session.
-async fn describe_self_agent(path_env: &PathEnv, self_params: &SelfAgentParams) -> AgentCliStatus {
+async fn describe_self_agent(
+    path_env: &Arc<PathEnv>,
+    self_params: &SelfAgentParams,
+) -> AgentCliStatus {
     let config_home = self_params
         .config_home
         .clone()
@@ -731,7 +690,7 @@ async fn describe_self_agent(path_env: &PathEnv, self_params: &SelfAgentParams) 
     });
 
     let (config_home_exists, location_statuses) = {
-        let path_env = path_env.clone();
+        let path_env = Arc::clone(path_env);
         let config_home_for_probe = config_home.clone();
         crate::blocking::run_blocking(move || {
             let exists =
@@ -750,7 +709,7 @@ async fn describe_self_agent(path_env: &PathEnv, self_params: &SelfAgentParams) 
     if !config_home_exists {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::ConfigHomeMissing,
-            params: params_map(&[("configHome", config_home.clone())]),
+            params: finding_params(&[("configHome", config_home.clone())]),
             severity: None,
         });
     }
@@ -800,13 +759,13 @@ async fn describe_self_agent(path_env: &PathEnv, self_params: &SelfAgentParams) 
 /// and its own `locations` array.
 async fn describe_external_agent(
     cli: ExternalAgentCliDefinition,
-    path_env: &PathEnv,
+    path_env: &Arc<PathEnv>,
     cancel: &CancellationToken,
     installable: bool,
     budget: &Option<ProbeBudget>,
 ) -> AgentCliStatus {
     let deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
-        path_env.clone(),
+        Arc::clone(path_env),
         cancel.clone(),
     ));
     let options = build_binary_scan_options(budget);
@@ -825,15 +784,14 @@ async fn describe_external_agent(
 
     let target_id = cli.target_id;
     let config_home = resolve_config_home(target_id, path_env);
-    let auth_spec = auth_probe_spec(&cli, &config_home, &path_env.platform);
 
     let (config_home_exists, auth, location_statuses) = {
-        let path_env = path_env.clone();
+        let path_env = Arc::clone(path_env);
         let config_home_for_probe = config_home.clone();
         crate::blocking::run_blocking(move || {
             let exists =
                 auth_signal::directory_exists(&config_home_for_probe, &host::RealAuthSignalFs);
-            let auth = run_auth_probe(&auth_spec);
+            let auth = probe_agent_auth(cli.auth, &config_home_for_probe, &path_env.platform);
             let locations = locations::describe_target_locations(
                 target_id,
                 &path_env,
@@ -851,7 +809,7 @@ async fn describe_external_agent(
     if cli_installed && !config_home_exists {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::ConfigHomeMissing,
-            params: params_map(&[("configHome", config_home.clone())]),
+            params: finding_params(&[("configHome", config_home.clone())]),
             severity: None,
         });
     }
@@ -862,7 +820,7 @@ async fn describe_external_agent(
     {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::NotAuthenticated,
-            params: params_map(&[("targetId", wire_str(&target_id))]),
+            params: finding_params(&[("targetId", wire_str(&target_id))]),
             severity: None,
         });
     }
@@ -892,17 +850,17 @@ async fn handle_probe_agent_clis(
     params: ProbeAgentClisParams,
     cancel: CancellationToken,
 ) -> Result<Value, RemoteError> {
-    let path_env = host::build_runtime_path_env(
+    let path_env = Arc::new(host::build_runtime_path_env(
         params
             .path_env
             .as_ref()
             .and_then(|override_| override_.env.as_ref()),
-    );
+    ));
     let definitions = select_agent_definitions(params.target_ids.as_deref())?;
 
     let mut tasks: tokio::task::JoinSet<(usize, AgentCliStatus)> = tokio::task::JoinSet::new();
     for (index, definition) in definitions.iter().copied().enumerate() {
-        let path_env = path_env.clone();
+        let path_env = Arc::clone(&path_env);
         let cancel = cancel.clone();
         let installable = params
             .installable

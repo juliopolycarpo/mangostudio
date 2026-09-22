@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 use cap_fs_ext::DirExt as _;
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
-use mango_protocol::error::{RemoteError, codes};
+use mango_protocol::error::RemoteError;
 
-use super::policy::CompiledPolicy;
+use super::io::{io_error, open_read, path_error};
+use super::policy::{CompiledPolicy, absolute};
 use crate::workspace::lexically_normalize;
 
 /// A directory that has been opened and checked against the final policy.
@@ -255,7 +256,7 @@ fn open_existing_file_with_hook(
 ) -> Result<File, RemoteError> {
     policy.check(path)?;
     hook.after_resolution();
-    let file = open_file(path).map_err(|error| open_error(path, error))?;
+    let file = open_read(path).map_err(|error| open_error(path, error))?;
     check_file_handle(policy, path, &file)?;
     Ok(file)
 }
@@ -300,7 +301,6 @@ pub(super) fn bind_opened_directory(
     dir: Dir,
 ) -> Result<BoundDir, RemoteError> {
     let final_path = directory_final_path(&dir)?;
-    policy.check_final_handle_path(requested, &final_path)?;
     let anchor = bind_authorization_anchor(policy, requested, &final_path, &final_path)?;
     Ok(BoundDir { anchor })
 }
@@ -317,7 +317,6 @@ fn bind_verified_parent(
     parent_target.extend(missing);
     let mut final_target = parent_target.clone();
     final_target.push(&leaf);
-    policy.check_final_handle_path(requested, &final_target)?;
     let anchor = bind_authorization_anchor(policy, requested, &final_target, &parent_target)?;
     let Some(dir) = open_or_create_anchored_directory(&anchor, create_missing)? else {
         return Ok(None);
@@ -351,6 +350,7 @@ fn bind_authorization_anchor(
     final_target: &Path,
     directory_target: &Path,
 ) -> Result<AnchoredDir, RemoteError> {
+    // Every binding caller relies on this check before any anchor is opened.
     policy.check_final_handle_path(requested, final_target)?;
     // A configured policy root can itself be renamed after binding. Only the
     // filesystem/volume root is immutable for the lifetime of a capability;
@@ -436,8 +436,7 @@ pub(super) fn verify_opened_file(
     file: cap_std::fs::File,
 ) -> Result<File, RemoteError> {
     let file = file.into_std();
-    let final_path = final_path_from_file(&file).map_err(handle_error)?;
-    policy.check_final_handle_path(requested, &final_path)?;
+    check_file_handle(policy, requested, &file)?;
     Ok(file)
 }
 
@@ -527,27 +526,7 @@ fn open_or_create_child(
 }
 
 fn absolute_normalized(path: &Path) -> Result<PathBuf, RemoteError> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))?
-            .join(path)
-    };
-    Ok(lexically_normalize(&absolute))
-}
-
-fn open_file(path: &Path) -> std::io::Result<File> {
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        // A FIFO substituted after policy resolution must not block the worker
-        // before its handle and type can be checked by the caller.
-        options.custom_flags(nix::libc::O_NONBLOCK);
-    }
-    options.open(path)
+    Ok(lexically_normalize(&absolute(path)?))
 }
 
 fn open_error(path: &Path, error: std::io::Error) -> RemoteError {
@@ -557,7 +536,7 @@ fn open_error(path: &Path, error: std::io::Error) -> RemoteError {
             path.display()
         ))
     } else {
-        RemoteError::new(codes::INTERNAL, error.to_string())
+        io_error(error)
     }
 }
 
@@ -565,10 +544,6 @@ fn handle_error(error: std::io::Error) -> RemoteError {
     path_error(format!(
         "Cannot verify the opened filesystem object's final path: {error}"
     ))
-}
-
-fn path_error(message: String) -> RemoteError {
-    RemoteError::new(codes::INTERNAL, message).with_detail("kind", "path_access")
 }
 
 #[cfg(target_os = "linux")]

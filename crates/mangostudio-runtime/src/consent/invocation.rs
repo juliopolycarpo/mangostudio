@@ -229,8 +229,11 @@ fn record_launch_grant(
         ("slot", Value::from(slot.as_str())),
     ];
     let update = [
-        ("profile", Some(Value::String("full".to_string()))),
-        ("allow", Some(allow_to_json(allow))),
+        ("profile", Some(Value::from(ManifestProfile::Full.as_str()))),
+        (
+            "allow",
+            Some(serde_json::to_value(allow).expect("a struct of ten bools always serialises")),
+        ),
         (
             "setup",
             Some(json!({
@@ -333,22 +336,6 @@ fn resolved_setup_is_configured(slot: RuntimeSlot, stored: Option<&Value>) -> bo
         || default_setup_state_for_slot(slot) == DefaultSetupState::Configured,
         |raw| raw == "configured",
     )
-}
-
-/// [`ResolvedCapabilityAllow`] as the `allow` object `runtime.json` stores.
-fn allow_to_json(allow: ResolvedCapabilityAllow) -> Value {
-    json!({
-        "fsRead": allow.fs_read,
-        "fsWrite": allow.fs_write,
-        "shell": allow.shell,
-        "git": allow.git,
-        "probing": allow.probing,
-        "mcp": allow.mcp,
-        "library": allow.library,
-        "checkpoints": allow.checkpoints,
-        "update": allow.update,
-        "externalAgents": allow.external_agents,
-    })
 }
 
 #[cfg(test)]

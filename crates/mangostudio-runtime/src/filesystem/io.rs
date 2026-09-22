@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::capability::{self, VerifiedParent};
 use super::policy::CompiledPolicy;
+use super::service::{BYTE_VIEW_MAX_BYTES, READ_MAX_BYTES};
 use crate::file_identity::{ObjectIdentity, object_identity};
 
 #[derive(Debug)]
@@ -83,11 +84,9 @@ pub(super) fn explain_unread(
         return error;
     }
     let size = metadata.len;
-    const TEXT_LIMIT: u64 = 10 * 1024 * 1024;
-    const BYTE_LIMIT: u64 = 256 * 1024;
-    if size > TEXT_LIMIT {
+    if size > READ_MAX_BYTES as u64 {
         return path_error(format!(
-            "Cannot {action} \"{}\": it is {size} bytes, past the {TEXT_LIMIT}-byte read_file limit, so the read-before-{action} guard cannot be satisfied for this path.",
+            "Cannot {action} \"{}\": it is {size} bytes, past the {READ_MAX_BYTES}-byte read_file limit, so the read-before-{action} guard cannot be satisfied for this path.",
             path.display()
         ));
     }
@@ -99,9 +98,9 @@ pub(super) fn explain_unread(
     {
         return error;
     }
-    if size > BYTE_LIMIT {
+    if size > BYTE_VIEW_MAX_BYTES as u64 {
         return path_error(format!(
-            "Cannot {action} \"{}\": it is a binary file of {size} bytes, past the {BYTE_LIMIT}-byte read_file byte-view limit, so the read-before-{action} guard cannot be satisfied for this path.",
+            "Cannot {action} \"{}\": it is a binary file of {size} bytes, past the {BYTE_VIEW_MAX_BYTES}-byte read_file byte-view limit, so the read-before-{action} guard cannot be satisfied for this path.",
             path.display()
         ));
     }
@@ -178,7 +177,15 @@ pub(super) fn read(
     })
 }
 
-fn open_read(path: &Path) -> std::io::Result<File> {
+/// Opens a path for reading without blocking on a FIFO, before its handle
+/// and type are checked by the caller.
+///
+/// # Example
+///
+/// ```ignore
+/// let file = open_read(path).map_err(io_error)?;
+/// ```
+pub(super) fn open_read(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -322,42 +329,63 @@ fn open_hash_file_if_present(
 }
 
 fn hash_open_file(file: &mut File) -> Result<String, RemoteError> {
-    let mut hasher = Sha256::new();
-    let mut chunk = [0; 64 * 1024];
-    loop {
-        let count = file.read(&mut chunk).map_err(io_error)?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&chunk[..count]);
-    }
-    Ok(hash_hex(&hasher.finalize()))
+    hash_reader(file, None)
 }
 
 fn hash_reader_cancellable(
     reader: &mut impl Read,
     cancel: &CancellationToken,
 ) -> Result<String, RemoteError> {
+    hash_reader(reader, Some(cancel))
+}
+
+/// Hashes a reader in fixed memory, checking `cancel` around every read.
+fn hash_reader(
+    reader: &mut impl Read,
+    cancel: Option<&CancellationToken>,
+) -> Result<String, RemoteError> {
+    let check = || cancel.map_or(Ok(()), check_cancel);
     let mut hasher = Sha256::new();
     let mut chunk = [0; 64 * 1024];
     loop {
-        check_cancel(cancel)?;
+        check()?;
         let count = reader.read(&mut chunk).map_err(io_error)?;
-        check_cancel(cancel)?;
+        check()?;
         if count == 0 {
             break;
         }
         hasher.update(&chunk[..count]);
     }
-    Ok(hash_hex(&hasher.finalize()))
+    Ok(hex(&hasher.finalize()))
 }
 
-fn hash_bytes(bytes: &[u8]) -> String {
-    hash_hex(&Sha256::digest(bytes))
+/// Returns the lowercase hex SHA-256 digest every filesystem result and
+/// freshness entry uses to name file content.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(sha256_hex(b"").len(), 64);
+/// ```
+pub(super) fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
 }
 
-fn hash_hex(hash: &[u8]) -> String {
-    hash.iter().map(|byte| format!("{byte:02x}")).collect()
+/// Encodes bytes as lowercase hexadecimal, two digits per byte.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(hex(&[0x00, 0xab, 0xff]), "00abff");
+/// ```
+pub(super) fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        encoded.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 pub(super) fn assert_regular(
@@ -426,7 +454,7 @@ pub(super) fn write_atomic(
     }
     let parent = capability::verified_parent(policy, path, true)?;
     if exclusive {
-        return write_exclusive_bound(&parent, path, bytes);
+        return write_exclusive_bound(&parent, path, bytes, io_error);
     }
     parent.with_parent(|dir, leaf| {
         let mode = inspect_destination_in(dir, leaf, path, || {})?;
@@ -514,15 +542,7 @@ pub(super) fn create_new(
 ) -> Result<f64, RemoteError> {
     if !policy.is_unrestricted() {
         let parent = capability::verified_parent(policy, path, true)?;
-        return parent.with_parent(|dir, leaf| {
-            let mut file = dir
-                .open_with(leaf, CapOpenOptions::new().write(true).create_new(true))
-                .map_err(create_error)?;
-            file.write_all(bytes)
-                .and_then(|()| file.into_std().metadata())
-                .map(|metadata| mtime(&metadata))
-                .map_err(|cause| exclusive_create_uncertain_error(path, cause))
-        });
+        return write_exclusive_bound(&parent, path, bytes, create_error);
     }
     fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(io_error)?;
     write_exclusive(path, bytes).map_err(create_error)
@@ -579,7 +599,7 @@ fn temporary_name() -> Result<OsString, RemoteError> {
     let mut random = [0; 8];
     getrandom::fill(&mut random)
         .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))?;
-    let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    let suffix = hex(&random);
     Ok(OsString::from(format!(".mango-{suffix}.tmp")))
 }
 
@@ -626,15 +646,18 @@ fn write_replacement_with_hook(
     result.map_err(io_error)
 }
 
+/// Creates `path` through its verified parent, mapping a failed open with
+/// `open_error` so callers choose how an existing name is reported.
 fn write_exclusive_bound(
     parent: &VerifiedParent,
     path: &Path,
     bytes: &[u8],
+    open_error: fn(std::io::Error) -> RemoteError,
 ) -> Result<f64, RemoteError> {
     parent.with_parent(|dir, leaf| {
         let mut file = dir
             .open_with(leaf, CapOpenOptions::new().write(true).create_new(true))
-            .map_err(io_error)?;
+            .map_err(open_error)?;
         file.write_all(bytes)
             .and_then(|()| file.into_std().metadata())
             .map(|metadata| mtime(&metadata))
@@ -803,7 +826,7 @@ fn write_replacement_in_with_hook(
     let mtime = mtime(&metadata);
     let identity = object_identity(&file, &metadata)
         .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))?;
-    let expected_hash = hash_bytes(bytes);
+    let expected_hash = sha256_hex(bytes);
     hook(ReplacementHookPhase::Prepared, temp_path);
     if !temporary_matches(dir, temp_path, identity, &expected_hash) {
         return Err(temporary_write_uncertain_error(
@@ -853,14 +876,7 @@ fn matching_destination_identity_in(
     leaf: &Path,
     expected: &[u8],
 ) -> Result<Option<ObjectIdentity>, RemoteError> {
-    let mut options = CapOpenOptions::new();
-    options.read(true);
-    options.follow(FollowSymlinks::No);
-    #[cfg(unix)]
-    {
-        use cap_std::fs::OpenOptionsExt as _;
-        options.custom_flags(nix::libc::O_NONBLOCK);
-    }
+    let options = read_nofollow_options();
     let file = dir.open_with(leaf, &options).map_err(io_error)?.into_std();
     let metadata = file.metadata().map_err(io_error)?;
     if !metadata.is_file() {
@@ -889,24 +905,26 @@ fn temporary_matches(
     expected_identity: ObjectIdentity,
     expected_hash: &str,
 ) -> bool {
+    matches!(
+        named_file_match_state_in(dir, temp, expected_identity, expected_hash),
+        Ok(NamedFileMatch::Matches)
+    )
+}
+
+/// Read-only, no-follow options for inspecting a name the caller may not own.
+/// Nonblocking open keeps a substituted FIFO from wedging the worker before
+/// its type is checked.
+fn read_nofollow_options() -> CapOpenOptions {
     let mut options = CapOpenOptions::new();
     options.read(true);
     options.follow(FollowSymlinks::No);
     #[cfg(unix)]
     {
         use cap_std::fs::OpenOptionsExt as _;
+
         options.custom_flags(nix::libc::O_NONBLOCK);
     }
-    let Ok(file) = dir.open_with(temp, &options) else {
-        return false;
-    };
-    let mut file = file.into_std();
-    let Ok(metadata) = file.metadata() else {
-        return false;
-    };
-    metadata.is_file()
-        && object_identity(&file, &metadata).is_ok_and(|identity| identity == expected_identity)
-        && hash_open_file(&mut file).is_ok_and(|hash| hash == expected_hash)
+    options
 }
 
 fn exclusive_create_uncertain_error(path: &Path, cause: std::io::Error) -> RemoteError {
@@ -1125,32 +1143,22 @@ fn copy_move_no_overwrite(
         paths: MovePaths { from, to },
     };
     let temporary_path = copied.paths.to.with_file_name(&copied.prepared.temporary);
-    match named_file_state(copied.to_parent) {
-        NamedFileState::Absent => {}
-        NamedFileState::Present => {
-            remove_owned_move_temporary(
-                copied.to_parent,
-                &copied.prepared.temporary,
-                copied.prepared.identity,
-                &copied.source.hash,
-                &temporary_path,
-                &copied.paths,
-                hooks,
-            )?;
-            return Err(destination_exists_error(to));
-        }
-        NamedFileState::Uncertain => {
-            remove_owned_move_temporary(
-                copied.to_parent,
-                &copied.prepared.temporary,
-                copied.prepared.identity,
-                &copied.source.hash,
-                &temporary_path,
-                &copied.paths,
-                hooks,
-            )?;
-            return Err(destination_availability_uncertain_error(from, to));
-        }
+    let unavailable = match named_file_state(copied.to_parent) {
+        NamedFileState::Absent => None,
+        NamedFileState::Present => Some(destination_exists_error(to)),
+        NamedFileState::Uncertain => Some(destination_availability_uncertain_error(from, to)),
+    };
+    if let Some(error) = unavailable {
+        remove_owned_move_temporary(
+            copied.to_parent,
+            &copied.prepared.temporary,
+            copied.prepared.identity,
+            &copied.source.hash,
+            &temporary_path,
+            &copied.paths,
+            hooks,
+        )?;
+        return Err(error);
     }
     if let Err(cause) = hooks.before_source_stage(from) {
         return Err(abort_unpublished_copy_before_source_stage(
@@ -1421,15 +1429,7 @@ fn named_file_match_state_in(
     expected_identity: ObjectIdentity,
     expected_hash: &str,
 ) -> Result<NamedFileMatch, RemoteError> {
-    let mut options = CapOpenOptions::new();
-    options.read(true);
-    options.follow(FollowSymlinks::No);
-    #[cfg(unix)]
-    {
-        use cap_std::fs::OpenOptionsExt as _;
-
-        options.custom_flags(nix::libc::O_NONBLOCK);
-    }
+    let options = read_nofollow_options();
     let file = match dir.open_with(leaf, &options) {
         Ok(file) => file.into_std(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1707,17 +1707,7 @@ fn staged_source_and_copy_recovery_error(
     state: CopiedMoveState,
     cause: impl std::fmt::Display,
 ) -> RemoteError {
-    let copy_path = match state {
-        CopiedMoveState::Temporary => {
-            format!(
-                "Temporary \"{}\" was retained for recovery.",
-                temporary.display()
-            )
-        }
-        CopiedMoveState::Published => {
-            "The destination may contain the copied bytes or a replacement.".to_owned()
-        }
-    };
+    let copy_path = copied_move_location(&state, temporary);
     path_error(format!(
         "Copied move from \"{}\" to \"{}\" could not restore staged source recovery at \"{}\" without replacing a recreated source. {copy_path} Inspect all paths before retrying. Cause: {cause}",
         from.display(),
@@ -1734,7 +1724,18 @@ fn committed_source_restore_uncertain_error(
     state: CopiedMoveState,
     cause: impl std::fmt::Display,
 ) -> RemoteError {
-    let copy_path = match state {
+    let copy_path = copied_move_location(&state, temporary);
+    path_error(format!(
+        "Copied move from \"{}\" to \"{}\" committed source restoration, but the source no longer identifies the captured bytes. {copy_path} Inspect both paths before retrying. Cause: {cause}",
+        from.display(),
+        to.display(),
+    ))
+    .with_detail("pathsMayHaveChanged", true)
+}
+
+/// Describes where the copied bytes remain after a failed copied move.
+fn copied_move_location(state: &CopiedMoveState, temporary: &Path) -> String {
+    match state {
         CopiedMoveState::Temporary => {
             format!(
                 "Temporary \"{}\" was retained for recovery.",
@@ -1744,13 +1745,7 @@ fn committed_source_restore_uncertain_error(
         CopiedMoveState::Published => {
             "The destination may contain the copied bytes or a replacement.".to_owned()
         }
-    };
-    path_error(format!(
-        "Copied move from \"{}\" to \"{}\" committed source restoration, but the source no longer identifies the captured bytes. {copy_path} Inspect both paths before retrying. Cause: {cause}",
-        from.display(),
-        to.display(),
-    ))
-    .with_detail("pathsMayHaveChanged", true)
+    }
 }
 
 fn destination_exists_error(destination: &Path) -> RemoteError {
@@ -1904,14 +1899,7 @@ fn verify_moved_destination(
     expected_hash: &str,
     expected_identity: ObjectIdentity,
 ) -> MoveVerification {
-    let mut options = CapOpenOptions::new();
-    options.read(true);
-    options.follow(FollowSymlinks::No);
-    #[cfg(unix)]
-    {
-        use cap_std::fs::OpenOptionsExt as _;
-        options.custom_flags(nix::libc::O_NONBLOCK);
-    }
+    let options = read_nofollow_options();
     let Ok(mut file) = parent.with_parent(|dir, leaf| {
         dir.open_with(leaf, &options)
             .map(|file| file.into_std())
@@ -2254,6 +2242,24 @@ mod tests {
         }
         .compile()
         .unwrap()
+    }
+
+    #[test]
+    fn hex_encodes_every_byte_as_two_lowercase_digits() {
+        assert_eq!(hex(&[]), "");
+        assert_eq!(hex(&[0x00, 0x0f, 0xab, 0xff]), "000fabff");
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_digests() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     struct ForcedCopyFailure {

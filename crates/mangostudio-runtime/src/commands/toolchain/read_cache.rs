@@ -51,10 +51,7 @@ impl<T: CacheValue> ReadCache<T> {
     pub(super) fn read(&self, path: &str, reader: &dyn Reader<Value = T>) -> Option<T> {
         let identity = reader.identity(path);
         if let Some(identity) = &identity {
-            let entries = self
-                .0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let entries = crate::ports::audit::lock(&self.0);
             if let Some(entry) = entries
                 .iter()
                 .find(|entry| entry.path == path && &entry.identity == identity)
@@ -73,10 +70,7 @@ impl<T: CacheValue> ReadCache<T> {
         {
             return Some(value);
         }
-        let mut entries = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut entries = crate::ports::audit::lock(&self.0);
         entries.retain(|entry| entry.path != path);
         while entries.len() >= MAX_ENTRIES
             || entries.iter().map(|entry| entry.bytes).sum::<usize>() + bytes > MAX_BYTES

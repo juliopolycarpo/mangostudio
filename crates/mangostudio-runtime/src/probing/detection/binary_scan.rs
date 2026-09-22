@@ -351,7 +351,7 @@ fn iterate_binary_candidates(
     }
 
     let names = binary_candidate_names(definition, &path_env.platform, &path_env.env);
-    let list_separator = if path_env.is_windows() { ';' } else { ':' };
+    let list_separator = path_env.path_list_separator();
     let path_value = path_env.env_var("PATH").unwrap_or("");
     let mut seen = HashSet::new();
 
@@ -427,10 +427,7 @@ pub fn windows_default_fnm_dir(path_env: &PathEnv) -> Option<String> {
     if !path_env.is_windows() {
         return None;
     }
-    let appdata = path_env.env_var("APPDATA")?.trim();
-    if appdata.is_empty() {
-        return None;
-    }
+    let appdata = path_env.non_blank_var("APPDATA")?;
     Some(join_path("win32", &[appdata, "fnm"]))
 }
 
@@ -688,9 +685,7 @@ async fn probe_candidates_bounded(
                     Some(CandidateProbeResult::Installation { version: Some(version), .. })
                         if options.stop_when.as_ref().is_some_and(|predicate| predicate(version))
                 );
-                results
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)[index] = result;
+                crate::ports::audit::lock(&results)[index] = result;
                 if is_terminal {
                     terminal_index.fetch_min(index, Ordering::SeqCst);
                 }
@@ -718,14 +713,14 @@ pub async fn scan_runtime(
     deps: Arc<dyn BinaryScanDeps>,
     options: BinaryScanOptions,
 ) -> RuntimeScanResult {
-    let path_env = deps.path_env().clone();
+    let path_env = deps.path_env();
     // Computed before the existence-check pass below, not after: that pass
     // is now real (possibly blocking-pool-routed) I/O per candidate, not a
     // synchronous in-memory lookup, so a slow filesystem there must eat
     // into this scan's own total budget rather than getting free time
     // before the clock the probe phase is measured against even starts.
     let deadline = TokioInstant::now() + Duration::from_millis(options.total_timeout_ms);
-    let candidates = iterate_binary_candidates(definition, &path_env, &options);
+    let candidates = iterate_binary_candidates(definition, path_env, &options);
     // Each existence check is individually raced against what remains of
     // the scan's own `deadline` — not the whole pass wrapped in one
     // `tokio::time::timeout`, which would discard every candidate already
@@ -808,7 +803,7 @@ pub async fn scan_runtime(
                     .entry(realpath_key)
                     .or_insert_with(|| candidate.path.clone());
 
-                let managed_by = detect_version_manager(&candidate.path, &path, &path_env);
+                let managed_by = detect_version_manager(&candidate.path, &path, path_env);
                 // Only candidates discovered through `PATH` can win normal
                 // shell lookup. Version-manager binaries retain that
                 // provenance through `path_index`.
@@ -822,8 +817,7 @@ pub async fn scan_runtime(
                 let effective =
                     candidate.origin == RuntimeOrigin::Path && !has_effective_installation;
                 has_effective_installation |= effective;
-                let path_source =
-                    resolve_path_source(&candidate.path, &path, managed_by, &path_env);
+                let path_source = resolve_path_source(&candidate.path, &path, managed_by, path_env);
 
                 installations.push(RuntimeInstallation {
                     path,
@@ -929,14 +923,8 @@ mod tests {
             _args: &'a [String],
             timeout_ms: u64,
         ) -> BoxFuture<'a, Result<Option<String>, ProbeError>> {
-            self.calls
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(binary.to_string());
-            self.timeouts_seen
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(timeout_ms);
+            crate::ports::audit::lock(&self.calls).push(binary.to_string());
+            crate::ports::audit::lock(&self.timeouts_seen).push(timeout_ms);
             let pending = self.pending.contains(binary);
             let response = self.responses.get(binary).cloned();
             Box::pin(async move {

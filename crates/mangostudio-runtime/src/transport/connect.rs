@@ -16,11 +16,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use mango_protocol::close::close_codes;
-use mango_protocol::contract::Contract;
 use mango_protocol::session::{SessionClosure, SessionOptions};
 use mango_protocol::transports::deadline::ConnectDeadline;
 use mango_protocol::transports::websocket::client::{WebSocketConnectOptions, connect_websocket};
-use mangostudio_runtime_contract::catalog::catalog;
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime_home::RuntimeSlot;
@@ -252,8 +250,6 @@ async fn run_one_connection(
     };
 
     let host = build_host(config.slot, &config.mango_home, &config.runtime_version);
-    let contract = Contract::from_catalog(catalog().clone())
-        .expect("the embedded catalog compiles into a contract");
     // Bounded by this dial's own `cancel`, unlike `stdio`/`serve`'s
     // connection setup: a shutdown mid-probe stops the wait instead of
     // running it out. See `hello_capabilities`'s own doc comment.
@@ -273,7 +269,6 @@ async fn run_one_connection(
     let (session, driver_handle) = crate::transport::start_session(
         port,
         options,
-        &contract,
         host.registry,
         host.authorization,
         config.slot.as_str(),

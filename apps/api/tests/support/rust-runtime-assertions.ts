@@ -21,35 +21,12 @@ import { join } from 'node:path';
 import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
-import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
+import {
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeHealthReport,
+} from '@mangostudio/shared/runtime-home';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 import { ToolArgumentError } from '../../src/services/tools/arg-parsing';
-
-/** Node-style platform/arch this test process itself runs on, mirroring `health.rs`'s own mapping. */
-function nodePlatform(): string {
-  return process.platform;
-}
-
-/**
- * The exact `allow` object a freshly auto-granted slot with no stored
- * `runtime.json` reports — `consent::presets::FULL` on the Rust side,
- * granted either directly (a `host` slot's own default) or through
- * `consent_by_invocation`'s "invocation is consent" grant (a never-before-seen
- * `remote` slot, which `serve`/`connect` both use). Every capability this
- * crate's `RuntimeCapabilityAllowSchema` declares, all `true`.
- */
-const FULL_ALLOW = {
-  fsRead: true,
-  fsWrite: true,
-  shell: true,
-  git: true,
-  probing: true,
-  mcp: true,
-  library: true,
-  checkpoints: true,
-  update: true,
-  externalAgents: true,
-} as const;
 
 /**
  * Asserts `runtime.health`'s shape field-by-field against what
@@ -69,8 +46,11 @@ export function assertRustRuntimeHealthShape(
   // A `target/debug` binary never sits inside any slot's managed install
   // layout, whichever slot it is asked to answer as.
   expect(health.source).toBe('bundled');
-  expect(health.platform).toBe(nodePlatform());
-  expect(health.allow).toEqual(FULL_ALLOW);
+  expect(health.platform).toBe(process.platform);
+  // A freshly auto-granted slot with no stored `runtime.json` reports the
+  // `full` preset: a `host` slot's own default, or the "invocation is
+  // consent" grant `serve`/`connect` record for a never-seen `remote` slot.
+  expect(health.allow).toEqual(RUNTIME_CONSENT_PRESETS.full);
   expect(health.profile).toBe('full');
   expect(health.setup?.state).toBe('configured');
   expect(typeof health.git.available).toBe('boolean');

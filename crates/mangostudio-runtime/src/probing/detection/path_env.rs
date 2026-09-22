@@ -44,10 +44,50 @@ impl PathEnv {
         self.env.get(key).map(String::as_str)
     }
 
+    /// [`PathEnv::env_var`] trimmed, or `None` when it is unset or blank —
+    /// how every detector reads a variable that names a directory
+    /// (`NVM_DIR`, `FNM_DIR`, `APPDATA`, …), since an exported-but-empty
+    /// value means "not configured", not "the current directory".
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::probing::detection::path_env::PathEnv;
+    ///
+    /// let mut env = PathEnv::default();
+    /// env.env.insert("NVM_DIR".into(), "  /opt/nvm ".into());
+    /// env.env.insert("FNM_DIR".into(), "   ".into());
+    /// assert_eq!(env.non_blank_var("NVM_DIR"), Some("/opt/nvm"));
+    /// assert_eq!(env.non_blank_var("FNM_DIR"), None);
+    /// ```
+    #[must_use]
+    pub fn non_blank_var(&self, key: &str) -> Option<&str> {
+        self.env_var(key)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
     /// Whether this environment describes a win32 host.
     #[must_use]
     pub fn is_windows(&self) -> bool {
         self.platform == "win32"
+    }
+
+    /// The separator between `PATH` entries on [`PathEnv::platform`] — `;`
+    /// on win32, `:` everywhere else — decided by the described platform,
+    /// never by the host this process runs on.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::probing::detection::path_env::PathEnv;
+    ///
+    /// let env = PathEnv { platform: "win32".into(), ..PathEnv::default() };
+    /// assert_eq!(env.path_list_separator(), ";");
+    /// ```
+    #[must_use]
+    pub fn path_list_separator(&self) -> &'static str {
+        if self.is_windows() { ";" } else { ":" }
     }
 }
 
@@ -161,6 +201,28 @@ mod tests {
         env.env.insert("PATH".to_string(), "/usr/bin".to_string());
         assert_eq!(env.env_var("PATH"), Some("/usr/bin"));
         assert_eq!(env.env_var("path"), None);
+    }
+
+    #[test]
+    fn non_blank_var_trims_and_treats_blank_as_unset() {
+        let mut env = PathEnv::default();
+        env.env
+            .insert("NVM_DIR".to_string(), " /opt/nvm\n".to_string());
+        env.env.insert("FNM_DIR".to_string(), " \t ".to_string());
+        assert_eq!(env.non_blank_var("NVM_DIR"), Some("/opt/nvm"));
+        assert_eq!(env.non_blank_var("FNM_DIR"), None);
+        assert_eq!(env.non_blank_var("MISSING"), None);
+    }
+
+    #[test]
+    fn path_list_separator_follows_the_described_platform() {
+        let mut env = PathEnv {
+            platform: "win32".to_string(),
+            ..PathEnv::default()
+        };
+        assert_eq!(env.path_list_separator(), ";");
+        env.platform = "darwin".to_string();
+        assert_eq!(env.path_list_separator(), ":");
     }
 
     #[test]

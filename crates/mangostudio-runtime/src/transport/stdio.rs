@@ -10,10 +10,8 @@
 use std::time::Duration;
 
 use mango_protocol::close::close_codes;
-use mango_protocol::contract::Contract;
 use mango_protocol::session::SessionOptions;
 use mango_protocol::transports::stdio::stdio_port;
-use mangostudio_runtime_contract::catalog::catalog;
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::invocation::stdio_consent;
@@ -56,10 +54,6 @@ pub(crate) async fn run_with_signals(
     }
 
     let host = build_host(slot, mango_home, runtime_version);
-    let contract = Contract::from_catalog(catalog().clone()).expect(
-        "the embedded catalog compiles into a contract; a change to the catalog that broke this \
-         would already fail mangostudio-runtime-contract's own build",
-    );
     // No request is in flight yet to cancel this against — a fresh token
     // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
     // `hello_capabilities`'s own doc comment.
@@ -71,7 +65,6 @@ pub(crate) async fn run_with_signals(
     let (session, mut driver_handle) = start_session(
         stdio_port(),
         options,
-        &contract,
         host.registry,
         host.authorization,
         slot.as_str(),

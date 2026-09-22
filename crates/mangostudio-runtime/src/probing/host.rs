@@ -45,7 +45,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -62,6 +62,7 @@ use super::detection::winget_ownership::{
 use super::locations::{LocationFsProbe, LocationLayout};
 use crate::blocking::run_blocking;
 use crate::file_identity::fingerprint;
+use crate::probe_cache::ProbeCache;
 use crate::subprocess::{ChildBudget, run_bounded_child};
 
 /// Builds a [`PathEnv`] for this host, mirroring
@@ -119,12 +120,12 @@ fn with_canonical_path_key(mut env: HashMap<String, String>) -> HashMap<String, 
 /// through [`crate::subprocess::run_bounded_child`], memoized by resolved
 /// path and fingerprint. Mirrors `createBinaryScanDeps`.
 pub(crate) struct RealBinaryScanDeps {
-    path_env: PathEnv,
+    path_env: Arc<PathEnv>,
     cancel: CancellationToken,
 }
 
 impl RealBinaryScanDeps {
-    pub(crate) fn new(path_env: PathEnv, cancel: CancellationToken) -> Self {
+    pub(crate) fn new(path_env: Arc<PathEnv>, cancel: CancellationToken) -> Self {
         Self { path_env, cancel }
     }
 }
@@ -178,17 +179,14 @@ const PROBE_MAX_STDERR_BYTES: usize = 1024;
 
 /// Every cached `probe_version` answer, keyed on the candidate path
 /// exactly as handed to this function — never a bare binary name, and
-/// never canonicalised (mirrors [`crate::health`]'s own `git_probe_cache`,
+/// never canonicalised (mirrors [`crate::health`]'s own `GIT_PROBE_CACHE`,
 /// which keys on `which_in`'s un-canonicalised, PATH-joined path for the
 /// identical reason: two `PATH` entries that alias the same real file
 /// through a symlink get two cache entries, which costs one redundant
 /// probe the first time each is seen and nothing after that — cheaper
 /// than a second `realpath` round trip on every single probe just to
 /// share a cache slot).
-fn probe_version_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<Option<String>>> {
-    static CACHE: OnceLock<Mutex<crate::probe_cache::ProbeCache<Option<String>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(Default::default()))
-}
+static PROBE_VERSION_CACHE: ProbeCache<Option<String>> = ProbeCache::new();
 
 /// Clears every cached `probe_version` answer. Test-only, gated the same
 /// way [`crate::health`]'s `invalidate_git_probe_cache` is: every caller
@@ -197,14 +195,11 @@ fn probe_version_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<Option
 /// Windows build under `-D warnings`.
 #[cfg(all(test, unix))]
 pub(crate) fn invalidate_probe_version_cache() {
-    probe_version_cache()
-        .lock()
-        .expect("the probe-version cache mutex is never poisoned")
-        .clear();
+    PROBE_VERSION_CACHE.clear();
 }
 
 /// Serializes tests that call [`invalidate_probe_version_cache`]: that
-/// function clears the *whole*, process-wide [`probe_version_cache`]
+/// function clears the *whole*, process-wide [`PROBE_VERSION_CACHE`]
 /// regardless of key, so two such tests running concurrently under Rust's
 /// default parallel test harness can wipe each other's cache entry
 /// between two probes of what each believes is its own, uniquely-named
@@ -214,22 +209,8 @@ pub(crate) fn invalidate_probe_version_cache() {
 /// cache this crate has.
 #[cfg(all(test, unix))]
 pub(crate) fn probe_version_test_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-fn lookup_probe_cache(path: &Path, fingerprint: &str) -> Option<Option<String>> {
-    let cache = probe_version_cache()
-        .lock()
-        .expect("the probe-version cache mutex is never poisoned");
-    cache.get(path, fingerprint)
-}
-
-fn cache_probe_result(path: PathBuf, fingerprint: String, value: Option<String>) {
-    let mut cache = probe_version_cache()
-        .lock()
-        .expect("the probe-version cache mutex is never poisoned");
-    cache.insert(path, fingerprint, value);
 }
 
 /// How much *longer* than the pure layer's own `timeout_ms` this module's
@@ -300,7 +281,7 @@ async fn probe_binary_version(
 
     if let Some(cached) = fingerprint
         .as_deref()
-        .and_then(|fingerprint| lookup_probe_cache(&path_buf, fingerprint))
+        .and_then(|fingerprint| PROBE_VERSION_CACHE.get(&path_buf, fingerprint))
     {
         return Ok(cached);
     }
@@ -326,7 +307,7 @@ async fn probe_binary_version(
             let text = String::from_utf8_lossy(&outcome.stdout).trim().to_string();
             let value = if text.is_empty() { None } else { Some(text) };
             if let Some(fingerprint) = fingerprint {
-                cache_probe_result(path_buf, fingerprint, value.clone());
+                PROBE_VERSION_CACHE.insert(path_buf, fingerprint, value.clone());
             }
             Ok(value)
         }

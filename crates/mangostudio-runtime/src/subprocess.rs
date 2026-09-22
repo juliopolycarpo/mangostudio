@@ -162,22 +162,16 @@ pub async fn run_bounded_child(
     budget: ChildBudget,
     cancel: &CancellationToken,
 ) -> Result<ChildOutcome, ChildRunError> {
-    let request = ProcessRequest {
-        program: program.to_path_buf(),
-        args: args.iter().map(Into::into).collect(),
-        env: env.map(|env| {
-            env.iter()
-                .map(|(key, value)| (key.clone().into(), value.clone().into()))
-                .collect()
-        }),
-        cwd: None,
-        stdin: ProcessStdin::Null,
-        budget: ProcessBudget::new(
-            budget.deadline,
-            budget.max_stdout_bytes,
-            budget.max_stderr_bytes,
-        ),
-    };
+    let mut request = ProcessRequest::new(program, args).with_budget(ProcessBudget::new(
+        budget.deadline,
+        budget.max_stdout_bytes,
+        budget.max_stderr_bytes,
+    ));
+    request.env = env.map(|env| {
+        env.iter()
+            .map(|(key, value)| (key.clone().into(), value.clone().into()))
+            .collect()
+    });
     let control = DefaultProcessSpawner
         .start(request, std::sync::Arc::new(AlwaysAllow), cancel.clone())
         .await

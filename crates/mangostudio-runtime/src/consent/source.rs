@@ -17,7 +17,7 @@
 
 use std::path::PathBuf;
 
-use mangostudio_runtime_contract::manifest::ManifestProfile;
+use mangostudio_runtime_contract::manifest::{ManifestProfile, capability_keys};
 use serde_json::Value;
 
 use crate::consent::presets::{ResolvedCapabilityAllow, consent_preset, default_consent_for_slot};
@@ -93,19 +93,21 @@ pub(crate) fn resolve_allow(slot: RuntimeSlot, stored: Option<&Value>) -> Resolv
     let Some(stored) = stored else {
         return defaults;
     };
-    let stored_bool = |key: &str| -> Option<bool> { stored.get("allow")?.get(key)?.as_bool() };
-    ResolvedCapabilityAllow {
-        fs_read: stored_bool("fsRead").unwrap_or(defaults.fs_read),
-        fs_write: stored_bool("fsWrite").unwrap_or(defaults.fs_write),
-        shell: stored_bool("shell").unwrap_or(defaults.shell),
-        git: stored_bool("git").unwrap_or(defaults.git),
-        probing: stored_bool("probing").unwrap_or(defaults.probing),
-        mcp: stored_bool("mcp").unwrap_or(defaults.mcp),
-        library: stored_bool("library").unwrap_or(defaults.library),
-        checkpoints: stored_bool("checkpoints").unwrap_or(defaults.checkpoints),
-        update: stored_bool("update").unwrap_or(defaults.update),
-        external_agents: stored_bool("externalAgents").unwrap_or(false),
+    // An absent `externalAgents` reads as denied even where the slot's
+    // default grants everything, so it starts from `false`, not the default.
+    let mut allow = ResolvedCapabilityAllow {
+        external_agents: false,
+        ..defaults
+    };
+    for key in capability_keys() {
+        if let Some(granted) = stored
+            .get("allow")
+            .and_then(|allow| allow.get(key)?.as_bool())
+        {
+            allow.set(key, granted);
+        }
     }
+    allow
 }
 
 #[cfg(test)]

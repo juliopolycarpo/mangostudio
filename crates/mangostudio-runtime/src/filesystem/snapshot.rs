@@ -6,22 +6,20 @@ use std::sync::Arc;
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
-use super::freshness::ReadObservation;
+use super::freshness::{ContentDigest, ReadObservation};
 use super::io;
 use super::params::{
     SnapshotCaptureParams, SnapshotExpectedPath, SnapshotHashParams, SnapshotRevertOperation,
     SnapshotRevertParams,
 };
 use super::policy::PathPolicy;
-use super::service::{ResponseBudget, Service, lock_error, snapshot_limit};
-use crate::blocking::run_blocking;
+use super::service::{ResponseBudget, Service, before_json, run_locked, snapshot_limit};
 use crate::ports::audit::lock;
 use crate::registry::Registry;
 
-const SNAPSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;
+pub(super) const SNAPSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;
 const ABSENT_HASH: &str = "absent";
 
 /// Registers the snapshot methods beside the filesystem methods that produce their data.
@@ -49,26 +47,21 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy =
                 self.compile_policy("snapshot.capture", &None, &[&params.path], false, &cancel)?;
             if !io::path_is_file(&policy, &params.path)? {
                 let result = json!({"exists":false});
-                response.preflight_snapshot(&result)?;
+                let result = response.preflight_snapshot(result)?;
                 return Ok(result);
             }
             let (size, _) = io::current_metadata(&policy, &params.path)?;
             snapshot_limit(&params.path, size)?;
             let observed = io::read(&policy, &params.path, SNAPSHOT_MAX_BYTES, &cancel)?;
-            let result = before_snapshot(&observed.bytes);
-            response.preflight_snapshot(&result)?;
+            let result = before_json(Some(&observed.bytes));
+            let result = response.preflight_snapshot(result)?;
             Ok(result)
         })
         .await
@@ -79,14 +72,9 @@ impl Service {
         params: SnapshotHashParams,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy =
                 self.compile_policy("snapshot.hash", &None, &[&params.path], false, &cancel)?;
             let hash = io::hash_file_if_present_cancellable(&policy, &params.path, &cancel)?;
@@ -142,14 +130,8 @@ impl Service {
             .containment_root
             .filter(|root| !root.as_os_str().is_empty());
         let paths = revert_paths(&params);
-        let guards = self
-            .state
-            .locks
-            .acquire(paths, &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let requested_policy = PathPolicy {
                 containment_root: params.containment_root.clone(),
                 ..PathPolicy::default()
@@ -178,7 +160,7 @@ impl Service {
                 .collect::<std::collections::HashSet<_>>()
                 .len();
             let result = json!({"revertedFiles":reverted_files});
-            response.preflight_snapshot(&result)?;
+            let result = response.preflight_snapshot(result)?;
             // Expected-state hashing can take long enough for permission or a
             // containment path to change. Repeat both checks immediately
             // before the first possible mutation while the whole path set is
@@ -289,14 +271,6 @@ fn assert_initial_containment(root: Option<&Path>, paths: &[PathBuf]) -> Result<
     Ok(())
 }
 
-fn before_snapshot(bytes: &[u8]) -> Value {
-    json!({
-        "exists":true,
-        "contentBase64":base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes),
-        "hash":hash_bytes(bytes),
-    })
-}
-
 trait SnapshotHasher {
     fn hash_if_present(
         &mut self,
@@ -403,10 +377,11 @@ fn restore_bytes(
 ) -> Result<(), RemoteError> {
     let bytes = decode_node_base64(content_base64);
     let mtime = service.write_io.write_atomic(policy, path, &bytes)?;
-    lock(&service.state.ledger).record_read(
+    let digest = ContentDigest::of(&bytes);
+    lock(&service.state.ledger).record_read_digest(
         chat_id,
         path,
-        &bytes,
+        &digest,
         mtime,
         ReadObservation::WholeFile,
     );
@@ -434,13 +409,6 @@ fn snapshot_conflict(path: &Path) -> RemoteError {
     )
     .with_detail("kind", "snapshot_conflict")
     .with_detail("resolvedPath", path.display().to_string())
-}
-
-fn hash_bytes(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 /// Decodes the permissive `Buffer.from(value, "base64")` subset used by the
@@ -493,6 +461,7 @@ mod tests {
 
     use super::*;
     use crate::consent::source::ConsentSource;
+    use crate::filesystem::io::sha256_hex as hash_bytes;
     use crate::filesystem::service::{NativeMoveIo, NativeWriteIo, State, WriteIo};
     use crate::runtime_home::{RuntimeSlot, write_runtime_slot_config};
     use crate::test_support::{ScratchDir, scratch_dir};

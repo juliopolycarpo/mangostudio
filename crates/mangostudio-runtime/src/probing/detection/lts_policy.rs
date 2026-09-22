@@ -27,9 +27,10 @@
 //! public domain —
 //! <http://howardhinnant.github.io/date_algorithms.html#days_from_civil>.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use super::types::LtsStatus;
+use crate::ports::wall_clock::epoch_millis;
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1_000;
 
@@ -37,15 +38,6 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1_000;
 /// trusting its dates outright (183 days — see
 /// [`classify_node_lts_status`]'s staleness check).
 pub const NODE_RELEASE_DATA_STALE_AFTER_MS: i64 = 183 * DAY_MS;
-
-/// How old live release metadata may be before it can no longer stand in
-/// for a stale bundled schedule.
-///
-/// Live metadata only refreshes latest patches, so it may stand in for
-/// bundled data while it is itself recent. A stale live cache must not keep
-/// an equally stale bundled schedule alive, hence a far tighter bound than
-/// [`NODE_RELEASE_DATA_STALE_AFTER_MS`].
-pub const NODE_RELEASE_LIVE_DATA_STALE_AFTER_MS: i64 = 14 * DAY_MS;
 
 /// One Node major's release schedule entry.
 #[derive(Debug, Clone, Copy)]
@@ -88,7 +80,7 @@ pub struct LtsPolicyOptions {
     pub latest_by_major: std::collections::BTreeMap<u32, String>,
     /// Whether [`LtsPolicyOptions::latest_by_major`] came from a live probe
     /// recent enough to excuse a stale bundled schedule.
-    pub live_data_available: Option<bool>,
+    pub live_data_available: bool,
 }
 
 /// A bare version string, fully anchored — distinct from
@@ -125,8 +117,7 @@ fn is_ascii_digits(value: &str) -> bool {
 /// does not parse as an exact version.
 #[must_use]
 pub fn normalize_node_version(value: &str) -> Option<String> {
-    parse_exact_node_version(value)
-        .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch))
+    parse_exact_node_version(value).map(|version| version.to_string())
 }
 
 fn compare_versions(left: super::types::SemVer, right: super::types::SemVer) -> std::cmp::Ordering {
@@ -182,9 +173,7 @@ fn end_of_day_ms(value: &str) -> Option<i64> {
 }
 
 fn now_ms(now: SystemTime) -> i64 {
-    now.duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
+    i64::try_from(epoch_millis(now)).unwrap_or(i64::MAX)
 }
 
 /// Whether `schedule` is too old to trust its own dates, unless
@@ -282,9 +271,7 @@ pub fn classify_node_lts_status(
     schedule: &NodeReleaseSchedule,
     options: &LtsPolicyOptions,
 ) -> LtsStatus {
-    if is_node_release_schedule_stale(schedule, options.now)
-        && options.live_data_available != Some(true)
-    {
+    if is_node_release_schedule_stale(schedule, options.now) && !options.live_data_available {
         return LtsStatus::Unknown;
     }
 
@@ -385,7 +372,7 @@ mod tests {
         LtsPolicyOptions {
             now,
             latest_by_major: std::collections::BTreeMap::new(),
-            live_data_available: None,
+            live_data_available: false,
         }
     }
 
@@ -525,7 +512,7 @@ mod tests {
     fn a_stale_schedule_with_live_data_available_still_classifies() {
         let far_future = at(NODE_RELEASE_DATA_STALE_AFTER_MS / DAY_MS + 10);
         let mut opts = options(far_future);
-        opts.live_data_available = Some(true);
+        opts.live_data_available = true;
         let status = classify_node_lts_status("24.18.0", &schedule(), &opts);
         assert_ne!(status, LtsStatus::Unknown);
     }

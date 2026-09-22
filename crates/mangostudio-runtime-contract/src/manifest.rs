@@ -102,6 +102,28 @@ pub enum ManifestProfile {
     Custom,
 }
 
+impl ManifestProfile {
+    /// The wire spelling `serde` gives this profile, for callers that write it
+    /// as a plain string rather than serialising the enum.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime_contract::manifest::ManifestProfile;
+    ///
+    /// assert_eq!(ManifestProfile::Readonly.as_str(), "readonly");
+    /// ```
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Readonly => "readonly",
+            Self::None => "none",
+            Self::Custom => "custom",
+        }
+    }
+}
+
 /// What the machine's owner granted, before intersection with what the
 /// machine actually has. Mirrors `RuntimeCapabilityAllowSchema`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

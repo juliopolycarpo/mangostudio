@@ -5,20 +5,18 @@ use std::{
     sync::Arc,
 };
 
-use base64::Engine;
 use mango_protocol::error::{RemoteError, codes};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    freshness::ReadObservation,
+    freshness::{ContentDigest, ReadObservation},
     io,
     params::Mutation,
     patch::{self, V4aUpdateHunk},
     policy::CompiledPolicy,
-    service::{Service, argument, preflight_response},
+    service::{Service, argument, preflight_response, run_locked, snapshot_record},
 };
 use crate::{blocking::run_blocking, ports::audit::lock};
 
@@ -79,12 +77,6 @@ enum PlannedOperation {
     },
 }
 
-#[derive(Debug)]
-struct Revalidated {
-    bytes: Vec<u8>,
-    mtime_ms: f64,
-}
-
 trait CommitHook {
     fn after_final_policy_check(&self);
 }
@@ -116,15 +108,8 @@ pub(super) async fn apply(
     assert_no_path_conflicts(&planned)?;
     preflight_mutation_response(&params, &planned, response_id, response_limit_bytes)?;
     let paths = planned.iter().flat_map(operation_paths).collect::<Vec<_>>();
-    let guards = service
-        .state
-        .locks
-        .acquire(paths, &cancel)
-        .await
-        .map_err(|_| RemoteError::new(codes::CANCELLED, "Filesystem operation cancelled"))?;
-
-    run_blocking(move || {
-        let _guards = guards;
+    let locks = service.state.locks.clone();
+    run_locked(locks, paths, cancel.clone(), move || {
         commit_operations(&service, &params, &planned, &cancel)
     })
     .await
@@ -265,7 +250,7 @@ fn commit_revalidated(
     service: &Service,
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
-    revalidated: &[Option<Revalidated>],
+    revalidated: &[Option<io::Observed>],
     cancel: &CancellationToken,
 ) -> Result<Value, RemoteError> {
     commit_revalidated_with_hook(
@@ -282,7 +267,7 @@ fn commit_revalidated_with_hook(
     service: &Service,
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
-    revalidated: &[Option<Revalidated>],
+    revalidated: &[Option<io::Observed>],
     cancel: &CancellationToken,
     hook: &dyn CommitHook,
 ) -> Result<Value, RemoteError> {
@@ -400,7 +385,7 @@ fn revalidate_operations(
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
     cancel: &CancellationToken,
-) -> Result<Vec<Option<Revalidated>>, RemoteError> {
+) -> Result<Vec<Option<io::Observed>>, RemoteError> {
     let mut values = Vec::with_capacity(planned.len());
     let mut failures = Vec::new();
     for operation in planned {
@@ -469,10 +454,7 @@ fn revalidate_operations(
                             move_to.as_deref().unwrap_or_default(),
                         )?;
                     }
-                    Ok(Some(Revalidated {
-                        bytes: observed.bytes,
-                        mtime_ms: observed.mtime_ms,
-                    }))
+                    Ok(Some(observed))
                 })
             }
         };
@@ -498,7 +480,7 @@ fn outcomes(
     service: &Service,
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
-    revalidated: &[Option<Revalidated>],
+    revalidated: &[Option<io::Observed>],
     writes: &[Option<f64>],
     move_hashes: &[Option<String>],
 ) -> Result<Value, RemoteError> {
@@ -512,13 +494,15 @@ fn outcomes(
                 content,
             } => {
                 let mtime = writes[index].expect("committed add has a write timestamp");
-                let sha256 = lock(&service.state.ledger).record_read(
+                let digest = ContentDigest::of(content.as_bytes());
+                lock(&service.state.ledger).record_read_digest(
                     &params.mutation.chat_id,
                     resolved_path,
-                    content.as_bytes(),
+                    &digest,
                     mtime,
                     ReadObservation::WholeFile,
                 );
+                let sha256 = digest.sha256;
                 files.push(json!({"path":input_path,"op":"add","sha256":sha256}));
                 push_snapshot(
                     &mut mutations,
@@ -569,21 +553,25 @@ fn outcomes(
                 }
                 let mtime = writes[index].unwrap_or(current.mtime_ms);
                 let sha256 = if *has_content_changes {
-                    lock(&service.state.ledger).record_edit(
+                    let digest = ContentDigest::of(content.as_bytes());
+                    lock(&service.state.ledger).record_edit_digest(
                         &params.mutation.chat_id,
                         target,
-                        content.as_bytes(),
+                        &digest,
                         mtime,
                         *line_numbers_valid_through_line,
-                    )
+                    );
+                    digest.sha256
                 } else {
-                    lock(&service.state.ledger).record_read(
+                    let digest = ContentDigest::of(&current.bytes);
+                    lock(&service.state.ledger).record_read_digest(
                         &params.mutation.chat_id,
                         target,
-                        &current.bytes,
+                        &digest,
                         mtime,
                         ReadObservation::WholeFile,
-                    )
+                    );
+                    digest.sha256
                 };
                 if let Some(moved_to) = move_to {
                     files.push(
@@ -702,7 +690,7 @@ fn preflight_mutation_response(
     }
     let count = files.len();
     let result = json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations});
-    preflight_response(&result, &response_id, response_limit_bytes, "patch")
+    preflight_response(result, &response_id, response_limit_bytes, "patch").map(drop)
 }
 
 fn push_snapshot(
@@ -717,12 +705,7 @@ fn push_snapshot(
     if !params.mutation.capture_snapshot {
         return;
     }
-    let before = before.map_or_else(|| json!({"exists":false}), |bytes| json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":hash(bytes)}));
-    let mut snapshot = json!({"path":path,"op":op,"before":before,"afterHash":after_hash});
-    if let Some(destination) = moved_to {
-        snapshot["movedTo"] = json!(destination);
-    }
-    output.push(snapshot);
+    output.push(snapshot_record(path, op, before, after_hash, moved_to));
 }
 
 fn read_patch_target(
@@ -820,13 +803,6 @@ fn commit_error(changed_paths: &[PathBuf], cause: RemoteError) -> RemoteError {
         error = error.with_detail("changedPaths", json!(unique));
     }
     error
-}
-
-fn hash(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 impl PlannedOperation {

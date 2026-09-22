@@ -16,14 +16,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mango_protocol::close::close_codes;
-use mango_protocol::contract::Contract;
 use mango_protocol::port::{Port, PortTx};
 use mango_protocol::session::{
     DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_LIVENESS_INTERVAL, Session, SessionClosure, SessionOptions,
 };
 use mango_protocol::transports::websocket::server::{AcceptOptions, accept_websocket};
 use mango_protocol::transports::websocket::{WebSocketOptions, WebSocketPort};
-use mangostudio_runtime_contract::catalog::catalog;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Semaphore, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -392,8 +390,6 @@ async fn handle_connection(
     drop(permit);
 
     let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
-    let contract = Contract::from_catalog(catalog().clone())
-        .expect("the embedded catalog compiles into a contract");
     // No request is in flight yet to cancel this against — a fresh token
     // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
     // `hello_capabilities`'s own doc comment.
@@ -446,7 +442,6 @@ async fn handle_connection(
     let (session, driver_handle) = crate::transport::start_session(
         port,
         options,
-        &contract,
         host.registry,
         host.authorization,
         context.slot.as_str(),

@@ -9,16 +9,14 @@ mod support;
 
 use std::sync::Arc;
 
-use mango_protocol::contract::Contract;
 use mango_protocol::error::codes;
 use mangostudio_runtime::ports::audit::Outcome;
 use mangostudio_runtime::ports::authorization::DenyingAuthorization;
 use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::registry::Registry;
-use mangostudio_runtime_contract::catalog::catalog;
 use serde::{Deserialize, Deserializer};
 use serde_json::json;
-use support::{RecordingAudit, health_result, open_pair, within};
+use support::{RecordingAudit, health_result, serve_pair, within};
 
 /// `runtime.health`'s params schema declares no properties and no
 /// `additionalProperties: false`, so it accepts this extra field without
@@ -64,18 +62,7 @@ async fn a_schema_valid_decode_failure_is_audited_as_internal() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("runtime.health is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let error = within(
         "the schema-valid decode failure",
@@ -115,18 +102,7 @@ async fn a_panicking_parameter_decode_is_redacted_and_audited() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("runtime.health is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let error = within(
         "the panicking parameter decode",
@@ -188,18 +164,7 @@ async fn a_panicking_concurrent_request_does_not_take_down_a_normal_one() {
             }
         });
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("runtime.health is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     // Starts first, but blocks on the gate — still in flight, not settled,
     // when the panicking request below resolves.

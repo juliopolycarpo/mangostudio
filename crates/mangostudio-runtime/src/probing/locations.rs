@@ -350,11 +350,7 @@ fn resolve_env_path(platform: &str, home_dir: &str, value: &str) -> String {
 /// override when set and non-blank; `home_dir/fallback_parts` otherwise.
 /// Mirrors `registry.ts`'s `configuredDir`.
 fn configured_dir(env: &PathEnv, variable: &str, fallback_parts: &[&str]) -> String {
-    match env
-        .env_var(variable)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
+    match env.non_blank_var(variable) {
         Some(configured) => resolve_env_path(&env.platform, &env.home_dir, configured),
         None => {
             let mut parts = vec![env.home_dir.as_str()];
@@ -517,18 +513,11 @@ fn codex_permission_rules_path(env: &PathEnv) -> Option<String> {
 /// "linux"` already).
 #[must_use]
 pub fn cursor_config_home(env: &PathEnv) -> String {
-    if let Some(configured) = env
-        .env_var("CURSOR_CONFIG_DIR")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(configured) = env.non_blank_var("CURSOR_CONFIG_DIR") {
         return resolve_env_path(&env.platform, &env.home_dir, configured);
     }
     if env.platform == "linux"
-        && let Some(xdg_config_home) = env
-            .env_var("XDG_CONFIG_HOME")
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
+        && let Some(xdg_config_home) = env.non_blank_var("XDG_CONFIG_HOME")
     {
         let resolved = resolve_env_path(&env.platform, &env.home_dir, xdg_config_home);
         return join_path("linux", &[&resolved, "cursor"]);

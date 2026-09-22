@@ -1,6 +1,6 @@
 //! Filesystem handlers, sharing process-wide freshness and mutation locks.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use base64::Engine;
@@ -11,14 +11,16 @@ use mango_protocol::{
     frame::Response,
 };
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use super::capability;
-use super::freshness::{Ledger, ObservedLineRange, PathLocks, ReadObservation};
+use super::freshness::{
+    ALL_LINES_VALID, ContentDigest, Ledger, ObservedLineRange, PathLocks, ReadObservation,
+};
 use super::io::{self, check_cancel, path_error};
 use super::params::*;
 use super::policy::{CompiledPolicy, PathPolicy};
+use super::snapshot::SNAPSHOT_MAX_BYTES;
 use super::text;
 use crate::blocking::run_blocking;
 use crate::consent::source::ConsentSource;
@@ -26,9 +28,8 @@ use crate::ports::audit::lock;
 use crate::ports::authorization::consent_denial;
 use crate::registry::Registry;
 
-const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
-const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
-const ALL_LINES: u64 = 9_007_199_254_740_991;
+pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
+pub(super) const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -133,15 +134,15 @@ impl ResponseBudget {
         }
     }
 
-    fn preflight_mutation(&self, result: &Value) -> Result<(), RemoteError> {
+    fn preflight_mutation(&self, result: Value) -> Result<Value, RemoteError> {
         preflight_response(result, &self.id, self.limit_bytes, "mutation")
     }
 
-    fn preflight_read(&self, result: &Value) -> Result<(), RemoteError> {
+    fn preflight_read(&self, result: Value) -> Result<Value, RemoteError> {
         preflight_response(result, &self.id, self.limit_bytes, "read")
     }
 
-    pub(super) fn preflight_snapshot(&self, result: &Value) -> Result<(), RemoteError> {
+    pub(super) fn preflight_snapshot(&self, result: Value) -> Result<Value, RemoteError> {
         preflight_response(result, &self.id, self.limit_bytes, "snapshot")
     }
 }
@@ -221,14 +222,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             self.read_sync(params, &response, &cancel)
         })
         .await
@@ -263,21 +259,20 @@ impl Service {
         })?;
         if byte_view {
             let content = if view == "hex" {
-                hash_hex(&observed.bytes)
+                io::hex(&observed.bytes)
             } else {
                 base64::engine::general_purpose::STANDARD.encode(&observed.bytes)
             };
-            let hash = hash_hex(&Sha256::digest(&observed.bytes));
-            let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
-            response.preflight_read(&result)?;
-            let recorded_hash = lock(&self.state.ledger).record_read(
+            let digest = ContentDigest::of(&observed.bytes);
+            let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":digest.sha256,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
+            let result = response.preflight_read(result)?;
+            lock(&self.state.ledger).record_read_digest(
                 &params.chat_id,
                 &params.resolved_path,
-                &observed.bytes,
+                &digest,
                 observed.mtime_ms,
                 ReadObservation::ByteView,
             );
-            debug_assert_eq!(recorded_hash, hash);
             return Ok(result);
         }
         if text::looks_binary(&observed.bytes) {
@@ -304,13 +299,13 @@ impl Service {
         } else {
             text::format_window(&observed.bytes, start, maximum)
         };
-        let hash = hash_hex(&Sha256::digest(&observed.bytes));
-        let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
-        response.preflight_read(&result)?;
-        let recorded_hash = lock(&self.state.ledger).record_read(
+        let digest = ContentDigest::of(&observed.bytes);
+        let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":digest.sha256,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
+        let result = response.preflight_read(result)?;
+        lock(&self.state.ledger).record_read_digest(
             &params.chat_id,
             &params.resolved_path,
-            &observed.bytes,
+            &digest,
             observed.mtime_ms,
             ReadObservation::Window(ObservedLineRange {
                 start_line: start as u64,
@@ -318,7 +313,6 @@ impl Service {
                 total_lines: total as u64,
             }),
         );
-        debug_assert_eq!(recorded_hash, hash);
         Ok(result)
     }
 
@@ -329,14 +323,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let method = if exclusive {
                 "fs.create-file"
             } else {
@@ -370,7 +359,8 @@ impl Service {
                     observed.as_ref().map_or(0, |value| value.bytes.len() as u64),
                 )?;
             }
-            let expected_hash = hash_hex(&Sha256::digest(params.content.as_bytes()));
+            let written = ContentDigest::of(params.content.as_bytes());
+            let expected_hash = &written.sha256;
             let mut result =
                 json!({"path":params.input_path,"bytesWritten":params.content.len(),"sha256":expected_hash});
             if !exclusive {
@@ -382,10 +372,10 @@ impl Service {
                 &params.resolved_path,
                 if exists { "edit" } else { "create" },
                 observed.as_ref().map(|observed| observed.bytes.as_slice()),
-                &expected_hash,
+                expected_hash,
                 None,
             );
-            response.preflight_mutation(&result)?;
+            let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 method,
                 &params.mutation,
@@ -414,14 +404,13 @@ impl Service {
                     params.content.as_bytes(),
                 )?
             };
-            let hash = lock(&self.state.ledger).record_read(
+            lock(&self.state.ledger).record_read_digest(
                 &params.mutation.chat_id,
                 &params.resolved_path,
-                params.content.as_bytes(),
+                &written,
                 mtime,
                 ReadObservation::WholeFile,
             );
-            debug_assert_eq!(hash, expected_hash);
             Ok(result)
         })
         .await
@@ -441,7 +430,8 @@ impl Service {
             }
             super::freshness::stale_file_error(path)
         })?;
-        lock(&self.state.ledger).assert_content(chat, path, &observed.bytes)?;
+        let digest = ContentDigest::of(&observed.bytes);
+        lock(&self.state.ledger).assert_digest(chat, path, &digest)?;
         Ok(observed)
     }
 
@@ -475,14 +465,9 @@ impl Service {
         if params.old_string == params.new_string {
             return Err(argument("oldString and newString must be different."));
         }
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy = self.compile_mutation_policy(
                 "fs.edit-file",
                 &params.mutation,
@@ -518,9 +503,10 @@ impl Service {
             debug_assert_eq!(updated.len(), projected_bytes);
             debug_assert_eq!(replaced, replacement_count);
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
-            let expected_hash = hash_hex(&Sha256::digest(&updated));
-            let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
-            response.preflight_mutation(&result)?;
+            let written = ContentDigest::of(&updated);
+            let expected_hash = &written.sha256;
+            let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),expected_hash,None);
+            let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.edit-file",
                 &params.mutation,
@@ -534,9 +520,8 @@ impl Service {
                 &updated,
             )?;
             let changed_lines = params.old_string.bytes().filter(|byte| *byte == b'\n').count() != params.new_string.bytes().filter(|byte| *byte == b'\n').count();
-            let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES };
-            let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
-            debug_assert_eq!(hash, expected_hash);
+            let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES_VALID };
+            lock(&self.state.ledger).record_edit_digest(&params.mutation.chat_id, &params.resolved_path, &written, mtime, through);
             Ok(result)
         }).await
     }
@@ -547,14 +532,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy = self.compile_mutation_policy(
                 "fs.replace-range",
                 &params.mutation,
@@ -571,10 +551,11 @@ impl Service {
             if start > end || end > total { return Err(argument(format!("Invalid line range {start}-{end} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",params.input_path))); }
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
-            let expected_hash = hash_hex(&Sha256::digest(&updated));
+            let written = ContentDigest::of(&updated);
+            let expected_hash = &written.sha256;
             let replaced = end-start+1;
-            let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
-            response.preflight_mutation(&result)?;
+            let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),expected_hash,None);
+            let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.replace-range",
                 &params.mutation,
@@ -587,9 +568,8 @@ impl Service {
                 &observed.bytes,
                 &updated,
             )?;
-            let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES} else {(start-1) as u64};
-            let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
-            debug_assert_eq!(hash, expected_hash);
+            let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES_VALID} else {(start-1) as u64};
+            lock(&self.state.ledger).record_edit_digest(&params.mutation.chat_id, &params.resolved_path, &written, mtime, through);
             Ok(result)
         }).await
     }
@@ -600,14 +580,9 @@ impl Service {
         response: ResponseBudget,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let guards = self
-            .state
-            .locks
-            .acquire(vec![params.resolved_path.clone()], &cancel)
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy = self.compile_mutation_policy(
                 "fs.delete-file",
                 &params.mutation,
@@ -648,7 +623,7 @@ impl Service {
                 "absent",
                 None,
             );
-            response.preflight_mutation(&result)?;
+            let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.delete-file",
                 &params.mutation,
@@ -680,17 +655,9 @@ impl Service {
                 "Source and destination must be different paths.",
             ));
         }
-        let guards = self
-            .state
-            .locks
-            .acquire(
-                vec![params.resolved_from.clone(), params.resolved_to.clone()],
-                &cancel,
-            )
-            .await
-            .map_err(lock_error)?;
-        run_blocking(move || {
-            let _guards = guards;
+        let paths = vec![params.resolved_from.clone(), params.resolved_to.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
             let policy = self.compile_mutation_policy(
                 "fs.move-file",
                 &params.mutation,
@@ -703,7 +670,7 @@ impl Service {
                 Some(io::read(
                     &policy,
                     &params.resolved_from,
-                    8 * 1024 * 1024,
+                    SNAPSHOT_MAX_BYTES,
                     &cancel,
                 )?)
             } else {
@@ -711,7 +678,7 @@ impl Service {
             };
             let expected_hash = before.as_ref().map_or_else(
                 || io::hash_file(&policy, &params.resolved_from),
-                |observed| Ok(hash_hex(&Sha256::digest(&observed.bytes))),
+                |observed| Ok(io::sha256_hex(&observed.bytes)),
             )?;
             let result = mutation_result(
                 json!({"from":params.input_from,"to":params.input_to,"moved":true}),
@@ -722,7 +689,7 @@ impl Service {
                 &expected_hash,
                 Some(&params.resolved_to),
             );
-            response.preflight_mutation(&result)?;
+            response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.move-file",
                 &params.mutation,
@@ -806,12 +773,8 @@ fn list_unrestricted(
         .map(|entry| {
             check_cancel(cancel)?;
             let entry = entry.map_err(list_error)?;
-            let kind = if entry.file_type().map_err(list_error)?.is_dir() {
-                "directory"
-            } else {
-                "file"
-            };
-            Ok(json!({"name":entry.file_name().to_string_lossy(),"type":kind}))
+            let is_dir = entry.file_type().map_err(list_error)?.is_dir();
+            Ok(entry_json(&entry.file_name(), is_dir))
         })
         .collect()
 }
@@ -834,15 +797,17 @@ fn list_bound(
             .map(|entry| {
                 check_cancel(cancel)?;
                 let entry = entry.map_err(list_error)?;
-                let kind = if entry.file_type().map_err(list_error)?.is_dir() {
-                    "directory"
-                } else {
-                    "file"
-                };
-                Ok(json!({"name":entry.file_name().to_string_lossy(),"type":kind}))
+                let is_dir = entry.file_type().map_err(list_error)?.is_dir();
+                Ok(entry_json(&entry.file_name(), is_dir))
             })
             .collect()
     })
+}
+
+/// Builds one `fs.list-directory` entry.
+fn entry_json(name: &std::ffi::OsStr, is_dir: bool) -> Value {
+    let kind = if is_dir { "directory" } else { "file" };
+    json!({"name":name.to_string_lossy(),"type":kind})
 }
 
 fn occupied_path(policy: &CompiledPolicy, params: &WriteParams, create: bool) -> RemoteError {
@@ -868,7 +833,7 @@ pub(super) fn argument(message: impl Into<String>) -> RemoteError {
 }
 
 pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> {
-    const MAX: u64 = 8 * 1024 * 1024;
+    const MAX: u64 = SNAPSHOT_MAX_BYTES as u64;
     if size <= MAX {
         return Ok(());
     }
@@ -884,8 +849,40 @@ pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> 
     .with_detail("sizeBytes", size))
 }
 
-pub(super) fn lock_error(_: super::freshness::PathLockError) -> RemoteError {
+fn lock_error(_: super::freshness::PathLockError) -> RemoteError {
     RemoteError::new(codes::CANCELLED, "Filesystem operation cancelled")
+}
+
+/// Acquires the path locks for `paths`, then runs `work` on the blocking pool
+/// while its worker owns the guards.
+///
+/// Cancellation while waiting for a lock reports the standard cancelled
+/// error. The guards stay held until `work` returns even if the awaiting task
+/// is dropped.
+///
+/// # Example
+///
+/// ```ignore
+/// let locks = self.state.locks.clone();
+/// run_locked(locks, vec![path], cancel.clone(), move || {
+///     self.read_sync(params, &response, &cancel)
+/// })
+/// .await
+/// ```
+pub(super) async fn run_locked<T, F>(
+    locks: PathLocks,
+    paths: Vec<PathBuf>,
+    cancel: CancellationToken,
+    work: F,
+) -> Result<T, RemoteError>
+where
+    F: FnOnce() -> Result<T, RemoteError> + Send + 'static,
+    T: Send + 'static,
+{
+    locks
+        .with_blocking_locks(paths, &cancel, work)
+        .await
+        .map_err(lock_error)?
 }
 
 fn committed_move_error(from: &Path, to: &Path, cause: RemoteError) -> RemoteError {
@@ -899,7 +896,7 @@ fn committed_move_error(from: &Path, to: &Path, cause: RemoteError) -> RemoteErr
 }
 
 fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
-    if value < 1.0 || value.fract() != 0.0 || value > ALL_LINES as f64 {
+    if value < 1.0 || value.fract() != 0.0 || value > ALL_LINES_VALID as f64 {
         return Err(argument(format!(
             "Invalid {name} {value}. Expected a positive safe integer."
         )));
@@ -907,25 +904,30 @@ fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
     Ok(value as usize)
 }
 
-fn hash_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
+/// Refuses a result whose response frame would exceed the negotiated limit,
+/// returning the result unchanged when it fits.
+///
+/// # Example
+///
+/// ```ignore
+/// let result = preflight_response(result, "request-id", limit_bytes, "read")?;
+/// ```
 pub(super) fn preflight_response(
-    result: &Value,
+    result: Value,
     response_id: &str,
     response_limit_bytes: usize,
     subject: &str,
-) -> Result<(), RemoteError> {
+) -> Result<Value, RemoteError> {
     let frame = Frame::Res(Response {
         id: response_id.to_owned(),
-        result: result.clone(),
+        result,
     });
-    let size = serde_json::to_vec(&frame)
-        .expect("a filesystem mutation response always serializes")
-        .len();
+    let size = serialized_len(&frame);
     if size <= response_limit_bytes {
-        return Ok(());
+        let Frame::Res(Response { result, .. }) = frame else {
+            unreachable!("the frame was built as a response");
+        };
+        return Ok(result);
     }
     let guidance = if subject == "read" {
         "Read a smaller text window or choose a more compact view."
@@ -943,6 +945,27 @@ pub(super) fn preflight_response(
     .with_detail("limitBytes", response_limit_bytes))
 }
 
+/// Counts the bytes `serde_json::to_vec` would produce without buffering them.
+fn serialized_len(frame: &Frame) -> usize {
+    struct ByteCount(usize);
+
+    impl std::io::Write for ByteCount {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut count = ByteCount(0);
+    serde_json::to_writer(&mut count, frame)
+        .expect("a filesystem mutation response always serializes");
+    count.0
+}
+
 pub(super) fn mutation_result(
     result: Value,
     params: &Mutation,
@@ -955,12 +978,46 @@ pub(super) fn mutation_result(
     if !params.capture_snapshot {
         return json!({"result":result,"mutations":[]});
     }
-    let before = before.map_or_else(||json!({"exists":false}),|bytes|json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":hash_hex(&Sha256::digest(bytes))}));
-    let mut snapshot = json!({"path":path,"op":op,"before":before,"afterHash":hash});
+    let snapshot = snapshot_record(path, op, before, hash, moved_to);
+    json!({"result":result,"mutations":[snapshot]})
+}
+
+/// Builds one `mutations[]` checkpoint record for a captured mutation.
+///
+/// # Example
+///
+/// ```ignore
+/// let record = snapshot_record(path, "delete", Some(&before), "absent", None);
+/// ```
+pub(super) fn snapshot_record(
+    path: &Path,
+    op: &str,
+    before: Option<&[u8]>,
+    after_hash: &str,
+    moved_to: Option<&Path>,
+) -> Value {
+    let mut snapshot =
+        json!({"path":path,"op":op,"before":before_json(before),"afterHash":after_hash});
     if let Some(to) = moved_to {
         snapshot["movedTo"] = json!(to);
     }
-    json!({"result":result,"mutations":[snapshot]})
+    snapshot
+}
+
+/// Describes a checkpoint's prior state: absent, or its full bytes and hash.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(before_json(None), json!({"exists": false}));
+/// ```
+pub(super) fn before_json(before: Option<&[u8]>) -> Value {
+    before.map_or_else(
+        || json!({"exists":false}),
+        |bytes| {
+            json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":io::sha256_hex(bytes)})
+        },
+    )
 }
 
 pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
@@ -1185,6 +1242,105 @@ mod tests {
         assert!(
             crate::result_check::compile_result_schema(schema).is_valid(result),
             "{method}: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_locked_runs_work_under_the_lock_and_releases_it() {
+        let locks = PathLocks::default();
+        let path = PathBuf::from("/workspace/run-locked");
+        let observed = locks.clone();
+        let value = run_locked(
+            locks.clone(),
+            vec![path],
+            CancellationToken::new(),
+            move || Ok(observed.active_paths()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(value, 1, "work must run while its path lock is held");
+        assert_eq!(locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn run_locked_reports_cancellation_before_work_runs() {
+        let locks = PathLocks::default();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let error = run_locked(
+            locks,
+            vec![PathBuf::from("/workspace/cancelled")],
+            cancel,
+            || -> Result<(), RemoteError> { panic!("work must not run after cancellation") },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
+        assert_eq!(error.message, "Filesystem operation cancelled");
+    }
+
+    #[test]
+    fn serialized_len_counts_the_bytes_to_vec_would_produce() {
+        let frame = Frame::Res(Response {
+            id: "request-\u{e9}".to_owned(),
+            result: json!({"content":"line \"one\"\n\u{1f600}","size":12,"nested":[1.5,null,true]}),
+        });
+        assert_eq!(
+            serialized_len(&frame),
+            serde_json::to_vec(&frame).unwrap().len()
+        );
+    }
+
+    #[test]
+    fn preflight_response_returns_a_fitting_result_unchanged() {
+        let result = json!({"path":"file","deleted":true});
+        assert_eq!(
+            preflight_response(result.clone(), "id", usize::MAX, "mutation").unwrap(),
+            result
+        );
+        let error = preflight_response(result, "id", 8, "mutation").unwrap_err();
+        assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+    }
+
+    #[test]
+    fn before_json_records_absence_or_prior_bytes() {
+        assert_eq!(before_json(None), json!({"exists":false}));
+        assert_eq!(
+            before_json(Some(b"abc")),
+            json!({
+                "exists": true,
+                "contentBase64": "YWJj",
+                "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            })
+        );
+    }
+
+    #[test]
+    fn snapshot_record_adds_moved_to_only_for_moves() {
+        let edit = snapshot_record(Path::new("/a"), "edit", None, "after", None);
+        assert_eq!(
+            edit,
+            json!({"path":"/a","op":"edit","before":{"exists":false},"afterHash":"after"})
+        );
+        let moved = snapshot_record(
+            Path::new("/a"),
+            "move",
+            None,
+            "after",
+            Some(Path::new("/b")),
+        );
+        assert_eq!(moved["movedTo"], "/b");
+    }
+
+    #[test]
+    fn entry_json_names_directories_and_files() {
+        assert_eq!(
+            entry_json(std::ffi::OsStr::new("src"), true),
+            json!({"name":"src","type":"directory"})
+        );
+        assert_eq!(
+            entry_json(std::ffi::OsStr::new("main.rs"), false),
+            json!({"name":"main.rs","type":"file"})
         );
     }
 
@@ -1488,7 +1644,7 @@ mod tests {
             .await
             .unwrap();
 
-        let committed_hash = hash_hex(&Sha256::digest(&replacement));
+        let committed_hash = io::sha256_hex(&replacement);
         assert_eq!(std::fs::read(&destination).unwrap(), replacement);
         assert_eq!(result["mutations"][0]["afterHash"], committed_hash);
         assert!(lock(&service.state.ledger).is_empty());
