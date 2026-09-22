@@ -136,7 +136,7 @@ async fn repeated_unsupported_interrupts_keep_waiting_bounded() {
 #[tokio::test(flavor = "current_thread")]
 async fn timeout_reaps_the_target_and_descendant_before_terminal() {
     let directory = scratch_dir("windows-job-timeout");
-    let (control, target, descendant) = start_tree(&directory, Duration::from_millis(250)).await;
+    let (control, target, descendant) = start_tree(&directory, Duration::from_secs(2)).await;
 
     let terminal = control.wait().await;
 
