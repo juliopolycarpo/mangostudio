@@ -6,7 +6,7 @@
 //! and [`profile_for_allow`] re-derives the label from it, so a hand-edited
 //! file cannot claim `readonly` while granting a shell.
 
-use mangostudio_runtime_contract::manifest::{ManifestProfile, capability_keys};
+use mangostudio_runtime_contract::manifest::ManifestProfile;
 use serde::Serialize;
 
 use crate::runtime_home::{DefaultSetupState, RuntimeSlot, default_setup_state_for_slot};
@@ -47,8 +47,9 @@ pub struct ResolvedCapabilityAllow {
 }
 
 impl ResolvedCapabilityAllow {
-    /// Whether `capability` (one of [`capability_keys`]'s wire names) is
-    /// granted. `false` for a name this build does not recognise — an
+    /// Whether `capability` (one of
+    /// [`capability_keys`](mangostudio_runtime_contract::manifest::capability_keys)'s
+    /// wire names) is granted. `false` for a name this build does not recognise — an
     /// unrecognised capability was never granted, the same answer an absent
     /// key gets.
     ///
@@ -65,18 +66,47 @@ impl ResolvedCapabilityAllow {
     /// ```
     #[must_use]
     pub fn is_granted(&self, capability: &str) -> bool {
+        let mut copy = *self;
+        copy.capability_mut(capability)
+            .is_some_and(|granted| *granted)
+    }
+
+    /// Grants or withholds `capability`; returns `false`, changing nothing,
+    /// for a name this build does not recognise.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::consent::presets::consent_preset;
+    /// use mangostudio_runtime_contract::manifest::ManifestProfile;
+    ///
+    /// let mut allow = consent_preset(ManifestProfile::None);
+    /// assert!(allow.set("shell", true));
+    /// assert!(allow.shell);
+    /// assert!(!allow.set("no.such.capability", true));
+    /// ```
+    pub fn set(&mut self, capability: &str, granted: bool) -> bool {
+        self.capability_mut(capability)
+            .map(|slot| *slot = granted)
+            .is_some()
+    }
+
+    /// The field behind one of
+    /// [`capability_keys`](mangostudio_runtime_contract::manifest::capability_keys)'s
+    /// wire names: the one place that maps a key to its field.
+    fn capability_mut(&mut self, capability: &str) -> Option<&mut bool> {
         match capability {
-            "fsRead" => self.fs_read,
-            "fsWrite" => self.fs_write,
-            "shell" => self.shell,
-            "git" => self.git,
-            "probing" => self.probing,
-            "mcp" => self.mcp,
-            "library" => self.library,
-            "checkpoints" => self.checkpoints,
-            "update" => self.update,
-            "externalAgents" => self.external_agents,
-            _ => false,
+            "fsRead" => Some(&mut self.fs_read),
+            "fsWrite" => Some(&mut self.fs_write),
+            "shell" => Some(&mut self.shell),
+            "git" => Some(&mut self.git),
+            "probing" => Some(&mut self.probing),
+            "mcp" => Some(&mut self.mcp),
+            "library" => Some(&mut self.library),
+            "checkpoints" => Some(&mut self.checkpoints),
+            "update" => Some(&mut self.update),
+            "externalAgents" => Some(&mut self.external_agents),
+            _ => None,
         }
     }
 }
@@ -180,19 +210,14 @@ pub fn consent_preset(profile: ManifestProfile) -> ResolvedCapabilityAllow {
 /// ```
 #[must_use]
 pub fn profile_for_allow(allow: ResolvedCapabilityAllow) -> ManifestProfile {
-    for (profile, preset) in [
+    [
         (ManifestProfile::Full, FULL),
         (ManifestProfile::Readonly, READONLY),
         (ManifestProfile::None, NONE),
-    ] {
-        if capability_keys()
-            .iter()
-            .all(|key| preset.is_granted(key) == allow.is_granted(key))
-        {
-            return profile;
-        }
-    }
-    ManifestProfile::Custom
+    ]
+    .into_iter()
+    .find_map(|(profile, preset)| (preset == allow).then_some(profile))
+    .unwrap_or(ManifestProfile::Custom)
 }
 
 /// What a slot means when nothing has answered for it yet: `host` and `wsl`

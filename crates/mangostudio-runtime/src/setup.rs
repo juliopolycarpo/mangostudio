@@ -152,23 +152,11 @@ fn apply_allow_overrides(
 ) -> ResolvedCapabilityAllow {
     let mut allow = base;
     for (key, value) in overrides {
-        match key.as_str() {
-            "fsRead" => allow.fs_read = *value,
-            "fsWrite" => allow.fs_write = *value,
-            "shell" => allow.shell = *value,
-            "git" => allow.git = *value,
-            "probing" => allow.probing = *value,
-            "mcp" => allow.mcp = *value,
-            "library" => allow.library = *value,
-            "checkpoints" => allow.checkpoints = *value,
-            "update" => allow.update = *value,
-            "externalAgents" => allow.external_agents = *value,
-            // `parse_allow_overrides` already rejects any key outside
-            // `capability_keys()`, so this is unreachable in practice —
-            // kept as a silent no-op rather than a panic, matching that
-            // function's own "the only gate" role.
-            _ => {}
-        }
+        // `parse_allow_overrides` already rejects any key outside
+        // `capability_keys()`, so an unrecognised key is unreachable in
+        // practice — kept as a silent no-op rather than a panic, matching
+        // that function's own "the only gate" role.
+        allow.set(key, *value);
     }
     allow
 }
@@ -404,18 +392,7 @@ pub fn run_non_interactive_setup(
     let allow = apply_allow_overrides(base, request.allow_overrides);
     let profile = crate::consent::presets::profile_for_allow(allow);
 
-    let allow_json = serde_json::json!({
-        "fsRead": allow.fs_read,
-        "fsWrite": allow.fs_write,
-        "shell": allow.shell,
-        "git": allow.git,
-        "probing": allow.probing,
-        "mcp": allow.mcp,
-        "library": allow.library,
-        "checkpoints": allow.checkpoints,
-        "update": allow.update,
-        "externalAgents": allow.external_agents,
-    });
+    let allow_json = serde_json::to_value(allow).expect("a struct of ten bools always serialises");
     let setup_json = serde_json::json!({
         "state": "configured",
         "at": format_iso8601_millis(wall_clock.now()),
@@ -428,29 +405,12 @@ pub fn run_non_interactive_setup(
         &[
             ("allow", Some(allow_json)),
             ("setup", Some(setup_json)),
-            (
-                "profile",
-                Some(serde_json::Value::String(
-                    manifest_profile_str(profile).to_string(),
-                )),
-            ),
+            ("profile", Some(serde_json::Value::from(profile.as_str()))),
         ],
     )
     .map_err(SetupError::Write)?;
 
     Ok(SetupOutcome { profile, allow, by })
-}
-
-/// The wire spelling for a [`ManifestProfile`], since that enum only
-/// derives `Serialize`/`Deserialize` (camelCase, lowercase) rather than
-/// exposing a plain `&str` accessor of its own.
-fn manifest_profile_str(profile: ManifestProfile) -> &'static str {
-    match profile {
-        ManifestProfile::Full => "full",
-        ManifestProfile::Readonly => "readonly",
-        ManifestProfile::None => "none",
-        ManifestProfile::Custom => "custom",
-    }
 }
 
 #[cfg(test)]

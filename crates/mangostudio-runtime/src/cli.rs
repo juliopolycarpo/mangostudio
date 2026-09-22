@@ -107,12 +107,7 @@ fn parse_token_source(value: &str) -> Option<TokenSource> {
 }
 
 fn parse_slot(value: &str) -> Option<RuntimeSlot> {
-    match value {
-        "host" => Some(RuntimeSlot::Host),
-        "wsl" => Some(RuntimeSlot::Wsl),
-        "remote" => Some(RuntimeSlot::Remote),
-        _ => None,
-    }
+    value.parse().ok()
 }
 
 fn parse(args: &[String]) -> Invocation {
@@ -330,7 +325,7 @@ fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
         Ok(outcome) => {
             println!(
                 "Configured the {slot} runtime as {}.",
-                setup_profile_str(outcome.profile)
+                outcome.profile.as_str()
             );
             i32::from(outcome.exit_code())
         }
@@ -338,15 +333,6 @@ fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
             eprintln!("mangostudio-runtime: {error}");
             i32::from(error.exit_code())
         }
-    }
-}
-
-fn setup_profile_str(profile: ManifestProfile) -> &'static str {
-    match profile {
-        ManifestProfile::Full => "full",
-        ManifestProfile::Readonly => "readonly",
-        ManifestProfile::None => "none",
-        ManifestProfile::Custom => "custom",
     }
 }
 
