@@ -876,10 +876,14 @@ async fn supervise_child(
         let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
         let dispatched = dispatch_stop(&mut child, pid, request).is_ok();
         graceful_requested = dispatched && matches!(request, StopRequest::Interrupt);
-        force_requested = matches!(
-            request,
-            StopRequest::Force | StopRequest::Cancel | StopRequest::Timeout
-        );
+        // Only a dispatched stop latches: `force_requested` is what disables the deadline arm
+        // below, so latching it on a *failed* dispatch would retire this worker's only remaining
+        // bound and leave the target running with nothing left to stop it.
+        force_requested = dispatched
+            && matches!(
+                request,
+                StopRequest::Force | StopRequest::Cancel | StopRequest::Timeout
+            );
         if dispatched && request_stops_capture(request) {
             stopped_capture.record(capture_was_open);
         }
@@ -890,10 +894,21 @@ async fn supervise_child(
             () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)), if !force_requested => {
                 cause = ProcessTerminalCause::TimedOut;
                 let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
-                let dispatched = dispatch_stop(&mut child, pid, StopRequest::Force).is_ok();
+                let dispatch = dispatch_stop(&mut child, pid, StopRequest::Force);
                 force_requested = true;
-                if dispatched {
-                    stopped_capture.record(capture_was_open);
+                stopped_capture.record(capture_was_open);
+                if let Err(error) = dispatch {
+                    // The tree could not be signalled at all (Windows `TerminateJobObject`
+                    // refusing the Job is the reachable case; a Unix group kill tolerates
+                    // `ESRCH` and cannot fail for this process's own descendants). Waiting on
+                    // `wait_target` past this point would block the caller forever on a target
+                    // nothing here can stop, so publish the timeout instead — the same give-up
+                    // the pre-supervisor `REAP_TIMEOUT` performed, reported rather than silent.
+                    eprintln!(
+                        "mangostudio-runtime: could not force a bounded child's process tree to \
+                         stop at its deadline: {error}"
+                    );
+                    break None;
                 }
             }
             Some(command) = commands.recv() => {
