@@ -47,6 +47,20 @@ pub const MAX_SUPERVISED_PROCESS_REQUESTS: usize = 16;
 /// record. This prevents cloned controls from retaining an unbounded queue of reply channels.
 const MAX_PROCESS_CONTROL_COMMANDS: usize = 16;
 
+/// How long a worker waits for its platform cleanup owner to report an empty process tree
+/// before publishing the terminal record anyway.
+///
+/// Final cleanup is a separate process (the Unix guardian) or a kernel object poll (the Windows
+/// Job), and neither is guaranteed to conclude: `wait_group_empty` treats `EPERM` and an
+/// unreaped zombie group member as "still live" and polls forever, and `wait_for_job_empty` does
+/// the same for a Job whose last process cannot be terminated. Without a bound here, one wedged
+/// descendant would hold this request's [`ProcessControl::wait`] open forever *and* keep one of
+/// the [`MAX_CONCURRENT_CHILD_PROCESSES`] slots plus a blocking thread for the process lifetime.
+/// A caller that asked for cleanup must not wait longer than this on top of its own budget —
+/// the same rule the pre-supervisor `REAP_TIMEOUT` enforced, with more room for the empty-group
+/// poll this cleanup additionally performs.
+const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Exact launch configuration for one process.
 #[derive(Clone, Debug)]
 pub struct ProcessRequest {
@@ -571,9 +585,12 @@ async fn cleanup_failed_start(child: &mut OwnedChild, pid: Option<u32>) {
     // suspended primary thread stopped and relies on Job termination below.
     child.abort_start();
     let _ = force_tree_for_child(child, pid);
-    let _ = child.wait_target().await;
+    // Both waits are bounded for the reason [`CLEANUP_TIMEOUT`] documents: this path runs while
+    // the admission and child permits are still held, so a cleanup owner that never concludes
+    // would retire a slot from the process-wide pool rather than merely delaying one caller.
+    let _ = tokio::time::timeout(CLEANUP_TIMEOUT, child.wait_target()).await;
     let _ = child.finalize();
-    let _ = child.wait_guardian().await;
+    let _ = tokio::time::timeout(CLEANUP_TIMEOUT, child.wait_guardian()).await;
 }
 
 async fn launch_child(
@@ -928,7 +945,20 @@ async fn supervise_child(
         let _ = child.force();
     }
     let _ = child.finalize();
-    let _ = child.wait_guardian().await;
+    // Bounded for the reason [`CLEANUP_TIMEOUT`] documents: the empty-tree proof belongs to a
+    // separate process (Unix) or a kernel-object poll (Windows), neither of which is guaranteed
+    // to conclude. Past the bound this worker publishes its terminal record anyway rather than
+    // holding the caller — and its child permit — open for the rest of the process lifetime.
+    if tokio::time::timeout(CLEANUP_TIMEOUT, child.wait_guardian())
+        .await
+        .is_err()
+    {
+        eprintln!(
+            "mangostudio-runtime: a bounded child's process tree did not report empty within \
+             {CLEANUP_TIMEOUT:?}; publishing its terminal record and leaving the remaining \
+             cleanup to the parent-death lease"
+        );
+    }
     let _ = shared.terminal.send(Some(ProcessTerminal {
         cause,
         exit: status.map(process_exit),
