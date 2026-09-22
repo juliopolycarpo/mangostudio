@@ -1041,7 +1041,14 @@ async fn collect_output(
     let mut stderr = None;
 
     while stdout.is_none() || stderr.is_none() {
+        // `biased`, so a reader that has *already* finished is harvested before an expired
+        // grace rather than racing it. Once the grace timer has actually fired, an unbiased
+        // `select!` chooses uniformly among the ready branches, so a capture that reached EOF
+        // in the same wake as the timer is discarded half the time — published empty and
+        // marked incomplete, and (via `drain_reached_deadline`) reported as a timeout, even
+        // though its bytes were already in hand.
         tokio::select! {
+            biased;
             result = &mut *stdout_reader, if stdout.is_none() => stdout = Some(result),
             result = &mut *stderr_reader, if stderr.is_none() => stderr = Some(result),
             () = &mut timeout => break,
