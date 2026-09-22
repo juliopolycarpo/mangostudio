@@ -20,32 +20,150 @@ mod support;
 use support::scratch::scratch_dir;
 
 const FIXTURE_DIRECTORY: &str = "MANGOSTUDIO_WINDOWS_JOB_FIXTURE_DIRECTORY";
+const STDIO_FIXTURE: &str = "MANGOSTUDIO_WINDOWS_STDIO_FIXTURE";
 
 static WINDOWS_JOB_START_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 /// A normal child proves that the explicit handle list carries stdout, stderr, stdin, Unicode
 /// argv, cwd, and an exact environment into CreateProcessW.
+///
+/// The child is this test binary re-entered in fixture mode, not a shell. A PowerShell host cannot
+/// serve as the child here: with stdout bound to an anonymous pipe it blocks forever on its first
+/// stdout write — one byte is enough — while its stderr write on an identically created pipe still
+/// arrives. `job_child_writes_stdout_under_the_full_request_shape` pins that down by running
+/// `cmd.exe` under this exact request shape and passing, so the stall belongs to the host and not
+/// to the pipe setup here. A Rust child also writes the exact bytes it means to, with no console
+/// encoding state in the way of the Unicode argument.
 #[tokio::test(flavor = "current_thread")]
 async fn job_child_preserves_stdio_argv_cwd_and_exact_environment() {
+    if std::env::var_os(STDIO_FIXTURE).is_some() {
+        run_stdio_fixture();
+        return;
+    }
+
     let directory = scratch_dir("windows-job-stdio");
-    let script = directory.join("stdio.ps1");
-    std::fs::write(
-        &script,
-        "param([string] $argument)\n[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n[Console]::Out.Write($argument + '|' + (Get-Location).Path + '|' + $env:MANGO_WINDOWS_MARKER + '|' + [Console]::In.ReadToEnd())\n[Console]::Error.Write('stderr')\n",
-    )
-    .expect("PowerShell fixture is written");
     let argument = "seedling 🌱 with a space and \"quote\"";
     let mut request = ProcessRequest::new(
-        powershell(),
+        std::env::current_exe().expect("the test binary path exists"),
         [
-            OsString::from("-NoProfile"),
-            OsString::from("-File"),
-            script.into_os_string(),
+            OsString::from("--exact"),
+            OsString::from("job_child_preserves_stdio_argv_cwd_and_exact_environment"),
+            OsString::from("--nocapture"),
             OsString::from(argument),
         ],
     )
     .with_stdin(ProcessStdin::Bytes(b"input-bytes".to_vec()))
-    .with_budget(ProcessBudget::new(Duration::from_secs(5), 4_096, 4_096));
+    .with_budget(ProcessBudget::new(Duration::from_secs(15), 4_096, 4_096));
+    request.cwd = Some(directory.to_path_buf());
+    request.env = Some(BTreeMap::from([
+        (
+            OsString::from("SystemRoot"),
+            std::env::var_os("SystemRoot").expect("Windows defines SystemRoot"),
+        ),
+        (
+            OsString::from("MANGO_WINDOWS_MARKER"),
+            OsString::from("exact-environment"),
+        ),
+        (OsString::from(STDIO_FIXTURE), OsString::from("1")),
+    ]));
+
+    let terminal = start(request).await.wait().await;
+
+    let report = describe(&terminal);
+    assert_eq!(terminal.cause, ProcessTerminalCause::Exited, "{report}");
+    assert_eq!(
+        terminal.exit.as_ref().and_then(|exit| exit.code),
+        Some(0),
+        "{report}"
+    );
+    let stdout = String::from_utf8(terminal.stdout.bytes).expect("fixture emits UTF-8");
+    let stderr = String::from_utf8(terminal.stderr.bytes).expect("fixture emits UTF-8");
+    // The child runs under libtest, which writes its own progress lines to the same two streams,
+    // so each expectation locates the fixture's payload rather than owning the whole capture.
+    assert!(stderr.contains("stderr-marker"), "{report}");
+    let expected_cwd =
+        std::fs::canonicalize(&directory).unwrap_or_else(|_| directory.to_path_buf());
+    assert!(
+        stdout.contains(&format!(
+            "{argument}|{}|exact-environment|input-bytes",
+            expected_cwd.display()
+        )),
+        "{report}"
+    );
+}
+
+/// The child half of `job_child_preserves_stdio_argv_cwd_and_exact_environment`: it reports the
+/// argv tail, cwd, marker variable, and stdin it was handed, so the parent can assert on exactly
+/// what `CreateProcessW` delivered.
+///
+/// Stdin is read to EOF, which also proves the supervisor closes its write end after feeding the
+/// configured bytes; a leaked write handle anywhere would hang here instead of returning.
+fn run_stdio_fixture() {
+    use std::io::{Read as _, Write as _};
+
+    let argument = std::env::args_os()
+        .next_back()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let cwd = std::env::current_dir().expect("the fixture child has a working directory");
+    // Both ends canonicalise: the parent launches with the requested path while Windows may hand
+    // the child a resolved or short-name form of the same directory.
+    let cwd = std::fs::canonicalize(&cwd).unwrap_or(cwd);
+    let marker = std::env::var("MANGO_WINDOWS_MARKER").unwrap_or_default();
+    let mut stdin = String::new();
+    std::io::stdin()
+        .read_to_string(&mut stdin)
+        .expect("the fixture child reads stdin to EOF");
+
+    let mut error = std::io::stderr();
+    error
+        .write_all(b"stderr-marker")
+        .expect("the fixture child writes stderr");
+    error.flush().expect("the fixture child flushes stderr");
+
+    let mut out = std::io::stdout();
+    out.write_all(format!("{argument}|{}|{marker}|{stdin}", cwd.display()).as_bytes())
+        .expect("the fixture child writes stdout");
+    out.flush().expect("the fixture child flushes stdout");
+}
+
+/// A minimal, non-.NET child proves the explicit handle list carries stdout on its own, apart from
+/// whatever console machinery a PowerShell host installs over its standard handles. It is the
+/// control for `job_child_preserves_stdio_argv_cwd_and_exact_environment`: both take the same
+/// supervisor path, so stdout reaching only one of them localises the fault to the host rather than
+/// to this crate's pipe setup.
+#[tokio::test(flavor = "current_thread")]
+async fn job_child_writes_stdout_through_the_handle_list() {
+    let request = ProcessRequest::new(
+        command_processor(),
+        [OsString::from("/c"), OsString::from("echo mango")],
+    )
+    .with_budget(ProcessBudget::new(Duration::from_secs(15), 4_096, 4_096));
+
+    let terminal = start(request).await.wait().await;
+
+    let report = describe(&terminal);
+    assert_eq!(terminal.cause, ProcessTerminalCause::Exited, "{report}");
+    assert!(
+        String::from_utf8_lossy(&terminal.stdout.bytes).contains("mango"),
+        "{report}"
+    );
+}
+
+/// The same minimal child under the PowerShell fixture's full request shape — exact environment,
+/// overridden cwd, and a byte-fed stdin pipe. It separates the two survivors: stdout arriving here
+/// means only the PowerShell host mishandles it, while stdout stalling here means one of those
+/// request options breaks stdout for any child and belongs to this crate.
+#[tokio::test(flavor = "current_thread")]
+async fn job_child_writes_stdout_under_the_full_request_shape() {
+    let directory = scratch_dir("windows-job-stdout-shape");
+    let mut request = ProcessRequest::new(
+        command_processor(),
+        [OsString::from("/c"), OsString::from("echo mango")],
+    )
+    .with_stdin(ProcessStdin::Bytes(b"input-bytes\r\n".to_vec()))
+    .with_budget(ProcessBudget::new(Duration::from_secs(15), 4_096, 4_096));
     request.cwd = Some(directory.to_path_buf());
     request.env = Some(BTreeMap::from([
         (
@@ -60,13 +178,12 @@ async fn job_child_preserves_stdio_argv_cwd_and_exact_environment() {
 
     let terminal = start(request).await.wait().await;
 
-    assert_eq!(terminal.cause, ProcessTerminalCause::Exited);
-    assert_eq!(terminal.exit.as_ref().and_then(|exit| exit.code), Some(0));
-    assert_eq!(terminal.stderr.bytes, b"stderr");
-    let stdout = String::from_utf8(terminal.stdout.bytes).expect("fixture emits UTF-8");
-    assert!(stdout.starts_with(argument));
-    assert!(stdout.contains("|exact-environment|input-bytes"));
-    assert!(stdout.contains(directory.to_string_lossy().as_ref()));
+    let report = describe(&terminal);
+    assert_eq!(terminal.cause, ProcessTerminalCause::Exited, "{report}");
+    assert!(
+        String::from_utf8_lossy(&terminal.stdout.bytes).contains("mango"),
+        "{report}"
+    );
 }
 
 /// The Job includes normal descendants and `force_kill` waits for it to become empty.
@@ -245,6 +362,28 @@ async fn start(request: ProcessRequest) -> mangostudio_runtime::subprocess::Proc
         .expect("Windows Job child starts")
 }
 
+/// Renders a terminal record so a failed expectation names what the supervisor actually observed
+/// instead of only the mismatched cause.
+///
+/// A bare cause prints `left: TimedOut, right: Exited` and names neither the exit code nor the
+/// captured bytes, and those are what separate a child that never finished from one whose capture
+/// never drained.
+fn describe(terminal: &ProcessTerminal) -> String {
+    format!(
+        "cause={:?} exit={:?} elapsed={:?} \
+         stdout(incomplete={}, truncated={})={:?} stderr(incomplete={}, truncated={})={:?}",
+        terminal.cause,
+        terminal.exit,
+        terminal.elapsed,
+        terminal.stdout.incomplete,
+        terminal.stdout.truncated,
+        String::from_utf8_lossy(&terminal.stdout.bytes),
+        terminal.stderr.incomplete,
+        terminal.stderr.truncated,
+        String::from_utf8_lossy(&terminal.stderr.bytes),
+    )
+}
+
 fn observed(stop: ProcessStop) -> ProcessTerminal {
     match stop {
         ProcessStop::Observed(terminal) => terminal,
@@ -314,9 +453,17 @@ async fn assert_process_is_gone(pid_file: &Path) {
     panic!("pid {pid} from {} survived Job cleanup", pid_file.display());
 }
 
-fn powershell() -> PathBuf {
+fn command_processor() -> PathBuf {
+    system32().join("cmd.exe")
+}
+
+fn system32() -> PathBuf {
     PathBuf::from(std::env::var_os("SystemRoot").expect("Windows defines SystemRoot"))
         .join("System32")
+}
+
+fn powershell() -> PathBuf {
+    system32()
         .join("WindowsPowerShell")
         .join("v1.0")
         .join("powershell.exe")
