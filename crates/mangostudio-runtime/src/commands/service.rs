@@ -456,6 +456,41 @@ fn start_error(method: &str, args: &[String], error: ProcessStartError) -> Remot
     }
 }
 
+fn shell_exit(terminal: &ProcessTerminal, windows: bool) -> (Option<i32>, Option<&'static str>) {
+    // Bun represents an explicit Windows kill as SIGKILL despite the OS's integer status.
+    if windows
+        && matches!(
+            terminal.cause,
+            ProcessTerminalCause::TimedOut
+                | ProcessTerminalCause::Cancelled
+                | ProcessTerminalCause::Forced
+        )
+    {
+        return (None, Some("SIGKILL"));
+    }
+    let exit = terminal.exit.as_ref().and_then(|exit| exit.code);
+    let signal = terminal
+        .exit
+        .as_ref()
+        .and_then(|exit| exit.signal.as_ref())
+        .map(|signal| signal.name);
+    (exit, signal)
+}
+
+fn cli_exit(terminal: &ProcessTerminal, windows: bool) -> Option<i32> {
+    let (exit, signal) = shell_exit(terminal, windows);
+    exit.or_else(|| {
+        if signal == Some("SIGKILL") {
+            return Some(137);
+        }
+        terminal
+            .exit
+            .as_ref()
+            .and_then(|exit| exit.signal.as_ref())
+            .map(|signal| 128 + signal.number)
+    })
+}
+
 fn map_terminal(
     method: &str,
     prepared: &Prepared,
@@ -463,13 +498,9 @@ fn map_terminal(
 ) -> Result<Value, RemoteError> {
     let stdout = capture_text(&terminal.stdout.bytes);
     let stderr = capture_text(&terminal.stderr.bytes);
-    let exit = terminal.exit.as_ref().and_then(|exit| exit.code);
+    let exit = cli_exit(&terminal, cfg!(windows));
     if let Some((kind, command)) = &prepared.shell {
-        let signal = terminal
-            .exit
-            .as_ref()
-            .and_then(|exit| exit.signal.as_ref())
-            .map(|signal| signal.name);
+        let (exit, signal) = shell_exit(&terminal, cfg!(windows));
         let termination = match terminal.cause {
             ProcessTerminalCause::TimedOut => json!({"kind":"timed_out"}),
             ProcessTerminalCause::Cancelled | ProcessTerminalCause::Forced => {
@@ -515,22 +546,15 @@ fn map_terminal(
             aborted,
         ));
     }
-    let code = exit
-        .or_else(|| {
-            terminal
-                .exit
-                .as_ref()
-                .and_then(|exit| exit.signal.as_ref())
-                .map(|signal| 128 + signal.number)
-        })
-        .unwrap_or(1);
+    let code = exit.unwrap_or(1);
     if code != 0 && !prepared.accepted.contains(&f64::from(code)) {
+        let fallback = format!("{label} command failed.");
         let message = if !stderr.trim().is_empty() {
             stderr.trim()
         } else if !stdout.trim().is_empty() {
             stdout.trim()
         } else {
-            "Command failed."
+            &fallback
         };
         let mut error = execution_error(
             method,

@@ -392,3 +392,62 @@ async fn admitted_mutation_finishes_after_the_caller_cancels() {
     assert_eq!(result["stdout"], "completed");
     assert_eq!(result["exitCode"], 0);
 }
+
+#[test]
+fn windows_forced_shell_exit_matches_bun_without_rewriting_natural_exits() {
+    let mut observed = terminal(1);
+    assert_eq!(shell_exit(&observed, true), (Some(1), None));
+    for cause in [
+        ProcessTerminalCause::TimedOut,
+        ProcessTerminalCause::Cancelled,
+        ProcessTerminalCause::Forced,
+    ] {
+        observed.cause = cause;
+        assert_eq!(shell_exit(&observed, true), (None, Some("SIGKILL")));
+        assert_eq!(cli_exit(&observed, true), Some(137));
+        assert_eq!(shell_exit(&observed, false), (Some(1), None));
+    }
+}
+
+#[test]
+fn timed_out_cli_errors_preserve_buns_numeric_signal_exit() {
+    let prepared = prepare(
+        "git.exec",
+        json!({"args":["--version"],"cwd":"/repo"}),
+        &PathEnv::default(),
+        100_000,
+    )
+    .unwrap();
+    let mut observed = terminal(0);
+    observed.cause = ProcessTerminalCause::TimedOut;
+    observed.exit = Some(ProcessExit {
+        success: false,
+        code: None,
+        signal: Some(ProcessSignal {
+            number: 9,
+            name: "SIGKILL",
+        }),
+    });
+    let error = map_terminal("git.exec", &prepared, observed).unwrap_err();
+    assert_eq!(error.details.unwrap()["exitCode"], 137);
+}
+
+#[test]
+fn silent_cli_failures_keep_the_tools_named_error_message() {
+    for (method, args, message) in [
+        ("git.exec", vec!["--version"], "Git command failed."),
+        ("gh.exec", vec!["--version"], "GitHub CLI command failed."),
+    ] {
+        let prepared = prepare(
+            method,
+            json!({"args":args,"cwd":"/repo"}),
+            &PathEnv::default(),
+            100_000,
+        )
+        .unwrap();
+        let mut observed = terminal(1);
+        observed.stdout.bytes.clear();
+        let error = map_terminal(method, &prepared, observed).unwrap_err();
+        assert_eq!(error.message, message);
+    }
+}
