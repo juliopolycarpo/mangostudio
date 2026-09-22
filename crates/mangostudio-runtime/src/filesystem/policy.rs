@@ -156,13 +156,21 @@ impl CompiledPolicy {
     }
 }
 
-fn absolute(path: &Path) -> Result<PathBuf, RemoteError> {
+/// Joins a relative path onto the process working directory, leaving `..`
+/// and `.` components for the caller to resolve.
+///
+/// # Example
+///
+/// ```ignore
+/// let target = lexically_normalize(&absolute(requested)?);
+/// ```
+pub(super) fn absolute(path: &Path) -> Result<PathBuf, RemoteError> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());
     }
     std::env::current_dir()
         .map(|cwd| cwd.join(path))
-        .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))
+        .map_err(super::io::io_error)
 }
 
 fn compile_root(path: &Path) -> Result<Root, RemoteError> {

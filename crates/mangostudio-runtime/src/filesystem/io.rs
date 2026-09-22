@@ -177,7 +177,15 @@ pub(super) fn read(
     })
 }
 
-fn open_read(path: &Path) -> std::io::Result<File> {
+/// Opens a path for reading without blocking on a FIFO, before its handle
+/// and type are checked by the caller.
+///
+/// # Example
+///
+/// ```ignore
+/// let file = open_read(path).map_err(io_error)?;
+/// ```
+pub(super) fn open_read(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
