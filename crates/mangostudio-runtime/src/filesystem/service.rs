@@ -14,7 +14,9 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::capability;
-use super::freshness::{ALL_LINES_VALID, Ledger, ObservedLineRange, PathLocks, ReadObservation};
+use super::freshness::{
+    ALL_LINES_VALID, ContentDigest, Ledger, ObservedLineRange, PathLocks, ReadObservation,
+};
 use super::io::{self, check_cancel, path_error};
 use super::params::*;
 use super::policy::{CompiledPolicy, PathPolicy};
@@ -266,17 +268,16 @@ impl Service {
             } else {
                 base64::engine::general_purpose::STANDARD.encode(&observed.bytes)
             };
-            let hash = io::sha256_hex(&observed.bytes);
-            let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
+            let digest = ContentDigest::of(&observed.bytes);
+            let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":digest.sha256,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
             let result = response.preflight_read(result)?;
-            let recorded_hash = lock(&self.state.ledger).record_read(
+            lock(&self.state.ledger).record_read_digest(
                 &params.chat_id,
                 &params.resolved_path,
-                &observed.bytes,
+                &digest,
                 observed.mtime_ms,
                 ReadObservation::ByteView,
             );
-            debug_assert_eq!(recorded_hash, hash);
             return Ok(result);
         }
         if text::looks_binary(&observed.bytes) {
@@ -303,13 +304,13 @@ impl Service {
         } else {
             text::format_window(&observed.bytes, start, maximum)
         };
-        let hash = io::sha256_hex(&observed.bytes);
-        let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":hash,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
+        let digest = ContentDigest::of(&observed.bytes);
+        let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":digest.sha256,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
         let result = response.preflight_read(result)?;
-        let recorded_hash = lock(&self.state.ledger).record_read(
+        lock(&self.state.ledger).record_read_digest(
             &params.chat_id,
             &params.resolved_path,
-            &observed.bytes,
+            &digest,
             observed.mtime_ms,
             ReadObservation::Window(ObservedLineRange {
                 start_line: start as u64,
@@ -317,7 +318,6 @@ impl Service {
                 total_lines: total as u64,
             }),
         );
-        debug_assert_eq!(recorded_hash, hash);
         Ok(result)
     }
 
@@ -369,7 +369,8 @@ impl Service {
                     observed.as_ref().map_or(0, |value| value.bytes.len() as u64),
                 )?;
             }
-            let expected_hash = io::sha256_hex(params.content.as_bytes());
+            let written = ContentDigest::of(params.content.as_bytes());
+            let expected_hash = &written.sha256;
             let mut result =
                 json!({"path":params.input_path,"bytesWritten":params.content.len(),"sha256":expected_hash});
             if !exclusive {
@@ -381,7 +382,7 @@ impl Service {
                 &params.resolved_path,
                 if exists { "edit" } else { "create" },
                 observed.as_ref().map(|observed| observed.bytes.as_slice()),
-                &expected_hash,
+                expected_hash,
                 None,
             );
             let result = response.preflight_mutation(result)?;
@@ -413,14 +414,13 @@ impl Service {
                     params.content.as_bytes(),
                 )?
             };
-            let hash = lock(&self.state.ledger).record_read(
+            lock(&self.state.ledger).record_read_digest(
                 &params.mutation.chat_id,
                 &params.resolved_path,
-                params.content.as_bytes(),
+                &written,
                 mtime,
                 ReadObservation::WholeFile,
             );
-            debug_assert_eq!(hash, expected_hash);
             Ok(result)
         })
         .await
@@ -440,7 +440,8 @@ impl Service {
             }
             super::freshness::stale_file_error(path)
         })?;
-        lock(&self.state.ledger).assert_content(chat, path, &observed.bytes)?;
+        let digest = ContentDigest::of(&observed.bytes);
+        lock(&self.state.ledger).assert_digest(chat, path, &digest)?;
         Ok(observed)
     }
 
@@ -517,8 +518,9 @@ impl Service {
             debug_assert_eq!(updated.len(), projected_bytes);
             debug_assert_eq!(replaced, replacement_count);
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
-            let expected_hash = io::sha256_hex(&updated);
-            let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
+            let written = ContentDigest::of(&updated);
+            let expected_hash = &written.sha256;
+            let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),expected_hash,None);
             let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.edit-file",
@@ -534,8 +536,7 @@ impl Service {
             )?;
             let changed_lines = params.old_string.bytes().filter(|byte| *byte == b'\n').count() != params.new_string.bytes().filter(|byte| *byte == b'\n').count();
             let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES_VALID };
-            let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
-            debug_assert_eq!(hash, expected_hash);
+            lock(&self.state.ledger).record_edit_digest(&params.mutation.chat_id, &params.resolved_path, &written, mtime, through);
             Ok(result)
         }).await
     }
@@ -570,9 +571,10 @@ impl Service {
             if start > end || end > total { return Err(argument(format!("Invalid line range {start}-{end} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",params.input_path))); }
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
-            let expected_hash = io::sha256_hex(&updated);
+            let written = ContentDigest::of(&updated);
+            let expected_hash = &written.sha256;
             let replaced = end-start+1;
-            let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),&expected_hash,None);
+            let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),expected_hash,None);
             let result = response.preflight_mutation(result)?;
             let policy = self.compile_mutation_policy(
                 "fs.replace-range",
@@ -587,8 +589,7 @@ impl Service {
                 &updated,
             )?;
             let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES_VALID} else {(start-1) as u64};
-            let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
-            debug_assert_eq!(hash, expected_hash);
+            lock(&self.state.ledger).record_edit_digest(&params.mutation.chat_id, &params.resolved_path, &written, mtime, through);
             Ok(result)
         }).await
     }

@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    freshness::ReadObservation,
+    freshness::{ContentDigest, ReadObservation},
     io,
     params::Mutation,
     patch::{self, V4aUpdateHunk},
@@ -501,13 +501,15 @@ fn outcomes(
                 content,
             } => {
                 let mtime = writes[index].expect("committed add has a write timestamp");
-                let sha256 = lock(&service.state.ledger).record_read(
+                let digest = ContentDigest::of(content.as_bytes());
+                lock(&service.state.ledger).record_read_digest(
                     &params.mutation.chat_id,
                     resolved_path,
-                    content.as_bytes(),
+                    &digest,
                     mtime,
                     ReadObservation::WholeFile,
                 );
+                let sha256 = digest.sha256;
                 files.push(json!({"path":input_path,"op":"add","sha256":sha256}));
                 push_snapshot(
                     &mut mutations,
@@ -558,21 +560,25 @@ fn outcomes(
                 }
                 let mtime = writes[index].unwrap_or(current.mtime_ms);
                 let sha256 = if *has_content_changes {
-                    lock(&service.state.ledger).record_edit(
+                    let digest = ContentDigest::of(content.as_bytes());
+                    lock(&service.state.ledger).record_edit_digest(
                         &params.mutation.chat_id,
                         target,
-                        content.as_bytes(),
+                        &digest,
                         mtime,
                         *line_numbers_valid_through_line,
-                    )
+                    );
+                    digest.sha256
                 } else {
-                    lock(&service.state.ledger).record_read(
+                    let digest = ContentDigest::of(&current.bytes);
+                    lock(&service.state.ledger).record_read_digest(
                         &params.mutation.chat_id,
                         target,
-                        &current.bytes,
+                        &digest,
                         mtime,
                         ReadObservation::WholeFile,
-                    )
+                    );
+                    digest.sha256
                 };
                 if let Some(moved_to) = move_to {
                     files.push(

@@ -52,6 +52,36 @@ pub enum LineNumbers {
     ValidThrough(u64),
 }
 
+/// The identity of observed bytes: their SHA-256 digest and length.
+///
+/// Callers hash content once, outside the ledger lock, and pass the digest to
+/// the `*_digest` methods.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContentDigest {
+    /// Hex-encoded SHA-256 digest of the content.
+    pub sha256: String,
+    /// Content length in bytes.
+    pub size: u64,
+}
+
+impl ContentDigest {
+    /// Hashes `content` into its ledger identity.
+    ///
+    /// ```
+    /// use mangostudio_runtime::filesystem::freshness::ContentDigest;
+    ///
+    /// let digest = ContentDigest::of(b"hello");
+    /// assert_eq!((digest.sha256.len(), digest.size), (64, 5));
+    /// ```
+    #[must_use]
+    pub fn of(content: &[u8]) -> Self {
+        Self {
+            sha256: super::io::sha256_hex(content),
+            size: content.len() as u64,
+        }
+    }
+}
+
 /// A recorded immutable file snapshot.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FreshnessEntry {
@@ -123,12 +153,36 @@ impl Ledger {
         observed_mtime_ms: f64,
         observation: ReadObservation,
     ) -> String {
-        let sha256 = super::io::sha256_hex(content);
+        let digest = ContentDigest::of(content);
+        self.record_read_digest(chat_id, path, &digest, observed_mtime_ms, observation);
+        digest.sha256
+    }
+
+    /// Records a read whose digest the caller computed outside the ledger lock.
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// use mangostudio_runtime::filesystem::freshness::{ContentDigest, Ledger, ReadObservation};
+    ///
+    /// let digest = ContentDigest::of(b"hello");
+    /// let mut ledger = Ledger::new();
+    /// ledger.record_read_digest("chat", Path::new("/tmp/a"), &digest, f64::NAN, ReadObservation::WholeFile);
+    /// ledger.assert_digest("chat", Path::new("/tmp/a"), &digest).unwrap();
+    /// ```
+    pub fn record_read_digest(
+        &mut self,
+        chat_id: &str,
+        path: &Path,
+        digest: &ContentDigest,
+        observed_mtime_ms: f64,
+        observation: ReadObservation,
+    ) {
+        let sha256 = &digest.sha256;
         let covered_through_line = match observation {
-            ReadObservation::Window(range) => self.extend_coverage(chat_id, path, &sha256, range),
+            ReadObservation::Window(range) => self.extend_coverage(chat_id, path, sha256, range),
             ReadObservation::WholeFile | ReadObservation::ByteView => ALL_LINES_VALID,
         };
-        let line_numbers = self.line_numbers_for_observation(chat_id, path, &sha256, observation);
+        let line_numbers = self.line_numbers_for_observation(chat_id, path, sha256, observation);
         let complete = match observation {
             ReadObservation::Window(range) => covered_through_line >= range.total_lines,
             ReadObservation::WholeFile | ReadObservation::ByteView => true,
@@ -138,7 +192,7 @@ impl Ledger {
             path.to_path_buf(),
             FreshnessEntry {
                 sha256: sha256.clone(),
-                size: content.len() as u64,
+                size: digest.size,
                 mtime_ms: observed_mtime_ms,
                 covered_through_line,
                 complete,
@@ -146,7 +200,6 @@ impl Ledger {
                 lru_tick: 0,
             },
         );
-        sha256
     }
 
     /// Records bytes written by an edit and the numbered prefix that survived it.
@@ -167,18 +220,47 @@ impl Ledger {
         observed_mtime_ms: f64,
         line_numbers_valid_through_line: u64,
     ) -> String {
+        let digest = ContentDigest::of(content);
+        self.record_edit_digest(
+            chat_id,
+            path,
+            &digest,
+            observed_mtime_ms,
+            line_numbers_valid_through_line,
+        );
+        digest.sha256
+    }
+
+    /// Records an edit whose digest the caller computed outside the ledger lock.
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// use mangostudio_runtime::filesystem::freshness::{ContentDigest, Ledger};
+    ///
+    /// let mut ledger = Ledger::new();
+    /// let digest = ContentDigest::of(b"one\ntwo");
+    /// ledger.record_edit_digest("chat", Path::new("/tmp/a"), &digest, f64::NAN, 1);
+    /// ledger.assert_line_numbers("chat", Path::new("/tmp/a"), 1).unwrap();
+    /// ```
+    pub fn record_edit_digest(
+        &mut self,
+        chat_id: &str,
+        path: &Path,
+        digest: &ContentDigest,
+        observed_mtime_ms: f64,
+        line_numbers_valid_through_line: u64,
+    ) {
         let previous = self.entry(chat_id, path);
         let previous_valid_through = match previous.map(|entry| entry.line_numbers) {
             Some(LineNumbers::ValidThrough(through_line)) => through_line,
             Some(LineNumbers::Unobserved) | None => ALL_LINES_VALID,
         };
-        let sha256 = super::io::sha256_hex(content);
         self.store(
             chat_id,
             path.to_path_buf(),
             FreshnessEntry {
-                sha256: sha256.clone(),
-                size: content.len() as u64,
+                sha256: digest.sha256.clone(),
+                size: digest.size,
                 mtime_ms: observed_mtime_ms,
                 covered_through_line: ALL_LINES_VALID,
                 complete: true,
@@ -188,7 +270,6 @@ impl Ledger {
                 lru_tick: 0,
             },
         );
-        sha256
     }
 
     /// Returns a complete snapshot, or the wire error a mutation must report.
@@ -222,8 +303,28 @@ impl Ledger {
         path: &Path,
         content: &[u8],
     ) -> Result<(), RemoteError> {
+        self.assert_digest(chat_id, path, &ContentDigest::of(content))
+    }
+
+    /// Verifies a digest computed outside the ledger lock against a chat's
+    /// most recent complete snapshot.
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// use mangostudio_runtime::filesystem::freshness::{ContentDigest, Ledger, ReadObservation};
+    ///
+    /// let mut ledger = Ledger::new();
+    /// ledger.record_read("chat", Path::new("/tmp/a"), b"hello", f64::NAN, ReadObservation::WholeFile);
+    /// assert!(ledger.assert_digest("chat", Path::new("/tmp/a"), &ContentDigest::of(b"hullo")).is_err());
+    /// ```
+    pub fn assert_digest(
+        &mut self,
+        chat_id: &str,
+        path: &Path,
+        digest: &ContentDigest,
+    ) -> Result<(), RemoteError> {
         let entry = self.complete_entry(chat_id, path)?;
-        if entry.size != content.len() as u64 || entry.sha256 != super::io::sha256_hex(content) {
+        if entry.size != digest.size || entry.sha256 != digest.sha256 {
             return Err(stale_file_error(path));
         }
         self.touch(chat_id, path);
@@ -716,10 +817,47 @@ mod tests {
     use tokio::sync::Barrier;
     use tokio_util::sync::CancellationToken;
 
-    use super::{Ledger, ObservedLineRange, PathLockError, PathLocks, ReadObservation};
+    use super::{
+        ContentDigest, Ledger, ObservedLineRange, PathLockError, PathLocks, ReadObservation,
+    };
 
     fn path(name: &str) -> PathBuf {
         PathBuf::from(format!("/workspace/{name}"))
+    }
+
+    #[test]
+    fn digest_methods_record_the_same_entries_as_the_byte_methods() {
+        let window = ReadObservation::Window(ObservedLineRange {
+            start_line: 1,
+            end_line: 1,
+            total_lines: 2,
+        });
+        let digest = ContentDigest::of(b"one\ntwo\n");
+        let mut by_bytes = Ledger::new();
+        let mut by_digest = Ledger::new();
+        let file = path("digest.txt");
+
+        let hash = by_bytes.record_read("chat", &file, b"one\ntwo\n", 1.0, window);
+        by_digest.record_read_digest("chat", &file, &digest, 1.0, window);
+        assert_eq!(hash, digest.sha256);
+        assert_eq!(
+            by_bytes.entry("chat", &file),
+            by_digest.entry("chat", &file)
+        );
+
+        let edited = ContentDigest::of(b"one\n");
+        by_bytes.record_edit("chat", &file, b"one\n", 2.0, 1);
+        by_digest.record_edit_digest("chat", &file, &edited, 2.0, 1);
+        assert_eq!(
+            by_bytes.entry("chat", &file),
+            by_digest.entry("chat", &file)
+        );
+
+        by_digest.assert_digest("chat", &file, &edited).unwrap();
+        let stale = by_digest
+            .assert_digest("chat", &file, &ContentDigest::of(b"two\n"))
+            .unwrap_err();
+        assert_eq!(kind(&stale), "stale_file");
     }
 
     fn kind(error: &mango_protocol::error::RemoteError) -> &serde_json::Value {

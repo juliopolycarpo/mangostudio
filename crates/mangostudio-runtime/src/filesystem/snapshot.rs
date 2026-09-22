@@ -8,7 +8,7 @@ use mango_protocol::session::CallContext;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::freshness::ReadObservation;
+use super::freshness::{ContentDigest, ReadObservation};
 use super::io;
 use super::params::{
     SnapshotCaptureParams, SnapshotExpectedPath, SnapshotHashParams, SnapshotRevertOperation,
@@ -394,10 +394,11 @@ fn restore_bytes(
 ) -> Result<(), RemoteError> {
     let bytes = decode_node_base64(content_base64);
     let mtime = service.write_io.write_atomic(policy, path, &bytes)?;
-    lock(&service.state.ledger).record_read(
+    let digest = ContentDigest::of(&bytes);
+    lock(&service.state.ledger).record_read_digest(
         chat_id,
         path,
-        &bytes,
+        &digest,
         mtime,
         ReadObservation::WholeFile,
     );
