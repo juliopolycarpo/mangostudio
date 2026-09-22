@@ -12,7 +12,7 @@
 //! Out of scope for every transport here, matching the crate's own current
 //! scope: every machine method group except `runtime.health` (see
 //! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
-//! `probing.*` (see [`crate::probing`]), and `fs.*` (see
+//! `probing.*` (see [`crate::probing`]), `fs.*`, and `snapshot.*` (both see
 //! [`crate::filesystem`]) is unimplemented, so
 //! [`crate::registry::Registry`] answers everything else with
 //! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
@@ -108,7 +108,7 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
 /// session itself: a [`Registry`] implementing `runtime.health`, the
-/// `workspace.*`, `probing.*`, and `fs.*` methods (see [`build_host`]
+/// `workspace.*`, `probing.*`, `fs.*`, and `snapshot.*` methods (see [`build_host`]
 /// for the full list; every other machine method group is out of scope, and
 /// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
 /// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
@@ -129,8 +129,9 @@ pub(crate) struct SessionHost {
 /// Builds one [`SessionHost`] for `slot` under `mango_home`, announcing
 /// `runtime_version` from `runtime.health`, and also implementing
 /// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
-/// `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`,
-/// and the eleven filesystem methods. Other groups remain unsupported.
+/// `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`, the
+/// eleven filesystem methods, and three snapshot methods. Other groups remain
+/// unsupported.
 ///
 /// Calls [`Registry::with_ports`], not
 /// [`Registry::with_ports_and_exclusivity`], so every connection this
@@ -482,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn build_host_implements_exactly_health_workspace_probing_and_filesystem() {
+    fn build_host_implements_exactly_health_workspace_probing_filesystem_and_snapshots() {
         let home = scratch_path("transport-build-host");
         let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
         assert_eq!(
@@ -503,6 +504,9 @@ mod tests {
                 "probing.runtimes",
                 "probing.version-managers",
                 "runtime.health",
+                "snapshot.capture",
+                "snapshot.hash",
+                "snapshot.revert",
                 "workspace.browse",
                 "workspace.resolve-contained",
                 "workspace.validate",

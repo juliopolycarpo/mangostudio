@@ -71,6 +71,15 @@ impl MoveIo for NativeMoveIo {
 }
 
 pub(super) trait WriteIo: Send + Sync {
+    fn write_atomic(
+        &self,
+        policy: &CompiledPolicy,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<f64, RemoteError> {
+        io::write_atomic(policy, path, bytes, false)
+    }
+
     fn write_atomic_if_unchanged(
         &self,
         policy: &CompiledPolicy,
@@ -95,13 +104,13 @@ impl WriteIo for NativeWriteIo {
 }
 
 #[derive(Clone)]
-struct ResponseBudget {
+pub(super) struct ResponseBudget {
     id: String,
     limit_bytes: usize,
 }
 
 impl ResponseBudget {
-    fn from_context(context: &CallContext) -> Self {
+    pub(super) fn from_context(context: &CallContext) -> Self {
         Self {
             id: context.id().to_owned(),
             limit_bytes: context.session().send_limit_bytes(),
@@ -109,10 +118,18 @@ impl ResponseBudget {
     }
 
     #[cfg(test)]
-    fn unbounded() -> Self {
+    pub(super) fn unbounded() -> Self {
         Self {
             id: "test-response".to_owned(),
             limit_bytes: usize::MAX,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn limited(limit_bytes: usize) -> Self {
+        Self {
+            id: "test-response".to_owned(),
+            limit_bytes,
         }
     }
 
@@ -122,6 +139,10 @@ impl ResponseBudget {
 
     fn preflight_read(&self, result: &Value) -> Result<(), RemoteError> {
         preflight_response(result, &self.id, self.limit_bytes, "read")
+    }
+
+    pub(super) fn preflight_snapshot(&self, result: &Value) -> Result<(), RemoteError> {
+        preflight_response(result, &self.id, self.limit_bytes, "snapshot")
     }
 }
 
@@ -177,7 +198,7 @@ impl Service {
         )
     }
 
-    fn compile_policy(
+    pub(super) fn compile_policy(
         &self,
         method: &str,
         policy: &Option<PathPolicy>,
@@ -346,7 +367,7 @@ impl Service {
             if params.mutation.capture_snapshot {
                 snapshot_limit(
                     &params.resolved_path,
-                    observed.as_ref().map_or(0, |value| value.bytes.len()),
+                    observed.as_ref().map_or(0, |value| value.bytes.len() as u64),
                 )?;
             }
             let expected_hash = hash_hex(&Sha256::digest(params.content.as_bytes()));
@@ -678,7 +699,7 @@ impl Service {
             )?;
             let metadata = io::assert_regular(&policy, &params.resolved_from, "move")?;
             let before = if params.mutation.capture_snapshot {
-                snapshot_limit(&params.resolved_from, metadata.len as usize)?;
+                snapshot_limit(&params.resolved_from, metadata.len)?;
                 Some(io::read(
                     &policy,
                     &params.resolved_from,
@@ -846,8 +867,8 @@ pub(super) fn argument(message: impl Into<String>) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
-pub(super) fn snapshot_limit(path: &Path, size: usize) -> Result<(), RemoteError> {
-    const MAX: usize = 8 * 1024 * 1024;
+pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> {
+    const MAX: u64 = 8 * 1024 * 1024;
     if size <= MAX {
         return Ok(());
     }
@@ -950,6 +971,7 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
         move_io: Arc::new(NativeMoveIo),
         write_io: Arc::new(NativeWriteIo),
     });
+    let registry = super::snapshot::register(registry, Arc::clone(&service));
     let read = Arc::clone(&service);
     let write = Arc::clone(&service);
     let create = Arc::clone(&service);
@@ -1800,7 +1822,7 @@ mod tests {
             Registry::new(),
             ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
         );
-        assert_eq!(registry.implemented_methods().len(), 11);
+        assert_eq!(registry.implemented_methods().len(), 14);
         assert!(positive_integer(0.0, "startLine").is_err());
         assert!(positive_integer(1.5, "startLine").is_err());
         assert_eq!(positive_integer(2.0, "startLine").unwrap(), 2);

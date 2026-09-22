@@ -58,7 +58,15 @@ fn file_not_found(path: &Path) -> RemoteError {
 }
 
 fn is_missing_path_error(error: &RemoteError) -> bool {
-    error.message.starts_with("Filesystem object not found:")
+    error.message.starts_with("File not found:")
+        || error.message.starts_with("Filesystem object not found:")
+}
+
+/// Whether an I/O helper found no filesystem object at its requested path.
+pub(super) fn is_not_found(error: &RemoteError) -> bool {
+    error.details.as_ref().is_some_and(|details| {
+        details.get("notFound").and_then(serde_json::Value::as_bool) == Some(true)
+    }) || is_missing_path_error(error)
 }
 
 /// Gives actionable read-before-write guidance only for an unread file.
@@ -255,15 +263,24 @@ pub(super) fn path_is_file(policy: &CompiledPolicy, path: &Path) -> Result<bool,
     })
 }
 
+/// Checks whether a path resolves to a regular file without opening it.
+///
+/// Callers still open through the capability after this classification, so the
+/// metadata result cannot authorize a later operation by itself.
+fn resolved_path_is_file(policy: &CompiledPolicy, path: &Path) -> Result<bool, RemoteError> {
+    policy.check(path)?;
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io_error(error)),
+    }
+}
+
 /// Hashes a committed file with fixed memory; callers must finish after mutation begins.
 pub(super) fn hash_file(policy: &CompiledPolicy, path: &Path) -> Result<String, RemoteError> {
-    let mut file = open_read_scoped(policy, path).map_err(|error| {
-        if is_missing_path_error(&error) {
-            file_not_found(path)
-        } else {
-            error
-        }
-    })?;
+    let Some(mut file) = open_hash_file_if_present(policy, path)? else {
+        return Err(file_not_found(path));
+    };
     if !file.metadata().map_err(io_error)?.is_file() {
         return Err(path_error(format!(
             "Cannot hash \"{}\": it is not a regular file.",
@@ -273,11 +290,65 @@ pub(super) fn hash_file(policy: &CompiledPolicy, path: &Path) -> Result<String, 
     hash_open_file(&mut file)
 }
 
+/// Hashes a present regular file in fixed memory, observing cancellation between chunks.
+pub(super) fn hash_file_if_present_cancellable(
+    policy: &CompiledPolicy,
+    path: &Path,
+    cancel: &CancellationToken,
+) -> Result<Option<String>, RemoteError> {
+    check_cancel(cancel)?;
+    // On Windows, opening a directory as a regular file can fail before we can
+    // inspect its metadata. Classify it first so snapshot.hash matches
+    // Bun.file(path).exists(), which treats directories as absent.
+    if !resolved_path_is_file(policy, path)? {
+        check_cancel(cancel)?;
+        return Ok(None);
+    }
+    let Some(mut file) = open_hash_file_if_present(policy, path)? else {
+        check_cancel(cancel)?;
+        return Ok(None);
+    };
+    if !file.metadata().map_err(io_error)?.is_file() {
+        check_cancel(cancel)?;
+        return Ok(None);
+    }
+    hash_reader_cancellable(&mut file, cancel).map(Some)
+}
+
+fn open_hash_file_if_present(
+    policy: &CompiledPolicy,
+    path: &Path,
+) -> Result<Option<File>, RemoteError> {
+    match open_read_scoped(policy, path) {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if is_not_found(&error) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 fn hash_open_file(file: &mut File) -> Result<String, RemoteError> {
     let mut hasher = Sha256::new();
     let mut chunk = [0; 64 * 1024];
     loop {
         let count = file.read(&mut chunk).map_err(io_error)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&chunk[..count]);
+    }
+    Ok(hash_hex(&hasher.finalize()))
+}
+
+fn hash_reader_cancellable(
+    reader: &mut impl Read,
+    cancel: &CancellationToken,
+) -> Result<String, RemoteError> {
+    let mut hasher = Sha256::new();
+    let mut chunk = [0; 64 * 1024];
+    loop {
+        check_cancel(cancel)?;
+        let count = reader.read(&mut chunk).map_err(io_error)?;
+        check_cancel(cancel)?;
         if count == 0 {
             break;
         }
@@ -1925,6 +1996,33 @@ mod tests {
             read(&policy, &path, 3, &token).unwrap_err().code,
             codes::CANCELLED
         );
+    }
+
+    #[test]
+    fn cancellable_hash_checks_after_its_final_read() {
+        struct CancellingReader {
+            token: CancellationToken,
+            bytes: Option<Vec<u8>>,
+        }
+
+        impl std::io::Read for CancellingReader {
+            fn read(&mut self, target: &mut [u8]) -> std::io::Result<usize> {
+                let Some(bytes) = self.bytes.take() else {
+                    return Ok(0);
+                };
+                target[..bytes.len()].copy_from_slice(&bytes);
+                self.token.cancel();
+                Ok(bytes.len())
+            }
+        }
+
+        let token = CancellationToken::new();
+        let mut reader = CancellingReader {
+            token: token.clone(),
+            bytes: Some(b"hash me".to_vec()),
+        };
+        let error = hash_reader_cancellable(&mut reader, &token).unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
     }
 
     #[cfg(unix)]

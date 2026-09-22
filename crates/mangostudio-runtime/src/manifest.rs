@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn filesystem_features_do_not_require_snapshot_or_library_implementations() {
+    fn filesystem_registration_enables_checkpoints_without_library() {
         let home = crate::test_support::scratch_dir("manifest-filesystem");
         let registry = crate::filesystem::register(
             crate::workspace_methods::register(Registry::new()),
@@ -286,7 +286,7 @@ mod tests {
         );
         let ready = build_features(&registry, &full_allow(), false);
         assert!(ready.fs_read && ready.fs_write && ready.tools);
-        assert!(!ready.checkpoints && !ready.library);
+        assert!(ready.checkpoints && !ready.library);
         let mut allow = full_allow();
         allow.fs_read = false;
         let denied = build_features(&registry, &allow, false);
