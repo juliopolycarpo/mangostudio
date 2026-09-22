@@ -6,7 +6,6 @@
 use std::time::Duration;
 
 use mango_protocol::close::close_codes;
-use mango_protocol::frame::PeerInfo;
 use mango_protocol::session::{Session, SessionOptions};
 use mango_protocol::transports::spawn::{SpawnOptions, sanitized_env, spawn_port};
 
@@ -20,14 +19,6 @@ fn binary_path() -> String {
 
 fn scratch_home(name: &str) -> ScratchDir {
     scratch_path(&format!("transport-stdio-spawn-test-{name}"))
-}
-
-fn hub_peer() -> PeerInfo {
-    PeerInfo {
-        name: "test-hub".into(),
-        version: "0.0.0".into(),
-        role: "hub".into(),
-    }
 }
 
 /// A fresh `MANGO_HOME` with nothing in it at all resolves to the `host`
@@ -54,7 +45,7 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
     let options = SpawnOptions::new([binary_path(), "stdio".to_string()]).with_env(env);
     let (port, launched) = spawn_port(options).expect("the argv names a real binary");
 
-    let (session, driver) = Session::spawn(port, SessionOptions::new(hub_peer()));
+    let (session, driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
     let remote = tokio::time::timeout(Duration::from_secs(10), session.ready())
         .await
         .expect("the child must say hello within the timeout")

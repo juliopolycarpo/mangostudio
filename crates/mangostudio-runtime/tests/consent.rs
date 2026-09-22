@@ -13,17 +13,15 @@ mod support;
 
 use std::sync::Arc;
 
-use mango_protocol::contract::Contract;
 use mango_protocol::error::codes;
 use mangostudio_runtime::ports::audit::Outcome;
 use mangostudio_runtime::ports::authorization::DenyingAuthorization;
 use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::registry::Registry;
-use mangostudio_runtime_contract::catalog::catalog;
 use serde_json::json;
 use support::{
     GrantingAuthorization, PartiallyGrantingAuthorization, RecordingAudit, health_result,
-    open_pair, within,
+    serve_pair, within,
 };
 
 #[tokio::test]
@@ -36,18 +34,7 @@ async fn denying_authorization_refuses_a_capability_bearing_method_and_records_i
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("terminal.list is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let denied = within("terminal.list", hub.request("terminal.list", json!({})))
         .await
@@ -77,18 +64,7 @@ async fn a_zero_capability_method_passes_even_under_the_denying_default() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("runtime.health is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let result = within("runtime.health", hub.request("runtime.health", json!({})))
         .await
@@ -105,18 +81,7 @@ async fn granting_authorization_lets_a_capability_bearing_method_through() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(GrantingAuthorization),
-        "host",
-    )
-    .expect("terminal.list is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(GrantingAuthorization)).await;
 
     let result = within("terminal.list", hub.request("terminal.list", json!({})))
         .await
@@ -138,18 +103,11 @@ async fn partially_granting_authorization_names_only_the_ungranted_capability() 
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
+    let (hub, _runtime) = serve_pair(
         registry,
         Arc::new(PartiallyGrantingAuthorization::new(["checkpoints"])),
-        "host",
     )
-    .expect("snapshot.capture is declared by the catalog");
-    guard.persist();
+    .await;
 
     let denied = within(
         "snapshot.capture",

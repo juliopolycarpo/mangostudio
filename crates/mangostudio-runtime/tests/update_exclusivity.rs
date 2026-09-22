@@ -13,15 +13,13 @@ mod support;
 
 use std::sync::Arc;
 
-use mango_protocol::contract::Contract;
 use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::ports::exclusivity::{NotUpdating, UpdateExclusivityTracker};
 use mangostudio_runtime::registry::Registry;
-use mangostudio_runtime_contract::catalog::catalog;
 use mangostudio_runtime_contract::errors::RUNTIME_UPDATE_REFUSED;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use support::{GrantingAuthorization, health_result, open_pair, within};
+use support::{GrantingAuthorization, health_result, serve_pair, within};
 
 /// A gate a handler blocks on until the test explicitly opens it, plus a
 /// one-shot signal fired the instant the handler starts running — the same
@@ -109,18 +107,7 @@ async fn an_update_call_refuses_while_an_ordinary_call_is_genuinely_in_flight() 
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(GrantingAuthorization),
-        "host",
-    )
-    .expect("both methods are declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(GrantingAuthorization)).await;
 
     let hub_for_health = hub.clone();
     let health =
@@ -183,18 +170,7 @@ async fn an_ordinary_call_refuses_while_an_update_call_is_genuinely_in_flight() 
         }
     });
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(GrantingAuthorization),
-        "host",
-    )
-    .expect("both methods are declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(GrantingAuthorization)).await;
 
     let hub_for_update = hub.clone();
     let update = tokio::spawn(async move {
@@ -257,18 +233,7 @@ async fn a_decode_failure_releases_an_ordinary_claim_before_an_update_starts() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(GrantingAuthorization),
-        "host",
-    )
-    .expect("both methods are declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(GrantingAuthorization)).await;
 
     let decode_error = within(
         "the schema-valid decode failure",

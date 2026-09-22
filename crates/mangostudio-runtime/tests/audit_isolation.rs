@@ -12,16 +12,14 @@ mod support;
 
 use std::sync::Arc;
 
-use mango_protocol::contract::Contract;
 use mango_protocol::error::codes;
 use mangostudio_runtime::ports::audit::Outcome;
 use mangostudio_runtime::ports::authorization::DenyingAuthorization;
 use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::registry::Registry;
-use mangostudio_runtime_contract::catalog::catalog;
 use serde_json::json;
 use support::{
-    PanickingAudit, PanickingAuthorization, RecordingAudit, health_result, open_pair, within,
+    PanickingAudit, PanickingAuthorization, RecordingAudit, health_result, serve_pair, within,
 };
 
 #[tokio::test]
@@ -38,18 +36,7 @@ async fn a_panicking_handler_still_produces_an_audit_entry() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("runtime.health is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let error = within(
         "the panicking request",
@@ -80,18 +67,7 @@ async fn a_successful_call_records_outcome_ok() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("runtime.health is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let result = within("the request", hub.request("runtime.health", json!({})))
         .await
@@ -128,20 +104,9 @@ async fn a_schema_invalid_result_is_never_recorded_as_ok() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
     // `terminal.list` needs `shell`; grant it so the request reaches the
     // handler at all — this test is about the result check, not consent.
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(support::GrantingAuthorization),
-        "host",
-    )
-    .expect("terminal.list is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(support::GrantingAuthorization)).await;
 
     let error = within("the request", hub.request("terminal.list", json!({})))
         .await
@@ -171,18 +136,7 @@ async fn a_panicking_audit_sink_leaves_a_successful_result_untouched_on_the_wire
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("runtime.health is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let result = within("the request", hub.request("runtime.health", json!({})))
         .await
@@ -209,18 +163,7 @@ async fn a_panicking_audit_sink_leaves_a_denial_as_denied_not_internal() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(DenyingAuthorization),
-        "host",
-    )
-    .expect("terminal.list is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(DenyingAuthorization)).await;
 
     let error = within("the request", hub.request("terminal.list", json!({})))
         .await
@@ -246,18 +189,7 @@ async fn a_panicking_authorization_port_records_error_not_denied() {
         },
     );
 
-    let (hub, runtime) = open_pair().await;
-    let contract =
-        Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles");
-    let guard = mangostudio_runtime::serve::serve(
-        &contract,
-        &runtime,
-        registry,
-        Arc::new(PanickingAuthorization),
-        "host",
-    )
-    .expect("terminal.list is declared by the catalog");
-    guard.persist();
+    let (hub, _runtime) = serve_pair(registry, Arc::new(PanickingAuthorization)).await;
 
     let error = within("the request", hub.request("terminal.list", json!({})))
         .await

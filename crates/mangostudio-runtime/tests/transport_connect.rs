@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mango_protocol::close::close_codes;
-use mango_protocol::frame::PeerInfo;
 use mango_protocol::session::{Session, SessionOptions};
 use mango_protocol::transports::websocket::WebSocketOptions;
 use mango_protocol::transports::websocket::server::{AcceptOptions, accept_websocket};
@@ -17,41 +16,11 @@ use tokio_util::sync::CancellationToken;
 
 mod support;
 
+use support::CollectingLog;
 use support::scratch::{ScratchDir, scratch_dir};
-
-fn hub_peer() -> PeerInfo {
-    PeerInfo {
-        name: "test-hub".into(),
-        version: "0.0.0".into(),
-        role: "hub".into(),
-    }
-}
 
 fn scratch_home(name: &str) -> ScratchDir {
     scratch_dir(&format!("transport-connect-test-{name}"))
-}
-
-/// A named log fake that actually records what it was told, rather than a
-/// closure that discards it — so a test can assert on the message a code
-/// path produces, not just that some path or other ran.
-#[derive(Clone, Default)]
-struct CollectingLog {
-    messages: Arc<std::sync::Mutex<Vec<String>>>,
-}
-
-impl CollectingLog {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn sink(&self) -> impl Fn(&str) + Clone + Send + Sync + 'static {
-        let messages = Arc::clone(&self.messages);
-        move |message: &str| messages.lock().unwrap().push(message.to_string())
-    }
-
-    fn messages(&self) -> Vec<String> {
-        self.messages.lock().unwrap().clone()
-    }
 }
 
 /// Accepts exactly one connection and closes it with `code` the instant the
@@ -67,7 +36,7 @@ async fn fake_hub_closing_with(listener: TcpListener, code: u16) {
     )
     .await
     .unwrap();
-    let (session, _driver) = Session::spawn(port, SessionOptions::new(hub_peer()));
+    let (session, _driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
     let _ = session.ready().await;
     session.close(code, Some("test hub closing")).await;
 }
@@ -92,7 +61,7 @@ async fn fake_hub_retrying_then_accepting(
     )
     .await
     .unwrap();
-    let (session, _driver) = Session::spawn(port, SessionOptions::new(hub_peer()));
+    let (session, _driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
     session
         .ready()
         .await
