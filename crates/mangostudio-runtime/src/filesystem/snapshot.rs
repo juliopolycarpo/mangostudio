@@ -15,7 +15,7 @@ use super::params::{
     SnapshotRevertParams,
 };
 use super::policy::PathPolicy;
-use super::service::{ResponseBudget, Service, lock_error, snapshot_limit};
+use super::service::{ResponseBudget, Service, before_json, lock_error, snapshot_limit};
 use crate::blocking::run_blocking;
 use crate::ports::audit::lock;
 use crate::registry::Registry;
@@ -66,7 +66,7 @@ impl Service {
             let (size, _) = io::current_metadata(&policy, &params.path)?;
             snapshot_limit(&params.path, size)?;
             let observed = io::read(&policy, &params.path, SNAPSHOT_MAX_BYTES, &cancel)?;
-            let result = before_snapshot(&observed.bytes);
+            let result = before_json(Some(&observed.bytes));
             response.preflight_snapshot(&result)?;
             Ok(result)
         })
@@ -286,14 +286,6 @@ fn assert_initial_containment(root: Option<&Path>, paths: &[PathBuf]) -> Result<
         }
     }
     Ok(())
-}
-
-fn before_snapshot(bytes: &[u8]) -> Value {
-    json!({
-        "exists":true,
-        "contentBase64":base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes),
-        "hash":io::sha256_hex(bytes),
-    })
 }
 
 trait SnapshotHasher {

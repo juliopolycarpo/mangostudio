@@ -5,7 +5,6 @@ use std::{
     sync::Arc,
 };
 
-use base64::Engine;
 use mango_protocol::error::{RemoteError, codes};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -17,7 +16,7 @@ use super::{
     params::Mutation,
     patch::{self, V4aUpdateHunk},
     policy::CompiledPolicy,
-    service::{Service, argument, preflight_response},
+    service::{Service, argument, preflight_response, snapshot_record},
 };
 use crate::{blocking::run_blocking, ports::audit::lock};
 
@@ -707,12 +706,7 @@ fn push_snapshot(
     if !params.mutation.capture_snapshot {
         return;
     }
-    let before = before.map_or_else(|| json!({"exists":false}), |bytes| json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":io::sha256_hex(bytes)}));
-    let mut snapshot = json!({"path":path,"op":op,"before":before,"afterHash":after_hash});
-    if let Some(destination) = moved_to {
-        snapshot["movedTo"] = json!(destination);
-    }
-    output.push(snapshot);
+    output.push(snapshot_record(path, op, before, after_hash, moved_to));
 }
 
 fn read_patch_target(

@@ -948,12 +948,46 @@ pub(super) fn mutation_result(
     if !params.capture_snapshot {
         return json!({"result":result,"mutations":[]});
     }
-    let before = before.map_or_else(||json!({"exists":false}),|bytes|json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":io::sha256_hex(bytes)}));
-    let mut snapshot = json!({"path":path,"op":op,"before":before,"afterHash":hash});
+    let snapshot = snapshot_record(path, op, before, hash, moved_to);
+    json!({"result":result,"mutations":[snapshot]})
+}
+
+/// Builds one `mutations[]` checkpoint record for a captured mutation.
+///
+/// # Example
+///
+/// ```ignore
+/// let record = snapshot_record(path, "delete", Some(&before), "absent", None);
+/// ```
+pub(super) fn snapshot_record(
+    path: &Path,
+    op: &str,
+    before: Option<&[u8]>,
+    after_hash: &str,
+    moved_to: Option<&Path>,
+) -> Value {
+    let mut snapshot =
+        json!({"path":path,"op":op,"before":before_json(before),"afterHash":after_hash});
     if let Some(to) = moved_to {
         snapshot["movedTo"] = json!(to);
     }
-    json!({"result":result,"mutations":[snapshot]})
+    snapshot
+}
+
+/// Describes a checkpoint's prior state: absent, or its full bytes and hash.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(before_json(None), json!({"exists": false}));
+/// ```
+pub(super) fn before_json(before: Option<&[u8]>) -> Value {
+    before.map_or_else(
+        || json!({"exists":false}),
+        |bytes| {
+            json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":io::sha256_hex(bytes)})
+        },
+    )
 }
 
 pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
@@ -1179,6 +1213,36 @@ mod tests {
             crate::result_check::compile_result_schema(schema).is_valid(result),
             "{method}: {result}"
         );
+    }
+
+    #[test]
+    fn before_json_records_absence_or_prior_bytes() {
+        assert_eq!(before_json(None), json!({"exists":false}));
+        assert_eq!(
+            before_json(Some(b"abc")),
+            json!({
+                "exists": true,
+                "contentBase64": "YWJj",
+                "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            })
+        );
+    }
+
+    #[test]
+    fn snapshot_record_adds_moved_to_only_for_moves() {
+        let edit = snapshot_record(Path::new("/a"), "edit", None, "after", None);
+        assert_eq!(
+            edit,
+            json!({"path":"/a","op":"edit","before":{"exists":false},"afterHash":"after"})
+        );
+        let moved = snapshot_record(
+            Path::new("/a"),
+            "move",
+            None,
+            "after",
+            Some(Path::new("/b")),
+        );
+        assert_eq!(moved["movedTo"], "/b");
     }
 
     #[test]
