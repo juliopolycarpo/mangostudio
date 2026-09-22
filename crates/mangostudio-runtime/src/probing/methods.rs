@@ -560,50 +560,28 @@ fn resolve_config_home(target_id: AgentTargetId, env: &PathEnv) -> String {
     }
 }
 
-/// How one [`ExternalAgentCliDefinition`]'s sign-in state is probed, with
-/// its auth path already resolved — split from
-/// [`AgentAuthDefinition`] so the (blocking) path join happens once,
-/// outside the `run_blocking` closure [`run_auth_probe`] runs inside.
-enum AuthProbeSpec {
-    File {
-        path: String,
-        unknown_when_missing: bool,
-    },
-    ConfigKey {
-        path: String,
-        key: &'static str,
-    },
-}
-
-fn auth_probe_spec(
-    cli: &ExternalAgentCliDefinition,
+/// Probes one agent CLI's sign-in state under `config_home` the way its
+/// [`AgentAuthDefinition`] says to. Blocking: runs inside the same
+/// `run_blocking` closure as the config-home existence check.
+fn probe_agent_auth(
+    auth: AgentAuthDefinition,
     config_home: &str,
     platform: &str,
-) -> AuthProbeSpec {
-    match cli.auth {
+) -> AuthSignalResult {
+    match auth {
         AgentAuthDefinition::File {
             file_name,
             unknown_when_missing,
-        } => AuthProbeSpec::File {
-            path: join_path(platform, &[config_home, file_name]),
+        } => probe_auth_file(
+            &join_path(platform, &[config_home, file_name]),
             unknown_when_missing,
-        },
-        AgentAuthDefinition::ConfigKey { file_name, key } => AuthProbeSpec::ConfigKey {
-            path: join_path(platform, &[config_home, file_name]),
+            &host::RealAuthSignalFs,
+        ),
+        AgentAuthDefinition::ConfigKey { file_name, key } => probe_config_key(
+            &join_path(platform, &[config_home, file_name]),
             key,
-        },
-    }
-}
-
-fn run_auth_probe(spec: &AuthProbeSpec) -> AuthSignalResult {
-    match spec {
-        AuthProbeSpec::File {
-            path,
-            unknown_when_missing,
-        } => probe_auth_file(path, *unknown_when_missing, &host::RealAuthSignalFs),
-        AuthProbeSpec::ConfigKey { path, key } => {
-            probe_config_key(path, key, &host::RealAuthSignalFs)
-        }
+            &host::RealAuthSignalFs,
+        ),
     }
 }
 
@@ -799,7 +777,6 @@ async fn describe_external_agent(
 
     let target_id = cli.target_id;
     let config_home = resolve_config_home(target_id, path_env);
-    let auth_spec = auth_probe_spec(&cli, &config_home, &path_env.platform);
 
     let (config_home_exists, auth, location_statuses) = {
         let path_env = path_env.clone();
@@ -807,7 +784,7 @@ async fn describe_external_agent(
         crate::blocking::run_blocking(move || {
             let exists =
                 auth_signal::directory_exists(&config_home_for_probe, &host::RealAuthSignalFs);
-            let auth = run_auth_probe(&auth_spec);
+            let auth = probe_agent_auth(cli.auth, &config_home_for_probe, &path_env.platform);
             let locations = locations::describe_target_locations(
                 target_id,
                 &path_env,
