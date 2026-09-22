@@ -1,6 +1,13 @@
-//! One place a path is decided to be inside a workspace root or not —
-//! shared by whichever later lane adds filesystem, process, or terminal
-//! methods, so none of them ever supplies a second authorization policy.
+//! One place a path is decided to be inside a workspace root or not, for
+//! the `workspace.*` methods, plus the symlink-aware resolution
+//! (`resolve_through_existing_ancestor`) and lexical normalization
+//! (`lexically_normalize`) the filesystem path policy builds on.
+//!
+//! The `fs.*` methods do not authorize through this module's root check.
+//! They evaluate a wire path policy (`crate::filesystem::policy`),
+//! recompile it under their path locks immediately before each mutation,
+//! and bind the operation to verified directory handles
+//! (`crate::filesystem::capability`).
 //!
 //! Mirrors `apps/runtime/src/services/workspace.ts` and
 //! `apps/runtime/src/services/fs-path-policy.ts`. The hub's own containment
@@ -15,12 +22,12 @@
 //! # Two checks, not one
 //!
 //! [`resolve_contained_workspace_path`] answers "is this path inside the
-//! root, right now". [`guard_mutation`] is the second, *later* check every
-//! mutating operation needs on top of it: a request-time answer can go
-//! stale by the time a write actually happens (a symlink swapped in
-//! between the two), so a caller that mutates re-runs the same
-//! containment decision immediately before the mutation, never relying on
-//! an earlier answer alone. Both draw on the same
+//! root, right now". [`guard_mutation`] is the second, *later* check a
+//! mutation authorized by that root check needs on top of it: a
+//! request-time answer can go stale by the time a write actually happens
+//! (a symlink swapped in between the two), so such a caller re-runs the
+//! same containment decision immediately before the mutation, never
+//! relying on an earlier answer alone. Both draw on the same
 //! [`resolve_contained_workspace_path`] — there is no second policy to
 //! keep in sync, only two different moments to apply the one policy at.
 
@@ -392,10 +399,11 @@ pub(crate) fn lexically_normalize(path: &Path) -> PathBuf {
 }
 
 /// Re-runs [`resolve_contained_workspace_path`] for every path `targets`
-/// names, immediately before calling `execute` — the re-check every
-/// mutating operation needs on top of whatever containment check already
-/// passed at request time. See the module docs for why this is the same
-/// policy applied a second time, not a second policy.
+/// names, immediately before calling `execute` — the re-check a mutation
+/// authorized by workspace-root containment needs on top of whatever
+/// containment check already passed at request time. See the module docs
+/// for why this is the same policy applied a second time, not a second
+/// policy.
 ///
 /// # Errors
 /// The first [`WorkspaceContainmentError`] any of `targets` produces;
