@@ -78,12 +78,6 @@ enum PlannedOperation {
     },
 }
 
-#[derive(Debug)]
-struct Revalidated {
-    bytes: Vec<u8>,
-    mtime_ms: f64,
-}
-
 trait CommitHook {
     fn after_final_policy_check(&self);
 }
@@ -264,7 +258,7 @@ fn commit_revalidated(
     service: &Service,
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
-    revalidated: &[Option<Revalidated>],
+    revalidated: &[Option<io::Observed>],
     cancel: &CancellationToken,
 ) -> Result<Value, RemoteError> {
     commit_revalidated_with_hook(
@@ -281,7 +275,7 @@ fn commit_revalidated_with_hook(
     service: &Service,
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
-    revalidated: &[Option<Revalidated>],
+    revalidated: &[Option<io::Observed>],
     cancel: &CancellationToken,
     hook: &dyn CommitHook,
 ) -> Result<Value, RemoteError> {
@@ -399,7 +393,7 @@ fn revalidate_operations(
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
     cancel: &CancellationToken,
-) -> Result<Vec<Option<Revalidated>>, RemoteError> {
+) -> Result<Vec<Option<io::Observed>>, RemoteError> {
     let mut values = Vec::with_capacity(planned.len());
     let mut failures = Vec::new();
     for operation in planned {
@@ -468,10 +462,7 @@ fn revalidate_operations(
                             move_to.as_deref().unwrap_or_default(),
                         )?;
                     }
-                    Ok(Some(Revalidated {
-                        bytes: observed.bytes,
-                        mtime_ms: observed.mtime_ms,
-                    }))
+                    Ok(Some(observed))
                 })
             }
         };
@@ -497,7 +488,7 @@ fn outcomes(
     service: &Service,
     params: &ApplyPatchParams,
     planned: &[PlannedOperation],
-    revalidated: &[Option<Revalidated>],
+    revalidated: &[Option<io::Observed>],
     writes: &[Option<f64>],
     move_hashes: &[Option<String>],
 ) -> Result<Value, RemoteError> {

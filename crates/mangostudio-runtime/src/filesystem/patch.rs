@@ -80,7 +80,7 @@ pub(super) fn apply_update_hunks(
     hunks: &[V4aUpdateHunk],
     input_path: &str,
 ) -> Result<AppliedUpdate, V4aHunkApplyError> {
-    let original = split_text_lines(source);
+    let original = split_lines(source);
     let mut lines = original.clone();
     for (index, hunk) in hunks.iter().enumerate() {
         let location = locate_hunk(&lines, hunk, input_path, index + 1)?;
@@ -113,10 +113,6 @@ pub(super) fn assert_text_content(
 struct TextLine {
     content: String,
     ending: LineEnding,
-}
-
-fn split_text_lines(input: &str) -> Vec<TextLine> {
-    split_lines(input)
 }
 
 fn split_lines(input: &str) -> Vec<TextLine> {
@@ -209,8 +205,8 @@ fn find_hunk_candidates(
                     line,
                     ignore_trailing_whitespace,
                 )
-            }) && !candidates.contains(&start)
-            {
+            }) {
+                // Marker windows are disjoint, so no start is visited twice.
                 candidates.push(start);
             }
         }
