@@ -116,7 +116,7 @@ async fn build_browse_result(params: BrowseParams) -> Result<Value, RemoteError>
         "entries": entries_json,
         "home": home,
         "roots": roots,
-        "separator": PATH_SEPARATOR,
+        "separator": std::path::MAIN_SEPARATOR_STR,
     });
     if truncated {
         result["truncated"] = Value::Bool(true);
@@ -179,11 +179,6 @@ fn read_workspace_directory(dir: &Path) -> std::io::Result<(Vec<BrowseEntry>, bo
     entries.truncate(MAX_WORKSPACE_DIRECTORY_ENTRIES);
     Ok((entries, truncated))
 }
-
-#[cfg(not(windows))]
-const PATH_SEPARATOR: &str = "/";
-#[cfg(windows)]
-const PATH_SEPARATOR: &str = "\\";
 
 /// The host's filesystem roots: a fixed `["/"]` everywhere but Windows,
 /// where every mounted drive letter is probed once per process and cached —
