@@ -354,50 +354,56 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     await assertReversal(rust, rustFixture);
   });
 
-  it('moves a snapshot back across Linux filesystems when the host exposes distinct mounts', async () => {
-    const fixtures = await crossDeviceFixturePair('cross-device-move');
-    if (!fixtures) return;
-    const bytes = Buffer.from('cross-device \u{1F30D}\n', 'utf8');
+  it.each(['short', 'long'] as const)(
+    'moves a snapshot with a %s source name back across Linux filesystems',
+    async (nameLength) => {
+      const fixtures = await crossDeviceFixturePair('cross-device-move');
+      if (!fixtures) return;
+      const bytes = Buffer.from('cross-device \u{1F30D}\n', 'utf8');
 
-    async function assertCrossDeviceMove(
-      client: RuntimeClient,
-      paths: CrossDevicePaths
-    ): Promise<void> {
-      const source = join(paths.sourceRoot, 'before-move.txt');
-      const destination = join(paths.destinationRoot, 'after-move.txt');
-      await writeFile(destination, bytes);
-      expect(
-        await client.snapshot.revert({
-          chatId: 'snapshot-cross-device-move',
-          expected: [
-            {
-              path: source,
-              afterHash: RUNTIME_ABSENT_HASH,
-              revertedHash: hashOf(bytes),
-            },
-            {
-              path: destination,
-              afterHash: hashOf(bytes),
-              revertedHash: RUNTIME_ABSENT_HASH,
-            },
-          ],
-          operations: [
-            {
-              type: 'move',
-              path: source,
-              movedTo: destination,
-              contentBase64: base64Of(bytes),
-            },
-          ],
-        })
-      ).toEqual({ revertedFiles: 1 });
-      await assertBytes(source, bytes);
-      await expect(Bun.file(destination).exists()).resolves.toBe(false);
+      async function assertCrossDeviceMove(
+        client: RuntimeClient,
+        paths: CrossDevicePaths
+      ): Promise<void> {
+        const source = join(paths.sourceRoot, 'before-move.txt');
+        const destination = join(
+          paths.destinationRoot,
+          nameLength === 'long' ? 'm'.repeat(234) : 'after-move.txt'
+        );
+        await writeFile(destination, bytes);
+        expect(
+          await client.snapshot.revert({
+            chatId: 'snapshot-cross-device-move',
+            expected: [
+              {
+                path: source,
+                afterHash: RUNTIME_ABSENT_HASH,
+                revertedHash: hashOf(bytes),
+              },
+              {
+                path: destination,
+                afterHash: hashOf(bytes),
+                revertedHash: RUNTIME_ABSENT_HASH,
+              },
+            ],
+            operations: [
+              {
+                type: 'move',
+                path: source,
+                movedTo: destination,
+                contentBase64: base64Of(bytes),
+              },
+            ],
+          })
+        ).toEqual({ revertedFiles: 1 });
+        await assertBytes(source, bytes);
+        await expect(Bun.file(destination).exists()).resolves.toBe(false);
+      }
+
+      await assertCrossDeviceMove(typescript, fixtures.typescript);
+      await assertCrossDeviceMove(rust, fixtures.rust);
     }
-
-    await assertCrossDeviceMove(typescript, fixtures.typescript);
-    await assertCrossDeviceMove(rust, fixtures.rust);
-  });
+  );
 
   it('treats an empty containment root as omitted during replay', async () => {
     const roots = await fixturePair('empty-containment');
