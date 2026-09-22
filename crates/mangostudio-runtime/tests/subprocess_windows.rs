@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mangostudio_runtime::subprocess::{
@@ -20,6 +20,8 @@ mod support;
 use support::scratch::scratch_dir;
 
 const FIXTURE_DIRECTORY: &str = "MANGOSTUDIO_WINDOWS_JOB_FIXTURE_DIRECTORY";
+
+static WINDOWS_JOB_START_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 /// A normal child proves that the explicit handle list carries stdout, stderr, stdin, Unicode
 /// argv, cwd, and an exact environment into CreateProcessW.
@@ -209,7 +211,7 @@ async fn start_tree(
     let script = directory.join("tree.ps1");
     std::fs::write(
         &script,
-        "param([string] $targetPath, [string] $descendantPath)\n[IO.File]::WriteAllText($targetPath, $PID)\n$child = Start-Process -FilePath \"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -ArgumentList '-NoProfile', '-Command', 'Start-Sleep -Seconds 30' -PassThru\n[IO.File]::WriteAllText($descendantPath, $child.Id)\nStart-Sleep -Seconds 30\n",
+        "param([string] $targetPath, [string] $descendantPath)\n[IO.File]::WriteAllText($targetPath, $PID)\n$fixtureRoot = Split-Path -Parent $targetPath\n$childStdin = Join-Path $fixtureRoot 'descendant.stdin'\n$childStdout = Join-Path $fixtureRoot 'descendant.stdout'\n$childStderr = Join-Path $fixtureRoot 'descendant.stderr'\n[IO.File]::WriteAllText($childStdin, '')\n$child = Start-Process -FilePath \"$env:SystemRoot\\System32\\timeout.exe\" -ArgumentList '/t', '30', '/nobreak' -RedirectStandardInput $childStdin -RedirectStandardOutput $childStdout -RedirectStandardError $childStderr -PassThru\n[IO.File]::WriteAllText($descendantPath, $child.Id)\nStart-Sleep -Seconds 30\n",
     )
     .expect("PowerShell tree fixture is written");
     let request = ProcessRequest::new(
@@ -230,6 +232,13 @@ async fn start_tree(
 }
 
 async fn start(request: ProcessRequest) -> mangostudio_runtime::subprocess::ProcessControl {
+    // Keep CreateProcessW fixture launches sequential. Several fixtures here start a PowerShell
+    // host, which is slow enough on a hosted runner that two concurrent startups can outlast the
+    // short deadline `timeout_reaps_the_target_and_descendant_before_terminal` depends on.
+    let _launch_guard = WINDOWS_JOB_START_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
     DefaultProcessSpawner
         .start(request, Arc::new(AlwaysAllow), CancellationToken::new())
         .await
