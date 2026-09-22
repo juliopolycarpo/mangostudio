@@ -102,6 +102,7 @@ mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
 tokio = { version = "1.53", features = ["test-util"] }
 
 [target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
 # `signal`: `kill(pid, 0)` for lock-holder liveness, mirroring `process.kill(pid, 0)` on the
 # TypeScript side. `hostname`: `gethostname()` for the lock body's `host` field. `fs`:
 # `access(2)` for `workspace.validate`'s read+execute directory check.

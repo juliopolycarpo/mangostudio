@@ -10,18 +10,24 @@ use std::future::Future;
 use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
+#[cfg(not(unix))]
+use std::process::Stdio;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use mango_protocol::RemoteError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+#[cfg(not(unix))]
 use tokio::process::{Child, Command};
 use tokio::sync::{Semaphore, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use super::MAX_CONCURRENT_CHILD_PROCESSES;
 use crate::blocking::run_blocking;
+
+#[cfg(unix)]
+use super::unix_guardian;
 
 /// The object-safe future returned by process ports.
 pub type ProcessFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -182,6 +188,12 @@ pub trait ProcessSpawner: Send + Sync {
 }
 
 /// Production [`ProcessSpawner`] implementation.
+///
+/// On Linux it launches a small guardian process that owns the target and a private process
+/// group. A parent-death lease makes the guardian kill that group if this runtime dies abruptly;
+/// terminal publication also clears ordinary descendants that outlive their direct parent. This
+/// contains ordinary descendants, not a program that deliberately escapes by creating another
+/// session or process group.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DefaultProcessSpawner;
 
@@ -447,13 +459,32 @@ async fn supervise_start(
         permit = Arc::clone(process_pool()).acquire_owned() => permit.expect("the process pool is never closed"),
     };
 
-    let child = match launch_child(request.clone(), check, cancel.clone(), deadline).await {
+    let mut child = match launch_child(request.clone(), check, cancel.clone(), deadline).await {
         Ok(child) => child,
         Err(error) => {
             let _ = result_tx.send(Err(error));
             return;
         }
     };
+    let pid = child.id();
+    let pre_launch_error = tokio::select! {
+        biased;
+        () = cancel.cancelled() => Some(ProcessStartError::CancelledBeforeStart),
+        () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => Some(ProcessStartError::TimedOutBeforeStart),
+        ready = child.wait_ready() => ready.err().map(ProcessStartError::SpawnFailed),
+    };
+    if let Some(error) = pre_launch_error {
+        let _ = force_tree_for_child(&mut child, pid);
+        let _ = child.wait().await;
+        let _ = result_tx.send(Err(error));
+        return;
+    }
+    if let Err(error) = check_before_effect(&cancel, deadline) {
+        let _ = force_tree_for_child(&mut child, pid);
+        let _ = child.wait().await;
+        let _ = result_tx.send(Err(error));
+        return;
+    }
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (terminal_tx, _) = watch::channel(None);
     let shared = Arc::new(Shared {
@@ -463,14 +494,17 @@ async fn supervise_start(
     let control = ProcessControl {
         shared: Arc::clone(&shared),
     };
-    let initial_stop = if cancel.is_cancelled() {
+    let _ = result_tx.send(Ok(control));
+    let release_failed = child.release_start().is_err();
+    let initial_stop = if release_failed {
+        Some(StopRequest::Force)
+    } else if cancel.is_cancelled() {
         Some(StopRequest::Cancel)
     } else if Instant::now() >= deadline {
         Some(StopRequest::Force)
     } else {
         None
     };
-    let _ = result_tx.send(Ok(control));
     supervise_child(
         child,
         request,
@@ -490,34 +524,47 @@ async fn launch_child(
     check: Arc<dyn LaunchCheck>,
     cancel: CancellationToken,
     deadline: Instant,
-) -> Result<Child, ProcessStartError> {
+) -> Result<OwnedChild, ProcessStartError> {
     run_blocking(move || {
         check_before_effect(&cancel, deadline)?;
         check.check().map_err(ProcessStartError::LaunchDenied)?;
         check_before_effect(&cancel, deadline)?;
 
-        let mut command = Command::new(&request.program);
-        command
-            .args(&request.args)
-            .kill_on_drop(true)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        match request.stdin {
-            ProcessStdin::Null => {
-                command.stdin(Stdio::null());
+        #[cfg(unix)]
+        {
+            unix_guardian::spawn(&request)
+                .map(OwnedChild::Guardian)
+                .map_err(ProcessStartError::SpawnFailed)
+        }
+
+        #[cfg(not(unix))]
+        {
+            let mut command = Command::new(&request.program);
+            command
+                .args(&request.args)
+                .kill_on_drop(true)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            match request.stdin {
+                ProcessStdin::Null => {
+                    command.stdin(Stdio::null());
+                }
+                ProcessStdin::Bytes(_) => {
+                    command.stdin(Stdio::piped());
+                }
             }
-            ProcessStdin::Bytes(_) => {
-                command.stdin(Stdio::piped());
+            if let Some(cwd) = request.cwd {
+                command.current_dir(cwd);
             }
+            if let Some(env) = request.env {
+                command.env_clear().envs(env);
+            }
+            configure_containment(&mut command)?;
+            command
+                .spawn()
+                .map(OwnedChild::Tokio)
+                .map_err(ProcessStartError::SpawnFailed)
         }
-        if let Some(cwd) = request.cwd {
-            command.current_dir(cwd);
-        }
-        if let Some(env) = request.env {
-            command.env_clear().envs(env);
-        }
-        configure_containment(&mut command)?;
-        command.spawn().map_err(ProcessStartError::SpawnFailed)
     })
     .await
 }
@@ -535,9 +582,111 @@ fn check_before_effect(
     Ok(())
 }
 
+enum OwnedChild {
+    #[cfg(unix)]
+    Guardian(unix_guardian::GuardianChild),
+    #[cfg(not(unix))]
+    Tokio(Child),
+}
+
+impl OwnedChild {
+    fn id(&self) -> Option<u32> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.id(),
+            #[cfg(not(unix))]
+            Self::Tokio(child) => child.id(),
+        }
+    }
+
+    async fn wait_ready(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.wait_ready().await,
+            #[cfg(not(unix))]
+            Self::Tokio(_) => Ok(()),
+        }
+    }
+
+    fn release_start(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.release_start(),
+            #[cfg(not(unix))]
+            Self::Tokio(_) => Ok(()),
+        }
+    }
+
+    fn take_stdout(&mut self) -> Option<Box<dyn AsyncRead + Send + Unpin>> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.take_stdout(),
+            #[cfg(not(unix))]
+            Self::Tokio(child) => child
+                .stdout
+                .take()
+                .map(|stdout| Box::new(stdout) as Box<dyn AsyncRead + Send + Unpin>),
+        }
+    }
+
+    fn take_stderr(&mut self) -> Option<Box<dyn AsyncRead + Send + Unpin>> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.take_stderr(),
+            #[cfg(not(unix))]
+            Self::Tokio(child) => child
+                .stderr
+                .take()
+                .map(|stderr| Box::new(stderr) as Box<dyn AsyncRead + Send + Unpin>),
+        }
+    }
+
+    fn take_stdin(&mut self) -> Option<Box<dyn tokio::io::AsyncWrite + Send + Unpin>> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.take_stdin(),
+            #[cfg(not(unix))]
+            Self::Tokio(child) => child
+                .stdin
+                .take()
+                .map(|stdin| Box::new(stdin) as Box<dyn tokio::io::AsyncWrite + Send + Unpin>),
+        }
+    }
+
+    async fn wait(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.wait().await,
+            #[cfg(not(unix))]
+            Self::Tokio(child) => child.wait().await,
+        }
+    }
+
+    fn interrupt(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.interrupt(),
+            #[cfg(not(unix))]
+            Self::Tokio(_) => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "graceful interruption is unsupported on Windows",
+            )),
+        }
+    }
+
+    fn force(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.force(),
+            #[cfg(not(unix))]
+            Self::Tokio(child) => child.start_kill(),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn supervise_child(
-    mut child: Child,
+    mut child: OwnedChild,
     request: ProcessRequest,
     deadline: Instant,
     started: Instant,
@@ -548,13 +697,13 @@ async fn supervise_child(
     _admission: tokio::sync::OwnedSemaphorePermit,
 ) {
     let pid = child.id();
-    let stdout = child.stdout.take().expect("stdout is piped");
-    let stderr = child.stderr.take().expect("stderr is piped");
+    let stdout = child.take_stdout().expect("stdout is piped");
+    let stderr = child.take_stderr().expect("stderr is piped");
     let mut stdout_reader = tokio::spawn(read_capped(stdout, request.budget.max_stdout_bytes));
     let mut stderr_reader = tokio::spawn(read_capped(stderr, request.budget.max_stderr_bytes));
     let stdin_writer = match request.stdin {
         ProcessStdin::Null => None,
-        ProcessStdin::Bytes(bytes) => child.stdin.take().map(|mut stdin| {
+        ProcessStdin::Bytes(bytes) => child.take_stdin().map(|mut stdin| {
             tokio::spawn(async move {
                 let result = stdin.write_all(&bytes).await;
                 let _ = stdin.shutdown().await;
@@ -608,6 +757,11 @@ async fn supervise_child(
     if drain_reached_deadline && cause == ProcessTerminalCause::Exited {
         cause = ProcessTerminalCause::TimedOut;
     }
+    // The guardian mirrors its direct target's status, but an ordinary descendant can outlive
+    // that target without holding a captured pipe. Once the bounded drain has either completed
+    // or force-stopped inherited writers, kill the surviving private group before publishing a
+    // terminal record so an `Exited` leader never leaves an ordinary descendant behind.
+    let _ = force_tree(pid);
     let _ = shared.terminal.send(Some(ProcessTerminal {
         cause,
         exit: status.map(process_exit),
@@ -733,14 +887,6 @@ async fn wait_for_terminal(
     }
 }
 
-#[cfg(unix)]
-fn configure_containment(command: &mut Command) -> Result<(), ProcessStartError> {
-    // Do not call setsid: SSH/GPG retain their normal controlling-terminal behavior. The child
-    // still leads a private process group that stop operations can own as one tree.
-    command.process_group(0);
-    Ok(())
-}
-
 #[cfg(windows)]
 fn configure_containment(_command: &mut Command) -> Result<(), ProcessStartError> {
     Err(ProcessStartError::SpawnFailed(io::Error::new(
@@ -749,7 +895,7 @@ fn configure_containment(_command: &mut Command) -> Result<(), ProcessStartError
     )))
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(all(not(unix), not(windows)))]
 fn configure_containment(_command: &mut Command) -> Result<(), ProcessStartError> {
     Err(ProcessStartError::SpawnFailed(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -757,42 +903,15 @@ fn configure_containment(_command: &mut Command) -> Result<(), ProcessStartError
     )))
 }
 
-fn dispatch_stop(child: &mut Child, pid: Option<u32>, request: StopRequest) -> io::Result<()> {
+fn dispatch_stop(child: &mut OwnedChild, pid: Option<u32>, request: StopRequest) -> io::Result<()> {
     match request {
-        StopRequest::Interrupt => interrupt_tree(pid),
+        StopRequest::Interrupt => child.interrupt(),
         StopRequest::Force | StopRequest::Cancel => force_tree_for_child(child, pid),
     }
 }
 
-#[cfg(unix)]
-fn interrupt_tree(pid: Option<u32>) -> io::Result<()> {
-    signal_group(pid, nix::sys::signal::Signal::SIGTERM)
-}
-
-#[cfg(windows)]
-fn interrupt_tree(_pid: Option<u32>) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "graceful interruption is unsupported on Windows",
-    ))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn interrupt_tree(_pid: Option<u32>) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "graceful interruption is unsupported",
-    ))
-}
-
-#[cfg(unix)]
-fn force_tree_for_child(_child: &mut Child, pid: Option<u32>) -> io::Result<()> {
-    force_tree(pid)
-}
-
-#[cfg(not(unix))]
-fn force_tree_for_child(child: &mut Child, _pid: Option<u32>) -> io::Result<()> {
-    child.start_kill()
+fn force_tree_for_child(child: &mut OwnedChild, _pid: Option<u32>) -> io::Result<()> {
+    child.force()
 }
 
 #[cfg(unix)]
@@ -882,7 +1001,7 @@ mod tests {
 
     fn request(program: PathBuf) -> ProcessRequest {
         ProcessRequest::new(program, std::iter::empty::<String>()).with_budget(
-            ProcessBudget::new(Duration::from_secs(2), 1_024, 1_024)
+            ProcessBudget::new(Duration::from_secs(10), 1_024, 1_024)
                 .with_post_exit_drain(Duration::from_millis(100)),
         )
     }
@@ -993,6 +1112,31 @@ mod tests {
         wait_for_file(&pid_file).await;
         drop(control);
 
+        assert_process_is_gone(&pid_file).await;
+    }
+
+    /// `start` returned only after the guardian had forked a target in its private group. This
+    /// proves a deadline that expires after that launch kills and reaps the actual target rather
+    /// than merely reporting a pre-admission timeout.
+    #[tokio::test]
+    async fn a_launched_child_past_its_deadline_is_killed_and_reaped() {
+        let dir = scratch_dir("process-launched-timeout");
+        let pid_file = dir.join("pid");
+        let sh = script(
+            &dir,
+            "slow.sh",
+            &format!("echo $$ > {}\nsleep 20", pid_file.display()),
+        );
+        let mut request = request(sh);
+        request.budget.deadline = Duration::from_secs(2);
+        let control = DefaultProcessSpawner
+            .start(request, Arc::new(AlwaysAllow), CancellationToken::new())
+            .await
+            .expect("the target launches before its two-second deadline");
+        wait_for_file(&pid_file).await;
+
+        let terminal = control.wait().await;
+        assert_eq!(terminal.cause, ProcessTerminalCause::TimedOut);
         assert_process_is_gone(&pid_file).await;
     }
 

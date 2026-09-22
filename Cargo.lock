@@ -647,6 +647,7 @@ dependencies = [
  "getrandom 0.3.4",
  "globset",
  "jsonschema",
+ "libc",
  "mango-protocol",
  "mangostudio-runtime-contract",
  "nix",
