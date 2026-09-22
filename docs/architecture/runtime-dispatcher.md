@@ -225,7 +225,8 @@ interrupt its remaining operations. A dropped caller also cannot release a runni
 `rust-snapshot-compat.integration.test.ts` compares the production Rust and TypeScript hosts
 through Hub clients: binary capture, missing files, size errors, reverse replay, freshness,
 retry conflicts, permissive base64 decoding, move collisions, and symlink or junction containment.
-It also exercises cross-device moves on Linux when the test filesystem provides two devices.
+It also exercises cross-device moves on Linux when the test filesystem provides two devices,
+including long filenames and retrying after source-removal permissions are restored.
 The runtime qualification job includes this suite on Linux, macOS, and Windows.
 
 ### Dispatcher behavior
