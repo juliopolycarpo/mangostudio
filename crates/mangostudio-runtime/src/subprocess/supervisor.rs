@@ -1086,6 +1086,15 @@ where
     }
 }
 
+/// Waits for the worker's published terminal record.
+///
+/// Every caller reaches this through a `&self` borrow of a [`ProcessControl`], which owns the
+/// `Arc<Shared>` holding the sender, so the channel cannot close while anyone is waiting and the
+/// error arm below is unreachable through the public API. It is still handled rather than
+/// discarded: `changed` reports a closed channel immediately and forever, so ignoring its result
+/// would turn any future refactor that detaches a receiver from its control into a hot spin
+/// instead of a visible failure. A worker that vanished without publishing is reported the same
+/// way a capture task that died is — forced, with both captures marked incomplete.
 async fn wait_for_terminal(
     receiver: &mut watch::Receiver<Option<ProcessTerminal>>,
 ) -> ProcessTerminal {
@@ -1093,7 +1102,15 @@ async fn wait_for_terminal(
         if let Some(terminal) = receiver.borrow().clone() {
             return terminal;
         }
-        let _ = receiver.changed().await;
+        if receiver.changed().await.is_err() {
+            return ProcessTerminal {
+                cause: ProcessTerminalCause::Forced,
+                exit: None,
+                elapsed: Duration::ZERO,
+                stdout: ProcessCapture::incomplete(),
+                stderr: ProcessCapture::incomplete(),
+            };
+        }
     }
 }
 
@@ -1169,7 +1186,7 @@ mod tests {
     use super::{
         AlwaysAllow, DefaultProcessSpawner, LaunchCheck, ProcessBudget, ProcessCapture,
         ProcessControl, ProcessRequest, ProcessSpawner, ProcessStartError, ProcessStdin,
-        ProcessTerminal, ProcessTerminalCause,
+        ProcessTerminal, ProcessTerminalCause, wait_for_terminal, watch,
     };
     use crate::test_support::scratch_dir;
 
@@ -1682,6 +1699,28 @@ sleep 20",
 
         assert_eq!(control.wait().await.cause, expected.cause);
         assert_eq!(observed(control.close().await).stdout, expected.stdout);
+    }
+
+    /// A worker that drops its sender without publishing must settle the wait rather than spin.
+    ///
+    /// `watch::Receiver::changed` reports a closed channel immediately and forever, so discarding
+    /// its result turns this into a hot loop that pins a core and never returns. The bounded
+    /// timeout is the assertion: a spinning or hanging implementation fails here by name instead
+    /// of wedging the suite.
+    #[tokio::test]
+    async fn a_terminal_channel_closed_without_a_record_settles_instead_of_spinning() {
+        let (sender, mut receiver) = watch::channel(None);
+        drop(sender);
+
+        let terminal =
+            tokio::time::timeout(Duration::from_secs(5), wait_for_terminal(&mut receiver))
+                .await
+                .expect("a closed terminal channel must settle, not spin or hang");
+
+        assert_eq!(terminal.cause, ProcessTerminalCause::Forced);
+        assert_eq!(terminal.exit, None);
+        assert!(terminal.stdout.incomplete);
+        assert!(terminal.stderr.incomplete);
     }
 
     struct PanicIfCalled;
