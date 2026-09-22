@@ -19,7 +19,7 @@ use crate::blocking::run_blocking;
 
 const MAX_ENTRIES_PER_CHAT: usize = 256;
 const MAX_ENTRIES_GLOBAL: usize = 10_000;
-const ALL_LINES_VALID: u64 = 9_007_199_254_740_991;
+pub(super) const ALL_LINES_VALID: u64 = 9_007_199_254_740_991;
 
 /// A numbered slice shown to the caller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

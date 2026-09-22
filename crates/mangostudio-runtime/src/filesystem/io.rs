@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::capability::{self, VerifiedParent};
 use super::policy::CompiledPolicy;
+use super::service::{BYTE_VIEW_MAX_BYTES, READ_MAX_BYTES};
 use crate::file_identity::{ObjectIdentity, object_identity};
 
 #[derive(Debug)]
@@ -83,11 +84,9 @@ pub(super) fn explain_unread(
         return error;
     }
     let size = metadata.len;
-    const TEXT_LIMIT: u64 = 10 * 1024 * 1024;
-    const BYTE_LIMIT: u64 = 256 * 1024;
-    if size > TEXT_LIMIT {
+    if size > READ_MAX_BYTES as u64 {
         return path_error(format!(
-            "Cannot {action} \"{}\": it is {size} bytes, past the {TEXT_LIMIT}-byte read_file limit, so the read-before-{action} guard cannot be satisfied for this path.",
+            "Cannot {action} \"{}\": it is {size} bytes, past the {READ_MAX_BYTES}-byte read_file limit, so the read-before-{action} guard cannot be satisfied for this path.",
             path.display()
         ));
     }
@@ -99,9 +98,9 @@ pub(super) fn explain_unread(
     {
         return error;
     }
-    if size > BYTE_LIMIT {
+    if size > BYTE_VIEW_MAX_BYTES as u64 {
         return path_error(format!(
-            "Cannot {action} \"{}\": it is a binary file of {size} bytes, past the {BYTE_LIMIT}-byte read_file byte-view limit, so the read-before-{action} guard cannot be satisfied for this path.",
+            "Cannot {action} \"{}\": it is a binary file of {size} bytes, past the {BYTE_VIEW_MAX_BYTES}-byte read_file byte-view limit, so the read-before-{action} guard cannot be satisfied for this path.",
             path.display()
         ));
     }

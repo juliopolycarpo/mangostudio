@@ -20,7 +20,7 @@ use crate::blocking::run_blocking;
 use crate::ports::audit::lock;
 use crate::registry::Registry;
 
-const SNAPSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;
+pub(super) const SNAPSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;
 const ABSENT_HASH: &str = "absent";
 
 /// Registers the snapshot methods beside the filesystem methods that produce their data.

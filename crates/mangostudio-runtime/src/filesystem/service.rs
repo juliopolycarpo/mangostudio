@@ -14,10 +14,11 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::capability;
-use super::freshness::{Ledger, ObservedLineRange, PathLocks, ReadObservation};
+use super::freshness::{ALL_LINES_VALID, Ledger, ObservedLineRange, PathLocks, ReadObservation};
 use super::io::{self, check_cancel, path_error};
 use super::params::*;
 use super::policy::{CompiledPolicy, PathPolicy};
+use super::snapshot::SNAPSHOT_MAX_BYTES;
 use super::text;
 use crate::blocking::run_blocking;
 use crate::consent::source::ConsentSource;
@@ -25,9 +26,8 @@ use crate::ports::audit::lock;
 use crate::ports::authorization::consent_denial;
 use crate::registry::Registry;
 
-const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
-const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
-const ALL_LINES: u64 = 9_007_199_254_740_991;
+pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
+pub(super) const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -533,7 +533,7 @@ impl Service {
                 &updated,
             )?;
             let changed_lines = params.old_string.bytes().filter(|byte| *byte == b'\n').count() != params.new_string.bytes().filter(|byte| *byte == b'\n').count();
-            let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES };
+            let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES_VALID };
             let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
             debug_assert_eq!(hash, expected_hash);
             Ok(result)
@@ -586,7 +586,7 @@ impl Service {
                 &observed.bytes,
                 &updated,
             )?;
-            let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES} else {(start-1) as u64};
+            let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES_VALID} else {(start-1) as u64};
             let hash = lock(&self.state.ledger).record_edit(&params.mutation.chat_id, &params.resolved_path, &updated, mtime, through);
             debug_assert_eq!(hash, expected_hash);
             Ok(result)
@@ -702,7 +702,7 @@ impl Service {
                 Some(io::read(
                     &policy,
                     &params.resolved_from,
-                    8 * 1024 * 1024,
+                    SNAPSHOT_MAX_BYTES,
                     &cancel,
                 )?)
             } else {
@@ -867,7 +867,7 @@ pub(super) fn argument(message: impl Into<String>) -> RemoteError {
 }
 
 pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> {
-    const MAX: u64 = 8 * 1024 * 1024;
+    const MAX: u64 = SNAPSHOT_MAX_BYTES as u64;
     if size <= MAX {
         return Ok(());
     }
@@ -898,7 +898,7 @@ fn committed_move_error(from: &Path, to: &Path, cause: RemoteError) -> RemoteErr
 }
 
 fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
-    if value < 1.0 || value.fract() != 0.0 || value > ALL_LINES as f64 {
+    if value < 1.0 || value.fract() != 0.0 || value > ALL_LINES_VALID as f64 {
         return Err(argument(format!(
             "Invalid {name} {value}. Expected a positive safe integer."
         )));
