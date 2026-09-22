@@ -44,7 +44,7 @@ use super::detection::runtime_definitions::{
 use super::detection::types::{
     AgentAuthSignal, ConsumerVersionRequirement, MinimumRuntimeVersion, RuntimeFinding,
     RuntimeFindingCode, RuntimeHealth, RuntimeId, RuntimeInstallation, RuntimeOrigin,
-    RuntimeStatus, VersionManagerId, finding_params, wire_str,
+    RuntimeStatus, VersionManagerId, VersionManagerStatus, finding_params, wire_str,
 };
 use super::detection::version_manager_support::ManagedVersionFileSystem;
 use super::detection::winget_ownership::{WingetOwnership, mark_winget_owned_node_installations};
@@ -241,12 +241,12 @@ async fn handle_probe_runtimes(
     params: ProbeRuntimesParams,
     cancel: CancellationToken,
 ) -> Result<Value, RemoteError> {
-    let path_env = host::build_runtime_path_env(
+    let path_env = Arc::new(host::build_runtime_path_env(
         params
             .path_env
             .as_ref()
             .and_then(|override_| override_.env.as_ref()),
-    );
+    ));
     let definitions = select_runtime_definitions(params.ids.as_deref())?;
 
     let needs_winget = path_env.platform == "win32"
@@ -258,7 +258,7 @@ async fn handle_probe_runtimes(
         tokio::task::JoinSet::new();
     for (index, definition) in definitions.iter().copied().enumerate() {
         let deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
-            path_env.clone(),
+            Arc::clone(&path_env),
             cancel.clone(),
         ));
         let options = build_binary_scan_options(&params.budget);
@@ -385,32 +385,31 @@ async fn handle_probe_version_managers(
         return Ok(json!({ "statuses": Vec::<Value>::new() }));
     }
 
-    let path_env = host::build_runtime_path_env(
+    let path_env = Arc::new(host::build_runtime_path_env(
         params
             .path_env
             .as_ref()
             .and_then(|override_| override_.env.as_ref()),
-    );
+    ));
 
     let node_deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
-        path_env.clone(),
+        Arc::clone(&path_env),
         cancel.clone(),
     ));
     let node_options = build_binary_scan_options(&params.budget);
     let node_scan_future = scan_runtime(&NODE_RUNTIME_DEFINITION, node_deps, node_options);
 
     let needs_fnm = wanted.contains(&VersionManagerId::Fnm);
-    let fnm_deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
-        path_env.clone(),
-        cancel.clone(),
-    ));
-    let fnm_options = build_binary_scan_options(&params.budget);
     let fnm_scan_future = async {
-        if needs_fnm {
-            Some(scan_runtime(&FNM_RUNTIME_DEFINITION, fnm_deps, fnm_options).await)
-        } else {
-            None
+        if !needs_fnm {
+            return None;
         }
+        let fnm_deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
+            Arc::clone(&path_env),
+            cancel.clone(),
+        ));
+        let fnm_options = build_binary_scan_options(&params.budget);
+        Some(scan_runtime(&FNM_RUNTIME_DEFINITION, fnm_deps, fnm_options).await)
     };
 
     let (node_scan, fnm_scan) = tokio::join!(node_scan_future, fnm_scan_future);
@@ -451,58 +450,63 @@ async fn handle_probe_version_managers(
             .map(|effective| effective.path.clone())
     };
 
-    let latest_by_major_provided = params.latest_by_major.is_some();
+    let live_data_available = params.latest_by_major.is_some();
     let latest_by_major: BTreeMap<u32, String> = params
         .latest_by_major
         .unwrap_or_default()
         .into_iter()
         .collect();
-    let live_data_available = latest_by_major_provided;
     let now = SystemTime::now();
 
-    let mut statuses = Vec::with_capacity(wanted.len());
-    for id in &wanted {
-        match id {
-            VersionManagerId::Nvm => {
-                let fs: Arc<dyn NvmFileSystem> = Arc::new(host::RealManagedVersionFs);
-                let status = detect_nvm(
-                    fs,
-                    &path_env,
-                    NvmDetectionOptions {
-                        now,
-                        schedule: &NODE_RELEASE_SCHEDULE,
-                        current_node_path: current_node_path_for(VersionManagerId::Nvm),
-                        latest_by_major: latest_by_major.clone(),
-                        live_data_available,
-                    },
-                )
-                .await;
-                statuses.push(status);
-            }
-            VersionManagerId::Fnm => {
-                let fs: Arc<dyn ManagedVersionFileSystem> = Arc::new(host::RealManagedVersionFs);
-                let manager_version =
-                    formatted_manager_version(fnm_runtime_status.as_ref(), &FNM_RUNTIME_DEFINITION);
-                let status = detect_fnm(
-                    fs,
-                    &path_env,
-                    FnmDetectionOptions {
-                        now,
-                        schedule: &NODE_RELEASE_SCHEDULE,
-                        current_node_path: current_node_path_for(VersionManagerId::Fnm),
-                        latest_by_major: latest_by_major.clone(),
-                        live_data_available,
-                        manager_version,
-                    },
-                )
-                .await;
-                statuses.push(status);
-            }
-            VersionManagerId::Volta => {
-                unreachable!("volta is filtered out of `wanted` before this loop runs")
-            }
+    // The two detectors share no state, so they run concurrently; each is
+    // skipped outright when no requested id names it.
+    let nvm_future = async {
+        if !wanted.contains(&VersionManagerId::Nvm) {
+            return None;
         }
-    }
+        let fs: Arc<dyn NvmFileSystem> = Arc::new(host::RealManagedVersionFs);
+        let options = NvmDetectionOptions {
+            now,
+            schedule: &NODE_RELEASE_SCHEDULE,
+            current_node_path: current_node_path_for(VersionManagerId::Nvm),
+            latest_by_major: latest_by_major.clone(),
+            live_data_available,
+        };
+        Some(detect_nvm(fs, &path_env, options).await)
+    };
+    let fnm_future = async {
+        if !needs_fnm {
+            return None;
+        }
+        let fs: Arc<dyn ManagedVersionFileSystem> = Arc::new(host::RealManagedVersionFs);
+        let options = FnmDetectionOptions {
+            now,
+            schedule: &NODE_RELEASE_SCHEDULE,
+            current_node_path: current_node_path_for(VersionManagerId::Fnm),
+            latest_by_major: latest_by_major.clone(),
+            live_data_available,
+            manager_version: formatted_manager_version(
+                fnm_runtime_status.as_ref(),
+                &FNM_RUNTIME_DEFINITION,
+            ),
+        };
+        Some(detect_fnm(fs, &path_env, options).await)
+    };
+    let (nvm_status, fnm_status) = tokio::join!(nvm_future, fnm_future);
+
+    // One entry per requested id, in request order — a repeated id repeats
+    // its status, exactly as when each id was detected on its own.
+    let statuses: Vec<VersionManagerStatus> = wanted
+        .iter()
+        .map(|id| match id {
+            VersionManagerId::Nvm => nvm_status.clone(),
+            VersionManagerId::Fnm => fnm_status.clone(),
+            VersionManagerId::Volta => {
+                unreachable!("volta is filtered out of `wanted` before this runs")
+            }
+        })
+        .map(|status| status.expect("every requested manager was detected above"))
+        .collect();
 
     Ok(json!({ "statuses": statuses }))
 }
@@ -671,7 +675,10 @@ fn health_for_agent(base_health: RuntimeHealth, findings: &[RuntimeFinding]) -> 
 /// route that reaches this method is already behind `requireAuth`, so
 /// `authenticated`/`authSignal` are always `true`/`session` — this
 /// process only ever answers on behalf of a signed-in session.
-async fn describe_self_agent(path_env: &PathEnv, self_params: &SelfAgentParams) -> AgentCliStatus {
+async fn describe_self_agent(
+    path_env: &Arc<PathEnv>,
+    self_params: &SelfAgentParams,
+) -> AgentCliStatus {
     let config_home = self_params
         .config_home
         .clone()
@@ -683,7 +690,7 @@ async fn describe_self_agent(path_env: &PathEnv, self_params: &SelfAgentParams) 
     });
 
     let (config_home_exists, location_statuses) = {
-        let path_env = path_env.clone();
+        let path_env = Arc::clone(path_env);
         let config_home_for_probe = config_home.clone();
         crate::blocking::run_blocking(move || {
             let exists =
@@ -752,13 +759,13 @@ async fn describe_self_agent(path_env: &PathEnv, self_params: &SelfAgentParams) 
 /// and its own `locations` array.
 async fn describe_external_agent(
     cli: ExternalAgentCliDefinition,
-    path_env: &PathEnv,
+    path_env: &Arc<PathEnv>,
     cancel: &CancellationToken,
     installable: bool,
     budget: &Option<ProbeBudget>,
 ) -> AgentCliStatus {
     let deps: Arc<dyn BinaryScanDeps> = Arc::new(host::RealBinaryScanDeps::new(
-        path_env.clone(),
+        Arc::clone(path_env),
         cancel.clone(),
     ));
     let options = build_binary_scan_options(budget);
@@ -779,7 +786,7 @@ async fn describe_external_agent(
     let config_home = resolve_config_home(target_id, path_env);
 
     let (config_home_exists, auth, location_statuses) = {
-        let path_env = path_env.clone();
+        let path_env = Arc::clone(path_env);
         let config_home_for_probe = config_home.clone();
         crate::blocking::run_blocking(move || {
             let exists =
@@ -843,17 +850,17 @@ async fn handle_probe_agent_clis(
     params: ProbeAgentClisParams,
     cancel: CancellationToken,
 ) -> Result<Value, RemoteError> {
-    let path_env = host::build_runtime_path_env(
+    let path_env = Arc::new(host::build_runtime_path_env(
         params
             .path_env
             .as_ref()
             .and_then(|override_| override_.env.as_ref()),
-    );
+    ));
     let definitions = select_agent_definitions(params.target_ids.as_deref())?;
 
     let mut tasks: tokio::task::JoinSet<(usize, AgentCliStatus)> = tokio::task::JoinSet::new();
     for (index, definition) in definitions.iter().copied().enumerate() {
-        let path_env = path_env.clone();
+        let path_env = Arc::clone(&path_env);
         let cancel = cancel.clone();
         let installable = params
             .installable

@@ -45,7 +45,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -119,12 +119,12 @@ fn with_canonical_path_key(mut env: HashMap<String, String>) -> HashMap<String, 
 /// through [`crate::subprocess::run_bounded_child`], memoized by resolved
 /// path and fingerprint. Mirrors `createBinaryScanDeps`.
 pub(crate) struct RealBinaryScanDeps {
-    path_env: PathEnv,
+    path_env: Arc<PathEnv>,
     cancel: CancellationToken,
 }
 
 impl RealBinaryScanDeps {
-    pub(crate) fn new(path_env: PathEnv, cancel: CancellationToken) -> Self {
+    pub(crate) fn new(path_env: Arc<PathEnv>, cancel: CancellationToken) -> Self {
         Self { path_env, cancel }
     }
 }

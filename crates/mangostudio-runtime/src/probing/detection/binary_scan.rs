@@ -713,14 +713,14 @@ pub async fn scan_runtime(
     deps: Arc<dyn BinaryScanDeps>,
     options: BinaryScanOptions,
 ) -> RuntimeScanResult {
-    let path_env = deps.path_env().clone();
+    let path_env = deps.path_env();
     // Computed before the existence-check pass below, not after: that pass
     // is now real (possibly blocking-pool-routed) I/O per candidate, not a
     // synchronous in-memory lookup, so a slow filesystem there must eat
     // into this scan's own total budget rather than getting free time
     // before the clock the probe phase is measured against even starts.
     let deadline = TokioInstant::now() + Duration::from_millis(options.total_timeout_ms);
-    let candidates = iterate_binary_candidates(definition, &path_env, &options);
+    let candidates = iterate_binary_candidates(definition, path_env, &options);
     // Each existence check is individually raced against what remains of
     // the scan's own `deadline` — not the whole pass wrapped in one
     // `tokio::time::timeout`, which would discard every candidate already
@@ -803,7 +803,7 @@ pub async fn scan_runtime(
                     .entry(realpath_key)
                     .or_insert_with(|| candidate.path.clone());
 
-                let managed_by = detect_version_manager(&candidate.path, &path, &path_env);
+                let managed_by = detect_version_manager(&candidate.path, &path, path_env);
                 // Only candidates discovered through `PATH` can win normal
                 // shell lookup. Version-manager binaries retain that
                 // provenance through `path_index`.
@@ -817,8 +817,7 @@ pub async fn scan_runtime(
                 let effective =
                     candidate.origin == RuntimeOrigin::Path && !has_effective_installation;
                 has_effective_installation |= effective;
-                let path_source =
-                    resolve_path_source(&candidate.path, &path, managed_by, &path_env);
+                let path_source = resolve_path_source(&candidate.path, &path, managed_by, path_env);
 
                 installations.push(RuntimeInstallation {
                     path,
