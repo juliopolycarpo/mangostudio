@@ -7,13 +7,11 @@
 //! # Why `AuditEntry` still carries no `params`
 //!
 //! [`crate::ports::audit`]'s own module docs already give the reason for
-//! leaving `params` off [`crate::ports::audit::AuditEntry`]: this crate
-//! implements no methods, so it has no params shapes to redact safely.
-//! That reasoning has not changed — this change still implements no
-//! methods either — so the field stays off, deliberately, again. What
-//! *has* changed is that a real sink now exists to write it to, which is
-//! why [`redact::redact_credential_shapes`] is built and tested here rather
-//! than left for later: TypeScript's `summarizeAuditArgs` is two things,
+//! leaving `params` off [`crate::ports::audit::AuditEntry`]. The
+//! filesystem and command method groups now exist, but the params
+//! whitelist has not been designed against them yet, so the field stays
+//! off. [`redact::redact_credential_shapes`] is built and tested here
+//! ahead of that because TypeScript's `summarizeAuditArgs` is two things,
 //! not one — a fixed whitelist of known-safe parameter keys (`path`,
 //! `command`, `cols`, …), which is genuinely params-shape-aware and still
 //! has no real caller in this crate, and the credential-shape redaction
@@ -22,9 +20,8 @@
 //! method params to check it against, would risk exactly the leak this
 //! crate's other seams (`panic::catch_panics`, `result_check`) exist to
 //! prevent; the redaction pass has no such dependency and is mirrored in
-//! full. Whichever later change implements the first method archetype
-//! (filesystem, shell, terminal) is what should also design that
-//! whitelist and add `params` to `AuditEntry` alongside it.
+//! full. The change that designs that whitelist against the implemented
+//! filesystem and command params also adds `params` to `AuditEntry`.
 
 pub mod redact;
 

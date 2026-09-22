@@ -6,21 +6,15 @@
 //! writes to `runtime.json`. Interactive prompting
 //! (`promptForProfile`/`promptForUpdates`/`promptForAudit`) is out of
 //! scope — this module is exactly the part of `setup.ts` that never awaits
-//! a person, and this crate's own `main.rs` has no argument parsing yet to
-//! wire it behind (see that file's own doc comment: "real argument parsing
-//! ... is a later change"). What follows is the precedence, override, and
-//! write logic as a tested library function, ready for that later change to
-//! call.
+//! a person. [`crate::cli`]'s `setup` subcommand is its caller.
 //!
 //! # The setup-pending signature
 //!
 //! `RUNTIME_SETUP_PENDING_SIGNATURE` (a hub greps stderr for it) is not
 //! written by `setup.ts` at all — it belongs to `cli.ts`, on the call path
-//! that refuses to serve a `pending` slot, which this crate does not build
-//! yet either (no transport, no serve loop). Nothing in this module invents
-//! a second place to print it; whichever change adds that call path is
-//! also the one that should reach for
-//! `mangostudio_runtime_contract::strings::RUNTIME_SETUP_PENDING_SIGNATURE`.
+//! that refuses to serve a `pending` slot. Here that is
+//! [`crate::consent::invocation::setup_pending_message`]; this module does
+//! not print it a second time.
 //!
 //! # Exit codes
 //!

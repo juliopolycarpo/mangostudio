@@ -6,9 +6,9 @@
 //!
 //! - [`presets`] — the `full`/`readonly`/`none` capability sets, and reading
 //!   a stored `allow` back into a profile name.
-//! - [`source`] — re-reads `runtime.json` on every call, only when its
-//!   fingerprint has actually changed, and fails closed to `none` the
-//!   moment the file stops being readable.
+//! - [`source`] — re-reads `runtime.json` on every call, never trusting a
+//!   cached copy, and fails closed to `none` the moment the file stops
+//!   being readable.
 //! - [`authorization`] — the [`crate::ports::authorization::Authorization`]
 //!   this crate registers for real, once a slot's consent is being served
 //!   from disk rather than from a named fake.
