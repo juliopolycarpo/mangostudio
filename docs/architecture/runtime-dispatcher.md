@@ -245,9 +245,11 @@ file rather than trusting its size and modification time: an equal-size rewrite 
 timestamp must still revoke permission. Probe caches use opened-file identity, nanosecond
 modification time, size, and permissions. Shell availability and toolchain selection are resolved
 afresh. Successful version-directory listings are cached by directory identity and metadata,
-with at most 32 entries and 1 MiB retained. Alias bytes and executable existence are reread on
-every launch, and the current environment is always merged anew; the cache contains no consent
-or prepared child environment.
+with at most 32 entries and 1 MiB retained. NVM alias reads use the same bounded cache with
+file identity and Unix change time, so equal-size edits with restored modification times still
+invalidate. Failed reads and empty observations are not cached. Executable existence and cached object
+identities are rechecked on every launch, and the current environment is always merged anew; the
+cache contains no consent or prepared child environment.
 
 Before launch, cancellation prevents an effect. After launch, read commands stop on cancellation;
 `gh.mutate` retains ownership until completion or its deadline because cancelling the caller cannot

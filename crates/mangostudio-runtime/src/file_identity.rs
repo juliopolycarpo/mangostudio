@@ -73,8 +73,15 @@ pub(crate) fn fingerprint(path: &Path) -> Option<String> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
         .as_nanos();
+    #[cfg(unix)]
+    let changed = (
+        std::os::unix::fs::MetadataExt::ctime(&metadata),
+        std::os::unix::fs::MetadataExt::ctime_nsec(&metadata),
+    );
+    #[cfg(not(unix))]
+    let changed = ();
     Some(format!(
-        "{}:{}:{modified}:{}:{:?}",
+        "{}:{}:{modified}:{changed:?}:{}:{:?}",
         identity.device,
         identity.inode,
         metadata.len(),

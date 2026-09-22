@@ -1,5 +1,5 @@
 //! Fresh toolchain resolution with identity-keyed version-directory caching.
-//! Alias bytes, executable existence, and the source environment stay live per launch.
+//! Alias and directory identities, executable existence, and source environments stay live.
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
-mod directory_cache;
+mod read_cache;
 
 use crate::probing::detection::{
     fnm::{fnm_default_alias_bin_dir, fnm_root_candidates},
@@ -45,6 +45,41 @@ impl ToolchainFs for NativeToolchainFs {
     }
 
     fn read_alias(&self, path: &str) -> Option<String> {
+        static CACHE: OnceLock<read_cache::ReadCache<String>> = OnceLock::new();
+        CACHE
+            .get_or_init(Default::default)
+            .read(path, &NativeAliasReader)
+    }
+
+    fn entries(&self, path: &str) -> Vec<String> {
+        static CACHE: OnceLock<read_cache::ReadCache<Vec<String>>> = OnceLock::new();
+        CACHE
+            .get_or_init(Default::default)
+            .read(path, &NativeDirectoryReader)
+            .unwrap_or_default()
+    }
+}
+
+struct NativeAliasReader;
+
+impl read_cache::Reader for NativeAliasReader {
+    type Value = String;
+
+    fn identity(&self, path: &str) -> Option<String> {
+        // NVM alias resolution is Unix-only. Its change time detects in-place edits even
+        // when a writer restores mtime; platforms without that witness bypass this cache.
+        #[cfg(unix)]
+        {
+            crate::file_identity::fingerprint(std::path::Path::new(path))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            None
+        }
+    }
+
+    fn read(&self, path: &str) -> Option<String> {
         let mut value = String::new();
         std::fs::File::open(path)
             .ok()?
@@ -53,18 +88,12 @@ impl ToolchainFs for NativeToolchainFs {
             .ok()?;
         (value.len() <= 4096).then_some(value)
     }
-
-    fn entries(&self, path: &str) -> Vec<String> {
-        static CACHE: OnceLock<directory_cache::DirectoryCache> = OnceLock::new();
-        CACHE
-            .get_or_init(Default::default)
-            .read(path, &NativeDirectoryReader)
-    }
 }
 
 struct NativeDirectoryReader;
 
-impl directory_cache::DirectoryReader for NativeDirectoryReader {
+impl read_cache::Reader for NativeDirectoryReader {
+    type Value = Vec<String>;
     fn identity(&self, path: &str) -> Option<String> {
         crate::file_identity::fingerprint(std::path::Path::new(path))
     }
@@ -88,7 +117,7 @@ struct Resolved {
 }
 
 /// Prepends the selected Node and Bun directories to an environment snapshot.
-/// Re-reads manager aliases every time so a changed default takes effect immediately.
+/// Revalidates manager aliases and directory identities so changed defaults take effect.
 ///
 /// # Example
 ///
@@ -532,4 +561,38 @@ fn native_directory_cache_tracks_installs_and_equal_metadata_replacement() {
         .set_modified(modified)
         .unwrap();
     assert_eq!(NativeToolchainFs.entries(path), ["v24.0.0"]);
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn alias_cache_observes_in_place_edits_with_restored_timestamps() {
+    use crate::test_support::scratch_dir;
+    let home = scratch_dir("toolchain-alias-cache");
+    let alias = home.join("default");
+    assert!(
+        NativeToolchainFs
+            .read_alias(alias.to_str().unwrap())
+            .is_none()
+    );
+    std::fs::write(&alias, "v20.0.0").unwrap();
+    let modified = std::fs::metadata(&alias).unwrap().modified().unwrap();
+    assert_eq!(
+        NativeToolchainFs
+            .read_alias(alias.to_str().unwrap())
+            .as_deref(),
+        Some("v20.0.0")
+    );
+    std::fs::write(&alias, "v22.0.0").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&alias)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    assert_eq!(
+        NativeToolchainFs
+            .read_alias(alias.to_str().unwrap())
+            .as_deref(),
+        Some("v22.0.0")
+    );
 }
