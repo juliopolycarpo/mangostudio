@@ -208,14 +208,30 @@ enum CreateFailure {
 /// How many *consecutive* `ERROR_ACCESS_DENIED`-over-a-confirmed-absent-path
 /// results [`with_slot_lock`] retries before reporting the error as fatal.
 ///
-/// Two, because the ambiguity such a result carries resolves on the very next
-/// attempt. Either a previous holder's pending delete completed between the
-/// failed `CREATE_NEW` and the probe — in which case the next `CREATE_NEW`
-/// succeeds — or the parent directory is unwritable, in which case the next
-/// one fails identically and the second miss reports it. A real permissions
-/// misconfiguration therefore still surfaces as [`LockError::Io`] within
-/// microseconds, never as a `policy.timeout`-long wait with a misleading
-/// "timed out waiting for the runtime slot lock" message.
+/// The ambiguity such a result carries resolves on the very next attempt:
+/// either a previous holder's pending delete completed between the failed
+/// `CREATE_NEW` and the probe, in which case the next `CREATE_NEW` succeeds,
+/// or the parent directory is unwritable, in which case the next one fails
+/// identically. One retry would therefore be enough to separate the two; two
+/// is the deliberately conservative choice, cheap because every retry is
+/// immediate — no sleep, no deadline spent.
+///
+/// This is a count of *retries*, not of attempts, so the **third** consecutive
+/// miss is the one reported. Read against `classify_access_denied`'s
+/// `consecutive_absent < MAX_CONSECUTIVE_ABSENT_RETRIES`, the ladder is:
+///
+/// | `consecutive_absent` | verdict |
+/// | --- | --- |
+/// | 0 | [`CreateFailure::RetryAbsent`] |
+/// | 1 | [`CreateFailure::RetryAbsent`] |
+/// | 2 | [`CreateFailure::Fatal`] |
+///
+/// Lowering this to 1 would drop a retry and narrow the very race the bounded
+/// retry exists to close, so align the comment to the constant rather than the
+/// other way round. A real permissions misconfiguration still surfaces as
+/// [`LockError::Io`] within microseconds either way, never as a
+/// `policy.timeout`-long wait behind a misleading "timed out waiting for the
+/// runtime slot lock" message.
 const MAX_CONSECUTIVE_ABSENT_RETRIES: u32 = 2;
 
 /// Decides what a failed `create_lock_file` means, given the error it returned
@@ -586,15 +602,61 @@ mod tests {
         );
     }
 
+    /// Restores a directory's permission bits when dropped.
+    ///
+    /// The restore has to survive an unwind, not just an early return: the
+    /// closure handed to `with_slot_lock` below is `unreachable!`, and it runs
+    /// only if the lock *was* acquired — exactly the regression the test
+    /// guards. That panic would skip a plain restore call and leave the scratch
+    /// directory at `0o555`, so `ScratchDir`'s own `Drop` could not remove it
+    /// and a temp directory would leak on every failing run.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let _restore = RestoreMode { dir: &dir, mode: original_mode };
+    /// std::fs::set_permissions(&dir, Permissions::from_mode(0o555)).unwrap();
+    /// // ... panic or return; the mode is restored either way.
+    /// ```
+    #[cfg(unix)]
+    struct RestoreMode<'a> {
+        dir: &'a std::path::Path,
+        mode: u32,
+    }
+
+    #[cfg(unix)]
+    impl Drop for RestoreMode<'_> {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt as _;
+            // Best-effort: a panic here during an unwind would abort the
+            // process instead of reporting the test failure in progress.
+            let _ = std::fs::set_permissions(self.dir, std::fs::Permissions::from_mode(self.mode));
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn an_unwritable_parent_directory_fails_fast_instead_of_waiting_out_the_timeout() {
-        // The constraint the bounded retry had to preserve end to end: a real
-        // permissions misconfiguration must still surface as `LockError::Io`
-        // straight away, never as a `policy.timeout`-long `TimedOut` with a
-        // message blaming a holder that was never there. Unix-only because
-        // this is how the unwritable parent is *staged*, not what is asserted:
-        // the assertion below holds on every platform.
+        // Pins the constraint the bounded retry had to preserve: a permission
+        // error on the lock's parent surfaces as `LockError::Io` well inside
+        // `policy.timeout`, never as a `TimedOut` blaming a holder that was
+        // never there. This already held before the bounded retry landed, so
+        // it is a regression guard, not evidence for the new behaviour.
+        //
+        // It deliberately does *not* reach the bounded retry. On Unix,
+        // `create_new` into a `0o555` directory returns `EACCES` (errno 13),
+        // not raw error 5, so `is_windows_access_denied` is false and
+        // `classify_create_failure` answers `Fatal` on the first attempt:
+        // `consecutive_absent` is never incremented and `RetryAbsent` is never
+        // taken. The Windows contract — error 5 over a confirmed-absent path
+        // retries, then reports `Io` once the bound is spent — is covered only
+        // by the `classify_access_denied` / `classify_create_failure`
+        // decision-table tests above; do not mistake this test for that
+        // coverage.
+        //
+        // `#[cfg(unix)]` because staging an unwritable parent is Unix-specific
+        // (`PermissionsExt`, plus the root bypass below). The Windows lane
+        // skips it entirely, exactly as it already skips
+        // `a_stale_lock_that_fails_to_delete_is_not_reported_as_reclaimed`.
         if nix::unistd::Uid::effective().is_root() {
             // Root bypasses the directory's write-permission check entirely,
             // so the create would succeed and never reach the branch this
@@ -610,6 +672,13 @@ mod tests {
         let dir = scratch_dir("unwritable-parent");
         let lock = dir.join("runtime.lock");
         let original_mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        // Declared after `dir`, so it drops *before* the `ScratchDir` whose
+        // own `Drop` removes the tree — the mode is back by the time the
+        // directory is unlinked, on a panic as well as on a clean return.
+        let _restore = RestoreMode {
+            dir: dir.path(),
+            mode: original_mode,
+        };
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
 
         // The full 5s production timeout, so a regression that falls through
@@ -618,10 +687,6 @@ mod tests {
         let started = std::time::Instant::now();
         let result = with_slot_lock(&lock, &policy, || unreachable!("must never acquire"));
         let elapsed = started.elapsed();
-
-        // Restored before any assertion, so a failure still leaves the scratch
-        // directory cleanable.
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(original_mode)).unwrap();
 
         let error = result.expect_err("an unwritable parent directory cannot be locked");
         assert!(
