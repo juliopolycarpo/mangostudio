@@ -604,12 +604,27 @@ fn write_replacement(
     bytes: &[u8],
     mode: Option<fs::Permissions>,
 ) -> Result<f64, RemoteError> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(temp)
-        .map_err(io_error)?;
+    write_replacement_with_hook(temp, path, bytes, mode, |_| {})
+}
+
+fn write_replacement_with_hook(
+    temp: &Path,
+    path: &Path,
+    bytes: &[u8],
+    mode: Option<fs::Permissions>,
+    mut before_write: impl FnMut(&Path),
+) -> Result<f64, RemoteError> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if mode.is_some() {
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        options.mode(0o600);
+    }
+    let mut file = options.open(temp).map_err(io_error)?;
     let prepared = (|| {
+        before_write(temp);
         file.write_all(bytes)?;
         if let Some(mode) = mode {
             file.set_permissions(mode)?;
@@ -753,6 +768,7 @@ fn write_replacement_in(
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ReplacementHookPhase {
+    BeforeWrite,
     Prepared,
     BeforePublish,
 }
@@ -776,10 +792,17 @@ fn write_replacement_in_with_hook(
         mode,
         expected,
     } = replacement;
-    let mut file = dir
-        .open_with(temp, CapOpenOptions::new().write(true).create_new(true))
-        .map_err(io_error)?;
+    let mut options = CapOpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if mode.is_some() {
+        use cap_std::fs::OpenOptionsExt as _;
+
+        options.mode(0o600);
+    }
+    let mut file = dir.open_with(temp, &options).map_err(io_error)?;
     let prepared = (|| -> std::io::Result<()> {
+        hook(ReplacementHookPhase::BeforeWrite, Path::new(temp));
         file.write_all(bytes)?;
         if let Some(mode) = mode {
             file.set_permissions(mode)?;
@@ -1226,6 +1249,14 @@ fn copy_source_to_temporary(
 fn open_move_temporary(dir: &cap_std::fs::Dir, temporary: &OsString) -> std::io::Result<File> {
     let mut options = CapOpenOptions::new();
     options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt as _;
+
+        // The copied bytes must never be exposed through the temporary name
+        // before the source mode is applied after the stream completes.
+        options.mode(0o600);
+    }
     #[cfg(windows)]
     {
         use cap_std::fs::OpenOptionsExt as _;
@@ -1833,6 +1864,9 @@ mod tests {
     use crate::filesystem::policy::PathPolicy;
     use crate::test_support::scratch_dir;
 
+    #[cfg(unix)]
+    use std::cell::Cell;
+
     fn copy_fallback_policy(root: &Path) -> CompiledPolicy {
         PathPolicy {
             allowed_roots: vec![root.to_path_buf()],
@@ -1850,6 +1884,21 @@ mod tests {
         fn before_copy(&mut self, temporary: &Path) -> std::io::Result<()> {
             self.temporary = Some(temporary.to_path_buf());
             Err(std::io::Error::other("forced copy failure"))
+        }
+    }
+
+    #[cfg(unix)]
+    struct PrivateTemporaryBeforeCopy {
+        mode: Option<u32>,
+    }
+
+    #[cfg(unix)]
+    impl MoveCopyHooks for PrivateTemporaryBeforeCopy {
+        fn before_copy(&mut self, temporary: &Path) -> std::io::Result<()> {
+            use std::os::unix::fs::PermissionsExt;
+
+            self.mode = Some(fs::metadata(temporary)?.permissions().mode() & 0o777);
+            Ok(())
         }
     }
 
@@ -1918,6 +1967,53 @@ mod tests {
         fn after_source_stage(&mut self, tombstone: &Path) {
             self.tombstone = Some(tombstone.to_path_buf());
         }
+    }
+
+    #[cfg(unix)]
+    struct BeforeWriteModeCapture {
+        root: PathBuf,
+        mode: Cell<Option<u32>>,
+    }
+
+    #[cfg(unix)]
+    impl BeforeWriteModeCapture {
+        fn new(root: &Path) -> Self {
+            Self {
+                root: root.to_path_buf(),
+                mode: Cell::new(None),
+            }
+        }
+
+        fn record(&self, temporary: &Path) {
+            use std::os::unix::fs::PermissionsExt;
+
+            self.mode.set(Some(
+                fs::metadata(self.root.join(temporary))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+            ));
+        }
+
+        fn mode(&self) -> u32 {
+            self.mode.get().unwrap()
+        }
+    }
+
+    #[cfg(unix)]
+    fn default_creation_mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap();
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        drop(file);
+        fs::remove_file(path).unwrap();
+        mode
     }
 
     fn unrestricted() -> CompiledPolicy {
@@ -2191,6 +2287,152 @@ mod tests {
         );
         assert_eq!(fs::read(&source).unwrap(), b"later source");
         assert_eq!(fs::read(&destination).unwrap(), b"copied bytes");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_move_creates_a_private_temp_before_streaming_and_restores_source_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = scratch_dir("fs-io-copy-move-private-temp");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o640)).unwrap();
+        let policy = copy_fallback_policy(&root);
+        let mut hooks = PrivateTemporaryBeforeCopy { mode: None };
+
+        copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
+            .unwrap();
+
+        assert_eq!(hooks.mode.unwrap() & 0o077, 0);
+        assert_eq!(
+            fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unrestricted_replacement_temp_is_private_only_when_preserving_an_existing_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = scratch_dir("fs-io-unrestricted-replacement-private-temp");
+        let destination = root.join("destination");
+        let temporary = root.join("temporary");
+        fs::write(&destination, b"before").unwrap();
+        fs::set_permissions(&destination, fs::Permissions::from_mode(0o640)).unwrap();
+        let mode = fs::metadata(&destination).unwrap().permissions();
+        let capture = BeforeWriteModeCapture::new(&root);
+
+        write_replacement_with_hook(
+            &temporary,
+            &destination,
+            b"after",
+            Some(mode),
+            |temporary| capture.record(temporary),
+        )
+        .unwrap();
+
+        assert_eq!(capture.mode() & 0o077, 0);
+        assert_eq!(
+            fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+
+        let default_mode = default_creation_mode(&root.join("default"));
+        let new_destination = root.join("new-destination");
+        let new_temporary = root.join("new-temporary");
+        let new_capture = BeforeWriteModeCapture::new(&root);
+        write_replacement_with_hook(
+            &new_temporary,
+            &new_destination,
+            b"new",
+            None,
+            |temporary| new_capture.record(temporary),
+        )
+        .unwrap();
+
+        assert_eq!(new_capture.mode(), default_mode);
+        assert_eq!(
+            fs::metadata(&new_destination).unwrap().permissions().mode() & 0o777,
+            default_mode
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_replacement_temp_is_private_only_when_preserving_an_existing_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = scratch_dir("fs-io-bounded-replacement-private-temp");
+        let destination = root.join("destination");
+        fs::write(&destination, b"before").unwrap();
+        fs::set_permissions(&destination, fs::Permissions::from_mode(0o640)).unwrap();
+        let mode = CapPermissions::from_std(fs::metadata(&destination).unwrap().permissions());
+        let policy = copy_fallback_policy(&root);
+        let parent = capability::verified_parent(&policy, &destination, true).unwrap();
+        let capture = BeforeWriteModeCapture::new(&root);
+
+        parent
+            .with_parent(|dir, leaf| {
+                let temporary = temporary_leaf(leaf)?;
+                write_replacement_in_with_hook(
+                    dir,
+                    leaf,
+                    &destination,
+                    &temporary,
+                    Replacement {
+                        bytes: b"after",
+                        mode: Some(mode),
+                        expected: None,
+                    },
+                    |phase, temporary| {
+                        if phase == ReplacementHookPhase::BeforeWrite {
+                            capture.record(temporary);
+                        }
+                    },
+                )
+            })
+            .unwrap();
+
+        assert_eq!(capture.mode() & 0o077, 0);
+        assert_eq!(
+            fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+
+        let default_mode = default_creation_mode(&root.join("default"));
+        let new_destination = root.join("new-destination");
+        let new_parent = capability::verified_parent(&policy, &new_destination, true).unwrap();
+        let new_capture = BeforeWriteModeCapture::new(&root);
+        new_parent
+            .with_parent(|dir, leaf| {
+                let temporary = temporary_leaf(leaf)?;
+                write_replacement_in_with_hook(
+                    dir,
+                    leaf,
+                    &new_destination,
+                    &temporary,
+                    Replacement {
+                        bytes: b"new",
+                        mode: None,
+                        expected: None,
+                    },
+                    |phase, temporary| {
+                        if phase == ReplacementHookPhase::BeforeWrite {
+                            new_capture.record(temporary);
+                        }
+                    },
+                )
+            })
+            .unwrap();
+
+        assert_eq!(new_capture.mode(), default_mode);
+        assert_eq!(
+            fs::metadata(&new_destination).unwrap().permissions().mode() & 0o777,
+            default_mode
+        );
     }
 
     #[test]
