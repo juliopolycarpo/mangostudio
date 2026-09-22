@@ -142,6 +142,11 @@ pub fn with_slot_lock<T>(
         std::fs::create_dir_all(parent).map_err(LockError::Io)?;
     }
     let deadline = Instant::now() + policy.timeout;
+    // Reset by every outcome that is not a confirmed-absent access denial, so
+    // the bound applies to a *run* of them rather than to the call as a whole:
+    // a long, genuinely contended wait can cross the delete-pending window
+    // repeatedly without ever spending its budget.
+    let mut consecutive_absent = 0u32;
 
     loop {
         match create_lock_file(lock_path) {
@@ -163,52 +168,133 @@ pub fn with_slot_lock<T>(
                     .map_err(LockError::Io)?;
                 return Ok(run());
             }
-            Err(error) if is_lock_contended(&error, lock_path) => {
-                if reclaim_if_abandoned(lock_path, policy) {
-                    continue;
+            Err(error) => match classify_create_failure(&error, lock_path, consecutive_absent) {
+                CreateFailure::Contended => {
+                    consecutive_absent = 0;
+                    if reclaim_if_abandoned(lock_path, policy) {
+                        continue;
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(LockError::TimedOut {
+                            path: lock_path.to_path_buf(),
+                        });
+                    }
+                    std::thread::sleep(policy.poll_interval);
                 }
-                if Instant::now() >= deadline {
-                    return Err(LockError::TimedOut {
-                        path: lock_path.to_path_buf(),
-                    });
-                }
-                std::thread::sleep(policy.poll_interval);
-            }
-            Err(error) => return Err(LockError::Io(error)),
+                // No sleep and no deadline check: the bound is what terminates
+                // this arm, and both readings of it resolve on the next
+                // attempt. Alternating absent/contended results still end at
+                // `policy.timeout`, since only the `Contended` arm above can
+                // repeat without limit and it honours the deadline.
+                CreateFailure::RetryAbsent => consecutive_absent += 1,
+                CreateFailure::Fatal => return Err(LockError::Io(error)),
+            },
         }
     }
 }
 
-/// Whether an error says another process still owns the lock path.
-///
-/// Windows can return `ERROR_ACCESS_DENIED` (5), rather than
-/// `ERROR_FILE_EXISTS`, while another handle to an exclusive-create lock is
-/// still being released. When the lock path exists, or its deletion is still
-/// pending, that is a transient contention result and must take the same
-/// poll-and-reclaim path as an ordinary existing lock. A confirmed absent
-/// path with the same error is an ordinary I/O failure, such as an unwritable
-/// parent directory.
-fn is_lock_contended(error: &io::Error, lock_path: &Path) -> bool {
-    if error.kind() == io::ErrorKind::AlreadyExists {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        error.raw_os_error() == Some(5) // ERROR_ACCESS_DENIED
-            && access_denied_lock_is_contended(lock_path.try_exists())
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = lock_path;
-        false
-    }
+/// What a failed `create_lock_file` attempt means to [`with_slot_lock`]'s loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CreateFailure {
+    /// Another holder owns the path: poll, reclaim, and honour the deadline.
+    Contended,
+    /// Retry the create straight away, without sleeping or consuming the
+    /// deadline. Only ever returned a bounded number of times in a row.
+    RetryAbsent,
+    /// A real I/O failure: surface it as [`LockError::Io`].
+    Fatal,
 }
 
-#[cfg(windows)]
-fn access_denied_lock_is_contended(presence: io::Result<bool>) -> bool {
+/// How many *consecutive* `ERROR_ACCESS_DENIED`-over-a-confirmed-absent-path
+/// results [`with_slot_lock`] retries before reporting the error as fatal.
+///
+/// Two, because the ambiguity such a result carries resolves on the very next
+/// attempt. Either a previous holder's pending delete completed between the
+/// failed `CREATE_NEW` and the probe — in which case the next `CREATE_NEW`
+/// succeeds — or the parent directory is unwritable, in which case the next
+/// one fails identically and the second miss reports it. A real permissions
+/// misconfiguration therefore still surfaces as [`LockError::Io`] within
+/// microseconds, never as a `policy.timeout`-long wait with a misleading
+/// "timed out waiting for the runtime slot lock" message.
+const MAX_CONSECUTIVE_ABSENT_RETRIES: u32 = 2;
+
+/// Decides what a failed `create_lock_file` means, given the error it returned
+/// and how many consecutive [`CreateFailure::RetryAbsent`] results preceded it.
+///
+/// `ERROR_FILE_EXISTS` ([`io::ErrorKind::AlreadyExists`]) is plain contention
+/// on every platform. Windows additionally answers `ERROR_ACCESS_DENIED` (5)
+/// to a `CREATE_NEW` while a previous holder's delete is still pending, which
+/// is why that code gets an existence probe rather than a verdict of its own —
+/// see [`classify_access_denied`]. On Unix, raw error 5 is `EIO` and says
+/// nothing of the sort, so the probe never runs there.
+///
+/// # Example
+/// ```ignore
+/// let already_exists = io::Error::from(io::ErrorKind::AlreadyExists);
+/// assert_eq!(
+///     classify_create_failure(&already_exists, lock_path, 0),
+///     CreateFailure::Contended,
+/// );
+/// ```
+fn classify_create_failure(
+    error: &io::Error,
+    lock_path: &Path,
+    consecutive_absent: u32,
+) -> CreateFailure {
+    if error.kind() == io::ErrorKind::AlreadyExists {
+        return CreateFailure::Contended;
+    }
+    if is_windows_access_denied(error) {
+        return classify_access_denied(lock_path.try_exists(), consecutive_absent);
+    }
+    CreateFailure::Fatal
+}
+
+/// Whether `error` is the `ERROR_ACCESS_DENIED` a Windows `CREATE_NEW` answers
+/// while a previous holder's delete is still pending.
+///
+/// Always `false` off Windows: raw OS error 5 is `EIO` there, an unrelated
+/// hardware-level failure that must stay fatal. Written as a runtime `cfg!`
+/// rather than a `#[cfg]` block deliberately — every branch below it then
+/// compiles, type-checks and unit-tests on a Linux or macOS development host,
+/// instead of existing only in a Windows build nobody runs locally.
+fn is_windows_access_denied(error: &io::Error) -> bool {
+    cfg!(windows) && error.raw_os_error() == Some(5)
+}
+
+/// Decides what a Windows `ERROR_ACCESS_DENIED` create failure means, given
+/// what a follow-up existence probe of the lock path answered.
+///
+/// The probe is a *second* syscall, and that is the whole difficulty. A path
+/// that is still present, or whose own probe is denied, is a holder on its way
+/// out: ordinary contention. A path the probe confirms **absent** is genuinely
+/// ambiguous — either the pending delete completed in the window between the
+/// two calls (transient, and the next create wins), or the parent directory is
+/// unwritable (permanent). Neither reading can be settled from this one
+/// answer, so the tie is broken by retrying a bounded number of times: see
+/// [`MAX_CONSECUTIVE_ABSENT_RETRIES`]. A probe that fails for some *other*
+/// reason is not a confirmed-absent path at all and stays fatal.
+///
+/// Kept cross-platform rather than `#[cfg(windows)]` so its decision table is
+/// executable on every host this crate is developed on; reaching it at all is
+/// what [`is_windows_access_denied`] gates.
+///
+/// # Example
+/// ```ignore
+/// // A delete that completed between the failed create and the probe:
+/// // retry rather than report a permissions failure that is not there.
+/// assert_eq!(classify_access_denied(Ok(false), 0), CreateFailure::RetryAbsent);
+/// ```
+fn classify_access_denied(presence: io::Result<bool>, consecutive_absent: u32) -> CreateFailure {
     match presence {
-        Ok(present) => present,
-        Err(error) => error.raw_os_error() == Some(5), // ERROR_ACCESS_DENIED
+        Ok(true) => CreateFailure::Contended,
+        // The probe itself being denied means the path is still there, with
+        // its deletion pending — the same transient contention.
+        Err(ref error) if error.raw_os_error() == Some(5) => CreateFailure::Contended,
+        Ok(false) if consecutive_absent < MAX_CONSECUTIVE_ABSENT_RETRIES => {
+            CreateFailure::RetryAbsent
+        }
+        Ok(false) | Err(_) => CreateFailure::Fatal,
     }
 }
 
@@ -348,15 +434,73 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::time::Duration;
 
-    #[cfg(windows)]
-    use super::access_denied_lock_is_contended;
     #[cfg(unix)]
     use super::reclaim_if_abandoned;
     use super::{
-        LockError, LockOwner, LockPolicy, create_lock_file, is_lock_contended, platform,
+        CreateFailure, LockError, LockOwner, LockPolicy, MAX_CONSECUTIVE_ABSENT_RETRIES,
+        classify_access_denied, classify_create_failure, create_lock_file, platform,
         with_slot_lock,
     };
     use crate::test_support::scratch_dir;
+
+    /// The `ERROR_ACCESS_DENIED` a Windows `CREATE_NEW` answers while a
+    /// previous holder's delete is still pending.
+    fn access_denied() -> std::io::Error {
+        std::io::Error::from_raw_os_error(5)
+    }
+
+    #[test]
+    fn an_access_denied_over_a_present_lock_path_is_contended() {
+        assert_eq!(
+            classify_access_denied(Ok(true), 0),
+            CreateFailure::Contended,
+            "expected Contended for a present lock path | received the classification above"
+        );
+    }
+
+    #[test]
+    fn an_access_denied_whose_probe_is_also_denied_is_contended() {
+        assert_eq!(
+            classify_access_denied(Err(access_denied()), 0),
+            CreateFailure::Contended,
+            "expected Contended while the previous holder's delete is still pending | received the classification above"
+        );
+    }
+
+    #[test]
+    fn an_access_denied_over_an_absent_lock_path_retries_within_the_bound() {
+        for consecutive_absent in 0..MAX_CONSECUTIVE_ABSENT_RETRIES {
+            assert_eq!(
+                classify_access_denied(Ok(false), consecutive_absent),
+                CreateFailure::RetryAbsent,
+                "expected RetryAbsent at consecutive_absent={consecutive_absent} (bound is {}) | received the classification above",
+                MAX_CONSECUTIVE_ABSENT_RETRIES
+            );
+        }
+    }
+
+    #[test]
+    fn an_access_denied_over_an_absent_lock_path_is_fatal_past_the_bound() {
+        assert_eq!(
+            classify_access_denied(Ok(false), MAX_CONSECUTIVE_ABSENT_RETRIES),
+            CreateFailure::Fatal,
+            "expected Fatal at consecutive_absent={} (the bound itself) | received the classification above",
+            MAX_CONSECUTIVE_ABSENT_RETRIES
+        );
+    }
+
+    #[test]
+    fn an_access_denied_whose_probe_fails_for_another_reason_is_fatal() {
+        // Not a *confirmed* absent path, so the bounded retry must not apply.
+        assert_eq!(
+            classify_access_denied(
+                Err(std::io::Error::from(std::io::ErrorKind::NotADirectory)),
+                0
+            ),
+            CreateFailure::Fatal,
+            "expected Fatal for a probe that errored with something other than ERROR_ACCESS_DENIED | received the classification above"
+        );
+    }
 
     #[test]
     fn the_default_policy_matches_the_shared_protocol_constants() {
@@ -375,34 +519,120 @@ mod tests {
         let lock = dir.join("runtime.lock");
         std::fs::write(&lock, b"owner").unwrap();
         let error = std::io::Error::from(std::io::ErrorKind::AlreadyExists);
-        assert!(is_lock_contended(&error, &lock));
+        assert_eq!(
+            classify_create_failure(&error, &lock, 0),
+            CreateFailure::Contended,
+            "expected Contended for ErrorKind::AlreadyExists | received the classification above"
+        );
     }
 
-    #[cfg(windows)]
+    /// What raw OS error 5 means to [`classify_create_failure`] here: on
+    /// Windows it is `ERROR_ACCESS_DENIED` and gets the existence probe, while
+    /// everywhere else it is `EIO` and stays fatal with no probe at all.
+    ///
+    /// Its two callers below therefore assert the *Windows* contract when CI
+    /// runs them on `windows-latest`, and the "raw error 5 is plain `EIO`"
+    /// contract when they run on Linux or macOS. Deliberately not
+    /// `#[cfg(windows)]`: no development host here can compile, let alone run,
+    /// a Windows-gated test body, so gating one would ship it unverified.
+    fn raw_error_5_verdict(on_windows: CreateFailure) -> CreateFailure {
+        if cfg!(windows) {
+            on_windows
+        } else {
+            CreateFailure::Fatal
+        }
+    }
+
     #[test]
-    fn windows_access_denied_while_creating_a_lock_is_contended() {
+    fn access_denied_while_creating_a_lock_that_is_still_there_is_contended() {
         let dir = scratch_dir("access-denied-lock");
         let lock = dir.join("runtime.lock");
         std::fs::write(&lock, b"owner").unwrap();
-        let error = std::io::Error::from_raw_os_error(5); // ERROR_ACCESS_DENIED
-        assert!(is_lock_contended(&error, &lock));
+        assert_eq!(
+            classify_create_failure(&access_denied(), &lock, 0),
+            raw_error_5_verdict(CreateFailure::Contended),
+            "expected Contended on Windows (ERROR_ACCESS_DENIED over a lock path that is still present), Fatal elsewhere (EIO) | received the classification above"
+        );
     }
 
-    #[cfg(windows)]
     #[test]
-    fn windows_access_denied_without_a_lock_is_not_contended() {
+    fn access_denied_without_a_lock_retries_within_the_bound() {
+        // Contract change: this case (previously
+        // `windows_access_denied_without_a_lock_is_not_contended`) used to be
+        // classified fatal outright, which is the CI race — a previous
+        // holder's delete completing between the failed `CREATE_NEW` and this
+        // probe surfaced as `LockError::Io`. It is now retried, bounded, and
+        // fatal only once the bound is spent.
         let dir = scratch_dir("access-denied-without-lock");
         let lock = dir.join("runtime.lock");
-        let error = std::io::Error::from_raw_os_error(5); // ERROR_ACCESS_DENIED
-        assert!(!is_lock_contended(&error, &lock));
+        assert_eq!(
+            classify_create_failure(&access_denied(), &lock, 0),
+            raw_error_5_verdict(CreateFailure::RetryAbsent),
+            "expected RetryAbsent on Windows (ERROR_ACCESS_DENIED over an absent lock path, within the bound), Fatal elsewhere (EIO) | received the classification above"
+        );
     }
 
-    #[cfg(windows)]
     #[test]
-    fn windows_access_denied_while_lock_deletion_is_pending_is_contended() {
-        assert!(access_denied_lock_is_contended(Err(
-            std::io::Error::from_raw_os_error(5), // ERROR_ACCESS_DENIED
-        )));
+    fn access_denied_without_a_lock_is_fatal_once_the_bound_is_spent() {
+        // An unwritable parent directory answers this way every time, so the
+        // bound runs out and the real error surfaces in microseconds rather
+        // than after a `policy.timeout`-long wait.
+        let dir = scratch_dir("access-denied-without-lock-exhausted");
+        let lock = dir.join("runtime.lock");
+        assert_eq!(
+            classify_create_failure(&access_denied(), &lock, MAX_CONSECUTIVE_ABSENT_RETRIES),
+            CreateFailure::Fatal,
+            "expected Fatal for ERROR_ACCESS_DENIED over an absent lock path once {MAX_CONSECUTIVE_ABSENT_RETRIES} consecutive retries were spent | received the classification above"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_parent_directory_fails_fast_instead_of_waiting_out_the_timeout() {
+        // The constraint the bounded retry had to preserve end to end: a real
+        // permissions misconfiguration must still surface as `LockError::Io`
+        // straight away, never as a `policy.timeout`-long `TimedOut` with a
+        // message blaming a holder that was never there. Unix-only because
+        // this is how the unwritable parent is *staged*, not what is asserted:
+        // the assertion below holds on every platform.
+        if nix::unistd::Uid::effective().is_root() {
+            // Root bypasses the directory's write-permission check entirely,
+            // so the create would succeed and never reach the branch this
+            // test exists to guard.
+            eprintln!(
+                "skipping an_unwritable_parent_directory_fails_fast_instead_of_waiting_out_the_timeout: running as root"
+            );
+            return;
+        }
+
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = scratch_dir("unwritable-parent");
+        let lock = dir.join("runtime.lock");
+        let original_mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        // The full 5s production timeout, so a regression that falls through
+        // to the poll loop is unmistakable rather than marginal.
+        let policy = LockPolicy::default();
+        let started = std::time::Instant::now();
+        let result = with_slot_lock(&lock, &policy, || unreachable!("must never acquire"));
+        let elapsed = started.elapsed();
+
+        // Restored before any assertion, so a failure still leaves the scratch
+        // directory cleanable.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(original_mode)).unwrap();
+
+        let error = result.expect_err("an unwritable parent directory cannot be locked");
+        assert!(
+            matches!(error, LockError::Io(_)),
+            "expected LockError::Io for an unwritable parent directory | received: {error:?}"
+        );
+        assert!(
+            elapsed < policy.timeout / 2,
+            "expected the failure well inside the {:?} timeout | received: {elapsed:?}",
+            policy.timeout
+        );
     }
 
     #[test]
