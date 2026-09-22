@@ -456,6 +456,21 @@ enum StopRequest {
     Timeout,
 }
 
+impl StopRequest {
+    /// Whether this request force-stops the whole tree (and so ends capture)
+    /// rather than asking the target to exit.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// assert!(StopRequest::Timeout.is_forceful());
+    /// assert!(!StopRequest::Interrupt.is_forceful());
+    /// ```
+    fn is_forceful(self) -> bool {
+        !matches!(self, Self::Interrupt)
+    }
+}
+
 fn process_pool() -> &'static Arc<Semaphore> {
     static POOL: OnceLock<Arc<Semaphore>> = OnceLock::new();
     POOL.get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_CHILD_PROCESSES)))
@@ -875,16 +890,12 @@ async fn supervise_child(
         cause = cause_for(request);
         let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
         let dispatched = dispatch_stop(&mut child, pid, request).is_ok();
-        graceful_requested = dispatched && matches!(request, StopRequest::Interrupt);
+        graceful_requested = dispatched && !request.is_forceful();
         // Only a dispatched stop latches: `force_requested` is what disables the deadline arm
         // below, so latching it on a *failed* dispatch would retire this worker's only remaining
         // bound and leave the target running with nothing left to stop it.
-        force_requested = dispatched
-            && matches!(
-                request,
-                StopRequest::Force | StopRequest::Cancel | StopRequest::Timeout
-            );
-        if dispatched && request_stops_capture(request) {
+        force_requested = dispatched && request.is_forceful();
+        if dispatched && request.is_forceful() {
             stopped_capture.record(capture_was_open);
         }
     }
@@ -912,8 +923,9 @@ async fn supervise_child(
                 }
             }
             Some(command) = commands.recv() => {
-                if (matches!(command.request, StopRequest::Interrupt) && (graceful_requested || force_requested))
-                    || (matches!(command.request, StopRequest::Force | StopRequest::Cancel) && force_requested)
+                // `request_stop` never sends `Timeout`, so "forceful" here means Force or Cancel.
+                if (!command.request.is_forceful() && (graceful_requested || force_requested))
+                    || (command.request.is_forceful() && force_requested)
                 {
                     let _ = command.reply.send(Ok(()));
                     continue;
@@ -922,9 +934,9 @@ async fn supervise_child(
                 match dispatch_stop(&mut child, pid, command.request) {
                     Ok(()) => {
                         cause = cause_for(command.request);
-                        graceful_requested |= matches!(command.request, StopRequest::Interrupt);
-                        force_requested |= matches!(command.request, StopRequest::Force | StopRequest::Cancel);
-                        if request_stops_capture(command.request) {
+                        graceful_requested |= !command.request.is_forceful();
+                        force_requested |= command.request.is_forceful();
+                        if command.request.is_forceful() {
                             stopped_capture.record(capture_was_open);
                         }
                         let _ = command.reply.send(Ok(()));
@@ -990,13 +1002,6 @@ fn cause_for(request: StopRequest) -> ProcessTerminalCause {
         StopRequest::Cancel => ProcessTerminalCause::Cancelled,
         StopRequest::Timeout => ProcessTerminalCause::TimedOut,
     }
-}
-
-fn request_stops_capture(request: StopRequest) -> bool {
-    matches!(
-        request,
-        StopRequest::Force | StopRequest::Cancel | StopRequest::Timeout
-    )
 }
 
 fn capture_was_open(
@@ -1179,11 +1184,10 @@ fn configure_containment(_command: &mut Command) -> Result<(), ProcessStartError
 }
 
 fn dispatch_stop(child: &mut OwnedChild, pid: Option<u32>, request: StopRequest) -> io::Result<()> {
-    match request {
-        StopRequest::Interrupt => child.interrupt(),
-        StopRequest::Force | StopRequest::Cancel | StopRequest::Timeout => {
-            force_tree_for_child(child, pid)
-        }
+    if request.is_forceful() {
+        force_tree_for_child(child, pid)
+    } else {
+        child.interrupt()
     }
 }
 
@@ -1230,6 +1234,19 @@ fn signal_name(number: i32) -> &'static str {
 
 /// Cap edges for [`read_capped`], which the launched-child tests only reach indirectly.
 /// Unlike the supervisor tests below, these need no process and run on every platform.
+#[cfg(test)]
+mod stop_requests {
+    use super::StopRequest;
+
+    #[test]
+    fn only_an_interrupt_is_not_forceful() {
+        assert!(!StopRequest::Interrupt.is_forceful());
+        assert!(StopRequest::Force.is_forceful());
+        assert!(StopRequest::Cancel.is_forceful());
+        assert!(StopRequest::Timeout.is_forceful());
+    }
+}
+
 #[cfg(test)]
 mod capped_reads {
     use tokio_util::sync::CancellationToken;
