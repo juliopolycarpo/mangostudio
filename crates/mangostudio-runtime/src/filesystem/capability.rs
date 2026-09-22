@@ -301,7 +301,6 @@ pub(super) fn bind_opened_directory(
     dir: Dir,
 ) -> Result<BoundDir, RemoteError> {
     let final_path = directory_final_path(&dir)?;
-    policy.check_final_handle_path(requested, &final_path)?;
     let anchor = bind_authorization_anchor(policy, requested, &final_path, &final_path)?;
     Ok(BoundDir { anchor })
 }
@@ -318,7 +317,6 @@ fn bind_verified_parent(
     parent_target.extend(missing);
     let mut final_target = parent_target.clone();
     final_target.push(&leaf);
-    policy.check_final_handle_path(requested, &final_target)?;
     let anchor = bind_authorization_anchor(policy, requested, &final_target, &parent_target)?;
     let Some(dir) = open_or_create_anchored_directory(&anchor, create_missing)? else {
         return Ok(None);
@@ -352,6 +350,7 @@ fn bind_authorization_anchor(
     final_target: &Path,
     directory_target: &Path,
 ) -> Result<AnchoredDir, RemoteError> {
+    // Every binding caller relies on this check before any anchor is opened.
     policy.check_final_handle_path(requested, final_target)?;
     // A configured policy root can itself be renamed after binding. Only the
     // filesystem/volume root is immutable for the lifetime of a capability;
