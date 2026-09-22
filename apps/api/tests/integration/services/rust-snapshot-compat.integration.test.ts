@@ -399,6 +399,27 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     await assertCrossDeviceMove(rust, fixtures.rust);
   });
 
+  it('treats an empty containment root as omitted during replay', async () => {
+    const roots = await fixturePair('empty-containment');
+    const bytes = Buffer.from('created');
+    for (const [client, directory] of [
+      [typescript, roots.typescript],
+      [rust, roots.rust],
+    ] as const) {
+      const path = join(directory, 'created.txt');
+      await writeFile(path, bytes);
+      expect(
+        await client.snapshot.revert({
+          chatId: 'empty-containment',
+          containmentRoot: '',
+          expected: [{ path, afterHash: hashOf(bytes) }],
+          operations: [{ type: 'create', path }],
+        })
+      ).toEqual({ revertedFiles: 1 });
+      expect(await client.snapshot.capture({ path })).toEqual({ exists: false });
+    }
+  });
+
   it('restores the same bytes from unpadded and malformed base64 strings, including a missing parent', async () => {
     const roots = await fixturePair('base64');
     const afterBytes = Buffer.from('after\n');

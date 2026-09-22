@@ -107,7 +107,7 @@ impl Service {
 
     async fn revert_snapshots_with_hasher<H>(
         self: Arc<Self>,
-        params: SnapshotRevertParams,
+        mut params: SnapshotRevertParams,
         response: ResponseBudget,
         cancel: CancellationToken,
         mut hasher: H,
@@ -115,6 +115,10 @@ impl Service {
     where
         H: SnapshotHasher + Send + 'static,
     {
+        // The TypeScript entry point treats an empty optional root as absent.
+        params.containment_root = params
+            .containment_root
+            .filter(|root| !root.as_os_str().is_empty());
         let paths = revert_paths(&params);
         let guards = self
             .state
