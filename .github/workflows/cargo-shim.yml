@@ -250,9 +250,9 @@ jobs:
     # Proves the hub's own real code actually talks to the real compiled
     # mangostudio-runtime binary over its three transports (stdio, direct-URL
     # serve, paired connect) — every other apps/api integration test spawns
-    # or dials the TypeScript in-process runtime instead. Targets the two
-    # qualification files directly rather than the whole apps/api suite,
-    # which does not need a Rust binary at all.
+    # or dials the TypeScript in-process runtime instead. Targets the `rust-*`
+    # qualification and compat files directly rather than the whole apps/api
+    # suite, which does not need a Rust binary at all.
     name: Real-binary qualification (${{ matrix.os }})
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
