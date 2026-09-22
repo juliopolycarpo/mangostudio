@@ -28,6 +28,8 @@ use tokio_util::sync::CancellationToken;
 mod supervisor;
 #[cfg(unix)]
 mod unix_guardian;
+#[cfg(windows)]
+mod windows_job;
 
 pub use supervisor::{
     AlwaysAllow, DefaultProcessSpawner, LaunchCheck, LaunchCheckError,

@@ -38,8 +38,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::JobObjects::{
-    CreateJobObjectW, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JobObjectBasicProcessIdList,
+    CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
     JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
     TerminateJobObject,
 };
@@ -47,9 +47,9 @@ use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, InitializeProcThreadAttributeList,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-    PROC_THREAD_ATTRIBUTE_JOB_LIST, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW,
-    UpdateProcThreadAttribute, WaitForSingleObject,
+    LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+    PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
+    STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use super::{ProcessRequest, ProcessStdin};
@@ -116,7 +116,9 @@ impl WindowsJobChild {
         let process = Arc::clone(&self.process);
         tokio::task::spawn_blocking(move || wait_for_process(&process))
             .await
-            .map_err(|error| io::Error::other(format!("Windows process wait task failed: {error}")))?
+            .map_err(|error| {
+                io::Error::other(format!("Windows process wait task failed: {error}"))
+            })?
     }
 
     /// Ends remaining descendants once capture has reached its bounded conclusion.
@@ -129,7 +131,9 @@ impl WindowsJobChild {
         let job = Arc::clone(&self.job);
         tokio::task::spawn_blocking(move || wait_for_job_empty(&job))
             .await
-            .map_err(|error| io::Error::other(format!("Windows Job cleanup task failed: {error}")))?
+            .map_err(|error| {
+                io::Error::other(format!("Windows Job cleanup task failed: {error}"))
+            })?
     }
 
     /// Console control delivery is not safe for arbitrary detached child consoles.
@@ -151,16 +155,8 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     let pipes = ChildPipes::from_request(request)?;
     let application = wide_nul(request.program.as_os_str(), "program")?;
     let mut command_line = command_line(request)?;
-    let current_directory = request
-        .cwd
-        .as_deref()
-        .map(path_wide_nul)
-        .transpose()?;
-    let environment = request
-        .env
-        .as_ref()
-        .map(environment_block)
-        .transpose()?;
+    let current_directory = request.cwd.as_deref().map(path_wide_nul).transpose()?;
+    let environment = request.env.as_ref().map(environment_block).transpose()?;
 
     let jobs = [job.raw()];
     let inherited_handles = pipes.inherited_handles();
@@ -188,9 +184,7 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     let environment_pointer = environment
         .as_ref()
         .map_or(ptr::null(), |block| block.as_ptr().cast::<c_void>());
-    let current_directory_pointer = current_directory
-        .as_ref()
-        .map_or(ptr::null(), Vec::as_ptr);
+    let current_directory_pointer = current_directory.as_ref().map_or(ptr::null(), Vec::as_ptr);
     let mut information = PROCESS_INFORMATION::default();
     let flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
 
@@ -400,13 +394,8 @@ fn create_killing_job() -> io::Result<Handle> {
 
 fn set_inheritable(handle: &Handle, inheritable: bool) -> io::Result<()> {
     // SAFETY: `handle` remains owned and valid for the call.
-    if unsafe {
-        SetHandleInformation(
-            handle.raw(),
-            HANDLE_FLAG_INHERIT,
-            u32::from(inheritable),
-        )
-    } == 0
+    if unsafe { SetHandleInformation(handle.raw(), HANDLE_FLAG_INHERIT, u32::from(inheritable)) }
+        == 0
     {
         Err(io::Error::last_os_error())
     } else {
@@ -422,7 +411,8 @@ impl AttributeList {
     fn new(count: u32) -> io::Result<Self> {
         let mut bytes = 0_usize;
         // SAFETY: the documented probe passes a null list and receives its byte requirement.
-        let result = unsafe { InitializeProcThreadAttributeList(ptr::null_mut(), count, 0, &mut bytes) };
+        let result =
+            unsafe { InitializeProcThreadAttributeList(ptr::null_mut(), count, 0, &mut bytes) };
         let probe_error = io::Error::last_os_error();
         if result != 0
             || probe_error.raw_os_error()
@@ -548,7 +538,9 @@ fn wait_for_job_empty(job: &Handle) -> io::Result<()> {
         }
 
         let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(i32::try_from(ERROR_MORE_DATA).expect("Win32 error fits i32")) {
+        if error.raw_os_error()
+            != Some(i32::try_from(ERROR_MORE_DATA).expect("Win32 error fits i32"))
+        {
             return Err(error);
         }
         let required_words = usize::try_from(required)
@@ -581,10 +573,7 @@ fn append_command_argument(output: &mut Vec<u16>, value: &OsStr, name: &str) -> 
     if !output.is_empty() {
         output.push(u16::from(b' '));
     }
-    let quote = value.is_empty()
-        || value
-            .iter()
-            .any(|unit| matches!(*unit, 0x09 | 0x20 | 0x22));
+    let quote = value.is_empty() || value.iter().any(|unit| matches!(*unit, 0x09 | 0x20 | 0x22));
     if !quote {
         output.extend(value);
         return Ok(());
@@ -657,11 +646,12 @@ fn environment_key(key: &OsStr) -> io::Result<Vec<u16>> {
 
 fn case_insensitive_wide_cmp(left: &[u16], right: &[u16]) -> Ordering {
     let left_length = i32::try_from(left.len()).expect("an allocated UTF-16 string fits i32");
-    let right_length =
-        i32::try_from(right.len()).expect("an allocated UTF-16 string fits i32");
+    let right_length = i32::try_from(right.len()).expect("an allocated UTF-16 string fits i32");
     // SAFETY: the slices remain readable for their supplied UTF-16-unit lengths. Windows uses
     // this ordinal comparison for case-insensitive environment names, including non-ASCII keys.
-    match unsafe { CompareStringOrdinal(left.as_ptr(), left_length, right.as_ptr(), right_length, 1) } {
+    match unsafe {
+        CompareStringOrdinal(left.as_ptr(), left_length, right.as_ptr(), right_length, 1)
+    } {
         CSTR_LESS_THAN => Ordering::Less,
         CSTR_EQUAL => Ordering::Equal,
         CSTR_GREATER_THAN => Ordering::Greater,
@@ -724,7 +714,10 @@ mod tests {
 
     #[test]
     fn empty_environment_has_required_double_nul_terminator() {
-        assert_eq!(environment_block(&BTreeMap::new()).expect("empty block should encode"), [0, 0]);
+        assert_eq!(
+            environment_block(&BTreeMap::new()).expect("empty block should encode"),
+            [0, 0]
+        );
     }
 
     #[test]

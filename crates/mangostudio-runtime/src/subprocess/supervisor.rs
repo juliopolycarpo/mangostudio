@@ -11,14 +11,14 @@ use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::ExitStatus;
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 use std::process::Stdio;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use mango_protocol::RemoteError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 use tokio::process::{Child, Command};
 use tokio::sync::{Semaphore, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
@@ -28,6 +28,8 @@ use crate::blocking::run_blocking;
 
 #[cfg(unix)]
 use super::unix_guardian;
+#[cfg(windows)]
+use super::windows_job;
 
 /// The object-safe future returned by process ports.
 pub type ProcessFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -587,7 +589,14 @@ async fn launch_child(
                 .map_err(ProcessStartError::SpawnFailed)
         }
 
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            windows_job::spawn(&request)
+                .map(OwnedChild::WindowsJob)
+                .map_err(ProcessStartError::SpawnFailed)
+        }
+
+        #[cfg(all(not(unix), not(windows)))]
         {
             let mut command = Command::new(&request.program);
             command
@@ -635,7 +644,9 @@ fn check_before_effect(
 enum OwnedChild {
     #[cfg(unix)]
     Guardian(unix_guardian::GuardianChild),
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    WindowsJob(windows_job::WindowsJobChild),
+    #[cfg(all(not(unix), not(windows)))]
     Tokio(Child),
 }
 
@@ -644,7 +655,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.id(),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.id(),
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(child) => child.id(),
         }
     }
@@ -653,7 +666,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.wait_ready().await,
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.wait_ready().await,
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(_) => Ok(()),
         }
     }
@@ -662,7 +677,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.release_start(),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.release_start(),
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(_) => Ok(()),
         }
     }
@@ -671,7 +688,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.take_stdout(),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.take_stdout(),
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(child) => child
                 .stdout
                 .take()
@@ -683,7 +702,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.take_stderr(),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.take_stderr(),
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(child) => child
                 .stderr
                 .take()
@@ -695,7 +716,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.take_stdin(),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.take_stdin(),
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(child) => child
                 .stdin
                 .take()
@@ -707,7 +730,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.wait_exec().await,
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.wait_exec().await,
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(_) => Ok(()),
         }
     }
@@ -716,7 +741,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.wait_target().await,
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.wait_target().await,
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(child) => child.wait().await,
         }
     }
@@ -725,7 +752,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.finalize(),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.finalize(),
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(_) => Ok(()),
         }
     }
@@ -734,7 +763,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.wait_guardian().await,
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.wait_guardian().await,
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(_) => Ok(()),
         }
     }
@@ -743,7 +774,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.interrupt(),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.interrupt(),
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(_) => Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "graceful interruption is unsupported on Windows",
@@ -755,7 +788,9 @@ impl OwnedChild {
         match self {
             #[cfg(unix)]
             Self::Guardian(child) => child.force(),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            Self::WindowsJob(child) => child.force(),
+            #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(child) => child.start_kill(),
         }
     }
@@ -1044,14 +1079,6 @@ async fn wait_for_terminal(
         }
         let _ = receiver.changed().await;
     }
-}
-
-#[cfg(windows)]
-fn configure_containment(_command: &mut Command) -> Result<(), ProcessStartError> {
-    Err(ProcessStartError::SpawnFailed(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "Windows Job Object containment must be configured before launch",
-    )))
 }
 
 #[cfg(all(not(unix), not(windows)))]
