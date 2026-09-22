@@ -38,7 +38,6 @@
 //!   unchanged, noted at each call site.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
@@ -53,6 +52,7 @@ use crate::blocking::run_blocking;
 use crate::consent::config::{ResolvedRuntimeSlotConfig, resolve_runtime_slot_config};
 use crate::consent::presets::consent_preset;
 use crate::file_identity::fingerprint;
+use crate::probe_cache::ProbeCache;
 use crate::registry::Registry;
 use crate::runtime_home::{
     RuntimeSlot, SlotFileState, home_dir, read_runtime_slot_config, slot_for_path,
@@ -463,7 +463,7 @@ async fn bounded_path_walk<T>(walk: impl std::future::Future<Output = Option<T>>
 /// Serializes tests that clear the process-wide Git probe cache.
 #[cfg(all(test, unix))]
 fn git_probe_test_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
@@ -524,7 +524,7 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
 /// Returns `dir.join(name)` as found, never canonicalised: two `PATH`
 /// entries that reach the same real file through a symlink or a `..`
 /// segment resolve to two different [`PathBuf`]s here, and so to two
-/// different [`git_probe_cache`] keys for what is, on disk, one binary. A
+/// different [`GIT_PROBE_CACHE`] keys for what is, on disk, one binary. A
 /// changed `PATH` ordering that starts naming the same binary through its
 /// other spelling re-probes rather than reusing an already-cached answer —
 /// wasted work, not a correctness bug (the fresh probe still reports the
@@ -577,11 +577,7 @@ struct GitProbeCancelled;
 /// [`crate::file_identity::fingerprint`]'s object identity and high-resolution metadata fingerprint
 /// format rather than inventing a second one, keyed alongside the path so
 /// a rebuilt binary at the same path also re-probes.
-fn git_probe_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<GitAvailability>> {
-    static CACHE: OnceLock<Mutex<crate::probe_cache::ProbeCache<GitAvailability>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(Default::default()))
-}
+static GIT_PROBE_CACHE: ProbeCache<GitAvailability> = ProbeCache::new();
 
 /// Clears every cached `git` probe result. Test-only: every caller lives in
 /// this module's `#[cfg(unix)]` git-probe tests, each of which wants a clean
@@ -591,10 +587,7 @@ fn git_probe_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<GitAvailab
 /// non-`#[cfg(test)]` entry point.
 #[cfg(all(test, unix))]
 fn invalidate_git_probe_cache() {
-    git_probe_cache()
-        .lock()
-        .expect("the git probe cache mutex is never poisoned")
-        .clear();
+    GIT_PROBE_CACHE.clear();
 }
 
 /// Probes `git --version`, memoised by resolved path and fingerprint.
@@ -663,7 +656,7 @@ async fn probe_cli(
         // `detect_shells`'s own "an absent tool is not an error" contract:
         // a wedged `PATH` entry must degrade this probe, never surface as
         // a distinct "probe failed" shape, and never be cached (see
-        // `git_probe_cache`'s own doc comment on caching only a definite,
+        // `GIT_PROBE_CACHE`'s own doc comment on caching only a definite,
         // successful answer).
         return Ok(GitAvailability {
             available: false,
@@ -679,7 +672,7 @@ async fn probe_cli(
 
     if let Some(cached) = fingerprint
         .as_deref()
-        .and_then(|key| lookup_git_cache(&git_path, key))
+        .and_then(|key| GIT_PROBE_CACHE.get(&git_path, key))
     {
         return Ok(cached);
     }
@@ -702,7 +695,7 @@ async fn probe_cli(
                 version,
             };
             if let Some(fingerprint) = fingerprint {
-                cache_git_result(git_path, fingerprint, availability.clone());
+                GIT_PROBE_CACHE.insert(git_path, fingerprint, availability.clone());
             }
             Ok(availability)
         }
@@ -716,20 +709,6 @@ async fn probe_cli(
             version: None,
         }),
     }
-}
-
-fn lookup_git_cache(path: &Path, fingerprint: &str) -> Option<GitAvailability> {
-    let cache = git_probe_cache()
-        .lock()
-        .expect("the git probe cache mutex is never poisoned");
-    cache.get(path, fingerprint)
-}
-
-fn cache_git_result(path: PathBuf, fingerprint: String, availability: GitAvailability) {
-    let mut cache = git_probe_cache()
-        .lock()
-        .expect("the git probe cache mutex is never poisoned");
-    cache.insert(path, fingerprint, availability);
 }
 
 /// `git version 2.51.0` becomes `Some("2.51.0")`. Mirrors
