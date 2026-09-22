@@ -452,6 +452,37 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     await assertRetry(rust, fixtures.rust);
   });
 
+  it('preserves the exclusive-destination error for a cross-device revert collision', async () => {
+    const fixtures = await crossDeviceFixturePair('cross-device-collision');
+    if (!fixtures) return;
+    const movedBytes = Buffer.from('captured source');
+    const occupiedBytes = Buffer.from('existing destination');
+
+    async function assertCollision(client: RuntimeClient, paths: CrossDevicePaths): Promise<void> {
+      const path = join(paths.sourceRoot, 'occupied.txt');
+      const movedTo = join(paths.destinationRoot, 'moved.txt');
+      await writeFile(path, occupiedBytes);
+      await writeFile(movedTo, movedBytes);
+      const error = await runtimeError(() =>
+        client.snapshot.revert({
+          chatId: 'cross-device-collision',
+          expected: [
+            { path, afterHash: hashOf(occupiedBytes) },
+            { path: movedTo, afterHash: hashOf(movedBytes) },
+          ],
+          operations: [{ type: 'move', path, movedTo, contentBase64: base64Of(movedBytes) }],
+        })
+      );
+      expect(error).toBeInstanceOf(PathAccessError);
+      expect(error.message).toBe(`"${path}" already exists. Choose a different destination.`);
+      await assertBytes(path, occupiedBytes);
+      await assertBytes(movedTo, movedBytes);
+    }
+
+    await assertCollision(typescript, fixtures.typescript);
+    await assertCollision(rust, fixtures.rust);
+  });
+
   it('treats an empty containment root as omitted during replay', async () => {
     const roots = await fixturePair('empty-containment');
     const bytes = Buffer.from('created');
