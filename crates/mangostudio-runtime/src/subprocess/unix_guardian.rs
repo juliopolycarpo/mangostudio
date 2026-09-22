@@ -930,7 +930,7 @@ unsafe fn wait_group_empty(process_group: libc::pid_t) {
         // SAFETY: process_group is the target group ID reported by the target itself and remains
         // owned by this guardian until the group has been killed and observed empty.
         if unsafe { libc::kill(-process_group, 0) } == 0 {
-            std::hint::spin_loop();
+            unsafe { pause_between_group_probes() };
             continue;
         }
         let error = unsafe { errno_raw() };
@@ -943,8 +943,25 @@ unsafe fn wait_group_empty(process_group: libc::pid_t) {
         // EPERM still means that a member exists. All processes in this group originated from
         // the request, but treating any other transient kernel result as live avoids publishing
         // terminal cleanup before the group has actually disappeared.
-        std::hint::spin_loop();
+        unsafe { pause_between_group_probes() };
     }
+}
+
+/// Waits between group probes in [`wait_group_empty`].
+///
+/// `nanosleep` is async-signal-safe, which is what this post-`fork` guardian is restricted to, and
+/// the interval matches the Windows Job path's empty-group poll. A bare `spin_loop` hint is only a
+/// pause instruction, not a wait: a descendant that takes tens of milliseconds to die — or that
+/// sits in uninterruptible sleep, or answers `EPERM` — would pin a core for that entire interval,
+/// while the supervisor blocks in `wait_guardian` holding one of its bounded live-child permits.
+unsafe fn pause_between_group_probes() {
+    let interval = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 10_000_000,
+    };
+    // SAFETY: `interval` is a fully initialised `timespec` that outlives the call, and a null
+    // remainder pointer is the documented way to discard an unslept interval after a signal.
+    unsafe { libc::nanosleep(&raw const interval, std::ptr::null_mut()) };
 }
 
 unsafe fn kill_guardian_group_and_exit(guardian_pgid: libc::pid_t) -> ! {
