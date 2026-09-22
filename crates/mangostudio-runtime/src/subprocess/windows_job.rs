@@ -33,7 +33,6 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Globalization::{
     CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN, CompareStringOrdinal,
 };
-use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
@@ -188,10 +187,15 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     let mut information = PROCESS_INFORMATION::default();
     let flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
 
+    // Inheritance is enabled here and revoked immediately below, so the three endpoints are
+    // capturable by an unrelated `CreateProcessW` for this call alone rather than for the whole
+    // of pipe creation, command-line encoding, and attribute-list setup. See
+    // `ChildPipes::set_child_inheritable`.
+    pipes.set_child_inheritable(true)?;
     // SAFETY: every UTF-16 buffer is NUL-terminated and remains live for this call; the command
     // line is writable; the Job and stdio backing handles remain owned by `job` and `pipes`; and
     // `attributes` owns the initialized attribute list plus its aligned backing storage.
-    if unsafe {
+    let created = unsafe {
         CreateProcessW(
             application.as_ref().map_or(ptr::null(), Vec::as_ptr),
             command_line.as_mut_ptr(),
@@ -204,9 +208,14 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
             &startup.StartupInfo,
             &mut information,
         )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
+    };
+    // Captured before the revoke below, which would otherwise overwrite the thread's last error.
+    let create_error = io::Error::last_os_error();
+    // Best effort: these endpoints are closed a few statements below in either outcome, and a
+    // failure to revoke must not mask why the spawn itself failed.
+    let _ = pipes.set_child_inheritable(false);
+    if created == 0 {
+        return Err(create_error);
     }
 
     // SAFETY: a successful CreateProcessW transfers one owned process and primary-thread handle.
@@ -294,6 +303,23 @@ impl ChildPipes {
         [self.stdin.raw(), self.stdout.raw(), self.stderr.raw()]
     }
 
+    /// Marks exactly the three endpoints this child inherits, for exactly the window `spawn`
+    /// needs them.
+    ///
+    /// Inheritance on Windows is a property of the handle, not of the call that uses it: every
+    /// handle marked inheritable is captured by every concurrent `CreateProcessW` in this process
+    /// that requests inheritance without an explicit handle list — `std::process::Command` is one.
+    /// The attribute handle list below bounds what *this* child receives; it cannot stop an
+    /// unrelated spawn elsewhere from capturing these. Keeping them non-inheritable outside the
+    /// call is what does, and it matters most for stdout and stderr: a leaked write endpoint keeps
+    /// the pipe's write side open in a process that never reads it, so this parent's reader never
+    /// observes EOF and a clean exit is published as a drain timeout instead.
+    fn set_child_inheritable(&self, inheritable: bool) -> io::Result<()> {
+        set_inheritable(&self.stdin, inheritable)?;
+        set_inheritable(&self.stdout, inheritable)?;
+        set_inheritable(&self.stderr, inheritable)
+    }
+
     fn into_parent(self) -> ParentPipes {
         ParentPipes {
             stdin: self
@@ -311,12 +337,12 @@ struct Pipe {
 }
 
 fn create_pipe(parent_reads: bool) -> io::Result<Pipe> {
-    let attributes = inheritable_attributes();
     let mut read = ptr::null_mut();
     let mut write = ptr::null_mut();
-    // SAFETY: output pointers and SECURITY_ATTRIBUTES are valid for this call. Both handles are
-    // immediately adopted, then only the child endpoint is retained in the attribute handle list.
-    if unsafe { CreatePipe(&mut read, &mut write, &attributes, 0) } == 0 {
+    // SAFETY: both output pointers are valid for this call. A null security descriptor requests
+    // default security and, deliberately, two *non*-inheritable endpoints: `spawn` turns
+    // inheritance on for the child endpoint alone, and only across its `CreateProcessW` call.
+    if unsafe { CreatePipe(&mut read, &mut write, ptr::null(), 0) } == 0 {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: successful CreatePipe returns exactly two owned handles.
@@ -326,21 +352,20 @@ fn create_pipe(parent_reads: bool) -> io::Result<Pipe> {
     } else {
         (write, read)
     };
-    set_inheritable(&parent, false)?;
     Ok(Pipe { parent, child })
 }
 
 fn null_stdin() -> io::Result<Handle> {
     let name = [u16::from(b'N'), u16::from(b'U'), u16::from(b'L'), 0];
-    let attributes = inheritable_attributes();
-    // SAFETY: `name` is NUL-terminated and the supplied security attributes make the child
-    // endpoint inheritable. The exact attribute handle list limits inheritance to this handle.
+    // SAFETY: `name` is NUL-terminated. A null security descriptor requests default security and,
+    // deliberately, a *non*-inheritable handle: `spawn` turns inheritance on only across its
+    // `CreateProcessW` call, where the exact attribute handle list limits it to this handle.
     let handle = unsafe {
         CreateFileW(
             name.as_ptr(),
             GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
-            &attributes,
+            ptr::null(),
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL,
             ptr::null_mut(),
@@ -351,15 +376,6 @@ fn null_stdin() -> io::Result<Handle> {
     } else {
         // SAFETY: CreateFileW returned one owned, valid handle.
         Ok(unsafe { Handle::from_raw(handle) })
-    }
-}
-
-fn inheritable_attributes() -> SECURITY_ATTRIBUTES {
-    SECURITY_ATTRIBUTES {
-        nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>())
-            .expect("SECURITY_ATTRIBUTES size fits in a Win32 u32"),
-        lpSecurityDescriptor: ptr::null_mut(),
-        bInheritHandle: 1,
     }
 }
 
@@ -700,8 +716,78 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::{OsStr, OsString};
 
-    use super::{application_name, command_line, environment_block};
-    use crate::subprocess::ProcessRequest;
+    use super::{
+        ChildPipes, HANDLE, HANDLE_FLAG_INHERIT, application_name, command_line, environment_block,
+    };
+    use crate::subprocess::{ProcessRequest, ProcessStdin};
+
+    /// Whether Windows would hand `handle` to a child of an inheriting `CreateProcessW`.
+    fn is_inheritable(handle: HANDLE) -> bool {
+        let mut flags = 0_u32;
+        // SAFETY: `handle` is one of the endpoints owned by the `ChildPipes` the caller still
+        // holds, so it stays valid for this query.
+        let queried =
+            unsafe { windows_sys::Win32::Foundation::GetHandleInformation(handle, &raw mut flags) };
+        assert!(
+            queried != 0,
+            "GetHandleInformation failed | {}",
+            std::io::Error::last_os_error()
+        );
+        flags & HANDLE_FLAG_INHERIT != 0
+    }
+
+    /// The child endpoints must be inheritable only while `spawn` is inside `CreateProcessW`.
+    ///
+    /// Inheritance is a property of the handle, so any concurrent `CreateProcessW` in this
+    /// process that inherits without an explicit handle list — `std::process::Command` does —
+    /// captures whatever is marked inheritable at that instant. A captured stdout or stderr write
+    /// endpoint keeps the pipe's write side open in a process that never reads it, so the
+    /// supervisor's reader never observes EOF and publishes a clean exit as a drain timeout.
+    #[test]
+    fn child_endpoints_are_inheritable_only_across_the_spawn_call() {
+        let request = ProcessRequest::new("fixture.exe", ["argument"])
+            .with_stdin(ProcessStdin::Bytes(b"input".to_vec()));
+        let pipes = ChildPipes::from_request(&request).expect("child pipes are created");
+
+        for (stream, handle) in ["stdin", "stdout", "stderr"]
+            .into_iter()
+            .zip(pipes.inherited_handles())
+        {
+            assert!(
+                !is_inheritable(handle),
+                "{stream} endpoint is inheritable before the spawn call | expected inheritance to \
+                 be off until CreateProcessW"
+            );
+        }
+
+        pipes
+            .set_child_inheritable(true)
+            .expect("inheritance is enabled for the spawn call");
+        for (stream, handle) in ["stdin", "stdout", "stderr"]
+            .into_iter()
+            .zip(pipes.inherited_handles())
+        {
+            assert!(
+                is_inheritable(handle),
+                "{stream} endpoint is not inheritable during the spawn call | the child would \
+                 receive an invalid standard handle"
+            );
+        }
+
+        pipes
+            .set_child_inheritable(false)
+            .expect("inheritance is revoked after the spawn call");
+        for (stream, handle) in ["stdin", "stdout", "stderr"]
+            .into_iter()
+            .zip(pipes.inherited_handles())
+        {
+            assert!(
+                !is_inheritable(handle),
+                "{stream} endpoint is still inheritable after the spawn call | an unrelated \
+                 CreateProcessW would capture it"
+            );
+        }
+    }
 
     #[test]
     fn command_line_quotes_windows_arguments() {
