@@ -9,6 +9,8 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::consent::source::ConsentSource;
 use crate::ports::authorization::Authorization;
@@ -38,14 +40,16 @@ use crate::runtime_home::RuntimeSlot;
 /// # }
 /// ```
 pub struct ConsentAuthorization {
-    source: ConsentSource,
+    source: Arc<ConsentSource>,
 }
 
 impl ConsentAuthorization {
     /// Builds an authorization port over `source`.
     #[must_use]
     pub fn new(source: ConsentSource) -> Self {
-        Self { source }
+        Self {
+            source: Arc::new(source),
+        }
     }
 
     /// The slot this authorization's consent is read from — for wiring a
@@ -64,7 +68,11 @@ impl Authorization for ConsentAuthorization {
         capabilities: &'a [String],
     ) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + 'a>> {
         Box::pin(async move {
-            let allow = self.source.refresh();
+            let source = Arc::clone(&self.source);
+            let read = crate::blocking::run_blocking(move || source.refresh());
+            let Ok(allow) = tokio::time::timeout(Duration::from_secs(2), read).await else {
+                return capabilities.to_vec();
+            };
             capabilities
                 .iter()
                 .filter(|capability| !allow.is_granted(capability))

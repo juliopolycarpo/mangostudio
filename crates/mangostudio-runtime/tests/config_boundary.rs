@@ -28,6 +28,9 @@ const ALLOWED: &[(&str, &str, usize)] = &[
     ("health.rs", "env::var_os(\"PATH\")", 2),
     ("probing/host.rs", "env::vars()", 1),
     ("runtime_home.rs", "env::home_dir()", 1),
+    // This snapshots the inherited environment for exact child execution before fork. It does
+    // not select or parse runtime configuration; AGENTS.md documents this distinct carve-out.
+    ("subprocess/unix_guardian.rs", "env::vars_os()", 1),
 ];
 
 /// The call *shapes* this test scans for, independent of which literal (if
@@ -36,7 +39,13 @@ const ALLOWED: &[(&str, &str, usize)] = &[
 /// argument changed, still surfaces as a hit rather than going unseen.
 /// `temp_dir` is absent: a scratch directory under `std::env::temp_dir()`
 /// is not an environment read in the sense this rule cares about.
-const ENV_READ_SHAPES: &[&str] = &["env::var(", "env::var_os(", "env::vars(", "env::home_dir("];
+const ENV_READ_SHAPES: &[&str] = &[
+    "env::var(",
+    "env::var_os(",
+    "env::vars(",
+    "env::vars_os(",
+    "env::home_dir(",
+];
 
 fn is_comment(line: &str) -> bool {
     line.trim_start().starts_with("//")

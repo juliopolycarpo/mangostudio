@@ -8,11 +8,9 @@
 //! Built: `schemaVersion`, `slot`, `version`, `digest`, `sourceSha`,
 //! `profile`, `allow`, `setup`, `audit` (from [`crate::consent::config`]),
 //! `source`, `binaryPath`, `runtimeVersion`, `platform`, `arch`, `homeDir`,
-//! `shells`, `git`, `lastError`.
+//! `shells`, `git`, `gh`, `lastError`.
 //!
 //! Deliberately skipped, all optional on the wire:
-//! - `gh` — a vendor CLI probe, out of this plan's "no vendor discovery"
-//!   scope.
 //! - `terminal` — PTY support; no terminal method group exists yet to
 //!   report on.
 //! - `externalAgents` — out of scope; a later plan owns it.
@@ -39,7 +37,6 @@
 //!   that mapping; anything neither table recognises passes through
 //!   unchanged, noted at each call site.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -55,7 +52,7 @@ use tokio_util::sync::CancellationToken;
 use crate::blocking::run_blocking;
 use crate::consent::config::{ResolvedRuntimeSlotConfig, resolve_runtime_slot_config};
 use crate::consent::presets::consent_preset;
-use crate::consent::source::fingerprint_of;
+use crate::file_identity::fingerprint;
 use crate::registry::Registry;
 use crate::runtime_home::{
     RuntimeSlot, SlotFileState, home_dir, read_runtime_slot_config, slot_for_path,
@@ -107,13 +104,21 @@ async fn build_health_report(
     let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
     let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
 
-    let (shells, git_probe) = collect_capability_probes(
-        resolved.allow.shell,
-        resolved.allow.git,
-        path_override,
-        cancel,
-    )
-    .await;
+    let ((shells, git_probe), gh_probe) = tokio::join!(
+        collect_capability_probes(
+            resolved.allow.shell,
+            resolved.allow.git,
+            path_override,
+            cancel
+        ),
+        probe_gh(resolved.allow.git, path_override, cancel),
+    );
+    let gh = gh_probe.map_err(|_| {
+        RemoteError::new(
+            codes::CANCELLED,
+            "runtime.health was cancelled while probing gh",
+        )
+    })?;
     let git = match git_probe {
         Ok(availability) => availability,
         Err(GitProbeCancelled) => {
@@ -156,6 +161,7 @@ async fn build_health_report(
         "homeDir": resolved_home_dir,
         "shells": shells,
         "git": git,
+        "gh": gh,
         "audit": resolved.audit,
         "lastError": state.error.as_ref().map(ToString::to_string),
     }))
@@ -180,8 +186,10 @@ pub(crate) async fn build_capability_manifest(
     let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
     let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
 
-    let (shells, git_probe) =
-        collect_capability_probes(resolved.allow.shell, resolved.allow.git, None, cancel).await;
+    let ((shells, git_probe), gh_probe) = tokio::join!(
+        collect_capability_probes(resolved.allow.shell, resolved.allow.git, None, cancel),
+        probe_gh(resolved.allow.git, None, cancel),
+    );
     let git = git_probe.unwrap_or_else(|GitProbeCancelled| unavailable_git());
 
     // Mirrors `build_health_report`'s own `unwrap_or_default()`: a `HOME`
@@ -209,6 +217,7 @@ pub(crate) async fn build_capability_manifest(
         git.clone(),
     );
     manifest.features = crate::manifest::build_features(registry, &allow, git.available);
+    manifest.gh = Some(gh_probe.unwrap_or_else(|_| unavailable_git()));
     manifest.profile = Some(resolved.profile);
     manifest.allow = Some(allow);
     manifest.enforces_path_policy = Some(true);
@@ -451,55 +460,7 @@ async fn bounded_path_walk<T>(walk: impl std::future::Future<Output = Option<T>>
         .flatten()
 }
 
-/// Every cached shell-detection answer, keyed on the exact `PATH` value it
-/// was computed against. A whole-string key, not a per-entry fingerprint
-/// the way [`git_probe_cache`] keys on one resolved binary's `mtime:size`:
-/// this walk only ever asks "does a name matching this shell exist
-/// somewhere on `PATH`", so a version-manager shim swapped in at an
-/// existing entry does not change the answer this cache holds, and does
-/// not need to invalidate it. A `PATH` that actually changes (an operator
-/// editing it, a new shell session) gets a fresh key and so a fresh walk.
-fn shell_detection_cache() -> &'static Mutex<HashMap<std::ffi::OsString, Vec<RuntimeShellKind>>> {
-    static CACHE: OnceLock<Mutex<HashMap<std::ffi::OsString, Vec<RuntimeShellKind>>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Clears every cached shell-detection answer. Test-only, mirroring
-/// [`invalidate_git_probe_cache`]'s own doc comment on why a hook that only
-/// ever compiles under `#[cfg(test)]` cannot be a production "the operator
-/// changed `PATH`" one — and, like that function, gated on `unix` too:
-/// every caller is one of this module's `#[cfg(unix)]` shell-detection
-/// tests, so an unqualified `#[cfg(test)]` here reproduces the exact
-/// Windows dead-code failure `invalidate_git_probe_cache` itself once had.
-#[cfg(all(test, unix))]
-fn invalidate_shell_detection_cache() {
-    shell_detection_cache()
-        .lock()
-        .expect("the shell detection cache mutex is never poisoned")
-        .clear();
-}
-
-/// Serializes tests that call [`invalidate_shell_detection_cache`]: that
-/// function clears the *whole*, process-wide [`shell_detection_cache`]
-/// regardless of key, so two such tests running concurrently under Rust's
-/// default parallel test harness can wipe each other's cache entry
-/// between their own two `detect_shells` calls — a real, observed,
-/// non-deterministic failure
-/// (`detect_shells_caches_by_the_exact_path_value` reporting `[]` instead
-/// of its own cached `[Bash]`), not a flake in the production code either
-/// test exercises. Mirrors [`crate::blocking::pool_saturation_test_lock`]'s
-/// own pattern for the identical class of problem on a different shared
-/// resource.
-#[cfg(all(test, unix))]
-fn shell_detection_test_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-/// The identical serialization [`shell_detection_test_lock`] gives shell-
-/// detection tests, for tests that call [`invalidate_git_probe_cache`]
-/// instead.
+/// Serializes tests that clear the process-wide Git probe cache.
 #[cfg(all(test, unix))]
 fn git_probe_test_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -515,11 +476,9 @@ fn git_probe_test_lock() -> &'static tokio::sync::Mutex<()> {
 /// real environment, and tests point this at a synthetic `PATH` instead of
 /// mutating the real, process-wide one every test in this binary shares.
 ///
-/// Only a *completed* walk is cached — mirrors [`probe_git`]'s own choice
-/// (see that function's doc comment): a walk this function gave up on at
-/// [`PATH_WALK_TIMEOUT`] says nothing about what a clean walk would
-/// have found, and caching it would announce every shell permanently
-/// absent over one transient stall.
+/// Availability is checked afresh: a PATH string cannot identify the files
+/// currently installed behind it. The bounded walk keeps slow mounts from
+/// blocking a handshake indefinitely.
 async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeShellKind> {
     let path_var = match path_override {
         Some(value) => value.to_os_string(),
@@ -528,14 +487,6 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
             None => return Vec::new(),
         },
     };
-
-    if let Some(cached) = shell_detection_cache()
-        .lock()
-        .expect("the shell detection cache mutex is never poisoned")
-        .get(&path_var)
-    {
-        return cached.clone();
-    }
 
     let walk = run_blocking({
         let path_var = path_var.clone();
@@ -555,21 +506,10 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
         }
     });
 
-    match tokio::time::timeout(PATH_WALK_TIMEOUT, walk).await {
-        Ok(detected) => {
-            shell_detection_cache()
-                .lock()
-                .expect("the shell detection cache mutex is never poisoned")
-                .insert(path_var, detected.clone());
-            detected
-        }
-        // A wedged entry degrades this connection's manifest to "no shells
-        // detected" rather than never sending `hello` at all — matching
-        // `probe_git`'s own "an absent tool is not an error" contract, one
-        // level up: a `PATH` this function cannot finish walking in time is
-        // reported the same way a `PATH` with nothing on it would be.
-        Err(_elapsed) => Vec::new(),
-    }
+    // A wedged entry degrades the manifest to no detected shells, keeping hello bounded.
+    tokio::time::timeout(PATH_WALK_TIMEOUT, walk)
+        .await
+        .unwrap_or_default()
 }
 
 /// Resolves `name` against an explicit `PATH` value, checking (on Unix)
@@ -591,7 +531,7 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
 /// truth), and one `PATH` layouts that reorder such entries are rare
 /// enough in practice that resolving every candidate has not been worth
 /// its own `std::fs::canonicalize` call on this walk's hot path.
-fn which_in(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
+pub(crate) fn which_in(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
     for dir in std::env::split_paths(path_var) {
         let candidate = dir.join(name);
         if is_executable_file(&candidate) {
@@ -634,12 +574,13 @@ struct GitProbeCancelled;
 /// path — never on the bare name `"git"`, so a `PATH` that starts
 /// resolving to a different binary is re-probed rather than serving a
 /// stale answer for the old one. Reuses
-/// [`crate::consent::source::fingerprint_of`]'s `mtime:size` fingerprint
+/// [`crate::file_identity::fingerprint`]'s object identity and high-resolution metadata fingerprint
 /// format rather than inventing a second one, keyed alongside the path so
 /// a rebuilt binary at the same path also re-probes.
-fn git_probe_cache() -> &'static Mutex<HashMap<PathBuf, (String, GitAvailability)>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (String, GitAvailability)>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn git_probe_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<GitAvailability>> {
+    static CACHE: OnceLock<Mutex<crate::probe_cache::ProbeCache<GitAvailability>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Default::default()))
 }
 
 /// Clears every cached `git` probe result. Test-only: every caller lives in
@@ -673,6 +614,25 @@ async fn probe_git(
     path_override: Option<&std::ffi::OsStr>,
     cancel: &CancellationToken,
 ) -> Result<GitAvailability, GitProbeCancelled> {
+    probe_cli("git", path_override, cancel).await
+}
+
+async fn probe_gh(
+    allowed: bool,
+    path_override: Option<&std::ffi::OsStr>,
+    cancel: &CancellationToken,
+) -> Result<GitAvailability, GitProbeCancelled> {
+    if !allowed {
+        return Ok(unavailable_git());
+    }
+    probe_cli("gh", path_override, cancel).await
+}
+
+async fn probe_cli(
+    program: &'static str,
+    path_override: Option<&std::ffi::OsStr>,
+    cancel: &CancellationToken,
+) -> Result<GitAvailability, GitProbeCancelled> {
     let path_var = match path_override {
         Some(value) => Some(value.to_os_string()),
         None => std::env::var_os("PATH"),
@@ -694,7 +654,7 @@ async fn probe_git(
     // `git.available: false`.
     let Some(git_path) = bounded_path_walk(run_blocking({
         let path_var = path_var.clone();
-        move || which_in("git", &path_var)
+        move || which_in(program, &path_var)
     }))
     .await
     else {
@@ -711,22 +671,16 @@ async fn probe_git(
         });
     };
 
-    let fingerprint = match run_blocking({
+    let fingerprint = run_blocking({
         let git_path = git_path.clone();
-        move || std::fs::metadata(&git_path)
+        move || fingerprint(&git_path)
     })
-    .await
-    {
-        Ok(metadata) => fingerprint_of(&metadata),
-        Err(_) => {
-            return Ok(GitAvailability {
-                available: false,
-                version: None,
-            });
-        }
-    };
+    .await;
 
-    if let Some(cached) = lookup_git_cache(&git_path, &fingerprint) {
+    if let Some(cached) = fingerprint
+        .as_deref()
+        .and_then(|key| lookup_git_cache(&git_path, key))
+    {
         return Ok(cached);
     }
 
@@ -737,12 +691,19 @@ async fn probe_git(
     };
     match run_bounded_child(&git_path, &["--version"], None, budget, cancel).await {
         Ok(outcome) if outcome.status_success => {
-            let version = parse_git_version(&String::from_utf8_lossy(&outcome.stdout));
+            let output = String::from_utf8_lossy(&outcome.stdout);
+            let version = if program == "git" {
+                parse_git_version(&output)
+            } else {
+                parse_gh_version(&output)
+            };
             let availability = GitAvailability {
                 available: true,
                 version,
             };
-            cache_git_result(git_path, fingerprint, availability.clone());
+            if let Some(fingerprint) = fingerprint {
+                cache_git_result(git_path, fingerprint, availability.clone());
+            }
             Ok(availability)
         }
         Ok(_) => Ok(GitAvailability {
@@ -761,15 +722,14 @@ fn lookup_git_cache(path: &Path, fingerprint: &str) -> Option<GitAvailability> {
     let cache = git_probe_cache()
         .lock()
         .expect("the git probe cache mutex is never poisoned");
-    let (cached_fingerprint, availability) = cache.get(path)?;
-    (cached_fingerprint == fingerprint).then(|| availability.clone())
+    cache.get(path, fingerprint)
 }
 
 fn cache_git_result(path: PathBuf, fingerprint: String, availability: GitAvailability) {
     let mut cache = git_probe_cache()
         .lock()
         .expect("the git probe cache mutex is never poisoned");
-    cache.insert(path, (fingerprint, availability));
+    cache.insert(path, fingerprint, availability);
 }
 
 /// `git version 2.51.0` becomes `Some("2.51.0")`. Mirrors
@@ -786,8 +746,51 @@ fn parse_git_version(output: &str) -> Option<String> {
     (!stripped.is_empty()).then(|| stripped.to_string())
 }
 
+fn parse_gh_version(output: &str) -> Option<String> {
+    let first = output.lines().next().unwrap_or("").trim();
+    let version = if first
+        .get(..10)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("gh version"))
+        && first[10..].starts_with(char::is_whitespace)
+    {
+        &first[10..]
+    } else {
+        first
+    };
+    let version = version.split('(').next().unwrap_or("").trim();
+    (!version.is_empty()).then(|| version.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gh_version_omits_release_date_and_url() {
+        assert_eq!(
+            super::parse_gh_version("gh version 2.88.0 (2026-01-01)\nhttps://release"),
+            Some("2.88.0".into())
+        );
+        assert_eq!(
+            super::parse_gh_version("GH VERSION\t2.88.0"),
+            Some("2.88.0".into())
+        );
+        assert_eq!(super::parse_gh_version(""), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn gh_probe_uses_git_consent_and_reports_a_real_cli() {
+        let (dir, path) = fake_git(
+            "gh-health",
+            "echo 'gh version 2.88.0 (2026-01-01)'\necho 'https://release'",
+        );
+        std::fs::rename(dir.join("git"), dir.join("gh")).unwrap();
+        let cancel = CancellationToken::new();
+        let denied = super::probe_gh(false, Some(&path), &cancel).await.unwrap();
+        assert!(!denied.available);
+        let allowed = super::probe_gh(true, Some(&path), &cancel).await.unwrap();
+        assert!(allowed.available);
+        assert_eq!(allowed.version.as_deref(), Some("2.88.0"));
+    }
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -808,10 +811,7 @@ mod tests {
     // fail-closed, `invalidate_git_probe_cache` itself) unused, which
     // `-D warnings` turns into a hard build failure rather than a lint note.
     #[cfg(unix)]
-    use super::{
-        detect_shells, git_probe_test_lock, invalidate_git_probe_cache,
-        invalidate_shell_detection_cache, probe_git, shell_detection_test_lock,
-    };
+    use super::{detect_shells, git_probe_test_lock, invalidate_git_probe_cache, probe_git};
     #[cfg(unix)]
     use crate::runtime_home::write_runtime_slot_config;
     #[cfg(unix)]
@@ -1124,15 +1124,44 @@ mod tests {
         assert_eq!(availability.version.as_deref(), Some("9.9.9"));
     }
 
-    /// [`git_probe_cache`]'s doc comment on [`detect_shells_caches_by_the_exact_path_value`]
-    /// claims `probe_git` has "its own cache tests" proven the same way; no
-    /// such test actually existed. This is that test: the fake `git` here
-    /// appends to a counter file on every real invocation and reports a
-    /// version derived from that count, while its own script file (and so
-    /// its `mtime:size` fingerprint) never changes between the two probes
-    /// below — a served-from-cache second call cannot observe a changed
-    /// count or a bumped version; a second *live* run of the script would
-    /// show both.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn replaced_git_with_preserved_size_and_timestamp_is_reprobed() {
+        let _exclusive = git_probe_test_lock().lock().await;
+        let (dir, path_var) = fake_git("probe-replaced-identity", "echo 'git version 9.9.9'");
+        let cancel = CancellationToken::new();
+        assert_eq!(
+            probe_git(Some(&path_var), &cancel)
+                .await
+                .unwrap()
+                .version
+                .as_deref(),
+            Some("9.9.9")
+        );
+        let path = dir.join("git");
+        let metadata = std::fs::metadata(&path).unwrap();
+        let original = std::fs::read_to_string(&path).unwrap();
+        let replacement = dir.join("replacement");
+        std::fs::write(&replacement, original.replace("9.9.9", "8.8.8")).unwrap();
+        std::fs::set_permissions(&replacement, metadata.permissions()).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_modified(metadata.modified().unwrap())
+            .unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        assert_eq!(
+            probe_git(Some(&path_var), &cancel)
+                .await
+                .unwrap()
+                .version
+                .as_deref(),
+            Some("8.8.8")
+        );
+    }
+
+    /// An unchanged executable fingerprint avoids a second version invocation.
     ///
     /// The `tr -d '[:space:]'` after `wc -l` is load-bearing: BSD `wc`
     /// (macOS) right-justifies its count with leading spaces even when
@@ -1219,8 +1248,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn detect_shells_finds_a_shell_present_on_a_synthetic_path() {
-        let _exclusive = shell_detection_test_lock().lock().await;
-        invalidate_shell_detection_cache();
         let (_dir, path_var) = fake_shells_on_path("shells-found", &["bash"]);
 
         let shells = detect_shells(Some(&path_var)).await;
@@ -1228,22 +1255,10 @@ mod tests {
         assert_eq!(shells, vec![RuntimeShellKind::Bash]);
     }
 
-    /// Regression test for the amplification blocker 2 exists to close:
-    /// `detect_shells` used to re-walk every `PATH` entry on every single
-    /// call (`build_health_report` per RPC, `build_capability_manifest`
-    /// per connection) with no cache at all — measured on a 54-entry `PATH`
-    /// with three misses, ~210ms of every connection's own handshake, more
-    /// than the (already cached, already timed) `git` child probe next to
-    /// it. Proven here the same way `probe_git`'s own cache tests are:
-    /// removing the fake shell after the first call, then asserting the
-    /// second call for the *same* `PATH` value still reports it present —
-    /// which only a served-from-cache answer could do, since a fresh walk
-    /// of this `PATH` would now find nothing.
+    /// A removed shell must disappear even if the PATH string stays identical.
     #[cfg(unix)]
     #[tokio::test]
-    async fn detect_shells_caches_by_the_exact_path_value() {
-        let _exclusive = shell_detection_test_lock().lock().await;
-        invalidate_shell_detection_cache();
+    async fn detect_shells_refreshes_after_removal_at_the_same_path() {
         let (dir, path_var) = fake_shells_on_path("shells-cache", &["bash"]);
 
         let first = detect_shells(Some(&path_var)).await;
@@ -1252,10 +1267,9 @@ mod tests {
         std::fs::remove_file(dir.join("bash")).unwrap();
 
         let second = detect_shells(Some(&path_var)).await;
-        assert_eq!(
-            second,
-            vec![RuntimeShellKind::Bash],
-            "a repeated PATH value must be served from cache, not re-walked"
+        assert!(
+            second.is_empty(),
+            "a removed executable must not stay available at an unchanged PATH"
         );
     }
 

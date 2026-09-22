@@ -23,6 +23,7 @@ import { rejectionOf } from '@mangostudio/protocol/testing';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
+import { ToolArgumentError } from '../../src/services/tools/arg-parsing';
 
 /** Node-style platform/arch this test process itself runs on, mirroring `health.rs`'s own mapping. */
 function nodePlatform(): string {
@@ -76,6 +77,7 @@ export function assertRustRuntimeHealthShape(
   if (health.git.available) {
     expect(typeof health.git.version).toBe('string');
   }
+  expect(typeof health.gh?.available).toBe('boolean');
   const expectedShell =
     process.platform === 'win32' ? 'powershell' : process.platform === 'darwin' ? 'zsh' : 'bash';
   expect(health.shells).toContain(expectedShell);
@@ -97,21 +99,70 @@ export function assertRustRuntimeFeatureCeiling(
     readonly checkpoints: boolean;
   }
 ): void {
+  // The shell feature includes terminal and install methods, which are not implemented yet.
+  const shell = false;
+  const git = manifest.allow?.git === true && manifest.git.available;
   expect(manifest.features).toEqual({
-    tools: expected.probing || expected.fsRead || expected.fsWrite || expected.checkpoints,
-    git: false,
+    tools:
+      shell ||
+      git ||
+      expected.probing ||
+      expected.fsRead ||
+      expected.fsWrite ||
+      expected.checkpoints,
+    git,
     probing: expected.probing,
     mcp: false,
     library: false,
     checkpoints: expected.checkpoints,
     fsRead: expected.fsRead,
     fsWrite: expected.fsWrite,
-    shell: false,
+    shell,
     update: false,
     externalAgents: false,
     toolchain: true,
   });
   expect(manifest.enforcesPathPolicy).toBe(true);
+}
+
+/**
+ * Exercises command handlers through the real Hub codec without remote mutations.
+ *
+ * @example
+ * await assertRustRuntimeCommandMethods(client, scratchDirectory);
+ */
+export async function assertRustRuntimeCommandMethods(
+  client: RuntimeClient,
+  cwd: string
+): Promise<void> {
+  const kind = process.platform === 'win32' ? 'powershell' : 'bash';
+  const command =
+    kind === 'powershell'
+      ? "[Console]::Out.Write('command output')"
+      : "printf '%s' 'command output'";
+  expect(
+    await client.shell.run({ kind, command, cwd, timeoutMs: 5000, maxOutputBytes: 4096 })
+  ).toMatchObject({
+    stdout: 'command output',
+    stderr: '',
+    exitCode: 0,
+    truncated: false,
+    termination: { kind: 'exited' },
+  });
+  if (client.manifest.git.available) {
+    expect((await client.git.exec({ args: ['--version'], cwd })).stdout).toMatch(/^git version /);
+  }
+  expect(typeof client.manifest.gh?.available).toBe('boolean');
+  if (client.manifest.gh?.available) {
+    expect((await client.gh.exec({ args: ['--version'], cwd })).stdout).toMatch(/^gh version /i);
+    // Cobra handles help locally, before auth or a GitHub request.
+    expect((await client.gh.mutate({ args: ['pr', 'create', '--help'], cwd })).exitCode).toBe(0);
+  }
+  const rejected = await rejectionOf(
+    client.gh.exec({ args: ['pr', 'private rejected operand'], cwd })
+  );
+  expect(rejected).toBeInstanceOf(ToolArgumentError);
+  expect(String(rejected)).not.toContain('private rejected operand');
 }
 
 /**

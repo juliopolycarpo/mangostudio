@@ -24,7 +24,7 @@
  * ## Named TS-to-Rust test inventory
  *
  * `crates/mangostudio-runtime/src/health.rs`'s own module doc names what this
- * crate deliberately does not build yet (`gh`, `terminal`, `externalAgents`,
+ * crate deliberately does not build yet (`terminal`, `externalAgents`,
  * `platformId`, `auditError` — all optional on the wire). The pure-TypeScript
  * runtime assertions below are now also proven end-to-end against the real
  * Rust binary, through the real hub call path, by the named test in this
@@ -44,10 +44,9 @@
  * | `apps/runtime/tests/unit/services/probing/toolchains.test.ts` typed `probing.*` request/result handling | the health tests over stdio and direct URL, through `assertRustRuntimeProbingMethods` |
  *
  * **Not yet replaced** — no Rust equivalent exists, per `health.rs`'s own
- * module doc: any TS assertion covering `gh`, `terminal`, or `externalAgents`
- * health fields (e.g. `apps/runtime/tests/unit/manifest.test.ts` "announces
- * gh under the same consent as git"), and the paired-connect transport's own
- * inventory entries live in the `-connect` sibling file instead.
+ * module doc: TS assertions covering `terminal` or `externalAgents` health fields.
+ * GitHub CLI availability and consent revocation are covered here. The paired-connect
+ * transport's inventory entries live in the `-connect` sibling file instead.
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
@@ -68,6 +67,7 @@ import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-ru
 import { insertTestUser } from '../../support/factories';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 import {
+  assertRustRuntimeCommandMethods,
   assertRustRuntimeFeatureCeiling,
   assertRustRuntimeFilesystemMethods,
   assertRustRuntimeHealthShape,
@@ -149,7 +149,7 @@ describe('Real Rust runtime qualification', () => {
     );
 
     it.skipIf(!binary.available)(
-      'workspace, filesystem and snapshot methods round-trip over stdio',
+      'workspace, filesystem, snapshot and command methods round-trip over stdio',
       async () => {
         mangoHome = await scratchMangoHome('stdio-workspace');
         previousMangoHome = process.env.MANGO_HOME;
@@ -169,6 +169,7 @@ describe('Real Rust runtime qualification', () => {
           await assertRustRuntimeFilesystemMethods(client, dir);
           await assertRustRuntimeWorkspaceMethods(client, dir);
           await assertRustRuntimeSnapshotMethods(client, dir);
+          await assertRustRuntimeCommandMethods(client, dir);
           await cleanupMangoHome(dir);
         } finally {
           await connection.close();
@@ -344,6 +345,8 @@ describe('Real Rust runtime qualification', () => {
 
         const revoked = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
         expect(revoked.manifest?.allow).toEqual(RUNTIME_CONSENT_PRESETS.none);
+        expect(revoked.manifest?.gh?.available).toBe(false);
+        expect((await client.health()).gh?.available).toBe(false);
         assertRustRuntimeFeatureCeiling(client.manifest, {
           probing: false,
           fsRead: false,
@@ -365,7 +368,7 @@ describe('Real Rust runtime qualification', () => {
     );
 
     it.skipIf(!binary.available)(
-      'workspace, filesystem and snapshot methods round-trip over a direct URL serve connection',
+      'workspace, filesystem, snapshot and command methods round-trip over a direct URL serve connection',
       async () => {
         await insertTestUser(TEST_USER);
         const store = new InMemorySecretStore();
@@ -406,6 +409,7 @@ describe('Real Rust runtime qualification', () => {
         await assertRustRuntimeFilesystemMethods(client, dir);
         await assertRustRuntimeWorkspaceMethods(client, dir);
         await assertRustRuntimeSnapshotMethods(client, dir);
+        await assertRustRuntimeCommandMethods(client, dir);
         await cleanupMangoHome(dir);
       },
       30_000

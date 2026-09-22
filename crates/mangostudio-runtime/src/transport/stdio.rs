@@ -38,11 +38,16 @@ pub const STDIO_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// session is built — see the module docs on why that registration happens
 /// first.
 pub async fn run(runtime_version: &str, mango_home: &std::path::Path) -> std::io::Result<i32> {
-    // Registered *before* the session (and so before consent's own disk
-    // I/O) opens anything: a signal that arrived in the gap between opening
-    // the session and registering its handler would otherwise be lost.
-    let mut signals = ShutdownSignals::install()?;
+    run_with_signals(runtime_version, mango_home, ShutdownSignals::install()?).await
+}
 
+/// Runs one stdio session with signal handlers that the synchronous CLI
+/// installed before entering the async runtime.
+pub(crate) async fn run_with_signals(
+    runtime_version: &str,
+    mango_home: &std::path::Path,
+    mut signals: ShutdownSignals,
+) -> std::io::Result<i32> {
     let slot = resolve_runtime_slot_for_current_exe(mango_home);
     let consent = stdio_consent(slot, mango_home);
     if let Some(refusal) = consent.refusal {

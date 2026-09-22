@@ -114,14 +114,17 @@
 pub mod audit;
 pub mod blocking;
 pub mod cli;
+pub mod commands;
 pub mod config;
 pub mod consent;
 pub mod event_check;
+mod file_identity;
 pub mod filesystem;
 pub mod health;
 pub mod manifest;
 pub mod panic;
 pub mod ports;
+mod probe_cache;
 pub mod probing;
 pub mod registry;
 pub mod result_check;

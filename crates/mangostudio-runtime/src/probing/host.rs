@@ -30,7 +30,7 @@
 //! # Memoization
 //!
 //! This module's own `probe_binary_version` caches by resolved candidate
-//! path plus `crate::consent::source::fingerprint_of`'s `mtime:size`
+//! path plus `crate::file_identity::fingerprint`'s identity and high-resolution metadata
 //! fingerprint — the exact pattern `crate::health`'s own `probe_git` cache
 //! already established and this module deliberately does not reinvent.
 //! Every one of this crate's
@@ -61,7 +61,7 @@ use super::detection::winget_ownership::{
 };
 use super::locations::{LocationFsProbe, LocationLayout};
 use crate::blocking::run_blocking;
-use crate::consent::source::fingerprint_of;
+use crate::file_identity::fingerprint;
 use crate::subprocess::{ChildBudget, run_bounded_child};
 
 /// Builds a [`PathEnv`] for this host, mirroring
@@ -176,13 +176,6 @@ const PROBE_MAX_STDOUT_BYTES: usize = 8 * 1024;
 /// `read_capped`).
 const PROBE_MAX_STDERR_BYTES: usize = 1024;
 
-/// One cache entry: the fingerprint a probe answered against, and the
-/// version string it produced (or `None`, when the binary ran but its
-/// output was empty). Factored out only so [`probe_version_cache`]'s own
-/// type stays under clippy's `type_complexity` threshold, not because
-/// anything else in this module needs to name it.
-type ProbeVersionCacheEntry = (String, Option<String>);
-
 /// Every cached `probe_version` answer, keyed on the candidate path
 /// exactly as handed to this function — never a bare binary name, and
 /// never canonicalised (mirrors [`crate::health`]'s own `git_probe_cache`,
@@ -192,9 +185,9 @@ type ProbeVersionCacheEntry = (String, Option<String>);
 /// probe the first time each is seen and nothing after that — cheaper
 /// than a second `realpath` round trip on every single probe just to
 /// share a cache slot).
-fn probe_version_cache() -> &'static Mutex<HashMap<PathBuf, ProbeVersionCacheEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, ProbeVersionCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn probe_version_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<Option<String>>> {
+    static CACHE: OnceLock<Mutex<crate::probe_cache::ProbeCache<Option<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Default::default()))
 }
 
 /// Clears every cached `probe_version` answer. Test-only, gated the same
@@ -216,7 +209,7 @@ pub(crate) fn invalidate_probe_version_cache() {
 /// default parallel test harness can wipe each other's cache entry
 /// between two probes of what each believes is its own, uniquely-named
 /// fake binary. Mirrors `crate::health`'s own `git_probe_test_lock`/
-/// `shell_detection_test_lock` and `crate::blocking::pool_saturation_test_lock`
+/// `crate::blocking::pool_saturation_test_lock`
 /// — the identical class of problem, once per process-wide test-only
 /// cache this crate has.
 #[cfg(all(test, unix))]
@@ -229,15 +222,14 @@ fn lookup_probe_cache(path: &Path, fingerprint: &str) -> Option<Option<String>> 
     let cache = probe_version_cache()
         .lock()
         .expect("the probe-version cache mutex is never poisoned");
-    let (cached_fingerprint, value) = cache.get(path)?;
-    (cached_fingerprint == fingerprint).then(|| value.clone())
+    cache.get(path, fingerprint)
 }
 
 fn cache_probe_result(path: PathBuf, fingerprint: String, value: Option<String>) {
     let mut cache = probe_version_cache()
         .lock()
         .expect("the probe-version cache mutex is never poisoned");
-    cache.insert(path, (fingerprint, value));
+    cache.insert(path, fingerprint, value);
 }
 
 /// How much *longer* than the pure layer's own `timeout_ms` this module's
@@ -302,11 +294,7 @@ async fn probe_binary_version(
     let path_buf = PathBuf::from(&binary_path);
     let fingerprint = run_blocking({
         let path_buf = path_buf.clone();
-        move || {
-            std::fs::metadata(&path_buf)
-                .ok()
-                .map(|metadata| fingerprint_of(&metadata))
-        }
+        move || fingerprint(&path_buf)
     })
     .await;
 

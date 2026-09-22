@@ -28,6 +28,7 @@ on:
       - "apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts"
       - "apps/api/tests/integration/services/rust-filesystem-search-compat.integration.test.ts"
       - "apps/api/tests/integration/services/rust-snapshot-compat.integration.test.ts"
+      - "apps/api/tests/integration/services/rust-command-compat.integration.test.ts"
       - "apps/api/tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts"
       - "apps/api/tests/support/rust-runtime-binary.ts"
       - "apps/api/tests/support/rust-runtime-assertions.ts"
@@ -102,7 +103,7 @@ jobs:
           # touches none of the paths above, rust evaluates false, the job
           # is skipped and allowed to be, and Gate reports green having
           # exercised none of it.
-          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|apps/api/tests/integration/services/(rust-runtime-qualification|rust-filesystem-search-compat|rust-snapshot-compat)\.integration\.test\.ts$|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
+          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|apps/api/tests/integration/services/(rust-runtime-qualification|rust-filesystem-search-compat|rust-snapshot-compat|rust-command-compat)\.integration\.test\.ts$|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
@@ -295,6 +296,7 @@ jobs:
           tests/integration/services/rust-runtime-qualification.integration.test.ts
           tests/integration/services/rust-filesystem-search-compat.integration.test.ts
           tests/integration/services/rust-snapshot-compat.integration.test.ts
+          tests/integration/services/rust-command-compat.integration.test.ts
           tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts
 
   gate:

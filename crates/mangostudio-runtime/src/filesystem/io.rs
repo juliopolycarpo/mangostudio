@@ -6,7 +6,7 @@ use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-#[cfg(not(windows))]
+#[cfg(all(test, target_os = "linux"))]
 use cap_fs_ext::MetadataExt as _;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt as _};
 use cap_std::fs::{OpenOptions as CapOpenOptions, Permissions as CapPermissions};
@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::capability::{self, VerifiedParent};
 use super::policy::CompiledPolicy;
+use crate::file_identity::{ObjectIdentity, object_identity};
 
 #[derive(Debug)]
 pub(super) struct Observed {
@@ -32,12 +33,6 @@ pub(super) struct FileInfo {
 struct PathMetadata {
     is_file: bool,
     len: u64,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct ObjectIdentity {
-    device: u64,
-    inode: u64,
 }
 
 struct ExpectedDestination<'a> {
@@ -2131,42 +2126,6 @@ fn atomic_rename_no_replace(
     _: &File,
 ) -> std::io::Result<()> {
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
-}
-
-#[cfg(not(windows))]
-fn object_identity(_: &File, metadata: &Metadata) -> std::io::Result<ObjectIdentity> {
-    Ok(ObjectIdentity {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-    })
-}
-
-#[cfg(windows)]
-#[allow(
-    unsafe_code,
-    reason = "stable Rust does not expose Windows file identity from Metadata"
-)]
-fn object_identity(file: &File, _: &Metadata) -> std::io::Result<ObjectIdentity> {
-    use std::mem::MaybeUninit;
-    use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
-    };
-
-    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
-    // SAFETY: `file` owns a live handle and `information` points to writable,
-    // correctly aligned storage for the structure populated by the API.
-    let success =
-        unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
-    if success == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // SAFETY: a successful call initialized every field in the structure.
-    let information = unsafe { information.assume_init() };
-    Ok(ObjectIdentity {
-        device: u64::from(information.dwVolumeSerialNumber),
-        inode: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
-    })
 }
 
 /// Removes a checked leaf through its verified parent directory.

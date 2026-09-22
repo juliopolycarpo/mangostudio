@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   ARTIFACT_DIR,
   CATALOG_SCHEMA_URL,
@@ -123,6 +124,7 @@ describe('runtime contract artifacts', () => {
     expect(strings.setupPendingSignature).toBe('runtime setup is pending on this machine');
     expect(strings.updateExitCode).toBe(75);
     expect(strings.pairingTokenPrefix).toBe('mrt_');
+    expect(strings.githubGraphqlDocuments).toEqual(PINNED_GITHUB_GRAPHQL_DOCUMENTS);
     expect(strings.runtimeHome.slots).toEqual(['host', 'wsl', 'remote']);
     expect(strings.errors.serviceErrorKinds).toContain('consent_denied');
   });

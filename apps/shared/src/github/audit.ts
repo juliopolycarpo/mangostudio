@@ -8,15 +8,33 @@
  */
 
 /**
- * Summarizes a `gh` argv down to its subcommand tokens, for audit lines.
+ * Summarizes a recognized `gh` operation for audit lines.
  *
  * Never the full argv: `gh pr create --title ... --body ...` carries prose a
  * user wrote, and the audit scrubber is best-effort pattern matching. Two
- * tokens name the operation, which is what an audit trail is for.
+ * tokens name a recognized operation; unknown tokens may themselves be prose.
  *
  * @example
  * summarizeGhSubcommand(['pr', 'create', '--title', 'Fix']); // ['pr', 'create']
  */
 export function summarizeGhSubcommand(args: readonly unknown[]): readonly string[] {
-  return args.filter((entry): entry is string => typeof entry === 'string').slice(0, 2);
+  if (args.length === 1 && args[0] === '--version') return ['--version'];
+  const [command, operation] = args;
+  if (typeof command !== 'string' || typeof operation !== 'string') return [];
+  return AUDIT_OPERATIONS.has(`${command} ${operation}`) ? [command, operation] : [];
 }
+
+const AUDIT_OPERATIONS: ReadonlySet<string> = new Set([
+  'auth status',
+  'repo view',
+  'pr view',
+  'pr list',
+  'pr status',
+  'pr checks',
+  'issue list',
+  'search prs',
+  'api graphql',
+  'pr create',
+  'pr ready',
+  'pr checkout',
+]);

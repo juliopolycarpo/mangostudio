@@ -330,7 +330,6 @@ function githubFailure(error: unknown, set: { status?: number | string }): ApiEr
         // what an operator needs to see, matching the runtime's own audit log.
         args: summarizeGhSubcommand(error.args),
         exitCode: error.exitCode,
-        stderr: error.stderr,
       });
     }
   } else if (error instanceof GithubOutputError) {
