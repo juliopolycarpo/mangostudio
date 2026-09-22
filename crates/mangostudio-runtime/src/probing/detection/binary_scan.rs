@@ -688,9 +688,7 @@ async fn probe_candidates_bounded(
                     Some(CandidateProbeResult::Installation { version: Some(version), .. })
                         if options.stop_when.as_ref().is_some_and(|predicate| predicate(version))
                 );
-                results
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)[index] = result;
+                crate::ports::audit::lock(&results)[index] = result;
                 if is_terminal {
                     terminal_index.fetch_min(index, Ordering::SeqCst);
                 }
@@ -929,14 +927,8 @@ mod tests {
             _args: &'a [String],
             timeout_ms: u64,
         ) -> BoxFuture<'a, Result<Option<String>, ProbeError>> {
-            self.calls
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(binary.to_string());
-            self.timeouts_seen
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(timeout_ms);
+            crate::ports::audit::lock(&self.calls).push(binary.to_string());
+            crate::ports::audit::lock(&self.timeouts_seen).push(timeout_ms);
             let pending = self.pending.contains(binary);
             let response = self.responses.get(binary).cloned();
             Box::pin(async move {

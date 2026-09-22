@@ -57,19 +57,13 @@ impl FixedWallClock {
     /// Moves this clock to `at`, for a test that needs more than one
     /// distinct instant.
     pub fn set(&self, at: SystemTime) {
-        *self
-            .at
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = at;
+        *crate::ports::audit::lock(&self.at) = at;
     }
 }
 
 impl WallClock for FixedWallClock {
     fn now(&self) -> SystemTime {
-        *self
-            .at
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        *crate::ports::audit::lock(&self.at)
     }
 }
 
