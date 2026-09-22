@@ -181,7 +181,10 @@ gates belong to `checkpoints` and `library`. They do not suppress working filesy
 Other features require every catalog method carrying their capability.
 
 The production registry implements health, workspace, probing, the eleven filesystem
-methods, and `snapshot.capture`, `snapshot.hash`, and `snapshot.revert`. An empty registry still advertises no capability-backed features, regardless of consent.
+methods, `snapshot.capture`, `snapshot.hash`, `snapshot.revert`, and the four command methods
+`shell.run`, `git.exec`, `gh.exec`, and `gh.mutate`. The shell feature remains false until the
+terminal methods sharing its capability are implemented. An empty registry still advertises no
+capability-backed features, regardless of consent.
 Only the schema fact `toolchain` remains true. The hello capabilities also announce the
 embedded catalog name and version in `contracts`, matching the TypeScript runtime.
 
@@ -228,6 +231,35 @@ retry conflicts, permissive base64 decoding, move collisions, and symlink or jun
 It also exercises cross-device moves on Linux when the test filesystem provides two devices,
 including long filenames and retrying after source-removal permissions are restored.
 The runtime qualification job includes this suite on Linux, macOS, and Windows.
+
+### Command behavior
+
+`commands/service.rs` prepares exact argv, cwd, environment, output bounds, and deadlines for
+`subprocess::ProcessSpawner`. Shell commands resolve the selected toolchain before applying
+secret filtering; Git and GitHub CLI receive their own fixed environment allowlists. GitHub
+GraphQL queries come from the shared generated query pins. Rejected operands are excluded from
+audit and Hub error logs.
+
+Consent is read again at the launch boundary. The Rust consent source deliberately rereads the
+file rather than trusting its size and modification time: an equal-size rewrite with a restored
+timestamp must still revoke permission. Probe caches use opened-file identity, nanosecond
+modification time, size, and permissions. Shell availability and toolchain selection are resolved
+afresh. Successful version-directory listings are cached by directory identity and metadata,
+with at most 32 entries and 1 MiB retained. Alias bytes and executable existence are reread on
+every launch, and the current environment is always merged anew; the cache contains no consent
+or prepared child environment.
+
+Before launch, cancellation prevents an effect. After launch, read commands stop on cancellation;
+`gh.mutate` retains ownership until completion or its deadline because cancelling the caller cannot
+undo an accepted external mutation. Output is capped before allocation and further constrained by
+the negotiated response frame budget.
+
+`rust-command-compat.integration.test.ts` compares the compiled Rust and TypeScript hosts through
+Hub clients. It covers shell output, exit codes, byte caps, UTF-8 decoding, timeout reporting,
+environment filtering, Git's accepted nonzero exits, GitHub CLI local help, and typed argument
+rejections. Shared qualification assertions exercise the command methods over stdio, direct URL
+serve, and paired connect. Process containment and parent-death fixtures live under
+`crates/mangostudio-runtime/tests/`.
 
 ### Dispatcher behavior
 

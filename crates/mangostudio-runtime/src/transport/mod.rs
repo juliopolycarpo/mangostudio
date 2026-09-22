@@ -13,7 +13,8 @@
 //! scope: every machine method group except `runtime.health` (see
 //! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
 //! `probing.*` (see [`crate::probing`]), `fs.*`, and `snapshot.*` (both see
-//! [`crate::filesystem`]) is unimplemented, so
+//! [`crate::filesystem`]), and `shell.run`/`git.exec`/`gh.exec`/`gh.mutate`
+//! (see [`crate::commands`]) is unimplemented, so
 //! [`crate::registry::Registry`] answers everything else with
 //! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
 //! module's own `hello_capabilities`, which shapes `crate::health`'s
@@ -170,6 +171,8 @@ pub(crate) fn build_host(
     let source = ConsentSource::new(slot, mango_home.to_path_buf());
     let registry =
         crate::filesystem::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
+    let registry =
+        crate::commands::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
@@ -483,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn build_host_implements_exactly_health_workspace_probing_filesystem_and_snapshots() {
+    fn build_host_implements_exactly_the_current_method_families() {
         let home = scratch_path("transport-build-host");
         let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
         assert_eq!(
@@ -500,10 +503,14 @@ mod tests {
                 "fs.read-file",
                 "fs.replace-range",
                 "fs.write-file",
+                "gh.exec",
+                "gh.mutate",
+                "git.exec",
                 "probing.agent-clis",
                 "probing.runtimes",
                 "probing.version-managers",
                 "runtime.health",
+                "shell.run",
                 "snapshot.capture",
                 "snapshot.hash",
                 "snapshot.revert",

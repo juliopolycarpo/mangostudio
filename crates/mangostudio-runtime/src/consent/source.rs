@@ -1,10 +1,7 @@
-//! Re-reading `runtime.json`'s `allow` set on every call, without re-reading
-//! the file itself when nothing has changed.
+//! Re-reading `runtime.json`'s `allow` set on every authorization check.
 //!
-//! Mirrors `apps/runtime/src/consent-source.ts`'s `staticConsentSource`
-//! (well, its `RuntimeConsentSource.refresh` half — this crate has no
-//! equivalent to the static, disk-free variant TypeScript also offers,
-//! since every slot this crate serves has a real `runtime.json` to read).
+//! Uses the TypeScript host's allow resolution, but deliberately rereads
+//! authority rather than trusting an unchanged metadata fingerprint.
 //!
 //! # The security property this module exists for
 //!
@@ -18,58 +15,16 @@
 //! serving the old, wider grant because the read happened to fail instead
 //! of returning `none` on disk.
 
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::SystemTime;
+use std::path::PathBuf;
 
 use mangostudio_runtime_contract::manifest::ManifestProfile;
 use serde_json::Value;
 
 use crate::consent::presets::{ResolvedCapabilityAllow, consent_preset, default_consent_for_slot};
-use crate::ports::audit::lock;
-use crate::runtime_home::{RuntimeSlot, read_runtime_slot_config, slot_config_path};
+use crate::runtime_home::{RuntimeSlot, read_runtime_slot_config};
 
-/// A `mtime:size` pair identifying one version of a file's contents,
-/// cheaply comparable without reading the file itself. Mirrors
-/// `consent-source.ts`'s own `${info.mtimeMs}:${info.size}`, though the two
-/// are never compared to each other — this is a process-local cache key,
-/// not a value written anywhere, so its exact formatting does not need to
-/// match TypeScript's byte for byte.
-///
-/// `pub(crate)`: [`crate::health`]'s `git` probe cache keys on this same
-/// shape, reusing it rather than inventing a second fingerprint format.
-pub(crate) fn fingerprint_of(metadata: &std::fs::Metadata) -> String {
-    let mtime_millis = metadata
-        .modified()
-        .ok()
-        .and_then(|modified| modified.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
-    format!("{mtime_millis}:{}", metadata.len())
-}
-
-/// A sentinel fingerprint for "confirmed absent", distinct from any real
-/// `mtime:size` pair (which never contains a colon-free non-numeric run).
-const ABSENT: &str = "absent";
-
-/// A sentinel fingerprint that matches no real one, cached after any read
-/// this module could not attribute to a specific file version (an
-/// unreadable stat). Its only job is to *not* equal a subsequent real
-/// fingerprint, forcing one more re-read before caching resumes — mirrors
-/// `consent-source.ts` setting `fingerprint = nextFingerprint ?? 'read'`
-/// after exactly that kind of read.
-const UNATTRIBUTED: &str = "read";
-
-struct Cache {
-    /// `None` means "no cached answer may be trusted" — the initial state,
-    /// and the state after any stat this module could not read at all.
-    fingerprint: Option<String>,
-    allow: ResolvedCapabilityAllow,
-}
-
-/// Reads `runtime.json`'s `allow` set for one slot, re-reading the file only
-/// when its `mtime:size` fingerprint has actually changed since the last
-/// call. See the module docs for the fail-closed rule this exists to serve.
+/// Reads the current consent for one slot without caching authority.
+/// Metadata and file identity can remain unchanged across a revocation.
 ///
 /// # Example
 ///
@@ -85,7 +40,6 @@ struct Cache {
 pub struct ConsentSource {
     slot: RuntimeSlot,
     mango_home: PathBuf,
-    cache: Mutex<Cache>,
 }
 
 impl ConsentSource {
@@ -93,14 +47,7 @@ impl ConsentSource {
     /// nothing until [`ConsentSource::refresh`] is first called.
     #[must_use]
     pub fn new(slot: RuntimeSlot, mango_home: PathBuf) -> Self {
-        Self {
-            slot,
-            mango_home,
-            cache: Mutex::new(Cache {
-                fingerprint: None,
-                allow: default_consent_for_slot(slot),
-            }),
-        }
+        Self { slot, mango_home }
     }
 
     /// This source's slot, for a caller (a consent denial's remediation
@@ -110,56 +57,21 @@ impl ConsentSource {
         self.slot
     }
 
-    fn config_path(&self) -> PathBuf {
-        slot_config_path(self.slot, &self.mango_home)
-    }
-
-    /// Re-reads `runtime.json` if its fingerprint has changed since the
-    /// last call (or if the last attempt could not be attributed to one —
-    /// see `UNATTRIBUTED`), and returns the resolved `allow` set either
-    /// way.
+    /// Re-reads the config and resolves consent without reusing prior authority.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if source.refresh().shell { /* launch after the final check */ }
+    /// ```
     #[must_use]
     pub fn refresh(&self) -> ResolvedCapabilityAllow {
-        let next_fingerprint = next_fingerprint(&self.config_path());
-
-        let mut cache = lock(&self.cache);
-        if let Some(next) = next_fingerprint.as_deref()
-            && cache.fingerprint.as_deref() == Some(next)
-        {
-            return cache.allow;
-        }
-
         let state = read_runtime_slot_config(self.slot, &self.mango_home);
-        let allow = if state.error.is_some() {
-            // Fail closed: unreadable, malformed, or schema-invalid all
-            // downgrade to `none` — never the previous cached grant, never
-            // `full`. This is the one branch the module docs are about.
+        if state.error.is_some() {
             consent_preset(ManifestProfile::None)
         } else {
             resolve_allow(self.slot, state.stored.as_ref())
-        };
-        cache.allow = allow;
-        cache.fingerprint = Some(next_fingerprint.unwrap_or_else(|| UNATTRIBUTED.to_string()));
-        allow
-    }
-}
-
-/// The fingerprint of whatever is at `path` right now, or `None` when this
-/// process could not even stat it (permissions, a transient I/O failure) —
-/// `None` deliberately never matches a cached fingerprint, so a caller
-/// always re-reads rather than trusting a cache it could not revalidate.
-fn next_fingerprint(path: &Path) -> Option<String> {
-    match std::fs::metadata(path) {
-        Ok(metadata) => Some(fingerprint_of(&metadata)),
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) =>
-        {
-            Some(ABSENT.to_string())
         }
-        Err(_) => None,
     }
 }
 
@@ -255,15 +167,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn same_size_same_timestamp_rewrite_cannot_reuse_consent() {
+        let home = scratch_home("consent-metadata-preserved");
+        write_runtime_slot_config(
+            RuntimeSlot::Host,
+            &home,
+            &[("allow", Some(json!({"shell": true})))],
+        )
+        .unwrap();
+        let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
+        assert!(source.refresh().shell);
+        let path = crate::runtime_home::slot_config_path(RuntimeSlot::Host, &home);
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert!(before.contains("\"shell\": true"));
+        let after = before.replace("\"shell\": true", "\"shell\":false");
+        assert_eq!(before.len(), after.len());
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, after).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert!(
+            !source.refresh().shell,
+            "fresh authority must not depend on cached file metadata"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
-    fn an_unchanged_file_is_not_re_read() {
+    fn removing_read_permission_without_changing_contents_fails_closed() {
         if nix::unistd::Uid::effective().is_root() {
-            // Root reads through a `chmod 000` file anyway, so the re-read
-            // this test tries to rule out would succeed either way and
-            // return the same, unchanged content — passing regardless of
-            // whether the cache hit ever fired.
-            eprintln!("skipping an_unchanged_file_is_not_re_read: running as root");
+            // Root reads through chmod 000, so it cannot exercise denial.
+            eprintln!("skipping permission denial test: running as root");
             return;
         }
         use std::os::unix::fs::PermissionsExt as _;
@@ -278,19 +217,13 @@ mod tests {
         let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         assert!(source.refresh().shell);
 
-        // Removes read permission without touching mtime or size, so the
-        // fingerprint the cache keys on is unchanged — `stat(2)` needs no
-        // read bit, only `open(2)` does. A genuine cache hit returns the
-        // previous answer without ever calling `read_runtime_slot_config`
-        // again; a re-read that ran anyway would hit `EACCES` and fail
-        // closed to `none`, which the regression below tells apart from a
-        // real cache hit.
+        // Read permission can change without changing contents or mtime.
         let path = crate::runtime_home::slot_config_path(RuntimeSlot::Host, &home);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
 
         assert!(
-            source.refresh().shell,
-            "an unchanged fingerprint must hit the cache, not re-read and fail closed"
+            !source.refresh().shell,
+            "unreadable consent must deny even when contents are unchanged"
         );
     }
 
@@ -298,14 +231,7 @@ mod tests {
     /// readable and becomes unreadable downgrades to `none` — not the
     /// previous grant, not `full`.
     ///
-    /// `chmod 0` alone would not exercise this: POSIX `stat(2)` needs no
-    /// read permission on the file itself (only search on its parent
-    /// directory), so a bare permission change leaves this module's
-    /// `mtime:size` fingerprint unchanged and the cache hit never even
-    /// looks at the file again — true of `consent-source.ts`'s identical
-    /// fingerprint too, not a gap this port introduces. The second write
-    /// below changes the file's size, which *does* change the fingerprint
-    /// and is what actually forces the re-read the `chmod` then fails.
+    /// Also covers changed contents followed by permission revocation.
     #[cfg(unix)]
     #[test]
     fn revocation_by_removing_read_permission_fails_closed_to_none() {
@@ -331,8 +257,7 @@ mod tests {
         let source = ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
         assert!(source.refresh().shell, "granted before revocation");
 
-        // Forces the fingerprint to change (a genuinely different file
-        // size), so the next `refresh` cannot serve the cached answer.
+        // Change the contents before removing permission as a separate case.
         write_runtime_slot_config(
             RuntimeSlot::Host,
             &home,

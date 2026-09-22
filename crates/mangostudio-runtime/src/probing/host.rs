@@ -30,7 +30,7 @@
 //! # Memoization
 //!
 //! This module's own `probe_binary_version` caches by resolved candidate
-//! path plus `crate::consent::source::fingerprint_of`'s `mtime:size`
+//! path plus `crate::file_identity::fingerprint`'s identity and high-resolution metadata
 //! fingerprint — the exact pattern `crate::health`'s own `probe_git` cache
 //! already established and this module deliberately does not reinvent.
 //! Every one of this crate's
@@ -61,7 +61,7 @@ use super::detection::winget_ownership::{
 };
 use super::locations::{LocationFsProbe, LocationLayout};
 use crate::blocking::run_blocking;
-use crate::consent::source::fingerprint_of;
+use crate::file_identity::fingerprint;
 use crate::subprocess::{ChildBudget, run_bounded_child};
 
 /// Builds a [`PathEnv`] for this host, mirroring
@@ -302,11 +302,7 @@ async fn probe_binary_version(
     let path_buf = PathBuf::from(&binary_path);
     let fingerprint = run_blocking({
         let path_buf = path_buf.clone();
-        move || {
-            std::fs::metadata(&path_buf)
-                .ok()
-                .map(|metadata| fingerprint_of(&metadata))
-        }
+        move || fingerprint(&path_buf)
     })
     .await;
 

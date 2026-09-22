@@ -44,6 +44,7 @@ import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/r
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestUser } from '../../support/factories';
 import {
+  assertRustRuntimeCommandMethods,
   assertRustRuntimeFeatureCeiling,
   assertRustRuntimeFilesystemMethods,
   assertRustRuntimeHealthShape,
@@ -213,6 +214,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
       await assertRustRuntimeFilesystemMethods(client, dir);
       await assertRustRuntimeWorkspaceMethods(client, dir);
       await assertRustRuntimeSnapshotMethods(client, dir);
+      await assertRustRuntimeCommandMethods(client, dir);
       await cleanupMangoHome(dir);
     },
     30_000
