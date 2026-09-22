@@ -99,7 +99,7 @@ export function assertRustRuntimeFeatureCeiling(
     readonly checkpoints: boolean;
   }
 ): void {
-  // The shell feature includes terminal methods, which are not implemented yet.
+  // The shell feature includes terminal and install methods, which are not implemented yet.
   const shell = false;
   const git = manifest.allow?.git === true && manifest.git.available;
   expect(manifest.features).toEqual({

@@ -183,7 +183,7 @@ Other features require every catalog method carrying their capability.
 The production registry implements health, workspace, probing, the eleven filesystem
 methods, `snapshot.capture`, `snapshot.hash`, `snapshot.revert`, and the four command methods
 `shell.run`, `git.exec`, `gh.exec`, and `gh.mutate`. The shell feature remains false until the
-terminal methods sharing its capability are implemented. An empty registry still advertises no
+terminal and install methods sharing its capability are implemented. An empty registry still advertises no
 capability-backed features, regardless of consent.
 Only the schema fact `toolchain` remains true. The hello capabilities also announce the
 embedded catalog name and version in `contracts`, matching the TypeScript runtime.

@@ -195,7 +195,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
   );
 
   it.skipIf(!binary.available)(
-    'workspace, filesystem and snapshot methods round-trip over a paired real runtime connection',
+    'workspace, filesystem, snapshot and command methods round-trip over a paired real runtime connection',
     async () => {
       hub = await startHub('rust-connect-qualification-workspace');
       mangoHome = await scratchMangoHome('connect-workspace');

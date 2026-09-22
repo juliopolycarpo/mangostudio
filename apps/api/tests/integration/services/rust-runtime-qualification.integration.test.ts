@@ -149,7 +149,7 @@ describe('Real Rust runtime qualification', () => {
     );
 
     it.skipIf(!binary.available)(
-      'workspace, filesystem and snapshot methods round-trip over stdio',
+      'workspace, filesystem, snapshot and command methods round-trip over stdio',
       async () => {
         mangoHome = await scratchMangoHome('stdio-workspace');
         previousMangoHome = process.env.MANGO_HOME;
@@ -368,7 +368,7 @@ describe('Real Rust runtime qualification', () => {
     );
 
     it.skipIf(!binary.available)(
-      'workspace, filesystem and snapshot methods round-trip over a direct URL serve connection',
+      'workspace, filesystem, snapshot and command methods round-trip over a direct URL serve connection',
       async () => {
         await insertTestUser(TEST_USER);
         const store = new InMemorySecretStore();

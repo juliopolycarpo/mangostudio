@@ -131,6 +131,27 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
     10_000
   );
 
+  describe.skipIf(process.platform === 'win32')('partial capture after leader exit', () => {
+    it.each([
+      ['printf prefix; (exec 1>&-; sleep 30) &', 'prefix', ''],
+      ['printf prefix >&2; (exec 2>&-; sleep 30) &', '', 'prefix'],
+      ['printf prefix; sleep 30 &', 'prefix', ''],
+    ])(
+      'retains arrived bytes when a descendant holds pipes: %s',
+      async (command, stdout, stderr) => {
+        const params = { kind, command, cwd: home, timeoutMs: 5000, maxOutputBytes: 4096 };
+        const expected = await typescript.shell.run(params, { timeoutMs: 5000 });
+        expect(expected.stdout).toBe(stdout);
+        expect(expected.stderr).toBe(stderr);
+        expect(expected.termination).toEqual({ kind: 'exited' });
+        expect(semanticShell(await rust.shell.run(params, { timeoutMs: 5000 }))).toEqual(
+          semanticShell(expected)
+        );
+      },
+      12_000
+    );
+  });
+
   it('applies the environment deny policy at shell launch', async () => {
     const command =
       kind === 'powershell'
