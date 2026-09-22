@@ -12,7 +12,7 @@
 //! of those copies with one.
 //!
 //! Uniqueness is process id, wall-clock nanoseconds, and a per-process
-//! atomic counter folded together — not pid-plus-counter alone. A few of
+//! atomic counter packed into separate bit ranges — not pid-plus-counter alone. A few of
 //! the copies this module replaces (`consent/invocation.rs`,
 //! `tests/cli.rs`, the three `tests/transport_*.rs` files) already carried
 //! a nanosecond component in their own `unique_suffix()`, because pid alone
@@ -43,8 +43,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// overwhelmingly likely to be unique across processes too — unlike a bare
 /// atomic counter, which restarts at zero every time a new process starts,
 /// or a bare pid, which a later process can reuse once this one exits.
-/// Folding a counter into the nanosecond reading (rather than trusting the
-/// clock alone) also covers a platform whose `SystemTime` resolution is
+/// Keeping the counter separate from the nanosecond reading (rather than
+/// adding them, which can collide under thread interleaving) also covers a platform whose `SystemTime` resolution is
 /// coarser than a nanosecond, where two calls in quick succession could
 /// otherwise read the same instant.
 fn unique_suffix() -> u128 {
@@ -54,7 +54,13 @@ fn unique_suffix() -> u128 {
         .expect("the system clock reads after the Unix epoch")
         .as_nanos();
     let count = COUNTER.fetch_add(1, Ordering::Relaxed);
-    nanos.wrapping_add(u128::from(count))
+    compose_suffix(nanos, count)
+}
+
+fn compose_suffix(nanos: u128, count: u64) -> u128 {
+    // The low 64 clock bits span about 584 years. The low suffix bits are
+    // exclusively the counter, so different counts cannot cancel clock drift.
+    (nanos << 64) | u128::from(count)
 }
 
 /// A directory under [`std::env::temp_dir`], unique across processes (see
@@ -187,6 +193,11 @@ pub fn scratch_path(prefix: &str) -> ScratchDir {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn clock_and_counter_interleaving_cannot_collide() {
+        // A thread can read the clock first but acquire its counter second.
+        assert_ne!(super::compose_suffix(100, 1), super::compose_suffix(101, 0));
+    }
     use super::{ScratchDir, scratch_dir, scratch_path};
 
     #[test]
