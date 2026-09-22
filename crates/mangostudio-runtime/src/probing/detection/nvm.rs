@@ -42,7 +42,7 @@ pub struct NvmDetectionOptions<'a> {
     pub latest_by_major: BTreeMap<u32, String>,
     /// Whether [`NvmDetectionOptions::latest_by_major`] came from a live
     /// probe recent enough to excuse a stale bundled schedule.
-    pub live_data_available: Option<bool>,
+    pub live_data_available: bool,
 }
 
 struct NvmAliasCache {
@@ -417,7 +417,7 @@ mod tests {
             schedule,
             current_node_path: None,
             latest_by_major: BTreeMap::new(),
-            live_data_available: None,
+            live_data_available: false,
         }
     }
 

@@ -457,7 +457,7 @@ async fn handle_probe_version_managers(
         .unwrap_or_default()
         .into_iter()
         .collect();
-    let live_data_available = latest_by_major_provided.then_some(true);
+    let live_data_available = latest_by_major_provided;
     let now = SystemTime::now();
 
     let mut statuses = Vec::with_capacity(wanted.len());

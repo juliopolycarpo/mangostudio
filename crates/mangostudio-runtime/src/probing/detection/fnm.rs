@@ -38,7 +38,7 @@ pub struct FnmDetectionOptions<'a> {
     pub latest_by_major: BTreeMap<u32, String>,
     /// Whether [`FnmDetectionOptions::latest_by_major`] came from a live
     /// probe recent enough to excuse a stale bundled schedule.
-    pub live_data_available: Option<bool>,
+    pub live_data_available: bool,
     /// `fnm --version` output, already parsed to `major.minor.patch`.
     /// Reused from the runtime's own fnm scan — the same one
     /// `probing.runtimes` runs — rather than spawning `fnm --version` a
@@ -326,7 +326,7 @@ mod tests {
             schedule,
             current_node_path: None,
             latest_by_major: BTreeMap::new(),
-            live_data_available: None,
+            live_data_available: false,
             manager_version: Some("1.38.1".to_string()),
         }
     }

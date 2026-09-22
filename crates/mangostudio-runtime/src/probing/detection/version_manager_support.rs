@@ -249,7 +249,7 @@ pub struct ManagedVersionListOptions<'a> {
     pub latest_by_major: BTreeMap<u32, String>,
     /// Whether [`ManagedVersionListOptions::latest_by_major`] came from a
     /// live probe recent enough to excuse a stale bundled schedule.
-    pub live_data_available: Option<bool>,
+    pub live_data_available: bool,
     /// The manager's configured default, once resolved to a bare version.
     pub default_version: Option<String>,
     /// The version actually running.
@@ -457,7 +457,7 @@ mod tests {
             schedule: &schedule,
             now: std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_785_000_000),
             latest_by_major: BTreeMap::new(),
-            live_data_available: None,
+            live_data_available: false,
             default_version: Some("24.18.0".to_string()),
             current_version: Some("24.18.0".to_string()),
         };
