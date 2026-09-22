@@ -374,7 +374,17 @@ fn run_stdio(env: &impl EnvSource) -> i32 {
         eprintln!("mangostudio-runtime: could not start the async runtime.");
         return 1;
     };
-    match runtime.block_on(crate::transport::stdio::run(VERSION, &home)) {
+    let signals = {
+        let _entered = runtime.enter();
+        crate::supervisor::ShutdownSignals::install()
+    };
+    let Ok(signals) = signals else {
+        eprintln!("mangostudio-runtime: could not install signal handlers.");
+        return 1;
+    };
+    match runtime.block_on(crate::transport::stdio::run_with_signals(
+        VERSION, &home, signals,
+    )) {
         Ok(code) => code,
         Err(error) => {
             eprintln!("mangostudio-runtime: {error}");
