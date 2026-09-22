@@ -404,7 +404,15 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     const afterBytes = Buffer.from('after\n');
 
     async function assertBase64Restore(client: RuntimeClient, root: string): Promise<void> {
-      for (const [index, contentBase64] of ['Y2Fmw6k', 'Y2Fmw6k=\n%', '%%%'].entries()) {
+      for (const [index, contentBase64] of [
+        'Y2Fmw6k',
+        'Y2Fmw6k=\n%',
+        '%%%',
+        '\u0154Q==',
+        '\uff34Q==',
+        '\ud83d\udc96TQ==',
+        'T\u013dQ==',
+      ].entries()) {
         const path = join(root, `base64-${index}.bin`);
         const decoded = Buffer.from(contentBase64, 'base64');
         await writeFile(path, afterBytes);
