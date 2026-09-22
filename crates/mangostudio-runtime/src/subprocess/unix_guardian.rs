@@ -328,9 +328,21 @@ fn environment_entry(key: &OsStr, value: &OsStr) -> io::Result<CString> {
 fn inherited_environment() -> Vec<CString> {
     // Snapshot before fork so the target never reads process-global environment state in its
     // post-fork path. This is child execution inheritance, not host configuration parsing.
-    // OS environment entries cannot contain a NUL byte.
-    std::env::vars_os()
-        .map(|(key, value)| environment_entry(&key, &value).expect("OS environment has no NUL"))
+    collect_inheritable(std::env::vars_os())
+}
+
+/// Keeps every inherited entry `execve` can carry, dropping the ones it cannot.
+///
+/// A real OS environment holds no NUL byte, but [`environment_entry`] also rejects an empty key
+/// and a key containing `=` — and `std::env::vars_os` deliberately preserves a *leading* `=`
+/// as part of the name (glibc's own rule, which keeps drive-relative entries such as `=C:` whole
+/// under WSL interop). Refusing to launch any child at all because one such entry exists in this
+/// process's environment is not the contract; inheriting everything `execve` accepts is.
+fn collect_inheritable(
+    entries: impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> Vec<CString> {
+    entries
+        .filter_map(|(key, value)| environment_entry(&key, &value).ok())
         .collect()
 }
 
@@ -1040,4 +1052,38 @@ unsafe fn errno_raw() -> libc::c_int {
 unsafe fn errno_raw() -> libc::c_int {
     // SAFETY: libc exposes this thread-local errno location on BSD-derived Unix targets.
     unsafe { *libc::__error() }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use super::collect_inheritable;
+
+    /// Regression test: this snapshot used to `.expect("OS environment has no NUL")` on every
+    /// entry, so a single name `environment_entry` refuses — a leading `=`, which
+    /// `std::env::vars_os` keeps as part of the name, or an empty one — panicked the supervisor
+    /// task and turned every command on the host into `SupervisorUnavailable`, blaming a NUL
+    /// byte that was never there.
+    #[test]
+    fn unrepresentable_inherited_names_are_dropped_rather_than_panicking() {
+        let entries = [
+            ("=C:", "C:\\work"),
+            ("", "empty name"),
+            ("PATH", "/usr/bin"),
+        ]
+        .map(|(key, value)| (OsString::from(key), OsString::from(value)));
+
+        let inherited = collect_inheritable(entries.into_iter());
+
+        let rendered: Vec<_> = inherited
+            .iter()
+            .map(|entry| entry.to_str().expect("test entries are UTF-8").to_owned())
+            .collect();
+        assert_eq!(
+            rendered,
+            vec!["PATH=/usr/bin".to_owned()],
+            "expected only entries execve can carry | received the refused names too"
+        );
+    }
 }
