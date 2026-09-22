@@ -3,27 +3,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RuntimeShellResult } from '@mangostudio/shared/runtime-contract';
-import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
-import { connectLocalRuntime } from '../../../src/services/runtime-client/connect-in-process-runtime';
-import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
-import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
+import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import { ToolArgumentError } from '../../../src/services/tools/arg-parsing';
 import {
   cleanupMangoHome,
   resolveRustRuntimeBinary,
-  rustRuntimeVersion,
   scratchMangoHome,
 } from '../../support/rust-runtime-binary';
+import {
+  type RustAndTypeScriptRuntimes,
+  spawnRustAndTypeScriptRuntimes,
+} from '../../support/rust-typescript-runtimes';
 
 const binary = resolveRustRuntimeBinary();
 const kind: 'powershell' | 'bash' = process.platform === 'win32' ? 'powershell' : 'bash';
-
-function authorizeFixture(): boolean {
-  return true;
-}
-function ignoreNotification(): void {
-  /* No UI subscriber in this fixture. */
-}
 
 function semanticShell(result: RuntimeShellResult): Omit<RuntimeShellResult, 'durationMs'> {
   const { durationMs, ...semantic } = result;
@@ -35,8 +28,7 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
   let home = '';
   let previousHome: string | undefined;
   let previousFixture: string | undefined;
-  let rustConnection: Awaited<ReturnType<typeof spawnRuntimeChild>> | undefined;
-  let typescriptConnection: Awaited<ReturnType<typeof connectLocalRuntime>> | undefined;
+  let runtimes: RustAndTypeScriptRuntimes | undefined;
   let rust: RuntimeClient;
   let typescript: RuntimeClient;
 
@@ -48,27 +40,12 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
     process.env.MANGO_COMMAND_FIXTURE = 'fixture value';
     await writeFile(join(home, 'first.txt'), 'first\n');
     await writeFile(join(home, 'second.txt'), 'second\n');
-    rustConnection = await spawnRuntimeChild({
-      environmentId: 'rust-command-compat',
-      launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
-      hubVersion: await rustRuntimeVersion(binary.path),
-      onClosed: ignoreNotification,
-    });
-    typescriptConnection = await connectLocalRuntime({
-      authorizeWorkspace: authorizeFixture,
-      externalAgentIsolation: 'withdrawn',
-    });
-    rust = new RuntimeClient(rustConnection.hub, ignoreNotification, 'rust-command-compat');
-    typescript = new RuntimeClient(
-      typescriptConnection.hub,
-      ignoreNotification,
-      'typescript-command-compat'
-    );
+    runtimes = await spawnRustAndTypeScriptRuntimes(binary.path, 'command-compat');
+    ({ rust, typescript } = runtimes);
   }, 30_000);
 
   afterAll(async () => {
-    await rustConnection?.close();
-    await typescriptConnection?.close();
+    await runtimes?.close();
     if (previousHome === undefined) delete process.env.MANGO_HOME;
     else process.env.MANGO_HOME = previousHome;
     if (previousFixture === undefined) delete process.env.MANGO_COMMAND_FIXTURE;

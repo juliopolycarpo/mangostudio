@@ -2,29 +2,24 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GrepPatternError, PathAccessError } from '@mangostudio/shared/runtime-contract';
-import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
-import { connectLocalRuntime } from '../../../src/services/runtime-client/connect-in-process-runtime';
-import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
-import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
+import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   cleanupMangoHome,
   resolveRustRuntimeBinary,
-  rustRuntimeVersion,
   scratchMangoHome,
 } from '../../support/rust-runtime-binary';
+import {
+  type RustAndTypeScriptRuntimes,
+  spawnRustAndTypeScriptRuntimes,
+} from '../../support/rust-typescript-runtimes';
 
 const binary = resolveRustRuntimeBinary();
-
-function allowQualificationWorkspace(): boolean {
-  return true;
-}
 
 describe.skipIf(!binary.available)('Rust filesystem search matches the TypeScript runtime', () => {
   let directory: string;
   let home: string;
   let previousHome: string | undefined;
-  let rustConnection: Awaited<ReturnType<typeof spawnRuntimeChild>> | undefined;
-  let tsConnection: Awaited<ReturnType<typeof connectLocalRuntime>> | undefined;
+  let runtimes: RustAndTypeScriptRuntimes | undefined;
   let rust: RuntimeClient;
   let typescript: RuntimeClient;
 
@@ -45,23 +40,12 @@ describe.skipIf(!binary.available)('Rust filesystem search matches the TypeScrip
     await writeFile(join(directory, 'binary.txt'), Buffer.from('foo\0'));
     await writeFile(join(directory, '..', 'outside', 'parent.txt'), 'foo\n');
     if (process.platform !== 'win32') await writeFile(join(directory, 'a*b.txt'), 'foo\n');
-    rustConnection = await spawnRuntimeChild({
-      environmentId: 'rust-search-compat',
-      launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
-      hubVersion: await rustRuntimeVersion(binary.path),
-      onClosed: () => undefined,
-    });
-    tsConnection = await connectLocalRuntime({
-      authorizeWorkspace: allowQualificationWorkspace,
-      externalAgentIsolation: 'withdrawn',
-    });
-    rust = new RuntimeClient(rustConnection.hub, () => undefined, 'rust-search-compat');
-    typescript = new RuntimeClient(tsConnection.hub, () => undefined, 'ts-search-compat');
+    runtimes = await spawnRustAndTypeScriptRuntimes(binary.path, 'search-compat');
+    ({ rust, typescript } = runtimes);
   }, 30_000);
 
   afterAll(async () => {
-    await rustConnection?.close();
-    await tsConnection?.close();
+    await runtimes?.close();
     if (previousHome === undefined) delete process.env.MANGO_HOME;
     else process.env.MANGO_HOME = previousHome;
     if (home) await cleanupMangoHome(home);

@@ -43,16 +43,16 @@ import {
   RuntimeSnapshotConflictError,
   type RuntimeSnapshotRevertParams,
 } from '@mangostudio/shared/runtime-contract';
-import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
-import { connectLocalRuntime } from '../../../src/services/runtime-client/connect-in-process-runtime';
-import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
-import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
+import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   cleanupMangoHome,
   resolveRustRuntimeBinary,
-  rustRuntimeVersion,
   scratchMangoHome,
 } from '../../support/rust-runtime-binary';
+import {
+  type RustAndTypeScriptRuntimes,
+  spawnRustAndTypeScriptRuntimes,
+} from '../../support/rust-typescript-runtimes';
 
 const binary = resolveRustRuntimeBinary();
 const SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
@@ -85,10 +85,6 @@ interface ReversalFixture {
   readonly operations: RuntimeSnapshotRevertParams['operations'];
 }
 
-function allowQualificationWorkspace(): boolean {
-  return true;
-}
-
 function hashOf(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -115,8 +111,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
   let root: string;
   let home: string;
   let previousHome: string | undefined;
-  let rustConnection: Awaited<ReturnType<typeof spawnRuntimeChild>> | undefined;
-  let typescriptConnection: Awaited<ReturnType<typeof connectLocalRuntime>> | undefined;
+  let runtimes: RustAndTypeScriptRuntimes | undefined;
   let rust: RuntimeClient;
   let typescript: RuntimeClient;
   const crossDeviceRoots: string[] = [];
@@ -257,27 +252,12 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     home = await scratchMangoHome('snapshot-compat');
     process.env.MANGO_HOME = home;
     root = await mkdtemp(join(tmpdir(), 'mango-rust-snapshot-compat-'));
-    rustConnection = await spawnRuntimeChild({
-      environmentId: 'rust-snapshot-compat',
-      launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
-      hubVersion: await rustRuntimeVersion(binary.path),
-      onClosed: () => undefined,
-    });
-    typescriptConnection = await connectLocalRuntime({
-      authorizeWorkspace: allowQualificationWorkspace,
-      externalAgentIsolation: 'withdrawn',
-    });
-    rust = new RuntimeClient(rustConnection.hub, () => undefined, 'rust-snapshot-compat');
-    typescript = new RuntimeClient(
-      typescriptConnection.hub,
-      () => undefined,
-      'typescript-snapshot-compat'
-    );
+    runtimes = await spawnRustAndTypeScriptRuntimes(binary.path, 'snapshot-compat');
+    ({ rust, typescript } = runtimes);
   }, 30_000);
 
   afterAll(async () => {
-    await rustConnection?.close();
-    await typescriptConnection?.close();
+    await runtimes?.close();
     if (previousHome === undefined) delete process.env.MANGO_HOME;
     else process.env.MANGO_HOME = previousHome;
     if (home) await cleanupMangoHome(home);
