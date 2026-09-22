@@ -380,11 +380,7 @@ fn formatted_manager_version(
     definition: &RuntimeDefinition,
 ) -> Option<String> {
     let raw = status?.effective.as_ref()?.version.as_deref()?;
-    let parsed = (definition.parse_version)(raw)?;
-    Some(format!(
-        "{}.{}.{}",
-        parsed.major, parsed.minor, parsed.patch
-    ))
+    (definition.parse_version)(raw).map(|parsed| parsed.to_string())
 }
 
 /// Builds the `probing.version-managers` result, mirroring

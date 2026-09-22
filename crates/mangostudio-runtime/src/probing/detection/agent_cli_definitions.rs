@@ -92,15 +92,6 @@ impl AgentCliDefinition {
     }
 }
 
-fn parse_version_match(raw: &str, pattern: &Regex) -> Option<SemVer> {
-    let captures = pattern.captures(raw.trim())?;
-    Some(SemVer {
-        major: captures[1].parse().ok()?,
-        minor: captures[2].parse().ok()?,
-        patch: captures[3].parse().ok()?,
-    })
-}
-
 static CLAUDE_VERSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(\d+)\.(\d+)\.(\d+)(?:\s+\(Claude Code\))?$")
         .expect("a fixed, hand-checked pattern")
@@ -109,7 +100,7 @@ static CLAUDE_VERSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// Parses `claude --version` output: `2.1.220 (Claude Code)`.
 #[must_use]
 pub fn parse_claude_version(raw: &str) -> Option<SemVer> {
-    parse_version_match(raw, &CLAUDE_VERSION_PATTERN)
+    SemVer::parse_trimmed(raw, &CLAUDE_VERSION_PATTERN)
 }
 
 static CODEX_VERSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -120,7 +111,7 @@ static CODEX_VERSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// Parses `codex --version` output: `codex-cli 0.145.0`.
 #[must_use]
 pub fn parse_codex_version(raw: &str) -> Option<SemVer> {
-    parse_version_match(raw, &CODEX_VERSION_PATTERN)
+    SemVer::parse_trimmed(raw, &CODEX_VERSION_PATTERN)
 }
 
 static CURSOR_AGENT_VERSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -132,7 +123,7 @@ static CURSOR_AGENT_VERSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// `2026.07.16-899851b`.
 #[must_use]
 pub fn parse_cursor_agent_version(raw: &str) -> Option<SemVer> {
-    parse_version_match(raw, &CURSOR_AGENT_VERSION_PATTERN)
+    SemVer::parse_trimmed(raw, &CURSOR_AGENT_VERSION_PATTERN)
 }
 
 fn no_well_known_directories(_env: &PathEnv) -> Vec<String> {

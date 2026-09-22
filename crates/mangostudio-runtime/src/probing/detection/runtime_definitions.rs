@@ -18,36 +18,24 @@ static OPTIONAL_V_PATTERN: LazyLock<Regex> =
 static PLAIN_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d+)\.(\d+)\.(\d+)").expect("a fixed, hand-checked pattern"));
 
-fn captures_to_semver(captures: &regex::Captures<'_>) -> Option<SemVer> {
-    Some(SemVer {
-        major: captures[1].parse().ok()?,
-        minor: captures[2].parse().ok()?,
-        patch: captures[3].parse().ok()?,
-    })
-}
-
-fn parse_semver(raw: &str, pattern: &Regex) -> Option<SemVer> {
-    captures_to_semver(&pattern.captures(raw.trim())?)
-}
-
 /// Parses `node --version` output (`v22.13.0`); the leading `v` is
 /// optional and trailing content after the version is tolerated (a
 /// release candidate suffix, for instance).
 #[must_use]
 pub fn parse_node_version(raw: &str) -> Option<SemVer> {
-    parse_semver(raw, &OPTIONAL_V_PATTERN)
+    SemVer::parse_trimmed(raw, &OPTIONAL_V_PATTERN)
 }
 
 /// Parses `bun --version` output (`1.2.3`); no `v` prefix.
 #[must_use]
 pub fn parse_bun_version(raw: &str) -> Option<SemVer> {
-    parse_semver(raw, &PLAIN_PATTERN)
+    SemVer::parse_trimmed(raw, &PLAIN_PATTERN)
 }
 
 /// Parses `winget --version` output (`v1.29.290`).
 #[must_use]
 pub fn parse_winget_version(raw: &str) -> Option<SemVer> {
-    parse_semver(raw, &OPTIONAL_V_PATTERN)
+    SemVer::parse_trimmed(raw, &OPTIONAL_V_PATTERN)
 }
 
 /// `raw` is searched rather than anchored: fnm and git prefix their
@@ -57,7 +45,7 @@ pub fn parse_winget_version(raw: &str) -> Option<SemVer> {
 /// time, and `raw` is a probed binary's stdout rather than a shape this
 /// process controls. No real version component is nine digits wide.
 fn parse_semver_anywhere(raw: &str, pattern: &Regex) -> Option<SemVer> {
-    captures_to_semver(&pattern.captures(raw)?)
+    SemVer::from_captures(&pattern.captures(raw)?)
 }
 
 static FNM_VERSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {

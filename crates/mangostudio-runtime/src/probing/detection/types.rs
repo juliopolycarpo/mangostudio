@@ -19,7 +19,9 @@
 //! test that would notice.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
+use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
 
 /// A parsed `major.minor.patch` version, always fully specified. Distinct
@@ -39,6 +41,59 @@ pub struct SemVer {
     pub minor: u32,
     /// The patch version component.
     pub patch: u32,
+}
+
+impl SemVer {
+    /// Reads a version out of `pattern`'s first three capture groups after
+    /// trimming `raw`, or `None` when `raw` does not match or a component
+    /// overflows `u32`. The shared body of every anchored `--version`
+    /// parser in this module.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let pattern = regex::Regex::new(r"^v?(\d+)\.(\d+)\.(\d+)").unwrap();
+    /// let version = SemVer::parse_trimmed(" v1.2.3\n", &pattern).unwrap();
+    /// assert_eq!(version.to_string(), "1.2.3");
+    /// ```
+    pub(crate) fn parse_trimmed(raw: &str, pattern: &Regex) -> Option<Self> {
+        Self::from_captures(&pattern.captures(raw.trim())?)
+    }
+
+    /// Builds a version from capture groups 1, 2 and 3 of `captures`, or
+    /// `None` when a component overflows `u32`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let pattern = regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)").unwrap();
+    /// let captures = pattern.captures("git version 2.45.1").unwrap();
+    /// assert_eq!(SemVer::from_captures(&captures).unwrap().minor, 45);
+    /// ```
+    pub(crate) fn from_captures(captures: &Captures<'_>) -> Option<Self> {
+        Some(Self {
+            major: captures[1].parse().ok()?,
+            minor: captures[2].parse().ok()?,
+            patch: captures[3].parse().ok()?,
+        })
+    }
+}
+
+/// Renders `major.minor.patch` — the same string every TypeScript peer
+/// builds with a template literal.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::probing::detection::types::SemVer;
+///
+/// let version = SemVer { major: 22, minor: 13, patch: 0 };
+/// assert_eq!(version.to_string(), "22.13.0");
+/// ```
+impl fmt::Display for SemVer {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
 }
 
 /// Which runtime, version manager or agent CLI a status is about.
@@ -456,4 +511,44 @@ pub struct VersionManagerStatus {
     pub current_version: Option<String>,
     /// Facts worth surfacing about this version manager.
     pub findings: Vec<RuntimeFinding>,
+}
+
+#[cfg(test)]
+mod tests {
+    use regex::Regex;
+
+    use super::SemVer;
+
+    #[test]
+    fn a_semver_displays_as_major_dot_minor_dot_patch() {
+        let version = SemVer {
+            major: 22,
+            minor: 13,
+            patch: 0,
+        };
+        assert_eq!(version.to_string(), "22.13.0");
+    }
+
+    #[test]
+    fn parse_trimmed_ignores_surrounding_whitespace_and_reads_three_groups() {
+        let pattern = Regex::new(r"^v?(\d+)\.(\d+)\.(\d+)$").expect("valid pattern");
+        assert_eq!(
+            SemVer::parse_trimmed("  v1.2.3\n", &pattern),
+            Some(SemVer {
+                major: 1,
+                minor: 2,
+                patch: 3
+            })
+        );
+        assert_eq!(SemVer::parse_trimmed("not a version", &pattern), None);
+    }
+
+    #[test]
+    fn from_captures_rejects_a_component_that_overflows_u32() {
+        let pattern = Regex::new(r"(\d+)\.(\d+)\.(\d+)").expect("valid pattern");
+        let captures = pattern
+            .captures("1.99999999999.0")
+            .expect("pattern matches");
+        assert_eq!(SemVer::from_captures(&captures), None);
+    }
 }

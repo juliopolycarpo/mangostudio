@@ -348,7 +348,7 @@ fn newest(fs: &dyn ToolchainFs, root: &str, selector: &str) -> Option<String> {
                 .all(|(wanted, actual)| *wanted == actual)
         })
         .max()
-        .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch))
+        .map(|version| version.to_string())
 }
 
 #[cfg(test)]

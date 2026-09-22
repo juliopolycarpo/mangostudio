@@ -126,8 +126,7 @@ fn is_ascii_digits(value: &str) -> bool {
 /// does not parse as an exact version.
 #[must_use]
 pub fn normalize_node_version(value: &str) -> Option<String> {
-    parse_exact_node_version(value)
-        .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch))
+    parse_exact_node_version(value).map(|version| version.to_string())
 }
 
 fn compare_versions(left: super::types::SemVer, right: super::types::SemVer) -> std::cmp::Ordering {
