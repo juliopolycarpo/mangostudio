@@ -192,6 +192,13 @@ pub async fn run_bounded_child(
     match terminal.cause {
         ProcessTerminalCause::TimedOut => Err(ChildRunError::TimedOut),
         ProcessTerminalCause::Cancelled => Err(ChildRunError::Cancelled),
+        // No observed status means the supervisor never learned what the child did (its
+        // cleanup owner died before reporting one), which is not the same as "the child ran
+        // and failed" — a caller reading `status_success: false` with no `exit_code` cannot
+        // tell the two apart, and this one reports a missing tool that way.
+        _ if terminal.exit.is_none() => Err(ChildRunError::SpawnFailed(std::io::Error::other(
+            "the process supervisor published no exit status for a bounded child",
+        ))),
         _ => Ok(ChildOutcome {
             status_success: terminal.exit.as_ref().is_some_and(|exit| exit.success),
             exit_code: terminal.exit.and_then(|exit| exit.code),
