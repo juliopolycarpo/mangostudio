@@ -45,10 +45,15 @@
 //! there, since `params` is a value the caller already sent, not one this
 //! runtime is the sole holder of.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
 use jsonschema::Validator;
 use jsonschema::error::ValidationErrorKind;
 use mango_protocol::error::{RemoteError, codes};
 use serde_json::Value;
+
+use crate::ports::audit::lock;
 
 /// Compiles `schema` the same way `mango_protocol::contract::params::compile`
 /// and `mangostudio_runtime_contract::schemas::compile` do: draft 2020-12,
@@ -68,6 +73,22 @@ pub fn compile_result_schema(schema: &Value) -> Validator {
         .should_validate_formats(true)
         .build(schema)
         .expect("a catalog method's result schema is a valid JSON Schema 2020-12 document")
+}
+
+/// `method`'s compiled `result` schema, compiled once per process.
+///
+/// Every transport builds a fresh [`crate::registry::Registry`] per
+/// connection, but the embedded catalog never changes, so each method's
+/// validator is compiled on first use and shared after that. `schema` must be
+/// `method`'s own catalog `result` schema; the cache is keyed by name alone.
+pub(crate) fn cached_result_validator(method: &str, schema: &Value) -> Arc<Validator> {
+    static VALIDATORS: OnceLock<Mutex<HashMap<String, Arc<Validator>>>> = OnceLock::new();
+    let mut validators = lock(VALIDATORS.get_or_init(Mutex::default));
+    Arc::clone(
+        validators
+            .entry(method.to_string())
+            .or_insert_with(|| Arc::new(compile_result_schema(schema))),
+    )
 }
 
 /// Checks `result` against `validator`, `method`'s compiled `result` schema.
@@ -154,7 +175,9 @@ mod tests {
     use mango_protocol::error::codes;
     use serde_json::json;
 
-    use super::{check_result, compile_result_schema};
+    use std::sync::Arc;
+
+    use super::{cached_result_validator, check_result, compile_result_schema};
 
     fn sessions_schema() -> jsonschema::Validator {
         compile_result_schema(&json!({
@@ -236,5 +259,17 @@ mod tests {
                 .unwrap()
                 .contains(secret)
         );
+    }
+
+    #[test]
+    fn a_method_result_validator_is_compiled_once_and_shared() {
+        let schema = json!({ "type": "object" });
+        let first = cached_result_validator("result_check.test.cached", &schema);
+        let second = cached_result_validator("result_check.test.cached", &schema);
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "expected the second lookup to reuse the first compiled validator, got a fresh compile"
+        );
+        assert!(check_result("result_check.test.cached", &second, &json!({})).is_ok());
     }
 }

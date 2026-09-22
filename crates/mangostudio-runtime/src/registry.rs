@@ -32,7 +32,7 @@ use crate::panic::catch_panics;
 use crate::ports::audit::{Audit, AuditEntry, NoopAudit, Outcome};
 use crate::ports::clock::{Clock, SystemClock};
 use crate::ports::exclusivity::{CallExclusivity, NoExclusivity};
-use crate::result_check::{check_result, compile_result_schema};
+use crate::result_check::{cached_result_validator, check_result};
 
 /// Whether a method name is implemented, declared but not implemented, or
 /// not part of the contract at all. Diagnostic only: every case other than
@@ -189,7 +189,7 @@ impl Registry {
              would silently shadow the first handler, and implemented_methods() would report \
              the name twice"
         );
-        let validator = Arc::new(compile_result_schema(&declared.result));
+        let validator = cached_result_validator(&method_name, &declared.result);
         let handler = Arc::new(handler);
         let audit = Arc::clone(&self.audit);
         let clock = Arc::clone(&self.clock);

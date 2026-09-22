@@ -29,13 +29,14 @@ pub mod serve;
 pub mod stdio;
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mango_protocol::contract::Contract;
 use mango_protocol::frame::PeerInfo;
 use mango_protocol::port::Port;
 use mango_protocol::session::{EventInput, Session, SessionClosure, SessionOptions};
+use mangostudio_runtime_contract::catalog::catalog;
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::authorization::ConsentAuthorization;
@@ -180,6 +181,21 @@ pub(crate) fn build_host(
     }
 }
 
+/// The embedded catalog compiled into a [`Contract`], once per process.
+///
+/// Every transport serves the same static catalog, so compiling it per
+/// connection (every `serve` supersession, every `connect` redial) only
+/// repeated the catalog validation and every schema compile.
+fn runtime_contract() -> &'static Contract {
+    static CONTRACT: OnceLock<Contract> = OnceLock::new();
+    CONTRACT.get_or_init(|| {
+        Contract::from_catalog(catalog().clone()).expect(
+            "the embedded catalog compiles into a contract; a change to the catalog that broke \
+             this would already fail mangostudio-runtime-contract's own build",
+        )
+    })
+}
+
 /// [`crate::health::build_capability_manifest`], shaped as the `Map`
 /// [`mango_protocol::session::SessionOptions::with_capabilities`] wants.
 ///
@@ -301,13 +317,12 @@ pub(crate) async fn heartbeat_loop(
 pub(crate) fn start_session<P: Port>(
     port: P,
     options: SessionOptions,
-    contract: &Contract,
     registry: Registry,
     authorization: Arc<dyn Authorization>,
     slot: &str,
 ) -> (Session, tokio::task::JoinHandle<SessionClosure>) {
     let (session, driver) = Session::open(port, options);
-    let guard = crate::serve::serve(contract, &session, registry, authorization, slot)
+    let guard = crate::serve::serve(runtime_contract(), &session, registry, authorization, slot)
         .expect("Registry::implement already panics on a catalog mismatch at registration time");
     guard.persist();
     let driver_handle = tokio::spawn(driver.run());
@@ -323,7 +338,7 @@ mod tests {
 
     use super::{
         RUNTIME_HEARTBEAT_TOPIC, RUNTIME_PEER_NAME, RUNTIME_PEER_ROLE, build_host, heartbeat_loop,
-        runtime_peer,
+        runtime_contract, runtime_peer,
     };
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::scratch_path;
@@ -519,6 +534,14 @@ mod tests {
                 "workspace.validate",
             ],
             "nothing else must be implemented yet"
+        );
+    }
+
+    #[test]
+    fn the_runtime_contract_is_compiled_once_per_process() {
+        assert!(
+            std::ptr::eq(runtime_contract(), runtime_contract()),
+            "expected every transport to share one compiled contract, got two instances"
         );
     }
 }
