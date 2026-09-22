@@ -101,18 +101,14 @@ async fn build_health_report(
     cancel: &CancellationToken,
     path_override: Option<&std::ffi::OsStr>,
 ) -> Result<Value, RemoteError> {
-    let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
-    let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
-
-    let ((shells, git_probe), gh_probe) = tokio::join!(
-        collect_capability_probes(
-            resolved.allow.shell,
-            resolved.allow.git,
-            path_override,
-            cancel
-        ),
-        probe_gh(resolved.allow.git, path_override, cancel),
-    );
+    let CapabilitySnapshot {
+        state,
+        fallback_source,
+        resolved,
+        shells,
+        git: git_probe,
+        gh: gh_probe,
+    } = collect_capability_snapshot(slot, mango_home, path_override, cancel).await;
     let gh = gh_probe.map_err(|_| {
         RemoteError::new(
             codes::CANCELLED,
@@ -183,13 +179,13 @@ pub(crate) async fn build_capability_manifest(
     registry: &Registry,
     cancel: &CancellationToken,
 ) -> RuntimeCapabilityManifest {
-    let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
-    let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
-
-    let ((shells, git_probe), gh_probe) = tokio::join!(
-        collect_capability_probes(resolved.allow.shell, resolved.allow.git, None, cancel),
-        probe_gh(resolved.allow.git, None, cancel),
-    );
+    let CapabilitySnapshot {
+        resolved,
+        shells,
+        git: git_probe,
+        gh: gh_probe,
+        ..
+    } = collect_capability_snapshot(slot, mango_home, None, cancel).await;
     let git = git_probe.unwrap_or_else(|GitProbeCancelled| unavailable_git());
 
     // Mirrors `build_health_report`'s own `unwrap_or_default()`: a `HOME`
@@ -224,6 +220,56 @@ pub(crate) async fn build_capability_manifest(
     manifest
 }
 
+/// Everything `runtime.health` and `hello.capabilities` both derive from:
+/// `slot`'s stored config (resolved fail-closed) and the shell, git, and gh
+/// probes it gates. Each probe keeps its own outcome so the two callers can
+/// apply their different cancellation policies.
+struct CapabilitySnapshot {
+    state: SlotFileState,
+    fallback_source: &'static str,
+    resolved: ResolvedRuntimeSlotConfig,
+    shells: Vec<RuntimeShellKind>,
+    git: Result<GitAvailability, GitProbeCancelled>,
+    gh: Result<GitAvailability, GitProbeCancelled>,
+}
+
+/// Reads and resolves `slot`'s config, then runs every probe it allows
+/// concurrently — the shared setup of [`build_health_report`] and
+/// [`build_capability_manifest`].
+///
+/// # Example
+///
+/// ```ignore
+/// let snapshot = collect_capability_snapshot(slot, &mango_home, None, &cancel).await;
+/// let git = snapshot.git.unwrap_or_else(|GitProbeCancelled| unavailable_git());
+/// ```
+async fn collect_capability_snapshot(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    path_override: Option<&std::ffi::OsStr>,
+    cancel: &CancellationToken,
+) -> CapabilitySnapshot {
+    let (state, fallback_source) = read_slot_state_and_source(slot, mango_home).await;
+    let resolved = resolve_slot_config_fail_closed(slot, &state, fallback_source);
+    let ((shells, git), gh) = tokio::join!(
+        collect_capability_probes(
+            resolved.allow.shell,
+            resolved.allow.git,
+            path_override,
+            cancel
+        ),
+        probe_gh(resolved.allow.git, path_override, cancel),
+    );
+    CapabilitySnapshot {
+        state,
+        fallback_source,
+        resolved,
+        shells,
+        git,
+        gh,
+    }
+}
+
 /// Collects the independent shell and git machine facts behind one shared
 /// seam for both `runtime.health` and `hello.capabilities`.
 ///
@@ -241,18 +287,21 @@ async fn collect_capability_probes(
     Vec<RuntimeShellKind>,
     Result<GitAvailability, GitProbeCancelled>,
 ) {
-    match (allow_shell, allow_git) {
-        (true, true) => {
-            run_independent_probes(
-                detect_shells(path_override),
-                probe_git(path_override, cancel),
-            )
-            .await
+    let shells = async {
+        if allow_shell {
+            detect_shells(path_override).await
+        } else {
+            Vec::new()
         }
-        (true, false) => (detect_shells(path_override).await, Ok(unavailable_git())),
-        (false, true) => (Vec::new(), probe_git(path_override, cancel).await),
-        (false, false) => (Vec::new(), Ok(unavailable_git())),
-    }
+    };
+    let git = async {
+        if allow_git {
+            probe_git(path_override, cancel).await
+        } else {
+            Ok(unavailable_git())
+        }
+    };
+    run_independent_probes(shells, git).await
 }
 
 /// Runs two independent probe futures concurrently, keeping each result so
@@ -631,10 +680,7 @@ async fn probe_cli(
         None => std::env::var_os("PATH"),
     };
     let Some(path_var) = path_var else {
-        return Ok(GitAvailability {
-            available: false,
-            version: None,
-        });
+        return Ok(unavailable_git());
     };
 
     // Bounded by `PATH_WALK_TIMEOUT` via `bounded_path_walk`, matching
@@ -658,10 +704,7 @@ async fn probe_cli(
         // a distinct "probe failed" shape, and never be cached (see
         // `GIT_PROBE_CACHE`'s own doc comment on caching only a definite,
         // successful answer).
-        return Ok(GitAvailability {
-            available: false,
-            version: None,
-        });
+        return Ok(unavailable_git());
     };
 
     let fingerprint = run_blocking({
@@ -699,15 +742,12 @@ async fn probe_cli(
             }
             Ok(availability)
         }
-        Ok(_) => Ok(GitAvailability {
-            available: false,
-            version: None,
-        }),
         Err(ChildRunError::Cancelled) => Err(GitProbeCancelled),
-        Err(ChildRunError::TimedOut | ChildRunError::SpawnFailed(_)) => Ok(GitAvailability {
-            available: false,
-            version: None,
-        }),
+        // A non-zero exit, a timeout and a failed spawn all say only "not
+        // usable right now" — never cached, never an error.
+        Ok(_) | Err(ChildRunError::TimedOut | ChildRunError::SpawnFailed(_)) => {
+            Ok(unavailable_git())
+        }
     }
 }
 
