@@ -1230,9 +1230,13 @@ mod tests {
             .await;
 
         assert_eq!(terminal.cause, ProcessTerminalCause::Exited);
+        // macOS exposes `/var` as a symlink to `/private/var` after the child enters its cwd.
+        // Compare the kernel's resolved directory while retaining the requested path for launch.
+        let expected_cwd =
+            std::fs::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
         assert_eq!(
             terminal.stdout.bytes,
-            format!("one value|{}|kept| input", dir.path().display()).into_bytes()
+            format!("one value|{}|kept| input", expected_cwd.display()).into_bytes()
         );
         assert!(!terminal.stdout.truncated);
         assert!(!terminal.stdout.incomplete);
