@@ -2,10 +2,10 @@
 //!
 //! The runtime process prepares every allocation, environment entry, and descriptor before
 //! forking. The guardian, its parent-death watchdog, and the target then use only direct libc
-//! calls. The guardian becomes a process-group leader before it forks the target, so the target
-//! can never exist outside the group the watchdog kills on parent death. The watchdog stays alive
-//! until the runtime acknowledges final capture, which closes the leader-exit gap for ordinary
-//! descendants that do not retain stdout or stderr.
+//! calls. The target creates its own process group while it is still held behind a start gate;
+//! the watchdog receives that group before the runtime can release `execve`. The watchdog stays
+//! alive until the runtime acknowledges final capture, which closes the leader-exit gap for
+//! ordinary descendants that do not retain stdout or stderr.
 
 #![cfg(unix)]
 #![allow(
@@ -32,14 +32,17 @@ const READY: u8 = b'R';
 const RELEASE: u8 = b'G';
 const FINALIZE: u8 = b'F';
 const STATUS_BYTES: usize = std::mem::size_of::<libc::c_int>();
+const READY_BYTES: usize = STATUS_BYTES + 1;
 
 pub(super) struct GuardianChild {
     pid: libc::pid_t,
+    target_pid: Option<libc::pid_t>,
     stdin: Option<Sender>,
     stdout: Option<Receiver>,
     stderr: Option<Receiver>,
     ready: Receiver,
     status: Receiver,
+    exec_error: Receiver,
     start: Option<OwnedFd>,
     finalize: Option<OwnedFd>,
     // Keeping this endpoint alive is the parent-death lease. Dropping it makes the watchdog
@@ -50,20 +53,29 @@ pub(super) struct GuardianChild {
 
 impl GuardianChild {
     pub(super) fn id(&self) -> Option<u32> {
-        u32::try_from(self.pid).ok()
+        u32::try_from(self.target_pid.unwrap_or(self.pid)).ok()
     }
 
     pub(super) async fn wait_ready(&mut self) -> io::Result<()> {
-        let mut byte = [0];
-        self.ready.read_exact(&mut byte).await?;
-        if byte == [READY] {
-            Ok(())
-        } else {
-            Err(io::Error::new(
+        let mut message = [0; READY_BYTES];
+        self.ready.read_exact(&mut message).await?;
+        if message[0] != READY {
+            return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "process guardian reported an invalid readiness byte",
-            ))
+            ));
         }
+        let mut target = [0; STATUS_BYTES];
+        target.copy_from_slice(&message[1..]);
+        let target = libc::c_int::from_ne_bytes(target);
+        if target <= 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "process guardian reported an invalid target process group",
+            ));
+        }
+        self.target_pid = Some(target);
+        Ok(())
     }
 
     pub(super) fn release_start(&mut self) -> io::Result<()> {
@@ -78,6 +90,25 @@ impl GuardianChild {
         let mut bytes = [0; STATUS_BYTES];
         self.status.read_exact(&mut bytes).await?;
         Ok(ExitStatus::from_raw(libc::c_int::from_ne_bytes(bytes)))
+    }
+
+    /// Waits for a pre-`execve` error, or EOF once `execve` closed the error pipe successfully.
+    pub(super) async fn wait_exec(&mut self) -> io::Result<()> {
+        let mut first = [0];
+        if self.exec_error.read(&mut first).await? == 0 {
+            return Ok(());
+        }
+        let mut bytes = [0; STATUS_BYTES];
+        bytes[0] = first[0];
+        if let Err(error) = self.exec_error.read_exact(&mut bytes[1..]).await {
+            return Err(io::Error::other(format!(
+                "process exec-error pipe ended after byte {}: {error}",
+                first[0]
+            )));
+        }
+        Err(io::Error::from_raw_os_error(libc::c_int::from_ne_bytes(
+            bytes,
+        )))
     }
 
     /// Lets the guardian terminate its group after capture has reached a bounded conclusion.
@@ -139,12 +170,14 @@ impl GuardianChild {
             stderr,
             ready,
             status,
+            exec_error,
             start,
             finalize,
             liveness,
         } = raw;
         set_nonblocking(&ready)?;
         set_nonblocking(&status)?;
+        set_nonblocking(&exec_error)?;
         set_nonblocking(&stdout)?;
         set_nonblocking(&stderr)?;
         if let Some(stdin) = &stdin {
@@ -153,6 +186,7 @@ impl GuardianChild {
 
         let ready = Receiver::from_owned_fd(ready)?;
         let status = Receiver::from_owned_fd(status)?;
+        let exec_error = Receiver::from_owned_fd(exec_error)?;
         let stdout = Receiver::from_owned_fd(stdout)?;
         let stderr = Receiver::from_owned_fd(stderr)?;
         let stdin = stdin.map(Sender::from_owned_fd).transpose()?;
@@ -160,11 +194,13 @@ impl GuardianChild {
 
         Ok(Self {
             pid,
+            target_pid: None,
             stdin,
             stdout: Some(stdout),
             stderr: Some(stderr),
             ready,
             status,
+            exec_error,
             start: Some(start),
             finalize: Some(finalize),
             _liveness: liveness,
@@ -180,6 +216,7 @@ struct RawGuardianChild {
     stderr: OwnedFd,
     ready: OwnedFd,
     status: OwnedFd,
+    exec_error: OwnedFd,
     start: OwnedFd,
     finalize: OwnedFd,
     liveness: OwnedFd,
@@ -189,11 +226,16 @@ struct GuardianFds {
     liveness_read: RawFd,
     ready_write: RawFd,
     status_write: RawFd,
+    exec_error_write: RawFd,
     start_read: RawFd,
     finalize_read: RawFd,
     stdin_target: RawFd,
     stdout_target: RawFd,
     stderr_target: RawFd,
+    target_ready_read: RawFd,
+    target_ready_write: RawFd,
+    watchdog_target_read: RawFd,
+    watchdog_target_write: RawFd,
     descriptor_limit: RawFd,
 }
 
@@ -354,6 +396,9 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
     let (liveness_read, liveness_write) = pipe_cloexec()?;
     let (ready_read, ready_write) = pipe_cloexec()?;
     let (status_read, status_write) = pipe_cloexec()?;
+    let (exec_error_read, exec_error_write) = pipe_cloexec()?;
+    let (target_ready_read, target_ready_write) = pipe_cloexec()?;
+    let (watchdog_target_read, watchdog_target_write) = pipe_cloexec()?;
     let (start_read, start_write) = pipe_cloexec()?;
     let (finalize_read, finalize_write) = pipe_cloexec()?;
     let (stdout_read, stdout_write) = pipe_cloexec()?;
@@ -369,11 +414,16 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
         liveness_read: liveness_read.as_raw_fd(),
         ready_write: ready_write.as_raw_fd(),
         status_write: status_write.as_raw_fd(),
+        exec_error_write: exec_error_write.as_raw_fd(),
         start_read: start_read.as_raw_fd(),
         finalize_read: finalize_read.as_raw_fd(),
         stdin_target: stdin_target.as_raw_fd(),
         stdout_target: stdout_write.as_raw_fd(),
         stderr_target: stderr_write.as_raw_fd(),
+        target_ready_read: target_ready_read.as_raw_fd(),
+        target_ready_write: target_ready_write.as_raw_fd(),
+        watchdog_target_read: watchdog_target_read.as_raw_fd(),
+        watchdog_target_write: watchdog_target_write.as_raw_fd(),
         descriptor_limit,
     };
 
@@ -391,6 +441,11 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
     drop(liveness_read);
     drop(ready_write);
     drop(status_write);
+    drop(exec_error_write);
+    drop(target_ready_read);
+    drop(target_ready_write);
+    drop(watchdog_target_read);
+    drop(watchdog_target_write);
     drop(start_read);
     drop(finalize_read);
     drop(stdin_target);
@@ -403,6 +458,7 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
         stderr: stderr_read,
         ready: ready_read,
         status: status_read,
+        exec_error: exec_error_read,
         start: start_write,
         finalize: finalize_write,
         liveness: liveness_write,
@@ -528,11 +584,16 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
                 fds.liveness_read,
                 fds.ready_write,
                 fds.status_write,
+                fds.exec_error_write,
                 fds.start_read,
                 fds.finalize_read,
                 fds.stdin_target,
                 fds.stdout_target,
                 fds.stderr_target,
+                fds.target_ready_read,
+                fds.target_ready_write,
+                fds.watchdog_target_read,
+                fds.watchdog_target_write,
             ],
             fds.descriptor_limit,
         )
@@ -540,63 +601,91 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     if unsafe { libc::setpgid(0, 0) } != 0 {
         unsafe { libc::_exit(127) };
     }
-    let pgid = unsafe { libc::getpid() };
+    let guardian_pgid = unsafe { libc::getpid() };
 
     let watchdog = unsafe { libc::fork() };
     if watchdog < 0 {
-        kill_group_and_exit(pgid);
+        kill_guardian_group_and_exit(guardian_pgid);
     }
     if watchdog == 0 {
-        watchdog_main(fds, pgid);
+        watchdog_main(fds, guardian_pgid);
     }
     unsafe { libc::close(fds.liveness_read) };
+    unsafe { libc::close(fds.watchdog_target_read) };
 
     let target = unsafe { libc::fork() };
     if target < 0 {
         unsafe { libc::kill(watchdog, libc::SIGKILL) };
-        kill_group_and_exit(pgid);
+        kill_guardian_group_and_exit(guardian_pgid);
     }
     if target == 0 {
         target_main(fds, spec);
     }
+    unsafe { libc::close(fds.target_ready_write) };
+    let Some(target_pgid) = (unsafe { read_status_raw(fds.target_ready_read) }) else {
+        kill_target_and_guardian_and_exit(target, guardian_pgid);
+    };
+    unsafe { libc::close(fds.target_ready_read) };
+    if target_pgid != target || !unsafe { write_status_raw(fds.watchdog_target_write, target_pgid) }
+    {
+        kill_target_and_guardian_and_exit(target, guardian_pgid);
+    }
+    unsafe { libc::close(fds.watchdog_target_write) };
     unsafe {
         close_except(
             &[fds.ready_write, fds.status_write, fds.finalize_read],
             fds.descriptor_limit,
         )
     };
-    if !write_one_raw(fds.ready_write, READY) {
-        kill_group_and_exit(pgid);
+    if !write_ready_raw(fds.ready_write, target_pgid) {
+        kill_target_and_guardian_and_exit(target, guardian_pgid);
     }
     unsafe { libc::close(fds.ready_write) };
 
-    let status = wait_raw(target);
+    // `waitid(WNOWAIT)` leaves the target as this guardian's zombie child until final cleanup.
+    // The target remains the process-group leader during that interval, so a recycled numeric PID
+    // can never redirect a later `kill(-target_pgid, ...)` at an unrelated process.
+    let status = wait_unreaped_raw(target);
     if !write_status_raw(fds.status_write, status) {
-        kill_group_and_exit(pgid);
+        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
     }
     unsafe { libc::close(fds.status_write) };
     // The parent either acknowledges bounded capture or disappears. In both cases, terminate
-    // every ordinary descendant before the guardian itself exits. The watchdog remains alive
-    // during this wait, so a runtime SIGKILL cannot open a leader-exit cleanup gap.
+    // every ordinary descendant before the guardian exits. The watchdog stays alive during this
+    // wait, so a runtime SIGKILL cannot open a leader-exit cleanup gap.
     if read_one_raw(fds.finalize_read) != Some(FINALIZE) {
-        kill_group_and_exit(pgid);
+        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
     }
-    kill_group_and_exit(pgid)
+    unsafe { libc::close(fds.finalize_read) };
+    unsafe { libc::kill(-target_pgid, libc::SIGKILL) };
+    let _ = unsafe { wait_raw(target) };
+    unsafe { libc::kill(watchdog, libc::SIGKILL) };
+    let _ = unsafe { wait_raw(watchdog) };
+    unsafe { libc::_exit(0) }
 }
 
-unsafe fn watchdog_main(fds: GuardianFds, pgid: libc::pid_t) -> ! {
-    unsafe { close_except(&[fds.liveness_read], fds.descriptor_limit) };
+unsafe fn watchdog_main(fds: GuardianFds, guardian_pgid: libc::pid_t) -> ! {
+    unsafe {
+        close_except(
+            &[fds.liveness_read, fds.watchdog_target_read],
+            fds.descriptor_limit,
+        )
+    };
+    let Some(target_pgid) = (unsafe { read_status_raw(fds.watchdog_target_read) }) else {
+        kill_guardian_group_and_exit(guardian_pgid);
+    };
+    unsafe { libc::close(fds.watchdog_target_read) };
     loop {
         let mut byte = 0;
         let read = unsafe { libc::read(fds.liveness_read, (&raw mut byte).cast(), 1) };
         if read == 0 {
-            kill_group_and_exit(pgid);
+            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
         }
         if read < 0 && unsafe { errno_raw() } == libc::EINTR {
             continue;
         }
         if read < 0 {
-            kill_group_and_exit(pgid);
+            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
         }
     }
 }
@@ -606,32 +695,47 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
         close_except(
             &[
                 fds.start_read,
+                fds.exec_error_write,
                 fds.stdin_target,
                 fds.stdout_target,
                 fds.stderr_target,
+                fds.target_ready_write,
             ],
             fds.descriptor_limit,
         )
     };
+    if unsafe { libc::setpgid(0, 0) } != 0 {
+        exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
+    }
+    if !unsafe { write_status_raw(fds.target_ready_write, libc::getpid()) } {
+        unsafe { libc::_exit(127) };
+    }
+    unsafe { libc::close(fds.target_ready_write) };
     if read_one_raw(fds.start_read) != Some(RELEASE) {
         unsafe { libc::_exit(127) };
     }
     unsafe { libc::close(fds.start_read) };
     if unsafe { dup_stdio(fds.stdin_target, fds.stdout_target, fds.stderr_target) }.is_err() {
-        unsafe { libc::_exit(127) };
+        exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
     }
     if let Some(cwd) = &spec.cwd
         && unsafe { libc::chdir(cwd.as_ptr()) } != 0
     {
-        unsafe { libc::_exit(127) };
+        exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
     }
+    let mut error = libc::ENOENT;
     for program in &spec.programs {
         unsafe { libc::execve(program.as_ptr(), spec.argv.as_ptr(), spec.envp.as_ptr()) };
-        let error = unsafe { errno_raw() };
+        error = unsafe { errno_raw() };
         if error != libc::ENOENT && error != libc::ENOTDIR {
             break;
         }
     }
+    exec_failed_and_exit(fds.exec_error_write, error)
+}
+
+unsafe fn exec_failed_and_exit(exec_error: RawFd, error: libc::c_int) -> ! {
+    let _ = unsafe { write_status_raw(exec_error, error) };
     unsafe { libc::_exit(127) }
 }
 
@@ -663,7 +767,7 @@ unsafe fn close_except(keep: &[RawFd], descriptor_limit: RawFd) {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 unsafe fn close_except_with_close_range(keep: &[RawFd], descriptor_limit: RawFd) -> bool {
     let mut cursor = 0;
-    let mut sorted = [-1; 8];
+    let mut sorted = [-1; 14];
     let mut count = 0;
     for descriptor in keep {
         if *descriptor < 0 || *descriptor >= descriptor_limit {
@@ -723,6 +827,73 @@ unsafe fn close_except_one_by_one(keep: &[RawFd], descriptor_limit: RawFd) {
     }
 }
 
+unsafe fn write_ready_raw(descriptor: RawFd, target_pgid: libc::pid_t) -> bool {
+    let mut message = [0; READY_BYTES];
+    message[0] = READY;
+    message[1..].copy_from_slice(&target_pgid.to_ne_bytes());
+    loop {
+        let written = unsafe { libc::write(descriptor, message.as_ptr().cast(), message.len()) };
+        if written == READY_BYTES as libc::ssize_t {
+            return true;
+        }
+        if written < 0 && unsafe { errno_raw() } == libc::EINTR {
+            continue;
+        }
+        return false;
+    }
+}
+
+unsafe fn read_status_raw(descriptor: RawFd) -> Option<libc::c_int> {
+    let mut status = 0;
+    let mut offset = 0;
+    while offset < STATUS_BYTES {
+        let read = unsafe {
+            libc::read(
+                descriptor,
+                (&raw mut status).cast::<u8>().add(offset).cast(),
+                STATUS_BYTES - offset,
+            )
+        };
+        if read > 0 {
+            offset += read as usize;
+            continue;
+        }
+        if read < 0 && unsafe { errno_raw() } == libc::EINTR {
+            continue;
+        }
+        return None;
+    }
+    Some(status)
+}
+
+unsafe fn wait_unreaped_raw(pid: libc::pid_t) -> libc::c_int {
+    // SAFETY: `siginfo_t` is an all-zeroable C output structure that `waitid` fills on success.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    loop {
+        let waited = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &raw mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if waited == 0 {
+            let status = unsafe { info.si_status() };
+            return match info.si_code {
+                libc::CLD_EXITED => status << 8,
+                libc::CLD_KILLED => status,
+                libc::CLD_DUMPED => status | 0x80,
+                _ => 127 << 8,
+            };
+        }
+        if unsafe { errno_raw() } == libc::EINTR {
+            continue;
+        }
+        return 127 << 8;
+    }
+}
+
 unsafe fn wait_raw(pid: libc::pid_t) -> libc::c_int {
     let mut status = 0;
     loop {
@@ -737,8 +908,17 @@ unsafe fn wait_raw(pid: libc::pid_t) -> libc::c_int {
     }
 }
 
-unsafe fn kill_group_and_exit(pgid: libc::pid_t) -> ! {
-    unsafe { libc::kill(-pgid, libc::SIGKILL) };
+unsafe fn kill_guardian_group_and_exit(guardian_pgid: libc::pid_t) -> ! {
+    unsafe { libc::kill(-guardian_pgid, libc::SIGKILL) };
+    unsafe { libc::_exit(127) }
+}
+
+unsafe fn kill_target_and_guardian_and_exit(
+    target_pgid: libc::pid_t,
+    guardian_pgid: libc::pid_t,
+) -> ! {
+    unsafe { libc::kill(-target_pgid, libc::SIGKILL) };
+    unsafe { libc::kill(-guardian_pgid, libc::SIGKILL) };
     unsafe { libc::_exit(127) }
 }
 
@@ -753,19 +933,6 @@ fn write_one_parent(descriptor: RawFd, byte: u8) -> io::Result<()> {
             continue;
         }
         return Err(io::Error::last_os_error());
-    }
-}
-
-unsafe fn write_one_raw(descriptor: RawFd, byte: u8) -> bool {
-    loop {
-        let written = unsafe { libc::write(descriptor, (&raw const byte).cast(), 1) };
-        if written == 1 {
-            return true;
-        }
-        if written < 0 && unsafe { errno_raw() } == libc::EINTR {
-            continue;
-        }
-        return false;
     }
 }
 
