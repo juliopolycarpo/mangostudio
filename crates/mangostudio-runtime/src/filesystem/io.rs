@@ -6,7 +6,7 @@ use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-#[cfg(all(test, not(windows)))]
+#[cfg(all(test, target_os = "linux"))]
 use cap_fs_ext::MetadataExt as _;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt as _};
 use cap_std::fs::{OpenOptions as CapOpenOptions, Permissions as CapPermissions};
