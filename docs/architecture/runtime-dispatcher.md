@@ -207,6 +207,27 @@ serve. Its paired-connect sibling runs the same assertions through the Hub conne
 The qualification job runs these suites on Linux, macOS, and Windows. Windows-only junction tests and Unix non-UTF-8 identity tests live in
 `filesystem::policy::tests`.
 
+### Snapshot behavior
+
+The three snapshot methods share the filesystem path locks and freshness ledger. Capture
+encodes raw bytes up to 8 MiB; hash reads incrementally; revert checks expected hashes before
+replaying the supplied reverse operations. Rust rechecks consent and containment after hashing,
+under the same locks, before the first mutation. Once replay starts, cancellation does not
+interrupt its remaining operations. A dropped caller also cannot release a running worker's locks.
+
+| TypeScript assertion                                                                               | Rust coverage (`filesystem::snapshot::tests`)                        |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `services/snapshot.test.ts`: rejects a file past the snapshot limit                                | `capture_enforces_the_eight_mebibyte_limit_and_preflights_its_frame` |
+| `services/snapshot.test.ts`: rejects an escape when containmentRoot is set                         | `revert_uses_the_typescript_containment_error_for_a_symlink_escape`  |
+| `services/cancellation.test.ts`: refuses an already-reverted retry cancelled during its final hash | `a_cancel_during_the_final_hash_refuses_an_already_reverted_retry`   |
+| `services/cancellation.test.ts`: finishes every revert operation after cancellation during replay  | `cancellation_after_the_first_replay_operation_completes_the_replay` |
+
+`rust-snapshot-compat.integration.test.ts` compares the production Rust and TypeScript hosts
+through Hub clients: binary capture, missing files, size errors, reverse replay, freshness,
+retry conflicts, permissive base64 decoding, move collisions, and symlink or junction containment.
+It also exercises cross-device moves on Linux when the test filesystem provides two devices.
+The runtime qualification job includes this suite on Linux, macOS, and Windows.
+
 ### Dispatcher behavior
 
 | TypeScript test (`packages/protocol/tests/`, `apps/runtime/`)                                        | Rust home                                                                                                                                                                                            |
