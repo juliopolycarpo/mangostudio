@@ -10,6 +10,7 @@
  * assertLockstep(versions); // throws naming the manifest that drifted
  */
 
+import { cargoLockVersion } from '../lib/cargo-version';
 import { ROOT_DIR } from '../lib/config';
 
 export interface ManifestVersion {
@@ -133,14 +134,19 @@ export function workspaceVersion(cargoToml: string): string {
  * ); // '0.1.0'
  */
 export function workspaceDependencyVersion(cargoToml: string, crateName: string): string {
-  const pattern = new RegExp(
-    `${escapeRegExp(crateName)}\\s*=\\s*\\{[^}]*version\\s*=\\s*"([^"]+)"`
-  );
-  const match = cargoToml.match(pattern);
-  if (!match?.[1]) {
-    throw new Error(`Cargo.toml has no ${crateName} entry under [workspace.dependencies].`);
-  }
-  return match[1];
+  const match = cargoToml.match(workspaceDependencyPattern(crateName));
+  if (!match?.[2]) throw missingWorkspaceDependency(crateName);
+  return match[2];
+}
+
+/** `crateName`'s `[workspace.dependencies]` pin: $1 up to the version, $2 the version, $3 its
+ * closing quote. // Usage: cargoToml.match(workspaceDependencyPattern('mango-protocol'))?.[2] */
+function workspaceDependencyPattern(crateName: string): RegExp {
+  return new RegExp(`(${escapeRegExp(crateName)}\\s*=\\s*\\{[^}]*version\\s*=\\s*")([^"]+)(")`);
+}
+
+function missingWorkspaceDependency(crateName: string): Error {
+  return new Error(`Cargo.toml has no ${crateName} entry under [workspace.dependencies].`);
 }
 
 /**
@@ -153,22 +159,9 @@ export function workspaceDependencyVersion(cargoToml: string, crateName: string)
  * ); // '0.1.0'
  */
 export function lockedCrateVersion(cargoLock: string, crateName: string): string {
-  let inNamedPackage = false;
-  for (const line of cargoLock.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed === '[[package]]') {
-      inNamedPackage = false;
-      continue;
-    }
-    const name = trimmed.match(/^name\s*=\s*"([^"]+)"/);
-    if (name) {
-      inNamedPackage = name[1] === crateName;
-      continue;
-    }
-    const version = inNamedPackage ? trimmed.match(/^version\s*=\s*"([^"]+)"/) : null;
-    if (version?.[1]) return version[1];
-  }
-  throw new Error(`Cargo.lock has no entry for ${crateName}.`);
+  const version = cargoLockVersion(cargoLock, crateName);
+  if (version === undefined) throw new Error(`Cargo.lock has no entry for ${crateName}.`);
+  return version;
 }
 
 /**
@@ -204,13 +197,9 @@ export async function writeVersions(version: string, root = ROOT_DIR): Promise<v
   let updated = `${head}[workspace.package]${nextTail}`;
 
   for (const crateName of WORKSPACE_DEPENDENCY_CRATES) {
-    const dependencyPattern = new RegExp(
-      `(${escapeRegExp(crateName)}\\s*=\\s*\\{[^}]*version\\s*=\\s*")[^"]+(")`
-    );
-    if (!dependencyPattern.test(updated)) {
-      throw new Error(`Cargo.toml has no ${crateName} entry under [workspace.dependencies].`);
-    }
-    updated = updated.replace(dependencyPattern, `$1${version}$2`);
+    const dependencyPattern = workspaceDependencyPattern(crateName);
+    if (!dependencyPattern.test(updated)) throw missingWorkspaceDependency(crateName);
+    updated = updated.replace(dependencyPattern, `$1${version}$3`);
   }
 
   // Validate and compute every rewrite before touching either manifest. Otherwise a missing later

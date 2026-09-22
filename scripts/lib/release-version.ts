@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { cargoLockVersion } from './cargo-version';
 import { ROOT_DIR } from './config';
 
 // Official semver grammar (https://semver.org), anchored. Accepts optional
@@ -172,24 +173,11 @@ export function readCargoManifestVersion(manifestPath: string): string {
  * // Usage: readCargoLockVersion('/repo/Cargo.lock', 'mangostudio') */
 export function readCargoLockVersion(lockfilePath: string, crateName: string): string {
   const raw = readTextFile(lockfilePath, 'Cargo lockfile');
-  let inNamedPackage = false;
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed === '[[package]]') {
-      inNamedPackage = false;
-      continue;
-    }
-    const name = trimmed.match(/^name\s*=\s*"([^"]+)"/);
-    if (name) {
-      inNamedPackage = name[1] === crateName;
-      continue;
-    }
-    const version = inNamedPackage && trimmed.match(/^version\s*=\s*"([^"]+)"/);
-    if (version) {
-      return version[1];
-    }
+  const version = cargoLockVersion(raw, crateName);
+  if (version === undefined) {
+    throw new Error(`Cargo.lock at ${lockfilePath} does not list ${crateName}`);
   }
-  throw new Error(`Cargo.lock at ${lockfilePath} does not list ${crateName}`);
+  return version;
 }
 
 /** The version every release artifact should carry: the VERSION env override

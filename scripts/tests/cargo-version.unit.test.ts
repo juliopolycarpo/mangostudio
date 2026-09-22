@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setCargoLockVersion, setCargoManifestVersion } from '../lib/cargo-version';
+import {
+  cargoLockVersion,
+  setCargoLockVersion,
+  setCargoManifestVersion,
+} from '../lib/cargo-version';
 import { readCargoLockVersion, readCargoManifestVersion } from '../lib/release-version';
 
 const MANIFEST = [
@@ -31,6 +35,17 @@ const LOCKFILE = [
 ].join('\n');
 
 const CANARY = '0.1.0-canary';
+
+describe('cargoLockVersion', () => {
+  test('reads the named package, not the first version line in the file', () => {
+    expect(cargoLockVersion(LOCKFILE, 'mangostudio')).toBe('0.1.0');
+    expect(cargoLockVersion(LOCKFILE, 'flate2')).toBe('1.1.9');
+  });
+
+  test('returns undefined for a crate the lockfile does not list', () => {
+    expect(cargoLockVersion(LOCKFILE, 'absent')).toBeUndefined();
+  });
+});
 
 describe('setCargoManifestVersion', () => {
   test('rewrites the [package] version, leaving dependency versions untouched', () => {
