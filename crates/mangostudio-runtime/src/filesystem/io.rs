@@ -1047,6 +1047,24 @@ struct PreparedCopyMove<'a> {
     paths: MovePaths<'a>,
 }
 
+enum NamedFileState {
+    Absent,
+    Present,
+    Uncertain,
+}
+
+enum NamedFileMatch {
+    Matches,
+    DoesNotMatch,
+    Uncertain,
+}
+
+enum SourceRestoreOutcome {
+    Restored,
+    NotCommitted,
+    CommittedUncertain,
+}
+
 trait MoveCopyHooks {
     fn destination_temporary_name(&mut self) -> Result<OsString, RemoteError> {
         temporary_name()
@@ -1071,6 +1089,8 @@ trait MoveCopyHooks {
     }
 
     fn after_source_stage(&mut self, _: &Path) {}
+
+    fn after_source_restore(&mut self, _: &Path) {}
 
     fn before_temporary_cleanup(&mut self, _: &Path) -> std::io::Result<()> {
         Ok(())
@@ -1110,6 +1130,33 @@ fn copy_move_no_overwrite(
         paths: MovePaths { from, to },
     };
     let temporary_path = copied.paths.to.with_file_name(&copied.prepared.temporary);
+    match named_file_state(copied.to_parent) {
+        NamedFileState::Absent => {}
+        NamedFileState::Present => {
+            remove_owned_move_temporary(
+                copied.to_parent,
+                &copied.prepared.temporary,
+                copied.prepared.identity,
+                &copied.source.hash,
+                &temporary_path,
+                &copied.paths,
+                hooks,
+            )?;
+            return Err(destination_exists_error(to));
+        }
+        NamedFileState::Uncertain => {
+            remove_owned_move_temporary(
+                copied.to_parent,
+                &copied.prepared.temporary,
+                copied.prepared.identity,
+                &copied.source.hash,
+                &temporary_path,
+                &copied.paths,
+                hooks,
+            )?;
+            return Err(destination_availability_uncertain_error(from, to));
+        }
+    }
     if let Err(cause) = hooks.before_source_stage(from) {
         return Err(abort_unpublished_copy_before_source_stage(
             &mut copied,
@@ -1169,7 +1216,7 @@ fn copy_move_no_overwrite(
     }
 
     hooks.before_publish(&temporary_path);
-    if !named_file_is_absent(copied.from_parent)
+    if !matches!(named_file_state(copied.from_parent), NamedFileState::Absent)
         || !named_file_matches_at(
             copied.to_parent,
             &copied.prepared.temporary,
@@ -1195,20 +1242,37 @@ fn copy_move_no_overwrite(
         ));
     }
     hooks.after_publish(to);
-    if !named_file_is_absent(copied.from_parent)
-        || !named_file_matches(
-            copied.to_parent,
-            copied.prepared.identity,
-            &copied.source.hash,
-        )
-    {
-        return Err(recover_staged_source_after_copy_failure(
-            &mut copied,
-            &tombstone,
-            CopiedMoveState::Published,
-            std::io::Error::from(std::io::ErrorKind::AlreadyExists),
-            hooks,
-        ));
+    let destination_match = named_file_match_state(
+        copied.to_parent,
+        copied.prepared.identity,
+        &copied.source.hash,
+    );
+    match (destination_match, named_file_state(copied.from_parent)) {
+        (NamedFileMatch::Matches, NamedFileState::Absent) => {}
+        (NamedFileMatch::Matches, source_state) => {
+            return Err(published_destination_source_state_error(
+                from,
+                to,
+                &tombstone_path,
+                source_state,
+            ));
+        }
+        (NamedFileMatch::DoesNotMatch, _) => {
+            return Err(recover_staged_source_after_copy_failure(
+                &mut copied,
+                &tombstone,
+                CopiedMoveState::Published,
+                std::io::Error::from(std::io::ErrorKind::AlreadyExists),
+                hooks,
+            ));
+        }
+        (NamedFileMatch::Uncertain, _) => {
+            return Err(published_destination_verification_uncertain_error(
+                from,
+                to,
+                &tombstone_path,
+            ));
+        }
     }
     remove_owned_move_temporary(
         copied.from_parent,
@@ -1346,14 +1410,70 @@ fn named_file_matches(parent: &VerifiedParent, identity: ObjectIdentity, hash: &
         .unwrap_or(false)
 }
 
-fn named_file_is_absent(parent: &VerifiedParent) -> bool {
+fn named_file_match_state(
+    parent: &VerifiedParent,
+    identity: ObjectIdentity,
+    hash: &str,
+) -> NamedFileMatch {
+    parent
+        .with_parent(|dir, leaf| named_file_match_state_in(dir, leaf, identity, hash))
+        .unwrap_or(NamedFileMatch::Uncertain)
+}
+
+fn named_file_match_state_in(
+    dir: &cap_std::fs::Dir,
+    leaf: &Path,
+    expected_identity: ObjectIdentity,
+    expected_hash: &str,
+) -> Result<NamedFileMatch, RemoteError> {
+    let mut options = CapOpenOptions::new();
+    options.read(true);
+    options.follow(FollowSymlinks::No);
+    #[cfg(unix)]
+    {
+        use cap_std::fs::OpenOptionsExt as _;
+
+        options.custom_flags(nix::libc::O_NONBLOCK);
+    }
+    let file = match dir.open_with(leaf, &options) {
+        Ok(file) => file.into_std(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(NamedFileMatch::DoesNotMatch);
+        }
+        Err(_) => return Ok(NamedFileMatch::Uncertain),
+    };
+    let metadata = match file.metadata() {
+        Ok(metadata) => metadata,
+        Err(_) => return Ok(NamedFileMatch::Uncertain),
+    };
+    if !metadata.is_file() {
+        return Ok(NamedFileMatch::DoesNotMatch);
+    }
+    let current_identity = match object_identity(&file, &metadata) {
+        Ok(identity) => identity,
+        Err(_) => return Ok(NamedFileMatch::Uncertain),
+    };
+    if current_identity != expected_identity {
+        return Ok(NamedFileMatch::DoesNotMatch);
+    }
+    let mut file = file;
+    match hash_open_file(&mut file) {
+        Ok(hash) if hash == expected_hash => Ok(NamedFileMatch::Matches),
+        Ok(_) => Ok(NamedFileMatch::DoesNotMatch),
+        Err(_) => Ok(NamedFileMatch::Uncertain),
+    }
+}
+
+fn named_file_state(parent: &VerifiedParent) -> NamedFileState {
     parent
         .with_parent(|dir, leaf| match dir.symlink_metadata(leaf) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-            Ok(_) => Ok(false),
-            Err(error) => Err(io_error(error)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(NamedFileState::Absent)
+            }
+            Ok(_) => Ok(NamedFileState::Present),
+            Err(_) => Ok(NamedFileState::Uncertain),
         })
-        .unwrap_or(false)
+        .unwrap_or(NamedFileState::Uncertain)
 }
 
 fn named_file_matches_at(
@@ -1474,15 +1594,33 @@ fn recover_staged_source_after_copy_failure(
 ) -> RemoteError {
     let tombstone_path = copied.paths.from.with_file_name(tombstone);
     let temporary_path = copied.paths.to.with_file_name(&copied.prepared.temporary);
-    if !restore_staged_source_no_replace(copied.from_parent, copied.source, tombstone) {
-        return staged_source_and_copy_recovery_error(
-            copied.paths.from,
-            copied.paths.to,
-            &tombstone_path,
-            &temporary_path,
-            state,
-            cause,
-        );
+    match restore_staged_source_no_replace(
+        copied.from_parent,
+        copied.source,
+        tombstone,
+        copied.paths.from,
+        hooks,
+    ) {
+        SourceRestoreOutcome::Restored => {}
+        SourceRestoreOutcome::NotCommitted => {
+            return staged_source_and_copy_recovery_error(
+                copied.paths.from,
+                copied.paths.to,
+                &tombstone_path,
+                &temporary_path,
+                state,
+                cause,
+            );
+        }
+        SourceRestoreOutcome::CommittedUncertain => {
+            return committed_source_restore_uncertain_error(
+                copied.paths.from,
+                copied.paths.to,
+                &temporary_path,
+                state,
+                cause,
+            );
+        }
     }
 
     if matches!(state, CopiedMoveState::Temporary)
@@ -1525,20 +1663,29 @@ fn restore_staged_source_no_replace(
     parent: &VerifiedParent,
     source: &mut MoveSource,
     tombstone: &OsString,
-) -> bool {
+    restored_path: &Path,
+    hooks: &mut impl MoveCopyHooks,
+) -> SourceRestoreOutcome {
     if !retained_source_matches(source) {
-        return false;
+        return SourceRestoreOutcome::NotCommitted;
     }
     parent
         .with_parent(|dir, leaf| {
             if !temporary_matches(dir, Path::new(tombstone), source.identity, &source.hash) {
-                return Ok(false);
+                return Ok(SourceRestoreOutcome::NotCommitted);
             }
-            atomic_rename_no_replace(dir, Path::new(tombstone), dir, leaf, &source.file)
-                .map_err(io_error)?;
-            Ok(temporary_matches(dir, leaf, source.identity, &source.hash))
+            if atomic_rename_no_replace(dir, Path::new(tombstone), dir, leaf, &source.file).is_err()
+            {
+                return Ok(SourceRestoreOutcome::NotCommitted);
+            }
+            hooks.after_source_restore(restored_path);
+            if temporary_matches(dir, leaf, source.identity, &source.hash) {
+                Ok(SourceRestoreOutcome::Restored)
+            } else {
+                Ok(SourceRestoreOutcome::CommittedUncertain)
+            }
         })
-        .unwrap_or(false)
+        .unwrap_or(SourceRestoreOutcome::NotCommitted)
 }
 
 fn staged_source_and_copy_uncertain_error(
@@ -1566,16 +1713,99 @@ fn staged_source_and_copy_recovery_error(
     cause: impl std::fmt::Display,
 ) -> RemoteError {
     let copy_path = match state {
-        CopiedMoveState::Temporary => format!(
-            "Temporary \"{}\" was retained because its ownership cannot be proved.",
-            temporary.display()
-        ),
+        CopiedMoveState::Temporary => {
+            format!(
+                "Temporary \"{}\" was retained for recovery.",
+                temporary.display()
+            )
+        }
         CopiedMoveState::Published => {
             "The destination may contain the copied bytes or a replacement.".to_owned()
         }
     };
     path_error(format!(
         "Copied move from \"{}\" to \"{}\" could not restore staged source recovery at \"{}\" without replacing a recreated source. {copy_path} Inspect all paths before retrying. Cause: {cause}",
+        from.display(),
+        to.display(),
+        tombstone.display(),
+    ))
+    .with_detail("pathsMayHaveChanged", true)
+}
+
+fn committed_source_restore_uncertain_error(
+    from: &Path,
+    to: &Path,
+    temporary: &Path,
+    state: CopiedMoveState,
+    cause: impl std::fmt::Display,
+) -> RemoteError {
+    let copy_path = match state {
+        CopiedMoveState::Temporary => {
+            format!(
+                "Temporary \"{}\" was retained for recovery.",
+                temporary.display()
+            )
+        }
+        CopiedMoveState::Published => {
+            "The destination may contain the copied bytes or a replacement.".to_owned()
+        }
+    };
+    path_error(format!(
+        "Copied move from \"{}\" to \"{}\" committed source restoration, but the source no longer identifies the captured bytes. {copy_path} Inspect both paths before retrying. Cause: {cause}",
+        from.display(),
+        to.display(),
+    ))
+    .with_detail("pathsMayHaveChanged", true)
+}
+
+fn destination_exists_error(destination: &Path) -> RemoteError {
+    path_error(format!(
+        "\"{}\" already exists. Choose a different destination.",
+        destination.display()
+    ))
+}
+
+fn destination_availability_uncertain_error(from: &Path, to: &Path) -> RemoteError {
+    path_error(format!(
+        "Could not confirm that destination \"{}\" is absent before staging source \"{}\". The source was retained and no copied destination was published.",
+        to.display(),
+        from.display(),
+    ))
+    .with_detail("pathsMayHaveChanged", true)
+}
+
+fn published_destination_source_state_error(
+    from: &Path,
+    to: &Path,
+    tombstone: &Path,
+    state: NamedFileState,
+) -> RemoteError {
+    let recovery_state = match state {
+        NamedFileState::Present => format!(
+            "the source was recreated, so recovery path \"{}\" was left untouched",
+            tombstone.display()
+        ),
+        NamedFileState::Uncertain => format!(
+            "the source and recovery path \"{}\" could not be checked",
+            tombstone.display()
+        ),
+        NamedFileState::Absent => unreachable!("the caller handles an absent source"),
+    };
+    path_error(format!(
+        "Copied move from \"{}\" to \"{}\" published a destination that still identifies the copied bytes, but {recovery_state}. Inspect source, destination, and recovery paths before retrying.",
+        from.display(),
+        to.display(),
+    ))
+    .with_detail("pathsMayHaveChanged", true)
+}
+
+fn published_destination_verification_uncertain_error(
+    from: &Path,
+    to: &Path,
+    tombstone: &Path,
+) -> RemoteError {
+    path_error(format!(
+        "Copied move from \"{}\" to \"{}\" published a destination, but it could not be verified to identify the copied bytes. Source recovery path \"{}\" was left untouched. Inspect source, destination, and recovery paths before retrying.",
         from.display(),
         to.display(),
         tombstone.display(),
@@ -2130,6 +2360,69 @@ mod tests {
         }
     }
 
+    struct SourceRecreatedAfterPublication {
+        source: PathBuf,
+        tombstone: Option<PathBuf>,
+    }
+
+    impl MoveCopyHooks for SourceRecreatedAfterPublication {
+        fn after_source_stage(&mut self, tombstone: &Path) {
+            self.tombstone = Some(tombstone.to_path_buf());
+        }
+
+        fn after_publish(&mut self, _: &Path) {
+            fs::write(&self.source, b"external source").unwrap();
+        }
+
+        fn after_source_restore(&mut self, _: &Path) {
+            panic!("a verified destination with a recreated source must not be restored");
+        }
+    }
+
+    #[cfg(not(windows))]
+    struct SourceParentRenamedAfterPublication {
+        source_parent: PathBuf,
+        relocated_parent: PathBuf,
+        tombstone: Option<PathBuf>,
+    }
+
+    #[cfg(not(windows))]
+    impl MoveCopyHooks for SourceParentRenamedAfterPublication {
+        fn after_source_stage(&mut self, tombstone: &Path) {
+            self.tombstone = Some(tombstone.to_path_buf());
+        }
+
+        fn after_publish(&mut self, _: &Path) {
+            fs::rename(&self.source_parent, &self.relocated_parent).unwrap();
+        }
+
+        fn after_source_restore(&mut self, _: &Path) {
+            panic!("a verified destination with an uncheckable source must not be restored");
+        }
+    }
+
+    #[cfg(not(windows))]
+    struct DestinationParentRenamedAfterPublication {
+        destination_parent: PathBuf,
+        relocated_parent: PathBuf,
+        tombstone: Option<PathBuf>,
+    }
+
+    #[cfg(not(windows))]
+    impl MoveCopyHooks for DestinationParentRenamedAfterPublication {
+        fn after_source_stage(&mut self, tombstone: &Path) {
+            self.tombstone = Some(tombstone.to_path_buf());
+        }
+
+        fn after_publish(&mut self, _: &Path) {
+            fs::rename(&self.destination_parent, &self.relocated_parent).unwrap();
+        }
+
+        fn after_source_restore(&mut self, _: &Path) {
+            panic!("an uncheckable destination must retain source recovery");
+        }
+    }
+
     struct ForcedSourceStageFailure;
 
     impl MoveCopyHooks for ForcedSourceStageFailure {
@@ -2149,6 +2442,14 @@ mod tests {
                 "the destination must remain private until source staging succeeds"
             );
             Err(std::io::Error::other("forced source stage failure"))
+        }
+    }
+
+    struct OccupiedDestinationBeforeSourceStage;
+
+    impl MoveCopyHooks for OccupiedDestinationBeforeSourceStage {
+        fn before_source_stage(&mut self, _: &Path) -> std::io::Result<()> {
+            panic!("a known occupied destination must be rejected before source staging");
         }
     }
 
@@ -2247,6 +2548,28 @@ mod tests {
             self.tombstone = Some(tombstone.to_path_buf());
             fs::write(&self.source, b"external source").unwrap();
             fs::write(&self.destination, b"external destination").unwrap();
+        }
+    }
+
+    struct SourceSwapAfterRestore {
+        destination: PathBuf,
+        temporary: Option<PathBuf>,
+        tombstone: Option<PathBuf>,
+    }
+
+    impl MoveCopyHooks for SourceSwapAfterRestore {
+        fn after_copy(&mut self, temporary: &Path) {
+            self.temporary = Some(temporary.to_path_buf());
+        }
+
+        fn after_source_stage(&mut self, tombstone: &Path) {
+            self.tombstone = Some(tombstone.to_path_buf());
+            fs::write(&self.destination, b"external destination").unwrap();
+        }
+
+        fn after_source_restore(&mut self, source: &Path) {
+            fs::remove_file(source).unwrap();
+            fs::write(source, b"external source").unwrap();
         }
     }
 
@@ -2706,6 +3029,47 @@ mod tests {
     }
 
     #[test]
+    fn copy_move_rejects_an_existing_destination_before_staging_the_source() {
+        let root = scratch_dir("fs-io-copy-move-existing-destination-before-stage");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        fs::write(&destination, b"external destination").unwrap();
+        let policy = copy_fallback_policy(&root);
+
+        let error = copy_move_no_overwrite_bound_with_hooks(
+            &policy,
+            &source,
+            &destination,
+            &mut OccupiedDestinationBeforeSourceStage,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.message,
+            format!(
+                "\"{}\" already exists. Choose a different destination.",
+                destination.display()
+            )
+        );
+        assert!(
+            error
+                .details
+                .as_ref()
+                .is_none_or(|details| !details.contains_key("pathsMayHaveChanged"))
+        );
+        assert_eq!(fs::read(&source).unwrap(), b"captured source");
+        assert_eq!(fs::read(&destination).unwrap(), b"external destination");
+        assert!(!fs::read_dir(&root).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".mango-")
+        }));
+    }
+
+    #[test]
     fn copy_move_keeps_a_destination_replaced_before_source_stage_failure() {
         let root = scratch_dir("fs-io-copy-move-source-stage-ownership-uncertain");
         let source = root.join("source");
@@ -3062,6 +3426,105 @@ mod tests {
     }
 
     #[test]
+    fn copy_move_keeps_verified_destination_and_tombstone_when_source_reappears() {
+        let root = scratch_dir("fs-io-copy-move-source-recreated-after-publication");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+        let mut hooks = SourceRecreatedAfterPublication {
+            source: source.clone(),
+            tombstone: None,
+        };
+
+        let error =
+            copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
+                .unwrap_err();
+
+        let tombstone = hooks.tombstone.unwrap();
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(error.message.contains("source was recreated"));
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert!(error.message.contains(&tombstone.display().to_string()));
+        assert_eq!(fs::read(&source).unwrap(), b"external source");
+        assert_eq!(fs::read(&destination).unwrap(), b"captured source");
+        assert_eq!(fs::read(&tombstone).unwrap(), b"captured source");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn copy_move_retains_recovery_when_the_source_cannot_be_rechecked_after_publish() {
+        let root = scratch_dir("fs-io-copy-move-source-parent-after-publish");
+        let source_parent = root.join("source-parent");
+        let relocated_parent = root.join("relocated-source-parent");
+        fs::create_dir(&source_parent).unwrap();
+        let source = source_parent.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+        let mut hooks = SourceParentRenamedAfterPublication {
+            source_parent,
+            relocated_parent: relocated_parent.clone(),
+            tombstone: None,
+        };
+
+        let error =
+            copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
+                .unwrap_err();
+
+        let tombstone = hooks.tombstone.unwrap();
+        let relocated_tombstone = relocated_parent.join(tombstone.file_name().unwrap());
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(error.message.contains("could not be checked"));
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert!(error.message.contains(&tombstone.display().to_string()));
+        assert!(!source.exists());
+        assert_eq!(fs::read(&destination).unwrap(), b"captured source");
+        assert_eq!(fs::read(&relocated_tombstone).unwrap(), b"captured source");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn copy_move_retains_recovery_when_the_published_destination_cannot_be_verified() {
+        let root = scratch_dir("fs-io-copy-move-destination-parent-after-publish");
+        let destination_parent = root.join("destination-parent");
+        let relocated_parent = root.join("relocated-destination-parent");
+        fs::create_dir(&destination_parent).unwrap();
+        let source = root.join("source");
+        let destination = destination_parent.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+        let mut hooks = DestinationParentRenamedAfterPublication {
+            destination_parent,
+            relocated_parent: relocated_parent.clone(),
+            tombstone: None,
+        };
+
+        let error =
+            copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
+                .unwrap_err();
+
+        let tombstone = hooks.tombstone.unwrap();
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(
+            error
+                .message
+                .contains("could not be verified to identify the copied bytes")
+        );
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert!(error.message.contains(&tombstone.display().to_string()));
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read(relocated_parent.join("destination")).unwrap(),
+            b"captured source"
+        );
+        assert_eq!(fs::read(&tombstone).unwrap(), b"captured source");
+    }
+
+    #[test]
     fn copy_move_restores_the_staged_source_when_destination_collides_before_publish() {
         let root = scratch_dir("fs-io-copy-move-source-stage-destination-swap");
         let source = root.join("source");
@@ -3111,6 +3574,37 @@ mod tests {
         assert_eq!(fs::read(&destination).unwrap(), b"external destination");
         assert_eq!(fs::read(&temporary).unwrap(), b"captured source");
         assert_eq!(fs::read(&tombstone).unwrap(), b"captured source");
+    }
+
+    #[test]
+    fn copy_move_reports_a_source_swap_after_restore_without_claiming_a_tombstone() {
+        let root = scratch_dir("fs-io-copy-move-source-swap-after-restore");
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::write(&source, b"captured source").unwrap();
+        let policy = copy_fallback_policy(&root);
+        let mut hooks = SourceSwapAfterRestore {
+            destination: destination.clone(),
+            temporary: None,
+            tombstone: None,
+        };
+
+        let error =
+            copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
+                .unwrap_err();
+
+        let temporary = hooks.temporary.unwrap();
+        let tombstone = hooks.tombstone.unwrap();
+        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
+        assert!(error.message.contains("committed source restoration"));
+        assert!(error.message.contains(&source.display().to_string()));
+        assert!(error.message.contains(&destination.display().to_string()));
+        assert!(error.message.contains(&temporary.display().to_string()));
+        assert!(!error.message.contains(&tombstone.display().to_string()));
+        assert_eq!(fs::read(&source).unwrap(), b"external source");
+        assert_eq!(fs::read(&destination).unwrap(), b"external destination");
+        assert_eq!(fs::read(&temporary).unwrap(), b"captured source");
+        assert!(!tombstone.exists());
     }
 
     #[cfg(not(windows))]
