@@ -22,7 +22,17 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { RemoteError } from '@mangostudio/protocol';
@@ -404,6 +414,43 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       await assertCrossDeviceMove(rust, fixtures.rust);
     }
   );
+
+  it('can retry a cross-device revert after source removal is denied', async () => {
+    if (process.getuid?.() === 0) return;
+    const fixtures = await crossDeviceFixturePair('cross-device-retry');
+    if (!fixtures) return;
+    const bytes = Buffer.from('retained until the reverse move commits');
+
+    async function assertRetry(client: RuntimeClient, paths: CrossDevicePaths): Promise<void> {
+      const path = join(paths.sourceRoot, 'before.txt');
+      const movedTo = join(paths.destinationRoot, 'after.txt');
+      const sourceMode = (await stat(paths.destinationRoot)).mode & 0o7777;
+      await writeFile(movedTo, bytes);
+      const params: RuntimeSnapshotRevertParams = {
+        chatId: 'cross-device-retry',
+        expected: [
+          { path, afterHash: RUNTIME_ABSENT_HASH, revertedHash: hashOf(bytes) },
+          { path: movedTo, afterHash: hashOf(bytes), revertedHash: RUNTIME_ABSENT_HASH },
+        ],
+        operations: [{ type: 'move', path, movedTo, contentBase64: base64Of(bytes) }],
+      };
+      try {
+        await chmod(paths.destinationRoot, 0o555);
+        const error = await runtimeError(() => client.snapshot.revert(params));
+        expect(error.message).toMatch(/permission denied|EACCES/i);
+        await assertBytes(movedTo, bytes);
+        expect(await client.snapshot.capture({ path })).toEqual({ exists: false });
+      } finally {
+        await chmod(paths.destinationRoot, sourceMode);
+      }
+      expect(await client.snapshot.revert(params)).toEqual({ revertedFiles: 1 });
+      await assertBytes(path, bytes);
+      expect(await client.snapshot.capture({ path: movedTo })).toEqual({ exists: false });
+    }
+
+    await assertRetry(typescript, fixtures.typescript);
+    await assertRetry(rust, fixtures.rust);
+  });
 
   it('treats an empty containment root as omitted during replay', async () => {
     const roots = await fixturePair('empty-containment');
