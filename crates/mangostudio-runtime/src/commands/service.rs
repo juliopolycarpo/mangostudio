@@ -348,12 +348,19 @@ fn duration(milliseconds: f64) -> Result<Duration, RemoteError> {
             "a positive finite duration",
         ));
     }
-    Duration::try_from_secs_f64(milliseconds / 1000.0).map_err(|_| {
+    let duration = Duration::try_from_secs_f64(milliseconds / 1000.0).map_err(|_| {
         argument(
             &format!("timeoutMs={milliseconds}"),
             "a positive finite duration",
         )
-    })
+    })?;
+    if std::time::Instant::now().checked_add(duration).is_none() {
+        return Err(argument(
+            &format!("timeoutMs={milliseconds}"),
+            "a duration representable by the platform clock",
+        ));
+    }
+    Ok(duration)
 }
 
 fn output_cap(limit: usize, echo: &Value, desired: usize) -> Result<usize, RemoteError> {
