@@ -124,6 +124,7 @@ pub mod health;
 pub mod manifest;
 pub mod panic;
 pub mod ports;
+mod probe_cache;
 pub mod probing;
 pub mod registry;
 pub mod result_check;

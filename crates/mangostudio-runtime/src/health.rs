@@ -37,7 +37,6 @@
 //!   that mapping; anything neither table recognises passes through
 //!   unchanged, noted at each call site.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -578,9 +577,10 @@ struct GitProbeCancelled;
 /// [`crate::file_identity::fingerprint`]'s object identity and high-resolution metadata fingerprint
 /// format rather than inventing a second one, keyed alongside the path so
 /// a rebuilt binary at the same path also re-probes.
-fn git_probe_cache() -> &'static Mutex<HashMap<PathBuf, (String, GitAvailability)>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (String, GitAvailability)>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn git_probe_cache() -> &'static Mutex<crate::probe_cache::ProbeCache<GitAvailability>> {
+    static CACHE: OnceLock<Mutex<crate::probe_cache::ProbeCache<GitAvailability>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Default::default()))
 }
 
 /// Clears every cached `git` probe result. Test-only: every caller lives in
@@ -722,15 +722,14 @@ fn lookup_git_cache(path: &Path, fingerprint: &str) -> Option<GitAvailability> {
     let cache = git_probe_cache()
         .lock()
         .expect("the git probe cache mutex is never poisoned");
-    let (cached_fingerprint, availability) = cache.get(path)?;
-    (cached_fingerprint == fingerprint).then(|| availability.clone())
+    cache.get(path, fingerprint)
 }
 
 fn cache_git_result(path: PathBuf, fingerprint: String, availability: GitAvailability) {
     let mut cache = git_probe_cache()
         .lock()
         .expect("the git probe cache mutex is never poisoned");
-    cache.insert(path, (fingerprint, availability));
+    cache.insert(path, fingerprint, availability);
 }
 
 /// `git version 2.51.0` becomes `Some("2.51.0")`. Mirrors
