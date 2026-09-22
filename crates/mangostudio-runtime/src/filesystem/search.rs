@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use globset::GlobBuilder;
 use mango_protocol::error::{RemoteError, codes};
-use rquickjs::{CatchResultExt, Context, Runtime};
+use rquickjs::{CatchResultExt, Context, Function, Persistent, Runtime};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -186,7 +186,6 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
         truncated = scan_opened_file(
             file,
             &params.resolved_path.to_string_lossy(),
-            &params.pattern,
             &params,
             cancel,
             &mut matches,
@@ -196,7 +195,6 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
         truncated = scan_file(
             &params.resolved_path,
             &params.resolved_path.to_string_lossy(),
-            &params.pattern,
             &params,
             &policy,
             cancel,
@@ -252,7 +250,6 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
                     scan_opened_file(
                         file,
                         &search.display_path(&match_path),
-                        &params.pattern,
                         &params,
                         cancel,
                         &mut matches,
@@ -261,7 +258,6 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
                     scan_file(
                         absolute,
                         &search.display_path(&match_path),
-                        &params.pattern,
                         &params,
                         &policy,
                         cancel,
@@ -470,7 +466,6 @@ fn grep_pattern_error(message: impl Into<String>) -> RemoteError {
 fn scan_file(
     absolute: &Path,
     display: &str,
-    pattern: &str,
     params: &GrepParams,
     policy: &CompiledPolicy,
     cancel: &CancellationToken,
@@ -501,7 +496,7 @@ fn scan_file(
             return Ok(false);
         }
     };
-    scan_bytes(observed.bytes, display, pattern, params, cancel, matches)
+    scan_bytes(observed.bytes, display, params, cancel, matches)
 }
 
 /// Scans a file that was opened relative to a verified directory capability.
@@ -511,7 +506,6 @@ fn scan_file(
 fn scan_opened_file(
     mut file: fs::File,
     display: &str,
-    pattern: &str,
     params: &GrepParams,
     cancel: &CancellationToken,
     matches: &mut Vec<Value>,
@@ -554,23 +548,22 @@ fn scan_opened_file(
     if bytes.len() > params.max_file_size_bytes {
         return Ok(false);
     }
-    scan_bytes(bytes, display, pattern, params, cancel, matches)
+    scan_bytes(bytes, display, params, cancel, matches)
 }
 
 fn scan_bytes(
     bytes: Vec<u8>,
     display: &str,
-    pattern: &str,
     params: &GrepParams,
     cancel: &CancellationToken,
     matches: &mut Vec<Value>,
 ) -> Result<bool, RemoteError> {
-    if bytes.iter().take(8 * 1024).any(|byte| *byte == 0) {
+    if super::text::looks_binary(&bytes) {
         return Ok(false);
     }
     let content = String::from_utf8_lossy(&bytes);
     let regex = JavascriptRegex::new(
-        pattern,
+        &params.pattern,
         params.case_insensitive,
         cancel.clone(),
         quickjs_heap_limit(bytes.len()),
@@ -613,6 +606,9 @@ enum JsMatch {
 }
 
 struct JavascriptRegex {
+    // Declared first: a persistent handle must be released before the
+    // context and runtime it belongs to.
+    test: Persistent<Function<'static>>,
     _runtime: Runtime,
     context: Context,
     cancel: CancellationToken,
@@ -651,18 +647,24 @@ impl JavascriptRegex {
         let flags = if case_insensitive { "i" } else { "" };
         let source = serde_json::to_string(pattern).expect("a Rust string always serializes");
         let flags = serde_json::to_string(flags).expect("a Rust string always serializes");
-        context
+        let test = context
             .with(|ctx| {
                 ctx.eval::<(), _>(format!(
                     "globalThis.__mangoGrep = new RegExp({source}, {flags});"
                 ))
                 .catch(&ctx)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+                // Compiled once so each line is a call, not a new program.
+                ctx.eval::<Function, _>("(line) => __mangoGrep.test(line)")
+                    .catch(&ctx)
+                    .map(|test| Persistent::save(&ctx, test))
+                    .map_err(|error| error.to_string())
             })
             .map_err(|error| {
                 grep_pattern_error(format!("Invalid pattern \"{pattern}\": {error}"))
             })?;
         Ok(Self {
+            test,
             _runtime: runtime,
             context,
             cancel,
@@ -690,11 +692,12 @@ impl JavascriptRegex {
         if self.interruption.expired() {
             return Ok(JsMatch::Interrupted);
         }
-        let line = serde_json::to_string(line).expect("a Rust string always serializes");
-        match self
-            .context
-            .with(|ctx| ctx.eval::<bool, _>(format!("__mangoGrep.test({line})")))
-        {
+        match self.context.with(|ctx| {
+            self.test
+                .clone()
+                .restore(&ctx)
+                .and_then(|test| test.call::<_, bool>((line,)))
+        }) {
             Ok(true) => Ok(JsMatch::Matched),
             Ok(false) => Ok(JsMatch::NotMatched),
             Err(_) if self.cancel.is_cancelled() => Err(RemoteError::new(
@@ -1472,6 +1475,21 @@ mod tests {
     }
 
     #[test]
+    fn regexp_matches_each_line_passed_as_an_argument_verbatim() {
+        let pattern = "^q\"\\\\\u{2028}x\\u0000$";
+        let regex = JavascriptRegex::new(pattern, false, token(), quickjs_heap_limit(16)).unwrap();
+        regex.start_file_budget(GREP_FILE_BUDGET);
+        for (line, expected) in [
+            ("q\"\\\u{2028}x\0", true),
+            ("q\"\\\u{2028}x", false),
+            ("q\"\\\u{2028}x\0", true),
+        ] {
+            let matched = matches!(regex.is_match(line).unwrap(), JsMatch::Matched);
+            assert_eq!(matched, expected, "line {line:?} against {pattern:?}");
+        }
+    }
+
+    #[test]
     fn regexp_interrupts_a_single_catastrophic_match() {
         let regex =
             JavascriptRegex::new("^(a+)+$", false, token(), quickjs_heap_limit(50_001)).unwrap();
@@ -1501,7 +1519,6 @@ mod tests {
             scan_file(
                 &path,
                 "slow.txt",
-                &params.pattern,
                 &params,
                 &params.path_policy.compile().unwrap(),
                 &token(),
