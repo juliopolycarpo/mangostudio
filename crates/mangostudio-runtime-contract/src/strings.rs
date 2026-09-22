@@ -8,35 +8,40 @@
 //! this module asserts every one against the embedded JSON so the mirror
 //! cannot drift silently.
 
-// `strings.json` backs only the drift tests below — every constant a caller
-// actually uses is a plain literal, verified against the embedded text
-// rather than parsed from it at call time. Kept behind `cfg(test)` so a
-// production build carries no unused-in-that-profile warning; `cargo test`
-// (part of every gate this crate runs under) still proves the embed is live
-// and Cargo's dep-info still tracks it for that target.
-#[cfg(test)]
+// Small constants have drift assertions below. GraphQL documents are loaded
+// directly so a new shared query never needs a second hand-maintained copy.
 use std::sync::OnceLock;
 
-#[cfg(test)]
 use serde_json::Value;
 
 /// `strings.json`, exactly as `bun run contracts:emit` wrote it.
-#[cfg(test)]
 const STRINGS_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../apps/shared/src/runtime-contract/generated/strings.json"
 ));
 
-#[cfg(test)]
 static STRINGS: OnceLock<Value> = OnceLock::new();
 
-/// The parsed `strings.json` document, for the tests in this crate that
-/// assert a Rust constant against it. Not part of the public API: a caller
-/// wants the typed constant, not a `Value` to index by hand.
-#[cfg(test)]
+/// Parses the embedded document once for typed accessors and drift assertions.
 fn document() -> &'static Value {
     STRINGS.get_or_init(|| {
         serde_json::from_str(STRINGS_JSON).expect("strings.json is well-formed JSON")
+    })
+}
+
+/// Returns the GraphQL documents the product permits through `gh api graphql`.
+/// The generated artifact derives these from the shared TypeScript source.
+///
+/// # Example
+///
+/// ```
+/// assert!(!mangostudio_runtime_contract::strings::github_graphql_documents().is_empty());
+/// ```
+pub fn github_graphql_documents() -> &'static [String] {
+    static DOCUMENTS: OnceLock<Vec<String>> = OnceLock::new();
+    DOCUMENTS.get_or_init(|| {
+        serde_json::from_value(document()["githubGraphqlDocuments"].clone())
+            .expect("generated GitHub GraphQL documents are strings")
     })
 }
 
@@ -85,8 +90,19 @@ pub(crate) fn errors_document() -> &'static Value {
 mod tests {
     use super::{
         RUNTIME_PAIRING_TOKEN_PREFIX, RUNTIME_SETUP_PENDING_SIGNATURE, RUNTIME_UPDATE_EXIT_CODE,
-        document, runtime_home,
+        document, github_graphql_documents, runtime_home,
     };
+
+    #[test]
+    fn github_documents_are_loaded_from_the_shared_artifact() {
+        let documents = github_graphql_documents();
+        assert!(!documents.is_empty());
+        assert_eq!(
+            serde_json::json!(documents),
+            document()["githubGraphqlDocuments"]
+        );
+        assert!(documents.iter().all(|query| query.starts_with("query(")));
+    }
 
     #[test]
     fn the_setup_pending_signature_mirrors_strings_json() {

@@ -11,6 +11,7 @@
  * be tested without touching disk.
  */
 
+import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   CONSENT_DENIED_KIND,
   HubIdentitySchema,
@@ -148,6 +149,7 @@ function stringsDocument(): Record<string, unknown> {
     setupPendingSignature: RUNTIME_SETUP_PENDING_SIGNATURE,
     updateExitCode: RUNTIME_UPDATE_EXIT_CODE,
     pairingTokenPrefix: RUNTIME_PAIRING_TOKEN_PREFIX,
+    githubGraphqlDocuments: [...PINNED_GITHUB_GRAPHQL_DOCUMENTS],
     runtimeHome: {
       slots: [...RUNTIME_SLOTS],
       homeDirName: MANGO_HOME_DIR_NAME,
