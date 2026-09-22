@@ -189,7 +189,7 @@ pub trait ProcessSpawner: Send + Sync {
 
 /// Production [`ProcessSpawner`] implementation.
 ///
-/// On Linux it launches a small guardian process that owns the target and a private process
+/// On Unix it launches a small guardian process that owns the target and a private process
 /// group. A parent-death lease makes the guardian kill that group if this runtime dies abruptly;
 /// terminal publication also clears ordinary descendants that outlive their direct parent. This
 /// contains ordinary descendants, not a program that deliberately escapes by creating another
@@ -475,13 +475,15 @@ async fn supervise_start(
     };
     if let Some(error) = pre_launch_error {
         let _ = force_tree_for_child(&mut child, pid);
-        let _ = child.wait().await;
+        let _ = child.wait_target().await;
+        let _ = child.wait_guardian().await;
         let _ = result_tx.send(Err(error));
         return;
     }
     if let Err(error) = check_before_effect(&cancel, deadline) {
         let _ = force_tree_for_child(&mut child, pid);
-        let _ = child.wait().await;
+        let _ = child.wait_target().await;
+        let _ = child.wait_guardian().await;
         let _ = result_tx.send(Err(error));
         return;
     }
@@ -653,12 +655,30 @@ impl OwnedChild {
         }
     }
 
-    async fn wait(&mut self) -> io::Result<ExitStatus> {
+    async fn wait_target(&mut self) -> io::Result<ExitStatus> {
         match self {
             #[cfg(unix)]
-            Self::Guardian(child) => child.wait().await,
+            Self::Guardian(child) => child.wait_target().await,
             #[cfg(not(unix))]
             Self::Tokio(child) => child.wait().await,
+        }
+    }
+
+    fn finalize(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.finalize(),
+            #[cfg(not(unix))]
+            Self::Tokio(_) => Ok(()),
+        }
+    }
+
+    async fn wait_guardian(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.wait_guardian().await,
+            #[cfg(not(unix))]
+            Self::Tokio(_) => Ok(()),
         }
     }
 
@@ -714,26 +734,39 @@ async fn supervise_child(
 
     let mut cause = ProcessTerminalCause::Exited;
     let mut stopping = false;
+    let mut stopped_capture = StoppedCapture::default();
     if let Some(request) = initial_stop {
         cause = cause_for(request);
+        let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
         stopping = dispatch_stop(&mut child, pid, request).is_ok();
+        if stopping && request_stops_capture(request) {
+            stopped_capture.record(capture_was_open);
+        }
     }
     let status = loop {
         tokio::select! {
-            status = child.wait() => break status.ok(),
+            status = child.wait_target() => break status.ok(),
             () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)), if !stopping => {
                 cause = ProcessTerminalCause::TimedOut;
+                let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
                 stopping = dispatch_stop(&mut child, pid, StopRequest::Force).is_ok();
+                if stopping {
+                    stopped_capture.record(capture_was_open);
+                }
             }
             Some(command) = commands.recv() => {
                 if stopping {
                     let _ = command.reply.send(Ok(()));
                     continue;
                 }
+                let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
                 match dispatch_stop(&mut child, pid, command.request) {
                     Ok(()) => {
                         cause = cause_for(command.request);
                         stopping = true;
+                        if request_stops_capture(command.request) {
+                            stopped_capture.record(capture_was_open);
+                        }
                         let _ = command.reply.send(Ok(()));
                     }
                     Err(error) => {
@@ -746,22 +779,26 @@ async fn supervise_child(
     if let Some(writer) = stdin_writer {
         writer.abort();
     }
-    let (stdout, stderr, drain_reached_deadline) = collect_output(
+    let (mut stdout, mut stderr, drain_reached_deadline) = collect_output(
         &mut stdout_reader,
         &mut stderr_reader,
         deadline,
         request.budget.post_exit_drain,
-        pid,
     )
     .await;
     if drain_reached_deadline && cause == ProcessTerminalCause::Exited {
         cause = ProcessTerminalCause::TimedOut;
     }
+    stopped_capture.apply(&mut stdout, &mut stderr);
     // The guardian mirrors its direct target's status, but an ordinary descendant can outlive
-    // that target without holding a captured pipe. Once the bounded drain has either completed
-    // or force-stopped inherited writers, kill the surviving private group before publishing a
-    // terminal record so an `Exited` leader never leaves an ordinary descendant behind.
-    let _ = force_tree(pid);
+    // that target without holding a captured pipe. A bounded drain concludes first; only then do
+    // we explicitly finalize the group (or force it after a drain timeout) and reap its guardian.
+    if drain_reached_deadline {
+        let _ = child.force();
+    } else {
+        let _ = child.finalize();
+    }
+    let _ = child.wait_guardian().await;
     let _ = shared.terminal.send(Some(ProcessTerminal {
         cause,
         exit: status.map(process_exit),
@@ -779,12 +816,40 @@ fn cause_for(request: StopRequest) -> ProcessTerminalCause {
     }
 }
 
+fn request_stops_capture(request: StopRequest) -> bool {
+    matches!(request, StopRequest::Force | StopRequest::Cancel)
+}
+
+fn capture_was_open(
+    stdout_reader: &tokio::task::JoinHandle<ProcessCapture>,
+    stderr_reader: &tokio::task::JoinHandle<ProcessCapture>,
+) -> (bool, bool) {
+    (!stdout_reader.is_finished(), !stderr_reader.is_finished())
+}
+
+#[derive(Default)]
+struct StoppedCapture {
+    stdout: bool,
+    stderr: bool,
+}
+
+impl StoppedCapture {
+    fn record(&mut self, open: (bool, bool)) {
+        self.stdout |= open.0;
+        self.stderr |= open.1;
+    }
+
+    fn apply(&self, stdout: &mut ProcessCapture, stderr: &mut ProcessCapture) {
+        stdout.incomplete |= self.stdout;
+        stderr.incomplete |= self.stderr;
+    }
+}
+
 async fn collect_output(
     stdout_reader: &mut tokio::task::JoinHandle<ProcessCapture>,
     stderr_reader: &mut tokio::task::JoinHandle<ProcessCapture>,
     deadline: Instant,
     post_exit_drain: Duration,
-    pid: Option<u32>,
 ) -> (ProcessCapture, ProcessCapture, bool) {
     let remaining = deadline.saturating_duration_since(Instant::now());
     let reaches_deadline = post_exit_drain >= remaining;
@@ -805,16 +870,21 @@ async fn collect_output(
             false,
         ),
         Err(_) => {
-            let _ = force_tree(pid);
-            stdout_reader.abort();
-            stderr_reader.abort();
-            (
-                ProcessCapture::incomplete(),
-                ProcessCapture::incomplete(),
-                reaches_deadline,
-            )
+            let stdout = stop_reader(stdout_reader).await;
+            let stderr = stop_reader(stderr_reader).await;
+            (stdout, stderr, reaches_deadline)
         }
     }
+}
+
+async fn stop_reader(reader: &mut tokio::task::JoinHandle<ProcessCapture>) -> ProcessCapture {
+    if reader.is_finished() {
+        return (&mut *reader)
+            .await
+            .unwrap_or_else(|_| ProcessCapture::incomplete());
+    }
+    reader.abort();
+    ProcessCapture::incomplete()
 }
 
 impl ProcessCapture {
@@ -912,27 +982,6 @@ fn dispatch_stop(child: &mut OwnedChild, pid: Option<u32>, request: StopRequest)
 
 fn force_tree_for_child(child: &mut OwnedChild, _pid: Option<u32>) -> io::Result<()> {
     child.force()
-}
-
-#[cfg(unix)]
-fn force_tree(pid: Option<u32>) -> io::Result<()> {
-    signal_group(pid, nix::sys::signal::Signal::SIGKILL)
-}
-
-#[cfg(not(unix))]
-fn force_tree(_pid: Option<u32>) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn signal_group(pid: Option<u32>, signal: nix::sys::signal::Signal) -> io::Result<()> {
-    let Some(pid) = pid else {
-        return Ok(());
-    };
-    match nix::sys::signal::kill(nix::unistd::Pid::from_raw(-(pid as i32)), signal) {
-        Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
-        Err(error) => Err(io::Error::from(error)),
-    }
 }
 
 fn process_exit(status: ExitStatus) -> ProcessExit {
@@ -1128,16 +1177,64 @@ mod tests {
             &format!("echo $$ > {}\nsleep 20", pid_file.display()),
         );
         let mut request = request(sh);
-        request.budget.deadline = Duration::from_secs(2);
+        // Admission is part of the public deadline. Leave enough room for unrelated unit tests
+        // sharing the global four-child pool, then prove this particular target was launched
+        // before asserting its later deadline cleanup.
+        request.budget.deadline = Duration::from_secs(5);
         let control = DefaultProcessSpawner
             .start(request, Arc::new(AlwaysAllow), CancellationToken::new())
             .await
-            .expect("the target launches before its two-second deadline");
+            .expect("the target launches before its five-second deadline");
         wait_for_file(&pid_file).await;
 
         let terminal = control.wait().await;
         assert_eq!(terminal.cause, ProcessTerminalCause::TimedOut);
         assert_process_is_gone(&pid_file).await;
+    }
+
+    /// A forced timeout must retain the observation that each capture stream was still open
+    /// when the supervisor killed the group, even when EOF arrives while the group is reaped.
+    #[tokio::test]
+    async fn forced_timeout_marks_open_captures_incomplete_after_reaping() {
+        let dir = scratch_dir("process-timeout-capture");
+        let sh = script(&dir, "slow.sh", "sleep 20");
+        let mut request = request(sh);
+        request.budget.deadline = Duration::from_millis(250);
+        let terminal = DefaultProcessSpawner
+            .start(request, Arc::new(AlwaysAllow), CancellationToken::new())
+            .await
+            .expect("script starts")
+            .wait()
+            .await;
+
+        assert_eq!(terminal.cause, ProcessTerminalCause::TimedOut);
+        assert!(terminal.stdout.incomplete);
+        assert!(terminal.stderr.incomplete);
+    }
+
+    /// Streams which reached EOF before a later timeout remain complete. A sleeping target that
+    /// closed both descriptors must not look like its output was interrupted.
+    #[tokio::test]
+    async fn forced_timeout_keeps_closed_captures_complete() {
+        let dir = scratch_dir("process-timeout-closed-capture");
+        let sh = script(
+            &dir,
+            "slow.sh",
+            "exec 1>&- 2>&-
+sleep 20",
+        );
+        let mut request = request(sh);
+        request.budget.deadline = Duration::from_millis(250);
+        let terminal = DefaultProcessSpawner
+            .start(request, Arc::new(AlwaysAllow), CancellationToken::new())
+            .await
+            .expect("script starts")
+            .wait()
+            .await;
+
+        assert_eq!(terminal.cause, ProcessTerminalCause::TimedOut);
+        assert!(!terminal.stdout.incomplete);
+        assert!(!terminal.stderr.incomplete);
     }
 
     #[tokio::test]
