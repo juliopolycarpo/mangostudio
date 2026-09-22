@@ -153,7 +153,7 @@ impl WindowsJobChild {
 pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     let job = Arc::new(create_killing_job()?);
     let pipes = ChildPipes::from_request(request)?;
-    let application = wide_nul(request.program.as_os_str(), "program")?;
+    let application = application_name(request.program.as_os_str())?;
     let mut command_line = command_line(request)?;
     let current_directory = request.cwd.as_deref().map(path_wide_nul).transpose()?;
     let environment = request.env.as_ref().map(environment_block).transpose()?;
@@ -193,7 +193,7 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     // `attributes` owns the initialized attribute list plus its aligned backing storage.
     if unsafe {
         CreateProcessW(
-            application.as_ptr(),
+            application.as_ref().map_or(ptr::null(), Vec::as_ptr),
             command_line.as_mut_ptr(),
             ptr::null(),
             ptr::null(),
@@ -664,6 +664,20 @@ fn path_wide_nul(path: &Path) -> io::Result<Vec<u16>> {
     wide_nul(path.as_os_str(), "cwd")
 }
 
+fn application_name(value: &OsStr) -> io::Result<Option<Vec<u16>>> {
+    // A null `lpApplicationName` makes CreateProcessW resolve a bare executable through PATH;
+    // the mutable command line still carries the exact program token. Supplying a non-null bare
+    // name asks Windows to open that literal path and breaks commands such as `git` and `gh`.
+    let has_path_separator = value
+        .encode_wide()
+        .any(|unit| unit == u16::from(b'\\') || unit == u16::from(b'/'));
+    if has_path_separator {
+        wide_nul(value, "program").map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
 fn wide_nul(value: &OsStr, name: &str) -> io::Result<Vec<u16>> {
     let mut value = wide(value, name)?;
     value.push(0);
@@ -684,9 +698,9 @@ fn wide(value: &OsStr, name: &str) -> io::Result<Vec<u16>> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
 
-    use super::{command_line, environment_block};
+    use super::{application_name, command_line, environment_block};
     use crate::subprocess::ProcessRequest;
 
     #[test]
@@ -711,6 +725,20 @@ mod tests {
         let rendered = String::from_utf16_lossy(&encoded);
 
         assert_eq!(rendered, "fixture.exe \"one\\\\\\\"two\"\0");
+    }
+
+    #[test]
+    fn bare_programs_use_windows_path_search() {
+        assert!(
+            application_name(OsStr::new("git"))
+                .expect("bare program has no invalid characters")
+                .is_none()
+        );
+        assert!(
+            application_name(OsStr::new(r"C:\\tools\\git.exe"))
+                .expect("explicit path is valid")
+                .is_some()
+        );
     }
 
     #[test]
