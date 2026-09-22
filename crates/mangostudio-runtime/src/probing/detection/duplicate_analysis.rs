@@ -6,13 +6,11 @@
 //! shadowed-by-earlier-path, version-below-minimum,
 //! version-below-minimum-for, version-probe-failed).
 
-use std::collections::BTreeMap;
-
 use super::binary_scan::RuntimeDefinition;
 use super::types::{
     ConsumerVersionRequirement, MinimumRuntimeVersion, RuntimeFinding, RuntimeFindingCode,
-    RuntimeFindingSeverity, RuntimeHealth, RuntimeId, RuntimeInstallation, RuntimeStatus, SemVer,
-    VersionFloor,
+    RuntimeFindingSeverity, RuntimeHealth, RuntimeInstallation, RuntimeStatus, SemVer,
+    VersionFloor, finding_params, wire_str,
 };
 
 /// Inputs [`analyze_runtime_scan`] needs beyond the scan itself.
@@ -56,22 +54,6 @@ fn format_version_floor(major: u32, minor: u32, patch: Option<u32>) -> String {
     }
 }
 
-fn runtime_id_param(id: RuntimeId) -> String {
-    match id {
-        RuntimeId::Bun => "bun",
-        RuntimeId::Node => "node",
-        RuntimeId::Nvm => "nvm",
-        RuntimeId::Fnm => "fnm",
-        RuntimeId::Winget => "winget",
-        RuntimeId::Git => "git",
-        RuntimeId::Mangostudio => "mangostudio",
-        RuntimeId::Claude => "claude",
-        RuntimeId::Codex => "codex",
-        RuntimeId::Cursor => "cursor",
-    }
-    .to_string()
-}
-
 /// Health is the worst severity carried by any finding; an absent
 /// severity counts as `warn`.
 fn health_for(
@@ -96,15 +78,6 @@ fn health_for(
     }
 }
 
-fn params(pairs: &[(&str, String)]) -> Option<BTreeMap<String, String>> {
-    Some(
-        pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_string(), value.clone()))
-            .collect(),
-    )
-}
-
 /// Builds the published [`RuntimeStatus`] for `definition` from `scan`,
 /// mirroring `duplicate-analysis.ts`'s `analyzeRuntimeScan` exactly.
 #[must_use]
@@ -118,7 +91,7 @@ pub fn analyze_runtime_scan(
         .iter()
         .map(|failure| RuntimeFinding {
             code: failure.code,
-            params: params(&[("path", failure.path.clone())]),
+            params: finding_params(&[("path", failure.path.clone())]),
             severity: None,
         })
         .collect();
@@ -147,7 +120,7 @@ pub fn analyze_runtime_scan(
     if first_canonical.is_none() {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::NotFound,
-            params: params(&[("runtime", runtime_id_param(definition.id))]),
+            params: finding_params(&[("runtime", wire_str(&definition.id))]),
             severity: None,
         });
     }
@@ -156,8 +129,8 @@ pub fn analyze_runtime_scan(
     {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::InstalledButNotOnPath,
-            params: params(&[
-                ("runtime", runtime_id_param(definition.id)),
+            params: finding_params(&[
+                ("runtime", wire_str(&definition.id)),
                 ("path", first_canonical.raw_path.clone()),
             ]),
             severity: None,
@@ -170,7 +143,7 @@ pub fn analyze_runtime_scan(
         }
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::VersionProbeFailed,
-            params: params(&[("path", installation.raw_path.clone())]),
+            params: finding_params(&[("path", installation.raw_path.clone())]),
             severity: None,
         });
     }
@@ -186,8 +159,8 @@ pub fn analyze_runtime_scan(
     if versions.len() > 1 {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::MultipleVersions,
-            params: params(&[
-                ("runtime", runtime_id_param(definition.id)),
+            params: finding_params(&[
+                ("runtime", wire_str(&definition.id)),
                 ("versions", versions.join(", ")),
             ]),
             // Several installed versions is normal for anyone on a
@@ -218,7 +191,7 @@ pub fn analyze_runtime_scan(
             }
             findings.push(RuntimeFinding {
                 code: RuntimeFindingCode::ShadowedByEarlierPath,
-                params: params(&[
+                params: finding_params(&[
                     ("effectivePath", effective_canonical.raw_path.clone()),
                     (
                         "effectivePathIndex",
@@ -246,7 +219,7 @@ pub fn analyze_runtime_scan(
             }
             findings.push(RuntimeFinding {
                 code: RuntimeFindingCode::VersionBelowMinimum,
-                params: params(&[
+                params: finding_params(&[
                     ("path", installation.raw_path.clone()),
                     ("version", version_str.clone()),
                     (
@@ -283,7 +256,7 @@ pub fn analyze_runtime_scan(
             }
             findings.push(RuntimeFinding {
                 code: RuntimeFindingCode::VersionBelowMinimumFor,
-                params: params(&[
+                params: finding_params(&[
                     ("consumer", requirement.consumer.clone()),
                     ("version", effective_version_str.clone()),
                     (
@@ -320,7 +293,7 @@ pub fn analyze_runtime_scan(
 #[cfg(test)]
 mod tests {
     use super::super::binary_scan::RuntimeScanResult;
-    use super::super::types::{PathSource, RuntimeOrigin};
+    use super::super::types::{PathSource, RuntimeId, RuntimeOrigin};
     use super::*;
 
     fn definition() -> RuntimeDefinition {

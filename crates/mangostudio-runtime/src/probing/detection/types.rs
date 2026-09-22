@@ -96,6 +96,42 @@ impl fmt::Display for SemVer {
     }
 }
 
+/// `value`'s serialized string form — the `kebab-case` spelling serde
+/// derives for every enum in this module — or an empty string for a value
+/// that does not serialize to a JSON string. Lets a finding's `params`
+/// name an id with the exact literal the wire uses, without a hand-kept
+/// second table of spellings.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(wire_str(&LtsStatus::EndOfLife), "end-of-life");
+/// ```
+pub(crate) fn wire_str<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// A [`RuntimeFinding::params`] map built from `(key, value)` pairs —
+/// always `Some`, since every caller has at least one param to report.
+///
+/// # Example
+///
+/// ```ignore
+/// let params = finding_params(&[("path", "/usr/bin/node".to_string())]);
+/// assert_eq!(params.unwrap()["path"], "/usr/bin/node");
+/// ```
+pub(crate) fn finding_params(pairs: &[(&str, String)]) -> Option<BTreeMap<String, String>> {
+    Some(
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), value.clone()))
+            .collect(),
+    )
+}
+
 /// Which runtime, version manager or agent CLI a status is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -517,7 +553,39 @@ pub struct VersionManagerStatus {
 mod tests {
     use regex::Regex;
 
-    use super::SemVer;
+    use super::{LtsStatus, RuntimeId, SemVer, VersionManagerId, finding_params, wire_str};
+
+    #[test]
+    fn wire_str_spells_each_id_the_way_the_wire_does() {
+        assert_eq!(wire_str(&RuntimeId::Mangostudio), "mangostudio");
+        assert_eq!(wire_str(&RuntimeId::Winget), "winget");
+        assert_eq!(wire_str(&VersionManagerId::Volta), "volta");
+        let lts = [
+            (LtsStatus::CurrentLts, "current-lts"),
+            (LtsStatus::LtsOutdatedPatch, "lts-outdated-patch"),
+            (LtsStatus::LtsSuperseded, "lts-superseded"),
+            (LtsStatus::EndOfLife, "end-of-life"),
+            (LtsStatus::CurrentRelease, "current-release"),
+            (LtsStatus::Unknown, "unknown"),
+        ];
+        for (status, expected) in lts {
+            assert_eq!(wire_str(&status), expected, "for {status:?}");
+        }
+    }
+
+    #[test]
+    fn wire_str_is_empty_for_a_value_that_is_not_a_json_string() {
+        assert_eq!(wire_str(&42), "");
+    }
+
+    #[test]
+    fn finding_params_keeps_every_pair() {
+        let params = finding_params(&[("runtime", "node".into()), ("path", "/bin/node".into())])
+            .expect("always Some");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params["runtime"], "node");
+        assert_eq!(params["path"], "/bin/node");
+    }
 
     #[test]
     fn a_semver_displays_as_major_dot_minor_dot_patch() {

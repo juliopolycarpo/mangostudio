@@ -20,7 +20,9 @@ use super::lts_policy::{
     LtsPolicyOptions, NodeReleaseSchedule, classify_node_lts_status, find_node_release_line,
     parse_exact_node_version,
 };
-use super::types::{ManagedVersion, RuntimeFinding, RuntimeFindingCode, VersionManagerId};
+use super::types::{
+    ManagedVersion, RuntimeFinding, RuntimeFindingCode, VersionManagerId, wire_str,
+};
 
 /// The filesystem seams both detectors need: read a directory
 /// (`versions/node`, `node-versions`), check whether a path exists, and
@@ -306,7 +308,7 @@ pub fn create_managed_version_findings(
         && current_version.is_none()
     {
         let mut params = BTreeMap::new();
-        params.insert("manager".to_string(), manager_param(manager));
+        params.insert("manager".to_string(), wire_str(&manager));
         params.insert("defaultAlias".to_string(), default_alias.to_string());
         if let Some(default_version) = default_version {
             params.insert("defaultVersion".to_string(), default_version.to_string());
@@ -328,10 +330,7 @@ pub fn create_managed_version_findings(
         }
         let mut params = BTreeMap::new();
         params.insert("version".to_string(), version.version.clone());
-        params.insert(
-            "ltsStatus".to_string(),
-            lts_status_param(version.lts_status),
-        );
+        params.insert("ltsStatus".to_string(), wire_str(&version.lts_status));
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::OutdatedLts,
             params: Some(params),
@@ -339,28 +338,6 @@ pub fn create_managed_version_findings(
         });
     }
     findings
-}
-
-fn manager_param(manager: VersionManagerId) -> String {
-    match manager {
-        VersionManagerId::Nvm => "nvm",
-        VersionManagerId::Fnm => "fnm",
-        VersionManagerId::Volta => "volta",
-    }
-    .to_string()
-}
-
-fn lts_status_param(status: super::types::LtsStatus) -> String {
-    use super::types::LtsStatus;
-    match status {
-        LtsStatus::CurrentLts => "current-lts",
-        LtsStatus::LtsOutdatedPatch => "lts-outdated-patch",
-        LtsStatus::LtsSuperseded => "lts-superseded",
-        LtsStatus::EndOfLife => "end-of-life",
-        LtsStatus::CurrentRelease => "current-release",
-        LtsStatus::Unknown => "unknown",
-    }
-    .to_string()
 }
 
 #[cfg(test)]

@@ -44,7 +44,7 @@ use super::detection::runtime_definitions::{
 use super::detection::types::{
     AgentAuthSignal, ConsumerVersionRequirement, MinimumRuntimeVersion, RuntimeFinding,
     RuntimeFindingCode, RuntimeHealth, RuntimeId, RuntimeInstallation, RuntimeOrigin,
-    RuntimeStatus, VersionManagerId,
+    RuntimeStatus, VersionManagerId, finding_params, wire_str,
 };
 use super::detection::version_manager_support::ManagedVersionFileSystem;
 use super::detection::winget_ownership::{WingetOwnership, mark_winget_owned_node_installations};
@@ -153,15 +153,6 @@ fn cancelled_error(method: &str) -> RemoteError {
     RemoteError::new(codes::CANCELLED, format!("{method} was cancelled"))
 }
 
-/// `T`'s wire (serialised) string form — used only to name an id in an
-/// error message, never to build a wire result.
-fn wire_str<T: Serialize>(value: &T) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
 /// Mirrors `RuntimeToolArgumentError`'s own wire shape exactly
 /// (`toRemoteError` in `apps/runtime/src/errors.ts`): `INTERNAL` carrying
 /// `details.kind: "tool_argument"`, not a dedicated `INVALID_PARAMS` — the
@@ -193,15 +184,6 @@ fn build_binary_scan_options(budget: &Option<ProbeBudget>) -> BinaryScanOptions 
         }
     }
     options
-}
-
-fn params_map(pairs: &[(&str, String)]) -> Option<BTreeMap<String, String>> {
-    Some(
-        pairs
-            .iter()
-            .map(|(key, value)| ((*key).to_string(), value.clone()))
-            .collect(),
-    )
 }
 
 // --- probing.runtimes -----------------------------------------------
@@ -640,7 +622,7 @@ fn map_runtime_findings(
             if finding.code == RuntimeFindingCode::NotFound {
                 RuntimeFinding {
                     code: RuntimeFindingCode::CliNotInstalled,
-                    params: params_map(&[("targetId", wire_str(&target_id))]),
+                    params: finding_params(&[("targetId", wire_str(&target_id))]),
                     severity: None,
                 }
             } else {
@@ -672,7 +654,7 @@ fn append_location_findings(findings: &mut Vec<RuntimeFinding>, locations: &[Loc
         }
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::LocationUnwritable,
-            params: params_map(&[
+            params: finding_params(&[
                 ("locationId", location.id.to_string()),
                 ("path", path.clone()),
             ]),
@@ -742,7 +724,7 @@ async fn describe_self_agent(path_env: &PathEnv, self_params: &SelfAgentParams) 
     if !config_home_exists {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::ConfigHomeMissing,
-            params: params_map(&[("configHome", config_home.clone())]),
+            params: finding_params(&[("configHome", config_home.clone())]),
             severity: None,
         });
     }
@@ -843,7 +825,7 @@ async fn describe_external_agent(
     if cli_installed && !config_home_exists {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::ConfigHomeMissing,
-            params: params_map(&[("configHome", config_home.clone())]),
+            params: finding_params(&[("configHome", config_home.clone())]),
             severity: None,
         });
     }
@@ -854,7 +836,7 @@ async fn describe_external_agent(
     {
         findings.push(RuntimeFinding {
             code: RuntimeFindingCode::NotAuthenticated,
-            params: params_map(&[("targetId", wire_str(&target_id))]),
+            params: finding_params(&[("targetId", wire_str(&target_id))]),
             severity: None,
         });
     }
