@@ -85,6 +85,15 @@ impl GuardianChild {
         write_one_parent(start.as_raw_fd(), RELEASE)
     }
 
+    /// Closes the start gate without allowing the target to execute its requested program.
+    ///
+    /// This is used only after the guardian already exists but before the supervisor has handed
+    /// out a public control. The target sees EOF and exits through its pre-exec failure path,
+    /// while the guardian remains available for the normal status and finalization handshake.
+    pub(super) fn abort_start(&mut self) {
+        let _ = self.start.take();
+    }
+
     /// Waits for the direct target's status, before the guardian tears down the remaining group.
     pub(super) async fn wait_target(&mut self) -> io::Result<ExitStatus> {
         let mut bytes = [0; STATUS_BYTES];
@@ -659,6 +668,7 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     unsafe { libc::close(fds.finalize_read) };
     unsafe { libc::kill(-target_pgid, libc::SIGKILL) };
     let _ = unsafe { wait_raw(target) };
+    wait_group_empty(target_pgid);
     unsafe { libc::kill(watchdog, libc::SIGKILL) };
     let _ = unsafe { wait_raw(watchdog) };
     unsafe { libc::_exit(0) }
@@ -905,6 +915,35 @@ unsafe fn wait_raw(pid: libc::pid_t) -> libc::c_int {
             continue;
         }
         return 127 << 8;
+    }
+}
+
+/// Waits until the target process group has no remaining members after the forced kill.
+///
+/// The target leader is kept unreaped until the final handshake so its numeric process-group ID
+/// cannot be recycled while the guardian still owns cleanup. Reaping it here is therefore safe:
+/// the immediately following group probe either observes remaining ordinary descendants or the
+/// kernel reports `ESRCH` once the group is empty. Descendants which deliberately create a new
+/// session are outside this guardian's containment contract.
+unsafe fn wait_group_empty(process_group: libc::pid_t) {
+    loop {
+        // SAFETY: process_group is the target group ID reported by the target itself and remains
+        // owned by this guardian until the group has been killed and observed empty.
+        if unsafe { libc::kill(-process_group, 0) } == 0 {
+            std::hint::spin_loop();
+            continue;
+        }
+        let error = unsafe { errno_raw() };
+        if error == libc::EINTR {
+            continue;
+        }
+        if error == libc::ESRCH {
+            return;
+        }
+        // EPERM still means that a member exists. All processes in this group originated from
+        // the request, but treating any other transient kernel result as live avoids publishing
+        // terminal cleanup before the group has actually disappeared.
+        std::hint::spin_loop();
     }
 }
 

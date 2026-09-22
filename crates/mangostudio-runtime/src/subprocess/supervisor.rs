@@ -565,6 +565,11 @@ async fn supervise_start(
 /// handshake as well as waiting, so an `execve` error cannot strand a guardian behind a closed
 /// start-result channel.
 async fn cleanup_failed_start(child: &mut OwnedChild, pid: Option<u32>) {
+    // A Unix target is held behind a private start gate until the public control is returned.
+    // Closing that gate first lets a target which has already created its own process group exit
+    // even when readiness has not reached the supervisor yet. The Windows equivalent keeps its
+    // suspended primary thread stopped and relies on Job termination below.
+    child.abort_start();
     let _ = force_tree_for_child(child, pid);
     let _ = child.wait_target().await;
     let _ = child.finalize();
@@ -681,6 +686,17 @@ impl OwnedChild {
             Self::WindowsJob(child) => child.release_start(),
             #[cfg(all(not(unix), not(windows)))]
             Self::Tokio(_) => Ok(()),
+        }
+    }
+
+    fn abort_start(&mut self) {
+        match self {
+            #[cfg(unix)]
+            Self::Guardian(child) => child.abort_start(),
+            #[cfg(windows)]
+            Self::WindowsJob(_) => {}
+            #[cfg(all(not(unix), not(windows)))]
+            Self::Tokio(_) => {}
         }
     }
 

@@ -111,6 +111,26 @@ async fn graceful_interrupt_is_explicitly_unsupported() {
     assert_process_is_gone(&descendant).await;
 }
 
+/// Unsupported interrupts must not leave one blocking OS waiter behind for every request. The
+/// public control remains usable after a large burst and the Job still reaches one forced cleanup.
+#[tokio::test(flavor = "current_thread")]
+async fn repeated_unsupported_interrupts_keep_waiting_bounded() {
+    let directory = scratch_dir("windows-job-interrupt-burst");
+    let (control, target, descendant) = start_tree(&directory, Duration::from_secs(30)).await;
+
+    for _ in 0..512 {
+        assert!(matches!(
+            control.interrupt().await,
+            ProcessStop::Unsupported
+        ));
+    }
+
+    let terminal = observed(control.force_kill().await);
+    assert_eq!(terminal.cause, ProcessTerminalCause::Forced);
+    assert_process_is_gone(&target).await;
+    assert_process_is_gone(&descendant).await;
+}
+
 /// A deadline can expire after a descendant has inherited the Job, and terminal publication
 /// still waits for both processes to disappear.
 #[tokio::test(flavor = "current_thread")]

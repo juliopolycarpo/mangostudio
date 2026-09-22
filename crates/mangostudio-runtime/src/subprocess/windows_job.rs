@@ -28,7 +28,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use windows_sys::Win32::Foundation::{
     ERROR_INSUFFICIENT_BUFFER, ERROR_MORE_DATA, GENERIC_READ, HANDLE, HANDLE_FLAG_INHERIT,
-    INVALID_HANDLE_VALUE, SetHandleInformation, WAIT_FAILED, WAIT_OBJECT_0,
+    INVALID_HANDLE_VALUE, SetHandleInformation, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Globalization::{
     CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN, CompareStringOrdinal,
@@ -113,12 +113,12 @@ impl WindowsJobChild {
     }
 
     pub(super) async fn wait_target(&mut self) -> io::Result<ExitStatus> {
-        let process = Arc::clone(&self.process);
-        tokio::task::spawn_blocking(move || wait_for_process(&process))
-            .await
-            .map_err(|error| {
-                io::Error::other(format!("Windows process wait task failed: {error}"))
-            })?
+        loop {
+            if let Some(status) = poll_process(&self.process)? {
+                return Ok(status);
+            }
+            tokio::time::sleep(JOB_EMPTY_POLL).await;
+        }
     }
 
     /// Ends remaining descendants once capture has reached its bounded conclusion.
@@ -480,24 +480,29 @@ impl Drop for AttributeList {
     }
 }
 
-fn wait_for_process(process: &Handle) -> io::Result<ExitStatus> {
-    // SAFETY: the Arc retained by WindowsJobChild keeps this process handle valid for the wait.
-    let result = unsafe { WaitForSingleObject(process.raw(), u32::MAX) };
+fn poll_process(process: &Handle) -> io::Result<Option<ExitStatus>> {
+    // A zero-timeout wait keeps this future cancellation-safe. Repeated unsupported interrupt
+    // requests can cancel the surrounding select without leaving one blocking OS waiter behind
+    // for each request.
+    // SAFETY: the Arc retained by WindowsJobChild keeps this process handle valid for the poll.
+    let result = unsafe { WaitForSingleObject(process.raw(), 0) };
+    if result == WAIT_TIMEOUT {
+        return Ok(None);
+    }
+    if result == WAIT_FAILED {
+        return Err(io::Error::last_os_error());
+    }
     if result != WAIT_OBJECT_0 {
-        return if result == WAIT_FAILED {
-            Err(io::Error::last_os_error())
-        } else {
-            Err(io::Error::other(format!(
-                "waiting for Windows process returned unexpected code {result}"
-            )))
-        };
+        return Err(io::Error::other(format!(
+            "polling Windows process returned unexpected code {result}"
+        )));
     }
     let mut exit_code = 0;
     // SAFETY: the completed process handle remains valid for this query.
     if unsafe { GetExitCodeProcess(process.raw(), &mut exit_code) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(ExitStatus::from_raw(exit_code))
+    Ok(Some(ExitStatus::from_raw(exit_code)))
 }
 
 fn terminate_job(job: &Handle) -> io::Result<()> {
