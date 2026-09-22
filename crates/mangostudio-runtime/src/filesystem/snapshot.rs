@@ -107,13 +107,35 @@ impl Service {
 
     async fn revert_snapshots_with_hasher<H>(
         self: Arc<Self>,
+        params: SnapshotRevertParams,
+        response: ResponseBudget,
+        cancel: CancellationToken,
+        hasher: H,
+    ) -> Result<Value, RemoteError>
+    where
+        H: SnapshotHasher + Send + 'static,
+    {
+        self.revert_snapshots_with_components(
+            params,
+            response,
+            cancel,
+            hasher,
+            NativeSnapshotPolicyCompiler,
+        )
+        .await
+    }
+
+    async fn revert_snapshots_with_components<H, P>(
+        self: Arc<Self>,
         mut params: SnapshotRevertParams,
         response: ResponseBudget,
         cancel: CancellationToken,
         mut hasher: H,
+        mut compiler: P,
     ) -> Result<Value, RemoteError>
     where
         H: SnapshotHasher + Send + 'static,
+        P: SnapshotPolicyCompiler + Send + 'static,
     {
         // The TypeScript entry point treats an empty optional root as absent.
         params.containment_root = params
@@ -135,7 +157,8 @@ impl Service {
             let all_paths = revert_paths(&params);
             assert_initial_containment(params.containment_root.as_deref(), &all_paths)?;
             let checked_paths = all_paths.iter().map(PathBuf::as_path).collect::<Vec<_>>();
-            let policy = self.compile_policy(
+            let policy = compiler.compile(
+                &self,
                 "snapshot.revert",
                 &Some(requested_policy.clone()),
                 &checked_paths,
@@ -160,13 +183,19 @@ impl Service {
             // containment path to change. Repeat both checks immediately
             // before the first possible mutation while the whole path set is
             // still locked.
-            let policy = self.compile_policy(
+            let policy = compiler.compile(
+                &self,
                 "snapshot.revert",
                 &Some(requested_policy),
                 &checked_paths,
                 false,
                 &cancel,
             )?;
+            // `compile` checks cancellation before its own authorization and
+            // path work. Check again after that work so a cancellation that
+            // lands while it runs cannot report an idempotent success or
+            // begin replay.
+            io::check_cancel(&cancel)?;
             if reverted {
                 return Ok(result);
             }
@@ -287,6 +316,34 @@ impl SnapshotHasher for NativeSnapshotHasher {
         cancel: &CancellationToken,
     ) -> Result<Option<String>, RemoteError> {
         io::hash_file_if_present_cancellable(policy, path, cancel)
+    }
+}
+
+trait SnapshotPolicyCompiler {
+    fn compile(
+        &mut self,
+        service: &Service,
+        method: &str,
+        policy: &Option<PathPolicy>,
+        paths: &[&Path],
+        capture_snapshot: bool,
+        cancel: &CancellationToken,
+    ) -> Result<super::policy::CompiledPolicy, RemoteError>;
+}
+
+struct NativeSnapshotPolicyCompiler;
+
+impl SnapshotPolicyCompiler for NativeSnapshotPolicyCompiler {
+    fn compile(
+        &mut self,
+        service: &Service,
+        method: &str,
+        policy: &Option<PathPolicy>,
+        paths: &[&Path],
+        capture_snapshot: bool,
+        cancel: &CancellationToken,
+    ) -> Result<super::policy::CompiledPolicy, RemoteError> {
+        service.compile_policy(method, policy, paths, capture_snapshot, cancel)
     }
 }
 
@@ -498,6 +555,31 @@ mod tests {
                 self.revoked = true;
             }
             Ok(hash)
+        }
+    }
+
+    struct CancellingFinalPolicyCompiler {
+        cancel: CancellationToken,
+        calls: usize,
+    }
+
+    impl SnapshotPolicyCompiler for CancellingFinalPolicyCompiler {
+        fn compile(
+            &mut self,
+            service: &Service,
+            method: &str,
+            policy: &Option<PathPolicy>,
+            paths: &[&Path],
+            capture_snapshot: bool,
+            cancel: &CancellationToken,
+        ) -> Result<super::super::policy::CompiledPolicy, RemoteError> {
+            let compiled =
+                service.compile_policy(method, policy, paths, capture_snapshot, cancel)?;
+            self.calls += 1;
+            if self.calls == 2 {
+                self.cancel.cancel();
+            }
+            Ok(compiled)
         }
     }
 
@@ -998,6 +1080,63 @@ mod tests {
         assert_eq!(error.code, codes::DENIED);
         assert_eq!(writes.writes.load(Ordering::SeqCst), 0);
         assert_eq!(std::fs::read(path).unwrap(), b"after");
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_the_final_policy_check_refuses_before_replay_writes() {
+        let cancel = CancellationToken::new();
+        let writes = Arc::new(CountingReplayWriteIo {
+            writes: AtomicUsize::new(0),
+        });
+        let (home, service) = fixture_with_write_io(Arc::clone(&writes) as Arc<dyn WriteIo>);
+        let path = home.join("after");
+        std::fs::write(&path, b"after").unwrap();
+        let error = Arc::clone(&service)
+            .revert_snapshots_with_components(
+                SnapshotRevertParams {
+                    chat_id: "chat".to_owned(),
+                    containment_root: None,
+                    expected: vec![expected(path.clone(), b"after", Some(b"before"))],
+                    operations: vec![restore(path.clone(), "YmVmb3Jl")],
+                },
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+                NativeSnapshotHasher,
+                CancellingFinalPolicyCompiler {
+                    cancel: cancel.clone(),
+                    calls: 0,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
+        assert_eq!(writes.writes.load(Ordering::SeqCst), 0);
+        assert_eq!(std::fs::read(path).unwrap(), b"after");
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_the_final_policy_check_refuses_an_already_reverted_retry() {
+        let (home, service) = fixture();
+        let path = home.join("already-reverted");
+        std::fs::write(&path, b"before").unwrap();
+        let cancel = CancellationToken::new();
+        let error = Arc::clone(&service)
+            .revert_snapshots_with_components(
+                SnapshotRevertParams {
+                    chat_id: "chat".to_owned(),
+                    containment_root: None,
+                    expected: vec![expected(path.clone(), b"after", Some(b"before"))],
+                    operations: vec![restore(path.clone(), "YmVmb3Jl")],
+                },
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+                NativeSnapshotHasher,
+                CancellingFinalPolicyCompiler { cancel, calls: 0 },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
+        assert_eq!(std::fs::read(path).unwrap(), b"before");
     }
 
     #[tokio::test]
