@@ -464,7 +464,9 @@ fn start_error(method: &str, args: &[String], error: ProcessStartError) -> Remot
 }
 
 fn shell_exit(terminal: &ProcessTerminal, windows: bool) -> (Option<i32>, Option<&'static str>) {
-    // Bun represents an explicit Windows kill as SIGKILL despite the OS's integer status.
+    // Bun exposes a process killed on Windows as exit code 1 with no signal,
+    // including the timeout path. Preserve that wire result while keeping the
+    // authoritative termination cause below as `timed_out` or `aborted`.
     if windows
         && matches!(
             terminal.cause,
@@ -473,7 +475,7 @@ fn shell_exit(terminal: &ProcessTerminal, windows: bool) -> (Option<i32>, Option
                 | ProcessTerminalCause::Forced
         )
     {
-        return (None, Some("SIGKILL"));
+        return (Some(1), None);
     }
     let exit = terminal.exit.as_ref().and_then(|exit| exit.code);
     let signal = terminal
@@ -485,11 +487,8 @@ fn shell_exit(terminal: &ProcessTerminal, windows: bool) -> (Option<i32>, Option
 }
 
 fn cli_exit(terminal: &ProcessTerminal, windows: bool) -> Option<i32> {
-    let (exit, signal) = shell_exit(terminal, windows);
+    let (exit, _) = shell_exit(terminal, windows);
     exit.or_else(|| {
-        if signal == Some("SIGKILL") {
-            return Some(137);
-        }
         terminal
             .exit
             .as_ref()

@@ -405,8 +405,8 @@ fn windows_forced_shell_exit_matches_bun_without_rewriting_natural_exits() {
         ProcessTerminalCause::Forced,
     ] {
         observed.cause = cause;
-        assert_eq!(shell_exit(&observed, true), (None, Some("SIGKILL")));
-        assert_eq!(cli_exit(&observed, true), Some(137));
+        assert_eq!(shell_exit(&observed, true), (Some(1), None));
+        assert_eq!(cli_exit(&observed, true), Some(1));
         assert_eq!(shell_exit(&observed, false), (Some(1), None));
     }
 }
@@ -431,7 +431,10 @@ fn timed_out_cli_errors_preserve_buns_numeric_signal_exit() {
         }),
     });
     let error = map_terminal("git.exec", &prepared, observed).unwrap_err();
-    assert_eq!(error.details.unwrap()["exitCode"], 137);
+    assert_eq!(
+        error.details.unwrap()["exitCode"],
+        if cfg!(windows) { 1 } else { 137 }
+    );
 }
 
 #[test]
