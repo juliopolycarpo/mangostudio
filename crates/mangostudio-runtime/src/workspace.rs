@@ -452,16 +452,51 @@ pub fn guard_mutation<T>(
 /// [`crate::workspace_methods::read_workspace_directory`] for why that
 /// listing builds its own filter-then-sort-then-cap pipeline instead of
 /// calling into this module for the whole thing.
+///
+/// ASCII-only pairs compare their folded bytes without allocating:
+/// `str::to_lowercase` folds ASCII byte for byte, so both paths order alike.
 pub(crate) fn compare_directory_entry_names(left: &str, right: &str) -> std::cmp::Ordering {
-    left.to_lowercase()
-        .cmp(&right.to_lowercase())
-        .then_with(|| left.cmp(right))
+    let folded = if left.is_ascii() && right.is_ascii() {
+        left.bytes()
+            .map(|byte| byte.to_ascii_lowercase())
+            .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+    } else {
+        left.to_lowercase().cmp(&right.to_lowercase())
+    };
+    folded.then_with(|| left.cmp(right))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkspaceContainmentError, guard_mutation, resolve_contained_workspace_path};
+    use super::{
+        WorkspaceContainmentError, compare_directory_entry_names, guard_mutation,
+        resolve_contained_workspace_path,
+    };
     use crate::test_support::scratch_dir as scratch_root;
+
+    /// Pins the allocation-free ASCII path and the Unicode fallback to the
+    /// plain `to_lowercase` ordering, including context-sensitive final sigma
+    /// and multi-character lowercase mappings.
+    #[test]
+    fn entry_name_order_matches_a_full_lowercase_fold() {
+        let names = [
+            "apple", "Apple", "APPLE", "banana", "Banana", "_x", "a-b", "a_b", "Zeta", "zeta1",
+            "ΣA", "σa", "ΟΔΟΣ", "οδος", "İx", "ix", "Äb", "äa", "a", "",
+        ];
+        for left in names {
+            for right in names {
+                let expected = left
+                    .to_lowercase()
+                    .cmp(&right.to_lowercase())
+                    .then_with(|| left.cmp(right));
+                assert_eq!(
+                    compare_directory_entry_names(left, right),
+                    expected,
+                    "order of {left:?} vs {right:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn a_path_inside_the_root_resolves_to_its_relative_form() {
