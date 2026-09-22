@@ -28,10 +28,10 @@ use tokio_util::sync::CancellationToken;
 mod supervisor;
 
 pub use supervisor::{
-    AlwaysAllow, DefaultProcessSpawner, LaunchCheck, LaunchCheckError, ProcessBudget,
-    ProcessCapture, ProcessControl, ProcessExit, ProcessFuture, ProcessRequest, ProcessSignal,
-    ProcessSpawner, ProcessStartError, ProcessStdin, ProcessStop, ProcessTerminal,
-    ProcessTerminalCause,
+    AlwaysAllow, DefaultProcessSpawner, LaunchCheck, LaunchCheckError,
+    MAX_SUPERVISED_PROCESS_REQUESTS, ProcessBudget, ProcessCapture, ProcessControl, ProcessExit,
+    ProcessFuture, ProcessRequest, ProcessSignal, ProcessSpawner, ProcessStartError, ProcessStdin,
+    ProcessStop, ProcessTerminal, ProcessTerminalCause,
 };
 
 /// How many children this process runs at once, across every caller.
@@ -210,6 +210,9 @@ fn map_start_error(error: ProcessStartError) -> ChildRunError {
         ProcessStartError::SupervisorUnavailable => ChildRunError::SpawnFailed(
             std::io::Error::other("the process supervisor stopped before reporting launch status"),
         ),
+        ProcessStartError::LimitExceeded => ChildRunError::SpawnFailed(std::io::Error::other(
+            "the process supervisor has reached its bounded request limit",
+        )),
     }
 }
 

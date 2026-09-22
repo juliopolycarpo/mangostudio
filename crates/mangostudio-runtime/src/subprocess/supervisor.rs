@@ -26,6 +26,13 @@ use crate::blocking::run_blocking;
 /// The object-safe future returned by process ports.
 pub type ProcessFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// The largest number of requests that may own supervisor admission state at once.
+///
+/// Four of these can own a child (see [`MAX_CONCURRENT_CHILD_PROCESSES`]); the
+/// remaining slots are bounded queueing. Refusing a larger burst keeps a caller
+/// from creating unbounded tasks that each retain request input and consent state.
+pub const MAX_SUPERVISED_PROCESS_REQUESTS: usize = 16;
+
 /// Exact launch configuration for one process.
 #[derive(Clone, Debug)]
 pub struct ProcessRequest {
@@ -158,6 +165,8 @@ pub enum ProcessStartError {
     SpawnFailed(io::Error),
     /// The supervisor worker stopped before reporting a start result.
     SupervisorUnavailable,
+    /// Every running and bounded-queue admission slot is occupied.
+    LimitExceeded,
 }
 
 /// Starts owned processes. Handler tests can implement this port with named fakes.
@@ -183,6 +192,10 @@ impl ProcessSpawner for DefaultProcessSpawner {
         check: Arc<dyn LaunchCheck>,
         cancel: CancellationToken,
     ) -> ProcessFuture<'_, Result<ProcessControl, ProcessStartError>> {
+        let admission = match Arc::clone(admission_pool()).try_acquire_owned() {
+            Ok(admission) => admission,
+            Err(_) => return Box::pin(async { Err(ProcessStartError::LimitExceeded) }),
+        };
         Box::pin(async move {
             let (result_tx, result_rx) = oneshot::channel();
             tokio::spawn(supervise_start(
@@ -191,6 +204,7 @@ impl ProcessSpawner for DefaultProcessSpawner {
                 cancel,
                 Instant::now(),
                 result_tx,
+                admission,
             ));
             result_rx
                 .await
@@ -286,6 +300,46 @@ impl std::fmt::Debug for ProcessControl {
 }
 
 impl ProcessControl {
+    /// Builds an already-settled control for a deterministic [`ProcessSpawner`] test fake.
+    ///
+    /// The returned handle owns no OS process. Its stop methods therefore return the supplied
+    /// terminal record immediately, which lets handler tests describe a non-zero exit, an
+    /// incomplete capture, or a timeout without spawning a platform child.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use mangostudio_runtime::subprocess::{
+    ///     ProcessCapture, ProcessControl, ProcessTerminal, ProcessTerminalCause,
+    /// };
+    ///
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// let terminal = ProcessTerminal {
+    ///     cause: ProcessTerminalCause::TimedOut,
+    ///     exit: None,
+    ///     elapsed: Duration::from_secs(1),
+    ///     stdout: ProcessCapture { bytes: vec![], truncated: false, incomplete: true },
+    ///     stderr: ProcessCapture { bytes: vec![], truncated: false, incomplete: true },
+    /// };
+    /// let control = ProcessControl::completed(terminal);
+    /// assert_eq!(control.wait().await.cause, ProcessTerminalCause::TimedOut);
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn completed(terminal: ProcessTerminal) -> Self {
+        let (commands, _receiver) = mpsc::unbounded_channel();
+        let (terminal_tx, _) = watch::channel(Some(terminal));
+        Self {
+            shared: Arc::new(Shared {
+                commands,
+                terminal: terminal_tx,
+            }),
+        }
+    }
+
     /// Waits for terminal cleanup. Dropping this future does not affect the owned child.
     pub fn wait(&self) -> ProcessFuture<'_, ProcessTerminal> {
         let mut terminal = self.shared.terminal.subscribe();
@@ -366,12 +420,18 @@ fn process_pool() -> &'static Arc<Semaphore> {
     POOL.get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_CHILD_PROCESSES)))
 }
 
+fn admission_pool() -> &'static Arc<Semaphore> {
+    static POOL: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    POOL.get_or_init(|| Arc::new(Semaphore::new(MAX_SUPERVISED_PROCESS_REQUESTS)))
+}
+
 async fn supervise_start(
     request: ProcessRequest,
     check: Arc<dyn LaunchCheck>,
     cancel: CancellationToken,
     started: Instant,
     result_tx: oneshot::Sender<Result<ProcessControl, ProcessStartError>>,
+    admission: tokio::sync::OwnedSemaphorePermit,
 ) {
     let deadline = started + request.budget.deadline;
     let permit = tokio::select! {
@@ -420,6 +480,7 @@ async fn supervise_start(
         shared,
         initial_stop,
         permit,
+        admission,
     )
     .await;
 }
@@ -484,6 +545,7 @@ async fn supervise_child(
     shared: Arc<Shared>,
     initial_stop: Option<StopRequest>,
     _permit: tokio::sync::OwnedSemaphorePermit,
+    _admission: tokio::sync::OwnedSemaphorePermit,
 ) {
     let pid = child.id();
     let stdout = child.stdout.take().expect("stdout is piped");
@@ -803,8 +865,9 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        AlwaysAllow, DefaultProcessSpawner, LaunchCheck, ProcessBudget, ProcessRequest,
-        ProcessSpawner, ProcessStartError, ProcessStdin, ProcessTerminalCause,
+        AlwaysAllow, DefaultProcessSpawner, LaunchCheck, ProcessBudget, ProcessCapture,
+        ProcessControl, ProcessRequest, ProcessSpawner, ProcessStartError, ProcessStdin,
+        ProcessTerminal, ProcessTerminalCause,
     };
     use crate::test_support::scratch_dir;
 
@@ -931,6 +994,29 @@ mod tests {
         drop(control);
 
         assert_process_is_gone(&pid_file).await;
+    }
+
+    #[tokio::test]
+    async fn completed_control_makes_a_named_handler_fake_deterministic() {
+        let expected = ProcessTerminal {
+            cause: ProcessTerminalCause::TimedOut,
+            exit: None,
+            elapsed: Duration::from_millis(50),
+            stdout: ProcessCapture {
+                bytes: b"partial".to_vec(),
+                truncated: false,
+                incomplete: true,
+            },
+            stderr: ProcessCapture {
+                bytes: Vec::new(),
+                truncated: false,
+                incomplete: true,
+            },
+        };
+        let control = ProcessControl::completed(expected.clone());
+
+        assert_eq!(control.wait().await.cause, expected.cause);
+        assert_eq!(observed(control.close().await).stdout, expected.stdout);
     }
 
     struct PanicIfCalled;
