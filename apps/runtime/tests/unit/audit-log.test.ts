@@ -357,6 +357,43 @@ describe('createRuntimeAuditSink', () => {
 });
 
 describe('dispatch audit hook', () => {
+  it.each(['full', 'readonly'] as const)(
+    'omits rejected gh arguments from the persisted %s audit',
+    async (profile) => {
+      const { home, env } = await tempHome();
+      const path = join(home, 'audit.log');
+      const sink = createRuntimeAuditSink({ slot: 'remote', enabled: true, env, path });
+      const connection = await connectRuntimeDefinition(
+        createLocalRuntimeHost({
+          runtimeVersion: '0.0.0-test',
+          consent: staticConsentSource(RUNTIME_CONSENT_PRESETS[profile], 'remote'),
+          audit: sink,
+        })
+      );
+      const privateArgument = 'unpublished project notes';
+      try {
+        await expect(
+          connection.request('gh.mutate', { args: ['pr', privateArgument], cwd: home })
+        ).rejects.toMatchObject(
+          profile === 'readonly'
+            ? { code: 'DENIED' }
+            : { code: 'INTERNAL', details: { kind: 'tool_argument' } }
+        );
+        await sink.flush();
+        const records = await readRuntimeAuditLog({ path });
+        expect(records).toHaveLength(1);
+        expect(records[0]).toMatchObject({
+          method: 'gh.mutate',
+          outcome: profile === 'readonly' ? 'denied' : 'error',
+        });
+        expect(await readFile(path, 'utf8')).not.toContain(privateArgument);
+      } finally {
+        await connection.close();
+        await sink.close();
+      }
+    }
+  );
+
   it('logs denials with method, capability, and reason when no work ran', async () => {
     const { home, env } = await tempHome();
     const path = join(home, 'audit.log');
