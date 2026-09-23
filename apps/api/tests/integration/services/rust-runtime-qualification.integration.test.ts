@@ -43,6 +43,9 @@
  * | `apps/runtime/tests/unit/services/workspace-resolve-contained.test.ts` "rejects the root itself, which is not a path within the root" (an escape) | same tests (resolve-contained error case) |
  * | `apps/runtime/tests/unit/services/probing/toolchains.test.ts` typed `probing.*` request/result handling | the health tests over stdio and direct URL, through `assertRustRuntimeProbingMethods` |
  * | `apps/runtime/tests/unit/services/library/library-service.test.ts` "library.read containment" and "library.scan caps" (contained reads, denied outside paths, invalid instances reported) | the workspace tests over stdio, direct URL and paired connect, through `assertRustRuntimeLibraryMethods`, which also diffs the scan against `scanLibraryInstances` on the same tree |
+ * | `apps/runtime/tests/unit/services/install.test.ts` "streams lines, writes a bounded raw log, and records success" | "runs, streams and cancels a controlled install through the hub relay over stdio" |
+ * | `apps/runtime/tests/unit/services/install.test.ts` "kills a child the hub asked it to cancel" (corrected: cancel stops the chain, the running step finishes) | same test (cancel mid-step, effect applied once) |
+ * | `apps/runtime/tests/unit/services/install.test.ts` "stops streaming once the hub session refuses a line, without abandoning the install" | "keeps a running install owned after the hub disconnects from a serve runtime" |
  *
  * **Not yet replaced** — no Rust equivalent exists for `externalAgents`, per
  * `health.rs`'s own module doc. PTY qualification now lives in the stdio test.
@@ -51,11 +54,13 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { realpath } from 'node:fs/promises';
+import { readFile, realpath, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { getDb } from '../../../src/db/database';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
+import { evaluateRemoteInstallGuard } from '../../../src/modules/environments/domain/install-guards';
 import { createEnvironmentRepository } from '../../../src/modules/environments/infrastructure/environment-repository';
 import { createTerminalSessionService } from '../../../src/modules/terminals/application/terminal-session-service';
 import { connectHttpRuntime } from '../../../src/services/runtime-client/connect-http-runtime';
@@ -84,6 +89,13 @@ import {
   rustRuntimeVersion,
   scratchMangoHome,
 } from '../../support/rust-runtime-binary';
+import {
+  expectAppliedOnce,
+  processGone,
+  startRelayedInstall,
+  waitUntil,
+  writeFakeInstaller,
+} from '../../support/rust-runtime-install-fixture';
 
 const binary = resolveRustRuntimeBinary();
 
@@ -347,6 +359,115 @@ describe('Real Rust runtime qualification', () => {
     );
 
     it.skipIf(!binary.available)(
+      'runs, streams and cancels a controlled install through the hub relay over stdio',
+      async () => {
+        mangoHome = await scratchMangoHome('stdio-install');
+        previousMangoHome = process.env.MANGO_HOME;
+        process.env.MANGO_HOME = mangoHome;
+        const connection = await spawnRuntimeChild({
+          environmentId: 'rust-stdio-install',
+          launch: resolveRuntimeLaunchCommand(undefined, {
+            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+          }),
+          hubVersion: runtimeVersion,
+          onClosed: () => undefined,
+        });
+        const scratch = await realpath(await scratchMangoHome('stdio-install-dir'));
+        try {
+          const client = new RuntimeClient(connection.hub, () => undefined, 'rust-stdio-install');
+          // The hub's install gate reads `features.shell !== false`; install is now implemented.
+          expect(client.manifest.features.shell).toBe(true);
+          expect(
+            evaluateRemoteInstallGuard({
+              allowInstalls: true,
+              installsEnabled: true,
+              runtimeShellAllowed: client.manifest.features.shell !== false,
+            }).allowed
+          ).toBe(true);
+
+          // Cancel during a step: the chain stops, but the running installer is not killed.
+          const installer = await writeFakeInstaller(scratch, 'waits', 'cancel-mid-step');
+          const abort = new AbortController();
+          const run = startRelayedInstall(client, installer, {
+            runId: 'rust-install-cancel',
+            signal: abort.signal,
+          });
+          await run.waitForLine('stdout', 'waiting');
+          await run.waitForLine('stderr', 'warn');
+          abort.abort('user_cancelled');
+          await run.waitForLine('system', 'Cancellation requested');
+          await writeFile(installer.release, '');
+          const result = await run.result;
+          expect(result).toMatchObject({ status: 'succeeded', exitCode: 0, truncated: false });
+          expect(run.lines).toContainEqual({ stream: 'stdout', line: 'done' });
+          await expectAppliedOnce(installer);
+          const log = await readFile(installer.logPath, 'utf8');
+          expect(log).toContain('waiting');
+          expect(log).toContain('done');
+
+          // Cancel before its run arrives: nothing launches.
+          const early = await writeFakeInstaller(scratch, 'sleeps', 'cancel-before-run');
+          expect(await client.install.cancel({ runId: 'rust-install-early' })).toEqual({
+            ok: true,
+          });
+          const cancelled = await client.install.run({
+            runId: 'rust-install-early',
+            argv: [...early.argv],
+            timeoutMs: 20_000,
+            logPath: early.logPath,
+          });
+          expect(cancelled).toMatchObject({ status: 'cancelled', exitCode: null });
+          await Bun.sleep(1_500);
+          expect(await Bun.file(early.marker).exists()).toBe(false);
+        } finally {
+          await connection.close();
+          await cleanupMangoHome(scratch);
+        }
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available)(
+      'finishes a running install step after the stdio hub goes away',
+      async () => {
+        mangoHome = await scratchMangoHome('stdio-install-hub-loss');
+        previousMangoHome = process.env.MANGO_HOME;
+        process.env.MANGO_HOME = mangoHome;
+        const connection = await spawnRuntimeChild({
+          environmentId: 'rust-stdio-install-hub-loss',
+          launch: resolveRuntimeLaunchCommand(undefined, {
+            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+          }),
+          hubVersion: runtimeVersion,
+          onClosed: () => undefined,
+        });
+        const scratch = await realpath(await scratchMangoHome('stdio-install-hub-loss-dir'));
+        try {
+          const client = new RuntimeClient(
+            connection.hub,
+            () => undefined,
+            'rust-stdio-install-hub-loss'
+          );
+          const installer = await writeFakeInstaller(scratch, 'sleeps', 'hub-loss');
+          const run = startRelayedInstall(client, installer, { runId: 'rust-install-hub-loss' });
+          await run.waitForLine('stdout', 'waiting');
+
+          // Closing the session is a lost hub, not a cancel: the step still applies its effect.
+          // This short step settles inside the launcher's terminate grace; the runtime's own
+          // wait past the protocol handler grace is proved by the crate's spawned-stdio test.
+          await connection.close();
+          await run.result;
+          await expectAppliedOnce(installer);
+          expect(await readFile(installer.logPath, 'utf8')).toContain('done');
+        } finally {
+          await connection.close();
+          await cleanupMangoHome(scratch);
+        }
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available)(
       'filesystem methods round-trip over stdio',
       async () => {
         mangoHome = await scratchMangoHome('stdio-filesystem');
@@ -589,8 +710,114 @@ describe('Real Rust runtime qualification', () => {
       },
       30_000
     );
+
+    /** Starts `serve` under a scratch home and returns a connected hub client. */
+    async function connectServe(name: string) {
+      await insertTestUser(TEST_USER);
+      const store = new InMemorySecretStore();
+      setRuntimeTokenStoreForTests(store);
+      const token = `rust-serve-${name}-token`;
+      mangoHome = await scratchMangoHome(`serve-${name}`);
+      const port = reserveEphemeralPort();
+      child = Bun.spawn({
+        cmd: [binary.path, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
+        env: { ...process.env, MANGO_HOME: mangoHome, MANGOSTUDIO_RUNTIME_SERVE_TOKEN: token },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const repository = createEnvironmentRepository(getDb());
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: async (userId, environmentId) => repository.find(userId, environmentId),
+        connectors: { http: connectHttpRuntime },
+      });
+      setRuntimeConnectionManagerForTests(manager);
+      const service = createEnvironmentService(repository, manager, () => undefined, store);
+      const environmentId = `rust-serve-${name}-box`;
+      await service.create(TEST_USER.id, {
+        id: environmentId,
+        name: `Rust serve ${name} box`,
+        transportKind: 'http',
+        config: { baseUrl: `http://127.0.0.1:${port}` },
+        token,
+      });
+      await connectUntilListening(() => service.connect(TEST_USER.id, environmentId));
+      const client = await manager.getClient(TEST_USER.id, environmentId);
+      return { client, disconnect: () => manager.disconnect(TEST_USER.id, environmentId) };
+    }
+
+    it.skipIf(!binary.available)(
+      'keeps a running install owned after the hub disconnects from a serve runtime',
+      async () => {
+        const { client, disconnect } = await connectServe('install-hub-loss');
+        const scratch = await realpath(await scratchMangoHome('serve-install-hub-loss-dir'));
+        try {
+          const installer = await writeFakeInstaller(scratch, 'waits', 'serve-hub-loss');
+          const run = startRelayedInstall(client, installer, { runId: 'rust-serve-hub-loss' });
+          await run.waitForLine('stdout', 'waiting');
+
+          disconnect();
+          await run.result;
+          await writeFile(installer.release, '');
+          await expectAppliedOnce(installer);
+          await waitUntil(
+            () => Bun.file(installer.logPath).size > 0,
+            'the install log to keep the unobserved output'
+          );
+          // No request was left to answer, so the owner wrote the audit line itself.
+          const audit = join(mangoHome, 'runtime', 'remote', 'audit.log');
+          await waitUntilAsync(async () => {
+            const text = await readFile(audit, 'utf8').catch(() => '');
+            return text.includes('"method":"install.run"');
+          }, 'an install.run audit line recorded by the run owner');
+          expect(await readFile(installer.logPath, 'utf8')).toContain('done');
+        } finally {
+          await cleanupMangoHome(scratch);
+        }
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available || process.platform === 'win32')(
+      'terminates a running install tree when the runtime process is signalled',
+      async () => {
+        const { client } = await connectServe('install-signal');
+        const scratch = await realpath(await scratchMangoHome('serve-install-signal-dir'));
+        try {
+          const installer = await writeFakeInstaller(scratch, 'grandchild', 'serve-signal');
+          const run = startRelayedInstall(client, installer, { runId: 'rust-serve-signal' });
+          await run.waitForLine('stdout', 'waiting');
+          await waitUntil(() => Bun.file(installer.pidFile).size > 0, 'the grandchild pid');
+          const pid = Number((await readFile(installer.pidFile, 'utf8')).trim());
+
+          child?.kill('SIGTERM');
+          await child?.exited;
+          child = undefined;
+          await run.result;
+
+          expect(await processGone(pid)).toBe(true);
+        } finally {
+          await cleanupMangoHome(scratch);
+        }
+      },
+      30_000
+    );
   });
 });
+
+/** {@link waitUntil} for an asynchronous condition. */
+async function waitUntilAsync(
+  condition: () => Promise<boolean>,
+  what: string,
+  timeoutMs = 10_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await condition())) {
+    if (Date.now() >= deadline) {
+      throw new Error(`expected ${what} | received: nothing within ${timeoutMs}ms`);
+    }
+    await Bun.sleep(20);
+  }
+}
 
 /** An unused TCP port on loopback, released back to the OS before returning. */
 function reserveEphemeralPort(): number {
