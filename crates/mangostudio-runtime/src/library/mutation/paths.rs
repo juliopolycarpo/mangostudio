@@ -18,6 +18,10 @@ use super::super::names::is_valid_resource_slug;
 use crate::probing::detection::path_env::{
     PathEnv, is_absolute, normalize_path, resolve_path, separator,
 };
+
+#[cfg(test)]
+#[path = "paths_node_tests.rs"]
+mod node_tests;
 use crate::probing::locations::{
     LocationDefinition, LocationLayout, ResourceFormat, location_by_id,
 };
@@ -155,14 +159,122 @@ pub(crate) fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// `resolvePathThroughExistingAncestor`, with a Windows verbatim prefix
-/// simplified so the answer is the string Node's `realpath` would give.
-/// `None` when the path cannot be verified (a symlink loop, or an ancestor
-/// this process cannot inspect).
+/// What one path segment is on disk, as `lstat` sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SegmentEntry {
+    /// Nothing there (`ENOENT`).
+    Missing,
+    /// A file or directory that is not a link.
+    Plain,
+    /// A symlink (or Windows junction), with its raw target text.
+    Link(String),
+}
+
+/// Bounds symlink hops, as `MAX_SYMLINK_HOPS` does in `path-containment.ts`.
+const MAX_SYMLINK_HOPS: u32 = 32;
+
+/// `resolvePathThroughExistingAncestor` for this host: every path a manifest
+/// records, and every root it is checked against, goes through here.
+///
+/// It resolves the path the way TypeScript does, not the way the kernel names
+/// it: symlinks are followed segment by segment, but nothing is canonicalized.
+/// The difference is load-bearing on Windows. `std::fs::canonicalize`
+/// expands an 8.3 short name (`C:\Users\RUNNER~1`) to its long form, while
+/// Node's JavaScript `realpathSync` keeps the spelling it was given. A Rust
+/// manifest recording the long form beside a TypeScript root in the short
+/// form fails TypeScript's `isPathPrefix` check, and the reverse fails ours,
+/// so both runtimes must spell a path the same way. `None` when the path
+/// cannot be verified: a symlink loop, or a segment this process cannot
+/// inspect.
 pub(crate) fn resolve_through_existing_ancestor(path: &str) -> Option<String> {
-    let resolved = crate::workspace::resolve_through_existing_ancestor(Path::new(path))?;
-    let text = path_string(&resolved);
-    Some(simplify_verbatim_path(&text).unwrap_or(text))
+    let platform = crate::health::node_platform();
+    resolve_like_node(platform, path, &|candidate| native_segment(candidate))
+}
+
+fn native_segment(candidate: &str) -> std::io::Result<SegmentEntry> {
+    let metadata = match std::fs::symlink_metadata(candidate) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(SegmentEntry::Missing);
+        }
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_symlink() {
+        return Ok(SegmentEntry::Plain);
+    }
+    let target = path_string(&std::fs::read_link(candidate)?);
+    Ok(SegmentEntry::Link(
+        simplify_verbatim_path(&target).unwrap_or(target),
+    ))
+}
+
+/// The pure half of [`resolve_through_existing_ancestor`], with the `lstat`
+/// and `readlink` it needs injected as `probe`.
+///
+/// # Example
+///
+/// ```ignore
+/// // An 8.3 name that is a plain directory keeps its spelling.
+/// let resolved = resolve_like_node("win32", r"C:\Users\RUNNER~1\x", &|_| Ok(SegmentEntry::Plain));
+/// assert_eq!(resolved.as_deref(), Some(r"C:\Users\RUNNER~1\x"));
+/// ```
+pub(crate) fn resolve_like_node(
+    platform: &str,
+    path: &str,
+    probe: &dyn Fn(&str) -> std::io::Result<SegmentEntry>,
+) -> Option<String> {
+    let (root, segments) = split_absolute(platform, &node_resolve(platform, path));
+    let mut resolved = root;
+    let mut pending: std::collections::VecDeque<String> = segments.into();
+    let mut hops = 0;
+    while let Some(segment) = pending.pop_front() {
+        let candidate = resolve_path(platform, &resolved, &segment);
+        match probe(&candidate).ok()? {
+            SegmentEntry::Missing => {
+                let mut parts: Vec<&str> = vec![&resolved, &segment];
+                parts.extend(pending.iter().map(String::as_str));
+                return Some(node_resolve(platform, &node_join(platform, &parts)));
+            }
+            SegmentEntry::Plain => resolved = candidate,
+            SegmentEntry::Link(target) => {
+                if hops >= MAX_SYMLINK_HOPS {
+                    return None;
+                }
+                hops += 1;
+                let parent = node_dirname(platform, &candidate);
+                let (target_root, target_segments) =
+                    split_absolute(platform, &resolve_path(platform, &parent, &target));
+                resolved = target_root;
+                for segment in target_segments.into_iter().rev() {
+                    pending.push_front(segment);
+                }
+            }
+        }
+    }
+    Some(resolved)
+}
+
+/// `splitAbsolutePath`: an absolute, normalized path's root (`/`, `C:\`,
+/// `\\server\share\`) and its remaining segments.
+fn split_absolute(platform: &str, path: &str) -> (String, Vec<String>) {
+    let sep = separator(platform);
+    let bytes = path.as_bytes();
+    let root_len = if platform == "win32" && bytes.len() >= 2 && bytes[1] == b':' {
+        3.min(path.len())
+    } else if platform == "win32" && path.starts_with("\\\\") {
+        path.char_indices()
+            .filter(|(_, c)| *c == sep)
+            .nth(3)
+            .map_or(path.len(), |(index, _)| index + 1)
+    } else {
+        1.min(path.len())
+    };
+    let segments = path[root_len..]
+        .split(sep)
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_string)
+        .collect();
+    (path[..root_len].to_string(), segments)
 }
 
 /// `ContainedResourcePath` without the root, which no caller here reads.
