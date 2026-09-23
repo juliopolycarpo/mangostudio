@@ -39,12 +39,26 @@ async fn within<T>(what: &str, future: impl std::future::Future<Output = T>) -> 
 
 /// Holds a hooked filesystem step until the test releases it, but never
 /// past [`WAIT`]: a test that panics before releasing must not leave a
-/// blocking worker spinning, which would stall the runtime's shutdown.
-fn hold_until_released(release: &AtomicBool) {
+/// blocking worker spinning, which would stall the runtime's shutdown. An
+/// expired hold is recorded in `expired` rather than panicking inside the
+/// worker; [`assert_held_until_released`] turns it into a test failure.
+fn hold_until_released(release: &AtomicBool, expired: &AtomicBool) {
     let deadline = std::time::Instant::now() + WAIT;
-    while !release.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+    while !release.load(Ordering::SeqCst) {
+        if std::time::Instant::now() >= deadline {
+            expired.store(true, Ordering::SeqCst);
+            return;
+        }
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// Fails the test when a hook gave up waiting instead of being released.
+fn assert_held_until_released(expired: &AtomicBool) {
+    assert!(
+        !expired.load(Ordering::SeqCst),
+        "expected the hook to be released within {WAIT:?} | received the deadline"
+    );
 }
 
 struct Lane {
@@ -300,12 +314,14 @@ async fn a_queued_write_rechecks_consent_under_the_owner() {
     let lane = lane("library-write-owner-recheck");
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(AtomicBool::new(false));
+    let expired = Arc::new(AtomicBool::new(false));
     {
         let entered = Arc::clone(&entered);
         let release = Arc::clone(&release);
+        let expired = Arc::clone(&expired);
         lane.fs.before(FsOp::WriteFile, "CLAUDE.md", move |_| {
             entered.notify_one();
-            hold_until_released(&release);
+            hold_until_released(&release, &expired);
         });
     }
     let first = tokio::spawn({
@@ -331,6 +347,7 @@ async fn a_queued_write_rechecks_consent_under_the_owner() {
         .await
         .unwrap()
         .unwrap();
+    assert_held_until_released(&expired);
     assert_eq!(
         first["failed"],
         json!([]),
@@ -376,15 +393,17 @@ async fn cancel_versus_commit_retains_the_owner_until_the_boundary() {
     let cancel = CancellationToken::new();
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(AtomicBool::new(false));
+    let expired = Arc::new(AtomicBool::new(false));
     {
         let (entered, release, cancel) =
             (Arc::clone(&entered), Arc::clone(&release), cancel.clone());
+        let expired = Arc::clone(&expired);
         lane.fs
             .before(FsOp::Copy(CopyPurpose::Stage), ".claude", move |_| {
                 // Mid-effect: the first destination is being staged.
                 cancel.cancel();
                 entered.notify_one();
-                hold_until_released(&release);
+                hold_until_released(&release, &expired);
             });
     }
     let running = tokio::spawn({
@@ -431,6 +450,7 @@ async fn cancel_versus_commit_retains_the_owner_until_the_boundary() {
         .await
         .unwrap()
         .unwrap();
+    assert_held_until_released(&expired);
     assert_eq!(result["applied"], json!([]), "received {result}");
     assert_eq!(result["partial"], json!(false));
     assert_eq!(result["failed"][0]["locationId"], "agents-skills");
