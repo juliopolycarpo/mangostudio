@@ -594,8 +594,8 @@ describe('terminalSessionService.open', () => {
 
   test('keeps missing shell consent on the unavailable reason even for an older runtime', async () => {
     const { terminalCloseAfterRevocation: _unproven, ...oldManifest } = FAKE_TERMINAL_MANIFEST;
-    // An older peer's health report omits `terminal`, so the refreshed manifest keeps the
-    // handshake's stale `terminal: true` while `allow.shell` records the withdrawn consent.
+    // Hand-built inconsistent manifest: `terminal: true` with withdrawn consent. Health refresh
+    // never produces it (an omitted `terminal` is dropped), but the gate must still refuse it.
     const client = new FakeTerminalRuntimeClient({
       manifest: {
         ...oldManifest,
