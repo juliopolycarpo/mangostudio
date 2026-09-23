@@ -114,6 +114,16 @@ pub(crate) fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
         .map_or(canonical.clone(), PathBuf::from))
 }
 
+/// On Windows, the Win32 spelling of an already-canonical verbatim path
+/// (see [`canonicalize`]); `None` elsewhere, or when there is nothing to
+/// simplify.
+pub(crate) fn simplify_verbatim_path(path: &str) -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    simplify_verbatim(path)
+}
+
 /// The Win32 spelling of a verbatim drive or UNC path, or `None` for any
 /// other path (including verbatim forms with no Win32 equivalent, such as a
 /// volume GUID).
