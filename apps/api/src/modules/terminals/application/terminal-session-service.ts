@@ -125,7 +125,7 @@ export interface TerminalSessionService {
   recordExit(sessionId: string, exit: TerminalExit): void;
   /** Records a client `resize` the runtime accepted. */
   recordResize(sessionId: string, cols: number, rows: number): void;
-  /** Closes every session with no attached viewer, idle past the configured timeout. */
+  /** Closes idle detached sessions and retries revoked cleanup regardless of idle age. */
   reapIdle(): void;
   /** Starts the unref'd idle-reaper interval; returns a function that stops it. */
   startIdleReaper(intervalMs?: number): () => void;
@@ -301,34 +301,49 @@ export function createTerminalSessionService(
     throw new TerminalNotIsolatedError();
   }
 
+  function closeTrackedSession(
+    id: string,
+    entry: TerminalSessionEntry,
+    reason: 'idle' | 'revoked'
+  ): void {
+    if (reaping.has(id)) return;
+    reaping.add(id);
+    void (async () => {
+      try {
+        await entry.client.terminal.close(
+          { sessionId: id },
+          { timeoutMs: TERMINAL_CLOSE_TIMEOUT_MS }
+        );
+        if (sessions.get(id) !== entry) return;
+        if (entry.viewer) {
+          entry.session.status = 'exited';
+          entry.session.exit = { exitCode: null, signal: null };
+          entry.session.lastActivityAt = d.now();
+          entry.viewer.close(
+            TERMINAL_SOCKET_CLOSE_CODES.GONE,
+            reason === 'revoked' ? 'Terminal access revoked' : 'Session closed while idle'
+          );
+        }
+        sessions.delete(id);
+      } catch (error) {
+        logger.warn(reason === 'revoked' ? 'revoked_close_failed' : 'idle_close_failed', {
+          sessionId: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        reaping.delete(id);
+      }
+    })();
+  }
+
   function reapIdleNow(): void {
     const cutoff = d.now() - d.getConfig().idleTimeoutMinutes * 60_000;
     for (const [id, entry] of sessions) {
-      if (entry.viewer || entry.session.lastActivityAt > cutoff || reaping.has(id)) continue;
-      reaping.add(id);
-      void (async () => {
-        try {
-          await entry.client.terminal.close(
-            { sessionId: id },
-            { timeoutMs: TERMINAL_CLOSE_TIMEOUT_MS }
-          );
-          if (sessions.get(id) !== entry) return;
-          if (entry.viewer) {
-            entry.session.status = 'exited';
-            entry.session.exit = { exitCode: null, signal: null };
-            entry.session.lastActivityAt = d.now();
-            entry.viewer.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session closed while idle');
-          }
-          sessions.delete(id);
-        } catch (error) {
-          logger.warn('idle_close_failed', {
-            sessionId: id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        } finally {
-          reaping.delete(id);
-        }
-      })();
+      if (reaping.has(id)) continue;
+      if (!entry.cleanupPending && (entry.viewer || entry.session.lastActivityAt > cutoff)) {
+        continue;
+      }
+      closeTrackedSession(id, entry, 'idle');
     }
   }
 
@@ -525,16 +540,16 @@ export function createTerminalSessionService(
         reservation.scopeEnded = 'revoked';
         if (!reservation.openSent) reservations.delete(reservation);
       }
-      for (const entry of sessions.values()) {
+      for (const [id, entry] of sessions) {
         if (entry.ownerUserId !== userId || entry.session.environmentId !== environmentId) {
           continue;
         }
         entry.cleanupPending = true;
-        if (entry.session.status === 'exited') continue;
         entry.session.status = 'exited';
         entry.session.exit = { exitCode: null, signal: null };
         entry.session.lastActivityAt = d.now();
         entry.viewer?.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Terminal access revoked');
+        closeTrackedSession(id, entry, 'revoked');
       }
     },
 

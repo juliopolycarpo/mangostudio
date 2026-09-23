@@ -252,9 +252,11 @@ describe('terminalSessionService.open', () => {
 
   test('keeps a confirmed late PTY as a retryable exited record after revocation', async () => {
     const gate = barrier();
+    let closeDenied = true;
     const client = new FakeTerminalRuntimeClient({
       gateFirstOpen: () => gate.promise,
-      failFirstClose: new RuntimeConsentDeniedError('shell access withdrawn'),
+      closeFailure: () =>
+        closeDenied ? new RuntimeConsentDeniedError('shell access withdrawn') : undefined,
     });
     const { service, now } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
     const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
@@ -277,6 +279,17 @@ describe('terminalSessionService.open', () => {
     service.reapIdle();
     await Promise.resolve();
     expect(client.calls.close).toHaveLength(2);
+    expect(service.list(USER_ID)).toHaveLength(1);
+    now.value += 31 * 60_000;
+    service.reapIdle();
+    await Promise.resolve();
+    expect(client.calls.close).toHaveLength(3);
+    expect(service.list(USER_ID)).toHaveLength(1);
+    closeDenied = false;
+    now.value += 31 * 60_000;
+    service.reapIdle();
+    await Promise.resolve();
+    expect(client.calls.close).toHaveLength(4);
     expect(service.list(USER_ID)).toHaveLength(0);
   });
 
@@ -576,6 +589,34 @@ describe('terminalSessionService.open', () => {
 });
 
 describe('terminalSessionService runtime disconnect', () => {
+  test('revocation closes a live PTY promptly and retries while cleanup is denied', async () => {
+    let closeDenied = true;
+    const client = new FakeTerminalRuntimeClient({
+      closeFailure: () =>
+        closeDenied
+          ? new RuntimeConsentDeniedError('old runtime denies terminal.close')
+          : undefined,
+    });
+    const { service } = createHarness({ client, config: { idleTimeoutMinutes: 30 } });
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+
+    service.revokeScope(USER_ID, ENVIRONMENT_ID);
+    expect(client.calls.close).toEqual([{ sessionId: session.id }]);
+    await Promise.resolve();
+    expect(service.list(USER_ID)).toMatchObject([{ id: session.id, status: 'exited' }]);
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+
+    service.reapIdle();
+    await Promise.resolve();
+    expect(client.calls.close).toHaveLength(2);
+    expect(service.list(USER_ID)).toHaveLength(1);
+    closeDenied = false;
+    service.reapIdle();
+    await Promise.resolve();
+    expect(client.calls.close).toHaveLength(3);
+    expect(service.list(USER_ID)).toHaveLength(0);
+  });
+
   test('shell revocation ends detached sessions and releases their capacity', async () => {
     const { service } = createHarness({ config: { maxSessionsPerUser: 1 } });
     const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });

@@ -53,6 +53,8 @@ export interface FakeTerminalRuntimeClientOptions {
   readonly gateFirstOpen?: () => Promise<unknown>;
   readonly failFirstOpen?: Error;
   readonly failFirstClose?: Error;
+  /** Refuses each close while the test's runtime cleanup gate remains closed. */
+  readonly closeFailure?: () => Error | undefined;
   /** Awaited before the first close settles, after recording its request. */
   readonly gateFirstClose?: () => Promise<unknown>;
   readonly gateFirstList?: () => Promise<unknown>;
@@ -101,6 +103,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
   #gateFirstOpen: (() => Promise<unknown>) | undefined;
   #failFirstOpen: Error | undefined;
   #failFirstClose: Error | undefined;
+  readonly #closeFailure: (() => Error | undefined) | undefined;
   #gateFirstClose: (() => Promise<unknown>) | undefined;
   #gateFirstList: (() => Promise<unknown>) | undefined;
   readonly #sessions = new Map<string, RuntimeTerminalSessionSummary>();
@@ -121,6 +124,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     this.#gateFirstOpen = options.gateFirstOpen;
     this.#failFirstOpen = options.failFirstOpen;
     this.#failFirstClose = options.failFirstClose;
+    this.#closeFailure = options.closeFailure;
     this.#gateFirstClose = options.gateFirstClose;
     this.#gateFirstList = options.gateFirstList;
     this.#gateFirstDetach = options.gateFirstDetach;
@@ -239,6 +243,8 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
       const failure = this.#failFirstClose;
       this.#failFirstClose = undefined;
       if (failure) throw failure;
+      const ongoingFailure = this.#closeFailure?.();
+      if (ongoingFailure) throw ongoingFailure;
       this.#sessions.delete(params.sessionId);
       return { ok: true as const };
     },
