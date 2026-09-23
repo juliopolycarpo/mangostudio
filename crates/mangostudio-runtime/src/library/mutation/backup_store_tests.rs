@@ -556,3 +556,53 @@ fn gc_purges_named_sets_and_reports_what_retention_took() {
         Err(StoreError::InvalidId("../x".into()))
     );
 }
+
+/// `DEFAULT_RETENTION_COUNT` and `DEFAULT_RETENTION_BYTES` in
+/// `backup-store.ts`: ten sets, 512 MiB.
+#[test]
+fn retention_defaults_match_typescript() {
+    assert_eq!(DEFAULT_RETENTION_COUNT, 10.0);
+    assert_eq!(
+        DEFAULT_RETENTION_BYTES, 536_870_912.0,
+        "expected 512 MiB | received {DEFAULT_RETENTION_BYTES}"
+    );
+}
+
+/// Every manifest version reads, v2 included (operation and resource keys,
+/// no environment).
+#[test]
+fn a_v2_manifest_reads_with_its_operation_and_keys() {
+    let v2 = json!({
+        "version": 2,
+        "backupId": "v2",
+        "createdAtMs": 7,
+        "operation": "removal",
+        "entries": [{
+            "locationId": "claude-skills", "slug": "gh", "kind": "directory",
+            "destinationPath": "/d", "resolvedPath": "/d", "writtenContentHash": "h",
+            "resourceKey": "skill:gh"
+        }]
+    });
+    let read = BackupManifest::from_json(&v2)
+        .unwrap_or_else(|| panic!("expected a v2 manifest to parse | received None"));
+    assert_eq!(
+        (read.version, read.operation, read.environment_id.as_deref()),
+        (2, Some(SetOperation::Removal), None)
+    );
+    assert_eq!(read.entries[0].resource_key.as_deref(), Some("skill:gh"));
+}
+
+/// A fractional `createdAtMs` (a hand-written or foreign manifest) is kept
+/// as written, not truncated, when the manifest is written back.
+#[test]
+fn a_fractional_timestamp_round_trips_unchanged() {
+    let mut set = manifest("fraction", vec![]);
+    set.created_at_ms = 1.5;
+    let text = set.to_json().to_pretty();
+    assert!(
+        text.contains("\"createdAtMs\": 1.5"),
+        "expected createdAtMs 1.5 | received {text}"
+    );
+    set.created_at_ms = 42.0;
+    assert!(set.to_json().to_pretty().contains("\"createdAtMs\": 42,"));
+}
