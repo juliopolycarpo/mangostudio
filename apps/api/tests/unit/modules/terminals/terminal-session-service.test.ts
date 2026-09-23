@@ -6,6 +6,7 @@ import {
   type ToolchainSelection,
 } from '@mangostudio/shared/environments';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { TERMINAL_SOCKET_CLOSE_CODES, type TerminalExit } from '@mangostudio/shared/terminal';
 import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
 import {
@@ -571,12 +572,35 @@ describe('terminalSessionService.open', () => {
     });
   });
 
+  test('offers a terminal from a peer that attests one without the install half of shell', async () => {
+    // The Rust runtime reports `features.shell: false` until install is implemented,
+    // while shell consent, discovered shells and the terminal handlers make `terminal` true.
+    const client = new FakeTerminalRuntimeClient({
+      manifest: {
+        ...FAKE_TERMINAL_MANIFEST,
+        features: { ...FAKE_TERMINAL_MANIFEST.features, shell: false },
+        allow: { ...RUNTIME_CONSENT_PRESETS.full, shell: true },
+      },
+    });
+    const { service } = createHarness({ client });
+
+    expect(await service.availability(USER_ID, ENVIRONMENT_ID)).toMatchObject({
+      available: true,
+      shells: ['bash'],
+    });
+    await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    expect(client.calls.open).toHaveLength(1);
+  });
+
   test('keeps missing shell consent on the unavailable reason even for an older runtime', async () => {
     const { terminalCloseAfterRevocation: _unproven, ...oldManifest } = FAKE_TERMINAL_MANIFEST;
+    // An older peer's health report omits `terminal`, so the refreshed manifest keeps the
+    // handshake's stale `terminal: true` while `allow.shell` records the withdrawn consent.
     const client = new FakeTerminalRuntimeClient({
       manifest: {
         ...oldManifest,
         features: { ...oldManifest.features, shell: false },
+        allow: { ...RUNTIME_CONSENT_PRESETS.full, shell: false },
       },
     });
     const { service } = createHarness({ client });
