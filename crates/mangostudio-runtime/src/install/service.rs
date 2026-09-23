@@ -116,11 +116,7 @@ pub(crate) struct Ports {
 }
 
 /// Registers `install.run` and `install.cancel` against the process-wide run table.
-pub(crate) fn register(
-    mut registry: Registry,
-    consent: ConsentSource,
-    mango_home: &Path,
-) -> Registry {
+pub(crate) fn register(registry: Registry, consent: ConsentSource, mango_home: &Path) -> Registry {
     let service = Arc::new(Service {
         ports: Ports {
             spawner: Arc::new(DefaultProcessSpawner),
@@ -138,8 +134,14 @@ pub(crate) fn register(
         },
         consent_read_timeout: CONSENT_READ_TIMEOUT,
     });
+    register_service(registry, &service)
+}
+
+/// Registers `install.run` and `install.cancel` over an already-built [`Service`], so a test
+/// can drive the real registry wiring against fake ports.
+fn register_service(mut registry: Registry, service: &Arc<Service>) -> Registry {
     for method in INSTALL_METHODS {
-        let service = Arc::clone(&service);
+        let service = Arc::clone(service);
         let register = match abandon_policy(method) {
             AbandonAudit::OwnedByHandler => Registry::implement_owning_abandon_audit,
             AbandonAudit::Record => Registry::implement,
