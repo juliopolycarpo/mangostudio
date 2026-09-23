@@ -1258,7 +1258,30 @@ unsafe fn kill_session_members_once(session: libc::pid_t) -> Option<bool> {
             {
                 let pinned = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
                 if pinned < 0 {
-                    if unsafe { errno_raw() } != libc::ESRCH {
+                    let error = unsafe { errno_raw() };
+                    if matches!(error, libc::ENOSYS | libc::EPERM) {
+                        // Older kernels and seccomp profiles can lack pidfds. Recheck the
+                        // process birth time and session immediately before signaling it.
+                        let Some(state) = (unsafe { proc_pid_state(directory, name) }) else {
+                            unsafe { libc::close(directory) };
+                            return None;
+                        };
+                        if state.running {
+                            live = true;
+                            if !unsafe {
+                                kill_unpinned_linux_pid(
+                                    directory,
+                                    name,
+                                    pid,
+                                    session,
+                                    state.start_time,
+                                )
+                            } {
+                                unsafe { libc::close(directory) };
+                                return None;
+                            }
+                        }
+                    } else if error != libc::ESRCH {
                         unsafe { libc::close(directory) };
                         return None;
                     }
@@ -1266,7 +1289,7 @@ unsafe fn kill_session_members_once(session: libc::pid_t) -> Option<bool> {
                     let pinned = pinned as RawFd;
                     let member = unsafe { libc::getsid(pid) } == session;
                     let running = if member {
-                        unsafe { proc_pid_running(directory, name) }
+                        unsafe { proc_pid_state(directory, name) }.map(|state| state.running)
                     } else {
                         Some(false)
                     };
@@ -1309,7 +1332,14 @@ fn parse_proc_pid(name: &[u8]) -> Option<libc::pid_t> {
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-unsafe fn proc_pid_running(directory: RawFd, name: &[u8]) -> Option<bool> {
+#[derive(Clone, Copy)]
+struct ProcPidState {
+    running: bool,
+    start_time: u64,
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn proc_pid_state(directory: RawFd, name: &[u8]) -> Option<ProcPidState> {
     let mut path = [0_u8; 32];
     let end = name.iter().position(|byte| *byte == 0)?;
     if end + b"/stat\0".len() > path.len() {
@@ -1325,7 +1355,10 @@ unsafe fn proc_pid_running(directory: RawFd, name: &[u8]) -> Option<bool> {
         )
     };
     if file < 0 {
-        return (unsafe { errno_raw() } == libc::ENOENT).then_some(false);
+        return (unsafe { errno_raw() } == libc::ENOENT).then_some(ProcPidState {
+            running: false,
+            start_time: 0,
+        });
     }
     let mut stat = [0_u8; 512];
     let read = unsafe { libc::read(file, stat.as_mut_ptr().cast(), stat.len()) };
@@ -1333,11 +1366,55 @@ unsafe fn proc_pid_running(directory: RawFd, name: &[u8]) -> Option<bool> {
     if read <= 0 {
         return None;
     }
-    let state = stat[..read as usize]
-        .iter()
-        .rposition(|byte| *byte == b')')
-        .and_then(|end| stat.get(end + 2));
-    state.map(|state| !matches!(state, b'Z' | b'X'))
+    parse_proc_pid_state(&stat[..read as usize])
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn parse_proc_pid_state(stat: &[u8]) -> Option<ProcPidState> {
+    let end = stat.iter().rposition(|byte| *byte == b')')?;
+    let mut fields = stat
+        .get(end + 1..)?
+        .split(|byte| byte.is_ascii_whitespace())
+        .filter(|field| !field.is_empty());
+    let state = *fields.next()?.first()?;
+    let start_time = fields.nth(18)?;
+    let mut parsed = 0_u64;
+    for byte in start_time {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        parsed = parsed
+            .checked_mul(10)?
+            .checked_add(u64::from(*byte - b'0'))?;
+    }
+    Some(ProcPidState {
+        running: !matches!(state, b'Z' | b'X'),
+        start_time: parsed,
+    })
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn kill_unpinned_linux_pid(
+    directory: RawFd,
+    name: &[u8],
+    pid: libc::pid_t,
+    session: libc::pid_t,
+    start_time: u64,
+) -> bool {
+    let Some(state) = (unsafe { proc_pid_state(directory, name) }) else {
+        return false;
+    };
+    if !state.running || state.start_time != start_time {
+        return true;
+    }
+    let observed_session = unsafe { libc::getsid(pid) };
+    if observed_session != session {
+        return observed_session > 0 || unsafe { errno_raw() } == libc::ESRCH;
+    }
+    // Unlike a pidfd, this leaves a narrow PID-reuse race between the final SID check and kill.
+    // The session leader stays unreaped and pins its SID, limiting accidental cross-session hits.
+    let result = unsafe { libc::kill(pid, libc::SIGKILL) };
+    result == 0 || unsafe { errno_raw() } == libc::ESRCH
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -1529,6 +1606,69 @@ mod tests {
         assert_eq!(parse_proc_pid(b"12x\0"), None);
         assert_eq!(parse_proc_pid(b"999999999999\0"), None);
         assert_eq!(parse_proc_pid(b"12"), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn proc_stat_parser_uses_birth_time_after_last_command_parenthesis() {
+        let stat =
+            b"123 (shell ) child) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 987654 20\n";
+        let parsed = super::parse_proc_pid_state(stat).expect("valid proc stat");
+        assert!(parsed.running);
+        assert_eq!(parsed.start_time, 987654);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn unpinned_linux_session_member_is_killed_with_matching_birth_time() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::{CommandExt, ExitStatusExt};
+
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.arg("60");
+        // SAFETY: only the direct libc setsid syscall runs between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().expect("spawn isolated session member");
+        let pid = child.id() as libc::pid_t;
+        let directory = std::fs::File::open("/proc").expect("open proc directory");
+        let name = format!("{pid}\0");
+        // SAFETY: the test child is alive and the /proc descriptor remains open.
+        let state = unsafe { super::proc_pid_state(directory.as_raw_fd(), name.as_bytes()) }
+            .expect("read child identity");
+        let stale_identity = unsafe {
+            super::kill_unpinned_linux_pid(
+                directory.as_raw_fd(),
+                name.as_bytes(),
+                pid,
+                pid,
+                state.start_time + 1,
+            )
+        };
+        let stale_child_alive = child.try_wait().expect("check child").is_none();
+        let killed = unsafe {
+            super::kill_unpinned_linux_pid(
+                directory.as_raw_fd(),
+                name.as_bytes(),
+                pid,
+                pid,
+                state.start_time,
+            )
+        };
+        if !killed {
+            let _ = child.kill();
+        }
+        let status = child.wait().expect("reap child");
+        assert!(stale_identity, "stale identity needs no signal");
+        assert!(stale_child_alive, "stale identity must not signal child");
+        assert!(killed, "fallback signals the matching session member");
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
     }
 
     /// Regression test: this snapshot used to `.expect("OS environment has no NUL")` on every
