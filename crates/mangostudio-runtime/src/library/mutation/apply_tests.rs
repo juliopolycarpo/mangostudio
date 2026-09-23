@@ -754,3 +754,69 @@ fn a_permission_change_before_the_commit_is_refused() {
     assert!(result.failed[0].message.contains("not writable"));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "old");
 }
+
+/// A hash mismatch records the digest verification itself observed, not a
+/// second read: the entry must describe the bytes that failed the check.
+#[test]
+fn a_mismatch_records_the_digest_verification_observed() {
+    let home = Home::new("apply-observed-digest");
+    let source = home.skill(&home.scratch.join("source"), "body");
+    home.hasher
+        .answer_once("skills", Ok("observed-by-verification".into()));
+    home.fs.fail(
+        FsOp::Remove,
+        &format!("{}{}", std::path::MAIN_SEPARATOR, "gh"),
+        0,
+    );
+    let result = run(
+        &home,
+        &[skill_op(
+            &home,
+            "claude-skills",
+            &[".claude", "skills"],
+            &source,
+            "expected",
+        )],
+    );
+    assert!(result.partial, "received {result:?}");
+    assert_eq!(
+        home.manifest(result.backup_id.as_deref().unwrap())["entries"][0]["writtenContentHash"],
+        "observed-by-verification",
+        "expected the digest verification saw | received a re-read"
+    );
+}
+
+/// Verification that saw no digest (a hash-invalid tree) re-reads the
+/// destination once, so undo can still compare against what is there.
+#[test]
+fn an_invalid_hash_verification_re_reads_the_destination() {
+    let home = Home::new("apply-invalid-rehash");
+    let destination = skills(&home, "gh");
+    let source = home.skill(&home.scratch.join("source"), "body");
+    home.hasher
+        .answer_once("skills", Err(HashError::Invalid("unsafe-name")));
+    home.fs.fail(
+        FsOp::Remove,
+        &format!("{}{}", std::path::MAIN_SEPARATOR, "gh"),
+        0,
+    );
+    let result = run(
+        &home,
+        &[skill_op(
+            &home,
+            "claude-skills",
+            &[".claude", "skills"],
+            &source,
+            "expected",
+        )],
+    );
+    assert_eq!(
+        result.failed[0].reason, "verification-failed",
+        "received {result:?}"
+    );
+    assert_eq!(
+        home.manifest(result.backup_id.as_deref().unwrap())["entries"][0]["writtenContentHash"],
+        home.hash(&destination, ResourceKind::Directory),
+        "expected the re-read digest | received the empty placeholder"
+    );
+}

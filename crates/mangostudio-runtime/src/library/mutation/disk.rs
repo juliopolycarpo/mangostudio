@@ -403,7 +403,6 @@ impl ResourceHasher for NativeHasher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::library::mutation::paths::path_string;
 
     #[test]
     fn copy_tree_refuses_an_existing_destination_and_keeps_timestamps() {
@@ -479,6 +478,8 @@ mod tests {
     #[test]
     fn the_atomic_writer_writes_through_a_symlink_and_keeps_the_mode() {
         use std::os::unix::fs::PermissionsExt;
+
+        use crate::library::mutation::paths::path_string;
         let scratch = crate::test_support::scratch_dir("library-atomic-write");
         let target = scratch.join("dotfiles-CLAUDE.md");
         std::fs::write(&target, "old").unwrap();
