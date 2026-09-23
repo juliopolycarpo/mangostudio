@@ -27,6 +27,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
+mod pipe_child;
 mod supervisor;
 #[cfg(unix)]
 mod unix_guardian;
@@ -169,6 +170,8 @@ impl PtyChild {
         }
     }
 }
+
+pub(crate) use pipe_child::PipeChild;
 
 pub use supervisor::{
     AlwaysAllow, DefaultProcessSpawner, LaunchCheck, LaunchCheckError,

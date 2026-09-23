@@ -4,6 +4,8 @@
 //! The manifest still withholds `mcp` until the whole catalog family works.
 
 mod client;
+mod consent;
+mod process;
 mod service;
 
 pub(crate) use service::register;

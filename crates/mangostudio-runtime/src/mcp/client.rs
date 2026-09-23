@@ -2,18 +2,21 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use rmcp::model::{ClientCapabilities, ClientConfig, Implementation, PaginatedRequestParams};
 use rmcp::service::RunningService;
-use rmcp::transport::{TokioChildProcess, which_command};
 use rmcp::{RoleClient, ServiceExt};
 use serde::Deserialize;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
+use super::process::{GuardedStdioSpawner, ProcessOwner, StartError, StdioLaunch, StdioSpawner};
 use crate::config::EnvSource;
+use crate::subprocess::LaunchCheck;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_TOOL_PAGES: usize = 256;
@@ -63,30 +66,41 @@ pub(crate) trait McpClient: Send {
     fn close(&mut self) -> ClientFuture<'_, ()>;
 }
 
+/// What a connect needs besides the server row: the fresh launch check a stdio child must pass
+/// immediately before it executes, and the caller's cancellation.
+pub(crate) struct ConnectContext {
+    pub launch_check: Arc<dyn LaunchCheck>,
+    pub cancel: CancellationToken,
+}
+
 /// Injectable connector for test sessions and the real stdio transport.
 pub(crate) trait McpConnector: Send + Sync {
     fn connect<'a>(
         &'a self,
         config: &'a McpConfig,
         secrets: &'a McpSecrets,
+        context: ConnectContext,
     ) -> ClientFuture<'a, Box<dyn McpClient>>;
 }
 
-/// Connects local stdio servers through the pinned SDK.
+/// Connects local stdio servers through the pinned SDK, with every child owned by the shared
+/// guardian or Job supervisor rather than by the SDK.
 ///
 /// # Example
 /// ```ignore
 /// let connector = StdioConnector::new("0.1.1");
-/// let client = connector.connect(&config, &secrets).await?;
+/// let client = connector.connect(&config, &secrets, context).await?;
 /// ```
 pub(crate) struct StdioConnector {
     runtime_version: String,
+    spawner: Arc<dyn StdioSpawner>,
 }
 
 impl StdioConnector {
     pub(crate) fn new(runtime_version: impl Into<String>) -> Self {
         Self {
             runtime_version: runtime_version.into(),
+            spawner: Arc::new(GuardedStdioSpawner::default()),
         }
     }
 }
@@ -96,6 +110,7 @@ impl McpConnector for StdioConnector {
         &'a self,
         config: &'a McpConfig,
         secrets: &'a McpSecrets,
+        context: ConnectContext,
     ) -> ClientFuture<'a, Box<dyn McpClient>> {
         Box::pin(async move {
             if config.transport != "stdio" {
@@ -115,57 +130,58 @@ impl McpConnector for StdioConnector {
                     )
                 })?;
             let timeout = timeout_for(config)?;
-            let mut process = which_command(command).map_err(|error| {
-                format!(
-                    "MCP server \"{}\" command \"{command}\" was not found: {error}",
-                    config.slug
-                )
-            })?;
-            process.args(&config.args);
-            process.env_clear();
-            process.envs(child_env(
-                &crate::config::ProcessEnv,
-                &config.env,
-                &secrets.env,
-            ));
-            let (transport, _) = TokioChildProcess::builder(process)
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|error| {
-                    format!("Failed to start MCP server \"{}\": {error}", config.slug)
-                })?;
+            let launch = StdioLaunch {
+                program: PathBuf::from(command),
+                args: config.args.clone(),
+                env: child_env(&crate::config::ProcessEnv, &config.env, &secrets.env),
+            };
+            let owned = self
+                .spawner
+                .start(launch, context.launch_check, context.cancel.clone())
+                .await
+                .map_err(|error| start_failure(&config.slug, command, error))?;
+            let process = owned.process.clone();
             let info = ClientConfig::new(
                 ClientCapabilities::default(),
                 Implementation::new("mangostudio", &self.runtime_version),
             );
-            let client = tokio::time::timeout(timeout, info.serve(transport))
-                .await
-                .map_err(|_| {
-                    format!(
-                        "MCP server \"{}\" did not initialize within {} ms",
-                        config.slug,
-                        timeout.as_millis()
-                    )
-                })?
-                .map_err(|error| {
-                    format!(
-                        "MCP server \"{}\" rejected initialize: {error}",
-                        config.slug
-                    )
-                })?;
-            let server = client.peer_info().ok_or_else(|| {
-                format!(
-                    "MCP server \"{}\" returned no initialize information",
+            let initialized = tokio::select! {
+                biased;
+                () = context.cancel.cancelled() => Err(format!(
+                    "MCP server \"{}\" connect was cancelled during initialize",
                     config.slug
-                )
-            })?;
-            let caps = ServerCapabilities {
-                tools: server.capabilities.tools.is_some(),
-                resources: server.capabilities.resources.is_some(),
-                prompts: server.capabilities.prompts.is_some(),
+                )),
+                result = tokio::time::timeout(timeout, info.serve((owned.stdout, owned.stdin))) => {
+                    initialized(config, timeout, result)
+                }
+            };
+            let client = match initialized {
+                Ok(client) => client,
+                Err(message) => {
+                    // The SDK transport (and with it stdin) is already gone on every error path;
+                    // the child tree is not, until its owner proves it.
+                    let _ = process.close().await;
+                    return Err(message);
+                }
+            };
+            let caps = match client.peer_info() {
+                Some(server) => ServerCapabilities {
+                    tools: server.capabilities.tools.is_some(),
+                    resources: server.capabilities.resources.is_some(),
+                    prompts: server.capabilities.prompts.is_some(),
+                },
+                None => {
+                    let _ = client.cancel().await;
+                    let _ = process.close().await;
+                    return Err(format!(
+                        "MCP server \"{}\" returned no initialize information",
+                        config.slug
+                    ));
+                }
             };
             Ok(Box::new(RmcpClient {
-                client,
+                client: Some(client),
+                process,
                 caps,
                 timeout,
             }) as Box<dyn McpClient>)
@@ -173,8 +189,58 @@ impl McpConnector for StdioConnector {
     }
 }
 
+fn initialized(
+    config: &McpConfig,
+    timeout: Duration,
+    result: Result<
+        Result<RunningService<RoleClient, ClientConfig>, rmcp::service::ClientInitializeError>,
+        tokio::time::error::Elapsed,
+    >,
+) -> Result<RunningService<RoleClient, ClientConfig>, String> {
+    result
+        .map_err(|_| {
+            format!(
+                "MCP server \"{}\" did not initialize within {} ms",
+                config.slug,
+                timeout.as_millis()
+            )
+        })?
+        .map_err(|error| {
+            format!(
+                "MCP server \"{}\" rejected initialize: {error}",
+                config.slug
+            )
+        })
+}
+
+fn start_failure(slug: &str, command: &str, error: StartError) -> String {
+    match error {
+        StartError::Cancelled => {
+            format!("MCP server \"{slug}\" connect was cancelled before launch")
+        }
+        StartError::LaunchDenied(error) => {
+            format!(
+                "MCP server \"{slug}\" launch was refused: {}",
+                error.message
+            )
+        }
+        StartError::LimitExceeded => format!(
+            "MCP server \"{slug}\" cannot start: {} stdio MCP servers are already running; \
+             expected a free slot",
+            super::process::MAX_MCP_CHILDREN
+        ),
+        StartError::Spawn(error) => {
+            format!("Failed to start MCP server \"{slug}\" command \"{command}\": {error}")
+        }
+        StartError::Unavailable => {
+            format!("MCP server \"{slug}\" launch owner stopped before reporting a result")
+        }
+    }
+}
+
 struct RmcpClient {
-    client: RunningService<RoleClient, ClientConfig>,
+    client: Option<RunningService<RoleClient, ClientConfig>>,
+    process: ProcessOwner,
     caps: ServerCapabilities,
     timeout: Duration,
 }
@@ -191,7 +257,11 @@ impl McpClient for RmcpClient {
             let mut seen = HashSet::new();
             for _ in 0..MAX_TOOL_PAGES {
                 let params = PaginatedRequestParams::default().with_cursor(cursor);
-                let page = tokio::time::timeout(self.timeout, self.client.list_tools(Some(params)))
+                let client = self
+                    .client
+                    .as_ref()
+                    .ok_or_else(|| "MCP session is already closed".to_owned())?;
+                let page = tokio::time::timeout(self.timeout, client.list_tools(Some(params)))
                     .await
                     .map_err(|_| {
                         format!("MCP tools/list exceeded {} ms", self.timeout.as_millis())
@@ -224,11 +294,12 @@ impl McpClient for RmcpClient {
 
     fn close(&mut self) -> ClientFuture<'_, ()> {
         Box::pin(async move {
-            self.client
-                .close_with_timeout(Duration::from_secs(3))
-                .await
-                .map_err(|error| format!("MCP stdio client cleanup failed: {error}"))?;
-            Ok(())
+            // Stopping the SDK drops its transport, which closes the child's stdin: that EOF is
+            // the server's first chance to exit before its owner escalates.
+            if let Some(client) = self.client.take() {
+                let _ = client.cancel().await;
+            }
+            self.process.close().await
         })
     }
 }
@@ -321,6 +392,13 @@ mod tests {
         );
     }
 
+    fn allowed() -> ConnectContext {
+        ConnectContext {
+            launch_check: Arc::new(crate::subprocess::AlwaysAllow),
+            cancel: CancellationToken::new(),
+        }
+    }
+
     #[tokio::test]
     async fn stdio_connector_initializes_and_reads_every_tool_page() {
         let fixture =
@@ -335,7 +413,7 @@ mod tests {
             timeout_ms: Some(10_000.0),
         };
         let mut client = StdioConnector::new("1.2.3")
-            .connect(&config, &McpSecrets::default())
+            .connect(&config, &McpSecrets::default(), allowed())
             .await
             .expect("the local fixture answers initialize");
         assert_eq!(

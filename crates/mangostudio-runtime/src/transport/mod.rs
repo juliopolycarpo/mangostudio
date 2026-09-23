@@ -170,8 +170,12 @@ pub(crate) fn build_host(
     );
     let registry = crate::workspace_methods::register(registry);
     let registry = crate::probing::register(registry);
-    let registry = crate::mcp::register(registry, runtime_version);
     let source = ConsentSource::new(slot, mango_home.to_path_buf());
+    let registry = crate::mcp::register(
+        registry,
+        runtime_version,
+        ConsentSource::new(slot, mango_home.to_path_buf()),
+    );
     let registry =
         crate::filesystem::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
     let registry =

@@ -10,7 +10,11 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use super::client::{McpClient, McpConfig, McpConnector, McpSecrets, StdioConnector};
+use super::client::{
+    ConnectContext, McpClient, McpConfig, McpConnector, McpSecrets, StdioConnector,
+};
+use super::consent::{FreshMcpLaunch, McpConsent};
+use crate::consent::source::ConsentSource;
 use crate::registry::Registry;
 
 #[derive(Deserialize)]
@@ -28,13 +32,15 @@ struct ServerParams {
 
 struct Service {
     connector: Arc<dyn McpConnector>,
+    consent: Arc<dyn McpConsent>,
     sessions: Mutex<HashMap<String, Box<dyn McpClient>>>,
 }
 
 impl Service {
-    fn new(connector: Arc<dyn McpConnector>) -> Self {
+    fn new(connector: Arc<dyn McpConnector>, consent: Arc<dyn McpConsent>) -> Self {
         Self {
             connector,
+            consent,
             sessions: Mutex::new(HashMap::new()),
         }
     }
@@ -59,7 +65,10 @@ impl Service {
         let client = tokio::select! {
             biased;
             () = cancel.cancelled() => return Err(cancelled("mcp.connect")),
-            result = self.connector.connect(&config, &params.secrets) => result,
+            result = self.connector.connect(&config, &params.secrets, ConnectContext {
+                launch_check: Arc::new(FreshMcpLaunch(Arc::clone(&self.consent))),
+                cancel: cancel.clone(),
+            }) => result,
         }
         .map_err(|message| failure("mcp_connection", &config.id, message))?;
         if cancel.is_cancelled() {
@@ -134,15 +143,27 @@ fn failure(kind: &str, server_id: &str, message: String) -> RemoteError {
 ///
 /// # Example
 /// ```ignore
-/// let registry = register(Registry::new(), "0.1.1");
+/// let registry = register(Registry::new(), "0.1.1", consent);
 /// assert_eq!(registry.classify("mcp.connect"), Classification::Implemented);
 /// ```
-pub(crate) fn register(registry: Registry, runtime_version: &str) -> Registry {
-    register_with_connector(registry, Arc::new(StdioConnector::new(runtime_version)))
+pub(crate) fn register(
+    registry: Registry,
+    runtime_version: &str,
+    consent: ConsentSource,
+) -> Registry {
+    register_with_connector(
+        registry,
+        Arc::new(StdioConnector::new(runtime_version)),
+        Arc::new(consent),
+    )
 }
 
-fn register_with_connector(registry: Registry, connector: Arc<dyn McpConnector>) -> Registry {
-    let service = Arc::new(Service::new(connector));
+fn register_with_connector(
+    registry: Registry,
+    connector: Arc<dyn McpConnector>,
+    consent: Arc<dyn McpConsent>,
+) -> Registry {
+    let service = Arc::new(Service::new(connector, consent));
     let connect = Arc::clone(&service);
     let registry = registry.implement(
         "mcp.connect",
@@ -176,6 +197,7 @@ mod tests {
     use super::*;
     use crate::manifest::build_features;
     use crate::mcp::client::{ClientFuture, ServerCapabilities, ToolDescriptor};
+    use crate::mcp::consent::fakes::SwitchableConsent;
     use crate::registry::Classification;
     use mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow;
 
@@ -217,6 +239,7 @@ mod tests {
             &'a self,
             _config: &'a McpConfig,
             _secrets: &'a McpSecrets,
+            _context: ConnectContext,
         ) -> ClientFuture<'a, Box<dyn McpClient>> {
             let closes = Arc::clone(&self.closes);
             Box::pin(async move { Ok(Box::new(FakeClient { closes }) as Box<dyn McpClient>) })
@@ -234,6 +257,7 @@ mod tests {
             &'a self,
             config: &'a McpConfig,
             _secrets: &'a McpSecrets,
+            _context: ConnectContext,
         ) -> ClientFuture<'a, Box<dyn McpClient>> {
             Box::pin(async move {
                 if config.id == "server-2" {
@@ -265,9 +289,12 @@ mod tests {
     #[tokio::test]
     async fn session_connect_lists_tools_replaces_and_disconnects() {
         let closes = Arc::new(AtomicUsize::new(0));
-        let service = Service::new(Arc::new(FakeConnector {
-            closes: Arc::clone(&closes),
-        }));
+        let service = Service::new(
+            Arc::new(FakeConnector {
+                closes: Arc::clone(&closes),
+            }),
+            SwitchableConsent::granted(),
+        );
         let cancel = CancellationToken::new();
         assert_eq!(
             service.connect(params(), &cancel).await.unwrap(),
@@ -323,9 +350,12 @@ mod tests {
     #[tokio::test]
     async fn cancelled_reconnect_keeps_the_existing_session() {
         let closes = Arc::new(AtomicUsize::new(0));
-        let service = Service::new(Arc::new(FakeConnector {
-            closes: Arc::clone(&closes),
-        }));
+        let service = Service::new(
+            Arc::new(FakeConnector {
+                closes: Arc::clone(&closes),
+            }),
+            SwitchableConsent::granted(),
+        );
         let active = CancellationToken::new();
         service.connect(params(), &active).await.unwrap();
 
@@ -356,7 +386,10 @@ mod tests {
             entered: Arc::clone(&entered),
             release: Arc::clone(&release),
         };
-        let service = Arc::new(Service::new(Arc::new(connector)));
+        let service = Arc::new(Service::new(
+            Arc::new(connector),
+            SwitchableConsent::granted(),
+        ));
         let active = CancellationToken::new();
         service.connect(params(), &active).await.unwrap();
 
@@ -396,6 +429,7 @@ mod tests {
             Arc::new(FakeConnector {
                 closes: Arc::new(AtomicUsize::new(0)),
             }),
+            SwitchableConsent::granted(),
         );
         for method in ["mcp.connect", "mcp.list-tools", "mcp.disconnect"] {
             assert_eq!(registry.classify(method), Classification::Implemented);
