@@ -290,8 +290,17 @@ mod tests {
                 "expected the refusal to name the expected shape | received {error}"
             );
         }
-        let launch = stdio_launch(&row(Some("server")), &secrets, &source).expect("launchable");
-        assert_eq!(launch.program, PathBuf::from("server"));
+        // A full path to a real file resolves as written on every OS (on Windows the explicit
+        // `.cmd` extension is tried as written first), so the control row stays launchable.
+        let directory = crate::test_support::scratch_dir("mcp-stdio-launchable");
+        let server = directory.join("server.cmd");
+        std::fs::write(&server, "").expect("the control server file is written");
+        let command = server.to_string_lossy().into_owned();
+        let launch =
+            stdio_launch(&row(Some(&command)), &secrets, &source).unwrap_or_else(|error| {
+                panic!("expected the control row launchable | received {error}")
+            });
+        assert_eq!(launch.program, server);
         assert_eq!(launch.args, vec!["--flag".to_owned()]);
     }
 }
