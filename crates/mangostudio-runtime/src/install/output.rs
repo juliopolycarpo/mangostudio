@@ -195,6 +195,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_bom_at_the_start_of_a_later_chunk_is_kept() {
+        assert_eq!(
+            lines(&[b"hi\n", b"\xef\xbb\xbfagain\n"]),
+            vec!["hi", "\u{FEFF}again"],
+            "expected only the stream's first code point treated as a BOM"
+        );
+    }
+
     /// TS: "caps captured output while continuing to a terminal result".
     #[test]
     fn the_limit_is_shared_across_chunks_and_announced_once() {

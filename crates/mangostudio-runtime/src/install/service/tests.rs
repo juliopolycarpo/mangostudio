@@ -732,6 +732,54 @@ async fn caps_captured_output_while_continuing_to_a_terminal_result() {
     );
 }
 
+/// A run without `outputLimitBytes` gets `INSTALL_OUTPUT_LIMIT_BYTES` (1 MiB), shared by both pipes.
+#[tokio::test]
+async fn the_default_output_limit_is_one_mebibyte() {
+    let harness = harness(vec![Script::Exit {
+        chunks: vec![
+            chunk(ProcessStream::Stdout, &vec![b'a'; 1024 * 1024 - 1]),
+            chunk(ProcessStream::Stderr, b"bc"),
+        ],
+        terminal: exited(0),
+    }]);
+
+    let result = harness.run(command("run-1")).await.unwrap();
+
+    assert_eq!(result["truncated"], json!(true));
+    assert_eq!(
+        harness.log.bytes.lock().unwrap().len(),
+        1024 * 1024,
+        "expected exactly 1 MiB kept across both pipes"
+    );
+    assert!(
+        harness
+            .events
+            .has_line("system", "Output truncated after 1048576 bytes.")
+    );
+}
+
+/// Consent that stays granted must never be read as a withdrawal while a step runs.
+#[tokio::test]
+async fn granted_consent_never_marks_a_running_step_stopping() {
+    let harness = harness(vec![Script::Running]);
+    let run = harness.spawn_run(command("run-1"), CancellationToken::new());
+    harness.wait_launched().await;
+
+    // Several consent polls (every 100 ms) run while the step is held.
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    harness.spawner.settle(exited(0));
+    let result = within("the step to settle", run).await.unwrap().unwrap();
+
+    assert_eq!(status(&result), "succeeded");
+    assert!(
+        !harness
+            .events
+            .has_line("system", "no further step will start"),
+        "expected no stopping notice while consent stayed granted | received {:?}",
+        harness.events.lines()
+    );
+}
+
 /// TS: "kills a timed-out child with SIGKILL" — the supervisor forces the tree at the deadline
 /// (proved against a real process below); the handler reports it as Bun did.
 #[tokio::test]
@@ -1362,6 +1410,46 @@ async fn a_start_that_never_launched_reports_why() {
         harness
             .events
             .has_line("system", "stopped before reporting")
+    );
+}
+
+/// The production consent port reads `runtime.json` fresh and names `install.run` in its denial.
+#[test]
+fn the_source_consent_adapter_follows_the_stored_shell_grant() {
+    use crate::consent::source::ConsentSource;
+    use crate::ports::wall_clock::SystemWallClock;
+    use crate::runtime_home::RuntimeSlot;
+    use crate::setup::{NonInteractiveSetupRequest, SetupAuthority, run_non_interactive_setup};
+    use mangostudio_runtime_contract::manifest::ManifestProfile;
+
+    let home = crate::test_support::ScratchDir::created("install-source-consent");
+    let consent = super::SourceConsent(ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()));
+    let set = |profile| {
+        run_non_interactive_setup(
+            &NonInteractiveSetupRequest {
+                slot: RuntimeSlot::Host,
+                profile: (profile, SetupAuthority::Cli),
+                allow_overrides: &[],
+            },
+            &home,
+            &SystemWallClock,
+        )
+        .unwrap();
+    };
+
+    set(ManifestProfile::Full);
+    assert!(
+        consent.check().is_ok(),
+        "expected the full profile to grant shell"
+    );
+    set(ManifestProfile::None);
+    let denial = consent
+        .check()
+        .expect_err("expected the none profile to deny shell");
+    assert!(
+        denial.message.contains("install.run") && denial.message.contains("shell"),
+        "expected a denial naming install.run and shell | received {:?}",
+        denial.message
     );
 }
 
