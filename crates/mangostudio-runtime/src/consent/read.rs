@@ -95,30 +95,60 @@ where
 /// A caller that arrives while a read is still running waits on that read (within its own
 /// bound) instead of starting another. The stderr diagnostic is written once per stuck read,
 /// not once per poll that gives up on it.
-pub(crate) struct ConsentReader {
+///
+/// The answer defaults to one capability's `bool`; the authorization guard coalesces whole
+/// resolved `allow` sets through a `ConsentReader<ResolvedCapabilityAllow>` with
+/// [`ConsentReader::read_value`].
+pub(crate) struct ConsentReader<T = bool> {
     capability: &'static str,
-    state: Arc<Mutex<ReaderState>>,
+    state: Arc<Mutex<ReaderState<T>>>,
 }
 
-#[derive(Default)]
-struct ReaderState {
+struct ReaderState<T> {
     /// The answer channel of the read still running, if any.
-    in_flight: Option<watch::Receiver<Option<bool>>>,
+    in_flight: Option<watch::Receiver<Option<T>>>,
     /// Whether the running read's timeout was already reported.
     reported: bool,
 }
 
-/// Clears the reader's in-flight slot when the read task ends, even by a panicking read.
-struct ClearOnDrop(Arc<Mutex<ReaderState>>);
+impl<T> Default for ReaderState<T> {
+    fn default() -> Self {
+        Self {
+            in_flight: None,
+            reported: false,
+        }
+    }
+}
 
-impl Drop for ClearOnDrop {
+/// Clears the reader's in-flight slot when the read task ends, even by a panicking read.
+struct ClearOnDrop<T>(Arc<Mutex<ReaderState<T>>>);
+
+impl<T> Drop for ClearOnDrop<T> {
     fn drop(&mut self) {
         let mut state = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
         *state = ReaderState::default();
     }
 }
 
-impl ConsentReader {
+impl ConsentReader<bool> {
+    /// Joins the outstanding read, or starts `read` if none is running, and waits `timeout`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let source = Arc::clone(&consent);
+    /// if reader.read(CONSENT_READ_TIMEOUT, move || source.granted()).await.revokes() { .. }
+    /// ```
+    pub(crate) async fn read<F>(&self, timeout: Duration, read: F) -> ConsentRead
+    where
+        F: FnOnce() -> bool + Send + 'static,
+    {
+        self.read_value(timeout, read)
+            .await
+            .map_or(ConsentRead::Unknown, ConsentRead::answered)
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> ConsentReader<T> {
     /// A reader for `capability`, named in its diagnostics.
     ///
     /// # Example
@@ -132,21 +162,23 @@ impl ConsentReader {
         }
     }
 
-    /// Joins the outstanding read, or starts `read` if none is running, and waits `timeout`.
+    /// Like [`ConsentReader::read`], but yields the read's own answer, or `None` when it did
+    /// not arrive within `timeout` (or the read panicked) — the caller decides what an unknown
+    /// answer means.
     ///
     /// # Example
     /// ```ignore
-    /// let source = Arc::clone(&consent);
-    /// if reader.read(CONSENT_READ_TIMEOUT, move || source.granted()).await.revokes() { .. }
+    /// let reader = ConsentReader::<ResolvedCapabilityAllow>::new("consent");
+    /// let allow = reader.read_value(CONSENT_READ_TIMEOUT, move || source.refresh()).await;
     /// ```
-    pub(crate) async fn read<F>(&self, timeout: Duration, read: F) -> ConsentRead
+    pub(crate) async fn read_value<F>(&self, timeout: Duration, read: F) -> Option<T>
     where
-        F: FnOnce() -> bool + Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
     {
         let mut answer = self.join_or_start(read);
         let outcome = tokio::time::timeout(timeout, answer.wait_for(Option::is_some)).await;
         if let Ok(Ok(value)) = outcome {
-            return value.map_or(ConsentRead::Unknown, ConsentRead::answered);
+            return value.clone();
         }
         let first = {
             let mut state = self.lock();
@@ -155,12 +187,12 @@ impl ConsentReader {
         if first {
             report_unknown(self.capability, timeout);
         }
-        ConsentRead::Unknown
+        None
     }
 
-    fn join_or_start<F>(&self, read: F) -> watch::Receiver<Option<bool>>
+    fn join_or_start<F>(&self, read: F) -> watch::Receiver<Option<T>>
     where
-        F: FnOnce() -> bool + Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
     {
         let mut state = self.lock();
         if let Some(running) = &state.in_flight {
@@ -181,7 +213,7 @@ impl ConsentReader {
         answer
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, ReaderState> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, ReaderState<T>> {
         self.state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())

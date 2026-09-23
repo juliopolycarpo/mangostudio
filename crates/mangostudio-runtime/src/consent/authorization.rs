@@ -6,12 +6,18 @@
 //! [`crate::ports::authorization::AuthorizationGuard`], from the contract
 //! itself) filtered down to the ones the freshly-resolved `allow` set does
 //! not grant.
+//!
+//! A read that does not finish within the consent read timeout is inconclusive, not a denial.
+//! Every declared capability is reported missing on it. Reads are coalesced through one
+//! `ConsentReader`, so a hung store holds one blocking permit however many calls wait on it.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::consent::presets::ResolvedCapabilityAllow;
+use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentReader};
 use crate::consent::source::ConsentSource;
 use crate::ports::authorization::Authorization;
 use crate::runtime_home::RuntimeSlot;
@@ -40,15 +46,35 @@ use crate::runtime_home::RuntimeSlot;
 /// # }
 /// ```
 pub struct ConsentAuthorization {
-    source: Arc<ConsentSource>,
+    slot: RuntimeSlot,
+    read: ReadAllow,
+    reader: ConsentReader<ResolvedCapabilityAllow>,
+    timeout: Duration,
 }
+
+/// One fresh read of the resolved `allow` set, run on the blocking pool.
+type ReadAllow = Arc<dyn Fn() -> ResolvedCapabilityAllow + Send + Sync>;
 
 impl ConsentAuthorization {
     /// Builds an authorization port over `source`.
     #[must_use]
     pub fn new(source: ConsentSource) -> Self {
+        let slot = source.slot();
+        Self::with_read(
+            slot,
+            Arc::new(move || source.refresh()),
+            CONSENT_READ_TIMEOUT,
+        )
+    }
+
+    /// Builds an authorization port over any `read`, bounded by `timeout` — the seam tests use
+    /// to stand in a stalled consent store.
+    fn with_read(slot: RuntimeSlot, read: ReadAllow, timeout: Duration) -> Self {
         Self {
-            source: Arc::new(source),
+            slot,
+            read,
+            reader: ConsentReader::new("consent"),
+            timeout,
         }
     }
 
@@ -57,7 +83,7 @@ impl ConsentAuthorization {
     /// slot in a denial's remediation sentence.
     #[must_use]
     pub fn slot(&self) -> RuntimeSlot {
-        self.source.slot()
+        self.slot
     }
 }
 
@@ -68,9 +94,11 @@ impl Authorization for ConsentAuthorization {
         capabilities: &'a [String],
     ) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + 'a>> {
         Box::pin(async move {
-            let source = Arc::clone(&self.source);
-            let read = crate::blocking::run_blocking(move || source.refresh());
-            let Ok(allow) = tokio::time::timeout(Duration::from_secs(2), read).await else {
+            if capabilities.is_empty() {
+                return Vec::new();
+            }
+            let read = Arc::clone(&self.read);
+            let Some(allow) = self.reader.read_value(self.timeout, move || read()).await else {
                 return capabilities.to_vec();
             };
             capabilities
@@ -91,6 +119,85 @@ mod tests {
     use crate::ports::authorization::Authorization;
     use crate::runtime_home::{RuntimeSlot, write_runtime_slot_config};
     use crate::test_support::scratch_dir as scratch_home;
+
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use crate::consent::presets::consent_preset;
+
+    const BOUND: Duration = Duration::from_millis(50);
+    const STALL: Duration = Duration::from_millis(600);
+
+    /// A consent store whose every read stalls past [`BOUND`], counting reads started.
+    struct StalledStore {
+        started: Arc<AtomicUsize>,
+    }
+
+    impl StalledStore {
+        fn new() -> Self {
+            Self {
+                started: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn authorization(&self) -> ConsentAuthorization {
+            let started = Arc::clone(&self.started);
+            ConsentAuthorization::with_read(
+                RuntimeSlot::Host,
+                Arc::new(move || {
+                    started.fetch_add(1, Ordering::SeqCst);
+                    std::thread::sleep(STALL);
+                    consent_preset(mangostudio_runtime_contract::manifest::ManifestProfile::Full)
+                }),
+                BOUND,
+            )
+        }
+
+        fn reads(&self) -> usize {
+            self.started.load(Ordering::SeqCst)
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_guard_checks_against_a_hung_store_share_one_read() {
+        let store = StalledStore::new();
+        let authorization = Arc::new(store.authorization());
+        let calls: Vec<_> = (0..6)
+            .map(|_| {
+                let authorization = Arc::clone(&authorization);
+                tokio::spawn(async move {
+                    authorization
+                        .missing_capabilities("shell.run", &["shell".to_string()])
+                        .await
+                })
+            })
+            .collect();
+        for call in calls {
+            call.await.unwrap();
+        }
+        let reads = store.reads();
+        assert_eq!(
+            reads, 1,
+            "expected 6 guard checks during one stall to start 1 consent read | received {reads}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zero_capability_method_never_reads_consent() {
+        let store = StalledStore::new();
+        let missing = store
+            .authorization()
+            .missing_capabilities("terminal.close", &[])
+            .await;
+        let reads = store.reads();
+        assert_eq!(
+            (missing.len(), reads),
+            (0, 0),
+            "expected (missing, reads) = (0, 0) | received ({}, {reads})",
+            missing.len()
+        );
+    }
 
     #[tokio::test]
     async fn a_fully_granted_capability_is_never_reported_missing() {
