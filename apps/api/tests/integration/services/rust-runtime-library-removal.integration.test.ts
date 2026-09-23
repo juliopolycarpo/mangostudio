@@ -123,6 +123,11 @@ function seedSkill(box: LibraryBox, locationId: LibraryLocationId, body: string)
   return path;
 }
 
+/** The presence map `present` answers when every skill location agrees. */
+function everywhere(value: boolean): Record<string, boolean> {
+  return Object.fromEntries(SKILL_LOCATIONS.map((id) => [id, value]));
+}
+
 /** Which of the given locations still hold the skill, as a readable map. */
 function present(
   box: LibraryBox,
@@ -347,7 +352,7 @@ describe('Rust runtime removal', () => {
         failed: [],
       });
       expect(result.removed).toHaveLength(4);
-      expect(Object.values(present(box, SKILL_LOCATIONS))).toEqual([false, false, false, false]);
+      expect(present(box, SKILL_LOCATIONS)).toEqual(everywhere(false));
 
       const undone = await undoLibraryPropagation(
         result.backupId ?? '',
@@ -356,7 +361,7 @@ describe('Rust runtime removal', () => {
       );
 
       expect(undone.restored).toHaveLength(4);
-      expect(Object.values(present(box, SKILL_LOCATIONS))).toEqual([true, true, true, true]);
+      expect(present(box, SKILL_LOCATIONS)).toEqual(everywhere(true));
       expect((await previewRemoval(SKILL_LOCATIONS)).entries[0]?.divergence).toBe('uniform');
     },
     TIMEOUT_MS
@@ -464,7 +469,7 @@ describe('Rust runtime removal atomicity', () => {
         ['cursor-skills', 'not-attempted'],
         ['mango-skills', 'not-attempted'],
       ]);
-      expect(Object.values(present(box, SKILL_LOCATIONS))).toEqual([true, true, true, true]);
+      expect(present(box, SKILL_LOCATIONS)).toEqual(everywhere(true));
     },
     TIMEOUT_MS
   );
