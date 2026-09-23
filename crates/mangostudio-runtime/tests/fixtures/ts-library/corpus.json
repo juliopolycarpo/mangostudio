@@ -1,0 +1,2666 @@
+{
+  "generatedBy": "apps/runtime/scripts/generate-library-fixtures.ts",
+  "pathSeparator": "/",
+  "collation": {
+    "input": [
+      "SKILL.md",
+      "references/x.md",
+      "references/Z.md",
+      "a-b",
+      "ab",
+      "a_b",
+      "A",
+      "a",
+      "b",
+      "B",
+      "é",
+      "e",
+      "f",
+      "ä",
+      "z.md",
+      "Z.md",
+      "a/b",
+      "a.b",
+      "a0",
+      "a10",
+      "a2",
+      "_x",
+      "-x",
+      "~x",
+      "日本.md",
+      "中文.md",
+      "😀.md",
+      "！.md",
+      "Ω.md",
+      "ß.md",
+      "ss.md",
+      "résumé.md",
+      "resume.md",
+      "Résumé.md",
+      " space.md",
+      "#hash.md",
+      "(paren).md",
+      "a b.md",
+      "a+b.md",
+      "a@b.md"
+    ],
+    "sorted": [
+      " space.md",
+      "_x",
+      "-x",
+      "！.md",
+      "(paren).md",
+      "#hash.md",
+      "~x",
+      "😀.md",
+      "a",
+      "A",
+      "ä",
+      "a b.md",
+      "a_b",
+      "a-b",
+      "a.b",
+      "a@b.md",
+      "a/b",
+      "a+b.md",
+      "a0",
+      "a10",
+      "a2",
+      "ab",
+      "b",
+      "B",
+      "e",
+      "é",
+      "f",
+      "references/x.md",
+      "references/Z.md",
+      "resume.md",
+      "résumé.md",
+      "Résumé.md",
+      "SKILL.md",
+      "ss.md",
+      "ß.md",
+      "z.md",
+      "Z.md",
+      "Ω.md",
+      "中文.md",
+      "日本.md"
+    ]
+  },
+  "frontmatterScalars": [
+    {
+      "raw": "plain",
+      "value": {
+        "type": "string",
+        "string": "plain"
+      }
+    },
+    {
+      "raw": "\"quoted\"",
+      "value": {
+        "type": "string",
+        "string": "quoted"
+      }
+    },
+    {
+      "raw": "'single'",
+      "value": {
+        "type": "string",
+        "string": "single"
+      }
+    },
+    {
+      "raw": "007",
+      "value": {
+        "type": "number",
+        "string": "7"
+      }
+    },
+    {
+      "raw": "1e3",
+      "value": {
+        "type": "number",
+        "string": "1000"
+      }
+    },
+    {
+      "raw": "0x1f",
+      "value": {
+        "type": "number",
+        "string": "31"
+      }
+    },
+    {
+      "raw": "0o17",
+      "value": {
+        "type": "number",
+        "string": "15"
+      }
+    },
+    {
+      "raw": "0b101",
+      "value": {
+        "type": "number",
+        "string": "5"
+      }
+    },
+    {
+      "raw": "-0",
+      "value": {
+        "type": "number",
+        "string": "0"
+      }
+    },
+    {
+      "raw": ".5",
+      "value": {
+        "type": "number",
+        "string": "0.5"
+      }
+    },
+    {
+      "raw": "5.",
+      "value": {
+        "type": "number",
+        "string": "5"
+      }
+    },
+    {
+      "raw": "+5",
+      "value": {
+        "type": "number",
+        "string": "5"
+      }
+    },
+    {
+      "raw": "1e21",
+      "value": {
+        "type": "number",
+        "string": "1e+21"
+      }
+    },
+    {
+      "raw": "1e-7",
+      "value": {
+        "type": "number",
+        "string": "1e-7"
+      }
+    },
+    {
+      "raw": "123456789012345680000",
+      "value": {
+        "type": "number",
+        "string": "123456789012345680000"
+      }
+    },
+    {
+      "raw": "1e999",
+      "value": {
+        "type": "string",
+        "string": "1e999"
+      }
+    },
+    {
+      "raw": "Infinity",
+      "value": {
+        "type": "string",
+        "string": "Infinity"
+      }
+    },
+    {
+      "raw": "-0x10",
+      "value": {
+        "type": "string",
+        "string": "-0x10"
+      }
+    },
+    {
+      "raw": "1_000",
+      "value": {
+        "type": "string",
+        "string": "1_000"
+      }
+    },
+    {
+      "raw": "true",
+      "value": {
+        "type": "boolean",
+        "string": "true"
+      }
+    },
+    {
+      "raw": "false",
+      "value": {
+        "type": "boolean",
+        "string": "false"
+      }
+    },
+    {
+      "raw": "[a, \"b\", ]",
+      "value": {
+        "type": "array",
+        "items": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "raw": "0.1",
+      "value": {
+        "type": "number",
+        "string": "0.1"
+      }
+    },
+    {
+      "raw": "1.5e300",
+      "value": {
+        "type": "number",
+        "string": "1.5e+300"
+      }
+    },
+    {
+      "raw": "12abc",
+      "value": {
+        "type": "string",
+        "string": "12abc"
+      }
+    }
+  ],
+  "frontmatterDocuments": [
+    {
+      "document": "---\nname: alpha\ndescription: first\n---\nbody",
+      "frontmatter": {
+        "name": {
+          "type": "string",
+          "string": "alpha"
+        },
+        "description": {
+          "type": "string",
+          "string": "first"
+        }
+      }
+    },
+    {
+      "document": "---\r\nname: crlf\r\n---\r\n",
+      "frontmatter": {
+        "name": {
+          "type": "string",
+          "string": "crlf"
+        }
+      }
+    },
+    {
+      "document": " --- \nname: padded\n --- \n",
+      "frontmatter": {
+        "name": {
+          "type": "string",
+          "string": "padded"
+        }
+      }
+    },
+    {
+      "document": "---\nname: unterminated\n",
+      "frontmatter": {}
+    },
+    {
+      "document": "no frontmatter at all",
+      "frontmatter": {}
+    },
+    {
+      "document": "---\ntools:\n  - read\n  - \"write\"\nname: arrays\n# comment\nkeyless line\n: novalue\n---\n",
+      "frontmatter": {
+        "tools": {
+          "type": "array",
+          "items": [
+            "read",
+            "write"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "string": "arrays"
+        }
+      }
+    },
+    {
+      "document": "---\nname:\n- orphan\n---\n",
+      "frontmatter": {
+        "name": {
+          "type": "array",
+          "items": [
+            "orphan"
+          ]
+        }
+      }
+    },
+    {
+      "document": "---\ntools:\n  # a note: inside\n\n  - read\n# name: evil\nname: ok\n---\n",
+      "frontmatter": {
+        "tools": {
+          "type": "array",
+          "items": [
+            "read"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "string": "ok"
+        }
+      }
+    },
+    {
+      "document": "---\nname: x]\ndescription: [y\n---\n",
+      "frontmatter": {
+        "name": {
+          "type": "string",
+          "string": "x]"
+        },
+        "description": {
+          "type": "string",
+          "string": "[y"
+        }
+      }
+    }
+  ],
+  "fileHashes": [
+    {
+      "base64": "",
+      "contentHash": "dba5b48794ca6642e7402dc6c710acaa7c28567ec03929992fc9a0f66d7b1a7c",
+      "sizeBytes": 0
+    },
+    {
+      "base64": "aGVsbG8=",
+      "contentHash": "8dafff9276cc012b6631b7d9198806f61a0bfdd6fe2386c1657ca34fff9150de",
+      "sizeBytes": 5
+    },
+    {
+      "base64": "77u/Ym9t",
+      "contentHash": "7a11ddad40bf68af0a948d8d1c155b79719361d69ba84ef9d5cf24695b9856ec",
+      "sizeBytes": 6
+    },
+    {
+      "base64": "AP8NCg==",
+      "contentHash": "d87be98a432c30bf650952a2b004fd760a79e665c337b04a87368477339b9cae",
+      "sizeBytes": 4
+    }
+  ],
+  "directoryHashes": [
+    {
+      "name": "utf16-order-and-length",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "base64": "LS0tCm5hbWU6IHgKLS0tCg=="
+        },
+        {
+          "path": "！.md",
+          "base64": "ZnVsbHdpZHRo"
+        },
+        {
+          "path": "😀.md",
+          "base64": "YXN0cmFs"
+        },
+        {
+          "path": "nested/deeper/a.md",
+          "base64": "YQ=="
+        }
+      ],
+      "result": {
+        "contentHash": "a0371ea2fdbbe0a009c71a17f9998d5a200fdf71e59a2d7b80bd679209dbd719",
+        "sizeBytes": 32,
+        "valid": true
+      }
+    },
+    {
+      "name": "empty",
+      "files": [],
+      "result": {
+        "contentHash": "6e1496c12f0e5d6bcc13823d46df8e026c7da4db7c10161f46fddbff680056d0",
+        "sizeBytes": 0,
+        "valid": true
+      }
+    },
+    {
+      "name": "unsafe-newline",
+      "files": [
+        {
+          "path": "a\nb.md",
+          "base64": "eA=="
+        }
+      ],
+      "result": {
+        "valid": false,
+        "invalidReason": "unsafe-name"
+      }
+    },
+    {
+      "name": "dot-segment",
+      "files": [
+        {
+          "path": "a/../b.md",
+          "base64": "eA=="
+        }
+      ],
+      "result": {
+        "valid": false,
+        "invalidReason": "path-escape"
+      }
+    }
+  ],
+  "scans": [
+    {
+      "name": "skills-mixed-validity",
+      "locationId": "mango-skills",
+      "locationPath": "skills",
+      "tree": [
+        {
+          "path": "skills/alpha/SKILL.md",
+          "text": "---\nname: alpha\ndescription: A skill.\n---\n\nBody of alpha.\n"
+        },
+        {
+          "path": "skills/beta/SKILL.md",
+          "text": "---\nname: not-beta\ndescription: A skill.\n---\n\nBody of not-beta.\n"
+        },
+        {
+          "path": "skills/gamma/README.md",
+          "text": "no entrypoint"
+        },
+        {
+          "path": "skills/My_Skill/SKILL.md",
+          "text": "---\nname: My_Skill\ndescription: A skill.\n---\n\nBody of My_Skill.\n"
+        },
+        {
+          "path": "skills/bad name/SKILL.md",
+          "text": "---\nname: bad name\ndescription: A skill.\n---\n\nBody of bad name.\n"
+        },
+        {
+          "path": "skills/.hidden/SKILL.md",
+          "text": "---\nname: hidden\ndescription: A skill.\n---\n\nBody of hidden.\n"
+        },
+        {
+          "path": "skills/file-not-dir.md",
+          "text": "a file where a skill directory belongs"
+        },
+        {
+          "path": "skills/007/SKILL.md",
+          "text": "---\nname: 007\ndescription: A skill.\n---\n\nBody of 007.\n"
+        },
+        {
+          "path": "skills/empty-description/SKILL.md",
+          "text": "---\nname: empty-description\n---\n"
+        },
+        {
+          "path": "skills/bom/SKILL.md",
+          "base64": "77u/LS0tCm5hbWU6IGJvbQpkZXNjcmlwdGlvbjogICBwYWRkZWQgIAotLS0KCkJvZHkgb2YgYm9tLgo="
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "bom"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/bom",
+              "format": "markdown-frontmatter",
+              "title": "bom",
+              "description": "padded",
+              "contentHash": "58f665ee2cfc684e6c739a1424b42690e134a79ae035807ea75d100958031888",
+              "sizeBytes": 59,
+              "valid": true
+            },
+            "whitespaceHash": "871372f877182d38bf1cdeddd0c604a3cf5628841a5187b6cdf62b0de53086f6"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "empty-description"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/empty-description",
+              "format": "markdown-frontmatter",
+              "title": "empty-description",
+              "contentHash": "1157b91c3e19246e9b43a0470e914a0be66502bf5544f7e65f6d871d93caacfb",
+              "sizeBytes": 32,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "ecb9a8ff493b3074b71c6391f8f36903f107220c2e5f0966626336c448679527"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "007"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/007",
+              "format": "markdown-frontmatter",
+              "title": "7",
+              "description": "A skill.",
+              "contentHash": "7ca948c523658ffe3078ff4e4062b4b4c64d5e2c5bd9e08b29765506e1a624d8",
+              "sizeBytes": 54,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "3b305853a8f1b8ee914007df9619f9dc87425c81dc36a1d0903e920990ee8dca"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "file-not-dir"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/file-not-dir.md",
+              "format": "markdown-frontmatter",
+              "title": "file-not-dir",
+              "valid": false,
+              "invalidReason": "unexpected-entry-type"
+            }
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "My_Skill"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/My_Skill",
+              "format": "markdown-frontmatter",
+              "title": "My_Skill",
+              "valid": false,
+              "invalidReason": "invalid-slug"
+            }
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "gamma"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/gamma",
+              "format": "markdown-frontmatter",
+              "title": "gamma",
+              "contentHash": "4240d03f2ef6133dfc0b741231c525f54a184a4d36cd5b4695d6df167c7f8425",
+              "sizeBytes": 13,
+              "valid": false,
+              "invalidReason": "missing-entrypoint"
+            },
+            "whitespaceHash": "24a59f98361f336b26adb3dcea6a8f2556d11f7382ff478afacade1f9b0418cc"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "beta"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/beta",
+              "format": "markdown-frontmatter",
+              "title": "not-beta",
+              "description": "A skill.",
+              "contentHash": "5e88881bb0819a57bfde2a8a81d8e8950d16736e3d744af232c8afd456ac22c1",
+              "sizeBytes": 64,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "f9443ee96d5575dacc83feda1c0d3fb1ac9ddd0ff794a6f57d8ac849dc1d6e0a"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "alpha"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/alpha",
+              "format": "markdown-frontmatter",
+              "title": "alpha",
+              "description": "A skill.",
+              "contentHash": "a99f3213d97b1758d9766dce6d0ca83e9cfd18d61fce898204e6ef98184f5fa7",
+              "sizeBytes": 58,
+              "valid": true
+            },
+            "whitespaceHash": "12a80ee793e8b83f9ceb71ff8a2517c724cc139e677687b7c71420d186fa7b55"
+          }
+        ],
+        "unreadableEntries": [
+          {
+            "locationId": "mango-skills",
+            "name": "bad name",
+            "reason": "invalid-name"
+          }
+        ]
+      }
+    },
+    {
+      "name": "skill-multi-file-ordering",
+      "locationId": "claude-skills",
+      "locationPath": "claude/skills",
+      "tree": [
+        {
+          "path": "claude/skills/ordered/SKILL.md",
+          "text": "---\nname: ordered\ndescription: A skill.\n---\n\nBody of ordered.\n"
+        },
+        {
+          "path": "claude/skills/ordered/references/Z.md",
+          "text": "Z  upper\n"
+        },
+        {
+          "path": "claude/skills/ordered/references/a.md",
+          "text": "a\tlower\r\n"
+        },
+        {
+          "path": "claude/skills/ordered/_x.md",
+          "text": "underscore"
+        },
+        {
+          "path": "claude/skills/ordered/é.md",
+          "text": "accent nbsp"
+        },
+        {
+          "path": "claude/skills/ordered/ä.md",
+          "text": "﻿bom inside"
+        },
+        {
+          "path": "claude/skills/ordered/日本.md",
+          "text": "cjk"
+        },
+        {
+          "path": "claude/skills/ordered/😀.md",
+          "text": "emoji sep"
+        },
+        {
+          "path": "claude/skills/ordered/scripts/run.sh",
+          "base64": "AP/+"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "ordered"
+            },
+            "instance": {
+              "locationId": "claude-skills",
+              "path": "<root>/claude/skills/ordered",
+              "format": "markdown-frontmatter",
+              "title": "ordered",
+              "description": "A skill.",
+              "contentHash": "3ec5db2d84f3eb1948c849df9efcaa0c831657b511a4239bcb94129a1443ec18",
+              "sizeBytes": 132,
+              "valid": true
+            },
+            "whitespaceHash": "7268f345604d8a2c794c1bcc1440ca692b1ff4549e3634dfbe822ab25d5f1c11"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "skill-caps",
+      "locationId": "agents-skills",
+      "locationPath": "agents/skills",
+      "tree": [
+        {
+          "path": "agents/skills/big-entry/SKILL.md",
+          "fill": {
+            "byte": 97,
+            "count": 262145
+          }
+        },
+        {
+          "path": "agents/skills/big-leaf/SKILL.md",
+          "text": "---\nname: big-leaf\ndescription: A skill.\n---\n\nBody of big-leaf.\n"
+        },
+        {
+          "path": "agents/skills/big-leaf/asset.bin",
+          "fill": {
+            "byte": 98,
+            "count": 2097153
+          }
+        },
+        {
+          "path": "agents/skills/just-fits/SKILL.md",
+          "text": "---\nname: just-fits\ndescription: A skill.\n---\n\nBody of just-fits.\n"
+        },
+        {
+          "path": "agents/skills/just-fits/asset.bin",
+          "fill": {
+            "byte": 99,
+            "count": 2097152
+          }
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "just-fits"
+            },
+            "instance": {
+              "locationId": "agents-skills",
+              "path": "<root>/agents/skills/just-fits",
+              "format": "markdown-frontmatter",
+              "title": "just-fits",
+              "description": "A skill.",
+              "contentHash": "983ff2a67159ad6c0815a857a9616c3806521434d45b40c32d4128fad2cd3d5e",
+              "sizeBytes": 2097218,
+              "valid": true
+            },
+            "whitespaceHash": "3833538e6165a837e78010214240316c09f8935354bb9671b2ecd03b52560bfb"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "big-leaf"
+            },
+            "instance": {
+              "locationId": "agents-skills",
+              "path": "<root>/agents/skills/big-leaf",
+              "format": "markdown-frontmatter",
+              "title": "big-leaf",
+              "valid": false,
+              "invalidReason": "too-large"
+            }
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "big-entry"
+            },
+            "instance": {
+              "locationId": "agents-skills",
+              "path": "<root>/agents/skills/big-entry",
+              "format": "markdown-frontmatter",
+              "title": "big-entry",
+              "valid": false,
+              "invalidReason": "too-large"
+            }
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "subagents-markdown",
+      "locationId": "claude-agents",
+      "locationPath": "claude/agents",
+      "tree": [
+        {
+          "path": "claude/agents/reviewer.md",
+          "text": "---\nname: Reviewer\ndescription: Reviews.\n---\n"
+        },
+        {
+          "path": "claude/agents/UPPER.MD",
+          "text": "no frontmatter"
+        },
+        {
+          "path": "claude/agents/notes.txt",
+          "text": "skipped: wrong extension"
+        },
+        {
+          "path": "claude/agents/noext",
+          "text": "skipped: no extension"
+        },
+        {
+          "path": "claude/agents/.dot.md",
+          "text": "skipped: dotfile"
+        },
+        {
+          "path": "claude/agents/a.b.md",
+          "text": "---\nname: dotted\n---\n"
+        },
+        {
+          "path": "claude/agents/nested/deep.md",
+          "text": "skipped: directory, not a file"
+        },
+        {
+          "path": "claude/agents/numeric.md",
+          "text": "---\nname: 1e3\ndescription: 0x1f\n---\n"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "numeric"
+            },
+            "instance": {
+              "locationId": "claude-agents",
+              "path": "<root>/claude/agents/numeric.md",
+              "format": "markdown-frontmatter",
+              "title": "1000",
+              "description": "31",
+              "contentHash": "f05ae05160822f2dbd681c151d1800867df9e99f3c656624d61144c144bde9ed",
+              "sizeBytes": 36,
+              "valid": true
+            },
+            "whitespaceHash": "01543154f25a1a44481ce48e799ccd00fb56f02f8af59928b580694fa8a3872b"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "a.b"
+            },
+            "instance": {
+              "locationId": "claude-agents",
+              "path": "<root>/claude/agents/a.b.md",
+              "format": "markdown-frontmatter",
+              "title": "dotted",
+              "contentHash": "5734070fb40e2987786dd53e41ae2af13ddbaec4f93ceeeaa689893071f96e1f",
+              "sizeBytes": 21,
+              "valid": true
+            },
+            "whitespaceHash": "8a6da7a45d1fa2354ca311dcb57cc155b46b2266733bd57a732f421c06db96c7"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "UPPER"
+            },
+            "instance": {
+              "locationId": "claude-agents",
+              "path": "<root>/claude/agents/UPPER.MD",
+              "format": "markdown-frontmatter",
+              "title": "UPPER",
+              "contentHash": "7090459c8c88e7641cec2606658efaa2ec785eb61073a6dc16df2bc181625ca5",
+              "sizeBytes": 14,
+              "valid": true
+            },
+            "whitespaceHash": "7b9f175bc2b15ee75a360bc8426b7791d245b9f183aa5a5724813ecfcb41185d"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "reviewer"
+            },
+            "instance": {
+              "locationId": "claude-agents",
+              "path": "<root>/claude/agents/reviewer.md",
+              "format": "markdown-frontmatter",
+              "title": "Reviewer",
+              "description": "Reviews.",
+              "contentHash": "b23cba4e56110e5ac1013e561691c07512b26d769f16fb336bd51ae06061f5a9",
+              "sizeBytes": 45,
+              "valid": true
+            },
+            "whitespaceHash": "875f893d07861e1ca74325ed772718b34a92621c04c33542a6f61dca4db3fc2c"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "subagents-toml",
+      "locationId": "codex-agents",
+      "locationPath": "codex/agents",
+      "tree": [
+        {
+          "path": "codex/agents/good.toml",
+          "text": "name = \"  Good Agent  \"\ndescription = \"Does things.\"\n"
+        },
+        {
+          "path": "codex/agents/bad.toml",
+          "text": "name = \"unterminated\n"
+        },
+        {
+          "path": "codex/agents/nameless.toml",
+          "text": "model = \"x\"\n"
+        },
+        {
+          "path": "codex/agents/typed.toml",
+          "text": "name = 5\ndescription = true\n"
+        },
+        {
+          "path": "codex/agents/blank-name.toml",
+          "text": "name = \"   \"\n"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "blank-name"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/blank-name.toml",
+              "format": "toml-agent",
+              "title": "blank-name",
+              "contentHash": "fb933443b8443b74891c8b6fedda6db80f05f5bb07077f99e58b298753561dc8",
+              "sizeBytes": 13,
+              "valid": true
+            },
+            "whitespaceHash": "30edad57062da751850d6c005809c89702840acf23c4b67fde7eab381ff28676"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "typed"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/typed.toml",
+              "format": "toml-agent",
+              "title": "typed",
+              "contentHash": "a44be6f7fafb1574157aab93b90cf5055bc19016da84c7571a51ff85aff94add",
+              "sizeBytes": 28,
+              "valid": true
+            },
+            "whitespaceHash": "0e6c7837bd8475b9c755205849bd25055b4c26db92bbac83490814ca9e37abab"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nameless"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nameless.toml",
+              "format": "toml-agent",
+              "title": "nameless",
+              "contentHash": "4352daaf7770220896426217854ecde2755cace4c9abf28c6bedad85cfa34e0e",
+              "sizeBytes": 12,
+              "valid": true
+            },
+            "whitespaceHash": "e9436c3f5730d6f2fe3b334d5f5eed7f25b132e2b3bf78c3d38b61116db1e6c1"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "bad"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/bad.toml",
+              "format": "toml-agent",
+              "title": "bad",
+              "contentHash": "7148cc9d91a7dbb8ca06fda61d014ca11a5d3d4000d5c23f2effb16e41899618",
+              "sizeBytes": 21,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "581d44a9a4a9d05c69c9a93d5cff82bfa36179bde7152c02a6896d499bd18903"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "good"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/good.toml",
+              "format": "toml-agent",
+              "title": "Good Agent",
+              "description": "Does things.",
+              "contentHash": "beeb3cfcf3edcbcb171ded9161c6520800bcc73ccacd28d4814673a132914cc1",
+              "sizeBytes": 53,
+              "valid": true
+            },
+            "whitespaceHash": "a07af99a427f3bb730cf60e77c56b24deef668ec9a75de0327f799eedc082296"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-object",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "{\"model\": \"x\"}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "ee53cd7b8376d6d29f988c7da5be76ad5c49a0fd8e49f70557180636949c1e9b",
+              "sizeBytes": 14,
+              "valid": true
+            },
+            "whitespaceHash": "805497a62c81e1895c4baa104b766c70c13faf802235566f2f486a10d93432c7"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-array",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "[1, 2]"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "3c18d74105253c36e5c38e2996ae3c70b56c80efa7b8a8965439057d36dd23ee",
+              "sizeBytes": 6,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "568ee37e542aec606f912d166cf0181ac6b2fb57c2aacf2e023f1bb8add7b165"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-malformed",
+      "locationId": "cursor-settings",
+      "locationPath": "cursor/cli-config.json",
+      "tree": [
+        {
+          "path": "cursor/cli-config.json",
+          "text": "{\"trailing\": 1,}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "cursor-settings",
+              "path": "<root>/cursor/cli-config.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "65e6e66a78eb5850abfd1cf70bfc10e0ac8a0d9f7fe0d738df55ea89acfc07bb",
+              "sizeBytes": 16,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "6f9b130b0e073d38f909b0deff7be8628e2039818247efdbe1e4a7af70aeaadc"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-bom",
+      "locationId": "codex-hooks",
+      "locationPath": "codex/hooks.json",
+      "tree": [
+        {
+          "path": "codex/hooks.json",
+          "base64": "77u/e30="
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "hook",
+              "slug": "hooks"
+            },
+            "instance": {
+              "locationId": "codex-hooks",
+              "path": "<root>/codex/hooks.json",
+              "format": "json-settings",
+              "title": "hooks",
+              "contentHash": "80a375ff43b8829ee368d83430a5747992e195f88f335b5c1ae729d2c5133ed5",
+              "sizeBytes": 5,
+              "valid": true
+            },
+            "whitespaceHash": "683d885acbf371cff706aa1ba46470615f71a9fe94133d1a7fc4d2ec77c11f25"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-toml-malformed",
+      "locationId": "codex-settings",
+      "locationPath": "codex/config.toml",
+      "tree": [
+        {
+          "path": "codex/config.toml",
+          "text": "[table\nkey = 1\n"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "codex-settings",
+              "path": "<root>/codex/config.toml",
+              "format": "toml-settings",
+              "title": "settings",
+              "contentHash": "cf6eb0e28b466469a5227513a18005310d3aa841919d7f75e3462e72058397ca",
+              "sizeBytes": 15,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "e7be0d3fbea9fa3bc911d0d5a9746674b575565c2e44ab8ca5ae1916a14fad67"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-toml-oversized",
+      "locationId": "mango-settings",
+      "locationPath": "mango/config.toml",
+      "tree": [
+        {
+          "path": "mango/config.toml",
+          "fill": {
+            "byte": 35,
+            "count": 2097153
+          }
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "mango-settings",
+              "path": "<root>/mango/config.toml",
+              "format": "toml-settings",
+              "title": "settings",
+              "valid": false,
+              "invalidReason": "too-large"
+            }
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "single-file-missing",
+      "locationId": "mango-instructions",
+      "locationPath": "mango/AGENTS.md",
+      "tree": [
+        {
+          "path": "mango/other.md",
+          "text": "unrelated"
+        }
+      ],
+      "expected": {
+        "instances": [],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "single-file-directory",
+      "locationId": "claude-instructions",
+      "locationPath": "claude/CLAUDE.md",
+      "tree": [
+        {
+          "path": "claude/CLAUDE.md",
+          "dir": true
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "instruction",
+              "slug": "global"
+            },
+            "instance": {
+              "locationId": "claude-instructions",
+              "path": "<root>/claude/CLAUDE.md",
+              "format": "markdown-plain",
+              "title": "global",
+              "valid": false,
+              "invalidReason": "unexpected-entry-type"
+            }
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "instruction-plain",
+      "locationId": "codex-instructions",
+      "locationPath": "codex/AGENTS.md",
+      "tree": [
+        {
+          "path": "codex/AGENTS.md",
+          "text": "---\nname: ignored\n---\nplain markdown"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "instruction",
+              "slug": "global"
+            },
+            "instance": {
+              "locationId": "codex-instructions",
+              "path": "<root>/codex/AGENTS.md",
+              "format": "markdown-plain",
+              "title": "global",
+              "contentHash": "02acdeb73fffd9124d19ceba148fc7fa116e764640f443a6df09ab36fc1a1f85",
+              "sizeBytes": 36,
+              "valid": true
+            },
+            "whitespaceHash": "1857abc01d70514f47cd2c47615a12024f824246cb0197c390de15de89b813c9"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "cursor-rules-mdc",
+      "locationId": "cursor-rules",
+      "locationPath": "cursor/rules",
+      "tree": [
+        {
+          "path": "cursor/rules/style.mdc",
+          "text": "---\ndescription: House style\n---\n"
+        },
+        {
+          "path": "cursor/rules/ignored.md",
+          "text": "wrong extension"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "instruction",
+              "slug": "style"
+            },
+            "instance": {
+              "locationId": "cursor-rules",
+              "path": "<root>/cursor/rules/style.mdc",
+              "format": "mdc",
+              "title": "style",
+              "description": "House style",
+              "contentHash": "a0707d872478c5dc367885582435fc7a4c440ce409135584e211a68225f140e2",
+              "sizeBytes": 33,
+              "valid": true
+            },
+            "whitespaceHash": "34e488cbec481fabb46cfab5495604ab87f734088e0b936fb975cc225f4e4315"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "permission-rules",
+      "locationId": "codex-permission-rules",
+      "locationPath": "codex/rules",
+      "tree": [
+        {
+          "path": "codex/rules/default.rules",
+          "text": "allow read\n"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "hook",
+              "slug": "default"
+            },
+            "instance": {
+              "locationId": "codex-permission-rules",
+              "path": "<root>/codex/rules/default.rules",
+              "format": "rules-dsl",
+              "title": "default",
+              "contentHash": "c0b33f2e3f294d11366587eb30d6f1542b11a15062da2128742fbb99c3ea512c",
+              "sizeBytes": 11,
+              "valid": true
+            },
+            "whitespaceHash": "8f01912bb9a5032fa0b2175c53b474f397405542474de8fac835029ea412b1da"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "missing-location",
+      "locationId": "cursor-commands",
+      "locationPath": "cursor/commands",
+      "tree": [
+        {
+          "path": "cursor/other",
+          "dir": true
+        }
+      ],
+      "expected": {
+        "instances": [],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "location-is-a-file",
+      "locationId": "claude-commands",
+      "locationPath": "claude/commands",
+      "tree": [
+        {
+          "path": "claude/commands",
+          "text": "not a directory"
+        }
+      ],
+      "expected": {
+        "instances": [],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "symlink-containment",
+      "locationId": "cursor-skills",
+      "locationPath": "cursor/skills",
+      "unixOnly": true,
+      "tree": [
+        {
+          "path": "outside/escaped/SKILL.md",
+          "text": "---\nname: escaped\ndescription: A skill.\n---\n\nBody of escaped.\n"
+        },
+        {
+          "path": "outside/secret.md",
+          "text": "secret"
+        },
+        {
+          "path": "cursor/skills/escaped",
+          "symlink": "../../outside/escaped"
+        },
+        {
+          "path": "cursor/skills/leaf-escape/SKILL.md",
+          "text": "---\nname: leaf-escape\ndescription: A skill.\n---\n\nBody of leaf-escape.\n"
+        },
+        {
+          "path": "cursor/skills/leaf-escape/secret.md",
+          "symlink": "../../../outside/secret.md"
+        },
+        {
+          "path": "cursor/skills/sibling/SKILL.md",
+          "text": "---\nname: sibling\ndescription: A skill.\n---\n\nBody of sibling.\n"
+        },
+        {
+          "path": "cursor/skills/sibling/alias.md",
+          "symlink": "SKILL.md"
+        },
+        {
+          "path": "cursor/skills/cycle/SKILL.md",
+          "text": "---\nname: cycle\ndescription: A skill.\n---\n\nBody of cycle.\n"
+        },
+        {
+          "path": "cursor/skills/cycle/loop",
+          "symlink": "."
+        },
+        {
+          "path": "cursor/skills/newline/SKILL.md",
+          "text": "---\nname: newline\ndescription: A skill.\n---\n\nBody of newline.\n"
+        },
+        {
+          "path": "cursor/skills/newline/bad\nname.md",
+          "text": "unsafe"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "newline"
+            },
+            "instance": {
+              "locationId": "cursor-skills",
+              "path": "<root>/cursor/skills/newline",
+              "format": "markdown-frontmatter",
+              "title": "newline",
+              "valid": false,
+              "invalidReason": "unsafe-name"
+            }
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "cycle"
+            },
+            "instance": {
+              "locationId": "cursor-skills",
+              "path": "<root>/cursor/skills/cycle",
+              "format": "markdown-frontmatter",
+              "title": "cycle",
+              "valid": false,
+              "invalidReason": "path-escape"
+            }
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "sibling"
+            },
+            "instance": {
+              "locationId": "cursor-skills",
+              "path": "<root>/cursor/skills/sibling",
+              "format": "markdown-frontmatter",
+              "title": "sibling",
+              "description": "A skill.",
+              "contentHash": "89e388f0fef27912d70c4b2c2946034347062f3e9878929553b7bd79212712bc",
+              "sizeBytes": 124,
+              "valid": true
+            },
+            "whitespaceHash": "31f3d0d95f6d586cf112a553f2397f6486d8d8898beafb3e559844665b4a65a6"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "leaf-escape"
+            },
+            "instance": {
+              "locationId": "cursor-skills",
+              "path": "<root>/cursor/skills/leaf-escape",
+              "format": "markdown-frontmatter",
+              "title": "leaf-escape",
+              "valid": false,
+              "invalidReason": "path-escape"
+            }
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "escaped"
+            },
+            "instance": {
+              "locationId": "cursor-skills",
+              "path": "<root>/cursor/skills/escaped",
+              "format": "markdown-frontmatter",
+              "title": "escaped",
+              "valid": false,
+              "invalidReason": "path-escape"
+            }
+          }
+        ],
+        "unreadableEntries": []
+      }
+    }
+  ],
+  "reads": [
+    {
+      "name": "bom-stripped",
+      "base64": "77u/aGVsbG8=",
+      "expected": {
+        "content": "hello",
+        "truncated": false,
+        "sizeBytes": 8
+      }
+    },
+    {
+      "name": "invalid-utf8",
+      "base64": "Yf/DKOKCYg==",
+      "expected": {
+        "content": "a��(�b",
+        "truncated": false,
+        "sizeBytes": 7
+      }
+    },
+    {
+      "name": "truncated-mid-sequence",
+      "base64": "YcOp4oKs8J+YgA==",
+      "maxBytes": 4,
+      "truncateOversize": true,
+      "expected": {
+        "content": "aé�",
+        "truncated": true,
+        "sizeBytes": 10
+      }
+    },
+    {
+      "name": "exact-cap",
+      "base64": "YWJjZA==",
+      "maxBytes": 4,
+      "expected": {
+        "content": "abcd",
+        "truncated": false,
+        "sizeBytes": 4
+      }
+    },
+    {
+      "name": "empty",
+      "base64": "",
+      "expected": {
+        "content": "",
+        "truncated": false,
+        "sizeBytes": 0
+      }
+    }
+  ],
+  "trees": [
+    {
+      "name": "directory-order",
+      "path": "skills/ordered",
+      "containment": "skills",
+      "tree": [
+        {
+          "path": "skills/ordered/SKILL.md",
+          "text": "entry"
+        },
+        {
+          "path": "skills/ordered/references/Z.md",
+          "text": "Z"
+        },
+        {
+          "path": "skills/ordered/references/a.md",
+          "text": "a"
+        },
+        {
+          "path": "skills/ordered/B.md",
+          "text": "B"
+        },
+        {
+          "path": "skills/ordered/b.md",
+          "text": "b"
+        },
+        {
+          "path": "skills/ordered/é.md",
+          "text": "e"
+        },
+        {
+          "path": "skills/ordered/bin.dat",
+          "base64": "77u/AP8="
+        }
+      ],
+      "expected": {
+        "files": [
+          {
+            "relativePath": "b.md",
+            "contentBase64": "Yg=="
+          },
+          {
+            "relativePath": "B.md",
+            "contentBase64": "Qg=="
+          },
+          {
+            "relativePath": "bin.dat",
+            "contentBase64": "77u/AP8="
+          },
+          {
+            "relativePath": "é.md",
+            "contentBase64": "ZQ=="
+          },
+          {
+            "relativePath": "references/a.md",
+            "contentBase64": "YQ=="
+          },
+          {
+            "relativePath": "references/Z.md",
+            "contentBase64": "Wg=="
+          },
+          {
+            "relativePath": "SKILL.md",
+            "contentBase64": "ZW50cnk="
+          }
+        ]
+      }
+    },
+    {
+      "name": "single-file",
+      "path": "agents/one.md",
+      "containment": "agents",
+      "tree": [
+        {
+          "path": "agents/one.md",
+          "base64": "77u/Ym9tIGtlcHQ="
+        }
+      ],
+      "expected": {
+        "files": [
+          {
+            "relativePath": "one.md",
+            "contentBase64": "77u/Ym9tIGtlcHQ="
+          }
+        ]
+      }
+    },
+    {
+      "name": "leaf-escape",
+      "path": "skills/leaky",
+      "containment": "skills",
+      "unixOnly": true,
+      "tree": [
+        {
+          "path": "outside.md",
+          "text": "secret"
+        },
+        {
+          "path": "skills/leaky/SKILL.md",
+          "text": "entry"
+        },
+        {
+          "path": "skills/leaky/secret.md",
+          "symlink": "../../outside.md"
+        }
+      ],
+      "expected": {
+        "error": "PathEscapeError"
+      }
+    }
+  ],
+  "settingsSources": {
+    "home": [
+      {
+        "path": ".claude/settings.json",
+        "base64": "77u/eyJob29rcyI6IHt9fQ=="
+      },
+      {
+        "path": ".codex/config.toml",
+        "text": "model = \"gpt\"\n"
+      },
+      {
+        "path": ".codex/rules/b.rules",
+        "text": "rule b\n"
+      },
+      {
+        "path": ".codex/rules/a.rules",
+        "text": "rule a\n"
+      },
+      {
+        "path": ".codex/rules/.hidden.rules",
+        "text": "hidden\n"
+      },
+      {
+        "path": ".codex/rules/notes.txt",
+        "text": "not a rule\n"
+      },
+      {
+        "path": ".codex/rules/nested.rules/inner.rules",
+        "text": "a directory named like a rule\n"
+      },
+      {
+        "path": ".mango/config.toml",
+        "fill": {
+          "byte": 35,
+          "count": 524289
+        }
+      },
+      {
+        "path": ".cursor/cli-config.json",
+        "dir": true
+      }
+    ],
+    "expected": {
+      "homeDir": "<root>",
+      "sources": [
+        {
+          "locationId": "mango-settings",
+          "present": true,
+          "failureReason": "too-large"
+        },
+        {
+          "locationId": "claude-settings",
+          "present": true,
+          "sizeBytes": 16,
+          "content": "﻿{\"hooks\": {}}"
+        },
+        {
+          "locationId": "claude-hooks",
+          "present": true,
+          "sizeBytes": 16,
+          "content": "﻿{\"hooks\": {}}"
+        },
+        {
+          "locationId": "codex-settings",
+          "present": true,
+          "sizeBytes": 14,
+          "content": "model = \"gpt\"\n"
+        },
+        {
+          "locationId": "codex-hooks",
+          "present": false
+        },
+        {
+          "locationId": "codex-permission-rules",
+          "present": true,
+          "sizeBytes": 14,
+          "rules": [
+            {
+              "name": "a.rules",
+              "content": "rule a\n"
+            },
+            {
+              "name": "b.rules",
+              "content": "rule b\n"
+            }
+          ]
+        },
+        {
+          "locationId": "cursor-settings",
+          "present": true,
+          "failureReason": "not-regular-file"
+        }
+      ]
+    }
+  },
+  "locations": [
+    {
+      "name": "linux-defaults",
+      "platform": "linux",
+      "homeDir": "/home/u",
+      "env": {},
+      "expected": [
+        {
+          "id": "mango-skills",
+          "path": "/home/u/.mango/skills",
+          "root": "/home/u/.mango/skills"
+        },
+        {
+          "id": "agents-skills",
+          "path": "/home/u/.agents/skills",
+          "root": "/home/u/.agents/skills"
+        },
+        {
+          "id": "claude-skills",
+          "path": "/home/u/.claude/skills",
+          "root": "/home/u/.claude/skills"
+        },
+        {
+          "id": "codex-skills",
+          "path": "/home/u/.codex/skills",
+          "root": "/home/u/.codex/skills"
+        },
+        {
+          "id": "cursor-skills",
+          "path": "/home/u/.cursor/skills",
+          "root": "/home/u/.cursor/skills"
+        },
+        {
+          "id": "cursor-skills-builtin",
+          "path": "/home/u/.cursor/skills-cursor",
+          "root": "/home/u/.cursor/skills-cursor"
+        },
+        {
+          "id": "mango-agents",
+          "path": "/home/u/.mango/agents",
+          "root": "/home/u/.mango/agents"
+        },
+        {
+          "id": "claude-agents",
+          "path": "/home/u/.claude/agents",
+          "root": "/home/u/.claude/agents"
+        },
+        {
+          "id": "codex-agents",
+          "path": "/home/u/.codex/agents",
+          "root": "/home/u/.codex/agents"
+        },
+        {
+          "id": "cursor-agents",
+          "path": "/home/u/.cursor/agents",
+          "root": "/home/u/.cursor/agents"
+        },
+        {
+          "id": "claude-commands",
+          "path": "/home/u/.claude/commands",
+          "root": "/home/u/.claude/commands"
+        },
+        {
+          "id": "codex-prompts",
+          "path": "/home/u/.codex/prompts",
+          "root": "/home/u/.codex/prompts"
+        },
+        {
+          "id": "cursor-commands",
+          "path": "/home/u/.cursor/commands",
+          "root": "/home/u/.cursor/commands"
+        },
+        {
+          "id": "mango-instructions",
+          "path": "/home/u/.mango/AGENTS.md",
+          "root": "/home/u/.mango"
+        },
+        {
+          "id": "claude-instructions",
+          "path": "/home/u/.claude/CLAUDE.md",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-instructions",
+          "path": "/home/u/.codex/AGENTS.md",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "cursor-rules",
+          "path": "/home/u/.cursor/rules",
+          "root": "/home/u/.cursor/rules"
+        },
+        {
+          "id": "claude-settings",
+          "path": "/home/u/.claude/settings.json",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-settings",
+          "path": "/home/u/.codex/config.toml",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "cursor-settings",
+          "path": "/home/u/.cursor/cli-config.json",
+          "root": "/home/u/.cursor"
+        },
+        {
+          "id": "mango-settings",
+          "path": "/home/u/.mango/config.toml",
+          "root": "/home/u/.mango"
+        },
+        {
+          "id": "codex-hooks",
+          "path": "/home/u/.codex/hooks.json",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "claude-hooks",
+          "path": "/home/u/.claude/settings.json",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-permission-rules",
+          "path": "/home/u/.codex/rules",
+          "root": "/home/u/.codex/rules"
+        }
+      ]
+    },
+    {
+      "name": "linux-overrides",
+      "platform": "linux",
+      "homeDir": "/home/u",
+      "env": {
+        "SKILLS_DIR": "./my-skills/",
+        "AGENTS_DIR": "/srv/agents/../agents2",
+        "CLAUDE_CONFIG_DIR": "  /opt/claude  ",
+        "CODEX_HOME": "codex-home",
+        "XDG_CONFIG_HOME": "/xdg"
+      },
+      "expected": [
+        {
+          "id": "mango-skills",
+          "path": "/home/u/my-skills",
+          "root": "/home/u/my-skills"
+        },
+        {
+          "id": "agents-skills",
+          "path": "/home/u/.agents/skills",
+          "root": "/home/u/.agents/skills"
+        },
+        {
+          "id": "claude-skills",
+          "path": "/opt/claude/skills",
+          "root": "/opt/claude/skills"
+        },
+        {
+          "id": "codex-skills",
+          "path": "/home/u/codex-home/skills",
+          "root": "/home/u/codex-home/skills"
+        },
+        {
+          "id": "cursor-skills",
+          "path": "/home/u/.cursor/skills",
+          "root": "/home/u/.cursor/skills"
+        },
+        {
+          "id": "cursor-skills-builtin",
+          "path": "/home/u/.cursor/skills-cursor",
+          "root": "/home/u/.cursor/skills-cursor"
+        },
+        {
+          "id": "mango-agents",
+          "path": "/srv/agents2",
+          "root": "/srv/agents2"
+        },
+        {
+          "id": "claude-agents",
+          "path": "/opt/claude/agents",
+          "root": "/opt/claude/agents"
+        },
+        {
+          "id": "codex-agents",
+          "path": "/home/u/codex-home/agents",
+          "root": "/home/u/codex-home/agents"
+        },
+        {
+          "id": "cursor-agents",
+          "path": "/home/u/.cursor/agents",
+          "root": "/home/u/.cursor/agents"
+        },
+        {
+          "id": "claude-commands",
+          "path": "/opt/claude/commands",
+          "root": "/opt/claude/commands"
+        },
+        {
+          "id": "codex-prompts",
+          "path": "/home/u/codex-home/prompts",
+          "root": "/home/u/codex-home/prompts"
+        },
+        {
+          "id": "cursor-commands",
+          "path": "/home/u/.cursor/commands",
+          "root": "/home/u/.cursor/commands"
+        },
+        {
+          "id": "mango-instructions",
+          "path": "/home/u/.mango/AGENTS.md",
+          "root": "/home/u/.mango"
+        },
+        {
+          "id": "claude-instructions",
+          "path": "/opt/claude/CLAUDE.md",
+          "root": "/opt/claude"
+        },
+        {
+          "id": "codex-instructions",
+          "path": "/home/u/codex-home/AGENTS.md",
+          "root": "/home/u/codex-home"
+        },
+        {
+          "id": "cursor-rules",
+          "path": "/home/u/.cursor/rules",
+          "root": "/home/u/.cursor/rules"
+        },
+        {
+          "id": "claude-settings",
+          "path": "/opt/claude/settings.json",
+          "root": "/opt/claude"
+        },
+        {
+          "id": "codex-settings",
+          "path": "/home/u/codex-home/config.toml",
+          "root": "/home/u/codex-home"
+        },
+        {
+          "id": "cursor-settings",
+          "path": "/xdg/cursor/cli-config.json",
+          "root": "/xdg/cursor"
+        },
+        {
+          "id": "mango-settings",
+          "path": "/home/u/.mango/config.toml",
+          "root": "/home/u/.mango"
+        },
+        {
+          "id": "codex-hooks",
+          "path": "/home/u/codex-home/hooks.json",
+          "root": "/home/u/codex-home"
+        },
+        {
+          "id": "claude-hooks",
+          "path": "/opt/claude/settings.json",
+          "root": "/opt/claude"
+        },
+        {
+          "id": "codex-permission-rules",
+          "path": "/home/u/codex-home/rules",
+          "root": "/home/u/codex-home/rules"
+        }
+      ]
+    },
+    {
+      "name": "linux-cursor-override-beats-xdg",
+      "platform": "linux",
+      "homeDir": "/home/u",
+      "env": {
+        "CURSOR_CONFIG_DIR": "/cursor",
+        "XDG_CONFIG_HOME": "/xdg"
+      },
+      "expected": [
+        {
+          "id": "mango-skills",
+          "path": "/home/u/.mango/skills",
+          "root": "/home/u/.mango/skills"
+        },
+        {
+          "id": "agents-skills",
+          "path": "/home/u/.agents/skills",
+          "root": "/home/u/.agents/skills"
+        },
+        {
+          "id": "claude-skills",
+          "path": "/home/u/.claude/skills",
+          "root": "/home/u/.claude/skills"
+        },
+        {
+          "id": "codex-skills",
+          "path": "/home/u/.codex/skills",
+          "root": "/home/u/.codex/skills"
+        },
+        {
+          "id": "cursor-skills",
+          "path": "/home/u/.cursor/skills",
+          "root": "/home/u/.cursor/skills"
+        },
+        {
+          "id": "cursor-skills-builtin",
+          "path": "/home/u/.cursor/skills-cursor",
+          "root": "/home/u/.cursor/skills-cursor"
+        },
+        {
+          "id": "mango-agents",
+          "path": "/home/u/.mango/agents",
+          "root": "/home/u/.mango/agents"
+        },
+        {
+          "id": "claude-agents",
+          "path": "/home/u/.claude/agents",
+          "root": "/home/u/.claude/agents"
+        },
+        {
+          "id": "codex-agents",
+          "path": "/home/u/.codex/agents",
+          "root": "/home/u/.codex/agents"
+        },
+        {
+          "id": "cursor-agents",
+          "path": "/home/u/.cursor/agents",
+          "root": "/home/u/.cursor/agents"
+        },
+        {
+          "id": "claude-commands",
+          "path": "/home/u/.claude/commands",
+          "root": "/home/u/.claude/commands"
+        },
+        {
+          "id": "codex-prompts",
+          "path": "/home/u/.codex/prompts",
+          "root": "/home/u/.codex/prompts"
+        },
+        {
+          "id": "cursor-commands",
+          "path": "/home/u/.cursor/commands",
+          "root": "/home/u/.cursor/commands"
+        },
+        {
+          "id": "mango-instructions",
+          "path": "/home/u/.mango/AGENTS.md",
+          "root": "/home/u/.mango"
+        },
+        {
+          "id": "claude-instructions",
+          "path": "/home/u/.claude/CLAUDE.md",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-instructions",
+          "path": "/home/u/.codex/AGENTS.md",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "cursor-rules",
+          "path": "/home/u/.cursor/rules",
+          "root": "/home/u/.cursor/rules"
+        },
+        {
+          "id": "claude-settings",
+          "path": "/home/u/.claude/settings.json",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-settings",
+          "path": "/home/u/.codex/config.toml",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "cursor-settings",
+          "path": "/cursor/cli-config.json",
+          "root": "/cursor"
+        },
+        {
+          "id": "mango-settings",
+          "path": "/home/u/.mango/config.toml",
+          "root": "/home/u/.mango"
+        },
+        {
+          "id": "codex-hooks",
+          "path": "/home/u/.codex/hooks.json",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "claude-hooks",
+          "path": "/home/u/.claude/settings.json",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-permission-rules",
+          "path": "/home/u/.codex/rules",
+          "root": "/home/u/.codex/rules"
+        }
+      ]
+    },
+    {
+      "name": "linux-blank-overrides",
+      "platform": "linux",
+      "homeDir": "/home/u",
+      "env": {
+        "SKILLS_DIR": "   "
+      },
+      "expected": [
+        {
+          "id": "mango-skills",
+          "path": "/home/u/.mango/skills",
+          "root": "/home/u/.mango/skills"
+        },
+        {
+          "id": "agents-skills",
+          "path": "/home/u/.agents/skills",
+          "root": "/home/u/.agents/skills"
+        },
+        {
+          "id": "claude-skills",
+          "path": "/home/u/.claude/skills",
+          "root": "/home/u/.claude/skills"
+        },
+        {
+          "id": "codex-skills",
+          "path": "/home/u/.codex/skills",
+          "root": "/home/u/.codex/skills"
+        },
+        {
+          "id": "cursor-skills",
+          "path": "/home/u/.cursor/skills",
+          "root": "/home/u/.cursor/skills"
+        },
+        {
+          "id": "cursor-skills-builtin",
+          "path": "/home/u/.cursor/skills-cursor",
+          "root": "/home/u/.cursor/skills-cursor"
+        },
+        {
+          "id": "mango-agents",
+          "path": "/home/u/.mango/agents",
+          "root": "/home/u/.mango/agents"
+        },
+        {
+          "id": "claude-agents",
+          "path": "/home/u/.claude/agents",
+          "root": "/home/u/.claude/agents"
+        },
+        {
+          "id": "codex-agents",
+          "path": "/home/u/.codex/agents",
+          "root": "/home/u/.codex/agents"
+        },
+        {
+          "id": "cursor-agents",
+          "path": "/home/u/.cursor/agents",
+          "root": "/home/u/.cursor/agents"
+        },
+        {
+          "id": "claude-commands",
+          "path": "/home/u/.claude/commands",
+          "root": "/home/u/.claude/commands"
+        },
+        {
+          "id": "codex-prompts",
+          "path": "/home/u/.codex/prompts",
+          "root": "/home/u/.codex/prompts"
+        },
+        {
+          "id": "cursor-commands",
+          "path": "/home/u/.cursor/commands",
+          "root": "/home/u/.cursor/commands"
+        },
+        {
+          "id": "mango-instructions",
+          "path": "/home/u/.mango/AGENTS.md",
+          "root": "/home/u/.mango"
+        },
+        {
+          "id": "claude-instructions",
+          "path": "/home/u/.claude/CLAUDE.md",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-instructions",
+          "path": "/home/u/.codex/AGENTS.md",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "cursor-rules",
+          "path": "/home/u/.cursor/rules",
+          "root": "/home/u/.cursor/rules"
+        },
+        {
+          "id": "claude-settings",
+          "path": "/home/u/.claude/settings.json",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-settings",
+          "path": "/home/u/.codex/config.toml",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "cursor-settings",
+          "path": "/home/u/.cursor/cli-config.json",
+          "root": "/home/u/.cursor"
+        },
+        {
+          "id": "mango-settings",
+          "path": "/home/u/.mango/config.toml",
+          "root": "/home/u/.mango"
+        },
+        {
+          "id": "codex-hooks",
+          "path": "/home/u/.codex/hooks.json",
+          "root": "/home/u/.codex"
+        },
+        {
+          "id": "claude-hooks",
+          "path": "/home/u/.claude/settings.json",
+          "root": "/home/u/.claude"
+        },
+        {
+          "id": "codex-permission-rules",
+          "path": "/home/u/.codex/rules",
+          "root": "/home/u/.codex/rules"
+        }
+      ]
+    },
+    {
+      "name": "darwin-defaults",
+      "platform": "darwin",
+      "homeDir": "/Users/u",
+      "env": {
+        "XDG_CONFIG_HOME": "/x"
+      },
+      "expected": [
+        {
+          "id": "mango-skills",
+          "path": "/Users/u/.mango/skills",
+          "root": "/Users/u/.mango/skills"
+        },
+        {
+          "id": "agents-skills",
+          "path": "/Users/u/.agents/skills",
+          "root": "/Users/u/.agents/skills"
+        },
+        {
+          "id": "claude-skills",
+          "path": "/Users/u/.claude/skills",
+          "root": "/Users/u/.claude/skills"
+        },
+        {
+          "id": "codex-skills",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "cursor-skills",
+          "path": "/Users/u/.cursor/skills",
+          "root": "/Users/u/.cursor/skills"
+        },
+        {
+          "id": "cursor-skills-builtin",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "mango-agents",
+          "path": "/Users/u/.mango/agents",
+          "root": "/Users/u/.mango/agents"
+        },
+        {
+          "id": "claude-agents",
+          "path": "/Users/u/.claude/agents",
+          "root": "/Users/u/.claude/agents"
+        },
+        {
+          "id": "codex-agents",
+          "path": "/Users/u/.codex/agents",
+          "root": "/Users/u/.codex/agents"
+        },
+        {
+          "id": "cursor-agents",
+          "path": "/Users/u/.cursor/agents",
+          "root": "/Users/u/.cursor/agents"
+        },
+        {
+          "id": "claude-commands",
+          "path": "/Users/u/.claude/commands",
+          "root": "/Users/u/.claude/commands"
+        },
+        {
+          "id": "codex-prompts",
+          "path": "/Users/u/.codex/prompts",
+          "root": "/Users/u/.codex/prompts"
+        },
+        {
+          "id": "cursor-commands",
+          "path": "/Users/u/.cursor/commands",
+          "root": "/Users/u/.cursor/commands"
+        },
+        {
+          "id": "mango-instructions",
+          "path": "/Users/u/.mango/AGENTS.md",
+          "root": "/Users/u/.mango"
+        },
+        {
+          "id": "claude-instructions",
+          "path": "/Users/u/.claude/CLAUDE.md",
+          "root": "/Users/u/.claude"
+        },
+        {
+          "id": "codex-instructions",
+          "path": "/Users/u/.codex/AGENTS.md",
+          "root": "/Users/u/.codex"
+        },
+        {
+          "id": "cursor-rules",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "claude-settings",
+          "path": "/Users/u/.claude/settings.json",
+          "root": "/Users/u/.claude"
+        },
+        {
+          "id": "codex-settings",
+          "path": "/Users/u/.codex/config.toml",
+          "root": "/Users/u/.codex"
+        },
+        {
+          "id": "cursor-settings",
+          "path": "/Users/u/.cursor/cli-config.json",
+          "root": "/Users/u/.cursor"
+        },
+        {
+          "id": "mango-settings",
+          "path": "/Users/u/.mango/config.toml",
+          "root": "/Users/u/.mango"
+        },
+        {
+          "id": "codex-hooks",
+          "path": "/Users/u/.codex/hooks.json",
+          "root": "/Users/u/.codex"
+        },
+        {
+          "id": "claude-hooks",
+          "path": "/Users/u/.claude/settings.json",
+          "root": "/Users/u/.claude"
+        },
+        {
+          "id": "codex-permission-rules",
+          "path": "/Users/u/.codex/rules",
+          "root": "/Users/u/.codex/rules"
+        }
+      ]
+    },
+    {
+      "name": "win32-overrides",
+      "platform": "win32",
+      "homeDir": "C:\\Users\\u",
+      "env": {
+        "SKILLS_DIR": "D:/skills/",
+        "CODEX_HOME": "..\\codex"
+      },
+      "expected": [
+        {
+          "id": "mango-skills",
+          "path": "D:\\skills\\"
+        },
+        {
+          "id": "agents-skills",
+          "path": "C:\\Users\\u\\.agents\\skills"
+        },
+        {
+          "id": "claude-skills",
+          "path": "C:\\Users\\u\\.claude\\skills"
+        },
+        {
+          "id": "codex-skills",
+          "path": null
+        },
+        {
+          "id": "cursor-skills",
+          "path": "C:\\Users\\u\\.cursor\\skills"
+        },
+        {
+          "id": "cursor-skills-builtin",
+          "path": null
+        },
+        {
+          "id": "mango-agents",
+          "path": "C:\\Users\\u\\.mango\\agents"
+        },
+        {
+          "id": "claude-agents",
+          "path": "C:\\Users\\u\\.claude\\agents"
+        },
+        {
+          "id": "codex-agents",
+          "path": "C:\\Users\\codex\\agents"
+        },
+        {
+          "id": "cursor-agents",
+          "path": "C:\\Users\\u\\.cursor\\agents"
+        },
+        {
+          "id": "claude-commands",
+          "path": "C:\\Users\\u\\.claude\\commands"
+        },
+        {
+          "id": "codex-prompts",
+          "path": "C:\\Users\\codex\\prompts"
+        },
+        {
+          "id": "cursor-commands",
+          "path": "C:\\Users\\u\\.cursor\\commands"
+        },
+        {
+          "id": "mango-instructions",
+          "path": "C:\\Users\\u\\.mango\\AGENTS.md"
+        },
+        {
+          "id": "claude-instructions",
+          "path": "C:\\Users\\u\\.claude\\CLAUDE.md"
+        },
+        {
+          "id": "codex-instructions",
+          "path": "C:\\Users\\codex\\AGENTS.md"
+        },
+        {
+          "id": "cursor-rules",
+          "path": null
+        },
+        {
+          "id": "claude-settings",
+          "path": "C:\\Users\\u\\.claude\\settings.json"
+        },
+        {
+          "id": "codex-settings",
+          "path": "C:\\Users\\codex\\config.toml"
+        },
+        {
+          "id": "cursor-settings",
+          "path": "C:\\Users\\u\\.cursor\\cli-config.json"
+        },
+        {
+          "id": "mango-settings",
+          "path": "C:\\Users\\u\\.mango\\config.toml"
+        },
+        {
+          "id": "codex-hooks",
+          "path": "C:\\Users\\codex\\hooks.json"
+        },
+        {
+          "id": "claude-hooks",
+          "path": "C:\\Users\\u\\.claude\\settings.json"
+        },
+        {
+          "id": "codex-permission-rules",
+          "path": "C:\\Users\\codex\\rules"
+        }
+      ]
+    },
+    {
+      "name": "unsupported-platform",
+      "platform": "freebsd",
+      "homeDir": "/home/u",
+      "env": {},
+      "expected": [
+        {
+          "id": "mango-skills",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "agents-skills",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "claude-skills",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "codex-skills",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "cursor-skills",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "cursor-skills-builtin",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "mango-agents",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "claude-agents",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "codex-agents",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "cursor-agents",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "claude-commands",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "codex-prompts",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "cursor-commands",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "mango-instructions",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "claude-instructions",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "codex-instructions",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "cursor-rules",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "claude-settings",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "codex-settings",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "cursor-settings",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "mango-settings",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "codex-hooks",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "claude-hooks",
+          "path": null,
+          "root": null
+        },
+        {
+          "id": "codex-permission-rules",
+          "path": null,
+          "root": null
+        }
+      ]
+    }
+  ]
+}
