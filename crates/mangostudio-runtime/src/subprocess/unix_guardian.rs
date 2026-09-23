@@ -1288,20 +1288,35 @@ unsafe fn kill_session_members_once(session: libc::pid_t) -> Option<bool> {
                 } else {
                     let pinned = pinned as RawFd;
                     let member = unsafe { libc::getsid(pid) } == session;
-                    let running = if member {
-                        unsafe { proc_pid_state(directory, name) }.map(|state| state.running)
+                    let state = if member {
+                        unsafe { proc_pid_state(directory, name) }
                     } else {
-                        Some(false)
+                        Some(ProcPidState {
+                            running: false,
+                            start_time: 0,
+                        })
                     };
-                    if running == Some(true) {
-                        live = true;
-                    }
-                    if running.is_none()
-                        || (running == Some(true) && !unsafe { kill_pinned_linux_pid(pinned) })
-                    {
+                    let Some(state) = state else {
                         unsafe { libc::close(pinned) };
                         unsafe { libc::close(directory) };
                         return None;
+                    };
+                    if state.running {
+                        live = true;
+                        if !unsafe {
+                            finish_pidfd_signal(
+                                kill_pinned_linux_pid(pinned),
+                                directory,
+                                name,
+                                pid,
+                                session,
+                                state.start_time,
+                            )
+                        } {
+                            unsafe { libc::close(pinned) };
+                            unsafe { libc::close(directory) };
+                            return None;
+                        }
                     }
                     unsafe { libc::close(pinned) };
                 }
@@ -1418,7 +1433,7 @@ unsafe fn kill_unpinned_linux_pid(
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-unsafe fn kill_pinned_linux_pid(pinned: RawFd) -> bool {
+unsafe fn kill_pinned_linux_pid(pinned: RawFd) -> Result<(), libc::c_int> {
     let result = unsafe {
         libc::syscall(
             libc::SYS_pidfd_send_signal,
@@ -1428,8 +1443,32 @@ unsafe fn kill_pinned_linux_pid(pinned: RawFd) -> bool {
             0,
         )
     };
+    if result == 0 {
+        return Ok(());
+    }
     let error = unsafe { errno_raw() };
-    result == 0 || error == libc::ESRCH
+    if error == libc::ESRCH {
+        return Ok(());
+    }
+    Err(error)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn finish_pidfd_signal(
+    attempt: Result<(), libc::c_int>,
+    directory: RawFd,
+    name: &[u8],
+    pid: libc::pid_t,
+    session: libc::pid_t,
+    start_time: u64,
+) -> bool {
+    match attempt {
+        Ok(()) => true,
+        Err(libc::ENOSYS | libc::EPERM) => unsafe {
+            kill_unpinned_linux_pid(directory, name, pid, session, start_time)
+        },
+        Err(_) => false,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1669,6 +1708,64 @@ mod tests {
         assert!(stale_child_alive, "stale identity must not signal child");
         assert!(killed, "fallback signals the matching session member");
         assert_eq!(status.signal(), Some(libc::SIGKILL));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn unavailable_pidfd_signal_falls_back_to_checked_pid_signal() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::{CommandExt, ExitStatusExt};
+
+        for error in [libc::EPERM, libc::ENOSYS] {
+            let mut command = std::process::Command::new("/bin/sleep");
+            command.arg("60");
+            // SAFETY: only the direct libc setsid syscall runs between fork and exec.
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+            let mut child = command.spawn().expect("spawn isolated session member");
+            let pid = child.id() as libc::pid_t;
+            let directory = std::fs::File::open("/proc").expect("open proc directory");
+            let name = format!("{pid}\0");
+            let state = unsafe { super::proc_pid_state(directory.as_raw_fd(), name.as_bytes()) }
+                .expect("read child identity");
+
+            // Inject the syscall result without installing a process-wide seccomp profile.
+            let fatal = unsafe {
+                super::finish_pidfd_signal(
+                    Err(libc::EIO),
+                    directory.as_raw_fd(),
+                    name.as_bytes(),
+                    pid,
+                    pid,
+                    state.start_time,
+                )
+            };
+            let alive_after_fatal = child.try_wait().expect("check child").is_none();
+            let killed = unsafe {
+                super::finish_pidfd_signal(
+                    Err(error),
+                    directory.as_raw_fd(),
+                    name.as_bytes(),
+                    pid,
+                    pid,
+                    state.start_time,
+                )
+            };
+            if !killed {
+                let _ = child.kill();
+            }
+            let status = child.wait().expect("reap child");
+            assert!(!fatal, "unrelated pidfd errors must remain cleanup errors");
+            assert!(alive_after_fatal, "unrelated errors must not signal by PID");
+            assert!(killed, "pidfd_send_signal errno={error} must fall back");
+            assert_eq!(status.signal(), Some(libc::SIGKILL));
+        }
     }
 
     /// Regression test: this snapshot used to `.expect("OS environment has no NUL")` on every
