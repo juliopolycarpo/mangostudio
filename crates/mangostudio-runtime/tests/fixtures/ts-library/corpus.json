@@ -500,6 +500,73 @@
           {
             "ref": {
               "kind": "skill",
+              "slug": "007"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/007",
+              "format": "markdown-frontmatter",
+              "title": "7",
+              "description": "A skill.",
+              "contentHash": "7ca948c523658ffe3078ff4e4062b4b4c64d5e2c5bd9e08b29765506e1a624d8",
+              "sizeBytes": 54,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "3b305853a8f1b8ee914007df9619f9dc87425c81dc36a1d0903e920990ee8dca"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "My_Skill"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/My_Skill",
+              "format": "markdown-frontmatter",
+              "title": "My_Skill",
+              "valid": false,
+              "invalidReason": "invalid-slug"
+            }
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "alpha"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/alpha",
+              "format": "markdown-frontmatter",
+              "title": "alpha",
+              "description": "A skill.",
+              "contentHash": "a99f3213d97b1758d9766dce6d0ca83e9cfd18d61fce898204e6ef98184f5fa7",
+              "sizeBytes": 58,
+              "valid": true
+            },
+            "whitespaceHash": "12a80ee793e8b83f9ceb71ff8a2517c724cc139e677687b7c71420d186fa7b55"
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "beta"
+            },
+            "instance": {
+              "locationId": "mango-skills",
+              "path": "<root>/skills/beta",
+              "format": "markdown-frontmatter",
+              "title": "not-beta",
+              "description": "A skill.",
+              "contentHash": "5e88881bb0819a57bfde2a8a81d8e8950d16736e3d744af232c8afd456ac22c1",
+              "sizeBytes": 64,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "f9443ee96d5575dacc83feda1c0d3fb1ac9ddd0ff794a6f57d8ac849dc1d6e0a"
+          },
+          {
+            "ref": {
+              "kind": "skill",
               "slug": "bom"
             },
             "instance": {
@@ -534,24 +601,6 @@
           {
             "ref": {
               "kind": "skill",
-              "slug": "007"
-            },
-            "instance": {
-              "locationId": "mango-skills",
-              "path": "<root>/skills/007",
-              "format": "markdown-frontmatter",
-              "title": "7",
-              "description": "A skill.",
-              "contentHash": "7ca948c523658ffe3078ff4e4062b4b4c64d5e2c5bd9e08b29765506e1a624d8",
-              "sizeBytes": 54,
-              "valid": false,
-              "invalidReason": "invalid-metadata"
-            },
-            "whitespaceHash": "3b305853a8f1b8ee914007df9619f9dc87425c81dc36a1d0903e920990ee8dca"
-          },
-          {
-            "ref": {
-              "kind": "skill",
               "slug": "file-not-dir"
             },
             "instance": {
@@ -561,20 +610,6 @@
               "title": "file-not-dir",
               "valid": false,
               "invalidReason": "unexpected-entry-type"
-            }
-          },
-          {
-            "ref": {
-              "kind": "skill",
-              "slug": "My_Skill"
-            },
-            "instance": {
-              "locationId": "mango-skills",
-              "path": "<root>/skills/My_Skill",
-              "format": "markdown-frontmatter",
-              "title": "My_Skill",
-              "valid": false,
-              "invalidReason": "invalid-slug"
             }
           },
           {
@@ -593,41 +628,6 @@
               "invalidReason": "missing-entrypoint"
             },
             "whitespaceHash": "24a59f98361f336b26adb3dcea6a8f2556d11f7382ff478afacade1f9b0418cc"
-          },
-          {
-            "ref": {
-              "kind": "skill",
-              "slug": "beta"
-            },
-            "instance": {
-              "locationId": "mango-skills",
-              "path": "<root>/skills/beta",
-              "format": "markdown-frontmatter",
-              "title": "not-beta",
-              "description": "A skill.",
-              "contentHash": "5e88881bb0819a57bfde2a8a81d8e8950d16736e3d744af232c8afd456ac22c1",
-              "sizeBytes": 64,
-              "valid": false,
-              "invalidReason": "invalid-metadata"
-            },
-            "whitespaceHash": "f9443ee96d5575dacc83feda1c0d3fb1ac9ddd0ff794a6f57d8ac849dc1d6e0a"
-          },
-          {
-            "ref": {
-              "kind": "skill",
-              "slug": "alpha"
-            },
-            "instance": {
-              "locationId": "mango-skills",
-              "path": "<root>/skills/alpha",
-              "format": "markdown-frontmatter",
-              "title": "alpha",
-              "description": "A skill.",
-              "contentHash": "a99f3213d97b1758d9766dce6d0ca83e9cfd18d61fce898204e6ef98184f5fa7",
-              "sizeBytes": 58,
-              "valid": true
-            },
-            "whitespaceHash": "12a80ee793e8b83f9ceb71ff8a2517c724cc139e677687b7c71420d186fa7b55"
           }
         ],
         "unreadableEntries": [
@@ -744,19 +744,16 @@
           {
             "ref": {
               "kind": "skill",
-              "slug": "just-fits"
+              "slug": "big-entry"
             },
             "instance": {
               "locationId": "agents-skills",
-              "path": "<root>/agents/skills/just-fits",
+              "path": "<root>/agents/skills/big-entry",
               "format": "markdown-frontmatter",
-              "title": "just-fits",
-              "description": "A skill.",
-              "contentHash": "983ff2a67159ad6c0815a857a9616c3806521434d45b40c32d4128fad2cd3d5e",
-              "sizeBytes": 2097218,
-              "valid": true
-            },
-            "whitespaceHash": "3833538e6165a837e78010214240316c09f8935354bb9671b2ecd03b52560bfb"
+              "title": "big-entry",
+              "valid": false,
+              "invalidReason": "too-large"
+            }
           },
           {
             "ref": {
@@ -775,16 +772,19 @@
           {
             "ref": {
               "kind": "skill",
-              "slug": "big-entry"
+              "slug": "just-fits"
             },
             "instance": {
               "locationId": "agents-skills",
-              "path": "<root>/agents/skills/big-entry",
+              "path": "<root>/agents/skills/just-fits",
               "format": "markdown-frontmatter",
-              "title": "big-entry",
-              "valid": false,
-              "invalidReason": "too-large"
-            }
+              "title": "just-fits",
+              "description": "A skill.",
+              "contentHash": "983ff2a67159ad6c0815a857a9616c3806521434d45b40c32d4128fad2cd3d5e",
+              "sizeBytes": 2097218,
+              "valid": true
+            },
+            "whitespaceHash": "3833538e6165a837e78010214240316c09f8935354bb9671b2ecd03b52560bfb"
           }
         ],
         "unreadableEntries": []
@@ -833,19 +833,18 @@
           {
             "ref": {
               "kind": "subagent",
-              "slug": "numeric"
+              "slug": "UPPER"
             },
             "instance": {
               "locationId": "claude-agents",
-              "path": "<root>/claude/agents/numeric.md",
+              "path": "<root>/claude/agents/UPPER.MD",
               "format": "markdown-frontmatter",
-              "title": "1000",
-              "description": "31",
-              "contentHash": "f05ae05160822f2dbd681c151d1800867df9e99f3c656624d61144c144bde9ed",
-              "sizeBytes": 36,
+              "title": "UPPER",
+              "contentHash": "7090459c8c88e7641cec2606658efaa2ec785eb61073a6dc16df2bc181625ca5",
+              "sizeBytes": 14,
               "valid": true
             },
-            "whitespaceHash": "01543154f25a1a44481ce48e799ccd00fb56f02f8af59928b580694fa8a3872b"
+            "whitespaceHash": "7b9f175bc2b15ee75a360bc8426b7791d245b9f183aa5a5724813ecfcb41185d"
           },
           {
             "ref": {
@@ -866,18 +865,19 @@
           {
             "ref": {
               "kind": "subagent",
-              "slug": "UPPER"
+              "slug": "numeric"
             },
             "instance": {
               "locationId": "claude-agents",
-              "path": "<root>/claude/agents/UPPER.MD",
+              "path": "<root>/claude/agents/numeric.md",
               "format": "markdown-frontmatter",
-              "title": "UPPER",
-              "contentHash": "7090459c8c88e7641cec2606658efaa2ec785eb61073a6dc16df2bc181625ca5",
-              "sizeBytes": 14,
+              "title": "1000",
+              "description": "31",
+              "contentHash": "f05ae05160822f2dbd681c151d1800867df9e99f3c656624d61144c144bde9ed",
+              "sizeBytes": 36,
               "valid": true
             },
-            "whitespaceHash": "7b9f175bc2b15ee75a360bc8426b7791d245b9f183aa5a5724813ecfcb41185d"
+            "whitespaceHash": "01543154f25a1a44481ce48e799ccd00fb56f02f8af59928b580694fa8a3872b"
           },
           {
             "ref": {
@@ -931,6 +931,23 @@
           {
             "ref": {
               "kind": "subagent",
+              "slug": "bad"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/bad.toml",
+              "format": "toml-agent",
+              "title": "bad",
+              "contentHash": "7148cc9d91a7dbb8ca06fda61d014ca11a5d3d4000d5c23f2effb16e41899618",
+              "sizeBytes": 21,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "581d44a9a4a9d05c69c9a93d5cff82bfa36179bde7152c02a6896d499bd18903"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
               "slug": "blank-name"
             },
             "instance": {
@@ -947,18 +964,19 @@
           {
             "ref": {
               "kind": "subagent",
-              "slug": "typed"
+              "slug": "good"
             },
             "instance": {
               "locationId": "codex-agents",
-              "path": "<root>/codex/agents/typed.toml",
+              "path": "<root>/codex/agents/good.toml",
               "format": "toml-agent",
-              "title": "typed",
-              "contentHash": "a44be6f7fafb1574157aab93b90cf5055bc19016da84c7571a51ff85aff94add",
-              "sizeBytes": 28,
+              "title": "Good Agent",
+              "description": "Does things.",
+              "contentHash": "beeb3cfcf3edcbcb171ded9161c6520800bcc73ccacd28d4814673a132914cc1",
+              "sizeBytes": 53,
               "valid": true
             },
-            "whitespaceHash": "0e6c7837bd8475b9c755205849bd25055b4c26db92bbac83490814ca9e37abab"
+            "whitespaceHash": "a07af99a427f3bb730cf60e77c56b24deef668ec9a75de0327f799eedc082296"
           },
           {
             "ref": {
@@ -979,36 +997,18 @@
           {
             "ref": {
               "kind": "subagent",
-              "slug": "bad"
+              "slug": "typed"
             },
             "instance": {
               "locationId": "codex-agents",
-              "path": "<root>/codex/agents/bad.toml",
+              "path": "<root>/codex/agents/typed.toml",
               "format": "toml-agent",
-              "title": "bad",
-              "contentHash": "7148cc9d91a7dbb8ca06fda61d014ca11a5d3d4000d5c23f2effb16e41899618",
-              "sizeBytes": 21,
-              "valid": false,
-              "invalidReason": "invalid-metadata"
-            },
-            "whitespaceHash": "581d44a9a4a9d05c69c9a93d5cff82bfa36179bde7152c02a6896d499bd18903"
-          },
-          {
-            "ref": {
-              "kind": "subagent",
-              "slug": "good"
-            },
-            "instance": {
-              "locationId": "codex-agents",
-              "path": "<root>/codex/agents/good.toml",
-              "format": "toml-agent",
-              "title": "Good Agent",
-              "description": "Does things.",
-              "contentHash": "beeb3cfcf3edcbcb171ded9161c6520800bcc73ccacd28d4814673a132914cc1",
-              "sizeBytes": 53,
+              "title": "typed",
+              "contentHash": "a44be6f7fafb1574157aab93b90cf5055bc19016da84c7571a51ff85aff94add",
+              "sizeBytes": 28,
               "valid": true
             },
-            "whitespaceHash": "a07af99a427f3bb730cf60e77c56b24deef668ec9a75de0327f799eedc082296"
+            "whitespaceHash": "0e6c7837bd8475b9c755205849bd25055b4c26db92bbac83490814ca9e37abab"
           }
         ],
         "unreadableEntries": []
@@ -1442,20 +1442,6 @@
           {
             "ref": {
               "kind": "skill",
-              "slug": "newline"
-            },
-            "instance": {
-              "locationId": "cursor-skills",
-              "path": "<root>/cursor/skills/newline",
-              "format": "markdown-frontmatter",
-              "title": "newline",
-              "valid": false,
-              "invalidReason": "unsafe-name"
-            }
-          },
-          {
-            "ref": {
-              "kind": "skill",
               "slug": "cycle"
             },
             "instance": {
@@ -1470,19 +1456,16 @@
           {
             "ref": {
               "kind": "skill",
-              "slug": "sibling"
+              "slug": "escaped"
             },
             "instance": {
               "locationId": "cursor-skills",
-              "path": "<root>/cursor/skills/sibling",
+              "path": "<root>/cursor/skills/escaped",
               "format": "markdown-frontmatter",
-              "title": "sibling",
-              "description": "A skill.",
-              "contentHash": "89e388f0fef27912d70c4b2c2946034347062f3e9878929553b7bd79212712bc",
-              "sizeBytes": 124,
-              "valid": true
-            },
-            "whitespaceHash": "31f3d0d95f6d586cf112a553f2397f6486d8d8898beafb3e559844665b4a65a6"
+              "title": "escaped",
+              "valid": false,
+              "invalidReason": "path-escape"
+            }
           },
           {
             "ref": {
@@ -1501,16 +1484,33 @@
           {
             "ref": {
               "kind": "skill",
-              "slug": "escaped"
+              "slug": "newline"
             },
             "instance": {
               "locationId": "cursor-skills",
-              "path": "<root>/cursor/skills/escaped",
+              "path": "<root>/cursor/skills/newline",
               "format": "markdown-frontmatter",
-              "title": "escaped",
+              "title": "newline",
               "valid": false,
-              "invalidReason": "path-escape"
+              "invalidReason": "unsafe-name"
             }
+          },
+          {
+            "ref": {
+              "kind": "skill",
+              "slug": "sibling"
+            },
+            "instance": {
+              "locationId": "cursor-skills",
+              "path": "<root>/cursor/skills/sibling",
+              "format": "markdown-frontmatter",
+              "title": "sibling",
+              "description": "A skill.",
+              "contentHash": "89e388f0fef27912d70c4b2c2946034347062f3e9878929553b7bd79212712bc",
+              "sizeBytes": 124,
+              "valid": true
+            },
+            "whitespaceHash": "31f3d0d95f6d586cf112a553f2397f6486d8d8898beafb3e559844665b4a65a6"
           }
         ],
         "unreadableEntries": []
@@ -1590,8 +1590,8 @@
           "text": "B"
         },
         {
-          "path": "skills/ordered/b.md",
-          "text": "b"
+          "path": "skills/ordered/c.md",
+          "text": "c"
         },
         {
           "path": "skills/ordered/é.md",
@@ -1605,16 +1605,16 @@
       "expected": {
         "files": [
           {
-            "relativePath": "b.md",
-            "contentBase64": "Yg=="
-          },
-          {
             "relativePath": "B.md",
             "contentBase64": "Qg=="
           },
           {
             "relativePath": "bin.dat",
             "contentBase64": "77u/AP8="
+          },
+          {
+            "relativePath": "c.md",
+            "contentBase64": "Yw=="
           },
           {
             "relativePath": "é.md",

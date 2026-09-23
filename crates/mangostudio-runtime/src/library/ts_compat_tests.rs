@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use super::cache::LibraryCache;
 use super::collation::locale_compare;
 use super::frontmatter::{FrontmatterValue, parse_frontmatter};
-use super::fs::NativeLibraryFs;
+use super::fs::{NativeLibraryFs, join_relative};
 use super::hash::{DirectoryManifest, ManifestViolation, hash_file_bytes, relative_path_violation};
 use super::read::{library_location_root, read_library_content};
 use super::reader::{ScanContext, read_location_instances};
@@ -223,7 +223,7 @@ fn location_scans_match_read_location_instances() {
         let root = scratch_dir(&format!("library-ts-scan-{name}"));
         build_tree(&root, &case["tree"]);
         let location = location_by_id(case["locationId"].as_str().unwrap()).unwrap();
-        let location_path: PathBuf = root.join(case["locationPath"].as_str().unwrap());
+        let location_path: PathBuf = join_relative(&root, case["locationPath"].as_str().unwrap());
         let warnings = Mutex::new(Vec::<String>::new());
         let warn = |message: &str| warnings.lock().unwrap().push(message.to_string());
         let cache = LibraryCache::default();
@@ -303,8 +303,8 @@ fn tree_reads_match_read_library_tree() {
         let name = case["name"].as_str().unwrap();
         let root = scratch_dir(&format!("library-ts-tree-{name}"));
         build_tree(&root, &case["tree"]);
-        let path = root.join(case["path"].as_str().unwrap());
-        let containment = root.join(case["containment"].as_str().unwrap());
+        let path = join_relative(&root, case["path"].as_str().unwrap());
+        let containment = join_relative(&root, case["containment"].as_str().unwrap());
         let outcome = read_library_tree(
             &NativeLibraryFs,
             &path.to_string_lossy(),

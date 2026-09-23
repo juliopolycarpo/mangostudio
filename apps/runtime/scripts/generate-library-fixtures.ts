@@ -470,8 +470,10 @@ const TREE_CASES: readonly TreeCase[] = [
       { path: 'skills/ordered/SKILL.md', text: 'entry' },
       { path: 'skills/ordered/references/Z.md', text: 'Z' },
       { path: 'skills/ordered/references/a.md', text: 'a' },
+      // Case-distinct names only across letters: `b.md` and `B.md` would be
+      // one file on a case-insensitive filesystem.
       { path: 'skills/ordered/B.md', text: 'B' },
-      { path: 'skills/ordered/b.md', text: 'b' },
+      { path: 'skills/ordered/c.md', text: 'c' },
       { path: 'skills/ordered/é.md', text: 'e' },
       { path: 'skills/ordered/bin.dat', base64: b64([0xef, 0xbb, 0xbf, 0x00, 0xff]) },
     ],
@@ -594,7 +596,21 @@ async function main(): Promise<void> {
         cache: new LibraryCache(),
         force: true,
       });
-      return relativize(stripVolatile(scanned), root);
+      // `readdir` order is the filesystem's, not the reader's: sort so the
+      // corpus is identical on every machine that regenerates it.
+      const ordered = {
+        instances: [...scanned.instances].sort((left, right) =>
+          left.instance.path < right.instance.path
+            ? -1
+            : left.instance.path > right.instance.path
+              ? 1
+              : 0
+        ),
+        unreadableEntries: [...scanned.unreadableEntries].sort((left, right) =>
+          left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+        ),
+      };
+      return relativize(stripVolatile(ordered), root);
     });
     scans.push({ ...scanCase, expected: result });
   }
