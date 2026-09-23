@@ -241,6 +241,9 @@ export async function expectAppliedOnce(
         lastRead = JSON.stringify(text);
         return text.endsWith('\n');
       } catch (error) {
+        // Not created yet, or still held open by the writer (Windows sharing violation).
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT' && code !== 'EBUSY') throw error;
         lastRead = error instanceof Error ? error.message : String(error);
         return false;
       }
