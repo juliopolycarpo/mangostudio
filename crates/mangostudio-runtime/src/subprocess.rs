@@ -27,6 +27,8 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
+#[cfg(any(windows, test))]
+mod batch;
 mod pipe_child;
 mod supervisor;
 #[cfg(unix)]

@@ -582,6 +582,94 @@ mod windows_tests {
     use super::*;
     use crate::subprocess::AlwaysAllow;
 
+    /// A `.cmd` shim resolved like `npx` receives shell syntax as literal text through `%*`, and
+    /// an argument cmd.exe cannot quote is refused before anything runs (BatBadBut).
+    #[tokio::test]
+    async fn a_cmd_shim_receives_shell_syntax_literally_and_unquotable_arguments_are_refused() {
+        use crate::mcp::stdio::{child_env, resolve_windows_program};
+
+        let directory = crate::test_support::scratch_dir("mcp-cmd-shim");
+        let output = directory.join("argv.json");
+        let injected = directory.join("injected.txt");
+        std::fs::write(
+            directory.join("argv.mjs"),
+            "import { writeFileSync } from 'node:fs';\n\
+             writeFileSync(process.env.ARGV_OUT, JSON.stringify(process.argv.slice(2)));\n",
+        )
+        .expect("the argv recorder is written");
+        std::fs::write(
+            directory.join("run.cmd"),
+            "@\"bun\" \"%~dp0argv.mjs\" %*\r\n",
+        )
+        .expect("the shim is written");
+        let mut env = child_env(
+            &crate::config::ProcessEnv,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
+        env.insert("ARGV_OUT".into(), output.to_string_lossy().into_owned());
+        let program = resolve_windows_program(
+            "run",
+            Some(&directory.to_string_lossy()),
+            None,
+            &|candidate| candidate.is_file(),
+        )
+        .expect("the shim resolves through PATHEXT");
+        let tricky = format!("a&b|c<d>e^f(g) & echo x> {}", injected.display());
+        let args = vec![tricky.clone(), "two words".to_owned(), "!x!".to_owned()];
+        let owned = GuardedStdioSpawner::default()
+            .start(
+                StdioLaunch {
+                    program: program.clone(),
+                    args: args.clone(),
+                    env: env.clone(),
+                },
+                Arc::new(AlwaysAllow),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("expected the shim to start | received {error:?}"));
+        drop(owned.stdin);
+        let _ = tokio::time::timeout(Duration::from_secs(30), owned.process.exited()).await;
+        let received: Vec<String> = serde_json::from_str(
+            &std::fs::read_to_string(&output).expect("the shim recorded its arguments"),
+        )
+        .expect("the recorded arguments are JSON");
+        assert_eq!(
+            received, args,
+            "expected every argument delivered literally"
+        );
+        assert!(
+            !injected.exists(),
+            "expected no command injected through cmd.exe"
+        );
+
+        let refused = GuardedStdioSpawner::default()
+            .start(
+                StdioLaunch {
+                    program,
+                    args: vec!["100%\"&calc".to_owned()],
+                    env,
+                },
+                Arc::new(AlwaysAllow),
+                CancellationToken::new(),
+            )
+            .await;
+        match refused {
+            Err(StartError::Spawn(error)) => {
+                assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+                assert!(
+                    error.to_string().contains("argument 0 contains"),
+                    "expected the refused argument named | received {error}"
+                );
+            }
+            other => panic!(
+                "expected StartError::Spawn(InvalidInput) | received {:?}",
+                other.map(|_| "a started shim")
+            ),
+        }
+    }
+
     /// A long-lived stdio server inside the kill-on-close Job: close must return after the Job
     /// has terminated it, well before the child would have exited on its own.
     #[tokio::test]
