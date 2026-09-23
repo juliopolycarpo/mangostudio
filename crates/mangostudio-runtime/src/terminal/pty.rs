@@ -831,6 +831,25 @@ mod tests {
             .await
             .expect("interactive shell starts");
         handle
+            .write(b"set +H; printf 'HISTORY_READY:%s\\n' $$\n".to_vec())
+            .await
+            .expect("history expansion is disabled before using $!");
+        let history_ready = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let text = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
+                if background_pid(&text, "HISTORY_READY:") == Some(handle.pid() as i32) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        if history_ready.is_err() {
+            let captured = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
+            let close = tokio::time::timeout(Duration::from_secs(15), handle.close()).await;
+            panic!("shell did not disable history expansion; output={captured:?}; close={close:?}");
+        }
+        handle
             .write(b"sleep 60 & echo BG1:$!; (trap '' HUP; sleep 60) & echo BG2:$!\n".to_vec())
             .await
             .expect("jobs start");
