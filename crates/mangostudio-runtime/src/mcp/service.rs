@@ -45,11 +45,19 @@ impl Service {
         cancel: &CancellationToken,
     ) -> Result<Value, RemoteError> {
         let config = params.config;
-        let mut sessions = self.sessions.lock().await;
+        let mut sessions = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(cancelled("mcp.connect")),
+            sessions = self.sessions.lock() => sessions,
+        };
+        if cancel.is_cancelled() {
+            return Err(cancelled("mcp.connect"));
+        }
         if let Some(mut old) = sessions.remove(&config.id) {
             let _ = old.close().await;
         }
         let client = tokio::select! {
+            biased;
             () = cancel.cancelled() => return Err(cancelled("mcp.connect")),
             result = self.connector.connect(&config, &params.secrets) => result,
         }
@@ -73,11 +81,16 @@ impl Service {
         params: ServerParams,
         cancel: &CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let sessions = self.sessions.lock().await;
+        let sessions = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(cancelled("mcp.list-tools")),
+            sessions = self.sessions.lock() => sessions,
+        };
         let client = sessions
             .get(&params.server_id)
             .ok_or_else(|| missing(&params.server_id))?;
         let tools = tokio::select! {
+            biased;
             () = cancel.cancelled() => return Err(cancelled("mcp.list-tools")),
             result = client.list_tools() => result,
         }
@@ -158,6 +171,7 @@ fn register_with_connector(registry: Registry, connector: Arc<dyn McpConnector>)
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use super::*;
     use crate::manifest::build_features;
@@ -206,6 +220,30 @@ mod tests {
         ) -> ClientFuture<'a, Box<dyn McpClient>> {
             let closes = Arc::clone(&self.closes);
             Box::pin(async move { Ok(Box::new(FakeClient { closes }) as Box<dyn McpClient>) })
+        }
+    }
+
+    struct BlockingConnector {
+        closes: Arc<AtomicUsize>,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    impl McpConnector for BlockingConnector {
+        fn connect<'a>(
+            &'a self,
+            config: &'a McpConfig,
+            _secrets: &'a McpSecrets,
+        ) -> ClientFuture<'a, Box<dyn McpClient>> {
+            Box::pin(async move {
+                if config.id == "server-2" {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                }
+                Ok(Box::new(FakeClient {
+                    closes: Arc::clone(&self.closes),
+                }) as Box<dyn McpClient>)
+            })
         }
     }
 
@@ -280,6 +318,75 @@ mod tests {
             missing.details.as_ref().and_then(|value| value.get("kind")),
             Some(&json!("mcp_session_missing"))
         );
+    }
+
+    #[tokio::test]
+    async fn cancelled_reconnect_keeps_the_existing_session() {
+        let closes = Arc::new(AtomicUsize::new(0));
+        let service = Service::new(Arc::new(FakeConnector {
+            closes: Arc::clone(&closes),
+        }));
+        let active = CancellationToken::new();
+        service.connect(params(), &active).await.unwrap();
+
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        let error = service.connect(params(), &cancelled).await.unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
+        assert_eq!(closes.load(Ordering::SeqCst), 0);
+        assert!(
+            service
+                .list_tools(
+                    ServerParams {
+                        server_id: "server-1".into()
+                    },
+                    &active
+                )
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_list_does_not_wait_behind_another_servers_connect() {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let connector = BlockingConnector {
+            closes: Arc::new(AtomicUsize::new(0)),
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        };
+        let service = Arc::new(Service::new(Arc::new(connector)));
+        let active = CancellationToken::new();
+        service.connect(params(), &active).await.unwrap();
+
+        let waiting = entered.notified();
+        let connecting = Arc::clone(&service);
+        let task = tokio::spawn(async move {
+            let mut second = params();
+            second.config.id = "server-2".into();
+            connecting.connect(second, &CancellationToken::new()).await
+        });
+        waiting.await;
+
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            service.list_tools(
+                ServerParams {
+                    server_id: "server-1".into(),
+                },
+                &cancelled,
+            ),
+        )
+        .await;
+        release.notify_one();
+        task.await.unwrap().unwrap();
+        let error = result
+            .expect("cancelled list must not wait for an unrelated connect")
+            .unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
     }
 
     #[test]
