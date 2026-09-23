@@ -72,6 +72,10 @@ const WIN32_INSTALL_ENV_KEYS = [
   'ProgramFiles',
   'ProgramFiles(x86)',
   'ProgramData',
+  // Every win32 recipe runs `powershell`; without its module path Windows PowerShell 5.1 can hang
+  // in module autoload on its first pipeline output (`Write-Output`, `irm … | iex`) until the
+  // recipe times out. It names module directories, not credentials.
+  'PSModulePath',
 ] as const;
 
 const RECIPE_ENV_KEYS = ['NVM_DIR', 'PROFILE', 'CODEX_NON_INTERACTIVE', 'FNM_DIR'] as const;

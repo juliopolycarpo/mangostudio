@@ -142,6 +142,8 @@ describe('runtime install execution', () => {
       ProgramFiles: 'C:\\Program Files',
       'ProgramFiles(x86)': 'C:\\Program Files (x86)',
       ProgramData: 'C:\\ProgramData',
+      // Without it Windows PowerShell 5.1 can hang in module autoload on its first pipeline output.
+      PSModulePath: 'C:\\Windows\\system32\\WindowsPowerShell\\v1.0\\Modules',
     };
 
     const win32Env = buildInstallEnvironment(source, {}, 'win32');

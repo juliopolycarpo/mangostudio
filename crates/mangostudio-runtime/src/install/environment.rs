@@ -31,12 +31,12 @@ const INSTALL_ENV_KEYS: [&str; 20] = [
 
 /// win32-only keys: what lets PowerShell start, plus what winget and vendor scripts read.
 ///
-/// `PSModulePath` is a deliberate addition over `WIN32_INSTALL_ENV_KEYS` in
-/// `apps/runtime/src/services/install.ts`. Every Windows recipe runs `powershell`, and without
-/// it Windows PowerShell 5.1 can hang in module autoload on its first pipeline output
-/// (`Write-Output`, `irm … | iex`) until the recipe times out. The Windows CI runner showed this
-/// under the install allowlist, and the same allowlist plus `PSModulePath` streamed at once. It
-/// names module directories, not credentials.
+/// `PSModulePath` matters because every Windows recipe runs `powershell`: without it Windows
+/// PowerShell 5.1 can hang in module autoload on its first pipeline output (`Write-Output`,
+/// `irm … | iex`) until the recipe times out. The Windows CI runner showed this under the install
+/// allowlist, and the same allowlist plus `PSModulePath` streamed at once. It names module
+/// directories, not credentials, and `WIN32_INSTALL_ENV_KEYS` in
+/// `apps/runtime/src/services/install.ts` forwards it too.
 const WIN32_INSTALL_ENV_KEYS: [&str; 12] = [
     "SystemRoot",
     "WINDIR",
