@@ -75,10 +75,13 @@ struct Entry {
 
 impl Entry {
     fn snapshot(&self) -> Value {
-        let size = *self
-            .size
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let size = {
+            let guard = self
+                .size
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            *guard
+        };
         let flow = self
             .flow
             .lock()
@@ -280,11 +283,11 @@ impl Service {
 
     fn attach(&self, params: SessionParams) -> Result<Value, RemoteError> {
         let entry = self.require(&params.session_id)?;
-        let mut flow = entry
+        let state = entry
             .flow
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        let state = flow.attach();
+            .unwrap_or_else(|poison| poison.into_inner())
+            .attach();
         let size = *entry
             .size
             .lock()
