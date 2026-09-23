@@ -223,7 +223,10 @@ mod tests {
 
     #[test]
     fn number_parsing_follows_string_to_number() {
-        let cases: [(&str, Option<f64>); 12] = [
+        let cases: [(&str, Option<f64>); 14] = [
+            // A radix prefix needs at least one digit after it.
+            ("0x", None),
+            ("0x1", Some(1.0)),
             ("007", Some(7.0)),
             ("0x1f", Some(31.0)),
             ("0B101", Some(5.0)),
@@ -245,6 +248,26 @@ mod tests {
                 js_finite_number(raw)
             );
         }
+    }
+
+    #[test]
+    fn non_finite_numbers_print_like_javascript() {
+        assert_eq!(js_number_to_string(f64::INFINITY), "Infinity");
+        assert_eq!(js_number_to_string(f64::NEG_INFINITY), "-Infinity");
+        assert_eq!(js_number_to_string(f64::NAN), "NaN");
+    }
+
+    /// Past `u128`, the radix digits are folded in floating point; `0x1`
+    /// followed by 32 zeros is exactly 2^128, which `Number()` also yields.
+    #[test]
+    fn a_radix_literal_past_u128_still_parses() {
+        let raw = format!("0x1{}", "0".repeat(32));
+        assert_eq!(
+            js_finite_number(&raw),
+            Some(2f64.powi(128)),
+            "Number({raw}): expected 2^128 | received {:?}",
+            js_finite_number(&raw)
+        );
     }
 
     #[test]

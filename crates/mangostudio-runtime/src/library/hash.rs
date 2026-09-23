@@ -184,6 +184,26 @@ mod tests {
             relative_path_violation("C:/x", true),
             Some(ManifestViolation::PathEscape)
         );
+        for escaping in ["a/./b", "a//b", ".", "a/.."] {
+            assert_eq!(
+                relative_path_violation(escaping, false),
+                Some(ManifestViolation::PathEscape),
+                "expected {escaping:?} to be refused as a path escape"
+            );
+        }
+        // Only `^[A-Za-z]:[\\/]` is a drive prefix (the regex hash.ts uses):
+        // names that merely resemble one stay hashable.
+        for name in ["ab\\c", "C:x", "a:b", "1:/x"] {
+            assert_eq!(
+                relative_path_violation(name, true),
+                None,
+                "expected {name:?} to be a safe win32 name | received a violation"
+            );
+        }
+        assert_eq!(
+            relative_path_violation("C:\\x", true),
+            Some(ManifestViolation::PathEscape)
+        );
         assert_eq!(
             relative_path_violation("", false),
             Some(ManifestViolation::PathEscape)
