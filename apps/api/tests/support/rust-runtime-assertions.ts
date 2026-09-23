@@ -22,7 +22,16 @@ import { join } from 'node:path';
 import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
-import { LibraryCache, scanLibraryInstances } from '@mangostudio/shared/library/machine';
+import {
+  createBackupStoreDeps,
+  executeLibraryUndo,
+  executePropagationWrites,
+  hashResourceAt,
+  LibraryCache,
+  listBackupSets,
+  readBackupManifest,
+  scanLibraryInstances,
+} from '@mangostudio/shared/library/machine';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
@@ -88,6 +97,9 @@ export function assertRustRuntimeFeatureCeiling(
   // so the feature follows shell consent alone.
   const shell = manifest.allow?.shell === true;
   const git = manifest.allow?.git === true && manifest.git.available;
+  // All ten library methods are implemented, so the feature follows consent
+  // exactly — the readonly preset included, which grants library alone.
+  const library = manifest.allow?.library === true;
   expect(manifest.features).toEqual({
     tools:
       shell ||
@@ -96,11 +108,12 @@ export function assertRustRuntimeFeatureCeiling(
       expected.fsRead ||
       expected.fsWrite ||
       expected.checkpoints ||
-      expected.mcp,
+      expected.mcp ||
+      library,
     git,
     probing: expected.probing,
     mcp: expected.mcp,
-    library: false,
+    library,
     checkpoints: expected.checkpoints,
     fsRead: expected.fsRead,
     fsWrite: expected.fsWrite,
@@ -377,15 +390,17 @@ export async function assertRustRuntimeSnapshotMethods(
 }
 
 /**
- * Exercises the five `library.*` reads over the production client and
- * diffs the scan against the TypeScript reader on the same tree.
+ * Exercises the ten `library.*` methods over the production client, diffs
+ * the scan against the TypeScript reader on the same tree, and proves the
+ * backup store is shared both ways: a set the Rust runtime writes is listed
+ * and restored by the TypeScript engine, and a set the TypeScript engine
+ * writes is listed and undone by the Rust runtime.
  *
- * `features.library` stays false on the Rust host until the write half
- * ships, so the Hub's own library service refuses it; these calls go
- * through the typed client directly. `SKILLS_DIR`/`AGENTS_DIR` are pinned
- * to scratch directories and `locationSettings` enables nothing, so only
- * the two always-on MangoStudio locations are scanned — never the real
- * home of the machine running the suite.
+ * `SKILLS_DIR`/`AGENTS_DIR` are pinned to scratch directories, every write
+ * names a scratch `backupRoot`, and `locationSettings` enables nothing, so
+ * only the two always-on MangoStudio locations are touched — never the real
+ * home of the machine running the suite. The Hub's own library service is
+ * qualified separately in `rust-runtime-library-qualification`.
  *
  * @example
  * await assertRustRuntimeLibraryMethods(client, scratchDirectory);
@@ -394,7 +409,7 @@ export async function assertRustRuntimeLibraryMethods(
   client: RuntimeClient,
   directory: string
 ): Promise<void> {
-  expect(client.manifest.features.library).toBe(false);
+  expect(client.manifest.features.library).toBe(true);
   const skills = join(directory, 'library-skills');
   const agents = join(directory, 'library-agents');
   const entrypoint = join(skills, 'qualified', 'SKILL.md');
@@ -483,4 +498,118 @@ export async function assertRustRuntimeLibraryMethods(
     'cursor-settings',
   ]);
   expect(typeof sources.homeDir).toBe('string');
+
+  await assertRustRuntimeLibraryWrites(client, directory, pathEnv);
+}
+
+/**
+ * The write lane and both directions of backup compatibility, against the
+ * `qualified` skill {@link assertRustRuntimeLibraryMethods} left in place.
+ */
+async function assertRustRuntimeLibraryWrites(
+  client: RuntimeClient,
+  directory: string,
+  pathEnv: { readonly env: Readonly<Record<string, string>> }
+): Promise<void> {
+  const skills = pathEnv.env.SKILLS_DIR ?? '';
+  const backupRoot = join(directory, 'library-backups');
+  const tsEnv = { platform: process.platform, homeDir: homedir(), env: { ...pathEnv.env } };
+  const tsStore = createBackupStoreDeps({ backupRoot });
+  const source = join(skills, 'qualified');
+  const hash = await hashResourceAt(source, 'directory');
+  const body = await readFile(join(source, 'SKILL.md'));
+
+  // Rust writes a transferred tree; TypeScript reads the set it left.
+  const applied = await client.library.apply({
+    backupRoot,
+    pathEnv,
+    environmentId: 'rust-qualification',
+    operations: [
+      {
+        resourceKey: 'skill:copied',
+        locationId: 'mango-skills',
+        slug: 'copied',
+        operation: 'create',
+        kind: 'directory',
+        expectedContentHash: hash,
+        destinationRoot: skills,
+        files: [{ relativePath: 'SKILL.md', contentRef: 'skill' }],
+      },
+    ],
+    contents: { skill: body.toString('base64') },
+  });
+  expect(applied.failed).toEqual([]);
+  const applySet = applied.backupId ?? '';
+  expect(await readBackupManifest(applySet, tsStore)).toMatchObject({
+    version: 3,
+    operation: 'propagation',
+    environmentId: 'rust-qualification',
+  });
+
+  // Rust removes the original; TypeScript restores it from the Rust set.
+  const removed = await client.library.remove({
+    backupRoot,
+    pathEnv,
+    operations: [
+      {
+        resourceKey: 'skill:qualified',
+        locationId: 'mango-skills',
+        slug: 'qualified',
+        kind: 'directory',
+        expectedPath: source,
+        expectedContentHash: hash,
+        lastCopy: false,
+      },
+    ],
+  });
+  expect(removed.failed).toEqual([]);
+  const removalSet = removed.backupId ?? '';
+  expect((await client.library.backups({ backupRoot })).sets).toEqual(
+    await listBackupSets(tsStore)
+  );
+  const restored = await executeLibraryUndo({ backupRoot, backupId: removalSet, pathEnv: tsEnv });
+  expect(restored.restored.map((entry) => entry.locationId)).toEqual(['mango-skills']);
+  expect(await hashResourceAt(source, 'directory')).toBe(hash);
+
+  // TypeScript writes a set; Rust lists it and undoes it.
+  const tsSet = '2026-09-23T10-15-44.087Z-00000000000000fe';
+  const tsWrite = await executePropagationWrites({
+    backupRoot,
+    pathEnv: tsEnv,
+    backupId: tsSet,
+    operations: [
+      {
+        resourceKey: 'skill:from-ts',
+        locationId: 'mango-skills',
+        slug: 'from-ts',
+        operation: 'create',
+        kind: 'directory',
+        expectedContentHash: hash,
+        destinationRoot: skills,
+        files: [{ relativePath: 'SKILL.md', contents: new Uint8Array(body) }],
+      },
+    ],
+  });
+  expect(tsWrite.failed).toEqual([]);
+  const listed = await client.library.backups({ backupRoot });
+  expect(listed.sets.find((set) => set.backupId === tsSet)).toMatchObject({
+    operation: 'propagation',
+    resourceKeys: ['skill:from-ts'],
+    manifestReadable: true,
+  });
+  const undone = await client.library.undo({ backupRoot, backupId: tsSet, pathEnv });
+  expect(undone.removed.map((entry) => entry.locationId)).toEqual(['mango-skills']);
+  await expect(readFile(join(skills, 'from-ts', 'SKILL.md'))).rejects.toThrow();
+  expect((await client.library.undo({ backupRoot, backupId: applySet, pathEnv })).removed).toEqual([
+    { locationId: 'mango-skills', destinationPath: join(skills, 'copied') },
+  ]);
+
+  const missing = await rejectionOf(
+    client.library.undo({ backupRoot, backupId: 'never-written', pathEnv })
+  );
+  expect((missing as RemoteError).details?.kind).toBe('library_backup_missing');
+  expect(
+    await client.library.gc({ backupRoot, purgeBackupIds: [applySet, removalSet, tsSet] })
+  ).toEqual({ purged: [applySet, removalSet, tsSet], pruned: [] });
+  expect(await client.library.backups({ backupRoot })).toEqual({ sets: [] });
 }
