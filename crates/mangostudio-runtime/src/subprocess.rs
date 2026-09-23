@@ -20,7 +20,9 @@
 //! this module runs the spawn itself inside [`crate::blocking::run_blocking`]
 //! rather than calling `Command::spawn` straight from an async context.
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
+use std::process::ExitStatus;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -30,6 +32,143 @@ mod supervisor;
 mod unix_guardian;
 #[cfg(windows)]
 mod windows_job;
+
+/// PTY child with the same guardian or Job ownership as a bounded process.
+pub(crate) enum PtyChild {
+    #[cfg(unix)]
+    Unix(unix_guardian::GuardianChild),
+    #[cfg(windows)]
+    Windows(windows_job::WindowsJobChild),
+}
+
+impl PtyChild {
+    pub(crate) fn spawn(request: &ProcessRequest, cols: u16, rows: u16) -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            unix_guardian::spawn_pty(request, cols, rows).map(Self::Unix)
+        }
+        #[cfg(windows)]
+        {
+            windows_job::spawn_pty(request, cols, rows).map(Self::Windows)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (request, cols, rows);
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "PTY requires Unix or Windows",
+            ))
+        }
+    }
+
+    pub(crate) fn id(&self) -> Option<u32> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.id(),
+            #[cfg(windows)]
+            Self::Windows(child) => child.id(),
+        }
+    }
+
+    pub(crate) async fn wait_ready(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.wait_ready().await,
+            #[cfg(windows)]
+            Self::Windows(child) => child.wait_ready().await,
+        }
+    }
+
+    pub(crate) fn release_start(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.release_start(),
+            #[cfg(windows)]
+            Self::Windows(child) => child.release_start(),
+        }
+    }
+
+    pub(crate) async fn wait_exec(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.wait_exec().await,
+            #[cfg(windows)]
+            Self::Windows(child) => child.wait_exec().await,
+        }
+    }
+
+    pub(crate) fn take_output(&mut self) -> Option<Box<dyn tokio::io::AsyncRead + Send + Unpin>> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.take_stdout(),
+            #[cfg(windows)]
+            Self::Windows(child) => child.take_stdout(),
+        }
+    }
+
+    pub(crate) fn take_input(&mut self) -> Option<Box<dyn tokio::io::AsyncWrite + Send + Unpin>> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.take_stdin(),
+            #[cfg(windows)]
+            Self::Windows(child) => child.take_stdin(),
+        }
+    }
+
+    pub(crate) async fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.resize(cols, rows)?.await,
+            #[cfg(windows)]
+            Self::Windows(child) => child.resize(cols, rows)?.await,
+        }
+    }
+
+    pub(crate) fn abort_start(&mut self) {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.abort_start(),
+            #[cfg(windows)]
+            Self::Windows(_) => {}
+        }
+    }
+
+    pub(crate) fn force(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.force(),
+            #[cfg(windows)]
+            Self::Windows(child) => child.force(),
+        }
+    }
+
+    pub(crate) async fn wait_target(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.wait_target().await,
+            #[cfg(windows)]
+            Self::Windows(child) => child.wait_target().await,
+        }
+    }
+
+    pub(crate) fn finalize(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.finalize(),
+            #[cfg(windows)]
+            Self::Windows(child) => child.finalize(),
+        }
+    }
+
+    pub(crate) async fn wait_tree(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.wait_guardian().await,
+            #[cfg(windows)]
+            Self::Windows(child) => child.wait_guardian().await,
+        }
+    }
+}
 
 pub use supervisor::{
     AlwaysAllow, DefaultProcessSpawner, LaunchCheck, LaunchCheckError,

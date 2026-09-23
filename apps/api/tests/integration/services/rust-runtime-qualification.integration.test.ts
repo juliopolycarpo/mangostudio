@@ -24,7 +24,7 @@
  * ## Named TS-to-Rust test inventory
  *
  * `crates/mangostudio-runtime/src/health.rs`'s own module doc names what this
- * crate deliberately does not build yet (`terminal`, `externalAgents`,
+ * crate deliberately does not build yet (`externalAgents`,
  * `platformId`, `auditError` — all optional on the wire). The pure-TypeScript
  * runtime assertions below are now also proven end-to-end against the real
  * Rust binary, through the real hub call path, by the named test in this
@@ -43,8 +43,8 @@
  * | `apps/runtime/tests/unit/services/workspace-resolve-contained.test.ts` "rejects the root itself, which is not a path within the root" (an escape) | same tests (resolve-contained error case) |
  * | `apps/runtime/tests/unit/services/probing/toolchains.test.ts` typed `probing.*` request/result handling | the health tests over stdio and direct URL, through `assertRustRuntimeProbingMethods` |
  *
- * **Not yet replaced** — no Rust equivalent exists, per `health.rs`'s own
- * module doc: TS assertions covering `terminal` or `externalAgents` health fields.
+ * **Not yet replaced** — no Rust equivalent exists for `externalAgents`, per
+ * `health.rs`'s own module doc. PTY qualification now lives in the stdio test.
  * GitHub CLI availability and consent revocation are covered here. The paired-connect
  * transport's inventory entries live in the `-connect` sibling file instead.
  */
@@ -141,6 +141,154 @@ describe('Real Rust runtime qualification', () => {
           // inside any slot's managed install layout.
           assertRustRuntimeHealthShape(await client.health(), { slot: 'host' });
           await assertRustRuntimeProbingMethods(client);
+        } finally {
+          await connection.close();
+        }
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available)(
+      'opens a real PTY, streams output and native exit, and closes over stdio',
+      async () => {
+        mangoHome = await scratchMangoHome('stdio-terminal');
+        previousMangoHome = process.env.MANGO_HOME;
+        process.env.MANGO_HOME = mangoHome;
+        const connection = await spawnRuntimeChild({
+          environmentId: 'rust-stdio-terminal',
+          launch: resolveRuntimeLaunchCommand(undefined, {
+            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+          }),
+          hubVersion: runtimeVersion,
+          onClosed: () => undefined,
+        });
+        try {
+          const client = new RuntimeClient(connection.hub, () => undefined, 'rust-stdio-terminal');
+          expect(client.manifest.terminal).toBe(true);
+          const sessionId = 'rust-pty-qualification';
+          const shell = process.platform === 'win32' ? 'powershell' : 'bash';
+          const opened = await client.terminal.open({
+            sessionId,
+            shell,
+            cwd: mangoHome,
+            cols: 80,
+            rows: 24,
+          });
+          expect(opened.pid).toBeGreaterThan(0);
+          const output: string[] = [];
+          let finishExit:
+            | ((exit: { exitCode: number | null; signal: string | null }) => void)
+            | undefined;
+          const exited = new Promise<{ exitCode: number | null; signal: string | null }>(
+            (resolve) => {
+              finishExit = resolve;
+            }
+          );
+          const unsubscribe = client.terminal.onOutput(sessionId, (event) => {
+            if (event.kind === 'data') output.push(Buffer.from(event.data, 'base64').toString());
+            if (event.kind === 'exit') finishExit?.(event);
+          });
+          try {
+            expect((await client.terminal.list()).sessions).toHaveLength(1);
+            expect((await client.terminal.attach({ sessionId })).status).toBe('running');
+            expect(await client.terminal.resize({ sessionId, cols: 100, rows: 40 })).toEqual({
+              ok: true,
+            });
+            expect(
+              await client.terminal.write({
+                sessionId,
+                data: Buffer.from(
+                  shell === 'powershell'
+                    ? "Write-Output 'rust-pty-ok'; exit 7\r\n"
+                    : "printf 'rust-pty-ok\\n'; exit 7\n"
+                ).toString('base64'),
+              })
+            ).toEqual({ ok: true });
+            const exit = await Promise.race([
+              exited,
+              new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Timed out waiting for Rust PTY exit')), 10_000);
+              }),
+            ]);
+            expect(output.join('')).toContain('rust-pty-ok');
+            expect(exit).toMatchObject({ exitCode: 7, signal: null });
+            expect(await client.terminal.ack({ sessionId, bytes: 1 })).toEqual({ ok: true });
+            expect(await client.terminal.detach({ sessionId })).toEqual({ ok: true });
+            const replay = await client.terminal.attach({ sessionId });
+            expect(replay.status).toBe('exited');
+            expect(Buffer.from(replay.scrollback, 'base64').toString()).toContain('rust-pty-ok');
+            expect((await client.terminal.list()).sessions[0]?.exitCode).toBe(7);
+            expect(await client.terminal.close({ sessionId })).toEqual({ ok: true });
+            expect(await client.terminal.close({ sessionId })).toEqual({ ok: true });
+            expect((await client.terminal.list()).sessions).toEqual([]);
+          } finally {
+            unsubscribe();
+            await client.terminal.close({ sessionId });
+          }
+        } finally {
+          await connection.close();
+        }
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available)(
+      'revokes an attached PTY with a typed exit and keeps cleanup callable',
+      async () => {
+        mangoHome = await scratchMangoHome('stdio-terminal-revocation');
+        previousMangoHome = process.env.MANGO_HOME;
+        process.env.MANGO_HOME = mangoHome;
+        const connection = await spawnRuntimeChild({
+          environmentId: 'rust-stdio-terminal-revocation',
+          launch: resolveRuntimeLaunchCommand(undefined, {
+            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+          }),
+          hubVersion: runtimeVersion,
+          onClosed: () => undefined,
+        });
+        try {
+          const client = new RuntimeClient(connection.hub, () => undefined, 'rust-stdio-terminal');
+          const sessionId = 'rust-pty-revocation';
+          await client.terminal.open({
+            sessionId,
+            shell: process.platform === 'win32' ? 'powershell' : 'bash',
+            cwd: mangoHome,
+            cols: 80,
+            rows: 24,
+          });
+          let finishExit: ((event: { reason?: string }) => void) | undefined;
+          const exited = new Promise<{ reason?: string }>((resolve) => {
+            finishExit = resolve;
+          });
+          const unsubscribe = client.terminal.onOutput(sessionId, (event) => {
+            if (event.kind === 'exit') finishExit?.(event);
+          });
+          try {
+            await client.terminal.attach({ sessionId });
+            const setup = Bun.spawn({
+              cmd: [binary.path, 'setup', '--slot', 'host', '--profile', 'none'],
+              env: { ...process.env, MANGO_HOME: mangoHome },
+              stdout: 'pipe',
+              stderr: 'pipe',
+            });
+            const [code, stderr] = await Promise.all([
+              setup.exited,
+              new Response(setup.stderr).text(),
+            ]);
+            expect(code).toBe(0);
+            expect(stderr).toBe('');
+            const event = await Promise.race([
+              exited,
+              new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Timed out waiting for PTY revocation')), 10_000);
+              }),
+            ]);
+            expect(event.reason).toBe('consent-revoked');
+            expect(await client.terminal.close({ sessionId })).toEqual({ ok: true });
+          } finally {
+            unsubscribe();
+            await client.terminal.close({ sessionId });
+          }
         } finally {
           await connection.close();
         }

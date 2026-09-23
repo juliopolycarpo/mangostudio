@@ -214,7 +214,11 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
           );
           return;
         case 'exit':
-          endWithExit({ exitCode: event.exitCode, signal: event.signal });
+          endWithExit({
+            exitCode: event.exitCode,
+            signal: event.signal,
+            ...(event.reason ? { reason: event.reason } : {}),
+          });
       }
     };
     state.unsubscribeOutput = client.terminal.onOutput(state.sessionId, (event) => {

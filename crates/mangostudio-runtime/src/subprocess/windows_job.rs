@@ -36,6 +36,9 @@ use windows_sys::Win32::Globalization::{
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
+use windows_sys::Win32::System::Console::{
+    COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON, ResizePseudoConsole,
+};
 use windows_sys::Win32::System::JobObjects::{
     CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_PROCESS_ID_LIST,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
@@ -47,17 +50,19 @@ use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, InitializeProcThreadAttributeList,
     LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-    PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
-    STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
+    PROC_THREAD_ATTRIBUTE_JOB_LIST, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
+    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, UpdateProcThreadAttribute,
+    WaitForSingleObject,
 };
 
 use super::{ProcessRequest, ProcessStdin};
+use crate::blocking::run_blocking;
 
 const JOB_EXIT_CODE: u32 = 1;
 const JOB_EMPTY_POLL: Duration = Duration::from_millis(10);
 
 /// A process created atomically inside a kill-on-close Job.
-pub(super) struct WindowsJobChild {
+pub(crate) struct WindowsJobChild {
     pid: u32,
     process: Arc<Handle>,
     job: Arc<Handle>,
@@ -65,9 +70,34 @@ pub(super) struct WindowsJobChild {
     stdin: Option<tokio::fs::File>,
     stdout: Option<tokio::fs::File>,
     stderr: Option<tokio::fs::File>,
+    pty: Option<Arc<PseudoConsole>>,
 }
 
 impl WindowsJobChild {
+    pub(super) fn resize(
+        &self,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<impl std::future::Future<Output = io::Result<()>> + Send + 'static> {
+        let pty = self.pty.as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Unsupported, "process has no pseudo-console")
+        })?;
+        let pty = Arc::clone(pty);
+        let size = console_size(cols, rows)?;
+        Ok(async move {
+            run_blocking(move || {
+                // SAFETY: the cloned `pty` remains live for the call and `size` is a valid COORD.
+                let result = unsafe { ResizePseudoConsole(pty.0, size) };
+                if result < 0 {
+                    Err(io::Error::from_raw_os_error(result))
+                } else {
+                    Ok(())
+                }
+            })
+            .await
+        })
+    }
+
     pub(super) fn id(&self) -> Option<u32> {
         Some(self.pid)
     }
@@ -241,7 +271,146 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
         stdin,
         stdout: Some(stdout),
         stderr: Some(stderr),
+        pty: None,
     })
+}
+
+/// Starts a ConPTY target atomically inside the same kill-on-close Job used by bounded children.
+pub(super) fn spawn_pty(
+    request: &ProcessRequest,
+    cols: u16,
+    rows: u16,
+) -> io::Result<WindowsJobChild> {
+    let job = Arc::new(create_killing_job()?);
+    let Pipe {
+        parent: stdin,
+        child: conpty_input,
+    } = create_pipe(false)?;
+    let Pipe {
+        parent: stdout,
+        child: conpty_output,
+    } = create_pipe(true)?;
+    let pty = Arc::new(PseudoConsole::new(
+        console_size(cols, rows)?,
+        &conpty_input,
+        &conpty_output,
+    )?);
+    // The child creation still needs these handles live. Microsoft closes the originals only
+    // after CreateProcessW has attached the pseudo-console to the target.
+    let application = application_name(request.program.as_os_str())?;
+    let mut command_line = command_line(request)?;
+    let current_directory = request.cwd.as_deref().map(path_wide_nul).transpose()?;
+    let environment = request.env.as_ref().map(environment_block).transpose()?;
+    let jobs = [job.raw()];
+    let mut attributes = AttributeList::new(2)?;
+    attributes.update(
+        PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
+        jobs.as_ptr().cast(),
+        size_of_val(&jobs),
+    )?;
+    // The ConPTY attribute takes the opaque HPCON value as lpValue, unlike the Job-list
+    // attribute, which takes a pointer to an array of HANDLEs.
+    attributes.update(
+        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
+        pty.0 as *const c_void,
+        size_of::<HPCON>(),
+    )?;
+    let mut startup = STARTUPINFOEXW::default();
+    startup.StartupInfo.cb =
+        u32::try_from(size_of::<STARTUPINFOEXW>()).expect("STARTUPINFOEXW fits u32");
+    // Keep the inherited standard console handles out of the child. ConPTY supplies its own.
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.lpAttributeList = attributes.pointer();
+    let environment_pointer = environment
+        .as_ref()
+        .map_or(ptr::null(), |block| block.as_ptr().cast::<c_void>());
+    let current_directory_pointer = current_directory.as_ref().map_or(ptr::null(), Vec::as_ptr);
+    let mut information = PROCESS_INFORMATION::default();
+    let flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
+    // SAFETY: all UTF-16 buffers and both process attributes remain live throughout CreateProcessW;
+    // the Job and ConPTY are owned by this scope and move to the child wrapper on success.
+    let created = unsafe {
+        CreateProcessW(
+            application.as_ref().map_or(ptr::null(), Vec::as_ptr),
+            command_line.as_mut_ptr(),
+            ptr::null(),
+            ptr::null(),
+            0,
+            flags,
+            environment_pointer,
+            current_directory_pointer,
+            &startup.StartupInfo,
+            &mut information,
+        )
+    };
+    let create_error = io::Error::last_os_error();
+    drop(conpty_input);
+    drop(conpty_output);
+    if created == 0 {
+        return Err(create_error);
+    }
+    // SAFETY: a successful CreateProcessW transfers one process and primary-thread handle.
+    let (process, thread) = unsafe {
+        (
+            Handle::from_raw(information.hProcess),
+            Handle::from_raw(information.hThread),
+        )
+    };
+    Ok(WindowsJobChild {
+        pid: information.dwProcessId,
+        process: Arc::new(process),
+        job,
+        thread: Some(thread),
+        stdin: Some(tokio::fs::File::from_std(stdin.into_file())),
+        stdout: Some(tokio::fs::File::from_std(stdout.into_file())),
+        stderr: None,
+        pty: Some(pty),
+    })
+}
+
+fn console_size(cols: u16, rows: u16) -> io::Result<COORD> {
+    let x = i16::try_from(cols).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("terminal columns {cols} exceed ConPTY maximum {}", i16::MAX),
+        )
+    })?;
+    let y = i16::try_from(rows).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("terminal rows {rows} exceed ConPTY maximum {}", i16::MAX),
+        )
+    })?;
+    if x == 0 || y == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("terminal size {cols}x{rows} requires nonzero columns and rows"),
+        ));
+    }
+    Ok(COORD { X: x, Y: y })
+}
+
+struct PseudoConsole(HPCON);
+
+impl PseudoConsole {
+    fn new(size: COORD, input: &Handle, output: &Handle) -> io::Result<Self> {
+        let mut handle = 0;
+        // SAFETY: both pipe handles remain open for this call and `handle` is writable output.
+        let result =
+            unsafe { CreatePseudoConsole(size, input.raw(), output.raw(), 0, &mut handle) };
+        if result < 0 {
+            Err(io::Error::from_raw_os_error(result))
+        } else {
+            Ok(Self(handle))
+        }
+    }
+}
+
+impl Drop for PseudoConsole {
+    fn drop(&mut self) {
+        // SAFETY: CreatePseudoConsole gave this wrapper unique ownership of the HPCON.
+        unsafe { ClosePseudoConsole(self.0) };
+    }
 }
 
 struct Handle(OwnedHandle);
@@ -715,11 +884,37 @@ fn wide(value: &OsStr, name: &str) -> io::Result<Vec<u16>> {
 mod tests {
     use std::collections::BTreeMap;
     use std::ffi::{OsStr, OsString};
+    use std::time::Duration;
 
     use super::{
         ChildPipes, HANDLE, HANDLE_FLAG_INHERIT, application_name, command_line, environment_block,
+        spawn_pty,
     };
     use crate::subprocess::{ProcessRequest, ProcessStdin};
+
+    #[tokio::test]
+    async fn conpty_target_waits_for_explicit_release() {
+        let request = ProcessRequest::new("cmd.exe", ["/C", "exit", "0"]);
+        let mut child = crate::blocking::run_blocking(move || spawn_pty(&request, 80, 24))
+            .await
+            .expect("ConPTY child starts suspended");
+        child.wait_ready().await.expect("child is ready");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), child.wait_target())
+                .await
+                .is_err(),
+            "ConPTY child executed before the launch gate released it"
+        );
+        child.release_start().expect("launch gate resumes child");
+        let status = tokio::time::timeout(Duration::from_secs(5), child.wait_target())
+            .await
+            .expect("released child exits")
+            .expect("native status is observed");
+        child.finalize().expect("Job is terminated");
+        child.wait_guardian().await.expect("Job is empty");
+        crate::blocking::run_blocking(move || drop(child)).await;
+        assert_eq!(status.code(), Some(0));
+    }
 
     /// Whether Windows would hand `handle` to a child of an inheriting `CreateProcessW`.
     fn is_inheritable(handle: HANDLE) -> bool {

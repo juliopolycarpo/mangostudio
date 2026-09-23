@@ -65,6 +65,8 @@ export const RuntimeTerminalOutputEventSchema = Type.Union([
     kind: Type.Literal('exit'),
     exitCode: Type.Union([Type.Number(), Type.Null()]),
     signal: Type.Union([Type.String(), Type.Null()]),
+    /** Why the runtime stopped this session, when it was not a natural process exit. */
+    reason: Type.Optional(Type.Literal('consent-revoked')),
   }),
 ]);
 export type RuntimeTerminalOutputEvent = Static<typeof RuntimeTerminalOutputEventSchema>;

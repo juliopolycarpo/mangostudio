@@ -61,6 +61,7 @@ export function assertRustRuntimeHealthShape(
   const expectedShell =
     process.platform === 'win32' ? 'powershell' : process.platform === 'darwin' ? 'zsh' : 'bash';
   expect(health.shells).toContain(expectedShell);
+  expect(health.terminal).toBe(true);
   expect(health.lastError ?? null).toBeNull();
 }
 
@@ -79,7 +80,7 @@ export function assertRustRuntimeFeatureCeiling(
     readonly checkpoints: boolean;
   }
 ): void {
-  // The shell feature includes terminal and install methods, which are not implemented yet.
+  // The shell feature includes install methods that are not implemented yet.
   const shell = false;
   const git = manifest.allow?.git === true && manifest.git.available;
   expect(manifest.features).toEqual({
@@ -103,6 +104,7 @@ export function assertRustRuntimeFeatureCeiling(
     toolchain: true,
   });
   expect(manifest.enforcesPathPolicy).toBe(true);
+  expect(manifest.terminal).toBe(manifest.allow?.shell === true && manifest.shells.length > 0);
 }
 
 /**

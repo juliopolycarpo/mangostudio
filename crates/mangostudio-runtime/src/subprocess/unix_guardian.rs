@@ -19,14 +19,18 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::ExitStatusExt;
+use std::pin::Pin;
 use std::process::ExitStatus;
 use std::sync::{Mutex, OnceLock};
+use std::task::{Context, Poll};
 
-use tokio::io::{AsyncReadExt, AsyncWrite};
+use tokio::io::unix::AsyncFd;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::net::unix::pipe::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
 use super::{ProcessRequest, ProcessStdin};
+use crate::blocking::run_blocking;
 
 const READY: u8 = b'R';
 const RELEASE: u8 = b'G';
@@ -34,12 +38,13 @@ const FINALIZE: u8 = b'F';
 const STATUS_BYTES: usize = std::mem::size_of::<libc::c_int>();
 const READY_BYTES: usize = STATUS_BYTES + 1;
 
-pub(super) struct GuardianChild {
+pub(crate) struct GuardianChild {
     pid: libc::pid_t,
     target_pid: Option<libc::pid_t>,
-    stdin: Option<Sender>,
-    stdout: Option<Receiver>,
+    stdin: Option<Box<dyn AsyncWrite + Send + Unpin>>,
+    stdout: Option<Box<dyn AsyncRead + Send + Unpin>>,
     stderr: Option<Receiver>,
+    pty_control: Option<OwnedFd>,
     ready: Receiver,
     status: Receiver,
     exec_error: Receiver,
@@ -52,6 +57,37 @@ pub(super) struct GuardianChild {
 }
 
 impl GuardianChild {
+    pub(crate) fn resize(
+        &self,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<impl std::future::Future<Output = io::Result<()>> + Send + 'static> {
+        let master = self
+            .pty_control
+            .as_ref()
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::Unsupported, "process has no pseudo-terminal")
+            })?
+            .try_clone()?;
+        Ok(async move {
+            run_blocking(move || {
+                let size = libc::winsize {
+                    ws_row: rows,
+                    ws_col: cols,
+                    ws_xpixel: 0,
+                    ws_ypixel: 0,
+                };
+                // SAFETY: `master` stays open for this call, and `size` has the platform layout.
+                if unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &raw const size) } < 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            })
+            .await
+        })
+    }
+
     pub(super) fn id(&self) -> Option<u32> {
         u32::try_from(self.target_pid.unwrap_or(self.pid)).ok()
     }
@@ -129,9 +165,7 @@ impl GuardianChild {
     }
 
     pub(super) fn take_stdout(&mut self) -> Option<Box<dyn tokio::io::AsyncRead + Send + Unpin>> {
-        self.stdout
-            .take()
-            .map(|stdout| Box::new(stdout) as Box<dyn tokio::io::AsyncRead + Send + Unpin>)
+        self.stdout.take()
     }
 
     pub(super) fn take_stderr(&mut self) -> Option<Box<dyn tokio::io::AsyncRead + Send + Unpin>> {
@@ -141,9 +175,7 @@ impl GuardianChild {
     }
 
     pub(super) fn take_stdin(&mut self) -> Option<Box<dyn AsyncWrite + Send + Unpin>> {
-        self.stdin
-            .take()
-            .map(|stdin| Box::new(stdin) as Box<dyn AsyncWrite + Send + Unpin>)
+        self.stdin.take()
     }
 
     /// Reaps the guardian after it has been finalized or force-killed.
@@ -166,7 +198,16 @@ impl GuardianChild {
 }
 
 pub(super) fn spawn(request: &ProcessRequest) -> io::Result<GuardianChild> {
-    let raw = spawn_raw(request)?;
+    let raw = spawn_raw(request, None)?;
+    GuardianChild::from_raw(raw)
+}
+
+pub(crate) fn spawn_pty(
+    request: &ProcessRequest,
+    cols: u16,
+    rows: u16,
+) -> io::Result<GuardianChild> {
+    let raw = spawn_raw(request, Some((cols, rows)))?;
     GuardianChild::from_raw(raw)
 }
 
@@ -177,6 +218,7 @@ impl GuardianChild {
             stdin,
             stdout,
             stderr,
+            pty_control,
             ready,
             status,
             exec_error,
@@ -196,9 +238,21 @@ impl GuardianChild {
         let ready = Receiver::from_owned_fd(ready)?;
         let status = Receiver::from_owned_fd(status)?;
         let exec_error = Receiver::from_owned_fd(exec_error)?;
-        let stdout = Receiver::from_owned_fd(stdout)?;
+        let stdout: Box<dyn AsyncRead + Send + Unpin> = if pty_control.is_some() {
+            Box::new(PtyReader(AsyncFd::new(stdout)?))
+        } else {
+            Box::new(Receiver::from_owned_fd(stdout)?)
+        };
         let stderr = Receiver::from_owned_fd(stderr)?;
-        let stdin = stdin.map(Sender::from_owned_fd).transpose()?;
+        let stdin = stdin
+            .map(|fd| -> io::Result<Box<dyn AsyncWrite + Send + Unpin>> {
+                if pty_control.is_some() {
+                    Ok(Box::new(PtyWriter(AsyncFd::new(fd)?)))
+                } else {
+                    Ok(Box::new(Sender::from_owned_fd(fd)?))
+                }
+            })
+            .transpose()?;
         let wait = tokio::task::spawn_blocking(move || wait_for_guardian(pid));
 
         Ok(Self {
@@ -207,6 +261,7 @@ impl GuardianChild {
             stdin,
             stdout: Some(stdout),
             stderr: Some(stderr),
+            pty_control,
             ready,
             status,
             exec_error,
@@ -218,11 +273,99 @@ impl GuardianChild {
     }
 }
 
+/// A PTY master is a character device, so Tokio's Unix pipe wrapper refuses it. `AsyncFd`
+/// registers the already-nonblocking descriptor with the reactor instead.
+struct PtyReader(AsyncFd<OwnedFd>);
+
+impl AsyncRead for PtyReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        loop {
+            let mut guard = match self.0.poll_read_ready(cx) {
+                Poll::Ready(Ok(guard)) => guard,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Pending => return Poll::Pending,
+            };
+            let result = guard.try_io(|inner| {
+                // SAFETY: `buf` offers valid writable spare capacity; the descriptor is owned by
+                // `inner` for this call and was configured nonblocking before reactor registration.
+                let read = unsafe {
+                    libc::read(
+                        inner.get_ref().as_raw_fd(),
+                        buf.unfilled_mut().as_mut_ptr().cast(),
+                        buf.remaining(),
+                    )
+                };
+                if read < 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(read as usize)
+                }
+            });
+            match result {
+                Ok(Ok(read)) => {
+                    // SAFETY: the successful read initialized exactly `read` bytes in the buffer.
+                    unsafe { buf.assume_init(read) };
+                    buf.advance(read);
+                    return Poll::Ready(Ok(()));
+                }
+                Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Ok(Err(error)) => return Poll::Ready(Err(error)),
+                Err(_) => continue,
+            }
+        }
+    }
+}
+
+struct PtyWriter(AsyncFd<OwnedFd>);
+
+impl AsyncWrite for PtyWriter {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        loop {
+            let mut guard = match self.0.poll_write_ready(cx) {
+                Poll::Ready(Ok(guard)) => guard,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Pending => return Poll::Pending,
+            };
+            let result = guard.try_io(|inner| {
+                // SAFETY: `buf` is readable for its full length and the owned fd is nonblocking.
+                let written = unsafe {
+                    libc::write(inner.get_ref().as_raw_fd(), buf.as_ptr().cast(), buf.len())
+                };
+                if written < 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(written as usize)
+                }
+            });
+            match result {
+                Ok(result) => return Poll::Ready(result),
+                Err(_) => continue,
+            }
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
 struct RawGuardianChild {
     pid: libc::pid_t,
     stdin: Option<OwnedFd>,
     stdout: OwnedFd,
     stderr: OwnedFd,
+    pty_control: Option<OwnedFd>,
     ready: OwnedFd,
     status: OwnedFd,
     exec_error: OwnedFd,
@@ -232,6 +375,7 @@ struct RawGuardianChild {
 }
 
 struct GuardianFds {
+    terminal: bool,
     liveness_read: RawFd,
     ready_write: RawFd,
     status_write: RawFd,
@@ -404,7 +548,7 @@ fn descriptor_limit() -> io::Result<RawFd> {
     Ok(limit as RawFd)
 }
 
-fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
+fn spawn_raw(request: &ProcessRequest, pty: Option<(u16, u16)>) -> io::Result<RawGuardianChild> {
     let spec = ExecSpec::from_request(request)?;
     let descriptor_limit = descriptor_limit()?;
     // Serialize descriptor creation and `fork` among supervisor launches. Platforms without
@@ -422,16 +566,40 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
     let (watchdog_target_read, watchdog_target_write) = pipe_cloexec()?;
     let (start_read, start_write) = pipe_cloexec()?;
     let (finalize_read, finalize_write) = pipe_cloexec()?;
-    let (stdout_read, stdout_write) = pipe_cloexec()?;
-    let (stderr_read, stderr_write) = pipe_cloexec()?;
-    let (stdin_target, stdin_parent) = match request.stdin {
-        ProcessStdin::Bytes(_) => {
-            let (target, parent) = pipe_cloexec()?;
-            (target, Some(parent))
-        }
-        ProcessStdin::Null => (open_null_stdin()?, None),
-    };
+    let (stderr_read, pipe_stderr_write) = pipe_cloexec()?;
+    let (stdin_target, stdin_parent, stdout_read, stdout_write, stderr_write, pty_control) =
+        if let Some((cols, rows)) = pty {
+            let (master, slave) = open_pty(cols, rows)?;
+            let input = master.try_clone()?;
+            let resize = master.try_clone()?;
+            (
+                slave.try_clone()?,
+                Some(input),
+                master,
+                slave.try_clone()?,
+                slave,
+                Some(resize),
+            )
+        } else {
+            let (stdout_read, stdout_write) = pipe_cloexec()?;
+            let (stdin_target, stdin_parent) = match request.stdin {
+                ProcessStdin::Bytes(_) => {
+                    let (target, parent) = pipe_cloexec()?;
+                    (target, Some(parent))
+                }
+                ProcessStdin::Null => (open_null_stdin()?, None),
+            };
+            (
+                stdin_target,
+                stdin_parent,
+                stdout_read,
+                stdout_write,
+                pipe_stderr_write,
+                None,
+            )
+        };
     let fds = GuardianFds {
+        terminal: pty.is_some(),
         liveness_read: liveness_read.as_raw_fd(),
         ready_write: ready_write.as_raw_fd(),
         status_write: status_write.as_raw_fd(),
@@ -477,6 +645,7 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
         stdin: stdin_parent,
         stdout: stdout_read,
         stderr: stderr_read,
+        pty_control,
         ready: ready_read,
         status: status_read,
         exec_error: exec_error_read,
@@ -484,6 +653,35 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
         finalize: finalize_write,
         liveness: liveness_write,
     })
+}
+
+fn open_pty(cols: u16, rows: u16) -> io::Result<(OwnedFd, OwnedFd)> {
+    let mut master = -1;
+    let mut slave = -1;
+    let size = libc::winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    // SAFETY: both output pointers and the winsize are valid for the duration of the call.
+    if unsafe {
+        libc::openpty(
+            &raw mut master,
+            &raw mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            &raw const size,
+        )
+    } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful openpty returned two uniquely owned descriptors.
+    let (master, slave) = unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+    set_cloexec(&master)?;
+    set_cloexec(&slave)?;
+    Ok((master, slave))
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -521,7 +719,6 @@ fn pipe_cloexec() -> io::Result<(OwnedFd, OwnedFd)> {
     Ok((read, write))
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn set_cloexec(fd: &OwnedFd) -> io::Result<()> {
     // SAFETY: `fd` is valid for its whole borrow.
     let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
@@ -726,7 +923,13 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
             fds.descriptor_limit,
         )
     };
-    if unsafe { libc::setpgid(0, 0) } != 0 {
+    if fds.terminal {
+        if unsafe { libc::setsid() } < 0
+            || unsafe { libc::ioctl(fds.stdin_target, libc::TIOCSCTTY, 0) } < 0
+        {
+            exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
+        }
+    } else if unsafe { libc::setpgid(0, 0) } != 0 {
         exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
     }
     if !unsafe { write_status_raw(fds.target_ready_write, libc::getpid()) } {

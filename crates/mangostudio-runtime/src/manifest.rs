@@ -15,9 +15,9 @@
 //! With an empty [`Registry`] (what this module's own tests build), every
 //! capability-gated feature computes `false` regardless of `allow` — the
 //! fail-closed floor this gate guarantees. The production registry
-//! `crate::transport::build_host` (crate-private) assembles only
-//! implements a subset of the catalog (`runtime.health`, `workspace.*`,
-//! `probing.*`, `fs.*`), so the same gate keeps every feature backed by a method
+//! `crate::transport::build_host` (crate-private) implements a subset of the
+//! catalog (`runtime.health`, `workspace.*`, `probing.*`, `fs.*`,
+//! `terminal.*`), so the same gate keeps every feature backed by a method
 //! outside that subset unadvertised there too, not just in the empty case.
 //!
 //! `toolchain` is the one feature `manifest.ts` hardcodes to `true`
