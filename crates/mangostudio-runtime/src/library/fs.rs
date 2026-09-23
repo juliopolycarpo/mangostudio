@@ -204,6 +204,9 @@ mod tests {
             Some(r"\\srv\share\x")
         );
         assert_eq!(simplify_verbatim(r"\\?\Volume{abc}\x"), None);
+        // A verbatim path is only a drive path with a letter, a colon, and a separator.
+        assert_eq!(simplify_verbatim(r"\\?\ab\c"), None);
+        assert_eq!(simplify_verbatim(r"\\?\a:b"), None);
         assert_eq!(simplify_verbatim(r"C:\Users\u"), None);
         assert_eq!(simplify_verbatim("/home/u"), None);
     }
