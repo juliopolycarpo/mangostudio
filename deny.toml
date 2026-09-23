@@ -94,6 +94,10 @@ skip = [
   # Dropping tokio-tungstenite's default-TLS feature would remove this, but that is a transport
   # code change, not a supply-chain one — left as a follow-up, not done here.
   { crate = "webpki-roots@0.26.11", reason = "tokio-tungstenite's own default TLS connector, unused — we build ours explicitly, see the rustls dependency comment" },
+
+  # reqwest (the runtime's MCP HTTP client) always enables hyper-util's `client-proxy`, which
+  # still pins base64 0.22 for proxy basic-auth; everything else in the graph is on 0.23.
+  { crate = "base64@0.22.1", reason = "hyper-util 0.1's client-proxy (always enabled by reqwest 0.13) has not moved to base64 0.23" },
 ]
 
 # sources: only crates.io. No git dependencies anywhere in this graph, and none are expected —

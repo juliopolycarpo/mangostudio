@@ -6,9 +6,13 @@
 
 mod client;
 mod consent;
+#[cfg(test)]
+mod fake_http;
+mod http;
 mod process;
 mod sdk;
 mod service;
+mod sse;
 mod stdio;
 mod types;
 

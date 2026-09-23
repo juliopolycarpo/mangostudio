@@ -22,6 +22,8 @@ pub(crate) struct McpConfig {
     pub command: Option<String>,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub url: Option<String>,
     pub timeout_ms: Option<f64>,
 }
 
@@ -31,6 +33,9 @@ pub(crate) struct McpSecrets {
     /// stdio: secret child environment variables, merged over the row's `env`.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// http: headers sent with every request on the session.
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
 }
 
 /// Server feature bits from the initialize response.

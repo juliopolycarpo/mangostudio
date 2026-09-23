@@ -403,6 +403,7 @@ mod tests {
                 command: Some("fixture".into()),
                 args: vec![],
                 env: Default::default(),
+                url: None,
                 timeout_ms: None,
             },
             secrets: McpSecrets::default(),

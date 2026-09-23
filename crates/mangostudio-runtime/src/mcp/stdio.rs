@@ -88,6 +88,7 @@ mod tests {
             command: command.map(str::to_owned),
             args: vec!["--flag".into()],
             env: BTreeMap::from([("PATH".into(), "/custom/bin".into())]),
+            url: None,
             timeout_ms: None,
         }
     }
