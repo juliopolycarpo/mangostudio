@@ -1136,7 +1136,9 @@ async fn supervise_child(
              cleanup to the parent-death lease"
         );
     }
-    let _ = shared.terminal.send(Some(ProcessTerminal {
+    // `send_replace`, not `send`: the latter drops the value when no caller happens to be
+    // inside `wait` at this instant, and a later `wait` would then never see this record.
+    shared.terminal.send_replace(Some(ProcessTerminal {
         cause,
         exit: status.map(process_exit),
         elapsed: started.elapsed(),
@@ -1735,6 +1737,31 @@ mod tests {
         );
         assert!(!terminal.stdout.truncated);
         assert!(!terminal.stdout.incomplete);
+    }
+
+    /// A worker that publishes while no caller is inside `wait` must still leave the record.
+    #[tokio::test]
+    async fn a_terminal_published_with_no_waiter_subscribed_is_kept_for_a_later_wait() {
+        let _guard = process_test_guard().await;
+        let dir = scratch_dir("process-late-wait");
+        let done = dir.join("done");
+        let sh = script(&dir, "exit.sh", &format!("printf x > {}; exit 7", done.display()));
+
+        let control = DefaultProcessSpawner
+            .start(request(sh), Arc::new(AlwaysAllow), CancellationToken::new())
+            .await
+            .expect("script starts");
+        wait_for_file(&done).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let terminal = tokio::time::timeout(Duration::from_secs(5), control.wait())
+            .await
+            .expect("expected a later wait to settle | received: still pending after 5s");
+
+        assert_eq!(
+            (terminal.cause, terminal.exit.as_ref().and_then(|exit| exit.code)),
+            (ProcessTerminalCause::Exited, Some(7)),
+            "expected the worker's own record (Exited, code 7) | received {terminal:?}"
+        );
     }
 
     #[tokio::test]
