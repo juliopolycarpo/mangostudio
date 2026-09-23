@@ -94,6 +94,30 @@ export function hubLibraryEnvFor(environmentId: string): Record<string, string> 
   return environmentId === LOCAL_ENVIRONMENT_ID ? configuredLibraryEnv() : undefined;
 }
 
+/**
+ * The `pathEnv` a library write, source read or undo sends to `environmentId`.
+ *
+ * Only the MangoStudio directories travel, and only to Local, by the same
+ * decision {@link hubLibraryEnvFor} makes for scans: a remote machine resolves
+ * its own directories, and pinning the hub's there would make the write, the
+ * source read and the undo resolve a root the preview never showed. The
+ * runtime merges its own `process.env` underneath, so forwarding the hub's
+ * whole environment would only put its secrets in the frame.
+ *
+ * @example
+ * libraryWritePathEnv(undefined, 'rust-box'); // {} — no hub pins on a remote machine
+ */
+export function libraryWritePathEnv(
+  workspaceRoot: string | undefined,
+  environmentId: string
+): { env?: Record<string, string>; workspaceRoot?: string } {
+  const pins = hubLibraryEnvFor(environmentId);
+  return {
+    ...(pins && { env: pins }),
+    ...(workspaceRoot !== undefined && { workspaceRoot }),
+  };
+}
+
 export function describeTargetLocations(
   targetId: LibraryTargetId,
   env: PathEnv = createLibraryPathEnv(),

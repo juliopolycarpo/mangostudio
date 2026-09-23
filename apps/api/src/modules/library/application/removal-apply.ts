@@ -35,7 +35,7 @@ import { LibraryRequestError } from '../domain/library-request-error';
 import { backupPolicyFor } from '../infrastructure/backup-roots';
 import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
 import { hashResourceAt } from '../infrastructure/instance-reader';
-import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
+import { createLibraryPathEnv, libraryWritePathEnv } from '../infrastructure/location-probe';
 import { nodeTreeRemovalFs, type TreeRemovalFs } from '../infrastructure/tree-removal';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
@@ -311,14 +311,8 @@ function toRuntimeRemoveParams(
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
     environmentId: deps.environmentId,
-    pathEnv: {
-      // Only the MangoStudio directories travel, matching `pathEnvParams` in
-      // `environment-library-service.ts`; the runtime merges its own
-      // `process.env` underneath, so forwarding the hub's would only put its
-      // secrets in the frame.
-      env: configuredLibraryEnv(),
-      ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
-    },
+    // Hub pins reach Local only; see `libraryWritePathEnv`.
+    pathEnv: libraryWritePathEnv(env.workspaceRoot, deps.environmentId),
     operations,
     lastCopyResourceKeys: [...plan.lastCopyResourceKeys],
   };
