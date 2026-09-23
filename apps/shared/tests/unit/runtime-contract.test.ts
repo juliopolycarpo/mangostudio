@@ -159,6 +159,22 @@ describe('RuntimeCapabilityManifestSchema', () => {
     expect(Value.Check(RuntimeCapabilityManifestSchema, OLD_MANIFEST)).toBe(true);
   });
 
+  it('accepts an optional revocation-safe terminal close attestation', () => {
+    expect(Value.Check(RuntimeCapabilityManifestSchema, OLD_MANIFEST)).toBe(true);
+    expect(
+      Value.Check(RuntimeCapabilityManifestSchema, {
+        ...OLD_MANIFEST,
+        terminalCloseAfterRevocation: true,
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(RuntimeCapabilityManifestSchema, {
+        ...OLD_MANIFEST,
+        terminalCloseAfterRevocation: 'true',
+      })
+    ).toBe(false);
+  });
+
   it('accepts an advertised directory-hash domain and treats its absence as valid', () => {
     expect(Value.Check(RuntimeCapabilityManifestSchema, OLD_MANIFEST)).toBe(true);
     expect(

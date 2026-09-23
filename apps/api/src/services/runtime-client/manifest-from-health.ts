@@ -90,6 +90,9 @@ export function capabilityManifestFromHealth(
     ...(handshake?.directoryHashDomain === undefined
       ? {}
       : { directoryHashDomain: handshake.directoryHashDomain }),
+    ...(handshake?.terminalCloseAfterRevocation === undefined
+      ? {}
+      : { terminalCloseAfterRevocation: handshake.terminalCloseAfterRevocation }),
     profile: report.profile,
     allow,
   };

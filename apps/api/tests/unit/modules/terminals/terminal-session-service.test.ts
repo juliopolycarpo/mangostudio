@@ -548,6 +548,23 @@ describe('terminalSessionService.open', () => {
     expect((error as TerminalUnavailableError).reason).toBe('unavailable');
   });
 
+  test('refuses a peer that cannot close its PTY after shell consent is revoked', async () => {
+    const { terminalCloseAfterRevocation: _unproven, ...oldManifest } = FAKE_TERMINAL_MANIFEST;
+    const client = new FakeTerminalRuntimeClient({ manifest: oldManifest });
+    const { service } = createHarness({ client });
+
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toMatchObject({
+      reason: 'unavailable',
+      message: expect.stringContaining('needs a runtime update'),
+    });
+    expect(client.calls.open).toHaveLength(0);
+    expect(await service.availability(USER_ID, ENVIRONMENT_ID)).toMatchObject({
+      available: false,
+      reason: 'unavailable',
+      openSessions: 0,
+    });
+  });
+
   test('reports a disconnected environment as unavailable', async () => {
     const service = createTerminalSessionService({
       getConfig: () => defaultConfig(),

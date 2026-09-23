@@ -122,6 +122,38 @@ describe('terminal HTTP routes with a fake runtime', () => {
     routes = createTerminalRoutes(service);
   });
 
+  it('returns 409 for an older peer without revocation-safe close, while a current peer opens', async () => {
+    const user = await insertTestUser();
+    const app = authedApp(routes, user);
+    const { terminalCloseAfterRevocation: _unproven, ...oldManifest } = FAKE_TERMINAL_MANIFEST;
+    client = new FakeTerminalRuntimeClient({ manifest: oldManifest });
+
+    const unavailable = await app.handle(
+      jsonRequest(`/terminals/availability?environmentId=${LOCAL_ENVIRONMENT_ID}`, 'GET')
+    );
+    expect((await unavailable.json()) as TerminalAvailability).toMatchObject({
+      available: false,
+      reason: 'unavailable',
+    });
+    const refused = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: ERROR_CODES.UNSUPPORTED,
+      error: expect.stringContaining('needs a runtime update'),
+      details: { reason: 'unavailable' },
+    });
+    expect(client.calls.open).toHaveLength(0);
+
+    client = new FakeTerminalRuntimeClient();
+    const opened = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    expect(opened.status).toBe(201);
+    expect(client.calls.open).toHaveLength(1);
+  });
+
   it('admits only one of two concurrent POST requests at a one-session cap', async () => {
     const user = await insertTestUser();
     let releaseOpen!: () => void;

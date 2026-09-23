@@ -41,6 +41,7 @@ export const FAKE_TERMINAL_MANIFEST: RuntimeCapabilityManifest = {
     toolchain: true,
   },
   terminal: true,
+  terminalCloseAfterRevocation: true,
 };
 
 export interface FakeTerminalRuntimeClientOptions {

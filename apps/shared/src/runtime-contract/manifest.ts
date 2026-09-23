@@ -106,6 +106,12 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    */
   terminal: Type.Optional(Type.Boolean()),
   /**
+   * This build can close an owned PTY after shell consent is withdrawn.
+   * Absent or false means terminal opens are unsafe: older runtimes deny the
+   * cleanup call after revocation and can leave a shell running indefinitely.
+   */
+  terminalCloseAfterRevocation: Type.Optional(Type.Boolean()),
+  /**
    * Whether this runtime re-checks the paths the hub names against the
    * {@link RuntimePathFilterSchema} the call carried.
    *

@@ -288,7 +288,22 @@ export function createTerminalSessionService(
   }
 
   function requireTerminalCapable(client: TerminalRuntimeClient, environmentId: string): void {
-    if (client.manifest.terminal === true && client.manifest.features.shell !== false) return;
+    if (
+      client.manifest.terminal === true &&
+      client.manifest.terminalCloseAfterRevocation === true &&
+      client.manifest.features.shell !== false
+    ) {
+      return;
+    }
+    if (
+      client.manifest.terminal === true &&
+      client.manifest.terminalCloseAfterRevocation !== true
+    ) {
+      throw new TerminalUnavailableError(
+        'unavailable',
+        `Environment "${environmentId}" needs a runtime update before it can safely close terminals after shell access is revoked.`
+      );
+    }
     throw new TerminalUnavailableError(
       'unavailable',
       `Environment "${environmentId}" does not offer a terminal.`
@@ -619,7 +634,11 @@ export function createTerminalSessionService(
       } catch {
         return refuse('disconnected');
       }
-      if (client.manifest.terminal !== true || client.manifest.features.shell === false) {
+      if (
+        client.manifest.terminal !== true ||
+        client.manifest.terminalCloseAfterRevocation !== true ||
+        client.manifest.features.shell === false
+      ) {
         return refuse('unavailable');
       }
       if (environmentId === LOCAL_ENVIRONMENT_ID && !d.isIdentityAttested(userId, environmentId)) {
