@@ -21,6 +21,8 @@ mod interrupt;
 mod paths;
 mod removal;
 mod service;
+#[cfg(test)]
+mod ts_backup_compat_tests;
 mod undo;
 mod writer;
 

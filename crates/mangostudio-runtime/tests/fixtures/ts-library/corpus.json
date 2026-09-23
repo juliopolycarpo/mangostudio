@@ -2662,5 +2662,336 @@
         }
       ]
     }
-  ]
+  ],
+  "backups": {
+    "note": "Written by the TypeScript engines; replayed by crates/mangostudio-runtime/src/library/mutation/ts_backup_compat_tests.rs.",
+    "results": {
+      "propagation": {
+        "backupId": "2026-09-23T10-15-44.087Z-00000000000000a1",
+        "backups": [
+          {
+            "environmentId": "remote-box",
+            "backupId": "2026-09-23T10-15-44.087Z-00000000000000a1"
+          }
+        ],
+        "partial": false,
+        "applied": [
+          {
+            "resourceKey": "skill:gh",
+            "environmentId": "remote-box",
+            "locationId": "claude-skills",
+            "operation": "overwrite",
+            "destinationPath": "<root><sep>home<sep>.claude<sep>skills<sep>gh",
+            "contentHash": "9ade662f6983910f3bb36053ddc79965d5465f357d52317779e25e83b1f7b5bc"
+          },
+          {
+            "resourceKey": "instruction:global",
+            "environmentId": "remote-box",
+            "locationId": "claude-instructions",
+            "operation": "create",
+            "destinationPath": "<root><sep>home<sep>.claude<sep>CLAUDE.md",
+            "contentHash": "2c7ebc6a907837a8793af2045bf21b17ede58b994fc7863ce82ae16db1bf3cbb"
+          }
+        ],
+        "skipped": [],
+        "failed": []
+      },
+      "transferred": {
+        "backupId": "2026-09-23T10-15-44.087Z-00000000000000a2",
+        "backups": [
+          {
+            "environmentId": "local",
+            "backupId": "2026-09-23T10-15-44.087Z-00000000000000a2"
+          }
+        ],
+        "partial": false,
+        "applied": [
+          {
+            "resourceKey": "skill:gh",
+            "environmentId": "local",
+            "locationId": "mango-skills",
+            "operation": "overwrite",
+            "destinationPath": "<root><sep>home<sep>.mango<sep>skills<sep>gh",
+            "contentHash": "517b1ee203f7dead76071a4b08dad27b594188ebb4c30cfe99b2948c26a6ef9f"
+          }
+        ],
+        "skipped": [],
+        "failed": []
+      },
+      "removal": {
+        "backupId": "2026-09-23T10-15-44.087Z-00000000000000a3",
+        "backups": [
+          {
+            "environmentId": "local",
+            "backupId": "2026-09-23T10-15-44.087Z-00000000000000a3"
+          }
+        ],
+        "partial": false,
+        "removed": [
+          {
+            "resourceKey": "subagent:reviewer",
+            "environmentId": "local",
+            "locationId": "claude-agents",
+            "path": "<root><sep>home<sep>.claude<sep>agents<sep>reviewer.md",
+            "contentHash": "68944f493104ffd44d70392db8c53dcd0ad7664e422be0d35e1cad929d8308b8",
+            "lastCopy": true
+          }
+        ],
+        "kept": [],
+        "failed": []
+      }
+    },
+    "setMtimesMs": {
+      "legacy-v1-set": 1790000000000,
+      "2026-09-23T10-15-44.087Z-00000000000000a1": 1790000060000,
+      "2026-09-23T10-15-44.087Z-00000000000000a2": 1790000120000,
+      "2026-09-23T10-15-44.087Z-00000000000000a3": 1790000180000
+    },
+    "afterWrites": [
+      {
+        "path": "backups/2026-09-23T10-15-44.087Z-00000000000000a1/claude-skills/gh/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCm9sZCBib2R5Cg=="
+      },
+      {
+        "path": "backups/2026-09-23T10-15-44.087Z-00000000000000a1/claude-skills/gh/refs/old.md",
+        "base64": "b2xkIHJlZmVyZW5jZQo="
+      },
+      {
+        "path": "backups/2026-09-23T10-15-44.087Z-00000000000000a1/manifest.json",
+        "template": "{\n  \"version\": 3,\n  \"backupId\": \"2026-09-23T10-15-44.087Z-00000000000000a1\",\n  \"createdAtMs\": 1790158544087,\n  \"entries\": [\n    {\n      \"locationId\": \"claude-skills\",\n      \"slug\": \"gh\",\n      \"kind\": \"directory\",\n      \"destinationPath\": \"<root><sep>home<sep>.claude<sep>skills<sep>gh\",\n      \"resolvedPath\": \"<root><sep>home<sep>.claude<sep>skills<sep>gh\",\n      \"writtenContentHash\": \"9ade662f6983910f3bb36053ddc79965d5465f357d52317779e25e83b1f7b5bc\",\n      \"resourceKey\": \"skill:gh\",\n      \"backupPath\": \"<root><sep>backups<sep>2026-09-23T10-15-44.087Z-00000000000000a1<sep>claude-skills<sep>gh\"\n    },\n    {\n      \"locationId\": \"claude-instructions\",\n      \"slug\": \"global\",\n      \"kind\": \"file\",\n      \"destinationPath\": \"<root><sep>home<sep>.claude<sep>CLAUDE.md\",\n      \"resolvedPath\": \"<root><sep>home<sep>.claude<sep>CLAUDE.md\",\n      \"writtenContentHash\": \"2c7ebc6a907837a8793af2045bf21b17ede58b994fc7863ce82ae16db1bf3cbb\",\n      \"resourceKey\": \"instruction:global\"\n    }\n  ],\n  \"operation\": \"propagation\",\n  \"environmentId\": \"remote-box\"\n}\n"
+      },
+      {
+        "path": "backups/2026-09-23T10-15-44.087Z-00000000000000a2/mango-skills/gh/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCm1hbmdvIGJvZHkK"
+      },
+      {
+        "path": "backups/2026-09-23T10-15-44.087Z-00000000000000a2/mango-skills/gh/nested/deep/a.md",
+        "base64": "ZGVlcAo="
+      },
+      {
+        "path": "backups/2026-09-23T10-15-44.087Z-00000000000000a2/manifest.json",
+        "template": "{\n  \"version\": 3,\n  \"backupId\": \"2026-09-23T10-15-44.087Z-00000000000000a2\",\n  \"createdAtMs\": 1790158544087,\n  \"entries\": [\n    {\n      \"locationId\": \"mango-skills\",\n      \"slug\": \"gh\",\n      \"kind\": \"directory\",\n      \"destinationPath\": \"<root><sep>home<sep>.mango<sep>skills<sep>gh\",\n      \"resolvedPath\": \"<root><sep>home<sep>.mango<sep>skills<sep>gh\",\n      \"writtenContentHash\": \"517b1ee203f7dead76071a4b08dad27b594188ebb4c30cfe99b2948c26a6ef9f\",\n      \"resourceKey\": \"skill:gh\",\n      \"backupPath\": \"<root><sep>backups<sep>2026-09-23T10-15-44.087Z-00000000000000a2<sep>mango-skills<sep>gh\"\n    }\n  ],\n  \"operation\": \"propagation\"\n}\n"
+      },
+      {
+        "path": "backups/2026-09-23T10-15-44.087Z-00000000000000a3/claude-agents/reviewer",
+        "base64": "LS0tCm5hbWU6IFJldmlld2VyCi0tLQpSZXZpZXcuCg=="
+      },
+      {
+        "path": "backups/2026-09-23T10-15-44.087Z-00000000000000a3/manifest.json",
+        "template": "{\n  \"version\": 3,\n  \"backupId\": \"2026-09-23T10-15-44.087Z-00000000000000a3\",\n  \"createdAtMs\": 1790158544087,\n  \"entries\": [\n    {\n      \"locationId\": \"claude-agents\",\n      \"slug\": \"reviewer\",\n      \"kind\": \"file\",\n      \"destinationPath\": \"<root><sep>home<sep>.claude<sep>agents<sep>reviewer.md\",\n      \"resolvedPath\": \"<root><sep>home<sep>.claude<sep>agents<sep>reviewer.md\",\n      \"backupPath\": \"<root><sep>backups<sep>2026-09-23T10-15-44.087Z-00000000000000a3<sep>claude-agents<sep>reviewer\",\n      \"resourceKey\": \"subagent:reviewer\",\n      \"writtenContentHash\": \"68944f493104ffd44d70392db8c53dcd0ad7664e422be0d35e1cad929d8308b8\"\n    }\n  ],\n  \"operation\": \"removal\",\n  \"pinned\": true,\n  \"lastCopyResourceKeys\": [\n    \"subagent:reviewer\"\n  ]\n}\n"
+      },
+      {
+        "path": "backups/legacy-v1-set/codex-instructions/global",
+        "base64": "bGVnYWN5IGluc3RydWN0aW9ucwo="
+      },
+      {
+        "path": "backups/legacy-v1-set/manifest.json",
+        "template": "{\n  \"version\": 1,\n  \"backupId\": \"legacy-v1-set\",\n  \"createdAtMs\": 1790072144087,\n  \"entries\": [\n    {\n      \"locationId\": \"codex-instructions\",\n      \"slug\": \"global\",\n      \"kind\": \"file\",\n      \"destinationPath\": \"<root><sep>home<sep>.codex<sep>AGENTS.md\",\n      \"resolvedPath\": \"<root><sep>home<sep>.codex<sep>AGENTS.md\",\n      \"backupPath\": \"<root><sep>backups<sep>legacy-v1-set<sep>codex-instructions<sep>global\",\n      \"writtenContentHash\": \"9625ebdba6100728bf79d851bd99ead4ad3856f8afb64a8356c76429227981a8\"\n    }\n  ]\n}\n"
+      },
+      {
+        "path": "home/.claude/CLAUDE.md",
+        "base64": "Q3JlYXRlZCBieSB0aGUgcHJvcGFnYXRpb24gZml4dHVyZS4K"
+      },
+      {
+        "path": "home/.claude/skills/gh/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCm5ldyBib2R5Cg=="
+      },
+      {
+        "path": "home/.claude/skills/gh/refs/new.md",
+        "base64": "bmV3IHJlZmVyZW5jZQo="
+      },
+      {
+        "path": "home/.mango/skills/gh/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCnRyYW5zZmVycmVkCg=="
+      },
+      {
+        "path": "home/.mango/skills/gh/refs/one.md",
+        "base64": "b25lCg=="
+      },
+      {
+        "path": "source/gh/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCm5ldyBib2R5Cg=="
+      },
+      {
+        "path": "source/gh/refs/new.md",
+        "base64": "bmV3IHJlZmVyZW5jZQo="
+      },
+      {
+        "path": "transferred-source/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCnRyYW5zZmVycmVkCg=="
+      },
+      {
+        "path": "transferred-source/refs/one.md",
+        "base64": "b25lCg=="
+      }
+    ],
+    "listing": {
+      "retentionCount": 2,
+      "sets": [
+        {
+          "backupId": "2026-09-23T10-15-44.087Z-00000000000000a3",
+          "createdAtMs": 1790158544087,
+          "entryCount": 1,
+          "pinned": true,
+          "lastCopyResourceKeys": [
+            "subagent:reviewer"
+          ],
+          "operation": "removal",
+          "resourceKeys": [
+            "subagent:reviewer"
+          ],
+          "evictsNext": false,
+          "manifestReadable": true,
+          "sizeBytesWithoutManifest": 31
+        },
+        {
+          "backupId": "2026-09-23T10-15-44.087Z-00000000000000a2",
+          "createdAtMs": 1790158544087,
+          "entryCount": 1,
+          "pinned": false,
+          "lastCopyResourceKeys": [],
+          "operation": "propagation",
+          "resourceKeys": [
+            "skill:gh"
+          ],
+          "evictsNext": false,
+          "manifestReadable": true,
+          "sizeBytesWithoutManifest": 53
+        },
+        {
+          "backupId": "2026-09-23T10-15-44.087Z-00000000000000a1",
+          "createdAtMs": 1790158544087,
+          "entryCount": 2,
+          "pinned": false,
+          "lastCopyResourceKeys": [],
+          "operation": "propagation",
+          "resourceKeys": [
+            "instruction:global",
+            "skill:gh"
+          ],
+          "evictsNext": false,
+          "manifestReadable": true,
+          "sizeBytesWithoutManifest": 60
+        },
+        {
+          "backupId": "legacy-v1-set",
+          "createdAtMs": 1790072144087,
+          "entryCount": 1,
+          "pinned": false,
+          "lastCopyResourceKeys": [],
+          "operation": "unknown",
+          "resourceKeys": [],
+          "evictsNext": true,
+          "manifestReadable": true,
+          "sizeBytesWithoutManifest": 20
+        }
+      ]
+    },
+    "undos": [
+      {
+        "backupId": "2026-09-23T10-15-44.087Z-00000000000000a3",
+        "report": {
+          "backupId": "2026-09-23T10-15-44.087Z-00000000000000a3",
+          "restored": [
+            {
+              "locationId": "claude-agents",
+              "destinationPath": "<root><sep>home<sep>.claude<sep>agents<sep>reviewer.md"
+            }
+          ],
+          "removed": [],
+          "skipped": []
+        }
+      },
+      {
+        "backupId": "2026-09-23T10-15-44.087Z-00000000000000a2",
+        "report": {
+          "backupId": "2026-09-23T10-15-44.087Z-00000000000000a2",
+          "restored": [
+            {
+              "locationId": "mango-skills",
+              "destinationPath": "<root><sep>home<sep>.mango<sep>skills<sep>gh"
+            }
+          ],
+          "removed": [],
+          "skipped": []
+        }
+      },
+      {
+        "backupId": "2026-09-23T10-15-44.087Z-00000000000000a1",
+        "report": {
+          "backupId": "2026-09-23T10-15-44.087Z-00000000000000a1",
+          "restored": [
+            {
+              "locationId": "claude-skills",
+              "destinationPath": "<root><sep>home<sep>.claude<sep>skills<sep>gh"
+            }
+          ],
+          "removed": [
+            {
+              "locationId": "claude-instructions",
+              "destinationPath": "<root><sep>home<sep>.claude<sep>CLAUDE.md"
+            }
+          ],
+          "skipped": []
+        }
+      },
+      {
+        "backupId": "legacy-v1-set",
+        "report": {
+          "backupId": "legacy-v1-set",
+          "restored": [
+            {
+              "locationId": "codex-instructions",
+              "destinationPath": "<root><sep>home<sep>.codex<sep>AGENTS.md"
+            }
+          ],
+          "removed": [],
+          "skipped": []
+        }
+      }
+    ],
+    "afterUndo": [
+      {
+        "path": "home/.claude/agents/reviewer.md",
+        "base64": "LS0tCm5hbWU6IFJldmlld2VyCi0tLQpSZXZpZXcuCg=="
+      },
+      {
+        "path": "home/.claude/skills/gh/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCm9sZCBib2R5Cg=="
+      },
+      {
+        "path": "home/.claude/skills/gh/refs/old.md",
+        "base64": "b2xkIHJlZmVyZW5jZQo="
+      },
+      {
+        "path": "home/.codex/AGENTS.md",
+        "base64": "bGVnYWN5IGluc3RydWN0aW9ucwo="
+      },
+      {
+        "path": "home/.mango/skills/gh/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCm1hbmdvIGJvZHkK"
+      },
+      {
+        "path": "home/.mango/skills/gh/nested/deep/a.md",
+        "base64": "ZGVlcAo="
+      }
+    ],
+    "hashes": [
+      {
+        "kind": "file",
+        "path": ".claude/agents/reviewer.md",
+        "contentHash": "68944f493104ffd44d70392db8c53dcd0ad7664e422be0d35e1cad929d8308b8"
+      },
+      {
+        "kind": "directory",
+        "path": ".claude/skills/gh",
+        "contentHash": "12777a2632ffff3cf3f6abce42a89577423bc090cf47af688f7839a86f7264bd"
+      },
+      {
+        "kind": "directory",
+        "path": ".mango/skills/gh",
+        "contentHash": "3a1a4b07675077b79fb4ab85ad25381cfa91c7635fd76c4b533ac34abdfa151b"
+      }
+    ]
+  }
 }
