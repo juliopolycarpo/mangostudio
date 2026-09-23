@@ -22,10 +22,6 @@ import type {
   RemovalPreviewRequest,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
-import {
-  executeRemovalWrites,
-  type RemovalWriteEngineDeps,
-} from '@mangostudio/shared/library/machine';
 import type { RuntimeLibraryRemoveParams } from '@mangostudio/shared/runtime-contract';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
@@ -34,9 +30,7 @@ import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { backupPolicyFor } from '../infrastructure/backup-roots';
 import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
-import { hashResourceAt } from '../infrastructure/instance-reader';
 import { createLibraryPathEnv, libraryWritePathEnv } from '../infrastructure/location-probe';
-import { nodeTreeRemovalFs, type TreeRemovalFs } from '../infrastructure/tree-removal';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
 import { resetLibraryCachesForEnvironments } from './environment-library-service';
@@ -50,12 +44,8 @@ export interface RemovalApplyDeps {
   preview(userId: string, request: RemovalPreviewRequest): Promise<RemovalPreview>;
   /** Layout of one machine; see `PropagationApplyDeps.pathEnv`. */
   pathEnv(environmentId: string): PathEnv;
-  hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   backup: BackupStoreDeps;
-  treeFs: TreeRemovalFs;
-  /** Which process performs the writes; see `PropagationApplyDeps.writeEngine`. */
-  writeEngine: 'runtime' | 'in-process';
-  /** Stands in for the RuntimeClient on the `runtime` engine. */
+  /** Stands in for the RuntimeClient; tests inject transport failures and runtime faults. */
   runtimeRemove?: (params: RuntimeLibraryRemoveParams) => Promise<RemovalApply>;
   /** Which machine the copies are removed from; see `PropagationApplyDeps`. */
   environmentId: string;
@@ -81,10 +71,7 @@ function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
   return {
     preview: overrides.preview ?? previewLibraryRemoval,
     pathEnv: overrides.pathEnv ?? (() => createLibraryPathEnv()),
-    hashAt: overrides.hashAt ?? hashResourceAt,
     backup: overrides.backup ?? defaultBackupStoreDeps,
-    treeFs: overrides.treeFs ?? nodeTreeRemovalFs,
-    writeEngine: overrides.writeEngine ?? 'runtime',
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     recordBackup: overrides.recordBackup ?? recordWrittenBackup,
     resetCaches: overrides.resetCaches ?? resetLibraryCachesForEnvironments,
@@ -256,26 +243,6 @@ function runWriteEngine(
   env: PathEnv,
   deps: RemovalApplyDeps
 ): Promise<RemovalApply> {
-  if (deps.writeEngine === 'in-process') {
-    const engineDeps: RemovalWriteEngineDeps = {
-      hashAt: deps.hashAt,
-      backup: deps.backup,
-      treeFs: deps.treeFs,
-    };
-    return executeRemovalWrites(
-      {
-        backupRoot: deps.backup.backupDir(),
-        retentionCount: deps.backup.retentionCount(),
-        retentionBytes: deps.backup.retentionBytes(),
-        pathEnv: env,
-        environmentId: deps.environmentId,
-        operations,
-        lastCopyResourceKeys: plan.lastCopyResourceKeys,
-      },
-      engineDeps
-    );
-  }
-
   const params = toRuntimeRemoveParams(operations, plan, env, deps);
   return deps.runtimeRemove ? deps.runtimeRemove(params) : runtimeRemove(userId, params, deps);
 }

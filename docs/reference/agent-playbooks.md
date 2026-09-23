@@ -306,10 +306,14 @@ fails silently:
   with the failure the hub already reported. Writes serialize per `backupRoot`
   on the runtime as well as on the hub — the hub releases its lock when the
   deadline fires, while the work here is still rolling back.
-- **Which process writes is stated, not inferred.** `writeEngine` on the apply,
-  removal, and undo deps picks `runtime` (the default, over the protocol) or
-  `in-process` (the engine here, against injected fs seams). Tests say which
-  they mean; a suite that means to cover the protocol cannot silently avoid it.
+- **The Hub never writes library resources itself.** Apply, removal, and undo
+  always go over the protocol; the only seam is `runtimeApply`/`runtimeRemove`/
+  `runtimeUndo`, which stands in for the client. Hub tests that write run
+  against the compiled Rust runtime (`rust-runtime-library-propagation` and
+  `rust-runtime-library-removal`, via `tests/support/rust-library-boxes.ts`),
+  and fault cases rewrite one operation of the Hub's real batch with
+  `tamperingApply`/`tamperingRemove`. Hub tests that must be refused before any
+  write pass `refuseLibraryApply`/`refuseLibraryRemove`.
 
 Propagated file bytes travel once per distinct payload in a `contents` map
 keyed by content hash, because fanning one resource across destinations used to
