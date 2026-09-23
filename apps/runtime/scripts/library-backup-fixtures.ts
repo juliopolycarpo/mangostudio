@@ -19,6 +19,7 @@
  */
 
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -54,6 +55,7 @@ const SET_IDS = {
   transferred: '2026-09-23T10-15-44.087Z-00000000000000a2',
   removal: '2026-09-23T10-15-44.087Z-00000000000000a3',
   legacy: 'legacy-v1-set',
+  uncommitted: 'uncommitted-set',
 } as const;
 
 interface TreeFile {
@@ -264,8 +266,18 @@ async function record(root: string): Promise<unknown> {
     backup
   );
 
+  // A set whose manifest was never written: an apply still in flight, or the
+  // only copy a failed commit left. Retention must list it and never evict it.
+  write(backupRoot, `${SET_IDS.uncommitted}/claude-skills/gh/SKILL.md`, `${SKILL}in flight\n`);
+
   // Listing order is by set mtime; pin it so the corpus is deterministic.
-  const order = [SET_IDS.legacy, SET_IDS.propagation, SET_IDS.transferred, SET_IDS.removal];
+  const order = [
+    SET_IDS.uncommitted,
+    SET_IDS.legacy,
+    SET_IDS.propagation,
+    SET_IDS.transferred,
+    SET_IDS.removal,
+  ];
   order.forEach((id, index) => {
     const seconds = 1_790_000_000 + index * 60;
     utimesSync(join(backupRoot, id), seconds, seconds);
@@ -281,8 +293,7 @@ async function record(root: string): Promise<unknown> {
     ...set,
     // The manifest's own bytes embed the scratch path, so they are compared
     // separately; everything else a set holds is fixed by this script.
-    sizeBytesWithoutManifest:
-      sizeBytes - statSync(join(backupRoot, set.backupId, 'manifest.json')).size,
+    sizeBytesWithoutManifest: sizeBytes - manifestSize(join(backupRoot, set.backupId)),
   }));
 
   const undoDeps = createLibraryUndoEngineDeps({ backupRoot }, { backup });
@@ -315,6 +326,11 @@ async function record(root: string): Promise<unknown> {
     afterUndo,
     hashes: recordedHashes,
   };
+}
+
+function manifestSize(setPath: string): number {
+  const manifest = join(setPath, 'manifest.json');
+  return existsSync(manifest) ? statSync(manifest).size : 0;
 }
 
 async function hashFileText(root: string, text: string): Promise<string> {

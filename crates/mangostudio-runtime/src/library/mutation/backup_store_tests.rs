@@ -729,3 +729,20 @@ fn prune_charges_the_current_set_it_names() {
     fixture.store.prune(Some("current")).unwrap();
     assert_eq!(ids(&fixture), vec!["big", "current", "middle"]);
 }
+
+/// The in-apply prune runs after the backup copy and before the manifest:
+/// the set being written still takes its ordinary slot, so an older set
+/// beyond the count is evicted rather than kept on its behalf.
+#[test]
+fn the_set_being_written_counts_before_its_manifest_lands() {
+    let mut fixture = fixture("backup-prune-current-uncommitted");
+    seed(&fixture, "older", 1.0, 1, Some(manifest("older", vec![])));
+    seed(&fixture, "current", 2.0, 1, None);
+    fixture.store.retention_count = 1.0;
+    fixture.store.prune(Some("current")).unwrap();
+    assert_eq!(
+        ids(&fixture),
+        vec!["current"],
+        "expected the older set evicted by the count | received it kept"
+    );
+}

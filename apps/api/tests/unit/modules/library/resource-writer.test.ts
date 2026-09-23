@@ -222,6 +222,11 @@ describe('directory resource writes', () => {
     ] as const) {
       const path = join(backupDir, id);
       mkdirSync(join(path, 'agents-skills', 'gh'), { recursive: true });
+      // Committed sets carry a manifest; retention never evicts one without.
+      writeFileSync(
+        join(path, 'manifest.json'),
+        JSON.stringify({ version: 3, backupId: id, createdAtMs: seconds, entries: [] })
+      );
       utimesSync(path, seconds, seconds);
     }
 

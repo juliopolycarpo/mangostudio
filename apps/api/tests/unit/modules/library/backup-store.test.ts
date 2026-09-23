@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -50,16 +51,26 @@ function deps(overrides: Partial<BackupStoreDeps> = {}): BackupStoreDeps {
   };
 }
 
-/** Creates a backup set shaped the way an apply writes one. */
+/**
+ * Creates a committed backup set shaped the way an apply writes one: the copy
+ * and its manifest. A set without a manifest is uncommitted — retention never
+ * evicts one — so an ordinary set has to carry it.
+ */
 function seedBackupSet(id: string, bytes: number, modifiedAtMs?: number): string {
   const setPath = join(backupRoot, id, 'claude-skills', 'gh');
   mkdirSync(setPath, { recursive: true });
   writeFileSync(join(setPath, 'SKILL.md'), 'x'.repeat(bytes));
+  seedManifest(join(backupRoot, id), id, { version: 2, operation: 'propagation' });
   if (modifiedAtMs !== undefined) {
     const seconds = modifiedAtMs / 1000;
     utimesSync(join(backupRoot, id), seconds, seconds);
   }
   return join(backupRoot, id);
+}
+
+/** A seeded set's manifest bytes, which the byte budget charges too. */
+function manifestBytes(id: string): number {
+  return statSync(join(backupRoot, id, 'manifest.json')).size;
 }
 
 /** The same shape, plus the manifest a last-copy removal writes. */
@@ -317,7 +328,11 @@ describe('pruneBackupSets', () => {
     seedBackupSet('old', 100, 1_000);
 
     // Room for the current set and one more, even though the count allows three.
-    await pruneBackupSets('current', deps({ retentionCount: () => 10, retentionBytes: () => 250 }));
+    const budget = 200 + manifestBytes('current') + manifestBytes('newer') + 50;
+    await pruneBackupSets(
+      'current',
+      deps({ retentionCount: () => 10, retentionBytes: () => budget })
+    );
 
     expect(existsSync(join(backupRoot, 'current'))).toBe(true);
     expect(existsSync(join(backupRoot, 'newer'))).toBe(true);
@@ -391,7 +406,9 @@ describe('listBackupSets', () => {
     const sets = await listBackupSets(deps());
 
     expect(sets.map((set) => set.backupId).sort()).toEqual(['one', 'two']);
-    expect(sets.reduce((total, set) => total + set.sizeBytes, 0)).toBe(150);
+    expect(sets.reduce((total, set) => total + set.sizeBytes, 0)).toBe(
+      150 + manifestBytes('one') + manifestBytes('two')
+    );
     expect(sets.every((set) => !set.pinned)).toBe(true);
   });
 
@@ -468,7 +485,9 @@ describe('listBackupSets', () => {
     seedBackupSet('older', 100, 2_000);
     seedBackupSet('newer', 100, 3_000);
     seedBackupSet('newest', 100, 4_000);
-    const store = deps({ retentionCount: () => 10, retentionBytes: () => 350 });
+    // Room for the two newest sets and part of a third.
+    const budget = 250 + manifestBytes('newest') + manifestBytes('newer');
+    const store = deps({ retentionCount: () => 10, retentionBytes: () => budget });
 
     const flagged = (await listBackupSets(store))
       .filter((set) => set.evictsNext)

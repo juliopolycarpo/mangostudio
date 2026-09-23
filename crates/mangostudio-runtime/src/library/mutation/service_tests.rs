@@ -24,6 +24,43 @@ use crate::test_support::{ScratchDir, scratch_dir};
 
 const SKILL: &str = "---\nname: gh\ndescription: d\n---\nbody\n";
 
+/// How long any step of these tests may take before it counts as a hang.
+/// Far above what a healthy run needs, so a regression fails with a message
+/// instead of stalling the suite.
+const WAIT: Duration = Duration::from_secs(10);
+
+/// Awaits `future`, failing the test if it makes no progress within
+/// [`WAIT`].
+async fn within<T>(what: &str, future: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(WAIT, future)
+        .await
+        .unwrap_or_else(|_| panic!("expected {what} within {WAIT:?} | received no progress"))
+}
+
+/// Holds a hooked filesystem step until the test releases it, but never
+/// past [`WAIT`]: a test that panics before releasing must not leave a
+/// blocking worker spinning, which would stall the runtime's shutdown. An
+/// expired hold is recorded in `expired` rather than panicking inside the
+/// worker; [`assert_held_until_released`] turns it into a test failure.
+fn hold_until_released(release: &AtomicBool, expired: &AtomicBool) {
+    let deadline = std::time::Instant::now() + WAIT;
+    while !release.load(Ordering::SeqCst) {
+        if std::time::Instant::now() >= deadline {
+            expired.store(true, Ordering::SeqCst);
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Fails the test when a hook gave up waiting instead of being released.
+fn assert_held_until_released(expired: &AtomicBool) {
+    assert!(
+        !expired.load(Ordering::SeqCst),
+        "expected the hook to be released within {WAIT:?} | received the deadline"
+    );
+}
+
 struct Lane {
     service: Arc<MutationService>,
     fs: Arc<ScriptedFs>,
@@ -277,14 +314,14 @@ async fn a_queued_write_rechecks_consent_under_the_owner() {
     let lane = lane("library-write-owner-recheck");
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(AtomicBool::new(false));
+    let expired = Arc::new(AtomicBool::new(false));
     {
         let entered = Arc::clone(&entered);
         let release = Arc::clone(&release);
+        let expired = Arc::clone(&expired);
         lane.fs.before(FsOp::WriteFile, "CLAUDE.md", move |_| {
             entered.notify_one();
-            while !release.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(5));
-            }
+            hold_until_released(&release, &expired);
         });
     }
     let first = tokio::spawn({
@@ -292,7 +329,7 @@ async fn a_queued_write_rechecks_consent_under_the_owner() {
         let params = apply_params(&lane, "first");
         async move { service.apply(params, CancellationToken::new()).await }
     });
-    entered.notified().await;
+    within("the first write to reach its hook", entered.notified()).await;
     let second = tokio::spawn({
         let service = Arc::clone(&lane.service);
         let mut params = apply_params(&lane, "second");
@@ -306,13 +343,20 @@ async fn a_queued_write_rechecks_consent_under_the_owner() {
     );
     allow(&lane, json!({ "fsWrite": false }));
     release.store(true, Ordering::SeqCst);
-    let first = first.await.unwrap().unwrap();
+    let first = within("the first write to finish", first)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_held_until_released(&expired);
     assert_eq!(
         first["failed"],
         json!([]),
         "the running write completes: {first}"
     );
-    let second = second.await.unwrap().unwrap_err();
+    let second = within("the queued write to be refused", second)
+        .await
+        .unwrap()
+        .unwrap_err();
     assert_eq!(second.code, codes::DENIED, "received {second:?}");
     assert_eq!(std::fs::read_to_string(claude_md(&lane)).unwrap(), "first");
 }
@@ -349,17 +393,17 @@ async fn cancel_versus_commit_retains_the_owner_until_the_boundary() {
     let cancel = CancellationToken::new();
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(AtomicBool::new(false));
+    let expired = Arc::new(AtomicBool::new(false));
     {
         let (entered, release, cancel) =
             (Arc::clone(&entered), Arc::clone(&release), cancel.clone());
+        let expired = Arc::clone(&expired);
         lane.fs
             .before(FsOp::Copy(CopyPurpose::Stage), ".claude", move |_| {
                 // Mid-effect: the first destination is being staged.
                 cancel.cancel();
                 entered.notify_one();
-                while !release.load(Ordering::SeqCst) {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
+                hold_until_released(&release, &expired);
             });
     }
     let running = tokio::spawn({
@@ -367,7 +411,11 @@ async fn cancel_versus_commit_retains_the_owner_until_the_boundary() {
         let cancel = cancel.clone();
         async move { service.apply(params, cancel).await }
     });
-    entered.notified().await;
+    within(
+        "the running apply to reach its staging hook",
+        entered.notified(),
+    )
+    .await;
     let waiter_cancel = CancellationToken::new();
     let waiter = tokio::spawn({
         let service = Arc::clone(&lane.service);
@@ -386,7 +434,10 @@ async fn cancel_versus_commit_retains_the_owner_until_the_boundary() {
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
     waiter_cancel.cancel();
-    let refused = waiter.await.unwrap().unwrap_err();
+    let refused = within("the cancelled waiter to be refused", waiter)
+        .await
+        .unwrap()
+        .unwrap_err();
     assert_eq!(
         refused.code,
         codes::CANCELLED,
@@ -395,7 +446,11 @@ async fn cancel_versus_commit_retains_the_owner_until_the_boundary() {
     assert!(!gc.is_finished(), "gc waits for the owner");
     release.store(true, Ordering::SeqCst);
 
-    let result = running.await.unwrap().unwrap();
+    let result = within("the running apply to compensate and finish", running)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_held_until_released(&expired);
     assert_eq!(result["applied"], json!([]), "received {result}");
     assert_eq!(result["partial"], json!(false));
     assert_eq!(result["failed"][0]["locationId"], "agents-skills");
@@ -407,7 +462,7 @@ async fn cancel_versus_commit_retains_the_owner_until_the_boundary() {
         !lane.home.join(".claude").join("skills").join("gh").exists(),
         "the operation that was mid-effect finished, then was compensated"
     );
-    assert!(gc.await.unwrap().is_ok());
+    assert!(within("the queued gc to run", gc).await.unwrap().is_ok());
     assert!(
         !claude_md(&lane).exists(),
         "the refused waiter wrote nothing"

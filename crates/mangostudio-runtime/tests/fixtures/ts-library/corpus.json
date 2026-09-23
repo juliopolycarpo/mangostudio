@@ -2742,10 +2742,11 @@
       }
     },
     "setMtimesMs": {
-      "legacy-v1-set": 1790000000000,
-      "2026-09-23T10-15-44.087Z-00000000000000a1": 1790000060000,
-      "2026-09-23T10-15-44.087Z-00000000000000a2": 1790000120000,
-      "2026-09-23T10-15-44.087Z-00000000000000a3": 1790000180000
+      "uncommitted-set": 1790000000000,
+      "legacy-v1-set": 1790000060000,
+      "2026-09-23T10-15-44.087Z-00000000000000a1": 1790000120000,
+      "2026-09-23T10-15-44.087Z-00000000000000a2": 1790000180000,
+      "2026-09-23T10-15-44.087Z-00000000000000a3": 1790000240000
     },
     "afterWrites": [
       {
@@ -2787,6 +2788,10 @@
       {
         "path": "backups/legacy-v1-set/manifest.json",
         "template": "{\n  \"version\": 1,\n  \"backupId\": \"legacy-v1-set\",\n  \"createdAtMs\": 1790072144087,\n  \"entries\": [\n    {\n      \"locationId\": \"codex-instructions\",\n      \"slug\": \"global\",\n      \"kind\": \"file\",\n      \"destinationPath\": \"<root><sep>home<sep>.codex<sep>AGENTS.md\",\n      \"resolvedPath\": \"<root><sep>home<sep>.codex<sep>AGENTS.md\",\n      \"backupPath\": \"<root><sep>backups<sep>legacy-v1-set<sep>codex-instructions<sep>global\",\n      \"writtenContentHash\": \"9625ebdba6100728bf79d851bd99ead4ad3856f8afb64a8356c76429227981a8\"\n    }\n  ]\n}\n"
+      },
+      {
+        "path": "backups/uncommitted-set/claude-skills/gh/SKILL.md",
+        "base64": "LS0tCm5hbWU6IGdoCmRlc2NyaXB0aW9uOiBHaXRIdWIKLS0tCmluIGZsaWdodAo="
       },
       {
         "path": "home/.claude/CLAUDE.md",
@@ -2884,6 +2889,18 @@
           "evictsNext": true,
           "manifestReadable": true,
           "sizeBytesWithoutManifest": 20
+        },
+        {
+          "backupId": "uncommitted-set",
+          "createdAtMs": 1790000000000,
+          "entryCount": 0,
+          "pinned": false,
+          "lastCopyResourceKeys": [],
+          "operation": "unknown",
+          "resourceKeys": [],
+          "evictsNext": false,
+          "manifestReadable": false,
+          "sizeBytesWithoutManifest": 47
         }
       ]
     },
