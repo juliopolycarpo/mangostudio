@@ -37,6 +37,7 @@ const RELEASE: u8 = b'G';
 const FINALIZE: u8 = b'F';
 const STATUS_BYTES: usize = std::mem::size_of::<libc::c_int>();
 const READY_BYTES: usize = STATUS_BYTES + 1;
+const TERMINAL_SESSION_CLEANUP_SECONDS: libc::time_t = 10;
 
 pub(crate) struct GuardianChild {
     pid: libc::pid_t,
@@ -180,12 +181,15 @@ impl GuardianChild {
 
     /// Reaps the guardian after it has been finalized or force-killed.
     pub(super) async fn wait_guardian(&mut self) -> io::Result<()> {
-        (&mut self.wait)
-            .await
-            .map_err(|error| {
-                io::Error::other(format!("process guardian wait task failed: {error}"))
-            })?
-            .map(|_| ())
+        let status = (&mut self.wait).await.map_err(|error| {
+            io::Error::other(format!("process guardian wait task failed: {error}"))
+        })??;
+        if self.pty_control.is_some() && !status.success() {
+            return Err(io::Error::other(format!(
+                "terminal guardian exited before session cleanup: {status}"
+            )));
+        }
+        Ok(())
     }
 
     pub(super) fn interrupt(&mut self) -> io::Result<()> {
@@ -841,12 +845,12 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     }
     unsafe { libc::close(fds.target_ready_write) };
     let Some(target_pgid) = (unsafe { read_status_raw(fds.target_ready_read) }) else {
-        kill_target_and_guardian_and_exit(target, guardian_pgid);
+        kill_target_and_guardian_and_exit(target, guardian_pgid, fds.terminal);
     };
     unsafe { libc::close(fds.target_ready_read) };
     if target_pgid != target || !unsafe { write_status_raw(fds.watchdog_target_write, target_pgid) }
     {
-        kill_target_and_guardian_and_exit(target, guardian_pgid);
+        kill_target_and_guardian_and_exit(target, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.watchdog_target_write) };
     unsafe {
@@ -856,7 +860,7 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
         )
     };
     if !write_ready_raw(fds.ready_write, target_pgid) {
-        kill_target_and_guardian_and_exit(target, guardian_pgid);
+        kill_target_and_guardian_and_exit(target, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.ready_write) };
 
@@ -865,19 +869,30 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     // can never redirect a later `kill(-target_pgid, ...)` at an unrelated process.
     let status = wait_unreaped_raw(target);
     if !write_status_raw(fds.status_write, status) {
-        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
+        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.status_write) };
     // The parent either acknowledges bounded capture or disappears. In both cases, terminate
     // every ordinary descendant before the guardian exits. The watchdog stays alive during this
     // wait, so a runtime SIGKILL cannot open a leader-exit cleanup gap.
     if read_one_raw(fds.finalize_read) != Some(FINALIZE) {
-        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
+        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.finalize_read) };
     unsafe { libc::kill(-target_pgid, libc::SIGKILL) };
+    if fds.terminal && !unsafe { kill_session_members(target_pgid) } {
+        unsafe { libc::_exit(127) };
+    }
     let _ = unsafe { wait_raw(target) };
-    wait_group_empty(target_pgid);
+    if !fds.terminal
+        || cfg!(not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos"
+        )))
+    {
+        wait_group_empty(target_pgid);
+    }
     unsafe { libc::kill(watchdog, libc::SIGKILL) };
     let _ = unsafe { wait_raw(watchdog) };
     unsafe { libc::_exit(0) }
@@ -898,13 +913,13 @@ unsafe fn watchdog_main(fds: GuardianFds, guardian_pgid: libc::pid_t) -> ! {
         let mut byte = 0;
         let read = unsafe { libc::read(fds.liveness_read, (&raw mut byte).cast(), 1) };
         if read == 0 {
-            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
+            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
         }
         if read < 0 && unsafe { errno_raw() } == libc::EINTR {
             continue;
         }
         if read < 0 {
-            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
+            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
         }
     }
 }
@@ -1162,6 +1177,243 @@ unsafe fn wait_group_empty(process_group: libc::pid_t) {
     }
 }
 
+/// Kills every live member of the terminal's session, including job-control groups that do not
+/// share the shell's process group. The leader stays unreaped while this runs, pinning its SID.
+/// A process that deliberately creates another session is outside terminal containment.
+unsafe fn kill_session_members(session: libc::pid_t) -> bool {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } < 0 {
+        return false;
+    }
+    let deadline = now.tv_sec.saturating_add(TERMINAL_SESSION_CLEANUP_SECONDS);
+    loop {
+        if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } < 0
+            || now.tv_sec >= deadline
+        {
+            return false;
+        }
+        let Some(live) = (unsafe { kill_session_members_once(session) }) else {
+            return false;
+        };
+        if !live {
+            return true;
+        }
+        unsafe { pause_between_group_probes() };
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn kill_session_members_once(session: libc::pid_t) -> Option<bool> {
+    let directory = unsafe {
+        libc::open(
+            c"/proc".as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if directory < 0 {
+        return None;
+    }
+    let mut live = false;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let size = unsafe {
+            libc::syscall(
+                libc::SYS_getdents64,
+                directory,
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            )
+        };
+        if size == 0 {
+            break;
+        }
+        if size < 0 {
+            if unsafe { errno_raw() } == libc::EINTR {
+                continue;
+            }
+            unsafe { libc::close(directory) };
+            return None;
+        }
+        let mut offset = 0;
+        while offset < size as usize {
+            if offset + 19 > size as usize {
+                unsafe { libc::close(directory) };
+                return None;
+            }
+            let length = usize::from(u16::from_ne_bytes([
+                buffer[offset + 16],
+                buffer[offset + 17],
+            ]));
+            if length < 20 || offset + length > size as usize {
+                unsafe { libc::close(directory) };
+                return None;
+            }
+            let name = &buffer[offset + 19..offset + length];
+            if let Some(pid) = parse_proc_pid(name)
+                && pid != session
+                && unsafe { libc::getsid(pid) } == session
+            {
+                let pinned = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+                if pinned < 0 {
+                    if unsafe { errno_raw() } != libc::ESRCH {
+                        unsafe { libc::close(directory) };
+                        return None;
+                    }
+                } else {
+                    let pinned = pinned as RawFd;
+                    let member = unsafe { libc::getsid(pid) } == session;
+                    let running = if member {
+                        unsafe { proc_pid_running(directory, name) }
+                    } else {
+                        Some(false)
+                    };
+                    if running == Some(true) {
+                        live = true;
+                    }
+                    if running.is_none()
+                        || (running == Some(true) && !unsafe { kill_pinned_linux_pid(pinned) })
+                    {
+                        unsafe { libc::close(pinned) };
+                        unsafe { libc::close(directory) };
+                        return None;
+                    }
+                    unsafe { libc::close(pinned) };
+                }
+            }
+            offset += length;
+        }
+    }
+    unsafe { libc::close(directory) };
+    Some(live)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn parse_proc_pid(name: &[u8]) -> Option<libc::pid_t> {
+    if !name.first()?.is_ascii_digit() {
+        return None;
+    }
+    let mut pid = 0_i32;
+    for byte in name {
+        if *byte == 0 {
+            return Some(pid);
+        }
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        pid = pid.checked_mul(10)?.checked_add(i32::from(*byte - b'0'))?;
+    }
+    None
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn proc_pid_running(directory: RawFd, name: &[u8]) -> Option<bool> {
+    let mut path = [0_u8; 32];
+    let end = name.iter().position(|byte| *byte == 0)?;
+    if end + b"/stat\0".len() > path.len() {
+        return None;
+    }
+    path[..end].copy_from_slice(&name[..end]);
+    path[end..end + b"/stat\0".len()].copy_from_slice(b"/stat\0");
+    let file = unsafe {
+        libc::openat(
+            directory,
+            path.as_ptr().cast(),
+            libc::O_RDONLY | libc::O_CLOEXEC,
+        )
+    };
+    if file < 0 {
+        return (unsafe { errno_raw() } == libc::ENOENT).then_some(false);
+    }
+    let mut stat = [0_u8; 512];
+    let read = unsafe { libc::read(file, stat.as_mut_ptr().cast(), stat.len()) };
+    unsafe { libc::close(file) };
+    if read <= 0 {
+        return None;
+    }
+    let state = stat[..read as usize]
+        .iter()
+        .rposition(|byte| *byte == b')')
+        .and_then(|end| stat.get(end + 2));
+    state.map(|state| !matches!(state, b'Z' | b'X'))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn kill_pinned_linux_pid(pinned: RawFd) -> bool {
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            pinned,
+            libc::SIGKILL,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        )
+    };
+    let error = unsafe { errno_raw() };
+    result == 0 || error == libc::ESRCH
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn kill_session_members_once(session: libc::pid_t) -> Option<bool> {
+    // libproc is a thin kernel wrapper here, but Apple does not formally promise these calls are
+    // async-signal-safe. Keep all storage on this guardian's stack and avoid allocator use.
+    let mut pids = [0_i32; 65_536];
+    let count = unsafe {
+        libc::proc_listallpids(
+            pids.as_mut_ptr().cast(),
+            i32::try_from(std::mem::size_of_val(&pids)).ok()?,
+        )
+    };
+    if count <= 0 || count as usize >= pids.len() {
+        return None;
+    }
+    let mut live = false;
+    for pid in pids[..count as usize].iter().copied() {
+        if pid <= 0 || pid == session || unsafe { libc::getsid(pid) } != session {
+            continue;
+        }
+        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        if unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
+        } != size
+        {
+            if unsafe { libc::getsid(pid) } == session {
+                return None;
+            }
+            continue;
+        }
+        let info = unsafe { info.assume_init() };
+        if info.pbi_status == libc::SZOMB {
+            continue;
+        }
+        live = true;
+        // macOS has no public pidfd equivalent. Recheck SID immediately before signaling this
+        // process, though PID reuse between the check and kill remains possible.
+        if unsafe { libc::getsid(pid) } == session
+            && unsafe { libc::kill(pid, libc::SIGKILL) } < 0
+            && unsafe { errno_raw() } != libc::ESRCH
+        {
+            return None;
+        }
+    }
+    Some(live)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
+unsafe fn kill_session_members_once(_session: libc::pid_t) -> Option<bool> {
+    // Other Unix targets retain the existing process-group containment behavior.
+    Some(false)
+}
+
 /// Waits between group probes in [`wait_group_empty`].
 ///
 /// `nanosleep` is async-signal-safe, which is what this post-`fork` guardian is restricted to, and
@@ -1187,8 +1439,12 @@ unsafe fn kill_guardian_group_and_exit(guardian_pgid: libc::pid_t) -> ! {
 unsafe fn kill_target_and_guardian_and_exit(
     target_pgid: libc::pid_t,
     guardian_pgid: libc::pid_t,
+    terminal: bool,
 ) -> ! {
     unsafe { libc::kill(-target_pgid, libc::SIGKILL) };
+    if terminal {
+        let _ = unsafe { kill_session_members(target_pgid) };
+    }
     unsafe { libc::kill(-guardian_pgid, libc::SIGKILL) };
     unsafe { libc::_exit(127) }
 }
@@ -1262,6 +1518,18 @@ mod tests {
     use std::ffi::OsString;
 
     use super::collect_inheritable;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn proc_pid_parser_accepts_only_bounded_decimal_entries() {
+        use super::parse_proc_pid;
+
+        assert_eq!(parse_proc_pid(b"1234\0"), Some(1234));
+        assert_eq!(parse_proc_pid(b".\0"), None);
+        assert_eq!(parse_proc_pid(b"12x\0"), None);
+        assert_eq!(parse_proc_pid(b"999999999999\0"), None);
+        assert_eq!(parse_proc_pid(b"12"), None);
+    }
 
     /// Regression test: this snapshot used to `.expect("OS environment has no NUL")` on every
     /// entry, so a single name `environment_entry` refuses — a leading `=`, which

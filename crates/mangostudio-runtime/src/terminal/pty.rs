@@ -43,6 +43,8 @@ pub struct PtyRequest {
     pub rows: u16,
     #[cfg(test)]
     ready_gate: Option<Arc<ReadyGate>>,
+    #[cfg(test)]
+    fail_cleanup: bool,
 }
 
 impl PtyRequest {
@@ -71,6 +73,8 @@ impl PtyRequest {
             rows,
             #[cfg(test)]
             ready_gate: None,
+            #[cfg(test)]
+            fail_cleanup: false,
         }
     }
 }
@@ -84,7 +88,21 @@ struct ReadyGate {
     released: std::sync::atomic::AtomicBool,
 }
 
-/// Native direct-child status, reported after its owned process tree is gone.
+#[cfg(test)]
+struct PendingOutput;
+
+#[cfg(test)]
+impl tokio::io::AsyncRead for PendingOutput {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        _buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        std::task::Poll::Pending
+    }
+}
+
+/// Direct-child status, or unknown status when process-tree cleanup fails.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PtyExit {
     /// Exit code when the process exited normally.
@@ -130,7 +148,7 @@ pub trait PtyHandle: Send + Sync {
 
 /// Starts a real PTY; tests can implement this port with a named fake.
 pub trait PtySpawner: Send + Sync {
-    /// Calls `on_data` for raw output and `on_exit` exactly once after owned tree cleanup.
+    /// Calls `on_data` for raw output and `on_exit` once after the tree cleanup attempt.
     fn spawn(
         &self,
         request: PtyRequest,
@@ -299,6 +317,8 @@ async fn supervise_pty(
     let rows = request.rows;
     #[cfg(test)]
     let ready_gate = request.ready_gate.clone();
+    #[cfg(test)]
+    let fail_cleanup = request.fail_cleanup;
     let mut process = ProcessRequest::new(request.program, request.args)
         .with_stdin(ProcessStdin::Bytes(Vec::new()));
     process.cwd = request.cwd;
@@ -385,6 +405,12 @@ async fn supervise_pty(
         return;
     };
     let output = child.take_output().expect("PTY output exists");
+    #[cfg(test)]
+    let output: Box<dyn tokio::io::AsyncRead + Send + Unpin> = if fail_cleanup {
+        Box::new(PendingOutput)
+    } else {
+        output
+    };
     let input = child.take_input().expect("PTY input exists");
     let (commands_tx, mut commands_rx) = mpsc::channel(MAX_PTY_COMMANDS);
     let (input_tx, input_rx) = mpsc::channel(MAX_PTY_WRITES);
@@ -431,14 +457,26 @@ async fn supervise_pty(
     writer.abort();
     let finalization = child.finalize();
     let tree = child.wait_tree().await;
+    let cleanup = finalization.and(tree);
+    #[cfg(test)]
+    let cleanup = if fail_cleanup {
+        Err(io::Error::other("injected PTY cleanup failure"))
+    } else {
+        cleanup
+    };
     // Closing ConPTY releases its output writer. The reader cannot reach EOF before this drop.
     run_blocking(move || drop(child)).await;
-    let _ = reader.await;
-    let cleanup = finalization.and(tree);
     if let Err(error) = cleanup {
+        reader.abort();
+        let _ = reader.await;
+        on_exit(PtyExit {
+            code: None,
+            signal: None,
+        });
         let _ = terminal_tx.send(Some(Err(Arc::new(error))));
         return;
     }
+    let _ = reader.await;
     on_exit(status.map(exit_from_status).unwrap_or(PtyExit {
         code: None,
         signal: None,
@@ -534,6 +572,8 @@ mod tests {
     };
     use crate::subprocess::{AlwaysAllow, LaunchCheck};
 
+    static REAL_PTY_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     struct DenyLaunch;
 
     struct InterruptedOnce {
@@ -575,6 +615,7 @@ mod tests {
 
     #[tokio::test]
     async fn abandoned_open_does_not_release_a_ready_unix_target() {
+        let _serial = REAL_PTY_TEST.lock().await;
         let gate = Arc::new(ReadyGate {
             reached: tokio::sync::Notify::new(),
             resume: tokio::sync::Notify::new(),
@@ -647,6 +688,7 @@ mod tests {
 
     #[tokio::test]
     async fn unix_pty_has_controlling_tty_and_reports_native_exit() {
+        let _serial = REAL_PTY_TEST.lock().await;
         let output = Arc::new(Mutex::new(Vec::new()));
         let collected = Arc::clone(&output);
         let (exit_tx, exit_rx) = oneshot::channel();
@@ -698,6 +740,7 @@ mod tests {
 
     #[tokio::test]
     async fn unix_pty_resize_changes_the_childs_reported_size() {
+        let _serial = REAL_PTY_TEST.lock().await;
         let output = Arc::new(Mutex::new(Vec::new()));
         let collected = Arc::clone(&output);
         let request = PtyRequest::new("/bin/sh", ["-c", "read line; stty size; read line"], 80, 24);
@@ -728,6 +771,140 @@ mod tests {
         handle.close().await.expect("owned child tree closes");
         handle.close().await.expect("second close is idempotent");
         assert!(handle.write(b"late".to_vec()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn cleanup_failure_reports_one_unknown_exit_and_preserves_close_error() {
+        let _serial = REAL_PTY_TEST.lock().await;
+        let (exit_tx, exit_rx) = oneshot::channel();
+        let exit_tx = Arc::new(Mutex::new(Some(exit_tx)));
+        let exits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let recorded = Arc::clone(&exits);
+        let mut request = PtyRequest::new("/bin/sh", ["-c", "exit 0"], 80, 24);
+        request.fail_cleanup = true;
+        let handle = DefaultPtySpawner
+            .spawn(
+                request,
+                Arc::new(AlwaysAllow),
+                Arc::new(|_| {}),
+                Arc::new(move |exit| {
+                    recorded.fetch_add(1, Ordering::AcqRel);
+                    if let Some(sender) = exit_tx.lock().unwrap().take() {
+                        let _ = sender.send(exit);
+                    }
+                }),
+            )
+            .await
+            .expect("PTY starts");
+        let error = tokio::time::timeout(Duration::from_secs(5), handle.close())
+            .await
+            .expect("cleanup completes")
+            .expect_err("cleanup failure is preserved");
+        assert!(error.to_string().contains("injected PTY cleanup failure"));
+        let exit = tokio::time::timeout(Duration::from_secs(5), exit_rx)
+            .await
+            .expect("cleanup failure publishes exit")
+            .expect("exit callback runs");
+        assert_eq!(
+            exit,
+            PtyExit {
+                code: None,
+                signal: None
+            }
+        );
+        assert_eq!(exits.load(Ordering::Acquire), 1);
+    }
+
+    #[tokio::test]
+    async fn closing_interactive_shell_kills_background_job_groups() {
+        let _serial = REAL_PTY_TEST.lock().await;
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let collected = Arc::clone(&output);
+        let request = PtyRequest::new("/bin/bash", ["-i"], 80, 24);
+        let handle = DefaultPtySpawner
+            .spawn(
+                request,
+                Arc::new(AlwaysAllow),
+                Arc::new(move |chunk| collected.lock().unwrap().extend(chunk)),
+                Arc::new(|_| {}),
+            )
+            .await
+            .expect("interactive shell starts");
+        handle
+            .write(b"sleep 60 & echo BG1:$!; (trap '' HUP; sleep 60) & echo BG2:$!\n".to_vec())
+            .await
+            .expect("jobs start");
+        let pids = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let text = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
+                if let (Some(first), Some(second)) =
+                    (background_pid(&text, "BG1:"), background_pid(&text, "BG2:"))
+                {
+                    break [first, second];
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("shell reports both background job process IDs");
+        let jobs_started = pids.iter().all(|pid| process_running(*pid));
+        let separate_from_shell = pids
+            .iter()
+            .all(|pid| process_group(*pid) != Some(handle.pid() as i32));
+        let separate_jobs = process_group(pids[0]) != process_group(pids[1]);
+        let close = tokio::time::timeout(Duration::from_secs(5), handle.close()).await;
+        let survivors = pids
+            .into_iter()
+            .filter(|pid| process_running(*pid))
+            .collect::<Vec<_>>();
+        for pid in &survivors {
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .status();
+        }
+        close
+            .expect("terminal closes")
+            .expect("owned tree cleanup completes");
+        assert!(jobs_started, "both jobs must be running before close");
+        assert!(
+            separate_from_shell && separate_jobs,
+            "jobs must have their own process groups"
+        );
+        assert!(
+            survivors.is_empty(),
+            "background jobs survived close: {survivors:?}"
+        );
+    }
+
+    fn background_pid(output: &str, marker: &str) -> Option<libc::pid_t> {
+        output
+            .split(marker)
+            .skip(1)
+            .filter_map(|text| {
+                text.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse()
+                    .ok()
+            })
+            .next()
+    }
+
+    fn process_running(pid: libc::pid_t) -> bool {
+        let output = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .output()
+            .expect("ps inspects the test child");
+        let state = String::from_utf8_lossy(&output.stdout);
+        output.status.success() && !state.trim().is_empty() && !state.trim().starts_with('Z')
+    }
+
+    fn process_group(pid: libc::pid_t) -> Option<libc::pid_t> {
+        let output = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "pgid="])
+            .output()
+            .expect("ps inspects the test job group");
+        String::from_utf8_lossy(&output.stdout).trim().parse().ok()
     }
 }
 
