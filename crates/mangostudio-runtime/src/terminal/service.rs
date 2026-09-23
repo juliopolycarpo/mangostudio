@@ -31,22 +31,25 @@ const MAX_TERMINAL_SESSIONS: usize = 16;
 const MAX_WRITE_BYTES: usize = 16 * 1024 - 1;
 const CONSENT_POLL: Duration = Duration::from_millis(100);
 
+/// Every method [`register`] installs; the hello manifest attests them as one unit.
+pub(crate) const TERMINAL_METHODS: [&str; 8] = [
+    "terminal.open",
+    "terminal.attach",
+    "terminal.detach",
+    "terminal.write",
+    "terminal.resize",
+    "terminal.ack",
+    "terminal.close",
+    "terminal.list",
+];
+
 pub(crate) fn register(mut registry: Registry, consent: ConsentSource) -> Registry {
     let service = Arc::new(Service::new(
         Arc::new(consent),
         Arc::new(DefaultPtySpawner),
         Arc::new(|| crate::probing::host::build_runtime_path_env(None)),
     ));
-    for method in [
-        "terminal.open",
-        "terminal.attach",
-        "terminal.detach",
-        "terminal.write",
-        "terminal.resize",
-        "terminal.ack",
-        "terminal.close",
-        "terminal.list",
-    ] {
+    for method in TERMINAL_METHODS {
         let service = Arc::clone(&service);
         registry = registry.implement(method, move |params: Value, context: CallContext| {
             let service = Arc::clone(&service);
@@ -237,11 +240,7 @@ impl Service {
         }
         if !self.fresh_shell_consent().await {
             handle.close().await.map_err(pty_io)?;
-            return Err(consent_denial(
-                "terminal.open",
-                &["shell".to_string()],
-                self.consent.slot().as_str(),
-            ));
+            return Err(shell_denial("terminal.open", &self.consent));
         }
         let entry = Arc::new(Entry {
             session_id: id.clone(),
@@ -338,14 +337,7 @@ impl Service {
             return Err(exited(&params.session_id));
         }
         if !self.fresh_shell_consent().await {
-            self.remove_live(&entry);
-            entry.consent_revoked.store(true, Ordering::Release);
-            self.close_entry(&entry).await.map_err(pty_io)?;
-            return Err(consent_denial(
-                "terminal.write",
-                &["shell".to_string()],
-                self.consent.slot().as_str(),
-            ));
+            return Err(self.revoke(&entry, "terminal.write").await);
         }
         if entry.closed.load(Ordering::Acquire) {
             return Err(not_found(&params.session_id));
@@ -363,14 +355,7 @@ impl Service {
             return Err(not_found(&params.session_id));
         }
         if !self.fresh_shell_consent().await {
-            self.remove_live(&entry);
-            entry.consent_revoked.store(true, Ordering::Release);
-            self.close_entry(&entry).await.map_err(pty_io)?;
-            return Err(consent_denial(
-                "terminal.resize",
-                &["shell".to_string()],
-                self.consent.slot().as_str(),
-            ));
+            return Err(self.revoke(&entry, "terminal.resize").await);
         }
         if entry.closed.load(Ordering::Acquire) {
             return Err(not_found(&params.session_id));
@@ -455,6 +440,16 @@ impl Service {
         if matches!(sessions.get(&entry.session_id), Some(Slot::Live(current)) if Arc::ptr_eq(current, entry))
         {
             sessions.remove(&entry.session_id);
+        }
+    }
+
+    /// Stops a session whose shell consent was withdrawn mid-call and returns the denial.
+    async fn revoke(&self, entry: &Arc<Entry>, method: &str) -> RemoteError {
+        self.remove_live(entry);
+        entry.consent_revoked.store(true, Ordering::Release);
+        match self.close_entry(entry).await {
+            Ok(()) => shell_denial(method, &self.consent),
+            Err(error) => pty_io(error),
         }
     }
 
@@ -567,6 +562,10 @@ impl Drop for Reservation {
     }
 }
 
+fn shell_denial(method: &str, consent: &ConsentSource) -> RemoteError {
+    consent_denial(method, &["shell".to_string()], consent.slot().as_str())
+}
+
 struct FreshLaunch {
     consent: Arc<ConsentSource>,
     cwd: Option<PathBuf>,
@@ -575,11 +574,7 @@ struct FreshLaunch {
 impl LaunchCheck for FreshLaunch {
     fn check(&self) -> Result<(), RemoteError> {
         if !self.consent.refresh().shell {
-            return Err(consent_denial(
-                "terminal.open",
-                &["shell".to_string()],
-                self.consent.slot().as_str(),
-            ));
+            return Err(shell_denial("terminal.open", &self.consent));
         }
         if let Some(cwd) = &self.cwd
             && !std::fs::metadata(cwd).is_ok_and(|metadata| metadata.is_dir())

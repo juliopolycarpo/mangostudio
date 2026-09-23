@@ -217,18 +217,9 @@ pub(crate) async fn build_capability_manifest(
     // close handler remains callable after shell consent is revoked. Attest that invariant
     // independently of current consent or shell discovery, which can change after hello.
     let terminal_implementation = cfg!(any(unix, windows))
-        && [
-            "terminal.open",
-            "terminal.attach",
-            "terminal.detach",
-            "terminal.write",
-            "terminal.resize",
-            "terminal.ack",
-            "terminal.close",
-            "terminal.list",
-        ]
-        .iter()
-        .all(|method| registry.classify(method) == crate::registry::Classification::Implemented);
+        && crate::terminal::TERMINAL_METHODS.iter().all(|method| {
+            registry.classify(method) == crate::registry::Classification::Implemented
+        });
     manifest.terminal_close_after_revocation = terminal_implementation.then_some(true);
     manifest.terminal = Some(allow.shell && !manifest.shells.is_empty() && terminal_implementation);
     manifest.gh = Some(gh_probe.unwrap_or_else(|_| unavailable_git()));

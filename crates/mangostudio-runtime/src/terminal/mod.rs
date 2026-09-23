@@ -4,4 +4,4 @@ pub mod flow;
 pub mod pty;
 mod service;
 
-pub(crate) use service::register;
+pub(crate) use service::{TERMINAL_METHODS, register};
