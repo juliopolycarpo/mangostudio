@@ -845,8 +845,17 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
-        .await
-        .expect("shell reports both background job process IDs");
+        .await;
+        let pids = match pids {
+            Ok(pids) => pids,
+            Err(_) => {
+                let captured = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
+                let close = tokio::time::timeout(Duration::from_secs(15), handle.close()).await;
+                panic!(
+                    "shell did not report both background job PIDs; output={captured:?}; close={close:?}"
+                );
+            }
+        };
         let jobs_started = pids.iter().all(|pid| process_running(*pid));
         let separate_from_shell = pids
             .iter()
