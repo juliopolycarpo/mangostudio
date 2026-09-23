@@ -3,9 +3,9 @@
 //! `CreateProcessW`, the install environment allowlist, a null stdin, the runtime's own cwd, a
 //! zero capture cap, and an output tap.
 //!
-//! When the install shape fails, the assertion reports a matrix that changes one factor at a time
-//! against it, up to the request `shell.run` builds (which CI has shown to stream), so a failure
-//! on a Windows runner names the factor that matters.
+//! When the install shape fails, the assertion names (never prints the values of) the variables
+//! the allowlist drops here and bisects them for the one PowerShell needs, so a failure on a
+//! Windows runner names the variable.
 #![cfg(windows)]
 
 use std::collections::BTreeMap;
@@ -19,10 +19,6 @@ use mangostudio_runtime::subprocess::{
     ProcessSpawner, ProcessStdin, ProcessStream,
 };
 use tokio_util::sync::CancellationToken;
-
-mod support;
-
-use support::scratch::scratch_dir;
 
 /// `INSTALL_ENV_KEYS` plus `WIN32_INSTALL_ENV_KEYS` from `src/install/environment.rs`.
 const INSTALL_KEYS: &[&str] = &[
@@ -76,14 +72,6 @@ fn install_env() -> BTreeMap<OsString, OsString> {
     env
 }
 
-fn powershell_path() -> PathBuf {
-    PathBuf::from(std::env::var_os("SystemRoot").expect("Windows defines SystemRoot"))
-        .join("System32")
-        .join("WindowsPowerShell")
-        .join("v1.0")
-        .join("powershell.exe")
-}
-
 #[derive(Clone)]
 struct Shape {
     label: &'static str,
@@ -115,15 +103,11 @@ impl Shape {
 }
 
 /// Runs one shape and returns the stdout it streamed (or captured) and a one-line report.
-async fn run(shape: &Shape) -> (String, String) {
+async fn run(shape: &Shape, deadline: Duration) -> (String, String) {
     let (tap, mut chunks) = ProcessOutputTap::channel(64);
     let mut request = ProcessRequest::new(&shape.program, shape.args.clone())
         .with_stdin(shape.stdin.clone())
-        .with_budget(ProcessBudget::new(
-            Duration::from_secs(15),
-            shape.cap,
-            shape.cap,
-        ));
+        .with_budget(ProcessBudget::new(deadline, shape.cap, shape.cap));
     request.env = Some(shape.env.clone());
     request.cwd = shape.cwd.clone();
     if shape.tap {
@@ -161,78 +145,88 @@ async fn run(shape: &Shape) -> (String, String) {
     (stdout, report)
 }
 
-/// One factor changed at a time from the install shape, ending at `shell.run`'s request.
-fn variants(directory: &std::path::Path) -> Vec<Shape> {
-    let base = Shape::install("Write-Output x");
-    let full: BTreeMap<OsString, OsString> = std::env::vars_os().collect();
-    let script = directory.join("installer.ps1");
-    std::fs::write(&script, "Write-Output 'x'\r\n").expect("script is written");
-    let mut shapes = Vec::new();
-    let mut push = |label, change: &dyn Fn(&mut Shape)| {
-        let mut shape = base.clone();
-        shape.label = label;
-        change(&mut shape);
-        shapes.push(shape);
-    };
-    push("-File script", &|shape| {
-        shape.args = vec![
-            "-NoProfile".into(),
-            "-NonInteractive".into(),
-            "-ExecutionPolicy".into(),
-            "Bypass".into(),
-            "-File".into(),
-            script.to_string_lossy().into_owned(),
-        ];
-    });
-    push("[Console]::Out.Write", &|shape| {
-        shape.args[3] = "[Console]::Out.Write('x')".into();
-    });
-    push("absolute powershell.exe", &|shape| {
-        shape.program = powershell_path();
-    });
-    push("full environment", &|shape| shape.env = full.clone());
-    push("explicit cwd", &|shape| {
-        shape.cwd = Some(directory.to_path_buf());
-    });
-    push("capture instead of tap", &|shape| {
-        shape.tap = false;
-        shape.cap = 4096;
-    });
-    push("byte stdin", &|shape| {
-        shape.stdin = ProcessStdin::Bytes(b"input\r\n".to_vec());
-    });
-    push("shell.run shape", &|shape| {
-        shape.program = powershell_path();
-        shape.args[3] = "[Console]::Out.Write('x')".into();
-        shape.env = full.clone();
-        shape.cwd = Some(directory.to_path_buf());
-        shape.tap = false;
-        shape.cap = 4096;
-    });
-    push("shell.run shape with Write-Output", &|shape| {
-        shape.program = powershell_path();
-        shape.env = full.clone();
-        shape.cwd = Some(directory.to_path_buf());
-        shape.tap = false;
-        shape.cap = 4096;
-    });
-    shapes
+/// Names (never values) of this process's variables the install allowlist drops, and of the
+/// allowlist keys that exist here only under a different casing.
+fn allowlist_report(full: &BTreeMap<OsString, OsString>) -> (Vec<OsString>, String) {
+    let allowed = install_env();
+    let dropped: Vec<OsString> = full
+        .keys()
+        .filter(|key| {
+            !allowed.contains_key(*key) && !key.to_string_lossy().eq_ignore_ascii_case("PATH")
+        })
+        .cloned()
+        .collect();
+    let recased: Vec<String> = INSTALL_KEYS
+        .iter()
+        .filter_map(|wanted| {
+            let actual = full
+                .keys()
+                .map(|key| key.to_string_lossy().into_owned())
+                .find(|key| key.eq_ignore_ascii_case(wanted) && key != wanted)?;
+            (!full.contains_key(&OsString::from(*wanted)))
+                .then(|| format!("{wanted} (here {actual})"))
+        })
+        .collect();
+    let report = format!(
+        "allowlist keys present only under another casing: {recased:?}\ndropped variables: {:?}",
+        dropped
+            .iter()
+            .map(|key| key.to_string_lossy())
+            .collect::<Vec<_>>()
+    );
+    (dropped, report)
+}
+
+/// The install shape with the allowlist plus `extra` variables from `full`, with a short bound.
+async fn streams_with(full: &BTreeMap<OsString, OsString>, extra: &[OsString]) -> (bool, String) {
+    let mut shape = Shape::install("Write-Output x");
+    for key in extra {
+        shape.env.insert(key.clone(), full[key].clone());
+    }
+    let (stdout, report) = run(&shape, Duration::from_secs(8)).await;
+    (stdout.contains('x'), report)
+}
+
+/// Bisects the dropped variables for one whose addition lets the install shape stream.
+async fn bisect(full: &BTreeMap<OsString, OsString>, dropped: Vec<OsString>) -> String {
+    let mut steps = Vec::new();
+    let (all, report) = streams_with(full, &dropped).await;
+    steps.push(format!(
+        "allowlist + all {} dropped: {report}",
+        dropped.len()
+    ));
+    if !all {
+        return steps.join("\n");
+    }
+    let mut candidates = dropped;
+    while candidates.len() > 1 {
+        let half = candidates.split_off(candidates.len() / 2);
+        let (first, report) = streams_with(full, &candidates).await;
+        let names: Vec<_> = candidates.iter().map(|key| key.to_string_lossy()).collect();
+        steps.push(format!("allowlist + {names:?}: {report}"));
+        if !first {
+            candidates = half;
+        }
+    }
+    let (single, report) = streams_with(full, &candidates).await;
+    steps.push(format!(
+        "allowlist + {:?} alone streams={single}: {report}",
+        candidates.first().map(|key| key.to_string_lossy())
+    ));
+    steps.join("\n")
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn powershell_streams_stdout_under_the_install_request_shape() {
-    let directory = scratch_dir("install-powershell-windows");
-    let (stdout, report) = run(&Shape::install("Write-Output x")).await;
+    let (stdout, report) = run(&Shape::install("Write-Output x"), Duration::from_secs(15)).await;
     if stdout.contains('x') {
         return;
     }
-    let mut matrix = vec![report];
-    for shape in variants(&directory) {
-        matrix.push(run(&shape).await.1);
-    }
+    let full: BTreeMap<OsString, OsString> = std::env::vars_os().collect();
+    let (dropped, names) = allowlist_report(&full);
+    let search = bisect(&full, dropped).await;
     panic!(
         "expected a PowerShell recipe child to stream stdout \"x\" under the install request \
-         shape | received none. One factor at a time:\n{}",
-        matrix.join("\n")
+         shape | received none.\n{report}\n{names}\nsearch:\n{search}"
     );
 }
