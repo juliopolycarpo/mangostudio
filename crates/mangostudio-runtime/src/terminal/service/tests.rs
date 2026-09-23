@@ -289,6 +289,26 @@ async fn revocation_closes_even_while_a_terminal_operation_is_busy() {
 }
 
 #[tokio::test]
+async fn close_does_not_wait_for_a_blocked_terminal_write() {
+    let closes = Arc::new(Mutex::new(0));
+    let service = service_with_live_entry(Arc::clone(&closes));
+    let entry = service.require("one").unwrap();
+    // A shell that stops reading input keeps `write_all` pending while `write` holds this lock.
+    let _busy = entry.operation.lock().await;
+
+    tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        service.close(SessionParams {
+            session_id: "one".into(),
+        }),
+    )
+    .await
+    .expect("terminal.close must not wait for a blocked terminal write")
+    .unwrap();
+    assert_eq!(*closes.lock().unwrap(), 1);
+}
+
+#[tokio::test]
 async fn fake_pty_covers_open_attach_write_resize_ack_detach_and_close() {
     let (_scratch, service, state) = prepared_service();
     let session = fake_session();

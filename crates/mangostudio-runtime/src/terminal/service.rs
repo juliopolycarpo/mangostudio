@@ -394,8 +394,10 @@ impl Service {
                 _ => None,
             }
         };
+        // No `operation` lock: a write to a shell that stopped reading input holds it until the
+        // child dies, and killing the child is exactly what releases it. `closed` is already set,
+        // so a write that has not reached its final check still refuses.
         if let Some(entry) = entry {
-            let _operation = entry.operation.lock().await;
             self.close_entry(&entry).await.map_err(pty_io)?;
         }
         Ok(json!({ "ok": true }))
