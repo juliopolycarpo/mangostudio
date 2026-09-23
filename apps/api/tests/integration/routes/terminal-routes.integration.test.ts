@@ -133,7 +133,7 @@ describe('terminal HTTP routes with a fake runtime', () => {
     );
     expect((await unavailable.json()) as TerminalAvailability).toMatchObject({
       available: false,
-      reason: 'unavailable',
+      reason: 'runtime-update-required',
     });
     const refused = await app.handle(
       jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
@@ -142,7 +142,7 @@ describe('terminal HTTP routes with a fake runtime', () => {
     expect(await refused.json()).toMatchObject({
       code: ERROR_CODES.UNSUPPORTED,
       error: expect.stringContaining('needs a runtime update'),
-      details: { reason: 'unavailable' },
+      details: { reason: 'runtime-update-required' },
     });
     expect(client.calls.open).toHaveLength(0);
 

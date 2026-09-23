@@ -554,14 +554,33 @@ describe('terminalSessionService.open', () => {
     const { service } = createHarness({ client });
 
     await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toMatchObject({
-      reason: 'unavailable',
+      reason: 'runtime-update-required',
       message: expect.stringContaining('needs a runtime update'),
     });
     expect(client.calls.open).toHaveLength(0);
     expect(await service.availability(USER_ID, ENVIRONMENT_ID)).toMatchObject({
       available: false,
-      reason: 'unavailable',
+      reason: 'runtime-update-required',
       openSessions: 0,
+    });
+  });
+
+  test('keeps missing shell consent on the unavailable reason even for an older runtime', async () => {
+    const { terminalCloseAfterRevocation: _unproven, ...oldManifest } = FAKE_TERMINAL_MANIFEST;
+    const client = new FakeTerminalRuntimeClient({
+      manifest: {
+        ...oldManifest,
+        features: { ...oldManifest.features, shell: false },
+      },
+    });
+    const { service } = createHarness({ client });
+
+    expect(await service.availability(USER_ID, ENVIRONMENT_ID)).toMatchObject({
+      available: false,
+      reason: 'unavailable',
+    });
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toMatchObject({
+      reason: 'unavailable',
     });
   });
 
