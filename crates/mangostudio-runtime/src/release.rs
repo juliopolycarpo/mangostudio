@@ -19,13 +19,19 @@
 //! |-----------------------------------------|--------------|
 //! | EOF grace, every server concurrently    | `T0 + 1.0 s` ([`EOF_CUTOFF`]) |
 //! | SIGTERM grace, every server concurrently| `T0 + 2.0 s` ([`TERM_CUTOFF`]) |
-//! | forced kill and empty-tree proof        | `T0 + 3.0 s` ([`SHUTDOWN_BUDGET`]) |
+//! | forced kill and empty-tree proof        | `T0 + 2.75 s` ([`PROOF_CUTOFF`]) |
+//! | every owner reported released           | `T0 + 3.0 s` ([`SHUTDOWN_BUDGET`]) |
 //! | blocking-task grace in `shut_down`      | `T0 + 3.5 s` ([`EXIT_DEADLINE`]) |
 //! | Hub SIGKILL                             | `T0 + 4.0 s` |
 //!
 //! Each MCP server's ordinary graces (two seconds each, matching the SDK's close) are compressed
 //! to these cut-offs only once shutdown has begun, so a single `mcp.disconnect` still gets the
 //! full sequence. The half second left before SIGKILL is the margin for process exit itself.
+//!
+//! The budget is best effort before the Hub's SIGKILL, not a guarantee of an orderly stop: in
+//! the ordinary case, a stubborn tree included, the forced kill's proof completes well inside it,
+//! but a tree whose proof is still missing at [`PROOF_CUTOFF`] is abandoned, and the Unix
+//! guardian's parent-death lease or the Windows kill-on-close Job is the backstop that ends it.
 //!
 //! On Windows the Hub has no signals to send: both escalation steps become process termination
 //! at `T0 + 2 s`. The runtime cannot interrupt a Job-contained server gracefully either, so a
@@ -47,14 +53,20 @@ pub(crate) const HUB_KILL_GRACE: Duration = Duration::from_secs(2);
 pub(crate) const EOF_CUTOFF: Duration = Duration::from_millis(1_000);
 /// When, after shutdown begins, a server still running after SIGTERM is killed.
 pub(crate) const TERM_CUTOFF: Duration = Duration::from_millis(2_000);
-/// How long, after shutdown begins, a host waits for every owner to release.
+/// When, after shutdown begins, an owner stops waiting for its empty-tree proof and reports
+/// released; the quarter second before [`SHUTDOWN_BUDGET`] covers dropping its handles.
+pub(crate) const PROOF_CUTOFF: Duration = Duration::from_millis(2_750);
+/// How long, after shutdown begins, a host waits for every owner to release. Best effort before
+/// the Hub's SIGKILL: an owner still working at this point is abandoned, and the Unix guardian's
+/// parent-death lease or the Windows kill-on-close Job ends its tree with the process.
 pub(crate) const SHUTDOWN_BUDGET: Duration = Duration::from_millis(3_000);
 /// When, after shutdown begins, the process must be leaving: the blocking-task grace in
 /// `cli.rs`'s `shut_down` is capped here.
 pub(crate) const EXIT_DEADLINE: Duration = Duration::from_millis(3_500);
 
 const _: () = assert!(EOF_CUTOFF.as_millis() < TERM_CUTOFF.as_millis());
-const _: () = assert!(TERM_CUTOFF.as_millis() < SHUTDOWN_BUDGET.as_millis());
+const _: () = assert!(TERM_CUTOFF.as_millis() < PROOF_CUTOFF.as_millis());
+const _: () = assert!(PROOF_CUTOFF.as_millis() < SHUTDOWN_BUDGET.as_millis());
 const _: () = assert!(SHUTDOWN_BUDGET.as_millis() < EXIT_DEADLINE.as_millis());
 const _: () = assert!(
     EXIT_DEADLINE.as_millis() < HUB_TERMINATE_GRACE.as_millis() + HUB_KILL_GRACE.as_millis()
@@ -79,7 +91,8 @@ impl Drop for Owner {
 }
 
 impl Release {
-    fn new() -> Self {
+    /// A tracker of its own; production code shares [`Self::process`], tests isolate with this.
+    pub(crate) fn new() -> Self {
         Self {
             began: watch::Sender::new(None),
             live: watch::Sender::new(0),

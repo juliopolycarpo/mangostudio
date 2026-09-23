@@ -21,7 +21,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::blocking::run_blocking;
-use crate::release::{EOF_CUTOFF, Owner, Release, TERM_CUTOFF};
+use crate::release::{EOF_CUTOFF, Owner, PROOF_CUTOFF, Release, TERM_CUTOFF};
 use crate::subprocess::{LaunchCheck, PipeChild, ProcessRequest};
 
 /// Process-wide ceiling on live stdio MCP servers.
@@ -134,6 +134,8 @@ pub(crate) trait StdioSpawner: Send + Sync {
 /// ```
 pub(crate) struct GuardedStdioSpawner {
     pool: Arc<Semaphore>,
+    /// The shutdown tracker each owner reports to and whose cut-offs bound its stop.
+    release: &'static Release,
 }
 
 impl Default for GuardedStdioSpawner {
@@ -141,6 +143,19 @@ impl Default for GuardedStdioSpawner {
         static POOL: OnceLock<Arc<Semaphore>> = OnceLock::new();
         Self {
             pool: Arc::clone(POOL.get_or_init(|| Arc::new(Semaphore::new(MAX_MCP_CHILDREN)))),
+            release: Release::process(),
+        }
+    }
+}
+
+impl GuardedStdioSpawner {
+    /// A spawner whose owners report to `release` instead of the process-wide tracker, so a test
+    /// can begin its own shutdown without stopping every other test's servers.
+    #[cfg(test)]
+    fn with_release(release: &'static Release) -> Self {
+        Self {
+            release,
+            ..Self::default()
         }
     }
 }
@@ -153,6 +168,7 @@ impl StdioSpawner for GuardedStdioSpawner {
         cancel: CancellationToken,
     ) -> StartFuture<'_> {
         let permit = Arc::clone(&self.pool).try_acquire_owned();
+        let release = self.release;
         Box::pin(async move {
             let permit = permit.map_err(|_| StartError::LimitExceeded)?;
             let (ready_tx, ready_rx) = oneshot::channel();
@@ -160,13 +176,13 @@ impl StdioSpawner for GuardedStdioSpawner {
             // Dropping this future before a result arrives abandons the start, never the child:
             // the owner task sees the cancellation and cleans up whatever it already launched.
             let abandon = start_cancel.clone().drop_guard();
-            let owner = Release::process().own();
+            let owner = release.own();
             tokio::spawn(own(
                 launch,
                 check,
                 start_cancel.clone(),
                 ready_tx,
-                (permit, owner),
+                (permit, owner, release),
             ));
             let result = ready_rx.await.unwrap_or(Err(StartError::Unavailable));
             let _ = abandon.disarm();
@@ -180,7 +196,7 @@ async fn own(
     check: Arc<dyn LaunchCheck>,
     cancel: CancellationToken,
     ready: oneshot::Sender<Result<OwnedStdio, StartError>>,
-    _held: (OwnedSemaphorePermit, Owner),
+    (_permit, _owner, tracker): (OwnedSemaphorePermit, Owner, &'static Release),
 ) {
     let mut request =
         ProcessRequest::new(launch.program, launch.args.into_iter().map(OsString::from));
@@ -212,14 +228,14 @@ async fn own(
     };
     if let Err(error) = release(&mut child, &cancel).await {
         child.abort_start();
-        let _ = cleanup(child, None).await;
+        let _ = cleanup(child, None, tracker).await;
         let _ = ready.send(Err(error));
         return;
     }
     let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.take_stdin(), child.take_stdout(), child.take_stderr())
     else {
-        let _ = cleanup(child, None).await;
+        let _ = cleanup(child, None, tracker).await;
         let _ = ready.send(Err(StartError::Spawn(io::Error::other(
             "the MCP server started without its three stdio pipes",
         ))));
@@ -241,7 +257,7 @@ async fn own(
     if ready.send(Ok(owned)).is_err() {
         close.cancel();
     }
-    let result = run(child, &close).await;
+    let result = run(child, &close, tracker).await;
     drain.abort();
     let _ = terminal_tx.send(Some(result));
 }
@@ -265,17 +281,21 @@ async fn release(child: &mut PipeChild, cancel: &CancellationToken) -> Result<()
 ///
 /// Process shutdown past [`EOF_CUTOFF`] counts as a close request too: a server whose session
 /// nobody closed (a connect that landed during teardown) is still stopped inside the budget.
-async fn run(mut child: PipeChild, close: &CancellationToken) -> Result<(), String> {
+async fn run(
+    mut child: PipeChild,
+    close: &CancellationToken,
+    release: &Release,
+) -> Result<(), String> {
     let exited = tokio::select! {
         status = child.wait_target() => Some(status),
         () = close.cancelled() => None,
-        () = Release::process().cutoff(EOF_CUTOFF) => None,
+        () = release.cutoff(EOF_CUTOFF) => None,
     };
     let exited = match exited {
         Some(status) => Some(status),
-        None => stop(&mut child).await,
+        None => stop(&mut child, release).await,
     };
-    cleanup(child, exited).await
+    cleanup(child, exited, release).await
 }
 
 /// EOF grace, SIGTERM grace, then a forced tree kill; returns the target status once seen.
@@ -283,12 +303,15 @@ async fn run(mut child: PipeChild, close: &CancellationToken) -> Result<(), Stri
 /// Once process shutdown has begun, each grace also ends at its shutdown cut-off
 /// ([`EOF_CUTOFF`], [`TERM_CUTOFF`]), so every server's stop fits the Hub's window however late
 /// it started; see [`crate::release`] for the arithmetic.
-async fn stop(child: &mut PipeChild) -> Option<io::Result<std::process::ExitStatus>> {
-    if let Some(status) = wait_within(child, EOF_GRACE, EOF_CUTOFF).await {
+async fn stop(
+    child: &mut PipeChild,
+    release: &Release,
+) -> Option<io::Result<std::process::ExitStatus>> {
+    if let Some(status) = wait_within(child, EOF_GRACE, EOF_CUTOFF, release).await {
         return Some(status);
     }
     if child.interrupt().is_ok()
-        && let Some(status) = wait_within(child, TERM_GRACE, TERM_CUTOFF).await
+        && let Some(status) = wait_within(child, TERM_GRACE, TERM_CUTOFF, release).await
     {
         return Some(status);
     }
@@ -300,39 +323,57 @@ async fn wait_within(
     child: &mut PipeChild,
     grace: Duration,
     cutoff: Duration,
+    release: &Release,
 ) -> Option<io::Result<std::process::ExitStatus>> {
     tokio::select! {
         status = child.wait_target() => Some(status),
         () = tokio::time::sleep(grace) => None,
-        () = Release::process().cutoff(cutoff) => None,
+        () = release.cutoff(cutoff) => None,
     }
 }
 
 /// Forces whatever is left of the tree, acknowledges final cleanup, and waits for the owner's
 /// empty-tree proof. Every exit path runs this exactly once.
+///
+/// Once process shutdown has begun, both waits also end at [`PROOF_CUTOFF`], so the owner
+/// reports released inside the shutdown budget; a proof still missing then is left to the
+/// guardian or Job lease, which ends the tree with the process.
 async fn cleanup(
     mut child: PipeChild,
     exited: Option<io::Result<std::process::ExitStatus>>,
+    release: &Release,
 ) -> Result<(), String> {
     let forced = child.force();
     if exited.is_none() {
-        let _ = tokio::time::timeout(CLEANUP_TIMEOUT, child.wait_target()).await;
+        let _ = within_cleanup_bound(child.wait_target(), release).await;
     }
     let finalized = child.finalize();
-    let tree = tokio::time::timeout(CLEANUP_TIMEOUT, child.wait_tree()).await;
+    let tree = within_cleanup_bound(child.wait_tree(), release).await;
     run_blocking(move || drop(child)).await;
     match tree {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => return Err(format!("MCP server process tree cleanup failed: {error}")),
-        Err(_) => {
+        Some(Ok(())) => {}
+        Some(Err(error)) => {
+            return Err(format!("MCP server process tree cleanup failed: {error}"));
+        }
+        None => {
             return Err(format!(
-                "MCP server process tree did not report empty within {CLEANUP_TIMEOUT:?}"
+                "MCP server process tree did not report empty within {CLEANUP_TIMEOUT:?} or \
+                 the shutdown budget"
             ));
         }
     }
     // A forced kill that found the group already gone is the ordinary case after a natural exit.
     let _ = forced;
     finalized.map_err(|error| format!("MCP server final cleanup acknowledgement failed: {error}"))
+}
+
+/// `wait`, for at most [`CLEANUP_TIMEOUT`] or until the shutdown [`PROOF_CUTOFF`].
+async fn within_cleanup_bound<T>(wait: impl Future<Output = T>, release: &Release) -> Option<T> {
+    tokio::select! {
+        result = wait => Some(result),
+        () = tokio::time::sleep(CLEANUP_TIMEOUT) => None,
+        () = release.cutoff(PROOF_CUTOFF) => None,
+    }
 }
 
 async fn discard(mut stderr: Reader) {
@@ -458,6 +499,109 @@ mod tests {
         }
     }
 
+    /// A shutdown tracker of the test's own, so beginning shutdown here stops only this test's
+    /// servers.
+    fn isolated_release() -> &'static Release {
+        Box::leak(Box::new(Release::new()))
+    }
+
+    #[tokio::test]
+    async fn an_owner_nobody_closed_stops_gracefully_at_the_shutdown_cutoff() {
+        let directory = scratch_dir("mcp-process-orphan");
+        let ready = directory.join("ready");
+        let log = directory.join("stop.log");
+        // Stdin stays open (the orphaned client still holds it), so only the owner's own
+        // shutdown cut-off can ask this server to stop; it leaves cleanly on SIGTERM.
+        let body = format!(
+            "trap 'echo term >> {log}; exit 0' TERM\necho ready > {ready}\nwhile :; do sleep 0.05; done",
+            log = log.display(),
+            ready = ready.display()
+        );
+        let release = isolated_release();
+        let owned = GuardedStdioSpawner::with_release(release)
+            .start(
+                launch(&script(&directory, &body)),
+                Arc::new(AlwaysAllow),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("expected a started server | received {error:?}"));
+        wait_for(&ready).await;
+
+        release.begin();
+        let bound = EOF_CUTOFF + Duration::from_millis(1_500);
+        let exited = tokio::time::timeout(bound, owned.process.exited()).await;
+
+        assert_eq!(
+            exited,
+            Ok(Ok(())),
+            "expected the unclosed owner to stop its server within {bound:?} of shutdown \
+             beginning | received {exited:?}"
+        );
+        let stopped = std::fs::read_to_string(&log).unwrap_or_default();
+        assert_eq!(
+            stopped.trim(),
+            "term",
+            "expected the server to record a graceful SIGTERM | received {stopped:?}"
+        );
+        drop(owned.stdin);
+    }
+
+    #[tokio::test]
+    async fn a_stubborn_tree_is_proven_gone_inside_the_shutdown_budget() {
+        let directory = scratch_dir("mcp-process-stubborn-budget");
+        let target = directory.join("target.pid");
+        let descendant = directory.join("descendant.pid");
+        // Ignores end of input and SIGTERM, with a descendant: only the forced tree kill ends it.
+        let body = format!(
+            "trap '' TERM\necho $$ > {}\nsleep 30 & echo $! > {}\nwhile :; do sleep 1; done",
+            target.display(),
+            descendant.display()
+        );
+        let release = isolated_release();
+        let owned = GuardedStdioSpawner::with_release(release)
+            .start(
+                launch(&script(&directory, &body)),
+                Arc::new(AlwaysAllow),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("expected a started server | received {error:?}"));
+        wait_for(&target).await;
+        wait_for(&descendant).await;
+
+        let started = tokio::time::Instant::now();
+        release.begin();
+        drop(owned.stdin);
+        let closing = tokio::spawn({
+            let process = owned.process.clone();
+            async move { process.close().await }
+        });
+        let released = release.released().await;
+        let took = started.elapsed();
+
+        assert!(
+            released && took < crate::release::SHUTDOWN_BUDGET,
+            "expected every owner released within {:?} | received released: {released} after \
+             {took:?}",
+            crate::release::SHUTDOWN_BUDGET
+        );
+        assert_eq!(
+            closing.await.expect("the close task completes"),
+            Ok(()),
+            "expected the empty-tree proof to complete, not be cut off"
+        );
+        for (name, pid) in [
+            ("target", pid_from(&target)),
+            ("descendant", pid_from(&descendant)),
+        ] {
+            assert!(
+                !alive(pid),
+                "expected {name} pid {pid} gone once released | received a live process"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn concurrent_closes_share_one_owner_result() {
         let directory = scratch_dir("mcp-process-concurrent-close");
@@ -571,6 +715,7 @@ mod tests {
         let directory = scratch_dir("mcp-process-pool");
         let spawner = GuardedStdioSpawner {
             pool: Arc::new(Semaphore::new(1)),
+            ..GuardedStdioSpawner::default()
         };
         let first = spawner
             .start(
