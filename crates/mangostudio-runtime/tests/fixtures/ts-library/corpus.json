@@ -1218,6 +1218,38 @@
           "text": "t = 24:00\n"
         },
         {
+          "path": "codex/agents/date-space-z.toml",
+          "text": "d = 1979-05-27 Z\ne = 1979-05-27 z\n"
+        },
+        {
+          "path": "codex/agents/date-t-space-z.toml",
+          "text": "d = 1979-05-27T Z\n"
+        },
+        {
+          "path": "codex/agents/date-space-offset.toml",
+          "text": "d = 1979-05-27 +01:00\n"
+        },
+        {
+          "path": "codex/agents/date-day-00-glued-time.toml",
+          "text": "d = 1979-01-0007:32Z\ne = 1979-12-0023:59:59.5-05:00\n"
+        },
+        {
+          "path": "codex/agents/date-day-00-glued-offset-hour-99.toml",
+          "text": "d = 1979-01-0007:32+99:59\n"
+        },
+        {
+          "path": "codex/agents/date-day-01-glued-time.toml",
+          "text": "d = 1979-01-0107:32Z\n"
+        },
+        {
+          "path": "codex/agents/date-day-00-separated-time.toml",
+          "text": "d = 1979-01-00T07:32Z\n"
+        },
+        {
+          "path": "codex/agents/date-day-00-glued-offset-minute-60.toml",
+          "text": "d = 1979-01-0007:32+23:60\n"
+        },
+        {
           "path": "codex/agents/date-as-name.toml",
           "text": "name = 1979-02-30\n"
         },
@@ -1355,6 +1387,89 @@
           {
             "ref": {
               "kind": "subagent",
+              "slug": "date-day-00-glued-offset-hour-99"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-00-glued-offset-hour-99.toml",
+              "format": "toml-agent",
+              "title": "date-day-00-glued-offset-hour-99",
+              "contentHash": "637907398cad9860b2e996156880a7218d5fbb4df9642526dc301a5ccf80b596",
+              "sizeBytes": 26,
+              "valid": true
+            },
+            "whitespaceHash": "bf9eff7aa711a739a513d9b1778921408046c65ec32869073dd56c8a211a0a77"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-00-glued-offset-minute-60"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-00-glued-offset-minute-60.toml",
+              "format": "toml-agent",
+              "title": "date-day-00-glued-offset-minute-60",
+              "contentHash": "014fa6f1b8c0340005cb144e7ba2c790840ff0383c2c4ea68e2ddf49ff52d5d6",
+              "sizeBytes": 26,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "46edc503225d509cf4a536396f559ad5602577c13a950b4a409c4e81bee18b8b"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-00-glued-time"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-00-glued-time.toml",
+              "format": "toml-agent",
+              "title": "date-day-00-glued-time",
+              "contentHash": "2ee4b5cf6dca82eb898afafafbf7f2fbf0fea72574fb4be9337c4d31536e002d",
+              "sizeBytes": 52,
+              "valid": true
+            },
+            "whitespaceHash": "9508438f89f76296a7eef6e8f002d36bc7f10a15a6021e1aab000c7b1ac59685"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-00-separated-time"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-00-separated-time.toml",
+              "format": "toml-agent",
+              "title": "date-day-00-separated-time",
+              "contentHash": "5c8694497a267f97d20b05e7d792d1beec567bcc0962a9affe091c02f43a30d6",
+              "sizeBytes": 22,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "8018d38999cc07456cd2f953d7ab4af8246d205d285ca6028d01b6d1f655543b"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-01-glued-time"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-01-glued-time.toml",
+              "format": "toml-agent",
+              "title": "date-day-01-glued-time",
+              "contentHash": "ae234a9dcfff7b83d2dbd6cb02ed9e06f218867d375b4d2a92f9de74ed808a25",
+              "sizeBytes": 21,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "89a7bea8563503778811ed5d578d6acd04fb51ff7c3a703a07846ed07af8a6d0"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
               "slug": "date-day-32"
             },
             "instance": {
@@ -1400,6 +1515,56 @@
               "valid": true
             },
             "whitespaceHash": "100491bd6273c098b411cc459373845a324f97a80e551ce08a6542cb5c6c71f3"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-space-offset"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-space-offset.toml",
+              "format": "toml-agent",
+              "title": "date-space-offset",
+              "contentHash": "91f538e5a81900fd6432abf659bf42c2f2295c79342822406adbc49e0dcf442d",
+              "sizeBytes": 22,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "0e10cb140709f5b226765f22a5d05669ec0a31763bca758e4c17f40c0208014c"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-space-z"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-space-z.toml",
+              "format": "toml-agent",
+              "title": "date-space-z",
+              "contentHash": "29bc13f35c31e5eba518cc6cbdc7664ea1fb08648f02fbeef1a00fca541c5a46",
+              "sizeBytes": 34,
+              "valid": true
+            },
+            "whitespaceHash": "125c4a6a0621e8090bd308d3cebb7d1cb474930c6e4c81ff7232dbeace4ae93c"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-t-space-z"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-t-space-z.toml",
+              "format": "toml-agent",
+              "title": "date-t-space-z",
+              "contentHash": "abb5aebb4c951aa879728764bac21bc1d564f771d530f90cd5fc6d4b8e294b8e",
+              "sizeBytes": 18,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "ae25712c1ab19c764c460822bcd7441c180b2e3fa8332f45887de7f2065945af"
           },
           {
             "ref": {

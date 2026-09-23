@@ -9,7 +9,8 @@
 //!   refuses one outside `Number.isSafeInteger`; reads a float the same way,
 //!   so `1e1000` is `Infinity`, not an error; and hands every date or time to
 //!   Bun's `Date`, which rolls `1979-02-30` over to March, refuses a `:60`
-//!   leap second, and accepts `07:32Z` and `1979-05-27Z`. [`smol_scalar`]
+//!   leap second, accepts `07:32Z`, `1979-05-27Z` and `1979-05-27 Z`, and
+//!   reads `1979-01-0007:32Z` through its legacy fallback. [`smol_scalar`]
 //!   ports that decision for each bare scalar; one `smol-toml` refuses makes
 //!   the document invalid, and one it accepts but the `toml` crate would not
 //!   is swapped for an equivalent the `toml` crate accepts before the
@@ -265,12 +266,12 @@ fn take_digits(text: &str, count: usize) -> Option<(u32, &str)> {
 /// what Bun's `Date` accepts for the string `TomlDate` builds from it.
 fn date_accepted(raw: &str) -> bool {
     let (date, rest) = match take_date(raw) {
-        Some((valid, rest)) => (Some(valid), rest),
+        Some((date, rest)) => (Some(date), rest),
         None => (None, raw),
     };
-    let (separator, rest) = match rest.strip_prefix(['T', 't', ' ']) {
-        Some(rest) => (true, rest),
-        None => (false, rest),
+    let (separator, rest) = match rest.chars().next() {
+        Some(c @ ('T' | 't' | ' ')) => (Some(c), &rest[1..]),
+        _ => (None, rest),
     };
     let (time, offset) = match take_time(rest) {
         Some((valid, offset)) => (Some(valid), offset),
@@ -280,26 +281,46 @@ fn date_accepted(raw: &str) -> bool {
         return false;
     };
     match (date, time) {
-        // `DATE_TIME_RE` matches without a separator, but `Date` refuses
-        // `1979-05-2707:32`.
-        (Some(date), Some(time)) => separator && date && time && offset.valid,
-        // `Date` takes `1979-05-27` and `1979-05-27Z`, not a numeric offset
-        // or a dangling `T`.
-        (Some(date), None) => date && !separator && !offset.numeric,
+        (Some(date), Some(time)) if separator.is_some() => date.valid() && time && offset.valid,
+        // Without a separator Bun's ISO parser refuses the string, and its
+        // legacy fallback reads only a `00` day glued to a time
+        // (`1979-01-0007:32Z`), checking offset minutes but not hours.
+        (Some(date), Some(time)) => {
+            date.month_valid() && date.day == 0 && time && offset.minutes_valid
+        }
+        // `Date` takes `1979-05-27`, `1979-05-27Z` and `1979-05-27 Z`, not a
+        // numeric offset or a dangling `T`.
+        (Some(date), None) => date.valid() && separator.is_none_or(|c| c == ' ') && !offset.numeric,
         // A bare time is prefixed with `0000-01-01T`; a separator of its own
         // would double it.
-        (None, Some(time)) => !separator && time && offset.valid,
+        (None, Some(time)) => separator.is_none() && time && offset.valid,
         (None, None) => false,
     }
 }
 
-/// `\d{4}-\d{2}-\d{2}`, and whether `Date` accepts it (it rolls day 29–31
-/// over past a short month's end).
-fn take_date(text: &str) -> Option<(bool, &str)> {
+/// The month and day of a `\d{4}-\d{2}-\d{2}` date.
+struct DateParts {
+    month: u32,
+    day: u32,
+}
+
+impl DateParts {
+    fn month_valid(&self) -> bool {
+        (1..=12).contains(&self.month)
+    }
+
+    /// What `Date` accepts: it rolls day 29–31 over past a short month's end.
+    fn valid(&self) -> bool {
+        self.month_valid() && (1..=31).contains(&self.day)
+    }
+}
+
+/// `\d{4}-\d{2}-\d{2}` off the front of `text`.
+fn take_date(text: &str) -> Option<(DateParts, &str)> {
     let (_, rest) = take_digits(text, 4)?;
     let (month, rest) = take_digits(rest.strip_prefix('-')?, 2)?;
     let (day, rest) = take_digits(rest.strip_prefix('-')?, 2)?;
-    Some(((1..=12).contains(&month) && (1..=31).contains(&day), rest))
+    Some((DateParts { month, day }, rest))
 }
 
 /// `\d{2}:\d{2}(:\d{2}(\.\d+)?)?`, and whether `Date` accepts it (no `:60`;
@@ -329,6 +350,7 @@ fn take_time(text: &str) -> Option<(bool, &str)> {
 struct Offset {
     numeric: bool,
     valid: bool,
+    minutes_valid: bool,
 }
 
 /// `(Z|[-+]\d{2}:\d{2})?` followed by the end of the scalar.
@@ -337,6 +359,7 @@ fn parse_offset(text: &str) -> Option<Offset> {
         return Some(Offset {
             numeric: false,
             valid: true,
+            minutes_valid: true,
         });
     }
     let (hours, rest) = take_digits(text.strip_prefix(['+', '-'])?, 2)?;
@@ -344,6 +367,7 @@ fn parse_offset(text: &str) -> Option<Offset> {
     rest.is_empty().then_some(Offset {
         numeric: true,
         valid: hours <= 23 && minutes <= 59,
+        minutes_valid: minutes <= 59,
     })
 }
 
@@ -427,6 +451,46 @@ mod tests {
             "1979-05-27T07:32:00.",
             "1979-05-2707:32",
             "Z",
+        ] {
+            assert_scalar(raw, &SmolScalar::Refused);
+        }
+    }
+
+    #[test]
+    fn a_date_then_a_space_then_z_is_a_utc_date_like_bun() {
+        for raw in ["1979-05-27 Z", "1979-05-27 z"] {
+            assert_scalar(raw, &SmolScalar::AcceptedAs(ACCEPTED_DATE));
+        }
+        for raw in ["1979-05-27T Z", "1979-05-27TZ", "1979-05-27 +01:00"] {
+            assert_scalar(raw, &SmolScalar::Refused);
+        }
+    }
+
+    #[test]
+    fn day_00_glued_to_a_time_takes_bun_legacy_fallback() {
+        for raw in [
+            "1979-01-0007:32Z",
+            "1979-01-0007:32",
+            "1979-02-0007:32z",
+            "1979-12-0023:59:59.5-05:00",
+            "0000-01-0000:00",
+            "1979-01-0007:32+99:59",
+            "1979-01-0007:32-24:00",
+        ] {
+            assert_scalar(raw, &SmolScalar::AcceptedAs(ACCEPTED_DATE));
+        }
+        for raw in [
+            "1979-01-0107:32Z",
+            "1979-01-3107:32Z",
+            "1979-13-0007:32Z",
+            "1979-00-0007:32Z",
+            "1979-01-00T07:32Z",
+            "1979-01-00 07:32Z",
+            "1979-01-00Z",
+            "1979-01-0007:60Z",
+            "1979-01-0007:32:60",
+            "1979-01-0024:00",
+            "1979-01-0007:32+23:60",
         ] {
             assert_scalar(raw, &SmolScalar::Refused);
         }
