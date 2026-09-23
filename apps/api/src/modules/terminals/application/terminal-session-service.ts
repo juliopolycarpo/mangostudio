@@ -448,6 +448,15 @@ export function createTerminalSessionService(
             return false;
           }
         };
+        const retainUnclaimed = (shell: TerminalSession['shell'], sessionCwd: string): void => {
+          if (reservation.scopeEnded === 'revoked') {
+            // Consent withdrawal cannot restore a cap seat, but an accepted or
+            // ambiguous PTY still needs a handle for a later cleanup retry.
+            registerSession(shell, sessionCwd, 'exited');
+          } else if (!reservation.scopeEnded) {
+            registerSession(shell, sessionCwd);
+          }
+        };
         reservation.openSent = true;
         let openResult: Awaited<ReturnType<TerminalRuntimeClient['terminal']['open']>>;
         try {
@@ -470,8 +479,8 @@ export function createTerminalSessionService(
           const consentDenied =
             error instanceof RuntimeConsentDeniedError ||
             (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.DENIED);
-          if (!(await closeUnclaimed()) && !reservation.scopeEnded && !consentDenied) {
-            registerSession(
+          if (!(await closeUnclaimed()) && !consentDenied) {
+            retainUnclaimed(
               body.shell ?? client.manifest.shells[0] ?? 'bash',
               cwd ?? client.manifest.homeDir
             );
@@ -495,15 +504,7 @@ export function createTerminalSessionService(
           throw error;
         }
         if (reservation.canceled) {
-          if (!(await closeUnclaimed())) {
-            // Revocation already removed the live seat. Keep a cleanup handle
-            // for an accepted PTY without reviving capacity while consent is off.
-            if (reservation.scopeEnded === 'revoked') {
-              registerSession(openResult.shell, openResult.cwd, 'exited');
-            } else if (!reservation.scopeEnded) {
-              registerSession(openResult.shell, openResult.cwd);
-            }
-          }
+          if (!(await closeUnclaimed())) retainUnclaimed(openResult.shell, openResult.cwd);
           requireReservation();
         }
         return registerSession(openResult.shell, openResult.cwd);

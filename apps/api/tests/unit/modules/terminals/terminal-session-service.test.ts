@@ -239,7 +239,13 @@ describe('terminalSessionService.open', () => {
 
       await expect(opening).rejects.toBeInstanceOf(TerminalUnavailableError);
       expect(client.calls.close).toHaveLength(1);
-      expect(service.list(USER_ID)).toHaveLength(0);
+      if (scenario === 'revocation') {
+        expect(service.list(USER_ID)).toMatchObject([
+          { id: client.calls.open[0]?.sessionId, status: 'exited' },
+        ]);
+      } else {
+        expect(service.list(USER_ID)).toHaveLength(0);
+      }
       expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
     });
   }
@@ -265,6 +271,31 @@ describe('terminalSessionService.open', () => {
         exit: { exitCode: null, signal: null },
       },
     ]);
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+    expect(service.getForAttach(USER_ID, retained[0]?.id ?? '')).toBeNull();
+    now.value += 31 * 60_000;
+    service.reapIdle();
+    await Promise.resolve();
+    expect(client.calls.close).toHaveLength(2);
+    expect(service.list(USER_ID)).toHaveLength(0);
+  });
+
+  test('keeps an ambiguous revoked open for cleanup without occupying capacity', async () => {
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({
+      gateFirstOpen: () => gate.promise,
+      failFirstOpen: new ToolExecutionTimedOutError('terminal.open timed out'),
+      failFirstClose: new RuntimeConsentDeniedError('shell access withdrawn'),
+    });
+    const { service, now } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+    const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    await client.waitForCall('open');
+    service.revokeScope(USER_ID, ENVIRONMENT_ID);
+    gate.release();
+
+    await expect(opening).rejects.toBeInstanceOf(TerminalUnavailableError);
+    const retained = service.list(USER_ID);
+    expect(retained).toMatchObject([{ id: client.calls.open[0]?.sessionId, status: 'exited' }]);
     expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
     expect(service.getForAttach(USER_ID, retained[0]?.id ?? '')).toBeNull();
     now.value += 31 * 60_000;
