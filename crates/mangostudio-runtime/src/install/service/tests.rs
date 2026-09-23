@@ -1723,7 +1723,6 @@ mod real {
 mod windows_powershell {
     use std::path::PathBuf;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
     use std::time::UNIX_EPOCH;
 
     use serde_json::json;
