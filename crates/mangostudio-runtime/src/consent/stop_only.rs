@@ -36,6 +36,40 @@ mod tests {
 
     use super::{STOP_ONLY_METHODS, is_stop_only};
 
+    /// Name suffixes that mark a method as stop-shaped. The catalog uses `.cancel`,
+    /// `.disconnect`, `.detach` and `.close` today; the rest cover verbs a later method may use.
+    const STOP_SHAPED_SUFFIXES: [&str; 7] = [
+        ".cancel",
+        ".disconnect",
+        ".detach",
+        ".close",
+        ".stop",
+        ".abort",
+        ".kill",
+    ];
+
+    /// Stop-shaped, capability-bearing methods that are deliberately not stop-only, each with
+    /// the reason. Empty today.
+    const NOT_STOP_ONLY: [(&str, &str); 0] = [];
+
+    #[test]
+    fn every_stop_shaped_catalog_method_is_classified() {
+        let unclassified: Vec<&str> = catalog()
+            .methods
+            .iter()
+            .filter(|method| !method.capabilities.is_empty())
+            .map(|method| method.name.as_str())
+            .filter(|name| STOP_SHAPED_SUFFIXES.iter().any(|s| name.ends_with(s)))
+            .filter(|name| !is_stop_only(name))
+            .filter(|name| !NOT_STOP_ONLY.iter().any(|(excluded, _)| excluded == name))
+            .collect();
+        assert!(
+            unclassified.is_empty(),
+            "expected every capability-bearing stop-shaped method to be in STOP_ONLY_METHODS or \
+             NOT_STOP_ONLY with a reason | received unclassified: {unclassified:?}"
+        );
+    }
+
     #[test]
     fn the_stop_only_set_is_pinned_against_the_catalog() {
         let pinned: Vec<(&str, bool)> = catalog()
