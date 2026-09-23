@@ -658,7 +658,7 @@ fn spawn_raw(request: &ProcessRequest, pty: Option<(u16, u16)>) -> io::Result<Ra
 fn open_pty(cols: u16, rows: u16) -> io::Result<(OwnedFd, OwnedFd)> {
     let mut master = -1;
     let mut slave = -1;
-    let size = libc::winsize {
+    let mut size = libc::winsize {
         ws_row: rows,
         ws_col: cols,
         ws_xpixel: 0,
@@ -670,8 +670,8 @@ fn open_pty(cols: u16, rows: u16) -> io::Result<(OwnedFd, OwnedFd)> {
             &raw mut master,
             &raw mut slave,
             std::ptr::null_mut(),
-            std::ptr::null(),
-            &raw const size,
+            std::ptr::null_mut(),
+            &raw mut size,
         )
     } < 0
     {
@@ -925,7 +925,7 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     };
     if fds.terminal {
         if unsafe { libc::setsid() } < 0
-            || unsafe { libc::ioctl(fds.stdin_target, libc::TIOCSCTTY, 0) } < 0
+            || unsafe { libc::ioctl(fds.stdin_target, libc::c_ulong::from(libc::TIOCSCTTY), 0) } < 0
         {
             exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
         }
