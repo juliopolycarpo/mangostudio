@@ -881,7 +881,9 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     unsafe { libc::close(fds.finalize_read) };
     unsafe { libc::kill(-target_pgid, libc::SIGKILL) };
     if fds.terminal && !unsafe { kill_session_members(target_pgid) } {
-        unsafe { libc::_exit(127) };
+        // Take the watchdog down while the target is still unreaped. A bare exit would leave it
+        // waiting on the liveness pipe, and it would later signal a PID that may be reused.
+        kill_guardian_group_and_exit(guardian_pgid);
     }
     let _ = unsafe { wait_raw(target) };
     if !fds.terminal
