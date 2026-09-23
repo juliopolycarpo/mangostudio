@@ -5,4 +5,4 @@ pub mod gh_policy;
 mod service;
 pub mod toolchain;
 
-pub(crate) use service::register;
+pub(crate) use service::{cli_exit, register};

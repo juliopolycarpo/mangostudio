@@ -14,8 +14,8 @@
 //! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
 //! `probing.*` (see [`crate::probing`]), `fs.*`, and `snapshot.*` (both see
 //! [`crate::filesystem`]), `shell.run`/`git.exec`/`gh.exec`/`gh.mutate`
-//! (see [`crate::commands`]), `terminal.*` (see [`crate::terminal`]), and `mcp.*`
-//! (see [`crate::mcp`]) is unimplemented, so
+//! (see [`crate::commands`]), `terminal.*` (see [`crate::terminal`]), `mcp.*`
+//! (see [`crate::mcp`]), and `install.run`/`install.cancel` is unimplemented, so
 //! [`crate::registry::Registry`] answers everything else with
 //! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
 //! module's own `hello_capabilities`, which shapes `crate::health`'s
@@ -111,7 +111,7 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
 /// session itself: a [`Registry`] implementing `runtime.health`, the
-/// `workspace.*`, `probing.*`, `fs.*`, `snapshot.*`, `terminal.*`, and `mcp.*` methods (see [`build_host`]
+/// `workspace.*`, `probing.*`, `fs.*`, `snapshot.*`, `terminal.*`, `mcp.*`, and `install.*` methods (see [`build_host`]
 /// for the full list; every other machine method group is out of scope, and
 /// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
 /// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
@@ -133,7 +133,8 @@ pub(crate) struct SessionHost {
 /// `runtime_version` from `runtime.health`, and also implementing
 /// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
 /// `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`, the
-/// eleven filesystem methods, three snapshot methods, eight terminal methods, and the nine MCP
+/// eleven filesystem methods, three snapshot methods, eight terminal methods, the nine MCP
+/// methods, and the two install
 /// methods. Other groups remain unsupported.
 ///
 /// Calls [`Registry::with_ports`], not
@@ -184,6 +185,11 @@ pub(crate) fn build_host(
         crate::terminal::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
     let registry =
         crate::library::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
+    let registry = crate::install::register(
+        registry,
+        ConsentSource::new(slot, mango_home.to_path_buf()),
+        mango_home,
+    );
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
@@ -531,6 +537,8 @@ mod tests {
                 "gh.exec",
                 "gh.mutate",
                 "git.exec",
+                "install.cancel",
+                "install.run",
                 "library.locations",
                 "library.read",
                 "library.read-tree",

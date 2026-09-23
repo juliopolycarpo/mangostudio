@@ -175,6 +175,9 @@ impl PtyChild {
 
 pub(crate) use pipe_child::PipeChild;
 
+#[cfg(test)]
+pub(crate) use supervisor::PendingSettler;
+
 pub use supervisor::{
     AlwaysAllow, DefaultProcessSpawner, LaunchCheck, LaunchCheckError,
     MAX_SUPERVISED_PROCESS_REQUESTS, ProcessBudget, ProcessCapture, ProcessControl, ProcessExit,

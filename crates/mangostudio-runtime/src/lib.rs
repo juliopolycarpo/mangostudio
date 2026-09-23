@@ -120,6 +120,7 @@ pub mod event_check;
 mod file_identity;
 pub mod filesystem;
 pub mod health;
+mod install;
 mod library;
 pub mod manifest;
 pub mod mcp;

@@ -181,6 +181,11 @@ impl ProcessOutputTap {
         let (sender, receiver) = mpsc::channel(capacity);
         (Self(sender), receiver)
     }
+    /// The underlying sender, so a test's [`ProcessSpawner`] fake can forward chunks itself.
+    #[cfg(test)]
+    pub(crate) fn into_sender(self) -> mpsc::Sender<ProcessOutputChunk> {
+        self.0
+    }
 }
 
 /// Standard-input policy for a child process.
@@ -1745,7 +1750,11 @@ mod tests {
         let _guard = process_test_guard().await;
         let dir = scratch_dir("process-late-wait");
         let done = dir.join("done");
-        let sh = script(&dir, "exit.sh", &format!("printf x > {}; exit 7", done.display()));
+        let sh = script(
+            &dir,
+            "exit.sh",
+            &format!("printf x > {}; exit 7", done.display()),
+        );
 
         let control = DefaultProcessSpawner
             .start(request(sh), Arc::new(AlwaysAllow), CancellationToken::new())
@@ -1758,7 +1767,10 @@ mod tests {
             .expect("expected a later wait to settle | received: still pending after 5s");
 
         assert_eq!(
-            (terminal.cause, terminal.exit.as_ref().and_then(|exit| exit.code)),
+            (
+                terminal.cause,
+                terminal.exit.as_ref().and_then(|exit| exit.code)
+            ),
             (ProcessTerminalCause::Exited, Some(7)),
             "expected the worker's own record (Exited, code 7) | received {terminal:?}"
         );
