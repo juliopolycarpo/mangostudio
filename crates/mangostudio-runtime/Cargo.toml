@@ -75,6 +75,9 @@ mangostudio-runtime-contract.workspace = true
 # `commands`, and for the audit log's credential-shape redaction, which needs
 # the same fixed set of patterns `apps/runtime/src/audit-log.ts` masks with.
 regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
+# MCP SDK access stays inside `mcp/client.rs`; the host owns the session and
+# wire mapping. Pin this version while the 2026-07-28 client API is integrated.
+rmcp = { version = "=3.4.0", default-features = false, features = ["client", "transport-child-process", "which-command"] }
 # `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
 # code units, named captures, and an engine interrupt hook for its hard deadline.
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }

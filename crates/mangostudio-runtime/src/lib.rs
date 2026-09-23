@@ -12,9 +12,9 @@
 //!
 //! - [`registry`] — a registry of the methods this build actually
 //!   implements. `transport::build_host` (crate-private) populates a
-//!   production one from `health::register`, `workspace_methods::register`
-//!   `probing::register`, and `filesystem::register`: `runtime.health`,
-//!   the three `workspace.*`, three `probing.*`, and eleven `fs.*` methods.
+//!   production one from each implemented method family, including the
+//!   stdio-only `mcp.connect`, `mcp.list-tools`, and `mcp.disconnect` slice.
+//!   The `mcp` capability remains false until its other six methods work.
 //!   A bare [`registry::Registry::new`]
 //!   stays empty, which is what its own tests and doctest fill with named
 //!   fakes to prove the plumbing without a real filesystem or subprocess
@@ -123,6 +123,7 @@ pub mod filesystem;
 pub mod health;
 mod library;
 pub mod manifest;
+pub mod mcp;
 pub mod panic;
 pub mod ports;
 mod probe_cache;
