@@ -88,9 +88,11 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
       if (term) {
         writeDimLine(
           term,
-          exit.signal
-            ? formatMessage(tRef.current.terminal.exitedBySignal, { signal: exit.signal })
-            : formatMessage(tRef.current.terminal.exited, { code: String(exit.exitCode ?? 0) })
+          exit.reason === 'consent-revoked'
+            ? tRef.current.terminal.exitedConsentRevoked
+            : exit.signal
+              ? formatMessage(tRef.current.terminal.exitedBySignal, { signal: exit.signal })
+              : formatMessage(tRef.current.terminal.exited, { code: String(exit.exitCode ?? 0) })
         );
       }
       onExitRef.current?.(exit);

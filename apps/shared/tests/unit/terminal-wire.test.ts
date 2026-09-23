@@ -55,6 +55,18 @@ describe('terminal wire codec', () => {
         encodeTerminalServerMessage({ type: 'exit', exit: { exitCode: 0, signal: null } })
       )
     ).toEqual({ type: 'exit', exit: { exitCode: 0, signal: null } });
+
+    expect(
+      decodeTerminalServerMessage(
+        encodeTerminalServerMessage({
+          type: 'exit',
+          exit: { exitCode: null, signal: 'SIGKILL', reason: 'consent-revoked' },
+        })
+      )
+    ).toEqual({
+      type: 'exit',
+      exit: { exitCode: null, signal: 'SIGKILL', reason: 'consent-revoked' },
+    });
     expect(
       decodeTerminalServerMessage(
         encodeTerminalServerMessage({ type: 'notice', notice: { kind: 'dropped', bytes: 4096 } })

@@ -6,7 +6,7 @@ import {
   type ToolchainSelection,
 } from '@mangostudio/shared/environments';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
-import { TERMINAL_SOCKET_CLOSE_CODES } from '@mangostudio/shared/terminal';
+import { TERMINAL_SOCKET_CLOSE_CODES, type TerminalExit } from '@mangostudio/shared/terminal';
 import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
 import {
   createTerminalSessionService,
@@ -61,10 +61,16 @@ function defaultConfig(overrides: Partial<TerminalConfig> = {}): TerminalConfig 
 /** Named fake viewer, recording what the service pushed or closed it with. */
 class RecordingViewer implements TerminalSessionViewer {
   readonly notices: Array<{ kind: string; bytes?: number }> = [];
+  readonly exits: TerminalExit[] = [];
   closed: { code: number; reason: string } | null = null;
 
   pushNotice(notice: { kind: string; bytes?: number }): void {
     this.notices.push(notice);
+  }
+
+  endWithExit(exit: TerminalExit): void {
+    this.exits.push(exit);
+    this.closed = { code: TERMINAL_SOCKET_CLOSE_CODES.GONE, reason: 'Session exited' };
   }
 
   close(code: number, reason: string): void {
@@ -651,6 +657,46 @@ describe('terminalSessionService runtime disconnect', () => {
     await Promise.resolve();
     expect(client.calls.close).toHaveLength(3);
     expect(service.list(USER_ID)).toHaveLength(0);
+  });
+
+  test('revocation tells an attached viewer why its terminal ended', async () => {
+    const { service } = createHarness();
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    const viewer = new RecordingViewer();
+    service.attachViewer(session.id, viewer);
+
+    service.revokeScope(USER_ID, ENVIRONMENT_ID);
+
+    const revoked: TerminalExit = { exitCode: null, signal: null, reason: 'consent-revoked' };
+    expect(viewer.exits).toEqual([revoked]);
+    expect(viewer.closed?.code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+    expect(service.list(USER_ID)).toMatchObject([{ id: session.id, exit: revoked }]);
+  });
+
+  test('revocation keeps an exit the session already recorded', async () => {
+    const { service } = createHarness();
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    service.attachViewer(session.id, new RecordingViewer());
+    service.recordExit(session.id, { exitCode: 0, signal: null });
+
+    service.revokeScope(USER_ID, ENVIRONMENT_ID);
+
+    expect(service.list(USER_ID)).toMatchObject([
+      { id: session.id, exit: { exitCode: 0, signal: null } },
+    ]);
+  });
+
+  test('a PTY exit reported after revocation does not erase the revocation reason', async () => {
+    const { service } = createHarness();
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    service.attachViewer(session.id, new RecordingViewer());
+
+    service.revokeScope(USER_ID, ENVIRONMENT_ID);
+    service.recordExit(session.id, { exitCode: null, signal: 'SIGHUP' });
+
+    expect(service.list(USER_ID)).toMatchObject([
+      { id: session.id, exit: { exitCode: null, signal: null, reason: 'consent-revoked' } },
+    ]);
   });
 
   test('shell revocation ends detached sessions and releases their capacity', async () => {

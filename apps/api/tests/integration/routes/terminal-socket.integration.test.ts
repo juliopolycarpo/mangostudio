@@ -238,6 +238,25 @@ describe('terminal socket relay', () => {
     expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
   });
 
+  it('sends one consent-revoked exit when shell access is withdrawn mid-session', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+
+    service.revokeScope(user.id, ENVIRONMENT_ID);
+    // The PTY the hub just closed reports its own end afterwards.
+    runtime.emitOutput(session.id, { kind: 'exit', exitCode: null, signal: 'SIGHUP' });
+
+    expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+    expect(viewer.messages.filter((message) => message.type === 'exit')).toEqual([
+      { type: 'exit', exit: { exitCode: null, signal: null, reason: 'consent-revoked' } },
+    ]);
+  });
+
   it('delivers a full exited scrollback before the socket closes', async () => {
     const user = await insertTestUser();
     const scrollback = Buffer.alloc(256 * 1024, 65);
