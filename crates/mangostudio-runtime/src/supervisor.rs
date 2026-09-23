@@ -194,7 +194,8 @@ pub async fn join_owned<T>(handle: JoinHandle<T>) -> T {
         .expect("an owned task must run to completion, never be aborted or panic")
 }
 
-/// `SIGINT`/`SIGTERM` (Unix) or `CTRL_C`/`CTRL_BREAK` (Windows), unified behind one
+/// `SIGINT`/`SIGTERM` (Unix) or `CTRL_C`/`CTRL_BREAK`/`CTRL_CLOSE`/
+/// `CTRL_LOGOFF`/`CTRL_SHUTDOWN` (Windows), unified behind one
 /// [`ShutdownSignals::wait`] — every handler **eagerly** registered by
 /// [`ShutdownSignals::install`], never inside `wait` itself.
 ///
@@ -204,9 +205,35 @@ pub async fn join_owned<T>(handle: JoinHandle<T>) -> T {
 /// — inside a `select!` arm sitting after a stretch of its own setup work —
 /// loses any signal that arrives in that window to the process's default
 /// disposition: no cooperative close, no exit code this crate controls.
-/// `tokio::signal::unix::signal` and `tokio::signal::windows::{ctrl_c,
-/// ctrl_break}` all register at the call itself, which is why [`ShutdownSignals::install`]
-/// is the only place either is ever called.
+/// `tokio::signal::unix::signal` and every `tokio::signal::windows`
+/// listener register at the call itself, which is why
+/// [`ShutdownSignals::install`] is the only place any of them is called.
+///
+/// # Windows termination budget
+///
+/// `CTRL_CLOSE`, `CTRL_LOGOFF` and `CTRL_SHUTDOWN` are terminating events:
+/// Windows ends the process once the handler returns, or once its own
+/// timeout expires (about 5 s for `CTRL_CLOSE`; system-defined at logoff
+/// and shutdown). Tokio's handler parks its thread for these events instead
+/// of returning, so the main thread keeps running: the session is
+/// cancelled, the transport closes, `cli` then bounds the async runtime's
+/// teardown by `RUNTIME_SHUTDOWN_GRACE` (2 s), and the process exits with
+/// the code this crate chose. On the stdio path the session closes in
+/// milliseconds and the teardown then waits out the full 2 s grace on the
+/// blocking stdin reader, so the process exits about 2 s after the event,
+/// inside the window. The
+/// transports' worst-case backstops (`CONNECT_SHUTDOWN_GRACE` and `serve`'s
+/// `SHUTDOWN_DRAIN_GRACE`, 5 s each, for a stuck peer) plus the 2 s runtime
+/// grace can exceed it; then Windows terminates the process, which is the
+/// same outcome as leaving the event unhandled, and owned process trees
+/// still end with their Job object.
+///
+/// `CTRL_LOGOFF` is handled because the runtime never runs in session 0:
+/// the installed user service is a Task Scheduler task in the user's
+/// interactive session (`docs/operations/remote-runtimes.md`), and a
+/// hub-spawned runtime lives in the hub's session. A logoff it receives is
+/// therefore its own session ending. The "any user logs off" caveat in the Windows documentation
+/// applies to real services, which must ignore the event.
 pub struct ShutdownSignals {
     #[cfg(unix)]
     interrupt: tokio::signal::unix::Signal,
@@ -219,6 +246,15 @@ pub struct ShutdownSignals {
     /// process with `STATUS_CONTROL_C_EXIT` instead of closing cooperatively.
     #[cfg(windows)]
     ctrl_break: tokio::signal::windows::CtrlBreak,
+    /// The console window closed.
+    #[cfg(windows)]
+    ctrl_close: tokio::signal::windows::CtrlClose,
+    /// The interactive session is logging off.
+    #[cfg(windows)]
+    ctrl_logoff: tokio::signal::windows::CtrlLogoff,
+    /// The system is shutting down.
+    #[cfg(windows)]
+    ctrl_shutdown: tokio::signal::windows::CtrlShutdown,
 }
 
 impl ShutdownSignals {
@@ -237,6 +273,9 @@ impl ShutdownSignals {
         Ok(Self {
             ctrl_c: tokio::signal::windows::ctrl_c()?,
             ctrl_break: tokio::signal::windows::ctrl_break()?,
+            ctrl_close: tokio::signal::windows::ctrl_close()?,
+            ctrl_logoff: tokio::signal::windows::ctrl_logoff()?,
+            ctrl_shutdown: tokio::signal::windows::ctrl_shutdown()?,
         })
     }
 
@@ -255,6 +294,9 @@ impl ShutdownSignals {
         tokio::select! {
             _ = self.ctrl_c.recv() => {}
             _ = self.ctrl_break.recv() => {}
+            _ = self.ctrl_close.recv() => {}
+            _ = self.ctrl_logoff.recv() => {}
+            _ = self.ctrl_shutdown.recv() => {}
         }
     }
 
