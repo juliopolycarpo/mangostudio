@@ -65,13 +65,13 @@ const LIBRARY_WRITE_TIMEOUT_MS = 60_000;
 export interface PropagationApplyDeps {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
   /**
-   * Path layout of one machine.
+   * Path layout of one machine, as the hub sees it.
    *
-   * Only the in-process engine consults it — over the protocol the runtime
-   * resolves its own layout and is sent nothing but the MangoStudio directory
-   * overrides. The parameter exists so a test can stand up two machines with
-   * two homes; production answers with the hub's own env for every id, because
-   * the hub cannot know another machine's.
+   * The runtime resolves its own layout over the protocol; the hub only derives
+   * the MangoStudio directory overrides it sends with every batch
+   * (`libraryWritePathEnv`) from this layout. The parameter exists so a test can
+   * stand up two machines with two homes; production answers with the hub's own
+   * env for every id, because the hub cannot know another machine's.
    */
   pathEnv(environmentId: string): PathEnv;
   readSourceFile(path: string): Promise<Uint8Array>;
@@ -1029,7 +1029,8 @@ export interface PropagationUndoDeps {
  * state hash exists to prevent.
  *
  * `userId` selects the Local runtime connection for the production RPC path.
- * Injected backup/hash/runtimeUndo overrides keep unit tests in-process.
+ * Injected overrides such as `backup` or `runtimeUndo` let tests stub the store
+ * or the runtime's answer; every production undo goes over the protocol.
  */
 export function undoLibraryPropagation(
   backupId: string,

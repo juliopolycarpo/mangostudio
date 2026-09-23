@@ -292,7 +292,6 @@ function reserveEphemeralPort(): number {
   return port;
 }
 
-/** Retries the real Hub dial until `serve` is listening. */
 /**
  * Drains a child stream and keeps its last `limit` characters, so a startup failure can quote what
  * the runtime printed without the pipe ever filling up.
@@ -312,6 +311,7 @@ function keepTail(stream: ReadableStream<Uint8Array>, limit = 4_000): () => stri
   return () => tail;
 }
 
+/** Retries the real Hub dial until `serve` is listening. */
 async function connectUntilListening<T>(attempt: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
