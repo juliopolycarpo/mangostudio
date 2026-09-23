@@ -67,6 +67,7 @@ function getRequestMethod(input: RequestInfo | URL, init?: RequestInit): string 
 export function createFetchScenario() {
   const originalFetch = globalThis.fetch;
   const responses = new Map<FetchScenarioKey, FetchScenarioResponse>();
+  const networkFailures = new Set<FetchScenarioKey>();
   // `jest.fn` is generic over the implementation it wraps, so it satisfies the
   // declared surface structurally but not nominally. `FetchScenarioMock` is
   // what the scenario's consumers are held to.
@@ -74,6 +75,10 @@ export function createFetchScenario() {
     const method = getRequestMethod(input, init);
     const url = getRequestUrl(input);
     const key = `${method} ${url.pathname}${url.search}` as FetchScenarioKey;
+    if (networkFailures.has(key)) {
+      // What a browser `fetch` rejects with when the connection itself fails.
+      return Promise.reject(new TypeError('Failed to fetch'));
+    }
     const response = responses.get(key);
 
     if (!response) {
@@ -113,6 +118,18 @@ export function createFetchScenario() {
     },
 
     /**
+     * Makes a method and path pair fail the way a dropped connection does:
+     * `fetch` rejects with a `TypeError` and no response ever arrives.
+     *
+     * @example
+     * scenario.failWithNetworkError('POST', '/api/terminals');
+     */
+    failWithNetworkError(method: string, path: string) {
+      networkFailures.add(`${method.toUpperCase()} ${path}`);
+      return this;
+    },
+
+    /**
      * Installs the scenario fetch mock on globalThis.
      */
     install() {
@@ -127,6 +144,7 @@ export function createFetchScenario() {
      */
     restore() {
       responses.clear();
+      networkFailures.clear();
       // `mockClear`, not `mockReset`: under `bun test` a reset strips the
       // implementation `jest.fn(impl)` was given, so the second test in a file
       // would get a `fetch` that returns `undefined` and every request after

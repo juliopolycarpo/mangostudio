@@ -8,6 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
@@ -91,6 +92,48 @@ describe('/terminal route', () => {
     render(<TerminalIndexPage />);
 
     expect(await screen.findByText('No terminals are open for this environment.')).toBeVisible();
+  });
+
+  function postCount(): number {
+    return fetchScenario.fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST').length;
+  }
+
+  it('shows the refusal reason of a rejected open and returns the button to idle', async () => {
+    const user = userEvent.setup();
+    mockLocalEnvironment();
+    fetchScenario.respondWithJson('POST', '/api/terminals', {
+      status: 409,
+      body: {
+        error: 'You already hold the maximum of 4 running terminal session(s).',
+        code: 'TERMINAL_LIMIT',
+        details: { limit: '4' },
+      },
+    });
+
+    render(<TerminalIndexPage />);
+    await screen.findByText('No terminals are open for this environment.');
+    await user.click(screen.getByRole('button', { name: 'New terminal' }));
+
+    expect(
+      await screen.findByText('You already have the maximum number of open terminals.')
+    ).toBeVisible();
+    const button = screen.getByRole('button', { name: 'New terminal' });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(postCount()).toBe(2));
+  });
+
+  it('shows the generic open failure when the request never reaches the hub', async () => {
+    const user = userEvent.setup();
+    mockLocalEnvironment();
+    fetchScenario.failWithNetworkError('POST', '/api/terminals');
+
+    render(<TerminalIndexPage />);
+    await screen.findByText('No terminals are open for this environment.');
+    await user.click(screen.getByRole('button', { name: 'New terminal' }));
+
+    expect(await screen.findByText('Could not open a terminal. Try again.')).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New terminal' })).toBeEnabled());
   });
 
   it('renders the unavailable reason for the chosen environment', async () => {

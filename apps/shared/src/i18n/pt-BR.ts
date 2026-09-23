@@ -2039,6 +2039,7 @@ export const messages = {
     disconnected: 'Desconectado do terminal.',
     notFound: 'Esta sessão de terminal não existe mais.',
     refused: 'Esta sessão de terminal não pode ser aberta daqui.',
+    openFailed: 'Não foi possível abrir um terminal. Tente novamente.',
     exited: 'Processo encerrado com código {code}.',
     exitedBySignal: 'Processo encerrado por {signal}.',
     exitedConsentRevoked: 'Terminal fechado porque o acesso ao shell foi revogado.',
