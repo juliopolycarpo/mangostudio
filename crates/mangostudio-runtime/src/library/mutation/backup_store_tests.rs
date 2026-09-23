@@ -606,3 +606,126 @@ fn a_fractional_timestamp_round_trips_unchanged() {
     set.created_at_ms = 42.0;
     assert!(set.to_json().to_pretty().contains("\"createdAtMs\": 42,"));
 }
+
+/// A foreign directory under the root — one holding a plain file, one
+/// holding a subdirectory that is not a location id — is not a set: it is
+/// neither listed nor retained on retention's behalf.
+#[test]
+fn only_manifest_or_location_shaped_directories_are_sets() {
+    let fixture = fixture("backup-foreign-shapes");
+    std::fs::create_dir_all(fixture.root.join("notes")).unwrap();
+    std::fs::write(fixture.root.join("notes").join("todo.txt"), "x").unwrap();
+    std::fs::create_dir_all(fixture.root.join("photos").join("2024")).unwrap();
+    seed(&fixture, "a", 1.0, 1, Some(manifest("a", vec![])));
+    let listed: Vec<String> = fixture
+        .store
+        .list()
+        .unwrap()
+        .into_iter()
+        .map(|row| row.backup_id)
+        .collect();
+    assert_eq!(
+        listed,
+        vec!["a"],
+        "expected only the real set | received {listed:?}"
+    );
+}
+
+/// Only "not found" means absent: a backup root that cannot be listed,
+/// and a manifest that cannot be read, are errors rather than silence.
+#[test]
+fn unreadable_stores_are_errors_not_empty_answers() {
+    let fixture = fixture("backup-unreadable-root");
+    std::fs::create_dir_all(fixture.root.parent().unwrap()).unwrap();
+    std::fs::write(&fixture.root, "a file where the root belongs").unwrap();
+    assert!(
+        matches!(fixture.store.list(), Err(StoreError::Io(_))),
+        "expected an I/O error for a root that is a file | received {:?}",
+        fixture.store.list()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_manifest_is_an_error_not_a_missing_set() {
+    use std::os::unix::fs::PermissionsExt;
+    if nix::unistd::geteuid().is_root() {
+        return;
+    }
+    let fixture = fixture("backup-unreadable-manifest");
+    seed(&fixture, "locked", 1.0, 1, Some(manifest("locked", vec![])));
+    let path = fixture.root.join("locked").join("manifest.json");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let read = fixture.store.read_manifest("locked");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(
+        matches!(read, Err(StoreError::Io(_))),
+        "expected a permission error, not a pruned set | received {read:?}"
+    );
+}
+
+/// The set an apply is writing is charged to the byte budget, and it is
+/// that set — found by its id — that is charged.
+#[test]
+fn prune_charges_the_current_set_it_names() {
+    let sizes = |fixture: &Fixture| -> std::collections::HashMap<String, f64> {
+        fixture
+            .store
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.backup_id, row.size_bytes as f64))
+            .collect()
+    };
+    // Equal-size current and newer sets, one byte short of both: the newer
+    // one goes, because the current one's bytes are already spent.
+    let mut fixture = fixture("backup-prune-current-bytes");
+    seed(
+        &fixture,
+        "current",
+        1.0,
+        10,
+        Some(manifest("current", vec![])),
+    );
+    seed(&fixture, "newer", 2.0, 10, Some(manifest("newer", vec![])));
+    let size = sizes(&fixture);
+    fixture.store.retention_bytes = size["current"] + size["newer"] - 1.0;
+    fixture.store.prune(Some("current")).unwrap();
+    assert_eq!(
+        ids(&fixture),
+        vec!["current"],
+        "expected the newer set evicted"
+    );
+
+    // Exactly within budget: both stay (the budget is a sum, not a product).
+    let mut fixture = self::fixture("backup-prune-current-sum");
+    seed(
+        &fixture,
+        "current",
+        1.0,
+        2,
+        Some(manifest("current", vec![])),
+    );
+    seed(&fixture, "newer", 2.0, 3, Some(manifest("newer", vec![])));
+    let size = sizes(&fixture);
+    fixture.store.retention_bytes = size["current"] + size["newer"];
+    fixture.store.prune(Some("current")).unwrap();
+    assert_eq!(ids(&fixture), vec!["current", "newer"]);
+
+    // A large newest set that fits beside the small current set is kept: the
+    // charge belongs to the named set, not to whichever set is listed first.
+    let mut fixture = self::fixture("backup-prune-current-identity");
+    seed(
+        &fixture,
+        "current",
+        1.0,
+        1,
+        Some(manifest("current", vec![])),
+    );
+    seed(&fixture, "middle", 2.0, 1, Some(manifest("middle", vec![])));
+    seed(&fixture, "big", 3.0, 400, Some(manifest("big", vec![])));
+    let size = sizes(&fixture);
+    fixture.store.retention_bytes = size["current"] + size["middle"] + size["big"];
+    fixture.store.prune(Some("current")).unwrap();
+    assert_eq!(ids(&fixture), vec!["big", "current", "middle"]);
+}

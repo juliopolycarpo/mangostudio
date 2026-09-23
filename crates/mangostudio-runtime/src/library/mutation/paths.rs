@@ -415,6 +415,51 @@ mod tests {
     ];
 
     #[test]
+    fn write_errors_display_their_message() {
+        let error = WriteError::new(WriteFailure::InvalidSlug, "bad slug");
+        assert_eq!(error.to_string(), "bad slug");
+    }
+
+    /// A `directory-of-files` entry is the slug plus its format's extension.
+    #[test]
+    fn directory_of_files_entries_carry_their_format_extension() {
+        let scratch = crate::test_support::scratch_dir("library-file-extensions");
+        let env = PathEnv {
+            platform: crate::health::node_platform().to_string(),
+            home_dir: path_string(&scratch),
+            env: Default::default(),
+        };
+        for (location_id, expected) in [
+            ("claude-agents", "reviewer.md"),
+            ("codex-agents", "reviewer.toml"),
+        ] {
+            let location = location_by_id(location_id).unwrap();
+            let destination = resolve_resource_destination(location, "reviewer", &env).unwrap();
+            assert!(
+                destination.logical_path.ends_with(expected),
+                "expected {location_id} to name {expected} | received {}",
+                destination.logical_path
+            );
+        }
+    }
+
+    /// Only "not found" is an absent destination: a path under a regular
+    /// file cannot be inspected and is refused, not written through.
+    #[cfg(unix)]
+    #[test]
+    fn a_destination_that_cannot_be_inspected_is_refused() {
+        let scratch = crate::test_support::scratch_dir("library-destination-notdir");
+        std::fs::write(scratch.join("file"), "x").unwrap();
+        let under = path_string(&scratch.join("file").join("child"));
+        let refused = assert_expected_resource_entry(&under, ResourceKind::Directory).unwrap_err();
+        assert_eq!(
+            refused.reason,
+            WriteFailure::UnexpectedEntryType,
+            "expected unexpected-entry-type | received {refused:?}"
+        );
+    }
+
+    #[test]
     fn a_single_file_location_only_accepts_its_declared_slug() {
         let scratch = crate::test_support::scratch_dir("library-single-file-slug");
         let home = path_string(&scratch);

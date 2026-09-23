@@ -206,6 +206,31 @@ mod tests {
         );
     }
 
+    /// Backslashes are separators only on win32, as `pathStyle` decides:
+    /// on POSIX a name like `x\..\y` is an ordinary file that hashes.
+    #[cfg(unix)]
+    #[test]
+    fn a_backslash_name_is_an_ordinary_file_off_windows() {
+        let scratch = crate::test_support::scratch_dir("library-hash-backslash");
+        std::fs::write(scratch.join("x\\..\\y"), "x").unwrap();
+        let hashed = hash_resource_at(&scratch.to_string_lossy(), ResourceKind::Directory, "linux");
+        assert!(
+            hashed.is_ok(),
+            "expected a POSIX backslash name to hash | received {hashed:?}"
+        );
+    }
+
+    #[test]
+    fn hash_errors_describe_themselves() {
+        assert_eq!(
+            HashError::Invalid("unsafe-name").to_string(),
+            "Library directory hash invalid: unsafe-name"
+        );
+        assert_eq!(HashError::Io("EIO".into()).to_string(), "EIO");
+        assert!(HashError::Escape.to_string().contains("outside its root"));
+        assert!(HashError::TooLarge.to_string().contains("hashing limits"));
+    }
+
     #[test]
     fn a_missing_resource_is_an_io_failure() {
         let scratch = crate::test_support::scratch_dir("library-hash-missing");
