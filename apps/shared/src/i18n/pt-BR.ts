@@ -2041,6 +2041,7 @@ export const messages = {
     refused: 'Esta sessão de terminal não pode ser aberta daqui.',
     exited: 'Processo encerrado com código {code}.',
     exitedBySignal: 'Processo encerrado por {signal}.',
+    exitedConsentRevoked: 'Terminal fechado porque o acesso ao shell foi revogado.',
     dropped: '{bytes} bytes de saída foram descartados porque o visualizador não acompanhou.',
     runtimeDisconnected: 'O runtime se desconectou; esta sessão terminou.',
     closeConfirmTitle: 'Fechar este terminal?',

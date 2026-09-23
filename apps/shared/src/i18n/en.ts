@@ -2020,6 +2020,7 @@ export const messages: Messages = {
     refused: 'This terminal session cannot be opened from here.',
     exited: 'Process exited with code {code}.',
     exitedBySignal: 'Process ended by {signal}.',
+    exitedConsentRevoked: 'Terminal closed because shell access was revoked.',
     dropped: '{bytes} bytes of output were dropped because the viewer could not keep up.',
     runtimeDisconnected: 'The runtime went away; this session ended.',
     closeConfirmTitle: 'Close this terminal?',

@@ -70,6 +70,8 @@ export type TerminalConfig = MangoConfig['terminal'];
  */
 export interface TerminalSessionViewer {
   readonly pushNotice: (notice: TerminalNotice) => void;
+  /** Sends the viewer the session's exit, then closes the socket once it drains. */
+  readonly endWithExit: (exit: TerminalExit) => void;
   readonly close: (code: number, reason: string) => void;
 }
 
@@ -308,6 +310,14 @@ export function createTerminalSessionService(
     throw new TerminalNotIsolatedError();
   }
 
+  /** Records the first exit a session reports; a later one (the PTY dying of the close that followed) keeps it. */
+  function markExited(entry: TerminalSessionEntry, exit: TerminalExit): void {
+    entry.session.lastActivityAt = d.now();
+    if (entry.session.status === 'exited') return;
+    entry.session.status = 'exited';
+    entry.session.exit = exit;
+  }
+
   function closeTrackedSession(
     id: string,
     entry: TerminalSessionEntry,
@@ -323,9 +333,7 @@ export function createTerminalSessionService(
         );
         if (sessions.get(id) !== entry) return;
         if (entry.viewer) {
-          entry.session.status = 'exited';
-          entry.session.exit = { exitCode: null, signal: null };
-          entry.session.lastActivityAt = d.now();
+          markExited(entry, { exitCode: null, signal: null });
           entry.viewer.close(
             TERMINAL_SOCKET_CLOSE_CODES.GONE,
             reason === 'revoked' ? 'Terminal access revoked' : 'Session closed while idle'
@@ -552,10 +560,8 @@ export function createTerminalSessionService(
           continue;
         }
         entry.cleanupPending = true;
-        entry.session.status = 'exited';
-        entry.session.exit = { exitCode: null, signal: null };
-        entry.session.lastActivityAt = d.now();
-        entry.viewer?.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Terminal access revoked');
+        markExited(entry, { exitCode: null, signal: null, reason: 'consent-revoked' });
+        if (entry.session.exit) entry.viewer?.endWithExit(entry.session.exit);
         closeTrackedSession(id, entry, 'revoked');
       }
     },
@@ -681,10 +687,7 @@ export function createTerminalSessionService(
 
     recordExit(sessionId, exit) {
       const entry = sessions.get(sessionId);
-      if (!entry) return;
-      entry.session.status = 'exited';
-      entry.session.exit = exit;
-      entry.session.lastActivityAt = d.now();
+      if (entry) markExited(entry, exit);
     },
 
     recordResize(sessionId, cols, rows) {

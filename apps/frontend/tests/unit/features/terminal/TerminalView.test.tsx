@@ -162,6 +162,41 @@ describe('TerminalView', () => {
     }
   });
 
+  it('explains consent revocation on the terminal exit frame', () => {
+    const writes: string[] = [];
+    const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (
+      this: Terminal,
+      data: string | Uint8Array
+    ) {
+      writes.push(String(data));
+    });
+    try {
+      render(
+        <TerminalView
+          sessionId="session-1"
+          createSocket={(url) => new FakeTerminalSocket(url) as unknown as WebSocket}
+          resolveUrl={() => 'ws://terminal.test/api/terminal/session-1'}
+        />
+      );
+      const socket = FakeTerminalSocket.instances[0];
+      act(() => socket?.open());
+      const frame = encodeTerminalServerMessage({
+        type: 'exit',
+        exit: { exitCode: null, signal: 'SIGKILL', reason: 'consent-revoked' },
+      });
+      act(() =>
+        socket?.onmessage?.({
+          data: frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength),
+        } as MessageEvent)
+      );
+
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toContain('Terminal closed because shell access was revoked.');
+    } finally {
+      writeln.mockRestore();
+    }
+  });
+
   it('narrates GONE on its own when no exit frame preceded it', () => {
     const writes: string[] = [];
     const writeln = spyOn(Terminal.prototype, 'writeln').mockImplementation(function (

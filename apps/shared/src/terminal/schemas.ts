@@ -111,6 +111,7 @@ export const TerminalExitSchema = Type.Object(
   {
     exitCode: Type.Union([Type.Integer(), Type.Null()]),
     signal: Type.Union([Type.String({ maxLength: 32 }), Type.Null()]),
+    reason: Type.Optional(Type.Literal('consent-revoked')),
   },
   { additionalProperties: false }
 );
