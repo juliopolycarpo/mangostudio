@@ -255,9 +255,14 @@ impl Service {
                 "Terminal open was cancelled before admission.",
             ));
         }
-        if !self.launch_shell_consent().await.allows() {
+        let consent = self.launch_shell_consent().await;
+        if !consent.allows() {
             handle.close().await.map_err(pty_io)?;
-            return Err(shell_denial("terminal.open", &self.consent));
+            return Err(if consent == ConsentRead::Denied {
+                shell_denial("terminal.open", &self.consent)
+            } else {
+                consent_unconfirmed("terminal.open")
+            });
         }
         let entry = Arc::new(Entry {
             session_id: id.clone(),
@@ -473,8 +478,9 @@ impl Service {
         entry.handle.close().await
     }
 
-    /// The fresh, uncoalesced read immediately before a terminal is admitted; an unknown
-    /// answer refuses the open (see [`ConsentRead::allows`]).
+    /// The fresh, uncoalesced read immediately before a terminal is admitted. Anything but a
+    /// grant refuses the open (see [`ConsentRead::allows`]): a denial with `DENIED`, an
+    /// unknown answer with the retryable `UNAVAILABLE`.
     async fn launch_shell_consent(&self) -> ConsentRead {
         let read = Arc::clone(&self.shell_read);
         read_consent("shell", self.consent_read_timeout, move || read()).await
@@ -498,12 +504,7 @@ impl Service {
         match self.fresh_shell_consent().await {
             ConsentRead::Granted => Ok(()),
             ConsentRead::Denied => Err(self.revoke(entry, method).await),
-            ConsentRead::Unknown => Err(RemoteError::new(
-                codes::UNAVAILABLE,
-                format!(
-                    "{method} was not delivered: shell consent could not be confirmed in time."
-                ),
-            )),
+            ConsentRead::Unknown => Err(consent_unconfirmed(method)),
         }
     }
 
@@ -606,6 +607,20 @@ impl Drop for Reservation {
             sessions.remove(&self.id);
         }
     }
+}
+
+/// The refusal for an effect whose shell consent could not be confirmed in time: `UNAVAILABLE`,
+/// retryable, and distinct from the `DENIED` an explicit withdrawal gets.
+///
+/// # Example
+/// ```ignore
+/// return Err(consent_unconfirmed("terminal.open"));
+/// ```
+fn consent_unconfirmed(method: &str) -> RemoteError {
+    RemoteError::new(
+        codes::UNAVAILABLE,
+        format!("{method} was not delivered: shell consent could not be confirmed in time."),
+    )
 }
 
 fn shell_denial(method: &str, consent: &ConsentSource) -> RemoteError {

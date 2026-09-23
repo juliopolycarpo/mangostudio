@@ -9,8 +9,9 @@
 //!   [`ConsentRead::Denied`]: the file was read and the capability is off. `Unknown` keeps the
 //!   current state and the next poll reads again — see [`ConsentRead::revokes`].
 //! - **Launch checks** (a fresh read immediately before an OS effect) proceed only on
-//!   [`ConsentRead::Granted`]: `Unknown` refuses the effect with the caller's existing error,
-//!   so nothing starts on consent that could not be confirmed — see [`ConsentRead::allows`].
+//!   [`ConsentRead::Granted`]: `Unknown` refuses the effect (a retryable `UNAVAILABLE` where
+//!   the caller has one, never a consent denial), so nothing starts on consent that could not
+//!   be confirmed — see [`ConsentRead::allows`].
 //!
 //! A read that finishes but cannot parse the file is still a denial: [`super::source`] fails
 //! closed to `none` for an unreadable or malformed file, and that is an explicit answer.
@@ -170,9 +171,12 @@ impl ConsentReader {
         let clear = ClearOnDrop(Arc::clone(&self.state));
         tokio::spawn(async move {
             let granted = run_blocking(read).await;
-            // Cleared before answering: a caller after this point starts a fresh read.
-            drop(clear);
+            // Answered before clearing: a caller that joins in between receives this answer
+            // instead of starting a second read; only a caller after the clear reads afresh.
+            // A panicking read unwinds past both lines, so `clear` still clears on drop and
+            // the dropped sender leaves every waiter with Unknown.
             let _ = sender.send(Some(granted));
+            drop(clear);
         });
         answer
     }
@@ -296,6 +300,41 @@ mod tests {
             (ConsentRead::Unknown, ConsentRead::Denied),
             "expected (first poll, joining poll) = (Unknown, the stuck read's Denied) | \
              received ({slow:?}, {joined:?})"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[allow(
+        clippy::await_holding_lock,
+        reason = "the held lock is what pins the read task inside the window under test"
+    )]
+    async fn an_answer_is_published_before_the_in_flight_read_is_cleared() {
+        let reader = ConsentReader::new("mcp");
+        let reads = Arc::new(AtomicUsize::new(0));
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let counted = Arc::clone(&reads);
+        let mut answer = reader.join_or_start(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            released.recv().unwrap();
+            true
+        });
+        // Holding the state lock parks the read task at the point where it clears `in_flight`,
+        // so whatever it did before that is observable here and nothing after it has happened.
+        let state = reader.lock();
+        release.send(()).unwrap();
+        let published =
+            tokio::time::timeout(Duration::from_secs(5), answer.wait_for(Option::is_some))
+                .await
+                .map(|value| *value.unwrap())
+                .ok();
+        let joinable = state.in_flight.as_ref().map(|running| *running.borrow());
+        drop(state);
+        let started = reads.load(Ordering::SeqCst);
+        assert_eq!(
+            (published, joinable, started),
+            (Some(Some(true)), Some(Some(true)), 1),
+            "expected (answer published, answer a joiner in the window receives, reads started) \
+             = (Some(Some(true)), Some(Some(true)), 1) | received ({published:?}, {joinable:?}, {started})"
         );
     }
 
