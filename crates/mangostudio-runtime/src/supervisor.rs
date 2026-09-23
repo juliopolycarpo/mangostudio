@@ -194,7 +194,7 @@ pub async fn join_owned<T>(handle: JoinHandle<T>) -> T {
         .expect("an owned task must run to completion, never be aborted or panic")
 }
 
-/// `SIGINT`/`SIGTERM` (Unix) or `CTRL_C` (Windows), unified behind one
+/// `SIGINT`/`SIGTERM` (Unix) or `CTRL_C`/`CTRL_BREAK` (Windows), unified behind one
 /// [`ShutdownSignals::wait`] — every handler **eagerly** registered by
 /// [`ShutdownSignals::install`], never inside `wait` itself.
 ///
@@ -204,8 +204,8 @@ pub async fn join_owned<T>(handle: JoinHandle<T>) -> T {
 /// — inside a `select!` arm sitting after a stretch of its own setup work —
 /// loses any signal that arrives in that window to the process's default
 /// disposition: no cooperative close, no exit code this crate controls.
-/// `tokio::signal::unix::signal` and `tokio::signal::windows::ctrl_c` both
-/// register at the call itself, which is why [`ShutdownSignals::install`]
+/// `tokio::signal::unix::signal` and `tokio::signal::windows::{ctrl_c,
+/// ctrl_break}` all register at the call itself, which is why [`ShutdownSignals::install`]
 /// is the only place either is ever called.
 pub struct ShutdownSignals {
     #[cfg(unix)]
@@ -214,6 +214,11 @@ pub struct ShutdownSignals {
     terminate: tokio::signal::unix::Signal,
     #[cfg(windows)]
     ctrl_c: tokio::signal::windows::CtrlC,
+    /// `CTRL_BREAK` is the only console event a parent can aim at a child
+    /// spawned in its own process group; left unhandled, it kills the
+    /// process with `STATUS_CONTROL_C_EXIT` instead of closing cooperatively.
+    #[cfg(windows)]
+    ctrl_break: tokio::signal::windows::CtrlBreak,
 }
 
 impl ShutdownSignals {
@@ -231,6 +236,7 @@ impl ShutdownSignals {
     pub fn install() -> std::io::Result<Self> {
         Ok(Self {
             ctrl_c: tokio::signal::windows::ctrl_c()?,
+            ctrl_break: tokio::signal::windows::ctrl_break()?,
         })
     }
 
@@ -246,7 +252,10 @@ impl ShutdownSignals {
     /// Resolves once any registered signal arrives.
     #[cfg(windows)]
     pub async fn wait(&mut self) {
-        self.ctrl_c.recv().await;
+        tokio::select! {
+            _ = self.ctrl_c.recv() => {}
+            _ = self.ctrl_break.recv() => {}
+        }
     }
 
     /// Spawns an owned task that cancels `token` the first time a signal
