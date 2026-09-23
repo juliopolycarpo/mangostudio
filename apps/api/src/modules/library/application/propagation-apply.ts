@@ -56,7 +56,7 @@ import { LibraryRequestError } from '../domain/library-request-error';
 import { backupPolicyFor } from '../infrastructure/backup-roots';
 import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
 import { hashResourceAt, readResourceFile } from '../infrastructure/instance-reader';
-import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
+import { createLibraryPathEnv, libraryWritePathEnv } from '../infrastructure/location-probe';
 import {
   type ResourceWriteResult,
   writeDirectoryResource,
@@ -197,7 +197,7 @@ async function readRemoteLibrarySource(
     {
       path: input.path,
       locationId: input.locationId,
-      pathEnv: { env: configuredLibraryEnv() },
+      pathEnv: libraryWritePathEnv(undefined, environmentId),
     },
     { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
   );
@@ -540,7 +540,7 @@ function toRuntimeApplyParams(
   return {
     ...envelope,
     environmentId: deps.environmentId,
-    pathEnv: writePathEnvParams(env),
+    pathEnv: libraryWritePathEnv(env.workspaceRoot, deps.environmentId),
     operations: prepared.map(({ contents: _bytes, files, ...operation }) => ({
       ...operation,
       ...(operation.kind === 'file' && { contentRef: operation.expectedContentHash }),
@@ -564,20 +564,6 @@ function toRuntimeApplyParams(
  */
 function treeFileKey(contentHash: string, relativePath: string): string {
   return `${contentHash}:${relativePath}`;
-}
-
-/**
- * Only the MangoStudio directories travel, exactly as `pathEnvParams` in
- * `environment-library-service.ts` sends them: they are hub configuration
- * rather than a fact about the host, and the runtime already merges its own
- * `process.env` underneath. Forwarding the hub's whole environment would put
- * its secrets in every write frame for no added resolution.
- */
-function writePathEnvParams(env: PathEnv): RuntimeLibraryApplyParams['pathEnv'] {
-  return {
-    env: configuredLibraryEnv(),
-    ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
-  };
 }
 
 function narrowAppliedOperation(
@@ -1165,7 +1151,7 @@ async function runUndo(
         await deps.runtimeUndo({
           backupRoot: deps.backup.backupDir(),
           backupId,
-          pathEnv: writePathEnvParams(env),
+          pathEnv: libraryWritePathEnv(env.workspaceRoot, deps.environmentId),
         })
       );
     }
@@ -1184,7 +1170,7 @@ async function runUndo(
     const params = {
       backupRoot: policy.backupRoot,
       backupId,
-      pathEnv: writePathEnvParams(env),
+      pathEnv: libraryWritePathEnv(env.workspaceRoot, deps.environmentId),
     };
     return named(await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }));
   } catch (error) {

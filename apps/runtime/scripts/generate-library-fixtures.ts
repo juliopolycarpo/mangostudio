@@ -6,7 +6,8 @@
  * script writes and replays every case through the Rust port: hash domains,
  * the `localeCompare` order that decides `whitespaceHash` and
  * `library.read-tree`'s file order, frontmatter scalars, instance discovery,
- * bounded content reads, settings sources and location resolution. Every
+ * bounded content reads, settings sources, location resolution, and backup
+ * sets the write engines left behind (`library-backup-fixtures.ts`). Every
  * expected value comes from the production shared code, never a restatement.
  *
  * Trees are described declaratively and built in a scratch directory on both
@@ -32,6 +33,7 @@ import {
   readSettingsSources,
 } from '@mangostudio/shared/library/machine';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
+import { recordBackupCorpus } from './library-backup-fixtures';
 
 const OUTPUT = join(
   import.meta.dir,
@@ -689,6 +691,7 @@ async function main(): Promise<void> {
     trees,
     settingsSources: { home: SETTINGS_HOME, expected: settingsSources },
     locations,
+    backups: await recordBackupCorpus(),
   };
   mkdirSync(dirname(OUTPUT), { recursive: true });
   writeFileSync(OUTPUT, `${JSON.stringify(corpus, null, 2)}\n`);

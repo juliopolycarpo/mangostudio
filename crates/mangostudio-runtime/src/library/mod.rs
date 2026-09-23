@@ -1,34 +1,35 @@
-//! The read half of the `library.*` method group: discovery, lockstep
-//! hashing, and bounded reads of the agent homes on this machine.
+//! The `library.*` method group: discovery, lockstep hashing and bounded
+//! reads of the agent homes on this machine, and — in [`mutation`] — the
+//! writes, backups and recovery that change them.
 //!
 //! Ported from `apps/shared/src/library/machine/` (`discovery.ts`,
-//! `instance-reader.ts`, `read.ts`, `settings-sources.ts`, `cache.ts`),
-//! `apps/shared/src/library/hash.ts`, and the read handlers of
-//! `apps/runtime/src/services/library/service.ts`. Those TypeScript modules
-//! are the parity baseline: `ts_compat_tests` replays a corpus the real
-//! TypeScript code produced (`apps/runtime/scripts/generate-library-fixtures.ts`).
+//! `instance-reader.ts`, `read.ts`, `settings-sources.ts`, `cache.ts`, and
+//! the write engines listed in [`mutation`]), `apps/shared/src/library/hash.ts`,
+//! and `apps/runtime/src/services/library/service.ts`. Those TypeScript
+//! modules are the parity baseline: `ts_compat_tests` and
+//! `mutation::ts_backup_compat_tests` replay a corpus the real TypeScript
+//! code produced (`apps/runtime/scripts/generate-library-fixtures.ts`).
 //!
 //! # Method inventory
 //!
-//! | Method | Implemented here |
-//! | --- | --- |
-//! | `library.locations` | yes |
-//! | `library.settings-sources` | yes |
-//! | `library.scan` | yes |
-//! | `library.read` | yes |
-//! | `library.read-tree` | yes |
-//! | `library.apply` | no — the mutation/backup lane |
-//! | `library.remove` | no — the mutation/backup lane |
-//! | `library.undo` | no — the mutation/backup lane |
-//! | `library.backups` | no — read-only, but it belongs with the backup store's fixtures |
-//! | `library.gc` | no — the mutation/backup lane |
+//! | Method | Consent | Implemented in |
+//! | --- | --- | --- |
+//! | `library.locations` | library | `service` |
+//! | `library.settings-sources` | library | `service` |
+//! | `library.scan` | library | `service` |
+//! | `library.read` | library | `service` |
+//! | `library.read-tree` | library | `service` |
+//! | `library.apply` | library + fsWrite | `mutation` |
+//! | `library.remove` | library + fsWrite | `mutation` |
+//! | `library.undo` (restore) | library + fsWrite | `mutation` |
+//! | `library.backups` | library | `mutation` — read-only, never prunes |
+//! | `library.gc` | library + fsWrite | `mutation` — the explicit purge |
 //!
-//! Because five of the ten methods carrying the `library` capability are
-//! unregistered, [`crate::manifest::build_features`] keeps
-//! `features.library` false: the hub gates every library surface on that
-//! one boolean, and advertising it now would send writes to a runtime that
-//! answers them with "not implemented". The five reads are still callable
-//! directly (consent permitting); the hub simply does not route to them yet.
+//! With all ten registered, [`crate::manifest::build_features`] advertises
+//! `features.library` exactly when consent grants `library` — the
+//! `readonly` preset included, where the writes answer consent denials and
+//! `library.backups` still lists — and the hub routes its library service
+//! here.
 //!
 //! # Where paths come from
 //!
@@ -60,6 +61,7 @@ mod frontmatter;
 mod fs;
 mod hash;
 mod js;
+mod mutation;
 mod names;
 mod read;
 mod reader;

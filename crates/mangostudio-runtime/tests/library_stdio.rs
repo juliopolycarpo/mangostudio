@@ -1,7 +1,8 @@
-//! The five `library.*` reads through the real compiled binary, spawned as
-//! a `stdio` child with a controlled environment — the only way to prove
-//! the relocated-home and runtime-local-override behaviour end to end,
-//! since both come from the child process's own environment block.
+//! The `library.*` methods through the real compiled binary, spawned as a
+//! `stdio` child with a controlled environment — the only way to prove the
+//! relocated-home and runtime-local-override behaviour end to end, since
+//! both come from the child process's own environment block, and the one
+//! place every write-lane answer passes the catalog's own result check.
 
 use std::path::Path;
 use std::time::Duration;
@@ -58,8 +59,8 @@ async fn spawn_runtime(
         .expect("the handshake succeeds");
     assert_eq!(
         remote.capabilities["features"]["library"],
-        json!(false),
-        "expected features.library false while only the read half is implemented | received {}",
+        json!(true),
+        "expected features.library true with all ten methods under full consent | received {}",
         remote.capabilities["features"]["library"]
     );
     (session, driver)
@@ -179,6 +180,165 @@ async fn the_compiled_runtime_keeps_its_own_override_unless_a_call_pins_one() {
         slugs(&again),
         ["runtime-own"],
         "the pin must not leak into an unpinned scan"
+    );
+
+    session
+        .close(close_codes::RELEASED, Some("test done"))
+        .await;
+    let _ = driver.await;
+}
+
+/// Apply (a transferred tree), list, undo, remove, undo the removal, and
+/// collect — every write-lane answer validated by the binary's own result
+/// check against the catalog, inside a scratch home and backup root.
+#[tokio::test]
+async fn the_compiled_runtime_applies_removes_undoes_and_collects() {
+    use base64::Engine;
+    let mango_home = scratch_path("library-stdio-writes-mango");
+    let home = scratch_path("library-stdio-writes-home");
+    std::fs::create_dir_all(&*home).unwrap();
+    let skills = home.join(".mango").join("skills");
+    let backups = home.join("backups").to_string_lossy().into_owned();
+    write_skill(&skills, "copied");
+    let (session, driver) = spawn_runtime(&mango_home, &home, &[]).await;
+    let settings = json!({ "home": {}, "workspace": {} });
+    let scan = call(
+        &session,
+        "library.scan",
+        json!({ "locationSettings": settings, "force": true }),
+    )
+    .await;
+    let hash = scan["entries"][0]["instance"]["contentHash"].clone();
+    std::fs::remove_dir_all(skills.join("copied")).unwrap();
+
+    let body = SKILL.replace("SLUG", "copied");
+    let applied = call(
+        &session,
+        "library.apply",
+        json!({
+            "backupRoot": backups,
+            "environmentId": "stdio-box",
+            "operations": [{
+                "resourceKey": "skill:copied", "locationId": "mango-skills", "slug": "copied",
+                "operation": "create", "kind": "directory", "expectedContentHash": hash,
+                "destinationRoot": skills.to_string_lossy(),
+                "files": [{ "relativePath": "SKILL.md", "contentRef": "c1" }],
+            }],
+            "contents": { "c1": base64::engine::general_purpose::STANDARD.encode(&body) },
+        }),
+    )
+    .await;
+    assert_eq!(applied["failed"], json!([]), "received {applied}");
+    assert_eq!(applied["backups"][0]["environmentId"], "stdio-box");
+    let apply_set = applied["backupId"].as_str().unwrap().to_string();
+    assert_eq!(
+        std::fs::read_to_string(skills.join("copied").join("SKILL.md")).unwrap(),
+        body
+    );
+
+    let listed = call(
+        &session,
+        "library.backups",
+        json!({ "backupRoot": backups }),
+    )
+    .await;
+    assert_eq!(listed["sets"][0]["backupId"], json!(apply_set));
+    assert_eq!(listed["sets"][0]["resourceKeys"], json!(["skill:copied"]));
+
+    let undone = call(
+        &session,
+        "library.undo",
+        json!({ "backupRoot": backups, "backupId": apply_set }),
+    )
+    .await;
+    assert_eq!(
+        undone["removed"].as_array().unwrap().len(),
+        1,
+        "received {undone}"
+    );
+    assert!(!skills.join("copied").exists());
+
+    write_skill(&skills, "copied");
+    let removed = call(
+        &session,
+        "library.remove",
+        json!({
+            "backupRoot": backups,
+            "operations": [{
+                "resourceKey": "skill:copied", "locationId": "mango-skills", "slug": "copied",
+                "kind": "directory", "expectedPath": skills.join("copied").to_string_lossy(),
+                "expectedContentHash": hash, "lastCopy": true,
+            }],
+            "lastCopyResourceKeys": ["skill:copied"],
+        }),
+    )
+    .await;
+    assert_eq!(removed["failed"], json!([]), "received {removed}");
+    let removal_set = removed["backupId"].as_str().unwrap().to_string();
+    assert!(!skills.join("copied").exists());
+    let listed = call(
+        &session,
+        "library.backups",
+        json!({ "backupRoot": backups, "retentionCount": 1 }),
+    )
+    .await;
+    let pinned = listed["sets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|set| set["backupId"] == json!(removal_set))
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (pinned["pinned"].clone(), pinned["evictsNext"].clone()),
+        (json!(true), json!(false))
+    );
+
+    let restored = call(
+        &session,
+        "library.undo",
+        json!({ "backupRoot": backups, "backupId": removal_set }),
+    )
+    .await;
+    assert_eq!(
+        restored["restored"].as_array().unwrap().len(),
+        1,
+        "received {restored}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(skills.join("copied").join("SKILL.md")).unwrap(),
+        body
+    );
+
+    let collected = call(
+        &session,
+        "library.gc",
+        json!({ "backupRoot": backups, "purgeBackupIds": [apply_set, removal_set] }),
+    )
+    .await;
+    assert_eq!(
+        collected["purged"].as_array().unwrap().len(),
+        2,
+        "received {collected}"
+    );
+    let missing = tokio::time::timeout(
+        Duration::from_secs(20),
+        session.request(
+            "library.undo",
+            json!({ "backupRoot": backups, "backupId": removal_set }),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(
+        missing
+            .details
+            .as_ref()
+            .and_then(|details| details.get("kind"))
+            .cloned(),
+        Some(json!("library_backup_missing")),
+        "received {missing:?}"
     );
 
     session

@@ -702,16 +702,15 @@ async fn withdrawn_library_consent_refuses_every_read() {
     }
 }
 
-/// The capability the hub reads must stay false while five of the ten
-/// `library.*` methods are unregistered, and the five this lane owns must
-/// be exactly the ones registered.
+/// `features.library` is truthful: true only when all ten catalog methods
+/// are registered *and* consent grants `library` (readonly included — it
+/// grants library without fsWrite, and `library.backups` stays callable
+/// there), and false for a partial registration whatever consent says.
 #[test]
-fn partial_library_registration_never_advertises_the_feature() {
+fn library_is_advertised_only_when_complete_and_consented() {
     let home = scratch_dir("library-capability");
-    let registry = super::register(
-        crate::registry::Registry::new(),
-        ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
-    );
+    let consent = || ConsentSource::new(RuntimeSlot::Host, home.to_path_buf());
+    let registry = super::register(crate::registry::Registry::new(), consent());
     let library_methods: Vec<&str> = mangostudio_runtime_contract::catalog::catalog()
         .methods
         .iter()
@@ -725,31 +724,45 @@ fn partial_library_registration_never_advertises_the_feature() {
     );
     let mut implemented = registry.implemented_methods();
     implemented.sort_unstable();
+    let mut declared = library_methods.clone();
+    declared.sort_unstable();
     assert_eq!(
-        implemented,
-        [
-            "library.locations",
-            "library.read",
-            "library.read-tree",
-            "library.scan",
-            "library.settings-sources"
-        ]
+        implemented, declared,
+        "every catalog library method is registered"
     );
-    let allow = mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow {
-        fs_read: true,
-        fs_write: true,
-        shell: true,
-        git: true,
-        probing: true,
-        mcp: true,
-        library: true,
-        checkpoints: true,
-        update: true,
-        external_agents: Some(true),
+    let allow = |library: bool, fs_write: bool| {
+        mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow {
+            fs_read: true,
+            fs_write,
+            shell: false,
+            git: false,
+            probing: true,
+            mcp: false,
+            library,
+            checkpoints: false,
+            update: false,
+            external_agents: Some(false),
+        }
     };
-    let features = crate::manifest::build_features(&registry, &allow, true);
+    let features = |registry: &crate::registry::Registry, library, fs_write| {
+        crate::manifest::build_features(registry, &allow(library, fs_write), false).library
+    };
     assert!(
-        !features.library,
+        features(&registry, true, true),
+        "expected library true under full consent | received false"
+    );
+    assert!(
+        features(&registry, true, false),
+        "expected library true under readonly consent (library without fsWrite) | received false"
+    );
+    assert!(
+        !features(&registry, false, true),
+        "expected library false once revoked | received true"
+    );
+    let service = Arc::new(LibraryService::native(consent()));
+    let reads_only = super::service::register_service(crate::registry::Registry::new(), service);
+    assert!(
+        !features(&reads_only, true, true),
         "expected features.library false with 5 of 10 methods registered | received true"
     );
 }

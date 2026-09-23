@@ -104,7 +104,7 @@ pub(crate) struct LibraryService {
     pub scan: ScanDeps,
 }
 
-fn tool_argument(message: String) -> RemoteError {
+pub(crate) fn tool_argument(message: String) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
@@ -115,7 +115,7 @@ fn unresolved(location_id: &str) -> String {
 /// Re-reads this slot's consent — a `runtime.json` read, so every caller
 /// runs it on a blocking worker — and refuses `method` when a capability it
 /// needs is no longer granted.
-fn authorize(consent: &ConsentSource, method: &str) -> Result<(), RemoteError> {
+pub(crate) fn authorize(consent: &ConsentSource, method: &str) -> Result<(), RemoteError> {
     let allow = consent.refresh();
     let missing: Vec<String> = mangostudio_runtime_contract::catalog::capabilities_of(method)
         .expect("library handlers belong to the catalog")
@@ -280,11 +280,16 @@ fn epoch_ms() -> u64 {
         })
 }
 
-/// Registers the five read methods this build implements. The other five
-/// `library.*` methods stay unregistered, which keeps `features.library`
-/// false (see `crate::library`'s module docs).
+/// Registers all ten `library.*` methods: the five reads here and the
+/// write lane in [`super::mutation`], sharing one consent source and one
+/// path seam.
 pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
-    register_service(registry, Arc::new(LibraryService::native(consent)))
+    let reads = Arc::new(LibraryService::native(consent));
+    let writes = Arc::new(super::mutation::MutationService::native(
+        Arc::clone(&reads.consent),
+        Arc::clone(&reads.path_env),
+    ));
+    super::mutation::register(register_service(registry, reads), writes)
 }
 
 pub(crate) fn register_service(registry: Registry, service: Arc<LibraryService>) -> Registry {
