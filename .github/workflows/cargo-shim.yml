@@ -24,6 +24,9 @@ on:
       - "apps/runtime/src/runtime-home.ts"
       - "apps/runtime/src/config.ts"
       - "apps/runtime/scripts/generate-home-fixtures.ts"
+      - "apps/runtime/scripts/generate-library-fixtures.ts"
+      - "apps/shared/src/library/**"
+      - "apps/shared/src/markdown/**"
       - "apps/runtime/package.json"
       - "apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts"
       - "apps/api/tests/integration/services/rust-filesystem-search-compat.integration.test.ts"
@@ -103,8 +106,11 @@ jobs:
           # change that broke spawnRuntimeChild's cancellation path, say,
           # touches none of the paths above, rust evaluates false, the job
           # is skipped and allowed to be, and Gate reports green having
-          # exercised none of it.
-          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/package\.json$|apps/api/tests/integration/services/(rust-runtime-qualification|rust-filesystem-search-compat|rust-snapshot-compat|rust-command-compat)\.integration\.test\.ts$|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/tests/support/rust-typescript-runtimes\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
+          # exercised none of it. The library readers' TypeScript baseline
+          # (apps/shared/src/library/, apps/shared/src/markdown/) and its
+          # corpus generator feed the ts-library half of the same freshness
+          # job, so a TypeScript-only change to them reruns the parity check.
+          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/runtime-home\.ts$|apps/runtime/src/config\.ts$|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/scripts/generate-library-fixtures\.ts$|apps/shared/src/library/|apps/shared/src/markdown/|apps/runtime/package\.json$|apps/api/tests/integration/services/(rust-runtime-qualification|rust-filesystem-search-compat|rust-snapshot-compat|rust-command-compat)\.integration\.test\.ts$|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/tests/support/rust-typescript-runtimes\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
@@ -246,6 +252,16 @@ jobs:
         run: |
           git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-home
           git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-home
+
+      # `src/library/ts_compat_tests.rs` replays this corpus; regenerating it
+      # from the real TypeScript readers is the only thing that notices a
+      # baseline change the committed file no longer describes.
+      - run: bun run --filter @mangostudio/runtime fixtures:library
+
+      - name: Fail if regenerating changed the committed ts-library corpus
+        run: |
+          git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-library
+          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-library
 
   real-binary-qualification:
     # Proves the hub's own real code actually talks to the real compiled
