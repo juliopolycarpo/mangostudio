@@ -56,6 +56,7 @@ import { getDb } from '../../../src/db/database';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import { createEnvironmentRepository } from '../../../src/modules/environments/infrastructure/environment-repository';
+import { createTerminalSessionService } from '../../../src/modules/terminals/application/terminal-session-service';
 import { connectHttpRuntime } from '../../../src/services/runtime-client/connect-http-runtime';
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
@@ -167,6 +168,22 @@ describe('Real Rust runtime qualification', () => {
           expect(client.manifest.terminal).toBe(true);
           const sessionId = 'rust-pty-qualification';
           const shell = process.platform === 'win32' ? 'powershell' : 'bash';
+          // The hub's own admission gate, not just the RPC: the terminal panel must offer this peer.
+          const terminals = createTerminalSessionService({
+            getConfig: () => ({
+              enabled: true,
+              idleTimeoutMinutes: 30,
+              maxSessionsPerUser: 8,
+              scrollbackKib: 256,
+            }),
+            getRuntimeClient: () => Promise.resolve(client),
+            isIdentityAttested: () => true,
+            now: Date.now,
+            randomId: () => crypto.randomUUID(),
+          });
+          expect(
+            await terminals.availability('rust-qualification-user', 'rust-stdio-terminal')
+          ).toMatchObject({ available: true, shells: expect.arrayContaining([shell]) });
           const opened = await client.terminal.open({
             sessionId,
             shell,

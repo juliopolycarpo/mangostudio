@@ -163,6 +163,20 @@ async function defaultResolveChat(chatId: string, userId: string): Promise<Termi
   return { ok: true, chatId, workdir: chat.workdir };
 }
 
+/**
+ * Whether the peer offers a PTY under the owner's current shell consent.
+ *
+ * `features.shell` also covers install, which a peer may not implement yet, so it cannot
+ * gate terminals. `allow.shell` is the consent itself; it still refuses an older peer whose
+ * health report omits `terminal` and so leaves the handshake's `true` in place after revocation.
+ *
+ * @example
+ * if (!offersTerminal(client)) return refuse('unavailable');
+ */
+function offersTerminal(client: TerminalRuntimeClient): boolean {
+  return client.manifest.terminal === true && client.manifest.allow?.shell !== false;
+}
+
 function defaultDeps(): TerminalSessionServiceDeps {
   return {
     getConfig: () => getApiConfig().terminal,
@@ -290,7 +304,7 @@ export function createTerminalSessionService(
   }
 
   function requireTerminalCapable(client: TerminalRuntimeClient, environmentId: string): void {
-    if (client.manifest.terminal !== true || client.manifest.features.shell === false) {
+    if (!offersTerminal(client)) {
       throw new TerminalUnavailableError(
         'unavailable',
         `Environment "${environmentId}" does not offer a terminal.`
@@ -632,9 +646,7 @@ export function createTerminalSessionService(
       } catch {
         return refuse('disconnected');
       }
-      if (client.manifest.terminal !== true || client.manifest.features.shell === false) {
-        return refuse('unavailable');
-      }
+      if (!offersTerminal(client)) return refuse('unavailable');
       if (client.manifest.terminalCloseAfterRevocation !== true) {
         return refuse('runtime-update-required');
       }
