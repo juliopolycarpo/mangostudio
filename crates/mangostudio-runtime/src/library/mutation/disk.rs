@@ -211,7 +211,9 @@ fn copy_entry(source: &Path, destination: &Path) -> io::Result<()> {
 
 /// `preserveTimestamps`: the copy keeps the source's access and
 /// modification times, which is what makes a restored skill scan with the
-/// timestamps it had before the apply.
+/// timestamps it had before the apply. Stamping needs a writable handle, so
+/// a read-only copy is made writable for that one step and then given its
+/// source's permissions back — `cp`'s own `makeFileWritable` dance.
 fn preserve_times(destination: &Path, source: &fs::Metadata) -> io::Result<()> {
     let mut times = fs::FileTimes::new();
     if let Ok(modified) = source.modified() {
@@ -220,10 +222,30 @@ fn preserve_times(destination: &Path, source: &fs::Metadata) -> io::Result<()> {
     if let Ok(accessed) = source.accessed() {
         times = times.set_accessed(accessed);
     }
-    OpenOptions::new()
+    let original = source.permissions();
+    let mut writable = original.clone();
+    // Only the owner's write bit is added on Unix (`mode | 0o200`), as `cp`
+    // does; on Windows this clears the read-only attribute.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        writable.set_mode(original.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    #[allow(clippy::permissions_set_readonly_false)]
+    writable.set_readonly(false);
+    let changed = writable != original;
+    if changed {
+        fs::set_permissions(destination, writable)?;
+    }
+    let stamped = OpenOptions::new()
         .write(true)
-        .open(destination)?
-        .set_times(times)
+        .open(destination)
+        .and_then(|file| file.set_times(times));
+    if changed {
+        fs::set_permissions(destination, original)?;
+    }
+    stamped
 }
 
 #[cfg(unix)]
@@ -412,6 +434,35 @@ mod tests {
             again.map_err(|error| error.kind()),
             Err(io::ErrorKind::AlreadyExists),
             "errorOnExist: a second copy onto the same path must fail"
+        );
+    }
+
+    /// A read-only file (a vendored skill, a locked instruction file) must
+    /// back up like any other and keep its mode: `cp` makes the copy
+    /// writable only long enough to stamp its timestamps.
+    #[cfg(unix)]
+    #[test]
+    fn copy_tree_backs_up_a_read_only_file_and_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = crate::test_support::scratch_dir("library-copy-read-only");
+        let source = scratch.join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        let locked = source.join("SKILL.md");
+        std::fs::write(&locked, "locked").unwrap();
+        std::fs::set_permissions(&locked, fs::Permissions::from_mode(0o444)).unwrap();
+        let destination = scratch.join("copy");
+        let copied = NativeMutationFs.copy_tree(&source, &destination, CopyPurpose::Backup);
+        assert!(
+            copied.is_ok(),
+            "expected a read-only file to back up | received {copied:?}"
+        );
+        assert_eq!(
+            std::fs::metadata(destination.join("SKILL.md"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o444
         );
     }
 
