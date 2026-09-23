@@ -405,6 +405,15 @@ describe('Real Rust runtime qualification', () => {
           expect(log).toContain('waiting');
           expect(log).toContain('done');
 
+          if (process.platform === 'win32') {
+            // Extra interpreter case: a cmd.exe batch installer relays the same way.
+            const batch = await writeFakeInstaller(scratch, 'sleeps', 'cmd-installer', 'cmd');
+            const batchRun = startRelayedInstall(client, batch, { runId: 'rust-install-cmd' });
+            expect(await batchRun.result).toMatchObject({ status: 'succeeded', exitCode: 0 });
+            expect(batchRun.lines).toContainEqual({ stream: 'stdout', line: 'done' });
+            await expectAppliedOnce(batch, batchRun);
+          }
+
           // Cancel before its run arrives: nothing launches.
           const early = await writeFakeInstaller(scratch, 'sleeps', 'cancel-before-run');
           expect(await client.install.cancel({ runId: 'rust-install-early' })).toEqual({

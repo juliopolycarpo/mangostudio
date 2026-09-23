@@ -8,11 +8,9 @@
  * once. Paths are written into the script text rather than passed through the
  * environment, because the runtime forwards only its install allowlist.
  *
- * On Windows the fake installer is a `cmd.exe` batch file, not a PowerShell
- * script: a PowerShell host whose stdout is an anonymous pipe can stall on its
- * first stdout write under the runtime's Job spawner on CI (recorded in
- * `crates/mangostudio-runtime/tests/subprocess_windows.rs`), while `cmd.exe`
- * is that suite's known-good stdout control.
+ * On Windows the fake installer is a PowerShell `-File` script by default,
+ * because every Windows recipe runs `powershell`; a `cmd.exe` batch file is
+ * available as an extra interpreter case.
  */
 
 import { expect } from 'bun:test';
@@ -43,6 +41,9 @@ export interface FakeInstaller {
  */
 export type FakeInstallerMode = 'waits' | 'sleeps' | 'grandchild';
 
+/** The Windows interpreter; recipes use `powershell`, `cmd` is an extra control case. */
+export type WindowsInterpreter = 'powershell' | 'cmd';
+
 const isWindows = process.platform === 'win32';
 
 /**
@@ -54,12 +55,48 @@ const isWindows = process.platform === 'win32';
 export async function writeFakeInstaller(
   directory: string,
   mode: FakeInstallerMode,
-  name: string
+  name: string,
+  interpreter: WindowsInterpreter = 'powershell'
 ): Promise<FakeInstaller> {
   const marker = join(directory, `${name}.marker`);
   const release = join(directory, `${name}.release`);
   const pidFile = join(directory, `${name}.pid`);
   const logPath = join(directory, `${name}.log`);
+  if (isWindows && interpreter === 'powershell') {
+    if (mode === 'grandchild') throw new Error('The grandchild installer is POSIX-only.');
+    const script = join(directory, `${name}.ps1`);
+    const wait =
+      mode === 'waits'
+        ? `while (-not (Test-Path -LiteralPath '${release}')) { Start-Sleep -Milliseconds 50 }`
+        : 'Start-Sleep -Seconds 1';
+    await writeFile(
+      script,
+      [
+        "Write-Output 'waiting'",
+        "[Console]::Error.WriteLine('warn')",
+        wait,
+        `Add-Content -LiteralPath '${marker}' -Value 'run'`,
+        "Write-Output 'done'",
+        '',
+      ].join('\r\n')
+    );
+    // The recipes' own POWERSHELL_ARGV_PREFIX shape, ending in `-File`.
+    return {
+      argv: [
+        'powershell',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        script,
+      ],
+      marker,
+      release,
+      logPath,
+      pidFile,
+    };
+  }
   if (isWindows) {
     if (mode === 'grandchild') throw new Error('The grandchild installer is POSIX-only.');
     const script = join(directory, `${name}.cmd`);
