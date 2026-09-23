@@ -1,11 +1,15 @@
 //! MCP client sessions owned by one runtime connection.
 //!
-//! This first slice serves stdio `connect`, `list-tools`, and `disconnect`.
-//! The manifest still withholds `mcp` until the whole catalog family works.
+//! `service` is the registry the `mcp.*` handlers share; `client` is the project-owned seam it
+//! talks through; `sdk` is the one `rmcp`-backed implementation of that seam; `process` owns a
+//! stdio server's process tree through the shared guardian/Job supervisor.
 
 mod client;
 mod consent;
 mod process;
+mod sdk;
 mod service;
+mod stdio;
+mod types;
 
 pub(crate) use service::register;
