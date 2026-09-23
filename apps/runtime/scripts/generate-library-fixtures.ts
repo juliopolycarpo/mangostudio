@@ -244,6 +244,80 @@ interface ScanCase {
 const SKILL = (name: string, description = 'A skill.') =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\nBody of ${name}.\n`;
 
+// --- parser edges --------------------------------------------------------------
+//
+// Documents where `JSON.parse` / `smol-toml` and the Rust host's parsers could
+// part ways: JSON past serde_json's default depth, lone surrogate escapes and
+// out-of-range numbers; TOML 1.1 syntax, bare scalars smol-toml reads through
+// `Number()` and Bun's `Date`, and the 64-container nesting limit both hosts
+// apply. Kept small: the corpus is committed.
+
+const nestedToml = {
+  arrays: (depth: number) => `a = ${'['.repeat(depth)}${']'.repeat(depth)}\n`,
+  inline: (depth: number) => `a = ${'{b='.repeat(depth)}1${'}'.repeat(depth)}\n`,
+  dotted: (segments: number) => `${Array(segments).fill('k').join('.')} = 1\n`,
+  header: (segments: number) => `[${Array(segments).fill('h').join('.')}]\n`,
+  arrayTable: (segments: number) => `[[${Array(segments).fill('t').join('.')}]]\n`,
+};
+
+const TOML_EDGES: Record<string, string> = {
+  'inline-table-newlines': 'name = "inline"\nopts = {\n  a = 1,\n  b = 2,\n}\n',
+  'inline-table-trailing-comma': 'opts = {x = 1,}\n',
+  'escape-e': 'name = "esc\\e"\n',
+  'escape-x': 'name = "\\x41gent"\n',
+  'escape-x-malformed': 'name = "\\xZZ"\n',
+  'escape-lone-surrogate': 'name = "\\uD800"\n',
+  'time-without-seconds': 't = 10:30\ndt = 1979-05-27T07:32\n',
+  'date-feb-30': 'd = 1979-02-30\n',
+  'date-feb-29-non-leap': 'd = 1979-02-29\n',
+  'date-apr-31-datetime': 'd = 1979-04-31 07:32:00+01:00\n',
+  'date-day-32': 'd = 1979-12-32\n',
+  'date-with-z': 'd = 1979-05-27Z\n',
+  'date-with-offset': 'd = 1979-05-27+01:00\n',
+  'time-with-offset': 't = 07:32Z\nu = 07:32:00+01:00\n',
+  'time-leap-second': 't = 00:00:60\n',
+  'datetime-leap-second': 'dt = 1979-05-27T23:59:60Z\n',
+  'time-hour-24': 't = 24:00\n',
+  'date-space-z': 'd = 1979-05-27 Z\ne = 1979-05-27 z\n',
+  'date-t-space-z': 'd = 1979-05-27T Z\n',
+  'date-space-offset': 'd = 1979-05-27 +01:00\n',
+  'date-day-00-glued-time': 'd = 1979-01-0007:32Z\ne = 1979-12-0023:59:59.5-05:00\n',
+  'date-day-00-glued-offset-hour-99': 'd = 1979-01-0007:32+99:59\n',
+  'date-day-01-glued-time': 'd = 1979-01-0107:32Z\n',
+  'date-day-00-separated-time': 'd = 1979-01-00T07:32Z\n',
+  'date-day-00-glued-offset-minute-60': 'd = 1979-01-0007:32+23:60\n',
+  'date-as-name': 'name = 1979-02-30\n',
+  'float-overflow': 'f = 1e1000\ng = -1e400\n',
+  'integer-safe-max': 'i = 9007199254740991\nj = -9007199254740991\n',
+  'integer-unsafe': 'i = 9007199254740992\n',
+  'integer-i64-max': 'i = 9223372036854775807\n',
+  'integer-hex-unsafe': 'i = 0x20000000000000\n',
+  'integer-octal-digit-8': 'i = 0o8\n',
+  'nesting-arrays-64': nestedToml.arrays(64),
+  'nesting-arrays-65': nestedToml.arrays(65),
+  'nesting-arrays-1000': nestedToml.arrays(1000),
+  'nesting-inline-64': nestedToml.inline(64),
+  'nesting-inline-65': nestedToml.inline(65),
+  'nesting-dotted-65': nestedToml.dotted(65),
+  'nesting-dotted-66': nestedToml.dotted(66),
+  'nesting-header-64': nestedToml.header(64),
+  'nesting-header-65': nestedToml.header(65),
+  'nesting-array-table-63': nestedToml.arrayTable(63),
+  'nesting-array-table-64': nestedToml.arrayTable(64),
+  'nesting-mixed-64': `[h]\nk.l = {z = {z = ${'['.repeat(60)}1${']'.repeat(60)}}}\n`,
+  'nesting-mixed-65': `[h]\nk.l = {z = {z = ${'['.repeat(61)}1${']'.repeat(61)}}}\n`,
+};
+
+const JSON_EDGES: Record<string, string> = {
+  'deep-129': `{"a":${'['.repeat(129)}${']'.repeat(129)}}`,
+  'deep-1000': `{"a":${'['.repeat(1000)}${']'.repeat(1000)}}`,
+  'lone-surrogate-value': '{"a":"\\ud800"}',
+  'lone-surrogate-key': '{"\\udfff":1}',
+  'number-overflow': '{"a":1e400,"b":-1e400,"c":1e-400}',
+  'raw-control-character': '{"a":"\u0001"}',
+  'hex-escape': '{"a":"\\x41"}',
+};
+
 const SCAN_CASES: readonly ScanCase[] = [
   {
     name: 'skills-mixed-validity',
@@ -353,6 +427,33 @@ const SCAN_CASES: readonly ScanCase[] = [
     locationPath: 'codex/hooks.json',
     tree: [{ path: 'codex/hooks.json', base64: b64([0xef, 0xbb, 0xbf, ...Buffer.from('{}')]) }],
   },
+  {
+    name: 'subagents-toml-parser-edges',
+    locationId: 'codex-agents',
+    locationPath: 'codex/agents',
+    tree: [
+      ...Object.entries(TOML_EDGES).map(([name, text]) => ({
+        path: `codex/agents/${name}.toml`,
+        text,
+      })),
+      {
+        path: 'codex/agents/bom.toml',
+        base64: b64([0xef, 0xbb, 0xbf, ...Buffer.from('name = "bom"\n')]),
+      },
+    ],
+  },
+  {
+    name: 'settings-toml-nesting-limit',
+    locationId: 'codex-settings',
+    locationPath: 'codex/config.toml',
+    tree: [{ path: 'codex/config.toml', text: nestedToml.header(65) }],
+  },
+  ...Object.entries(JSON_EDGES).map(([name, text]) => ({
+    name: `settings-json-${name}`,
+    locationId: 'claude-settings',
+    locationPath: 'claude/settings.json',
+    tree: [{ path: 'claude/settings.json', text }],
+  })),
   {
     name: 'settings-toml-malformed',
     locationId: 'codex-settings',

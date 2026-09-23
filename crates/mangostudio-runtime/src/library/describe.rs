@@ -1,16 +1,24 @@
 //! `describeInstance` from `instance-reader.ts`: the title, description and
 //! metadata validity a scan derives from an instance's entrypoint text.
 //!
-//! Known parser gaps, recorded rather than hidden: JSON validity uses
-//! `serde_json` (depth-limited at 128 and strict about unpaired `\uD800`
-//! escapes, both of which `JSON.parse` accepts), and TOML validity uses the
-//! `toml` crate (TOML 1.1) where the TypeScript host uses `smol-toml`. A
-//! document that only one parser accepts reports `invalid-metadata` on one
-//! host and valid on the other; nothing in the corpus does.
+//! JSON validity matches `JSON.parse` in Bun, including documents a
+//! `serde_json::Value` parse refuses: nesting past 128 levels, unpaired
+//! `\uD800` escapes and out-of-range numbers such as `1e400` (see
+//! [`json_parse_yields_object`]).
+//!
+//! TOML validity matches `smol-toml`, bare scalars included: an integer
+//! outside `Number.isSafeInteger` is refused, `1e1000` is accepted as
+//! `Infinity`, and dates follow Bun's `Date` (see [`parse_like_smol_toml`]).
+//! One rule is narrowed on both hosts rather than matched: a document whose
+//! parsed value nests more than 64 containers below the root is
+//! `invalid-metadata`, where `smol-toml` alone would accept any depth of
+//! dotted keys. `tests/fixtures/ts-library/corpus.json` records the
+//! TypeScript host's answer for each of these edge documents.
 
 use super::cache::Display;
 use super::frontmatter::parse_frontmatter;
 use super::js::js_trim;
+use super::smol_toml::parse_like_smol_toml;
 use super::types::InvalidReason;
 use crate::probing::locations::{LocationDefinition, ResourceFormat};
 
@@ -41,10 +49,7 @@ pub(crate) fn describe_instance(
             describe_markdown(location.kind, slug, text)
         }
         ResourceFormat::JsonSettings => {
-            let object = matches!(
-                serde_json::from_str::<serde_json::Value>(text),
-                Ok(serde_json::Value::Object(_))
-            );
+            let object = json_parse_yields_object(text);
             titled(
                 slug,
                 None,
@@ -56,6 +61,36 @@ pub(crate) fn describe_instance(
         }
         ResourceFormat::MarkdownPlain | ResourceFormat::RulesDsl => titled(slug, None, None),
     }
+}
+
+/// Whether `JSON.parse(text)` returns a plain object, without building the
+/// value: the settings title is always the slug, so only validity and the
+/// top-level shape matter.
+///
+/// `IgnoredAny` routes serde_json through its skip path, which walks nesting
+/// with a heap-allocated stack (no recursion limit, no stack growth) and
+/// checks `\u` escapes for four hex digits without pairing surrogates, and
+/// never converts numbers — the same three things `JSON.parse` accepts where
+/// a `serde_json::Value` parse refuses (depth past 128, a lone `\ud800`,
+/// `1e400`). Both grammars share one whitespace set, so the first
+/// non-whitespace byte decides the shape of a document that parsed.
+///
+/// # Example
+///
+/// ```ignore
+/// assert!(json_parse_yields_object(r#"{"a":"\ud800"}"#));
+/// assert!(!json_parse_yields_object("[1]"));
+/// ```
+fn json_parse_yields_object(text: &str) -> bool {
+    use serde::Deserialize as _;
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    let parsed = serde::de::IgnoredAny::deserialize(&mut deserializer)
+        .and_then(|_| deserializer.end())
+        .is_ok();
+    parsed
+        && text
+            .trim_start_matches([' ', '\t', '\n', '\r'])
+            .starts_with('{')
 }
 
 fn titled(title: &str, description: Option<String>, invalid: Option<InvalidReason>) -> Display {
@@ -91,7 +126,7 @@ fn describe_markdown(kind: &str, slug: &str, text: &str) -> Display {
 }
 
 fn describe_toml(format: ResourceFormat, slug: &str, text: &str) -> Display {
-    let Ok(table) = text.parse::<toml::Table>() else {
+    let Some(table) = parse_like_smol_toml(text) else {
         return titled(slug, None, Some(InvalidReason::InvalidMetadata));
     };
     if format != ResourceFormat::TomlAgent {
@@ -149,6 +184,185 @@ mod tests {
         assert_eq!(
             describe_instance(settings, "settings", Some("{,}")).invalid_reason,
             Some(InvalidReason::InvalidMetadata)
+        );
+    }
+
+    fn json_verdict(text: &str) -> Option<InvalidReason> {
+        let settings = location_by_id("claude-settings").unwrap();
+        describe_instance(settings, "settings", Some(text)).invalid_reason
+    }
+
+    #[test]
+    fn json_settings_nested_past_serde_json_default_depth_stay_valid_like_json_parse() {
+        // `JSON.parse` in Bun accepts millions of levels; a settings file is
+        // capped at 2 MiB, so a million levels is the most one can hold.
+        for depth in [129, 1_000_000] {
+            let text = format!("{{\"a\":{}{}}}", "[".repeat(depth), "]".repeat(depth));
+            let received = json_verdict(&text);
+            assert_eq!(
+                received, None,
+                "expected depth {depth} JSON verdict: valid (None) | received: {received:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_settings_with_lone_surrogate_escapes_stay_valid_like_json_parse() {
+        for text in [
+            r#"{"a":"\ud800"}"#,
+            r#"{"\udfff":1}"#,
+            r#"{"a":["\udc00x"]}"#,
+        ] {
+            let received = json_verdict(text);
+            assert_eq!(
+                received, None,
+                "expected {text} JSON verdict: valid (None) | received: {received:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_settings_with_out_of_range_numbers_stay_valid_like_json_parse() {
+        for text in [r#"{"a":1e400}"#, r#"{"a":-1e400}"#, r#"{"a":1e-400}"#] {
+            let received = json_verdict(text);
+            assert_eq!(
+                received, None,
+                "expected {text} JSON verdict: valid (None) | received: {received:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_settings_still_reject_what_json_parse_rejects() {
+        for text in [
+            "{\"a\":\"\u{1}\"}",
+            r#"{"a":1} x"#,
+            r#"{"a":"\x41"}"#,
+            r#"{"a":"\ud80"}"#,
+            "{\"a\":1",
+            "",
+            r#"{"a":01}"#,
+        ] {
+            let received = json_verdict(text);
+            assert_eq!(
+                received,
+                Some(InvalidReason::InvalidMetadata),
+                "expected {text:?} JSON verdict: invalid-metadata | received: {received:?}"
+            );
+        }
+        let received = json_verdict(" \t\r\n{} \n");
+        assert_eq!(
+            received, None,
+            "expected whitespace-wrapped object verdict: valid (None) | received: {received:?}"
+        );
+    }
+
+    fn toml_verdict(text: &str) -> Option<InvalidReason> {
+        let settings = location_by_id("codex-settings").unwrap();
+        describe_instance(settings, "config", Some(text)).invalid_reason
+    }
+
+    fn assert_toml_verdicts(expected: Option<InvalidReason>, documents: &[String]) {
+        for text in documents {
+            let received = toml_verdict(text);
+            let shown: String = text.chars().take(48).collect();
+            assert_eq!(
+                received, expected,
+                "expected TOML verdict for {shown:?}: {expected:?} | received: {received:?}"
+            );
+        }
+    }
+
+    /// `[h.h…]` (`header` segments), then `k.k… = ` (`dotted` segments) over
+    /// `inline` nested inline tables around `arrays` nested arrays of `1`:
+    /// its deepest container sits `header + dotted + inline + arrays - 1`
+    /// levels below the root.
+    fn mixed(header: usize, dotted: usize, inline: usize, arrays: usize) -> String {
+        let path = |count: usize, name: &str| vec![name; count].join(".");
+        format!(
+            "[{}]\n{} = {}{}1{}{}\n",
+            path(header, "h"),
+            path(dotted, "k"),
+            "{z = ".repeat(inline),
+            "[".repeat(arrays),
+            "]".repeat(arrays),
+            "}".repeat(inline),
+        )
+    }
+
+    #[test]
+    fn toml_nesting_past_64_containers_is_invalid_metadata_on_both_hosts() {
+        let arrays = |depth: usize| format!("a = {}{}", "[".repeat(depth), "]".repeat(depth));
+        let inline = |depth: usize| format!("a = {}1{}", "{b=".repeat(depth), "}".repeat(depth));
+        let dotted = |segments: usize| format!("{} = 1", vec!["k"; segments].join("."));
+        let header = |segments: usize| format!("[{}]", vec!["h"; segments].join("."));
+        let array_table = |segments: usize| format!("[[{}]]", vec!["t"; segments].join("."));
+        assert_toml_verdicts(
+            None,
+            &[
+                arrays(64),
+                inline(64),
+                dotted(65),
+                header(64),
+                array_table(63),
+                mixed(10, 10, 20, 25),
+            ],
+        );
+        assert_toml_verdicts(
+            Some(InvalidReason::InvalidMetadata),
+            &[
+                arrays(65),
+                inline(65),
+                dotted(66),
+                header(65),
+                array_table(64),
+                mixed(10, 10, 20, 26),
+                arrays(1_000_000),
+                dotted(500_000),
+                header(100_000),
+            ],
+        );
+    }
+
+    #[test]
+    fn toml_scalars_smol_toml_accepts_stay_valid() {
+        let documents = [
+            "a = 1979-02-30",
+            "a = 1979-02-29",
+            "a = 1979-06-31T07:32",
+            "a = 1979-02-31 07:32:00+01:00",
+            "a = 1979-05-27Z",
+            "a = 07:32Z",
+            "a = 07:32:00+01:00",
+            "a = 1e1000",
+            "a = -1e400",
+            "a = 9007199254740991",
+            "a = -9007199254740991",
+            "a = 10:30",
+            "a = \"\\e\\x41\"",
+            "a = {x = 1,}",
+            "a = {\nx = 1\n}",
+        ];
+        assert_toml_verdicts(None, &documents.map(String::from));
+    }
+
+    #[test]
+    fn toml_scalars_smol_toml_rejects_are_invalid_metadata() {
+        let documents = [
+            "a = 00:00:60",
+            "a = 1979-05-27T23:59:60Z",
+            "a = 9007199254740992",
+            "a = -9007199254740992",
+            "a = 9223372036854775807",
+            "a = 0x20000000000000",
+            "a = 1979-05-27+01:00",
+            "a = 1979-12-32",
+            "a = 24:00",
+            "a = 0o8",
+        ];
+        assert_toml_verdicts(
+            Some(InvalidReason::InvalidMetadata),
+            &documents.map(String::from),
         );
     }
 

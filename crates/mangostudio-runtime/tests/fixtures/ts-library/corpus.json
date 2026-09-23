@@ -1145,6 +1145,1220 @@
       }
     },
     {
+      "name": "subagents-toml-parser-edges",
+      "locationId": "codex-agents",
+      "locationPath": "codex/agents",
+      "tree": [
+        {
+          "path": "codex/agents/inline-table-newlines.toml",
+          "text": "name = \"inline\"\nopts = {\n  a = 1,\n  b = 2,\n}\n"
+        },
+        {
+          "path": "codex/agents/inline-table-trailing-comma.toml",
+          "text": "opts = {x = 1,}\n"
+        },
+        {
+          "path": "codex/agents/escape-e.toml",
+          "text": "name = \"esc\\e\"\n"
+        },
+        {
+          "path": "codex/agents/escape-x.toml",
+          "text": "name = \"\\x41gent\"\n"
+        },
+        {
+          "path": "codex/agents/escape-x-malformed.toml",
+          "text": "name = \"\\xZZ\"\n"
+        },
+        {
+          "path": "codex/agents/escape-lone-surrogate.toml",
+          "text": "name = \"\\uD800\"\n"
+        },
+        {
+          "path": "codex/agents/time-without-seconds.toml",
+          "text": "t = 10:30\ndt = 1979-05-27T07:32\n"
+        },
+        {
+          "path": "codex/agents/date-feb-30.toml",
+          "text": "d = 1979-02-30\n"
+        },
+        {
+          "path": "codex/agents/date-feb-29-non-leap.toml",
+          "text": "d = 1979-02-29\n"
+        },
+        {
+          "path": "codex/agents/date-apr-31-datetime.toml",
+          "text": "d = 1979-04-31 07:32:00+01:00\n"
+        },
+        {
+          "path": "codex/agents/date-day-32.toml",
+          "text": "d = 1979-12-32\n"
+        },
+        {
+          "path": "codex/agents/date-with-z.toml",
+          "text": "d = 1979-05-27Z\n"
+        },
+        {
+          "path": "codex/agents/date-with-offset.toml",
+          "text": "d = 1979-05-27+01:00\n"
+        },
+        {
+          "path": "codex/agents/time-with-offset.toml",
+          "text": "t = 07:32Z\nu = 07:32:00+01:00\n"
+        },
+        {
+          "path": "codex/agents/time-leap-second.toml",
+          "text": "t = 00:00:60\n"
+        },
+        {
+          "path": "codex/agents/datetime-leap-second.toml",
+          "text": "dt = 1979-05-27T23:59:60Z\n"
+        },
+        {
+          "path": "codex/agents/time-hour-24.toml",
+          "text": "t = 24:00\n"
+        },
+        {
+          "path": "codex/agents/date-space-z.toml",
+          "text": "d = 1979-05-27 Z\ne = 1979-05-27 z\n"
+        },
+        {
+          "path": "codex/agents/date-t-space-z.toml",
+          "text": "d = 1979-05-27T Z\n"
+        },
+        {
+          "path": "codex/agents/date-space-offset.toml",
+          "text": "d = 1979-05-27 +01:00\n"
+        },
+        {
+          "path": "codex/agents/date-day-00-glued-time.toml",
+          "text": "d = 1979-01-0007:32Z\ne = 1979-12-0023:59:59.5-05:00\n"
+        },
+        {
+          "path": "codex/agents/date-day-00-glued-offset-hour-99.toml",
+          "text": "d = 1979-01-0007:32+99:59\n"
+        },
+        {
+          "path": "codex/agents/date-day-01-glued-time.toml",
+          "text": "d = 1979-01-0107:32Z\n"
+        },
+        {
+          "path": "codex/agents/date-day-00-separated-time.toml",
+          "text": "d = 1979-01-00T07:32Z\n"
+        },
+        {
+          "path": "codex/agents/date-day-00-glued-offset-minute-60.toml",
+          "text": "d = 1979-01-0007:32+23:60\n"
+        },
+        {
+          "path": "codex/agents/date-as-name.toml",
+          "text": "name = 1979-02-30\n"
+        },
+        {
+          "path": "codex/agents/float-overflow.toml",
+          "text": "f = 1e1000\ng = -1e400\n"
+        },
+        {
+          "path": "codex/agents/integer-safe-max.toml",
+          "text": "i = 9007199254740991\nj = -9007199254740991\n"
+        },
+        {
+          "path": "codex/agents/integer-unsafe.toml",
+          "text": "i = 9007199254740992\n"
+        },
+        {
+          "path": "codex/agents/integer-i64-max.toml",
+          "text": "i = 9223372036854775807\n"
+        },
+        {
+          "path": "codex/agents/integer-hex-unsafe.toml",
+          "text": "i = 0x20000000000000\n"
+        },
+        {
+          "path": "codex/agents/integer-octal-digit-8.toml",
+          "text": "i = 0o8\n"
+        },
+        {
+          "path": "codex/agents/nesting-arrays-64.toml",
+          "text": "a = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]\n"
+        },
+        {
+          "path": "codex/agents/nesting-arrays-65.toml",
+          "text": "a = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]\n"
+        },
+        {
+          "path": "codex/agents/nesting-arrays-1000.toml",
+          "text": "a = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]\n"
+        },
+        {
+          "path": "codex/agents/nesting-inline-64.toml",
+          "text": "a = {b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b=1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}\n"
+        },
+        {
+          "path": "codex/agents/nesting-inline-65.toml",
+          "text": "a = {b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b={b=1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}\n"
+        },
+        {
+          "path": "codex/agents/nesting-dotted-65.toml",
+          "text": "k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k = 1\n"
+        },
+        {
+          "path": "codex/agents/nesting-dotted-66.toml",
+          "text": "k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k.k = 1\n"
+        },
+        {
+          "path": "codex/agents/nesting-header-64.toml",
+          "text": "[h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h]\n"
+        },
+        {
+          "path": "codex/agents/nesting-header-65.toml",
+          "text": "[h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h]\n"
+        },
+        {
+          "path": "codex/agents/nesting-array-table-63.toml",
+          "text": "[[t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t]]\n"
+        },
+        {
+          "path": "codex/agents/nesting-array-table-64.toml",
+          "text": "[[t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t.t]]\n"
+        },
+        {
+          "path": "codex/agents/nesting-mixed-64.toml",
+          "text": "[h]\nk.l = {z = {z = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}}\n"
+        },
+        {
+          "path": "codex/agents/nesting-mixed-65.toml",
+          "text": "[h]\nk.l = {z = {z = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}}\n"
+        },
+        {
+          "path": "codex/agents/bom.toml",
+          "base64": "77u/bmFtZSA9ICJib20iCg=="
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "bom"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/bom.toml",
+              "format": "toml-agent",
+              "title": "bom",
+              "contentHash": "c55cbfde23d75ec1efc5369b772c107d2867985b0a73f8cf1961d6af248fa682",
+              "sizeBytes": 16,
+              "valid": true
+            },
+            "whitespaceHash": "ef0bd916c8371da4430464f49fab7b0586550357c859e6c502331ed27f65b6a4"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-apr-31-datetime"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-apr-31-datetime.toml",
+              "format": "toml-agent",
+              "title": "date-apr-31-datetime",
+              "contentHash": "a385095e6f77cf509f4b89c006b6ad623ea8c1c36f3fdca21d10e72129358263",
+              "sizeBytes": 30,
+              "valid": true
+            },
+            "whitespaceHash": "8466c89241e1f2e2d2d257e4aea13fdcfdbe0f85195a66877013e5e102661253"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-as-name"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-as-name.toml",
+              "format": "toml-agent",
+              "title": "date-as-name",
+              "contentHash": "41f0ae7c3e74885291f84ff5265306e90c3b5b6b0549c6d722173b66408231b5",
+              "sizeBytes": 18,
+              "valid": true
+            },
+            "whitespaceHash": "551dc2445441f18ef13109a0b4e27b45152bdc5c78e07197a0b25c6e2246f8cf"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-00-glued-offset-hour-99"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-00-glued-offset-hour-99.toml",
+              "format": "toml-agent",
+              "title": "date-day-00-glued-offset-hour-99",
+              "contentHash": "637907398cad9860b2e996156880a7218d5fbb4df9642526dc301a5ccf80b596",
+              "sizeBytes": 26,
+              "valid": true
+            },
+            "whitespaceHash": "bf9eff7aa711a739a513d9b1778921408046c65ec32869073dd56c8a211a0a77"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-00-glued-offset-minute-60"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-00-glued-offset-minute-60.toml",
+              "format": "toml-agent",
+              "title": "date-day-00-glued-offset-minute-60",
+              "contentHash": "014fa6f1b8c0340005cb144e7ba2c790840ff0383c2c4ea68e2ddf49ff52d5d6",
+              "sizeBytes": 26,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "46edc503225d509cf4a536396f559ad5602577c13a950b4a409c4e81bee18b8b"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-00-glued-time"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-00-glued-time.toml",
+              "format": "toml-agent",
+              "title": "date-day-00-glued-time",
+              "contentHash": "2ee4b5cf6dca82eb898afafafbf7f2fbf0fea72574fb4be9337c4d31536e002d",
+              "sizeBytes": 52,
+              "valid": true
+            },
+            "whitespaceHash": "9508438f89f76296a7eef6e8f002d36bc7f10a15a6021e1aab000c7b1ac59685"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-00-separated-time"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-00-separated-time.toml",
+              "format": "toml-agent",
+              "title": "date-day-00-separated-time",
+              "contentHash": "5c8694497a267f97d20b05e7d792d1beec567bcc0962a9affe091c02f43a30d6",
+              "sizeBytes": 22,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "8018d38999cc07456cd2f953d7ab4af8246d205d285ca6028d01b6d1f655543b"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-01-glued-time"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-01-glued-time.toml",
+              "format": "toml-agent",
+              "title": "date-day-01-glued-time",
+              "contentHash": "ae234a9dcfff7b83d2dbd6cb02ed9e06f218867d375b4d2a92f9de74ed808a25",
+              "sizeBytes": 21,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "89a7bea8563503778811ed5d578d6acd04fb51ff7c3a703a07846ed07af8a6d0"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-day-32"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-day-32.toml",
+              "format": "toml-agent",
+              "title": "date-day-32",
+              "contentHash": "a3c2c8d8919ebe562ef60b02d65bed0a56c5b4b1612b0891f6a4f61a8d4a66e3",
+              "sizeBytes": 15,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "bbe3ce62e5949380bb2443ffb2d8874343671880af95246cc6bd9186c78c4518"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-feb-29-non-leap"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-feb-29-non-leap.toml",
+              "format": "toml-agent",
+              "title": "date-feb-29-non-leap",
+              "contentHash": "61adc357b56f80608fa4e292c1d0c562bd86cb1ee7159661c192bfa79a5a8955",
+              "sizeBytes": 15,
+              "valid": true
+            },
+            "whitespaceHash": "42595ef39decdacf841715c124e471cf3670f4a1a64168ec3d68a14f0e45b365"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-feb-30"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-feb-30.toml",
+              "format": "toml-agent",
+              "title": "date-feb-30",
+              "contentHash": "f44fdec54f391c0e988b56572cbe2c49df897ec181b78ac63107d588ec374c40",
+              "sizeBytes": 15,
+              "valid": true
+            },
+            "whitespaceHash": "100491bd6273c098b411cc459373845a324f97a80e551ce08a6542cb5c6c71f3"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-space-offset"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-space-offset.toml",
+              "format": "toml-agent",
+              "title": "date-space-offset",
+              "contentHash": "91f538e5a81900fd6432abf659bf42c2f2295c79342822406adbc49e0dcf442d",
+              "sizeBytes": 22,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "0e10cb140709f5b226765f22a5d05669ec0a31763bca758e4c17f40c0208014c"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-space-z"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-space-z.toml",
+              "format": "toml-agent",
+              "title": "date-space-z",
+              "contentHash": "29bc13f35c31e5eba518cc6cbdc7664ea1fb08648f02fbeef1a00fca541c5a46",
+              "sizeBytes": 34,
+              "valid": true
+            },
+            "whitespaceHash": "125c4a6a0621e8090bd308d3cebb7d1cb474930c6e4c81ff7232dbeace4ae93c"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-t-space-z"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-t-space-z.toml",
+              "format": "toml-agent",
+              "title": "date-t-space-z",
+              "contentHash": "abb5aebb4c951aa879728764bac21bc1d564f771d530f90cd5fc6d4b8e294b8e",
+              "sizeBytes": 18,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "ae25712c1ab19c764c460822bcd7441c180b2e3fa8332f45887de7f2065945af"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-with-offset"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-with-offset.toml",
+              "format": "toml-agent",
+              "title": "date-with-offset",
+              "contentHash": "86d0dca0890799a03b9decce3d1615714fe58f3361ea4c7311bea50b78dab4d7",
+              "sizeBytes": 21,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "f49fbf9be3f50c0cbfb6d8974acd78d038d4d4dc8ee1b0135c6f6e9e761760ed"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "date-with-z"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/date-with-z.toml",
+              "format": "toml-agent",
+              "title": "date-with-z",
+              "contentHash": "62e578ebf9b7a4d6b79d0c884b8d8092ffe4e3cbd746ed30e04af20b6451c2b1",
+              "sizeBytes": 16,
+              "valid": true
+            },
+            "whitespaceHash": "f8a336925ab2fca53a61361c8bd877abdd4fb1bfa4cb6ab5416fdfb4aa935e8a"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "datetime-leap-second"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/datetime-leap-second.toml",
+              "format": "toml-agent",
+              "title": "datetime-leap-second",
+              "contentHash": "05fd3f847b5738d43cd740e922ce94f59829b6e7e9651fdaf9d9ed617ef841b3",
+              "sizeBytes": 26,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "da81b849ca21735ec8886a7a9c9c9c4756db6f4828b1a396595a81b930b5af83"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "escape-e"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/escape-e.toml",
+              "format": "toml-agent",
+              "title": "esc\u001b",
+              "contentHash": "a34aee62da06f111bed87d0f15994500f6b5c34e315f194714ad62d7f9ae9109",
+              "sizeBytes": 15,
+              "valid": true
+            },
+            "whitespaceHash": "c12d4dbc8c7aa7facdce9294604db0d453dd381a83ab02fe60f1b615332d07c4"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "escape-lone-surrogate"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/escape-lone-surrogate.toml",
+              "format": "toml-agent",
+              "title": "escape-lone-surrogate",
+              "contentHash": "c002e2c0e7e3a00ef9addd172b14a5c1ceb07897a18469b8ccdc79518cc1adf4",
+              "sizeBytes": 16,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "4c9319fcec0e5b21cfcb198500f4ab3b99b5c51efaa5bad3d4b24a6a390db414"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "escape-x-malformed"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/escape-x-malformed.toml",
+              "format": "toml-agent",
+              "title": "escape-x-malformed",
+              "contentHash": "41a22ed6758241bf7bf79536d97fd00d6290ef547f3f37b925a10090e5713f4b",
+              "sizeBytes": 14,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "74318851fe21f797f37bdcd59d9bed7fb03fca191a0871ad970a710be6d238b3"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "escape-x"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/escape-x.toml",
+              "format": "toml-agent",
+              "title": "Agent",
+              "contentHash": "2b7c1fdb56d7eb8c160d5f84e983c92f6ebc56a6b0d73d7e4b5dc43b2512db5b",
+              "sizeBytes": 18,
+              "valid": true
+            },
+            "whitespaceHash": "ca53ec646b5bbde79d8eed5fd4bebca6c90bb4ed88269e7a8bb44ed2ffe7fed0"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "float-overflow"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/float-overflow.toml",
+              "format": "toml-agent",
+              "title": "float-overflow",
+              "contentHash": "c2e2ae4004405a97f2d1055d1d8c55a0367f490256d973c6c6231a737d90beac",
+              "sizeBytes": 22,
+              "valid": true
+            },
+            "whitespaceHash": "171aa0fb054db790735d43235c3cdd9a7e68c5b40c255fd409f7220eff050b78"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "inline-table-newlines"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/inline-table-newlines.toml",
+              "format": "toml-agent",
+              "title": "inline",
+              "contentHash": "f2fd8131f47799afeaae1237480d457f6136da633d19bc04f68092a8f677d595",
+              "sizeBytes": 45,
+              "valid": true
+            },
+            "whitespaceHash": "bbb09e7ad37677408c18c1cdc1af7db7bcf8048009ee6a0107cc40c259b1a883"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "inline-table-trailing-comma"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/inline-table-trailing-comma.toml",
+              "format": "toml-agent",
+              "title": "inline-table-trailing-comma",
+              "contentHash": "9bfa589d4c7a6c29d81c59fff0739461c4fba20e19e556de44e0a51312171e7d",
+              "sizeBytes": 16,
+              "valid": true
+            },
+            "whitespaceHash": "709ed8917cd7ae74267c5bf7c31915b162f9c6e852a50d2d89d4195dfef0a3a3"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "integer-hex-unsafe"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/integer-hex-unsafe.toml",
+              "format": "toml-agent",
+              "title": "integer-hex-unsafe",
+              "contentHash": "4d0cf8a0585278e2eac70612ebc040acd7fd26a2f47734ed054358dbe7116137",
+              "sizeBytes": 21,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "fdce1c0a96cf4484ff39e6e8bb16b793b1265451a860c934fd5a424710ce32a7"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "integer-i64-max"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/integer-i64-max.toml",
+              "format": "toml-agent",
+              "title": "integer-i64-max",
+              "contentHash": "88f2ca36dee97ff0c1d56a07049d4992bdf6456046a832ced117e0d8d953a776",
+              "sizeBytes": 24,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "3623576c5221953f3f7120d0037250fde549735b8884ae3c9070d3acdc299fe5"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "integer-octal-digit-8"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/integer-octal-digit-8.toml",
+              "format": "toml-agent",
+              "title": "integer-octal-digit-8",
+              "contentHash": "7553f976c4519f7343e895858cc5a249867c96bb6c7e81ad5016170c537606cd",
+              "sizeBytes": 8,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "bc9f21556b9d70a5695492dff10e32a59d8b8eafe50682f007e8a169ced1c054"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "integer-safe-max"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/integer-safe-max.toml",
+              "format": "toml-agent",
+              "title": "integer-safe-max",
+              "contentHash": "4e95f555b66dc7b600e433f6bbd4602bc4fbfbfb26a757d1f2c3dcb66ae3ef48",
+              "sizeBytes": 43,
+              "valid": true
+            },
+            "whitespaceHash": "733e583160ef7295425842ffe3c5cd14817104c11a482f98356d9dfc61eff209"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "integer-unsafe"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/integer-unsafe.toml",
+              "format": "toml-agent",
+              "title": "integer-unsafe",
+              "contentHash": "4033d190c598cadf2f2b81cbb807e4cf9cb81eb48a7ae97b521b6c3755b89155",
+              "sizeBytes": 21,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "7e179b39495f0d05c0892a1cf216999a0496f020b8877a18b6cfc84ba3e9c9b8"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-array-table-63"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-array-table-63.toml",
+              "format": "toml-agent",
+              "title": "nesting-array-table-63",
+              "contentHash": "c0ff15fa819979fdaf67d0cb1a1ae6488588600f8b6c911b74ee6ff07bf8ea1e",
+              "sizeBytes": 130,
+              "valid": true
+            },
+            "whitespaceHash": "4a2f2bf7420ef16eee5b3891e031772bd337779f604ac88ccb784f77935f68c9"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-array-table-64"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-array-table-64.toml",
+              "format": "toml-agent",
+              "title": "nesting-array-table-64",
+              "contentHash": "18ab6774947c5fb423033985fb596e8466739dca66feda8a5249fef456898eb5",
+              "sizeBytes": 132,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "1b974e2b4045d2b32cab427d18a44320c31ba38a9ef73d03e7397edffef00293"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-arrays-1000"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-arrays-1000.toml",
+              "format": "toml-agent",
+              "title": "nesting-arrays-1000",
+              "contentHash": "06a26fd28e31082ddca1c6c22e4e350c4dfd4f17fa1e5aae6066b223e81909a0",
+              "sizeBytes": 2005,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "ea54ff73d813bde266ae953d84e05348ba0ba55b9316106853121cc654558f36"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-arrays-64"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-arrays-64.toml",
+              "format": "toml-agent",
+              "title": "nesting-arrays-64",
+              "contentHash": "54afaa78f9bd840478f688112209cba2539e6d6d1333e50b333ce6a11f0e46c1",
+              "sizeBytes": 133,
+              "valid": true
+            },
+            "whitespaceHash": "3632c2ac0a71356c58bbe783e5bd4923b0dd25ad4557ea07f97c20f1d8590bfe"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-arrays-65"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-arrays-65.toml",
+              "format": "toml-agent",
+              "title": "nesting-arrays-65",
+              "contentHash": "f2e98bdaadca6bb11cab281f146e5209da085fc4e12d8863a1a1bad28f75235f",
+              "sizeBytes": 135,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "b2e68ccff24b2ecee188662c35790535da11b4473cdca66fd51e7f3b552c6512"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-dotted-65"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-dotted-65.toml",
+              "format": "toml-agent",
+              "title": "nesting-dotted-65",
+              "contentHash": "effb661f3d8a563662afa96c278632a9fbebd0241f38f5fd03eca539c6a799d5",
+              "sizeBytes": 134,
+              "valid": true
+            },
+            "whitespaceHash": "3f0be999e1f364dc2ce77238a8aa9a6f867daf88ea34973ccde2d4583dbac43e"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-dotted-66"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-dotted-66.toml",
+              "format": "toml-agent",
+              "title": "nesting-dotted-66",
+              "contentHash": "bdb7f0f97187257d4ce8e586b4d1974a716c17d2f134ef3dfb5b580deb5ae572",
+              "sizeBytes": 136,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "d29d3cda22fe19c3da0e760646676845a332448298a2acdbc6fa3d1c0a5f753c"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-header-64"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-header-64.toml",
+              "format": "toml-agent",
+              "title": "nesting-header-64",
+              "contentHash": "a925a669f6c583ec76ef40dc198ed7f92be22098c22d60656109ee56d9929963",
+              "sizeBytes": 130,
+              "valid": true
+            },
+            "whitespaceHash": "c174c5e8b4c09afa6c8cf120c9595842f8dfb1642745164cc68151bad76cc753"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-header-65"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-header-65.toml",
+              "format": "toml-agent",
+              "title": "nesting-header-65",
+              "contentHash": "6249cbbcd6a86d84d4cd69a6cfe7e7300d285a371f8db37e03a5d26362d7b72e",
+              "sizeBytes": 132,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "5dd754a36ee26803b2c49be3e9be58dc39c5d58791ca052d58ad1a29ea20d111"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-inline-64"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-inline-64.toml",
+              "format": "toml-agent",
+              "title": "nesting-inline-64",
+              "contentHash": "31d64fa413ea8b2297931e09677b16c8b1a0fc0d1762c07a2ce0fd874905e44e",
+              "sizeBytes": 262,
+              "valid": true
+            },
+            "whitespaceHash": "ccd847d8f7608f02d31c4b044a24fc91c938d819fec0b0f10d4703d10a5ce5b2"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-inline-65"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-inline-65.toml",
+              "format": "toml-agent",
+              "title": "nesting-inline-65",
+              "contentHash": "4d7de45e950979b215e83be916351ef967b6db0a01297d3f500066e27cf8c514",
+              "sizeBytes": 266,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "9be1392d97edee80e60fea13ee98c541cbc263db500aed6f3cce3c0d8395d579"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-mixed-64"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-mixed-64.toml",
+              "format": "toml-agent",
+              "title": "nesting-mixed-64",
+              "contentHash": "6e224a3ced6ff9ee7d9ede7df550dea15d4332074682376f7214d4cc22cf899d",
+              "sizeBytes": 144,
+              "valid": true
+            },
+            "whitespaceHash": "8fd0e9a33f2c4cd3917840a0168dd27102c050ac3a97b83a0e2a1fbaf4aae53f"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "nesting-mixed-65"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/nesting-mixed-65.toml",
+              "format": "toml-agent",
+              "title": "nesting-mixed-65",
+              "contentHash": "6fcf657a48498f55741ff82092f28c7a9a141aeb93e2dc401ab5bf60388e2e62",
+              "sizeBytes": 146,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "9921aeefae2b8986199aaf497ae8ba0573bf2a750589af489af97e14c68f7607"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "time-hour-24"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/time-hour-24.toml",
+              "format": "toml-agent",
+              "title": "time-hour-24",
+              "contentHash": "03c4810bdc915d076dd3ee7db564ceb121cac8acd909ff0e514044ede6af30d7",
+              "sizeBytes": 10,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "bb90d1e7083a016fdb57a468e87bcca6d0f6ce93c8dd9ea7ec090d07a66aa6c3"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "time-leap-second"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/time-leap-second.toml",
+              "format": "toml-agent",
+              "title": "time-leap-second",
+              "contentHash": "7c2b01341596bd4404f4ef8bae5b0aa67292902295e843c6529e1f37bc01baa5",
+              "sizeBytes": 13,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "6ffee172372ef5648a54de9094fbc4da1e30240c4033ff373b8890cc558c8ebc"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "time-with-offset"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/time-with-offset.toml",
+              "format": "toml-agent",
+              "title": "time-with-offset",
+              "contentHash": "3659b5b738ff2f561ff40ef79b5e09cb531398f5da8a9a10a618210b6ec72cb9",
+              "sizeBytes": 30,
+              "valid": true
+            },
+            "whitespaceHash": "d93fbf312a992cdb599655fa9263d3f5d809dfbafcf4be8294711967a5c7cf17"
+          },
+          {
+            "ref": {
+              "kind": "subagent",
+              "slug": "time-without-seconds"
+            },
+            "instance": {
+              "locationId": "codex-agents",
+              "path": "<root>/codex/agents/time-without-seconds.toml",
+              "format": "toml-agent",
+              "title": "time-without-seconds",
+              "contentHash": "bf5e6366c6d1a697924f66637f7be0525a99ecbbc4d2bcdd09688e5568849952",
+              "sizeBytes": 32,
+              "valid": true
+            },
+            "whitespaceHash": "343964e52c352614fa1b68bb0dadd3e35e2acf285374cb8b749721c94291c56b"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-toml-nesting-limit",
+      "locationId": "codex-settings",
+      "locationPath": "codex/config.toml",
+      "tree": [
+        {
+          "path": "codex/config.toml",
+          "text": "[h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h.h]\n"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "codex-settings",
+              "path": "<root>/codex/config.toml",
+              "format": "toml-settings",
+              "title": "settings",
+              "contentHash": "6249cbbcd6a86d84d4cd69a6cfe7e7300d285a371f8db37e03a5d26362d7b72e",
+              "sizeBytes": 132,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "db06e65ddb9a412d5fe8037f49d0ced150c241ce4a764d720cbc72be1d88e2d7"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-deep-129",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "{\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "172404e397bbaeabc3e831f5cfb0df64972d2dc3b70eb1ee0a2e0068467b8e24",
+              "sizeBytes": 264,
+              "valid": true
+            },
+            "whitespaceHash": "45f1a80060a45c692d4010e11bf307006aecbcaf24bfdc8228eb740b8ff5e4cf"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-deep-1000",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "{\"a\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "e862b1ed3cc12e0b70c81307a7e2e7635d0b324f2b09607c6005a8d2eacace40",
+              "sizeBytes": 2006,
+              "valid": true
+            },
+            "whitespaceHash": "070fa5f2626c5651427839d68ed741cc65462dce40235031462df0bade1f7eb7"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-lone-surrogate-value",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "{\"a\":\"\\ud800\"}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "bfc87d3d7b824532c17565aa3ec5f5fdaa10af95ed32c48552011a5bf508b5dc",
+              "sizeBytes": 14,
+              "valid": true
+            },
+            "whitespaceHash": "a30cd84a7697c48732840cdc2121be920c3b78c444e0c6a3a30d43b675270b5b"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-lone-surrogate-key",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "{\"\\udfff\":1}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "bf3c14beda66ae01f285d7e6d4b8f5d960f84e224cf709f724ed050bd3a1bfbe",
+              "sizeBytes": 12,
+              "valid": true
+            },
+            "whitespaceHash": "cb90a7f599a92bb397750200b9510f31d1d20c0734cc9974ff85b95330f9d659"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-number-overflow",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "{\"a\":1e400,\"b\":-1e400,\"c\":1e-400}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "781c26eafbd30d4a93c2e787f64512c39eb2206267f28ab16e94f6bef5dcd3b6",
+              "sizeBytes": 33,
+              "valid": true
+            },
+            "whitespaceHash": "f21cb03175e8eb56c73906139e6aefc1a7eb79fd927251d3d373d2faaa849c0d"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-raw-control-character",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "{\"a\":\"\u0001\"}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "d656f84b39c71f4cc85cdd77e49cdee8f784dbed074c3331d9aadfa78429466b",
+              "sizeBytes": 9,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "0f17c4fd3432ff4f155bbb6248a23e52e0be415d4cd1a07df1d947bafc953630"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
+      "name": "settings-json-hex-escape",
+      "locationId": "claude-settings",
+      "locationPath": "claude/settings.json",
+      "tree": [
+        {
+          "path": "claude/settings.json",
+          "text": "{\"a\":\"\\x41\"}"
+        }
+      ],
+      "expected": {
+        "instances": [
+          {
+            "ref": {
+              "kind": "setting",
+              "slug": "settings"
+            },
+            "instance": {
+              "locationId": "claude-settings",
+              "path": "<root>/claude/settings.json",
+              "format": "json-settings",
+              "title": "settings",
+              "contentHash": "84b9882d068f66bc439ee23c0c54f9fc4d9ac0d8a4a7b4db0d760325e741b666",
+              "sizeBytes": 12,
+              "valid": false,
+              "invalidReason": "invalid-metadata"
+            },
+            "whitespaceHash": "24a2e4f6f6d7604ec10da6c5ab6a91eeb25a0cbb4421dcc1210c4257490a8e68"
+          }
+        ],
+        "unreadableEntries": []
+      }
+    },
+    {
       "name": "settings-toml-malformed",
       "locationId": "codex-settings",
       "locationPath": "codex/config.toml",

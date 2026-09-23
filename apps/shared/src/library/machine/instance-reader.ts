@@ -18,6 +18,7 @@ import {
   normalizeHashPath,
 } from '../index';
 import type { CachedInstanceDisplay, CachedInstanceHash, LibraryCache } from './cache';
+import { tomlNestingWithinLimit } from './toml-nesting';
 
 const textDecoder = new TextDecoder();
 /** The file inside a skill directory that carries its text and frontmatter. */
@@ -558,7 +559,7 @@ function describeInstance(
         location.format === 'toml-agent' && typeof value.description === 'string'
           ? value.description.trim()
           : undefined;
-      return isObject(value)
+      return isObject(value) && tomlNestingWithinLimit(value)
         ? { title, ...(description && { description }) }
         : { title: slug, invalidReason: 'invalid-metadata' };
     }
