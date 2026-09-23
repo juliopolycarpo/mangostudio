@@ -45,6 +45,10 @@ use super::types::{
 
 /// Upper bound on list pages, so a server that never stops paginating cannot hold a request.
 const MAX_PAGES: usize = 256;
+/// Upper bound on one listing's total serialized JSON size across all its pages: 64 times the
+/// 64 KiB [`content::MCP_RESULT_MAX_BYTES`] result cap (4 MiB). [`MAX_PAGES`] alone bounds page
+/// count, not page size, so without this a hostile server could grow the list without bound.
+const MAX_LIST_BYTES: usize = 64 * content::MCP_RESULT_MAX_BYTES;
 /// Bound on delivering a `notifications/cancelled` after a caller gives up.
 const CANCEL_NOTICE_TIMEOUT: Duration = Duration::from_secs(1);
 /// The MCP revision this client advertises, pinned to what the TypeScript SDK 1.30 host sends
@@ -616,7 +620,8 @@ fn as_json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
-/// Reads every page of a list method, refusing a repeated cursor or more than [`MAX_PAGES`].
+/// Reads every page of a list method, refusing a repeated cursor, more than [`MAX_PAGES`], or a
+/// listing larger than [`MAX_LIST_BYTES`].
 async fn paginate(
     peer: &Peer<RoleClient>,
     options: RequestOptions,
@@ -624,12 +629,48 @@ async fn paginate(
     request: impl Fn(Option<String>) -> ClientRequest,
     page: impl Fn(ServerResult) -> Option<(Vec<Value>, Option<String>)>,
 ) -> Result<Vec<Value>, McpFailure> {
+    let (options, request, page) = (&options, &request, &page);
+    collect_pages(method, MAX_LIST_BYTES, |cursor| async move {
+        let result = request_once(peer, request(cursor), options).await?;
+        page(result).ok_or_else(|| unexpected(method))
+    })
+    .await
+}
+
+/// Accumulates the pages `fetch` returns until one has no cursor, within `budget` total bytes.
+///
+/// # Example
+/// ```ignore
+/// let items = collect_pages("tools/list", MAX_LIST_BYTES, |cursor| fetch_page(cursor)).await?;
+/// ```
+async fn collect_pages<F, Fut>(
+    method: &'static str,
+    budget: usize,
+    mut fetch: F,
+) -> Result<Vec<Value>, McpFailure>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<(Vec<Value>, Option<String>), McpFailure>>,
+{
     let mut items = Vec::new();
+    let mut spent = 0_usize;
     let mut cursor = None;
     let mut seen = HashSet::new();
     for _ in 0..MAX_PAGES {
-        let result = request_once(peer, request(cursor), &options).await?;
-        let (entries, next) = page(result).ok_or_else(|| unexpected(method))?;
+        let (entries, next) = fetch(cursor).await?;
+        spent = entries
+            .iter()
+            .map(serialized_len)
+            .fold(spent, usize::saturating_add);
+        if spent > budget {
+            return Err(McpFailure::call(
+                CallFailure::Other,
+                format!(
+                    "MCP {method} exceeded {budget} bytes across its pages; expected a smaller \
+                     listing"
+                ),
+            ));
+        }
         items.extend(entries);
         let Some(next) = next else {
             return Ok(items);
@@ -646,6 +687,24 @@ async fn paginate(
         CallFailure::Other,
         format!("MCP {method} exceeded {MAX_PAGES} pages; expected a final page"),
     ))
+}
+
+/// The compact JSON length of `value`, counted without building the string.
+fn serialized_len(value: &Value) -> usize {
+    struct Counter(usize);
+    impl std::io::Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(bytes.len());
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = Counter(0);
+    // Serializing a `Value` into an infallible writer cannot fail.
+    let _ = serde_json::to_writer(&mut counter, value);
+    counter.0
 }
 
 /// Sends one request, racing the caller's cancellation and the request bound against the reply.
@@ -722,6 +781,77 @@ mod tests {
     use crate::mcp::fake_http::{FakeHttpMcpServer, Mode, Recorded};
     use crate::mcp::types::FailureKind;
     use crate::subprocess::AlwaysAllow;
+
+    type Page = std::future::Ready<Result<(Vec<Value>, Option<String>), McpFailure>>;
+
+    /// A listing served from fixed pages, each linking to the next by index.
+    fn fixed_pages(pages: Vec<Vec<Value>>) -> impl FnMut(Option<String>) -> Page {
+        move |cursor| {
+            let index = cursor.map_or(0, |cursor| cursor.parse::<usize>().unwrap());
+            let next = (index + 1 < pages.len()).then(|| (index + 1).to_string());
+            std::future::ready(Ok((pages[index].clone(), next)))
+        }
+    }
+
+    fn named(count: usize, from: usize) -> Vec<Value> {
+        (from..from + count)
+            .map(|index| json!({ "name": format!("tool-{index:04}") }))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn pagination_under_budget_returns_every_page_in_order() {
+        let pages = vec![named(3, 0), named(3, 3), named(2, 6)];
+        // 8 items of 20 bytes each: a budget of exactly 160 bytes is still within bounds.
+        let items = collect_pages("tools/list", 160, fixed_pages(pages))
+            .await
+            .expect("expected an under-budget listing to succeed");
+        assert_eq!(
+            items,
+            named(8, 0),
+            "expected all 8 tools across 3 pages in order | received {items:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pagination_budget_exceeded_is_an_other_failure_naming_the_limit() {
+        // Each item serializes to 20 bytes ({"name":"tool-0000"}); 3 pages of 3 are 180 bytes.
+        let pages = vec![named(3, 0), named(3, 3), named(3, 6)];
+        let failure = collect_pages("tools/list", 100, fixed_pages(pages))
+            .await
+            .expect_err("expected a listing past its byte budget to fail");
+        let received = (failure.kind, failure.message.clone());
+        assert_eq!(
+            received,
+            (
+                FailureKind::Call(CallFailure::Other),
+                "MCP tools/list exceeded 100 bytes across its pages; expected a smaller listing"
+                    .to_owned()
+            ),
+            "expected an `other` failure naming the byte limit | received {received:?}"
+        );
+    }
+
+    #[test]
+    fn serialized_len_counts_compact_json_bytes() {
+        let value = json!({ "name": "tool-0000" });
+        let expected = serde_json::to_string(&value).unwrap().len();
+        let counted = serialized_len(&value);
+        assert_eq!(
+            (counted, expected),
+            (20, 20),
+            "expected (counted, to_string len) = (20, 20) | received ({counted}, {expected})"
+        );
+    }
+
+    #[test]
+    fn list_budget_is_sixty_four_result_caps() {
+        assert_eq!(
+            MAX_LIST_BYTES,
+            4 * 1024 * 1024,
+            "expected MAX_LIST_BYTES = 4 MiB (64 x 64 KiB) | received {MAX_LIST_BYTES}"
+        );
+    }
 
     fn fixture_config() -> McpConfig {
         let fixture =

@@ -21,6 +21,7 @@ use super::flow::{ExitInfo, OutputFrame, SCROLLBACK_MAX_BYTES, TerminalFlow};
 use super::pty::{DefaultPtySpawner, PtyError, PtyHandle, PtyRequest, PtySpawner};
 use crate::blocking::run_blocking;
 use crate::commands::{environment, toolchain};
+use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentRead, ConsentReader, read_consent};
 use crate::consent::source::ConsentSource;
 use crate::ports::authorization::consent_denial;
 use crate::probing::detection::path_env::PathEnv;
@@ -36,6 +37,9 @@ const _: () = assert!(
 );
 const MAX_WRITE_BYTES: usize = 16 * 1024 - 1;
 const CONSENT_POLL: Duration = Duration::from_millis(100);
+
+/// Reads whether shell consent is granted now; injected so a test can model a slow store.
+type ShellRead = Arc<dyn Fn() -> bool + Send + Sync>;
 
 /// Every method [`register`] installs; the hello manifest attests them as one unit.
 pub(crate) const TERMINAL_METHODS: [&str; 8] = [
@@ -113,6 +117,9 @@ impl Entry {
 
 struct Service {
     consent: Arc<ConsentSource>,
+    shell_read: ShellRead,
+    consent_read_timeout: Duration,
+    consent_reader: ConsentReader,
     spawner: Arc<dyn PtySpawner>,
     host: Arc<dyn Fn() -> PathEnv + Send + Sync>,
     sessions: Mutex<HashMap<String, Slot>>,
@@ -126,8 +133,12 @@ impl Service {
         spawner: Arc<dyn PtySpawner>,
         host: Arc<dyn Fn() -> PathEnv + Send + Sync>,
     ) -> Self {
+        let source = Arc::clone(&consent);
         Self {
             consent,
+            shell_read: Arc::new(move || source.refresh().shell),
+            consent_read_timeout: CONSENT_READ_TIMEOUT,
+            consent_reader: ConsentReader::new("shell"),
             spawner,
             host,
             sessions: Mutex::new(HashMap::new()),
@@ -244,7 +255,7 @@ impl Service {
                 "Terminal open was cancelled before admission.",
             ));
         }
-        if !self.fresh_shell_consent().await {
+        if !self.launch_shell_consent().await.allows() {
             handle.close().await.map_err(pty_io)?;
             return Err(shell_denial("terminal.open", &self.consent));
         }
@@ -342,9 +353,7 @@ impl Service {
         {
             return Err(exited(&params.session_id));
         }
-        if !self.fresh_shell_consent().await {
-            return Err(self.revoke(&entry, "terminal.write").await);
-        }
+        self.recheck(&entry, "terminal.write").await?;
         if entry.closed.load(Ordering::Acquire) {
             return Err(not_found(&params.session_id));
         }
@@ -360,9 +369,7 @@ impl Service {
         if entry.closed.load(Ordering::Acquire) {
             return Err(not_found(&params.session_id));
         }
-        if !self.fresh_shell_consent().await {
-            return Err(self.revoke(&entry, "terminal.resize").await);
-        }
+        self.recheck(&entry, "terminal.resize").await?;
         if entry.closed.load(Ordering::Acquire) {
             return Err(not_found(&params.session_id));
         }
@@ -466,14 +473,46 @@ impl Service {
         entry.handle.close().await
     }
 
-    async fn fresh_shell_consent(&self) -> bool {
-        let source = Arc::clone(&self.consent);
-        tokio::time::timeout(
-            Duration::from_secs(2),
-            run_blocking(move || source.refresh().shell),
-        )
-        .await
-        .unwrap_or(false)
+    /// The fresh, uncoalesced read immediately before a terminal is admitted; an unknown
+    /// answer refuses the open (see [`ConsentRead::allows`]).
+    async fn launch_shell_consent(&self) -> ConsentRead {
+        let read = Arc::clone(&self.shell_read);
+        read_consent("shell", self.consent_read_timeout, move || read()).await
+    }
+
+    /// The coalesced read the watcher and live-session rechecks share, so a hung consent store
+    /// holds one blocking permit however often they ask.
+    async fn fresh_shell_consent(&self) -> ConsentRead {
+        let read = Arc::clone(&self.shell_read);
+        self.consent_reader
+            .read(self.consent_read_timeout, move || read())
+            .await
+    }
+
+    /// The fresh check before writing to or resizing a live shell.
+    ///
+    /// An explicit denial revokes the session, as the watcher would. An unknown read refuses
+    /// this one effect with `UNAVAILABLE` (fail closed) but leaves the session open: a slow
+    /// consent store is not a withdrawal, and the next call or watcher poll reads again.
+    async fn recheck(&self, entry: &Arc<Entry>, method: &str) -> Result<(), RemoteError> {
+        match self.fresh_shell_consent().await {
+            ConsentRead::Granted => Ok(()),
+            ConsentRead::Denied => Err(self.revoke(entry, method).await),
+            ConsentRead::Unknown => Err(RemoteError::new(
+                codes::UNAVAILABLE,
+                format!(
+                    "{method} was not delivered: shell consent could not be confirmed in time."
+                ),
+            )),
+        }
+    }
+
+    /// One watcher poll: closes every live session once shell consent is explicitly withdrawn;
+    /// an unknown read keeps them open until the next poll.
+    async fn poll_consent(&self) {
+        if self.fresh_shell_consent().await.revokes() {
+            self.revoke_all(true).await;
+        }
     }
 
     fn start_watcher(self: &Arc<Self>, session: Session) {
@@ -516,6 +555,7 @@ impl Service {
 
 async fn watch_consent(service: Weak<Service>, session: Session) {
     let mut ticks = tokio::time::interval(CONSENT_POLL);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ticks.tick().await;
     loop {
         tokio::select! {
@@ -527,9 +567,7 @@ async fn watch_consent(service: Weak<Service>, session: Session) {
             }
             _ = ticks.tick() => {
                 let Some(service) = service.upgrade() else { return; };
-                if !service.fresh_shell_consent().await {
-                    service.revoke_all(true).await;
-                }
+                service.poll_consent().await;
             }
         }
     }

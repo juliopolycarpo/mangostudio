@@ -16,6 +16,8 @@
 //!   points a person or a hub starts directly rather than answering ahead of
 //!   time with `setup`. Mirrors `runtime-home.ts`'s `consentByInvocation` and
 //!   `cli.ts`'s `stdioConsent`.
+//! - `read` — the bounded, tri-state consent read (granted, denied, or
+//!   unknown) the live-resource watchers and launch checks share.
 //! - [`config`] — the fully-resolved, default-filled `runtime.json` shape
 //!   `runtime.health` reports, mirroring `resolveRuntimeSlotConfig`.
 
@@ -23,4 +25,5 @@ pub mod authorization;
 pub mod config;
 pub mod invocation;
 pub mod presets;
+pub(crate) mod read;
 pub mod source;
