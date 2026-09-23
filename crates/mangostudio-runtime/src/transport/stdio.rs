@@ -85,6 +85,9 @@ pub(crate) async fn run_with_signals(
             (result.expect("the session driver must run to completion, never be aborted or panic"), false)
         }
     };
+    // Either way the session is over: the children it started begin their bounded release now,
+    // concurrently with the install wait below, and `cli.rs` awaits it before exiting.
+    crate::release::Release::process().begin();
     // End of input means the hub went away, not that this process must: a running install step
     // finishes within its own deadline first. A signal still ends the process at once, and the
     // supervisor's parent-death lease then terminates whatever a step still owns.

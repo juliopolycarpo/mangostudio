@@ -4,12 +4,40 @@
 // appends every message it receives there as one JSON line, so a test can assert what crossed
 // the runtime -> server boundary (the initialize frame, cancellation notices, elicitation
 // answers).
+//
+// When MCP_FIXTURE_SHUTDOWN_LOG names a file, the server also records how it was asked to stop:
+// `eof` when its stdin ends, `term` on SIGTERM, and `clean-exit` once it leaves on its own after a
+// short unwind. MCP_FIXTURE_SHUTDOWN_MODE picks what it honours: `graceful` (default) exits after
+// EOF or SIGTERM, `ignore-eof` exits only after SIGTERM, `stubborn` ignores both, so only a forced
+// kill ends it. A SIGKILLed server never writes `clean-exit`. Each line is `<event> <epoch ms>`, so a
+// test can also tell when SIGTERM came relative to end of input.
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const log = process.env.MCP_FIXTURE_LOG;
 const pending = new Map();
 let nextId = 1;
+const shutdownLog = process.env.MCP_FIXTURE_SHUTDOWN_LOG;
+const shutdownMode = process.env.MCP_FIXTURE_SHUTDOWN_MODE ?? 'graceful';
+const UNWIND_MS = 300;
+
+function recordShutdown(event) {
+  if (shutdownLog) appendFileSync(shutdownLog, `${event} ${Date.now()}\n`);
+}
+
+function unwindAndExit() {
+  setTimeout(() => {
+    recordShutdown('clean-exit');
+    process.exit(0);
+  }, UNWIND_MS);
+}
+
+if (shutdownLog) {
+  process.on('SIGTERM', () => {
+    recordShutdown('term');
+    if (shutdownMode !== 'stubborn') unwindAndExit();
+  });
+}
 
 function send(message) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
@@ -141,4 +169,10 @@ for await (const line of input) {
   } else {
     send({ id, error: { code: -32601, message: `Method not found: ${method}` } });
   }
+}
+
+if (shutdownLog) {
+  recordShutdown('eof');
+  if (shutdownMode === 'graceful') unwindAndExit();
+  else setInterval(() => {}, 1_000);
 }

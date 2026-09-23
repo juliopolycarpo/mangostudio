@@ -362,8 +362,14 @@ fn build_runtime() -> std::io::Result<tokio::runtime::Runtime> {
 /// resource.
 const RUNTIME_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Shuts `runtime` down without waiting on blocking work past
-/// [`RUNTIME_SHUTDOWN_GRACE`].
+/// Waits for every MCP server and terminal this process still owns to release, within the
+/// shutdown budget, then shuts `runtime` down without waiting on blocking work past
+/// [`RUNTIME_SHUTDOWN_GRACE`] or the budget's exit deadline, whichever comes first.
+///
+/// Dropping the runtime cancels every async task at once, so without the release wait each
+/// child's teardown would be cut short and its tree reaped by the parent-death lease instead of
+/// given its end of input and SIGTERM. See [`crate::release`] for how the budget fits the Hub's
+/// escalation window.
 ///
 /// # Example
 ///
@@ -372,7 +378,25 @@ const RUNTIME_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_se
 /// shut_down(runtime);
 /// ```
 fn shut_down(runtime: tokio::runtime::Runtime) {
-    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_GRACE);
+    let release = crate::release::Release::process();
+    if !runtime.block_on(release.released()) {
+        eprintln!(
+            "mangostudio-runtime: some MCP servers or terminals had not released within {:?}; \
+             exiting ends them.",
+            crate::release::SHUTDOWN_BUDGET
+        );
+    }
+    runtime.shutdown_timeout(release.exit_grace(RUNTIME_SHUTDOWN_GRACE));
+}
+
+/// Starts the shutdown budget the moment `cancel` fires rather than when the host's loop has
+/// finished draining, so the child release runs alongside that drain inside one window.
+fn begin_release_on(cancel: &CancellationToken) {
+    let cancel = cancel.clone();
+    tokio::spawn(async move {
+        cancel.cancelled().await;
+        crate::release::Release::process().begin();
+    });
 }
 
 fn run_stdio(env: &impl EnvSource) -> i32 {
@@ -506,6 +530,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         };
         let cancel = CancellationToken::new();
         let signal_task = signals.watch(cancel.clone());
+        begin_release_on(&cancel);
 
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
@@ -617,6 +642,7 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         };
         let cancel = CancellationToken::new();
         let signal_task = signals.watch(cancel.clone());
+        begin_release_on(&cancel);
 
         let jitter = RandomJitter::default();
         let log = |message: &str| eprintln!("mangostudio-runtime: {message}");

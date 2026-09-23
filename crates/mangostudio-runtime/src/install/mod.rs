@@ -24,8 +24,14 @@
 //! - **A step's timeout** forces its process tree through the supervisor and is reported as
 //!   `timed-out` with a note that the machine may be partially changed.
 //! - **Runtime process exit** by signal ends the process, and the supervisor's parent-death lease
-//!   (a Job object on Windows) terminates whatever the step still owns. On end of stdio input the
-//!   host first waits for [`settled`], bounded by each step's own deadline.
+//!   (a Job object on Windows) terminates whatever the step still owns. On end of stdio input with
+//!   no signal after it, the host first waits for [`settled`], bounded by each step's own deadline.
+//!   That is the hub crashing or otherwise vanishing. An orderly Hub stop ends stdin and then
+//!   escalates to SIGTERM after 2 s and SIGKILL 2 s later (`TERMINATE_GRACE_MS` and
+//!   `KILL_GRACE_MS` in `apps/api/src/services/runtime-client/spawn-runtime-child.ts`; on Windows
+//!   both steps are process termination at 2 s), so its signal or termination cuts the wait
+//!   short and a longer step is killed. Whether the Hub should widen that
+//!   window while installs run is an open decision owned there, not here.
 //!
 //! Detaching a browser viewer is not cancellation, and no path promises rollback. A run's owner is
 //! a task of its own, so dropping the request (the session tearing down its handlers) never
@@ -45,7 +51,9 @@ pub(crate) use service::register;
 ///
 /// Each run is bounded by its own step deadline plus the supervisor's cleanup bound, so this
 /// never waits indefinitely. The stdio host awaits it after its hub session ends on end of input,
-/// so a lost hub does not turn into a killed installer.
+/// until a signal arrives. So a hub that crashes (end of input, no signal) does not turn into a
+/// killed installer; an orderly Hub stop still signals within its own escalation window, which
+/// ends a longer step (see the module docs).
 ///
 /// # Example
 ///

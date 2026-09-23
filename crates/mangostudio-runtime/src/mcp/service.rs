@@ -670,7 +670,13 @@ impl Service {
         let service = Arc::downgrade(self);
         let session = session.clone();
         let poll = self.consent_poll;
-        tokio::spawn(async move { watch_connection(service, session, poll).await });
+        // The watcher runs every session's close when the hub session ends, including HTTP
+        // sessions that own no process; a host shutting down waits for it like a child owner.
+        let owner = crate::release::Release::process().own();
+        tokio::spawn(async move {
+            let _owner = owner;
+            watch_connection(service, session, poll).await;
+        });
     }
 
     /// Re-reads `mcp` consent off the executor for the revocation watcher; a read that cannot

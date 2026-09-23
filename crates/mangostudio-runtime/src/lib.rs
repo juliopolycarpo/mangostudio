@@ -130,6 +130,7 @@ pub mod ports;
 mod probe_cache;
 pub mod probing;
 pub mod registry;
+mod release;
 pub mod result_check;
 pub mod runtime_home;
 pub mod serve;
