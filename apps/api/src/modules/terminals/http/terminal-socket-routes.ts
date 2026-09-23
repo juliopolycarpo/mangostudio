@@ -125,14 +125,18 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
      * session which had already ended — that must not report a shell's end
      * differently.
      */
-    const endWithExit = (exit: TerminalExit): void => {
-      service.recordExit(state.sessionId, exit);
+    const sendExit = (exit: TerminalExit): void => {
       relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
       relay.closeAfterDrain(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
+    };
+    const endWithExit = (exit: TerminalExit): void => {
+      service.recordExit(state.sessionId, exit);
+      sendExit(exit);
     };
 
     const viewer: TerminalSessionViewer = {
       pushNotice: (notice) => relay.push(encodeTerminalServerMessage({ type: 'notice', notice })),
+      endWithExit: sendExit,
       close: (code, reason) => {
         if (code === TERMINAL_SOCKET_CLOSE_CODES.REPLACED) {
           socket.raw.close(code, reason);
