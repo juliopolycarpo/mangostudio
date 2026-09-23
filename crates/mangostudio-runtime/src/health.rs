@@ -8,11 +8,9 @@
 //! Built: `schemaVersion`, `slot`, `version`, `digest`, `sourceSha`,
 //! `profile`, `allow`, `setup`, `audit` (from [`crate::consent::config`]),
 //! `source`, `binaryPath`, `runtimeVersion`, `platform`, `arch`, `homeDir`,
-//! `shells`, `git`, `gh`, `lastError`.
+//! `shells`, `git`, `gh`, `terminal`, `lastError`.
 //!
 //! Deliberately skipped, all optional on the wire:
-//! - `terminal` — PTY support; no terminal method group exists yet to
-//!   report on.
 //! - `externalAgents` — out of scope; a later plan owns it.
 //! - `platformId` — needs glibc-version detection on Linux, which this
 //!   crate has no port for yet. A real gap, not a "never"; left for a later
@@ -133,6 +131,7 @@ async fn build_health_report(
     let resolved_home_dir = home_dir()
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_default();
+    let terminal = resolved.allow.shell && !shells.is_empty() && cfg!(any(unix, windows));
 
     Ok(json!({
         "schemaVersion": resolved.schema_version,
@@ -158,6 +157,7 @@ async fn build_health_report(
         "shells": shells,
         "git": git,
         "gh": gh,
+        "terminal": terminal,
         "audit": resolved.audit,
         "lastError": state.error.as_ref().map(ToString::to_string),
     }))
@@ -213,6 +213,15 @@ pub(crate) async fn build_capability_manifest(
         git.clone(),
     );
     manifest.features = crate::manifest::build_features(registry, &allow, git.available);
+    // `terminal::register` installs these methods together with the consent watcher. Its
+    // close handler remains callable after shell consent is revoked. Attest that invariant
+    // independently of current consent or shell discovery, which can change after hello.
+    let terminal_implementation = cfg!(any(unix, windows))
+        && crate::terminal::TERMINAL_METHODS.iter().all(|method| {
+            registry.classify(method) == crate::registry::Classification::Implemented
+        });
+    manifest.terminal_close_after_revocation = terminal_implementation.then_some(true);
+    manifest.terminal = Some(allow.shell && !manifest.shells.is_empty() && terminal_implementation);
     manifest.gh = Some(gh_probe.unwrap_or_else(|_| unavailable_git()));
     manifest.profile = Some(resolved.profile);
     manifest.allow = Some(allow);
@@ -1078,14 +1087,59 @@ mod tests {
         // its own tests for.
         assert!(!manifest.features.fs_read);
         assert!(!manifest.features.tools);
+        assert_eq!(manifest.terminal, Some(false));
         assert!(manifest.features.toolchain, "toolchain is unconditional");
 
         let wire = serde_json::to_value(&manifest).expect("serialises");
+        assert!(wire.get("terminalCloseAfterRevocation").is_none());
         assert!(
             mangostudio_runtime_contract::schemas::validate_manifest(&wire).is_ok(),
             "a manifest this crate builds for `hello` must validate against the same schema the \
              hub checks it with: {wire}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_preconsented_host_with_terminal_handlers_announces_pty_support() {
+        let home = scratch_home("terminal-capabilities-host");
+        let host = crate::transport::build_host(RuntimeSlot::Host, &home, "0.1.0");
+        let manifest = build_capability_manifest(
+            RuntimeSlot::Host,
+            &home,
+            &host.registry,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert!(!manifest.shells.is_empty());
+        assert_eq!(manifest.terminal, Some(true));
+        let wire = serde_json::to_value(&manifest).expect("serialises");
+        assert_eq!(
+            wire["terminalCloseAfterRevocation"], true,
+            "terminal support must attest close remains usable after revocation"
+        );
+    }
+
+    #[tokio::test]
+    async fn denied_shell_keeps_the_terminal_cleanup_attestation() {
+        let home = scratch_home("terminal-revocation-capabilities-host");
+        crate::runtime_home::write_runtime_slot_config(
+            RuntimeSlot::Host,
+            &home,
+            &[("allow", Some(serde_json::json!({ "shell": false })))],
+        )
+        .expect("deny shell consent");
+        let host = crate::transport::build_host(RuntimeSlot::Host, &home, "0.1.0");
+        let manifest = build_capability_manifest(
+            RuntimeSlot::Host,
+            &home,
+            &host.registry,
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(manifest.terminal, Some(false));
+        assert_eq!(manifest.terminal_close_after_revocation, Some(true));
+        assert!(manifest.shells.is_empty());
     }
 
     /// Shell discovery and `git --version` do not depend on one another, but

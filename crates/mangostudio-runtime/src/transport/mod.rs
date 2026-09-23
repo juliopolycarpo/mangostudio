@@ -13,8 +13,8 @@
 //! scope: every machine method group except `runtime.health` (see
 //! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
 //! `probing.*` (see [`crate::probing`]), `fs.*`, and `snapshot.*` (both see
-//! [`crate::filesystem`]), and `shell.run`/`git.exec`/`gh.exec`/`gh.mutate`
-//! (see [`crate::commands`]) is unimplemented, so
+//! [`crate::filesystem`]), `shell.run`/`git.exec`/`gh.exec`/`gh.mutate`
+//! (see [`crate::commands`]), and `terminal.*` (see [`crate::terminal`]) is unimplemented, so
 //! [`crate::registry::Registry`] answers everything else with
 //! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
 //! module's own `hello_capabilities`, which shapes `crate::health`'s
@@ -110,7 +110,7 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
 /// session itself: a [`Registry`] implementing `runtime.health`, the
-/// `workspace.*`, `probing.*`, `fs.*`, and `snapshot.*` methods (see [`build_host`]
+/// `workspace.*`, `probing.*`, `fs.*`, `snapshot.*`, and `terminal.*` methods (see [`build_host`]
 /// for the full list; every other machine method group is out of scope, and
 /// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
 /// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
@@ -132,7 +132,7 @@ pub(crate) struct SessionHost {
 /// `runtime_version` from `runtime.health`, and also implementing
 /// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
 /// `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`, the
-/// eleven filesystem methods, and three snapshot methods. Other groups remain
+/// eleven filesystem methods, three snapshot methods, and eight terminal methods. Other groups remain
 /// unsupported.
 ///
 /// Calls [`Registry::with_ports`], not
@@ -174,6 +174,8 @@ pub(crate) fn build_host(
         crate::filesystem::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
     let registry =
         crate::commands::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
+    let registry =
+        crate::terminal::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
@@ -529,6 +531,14 @@ mod tests {
                 "snapshot.capture",
                 "snapshot.hash",
                 "snapshot.revert",
+                "terminal.ack",
+                "terminal.attach",
+                "terminal.close",
+                "terminal.detach",
+                "terminal.list",
+                "terminal.open",
+                "terminal.resize",
+                "terminal.write",
                 "workspace.browse",
                 "workspace.resolve-contained",
                 "workspace.validate",

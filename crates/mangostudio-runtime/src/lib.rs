@@ -133,6 +133,7 @@ pub mod serve;
 pub mod setup;
 pub mod subprocess;
 pub mod supervisor;
+pub mod terminal;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod transport;

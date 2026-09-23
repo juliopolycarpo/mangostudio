@@ -11741,6 +11741,10 @@
                     "type": "null"
                   }
                 ]
+              },
+              "reason": {
+                "type": "string",
+                "const": "consent-revoked"
               }
             }
           }

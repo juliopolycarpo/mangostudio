@@ -19,27 +19,33 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::ExitStatusExt;
+use std::pin::Pin;
 use std::process::ExitStatus;
 use std::sync::{Mutex, OnceLock};
+use std::task::{Context, Poll};
 
-use tokio::io::{AsyncReadExt, AsyncWrite};
+use tokio::io::unix::AsyncFd;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::net::unix::pipe::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
 use super::{ProcessRequest, ProcessStdin};
+use crate::blocking::run_blocking;
 
 const READY: u8 = b'R';
 const RELEASE: u8 = b'G';
 const FINALIZE: u8 = b'F';
 const STATUS_BYTES: usize = std::mem::size_of::<libc::c_int>();
 const READY_BYTES: usize = STATUS_BYTES + 1;
+const TERMINAL_SESSION_CLEANUP_SECONDS: libc::time_t = 10;
 
-pub(super) struct GuardianChild {
+pub(crate) struct GuardianChild {
     pid: libc::pid_t,
     target_pid: Option<libc::pid_t>,
-    stdin: Option<Sender>,
-    stdout: Option<Receiver>,
+    stdin: Option<Box<dyn AsyncWrite + Send + Unpin>>,
+    stdout: Option<Box<dyn AsyncRead + Send + Unpin>>,
     stderr: Option<Receiver>,
+    pty_control: Option<OwnedFd>,
     ready: Receiver,
     status: Receiver,
     exec_error: Receiver,
@@ -52,6 +58,37 @@ pub(super) struct GuardianChild {
 }
 
 impl GuardianChild {
+    pub(crate) fn resize(
+        &self,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<impl std::future::Future<Output = io::Result<()>> + Send + 'static> {
+        let master = self
+            .pty_control
+            .as_ref()
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::Unsupported, "process has no pseudo-terminal")
+            })?
+            .try_clone()?;
+        Ok(async move {
+            run_blocking(move || {
+                let size = libc::winsize {
+                    ws_row: rows,
+                    ws_col: cols,
+                    ws_xpixel: 0,
+                    ws_ypixel: 0,
+                };
+                // SAFETY: `master` stays open for this call, and `size` has the platform layout.
+                if unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &raw const size) } < 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            })
+            .await
+        })
+    }
+
     pub(super) fn id(&self) -> Option<u32> {
         u32::try_from(self.target_pid.unwrap_or(self.pid)).ok()
     }
@@ -129,9 +166,7 @@ impl GuardianChild {
     }
 
     pub(super) fn take_stdout(&mut self) -> Option<Box<dyn tokio::io::AsyncRead + Send + Unpin>> {
-        self.stdout
-            .take()
-            .map(|stdout| Box::new(stdout) as Box<dyn tokio::io::AsyncRead + Send + Unpin>)
+        self.stdout.take()
     }
 
     pub(super) fn take_stderr(&mut self) -> Option<Box<dyn tokio::io::AsyncRead + Send + Unpin>> {
@@ -141,19 +176,20 @@ impl GuardianChild {
     }
 
     pub(super) fn take_stdin(&mut self) -> Option<Box<dyn AsyncWrite + Send + Unpin>> {
-        self.stdin
-            .take()
-            .map(|stdin| Box::new(stdin) as Box<dyn AsyncWrite + Send + Unpin>)
+        self.stdin.take()
     }
 
     /// Reaps the guardian after it has been finalized or force-killed.
     pub(super) async fn wait_guardian(&mut self) -> io::Result<()> {
-        (&mut self.wait)
-            .await
-            .map_err(|error| {
-                io::Error::other(format!("process guardian wait task failed: {error}"))
-            })?
-            .map(|_| ())
+        let status = (&mut self.wait).await.map_err(|error| {
+            io::Error::other(format!("process guardian wait task failed: {error}"))
+        })??;
+        if self.pty_control.is_some() && !status.success() {
+            return Err(io::Error::other(format!(
+                "terminal guardian exited before session cleanup: {status}"
+            )));
+        }
+        Ok(())
     }
 
     pub(super) fn interrupt(&mut self) -> io::Result<()> {
@@ -166,7 +202,16 @@ impl GuardianChild {
 }
 
 pub(super) fn spawn(request: &ProcessRequest) -> io::Result<GuardianChild> {
-    let raw = spawn_raw(request)?;
+    let raw = spawn_raw(request, None)?;
+    GuardianChild::from_raw(raw)
+}
+
+pub(crate) fn spawn_pty(
+    request: &ProcessRequest,
+    cols: u16,
+    rows: u16,
+) -> io::Result<GuardianChild> {
+    let raw = spawn_raw(request, Some((cols, rows)))?;
     GuardianChild::from_raw(raw)
 }
 
@@ -177,6 +222,7 @@ impl GuardianChild {
             stdin,
             stdout,
             stderr,
+            pty_control,
             ready,
             status,
             exec_error,
@@ -196,9 +242,21 @@ impl GuardianChild {
         let ready = Receiver::from_owned_fd(ready)?;
         let status = Receiver::from_owned_fd(status)?;
         let exec_error = Receiver::from_owned_fd(exec_error)?;
-        let stdout = Receiver::from_owned_fd(stdout)?;
+        let stdout: Box<dyn AsyncRead + Send + Unpin> = if pty_control.is_some() {
+            Box::new(PtyReader(AsyncFd::new(stdout)?))
+        } else {
+            Box::new(Receiver::from_owned_fd(stdout)?)
+        };
         let stderr = Receiver::from_owned_fd(stderr)?;
-        let stdin = stdin.map(Sender::from_owned_fd).transpose()?;
+        let stdin = stdin
+            .map(|fd| -> io::Result<Box<dyn AsyncWrite + Send + Unpin>> {
+                if pty_control.is_some() {
+                    Ok(Box::new(PtyWriter(AsyncFd::new(fd)?)))
+                } else {
+                    Ok(Box::new(Sender::from_owned_fd(fd)?))
+                }
+            })
+            .transpose()?;
         let wait = tokio::task::spawn_blocking(move || wait_for_guardian(pid));
 
         Ok(Self {
@@ -207,6 +265,7 @@ impl GuardianChild {
             stdin,
             stdout: Some(stdout),
             stderr: Some(stderr),
+            pty_control,
             ready,
             status,
             exec_error,
@@ -218,11 +277,99 @@ impl GuardianChild {
     }
 }
 
+/// A PTY master is a character device, so Tokio's Unix pipe wrapper refuses it. `AsyncFd`
+/// registers the already-nonblocking descriptor with the reactor instead.
+struct PtyReader(AsyncFd<OwnedFd>);
+
+impl AsyncRead for PtyReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        loop {
+            let mut guard = match self.0.poll_read_ready(cx) {
+                Poll::Ready(Ok(guard)) => guard,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Pending => return Poll::Pending,
+            };
+            let result = guard.try_io(|inner| {
+                // SAFETY: `buf` offers valid writable spare capacity; the descriptor is owned by
+                // `inner` for this call and was configured nonblocking before reactor registration.
+                let read = unsafe {
+                    libc::read(
+                        inner.get_ref().as_raw_fd(),
+                        buf.unfilled_mut().as_mut_ptr().cast(),
+                        buf.remaining(),
+                    )
+                };
+                if read < 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(read as usize)
+                }
+            });
+            match result {
+                Ok(Ok(read)) => {
+                    // SAFETY: the successful read initialized exactly `read` bytes in the buffer.
+                    unsafe { buf.assume_init(read) };
+                    buf.advance(read);
+                    return Poll::Ready(Ok(()));
+                }
+                Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Ok(Err(error)) => return Poll::Ready(Err(error)),
+                Err(_) => continue,
+            }
+        }
+    }
+}
+
+struct PtyWriter(AsyncFd<OwnedFd>);
+
+impl AsyncWrite for PtyWriter {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        loop {
+            let mut guard = match self.0.poll_write_ready(cx) {
+                Poll::Ready(Ok(guard)) => guard,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Pending => return Poll::Pending,
+            };
+            let result = guard.try_io(|inner| {
+                // SAFETY: `buf` is readable for its full length and the owned fd is nonblocking.
+                let written = unsafe {
+                    libc::write(inner.get_ref().as_raw_fd(), buf.as_ptr().cast(), buf.len())
+                };
+                if written < 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(written as usize)
+                }
+            });
+            match result {
+                Ok(result) => return Poll::Ready(result),
+                Err(_) => continue,
+            }
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
 struct RawGuardianChild {
     pid: libc::pid_t,
     stdin: Option<OwnedFd>,
     stdout: OwnedFd,
     stderr: OwnedFd,
+    pty_control: Option<OwnedFd>,
     ready: OwnedFd,
     status: OwnedFd,
     exec_error: OwnedFd,
@@ -232,6 +379,7 @@ struct RawGuardianChild {
 }
 
 struct GuardianFds {
+    terminal: bool,
     liveness_read: RawFd,
     ready_write: RawFd,
     status_write: RawFd,
@@ -404,7 +552,7 @@ fn descriptor_limit() -> io::Result<RawFd> {
     Ok(limit as RawFd)
 }
 
-fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
+fn spawn_raw(request: &ProcessRequest, pty: Option<(u16, u16)>) -> io::Result<RawGuardianChild> {
     let spec = ExecSpec::from_request(request)?;
     let descriptor_limit = descriptor_limit()?;
     // Serialize descriptor creation and `fork` among supervisor launches. Platforms without
@@ -422,16 +570,40 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
     let (watchdog_target_read, watchdog_target_write) = pipe_cloexec()?;
     let (start_read, start_write) = pipe_cloexec()?;
     let (finalize_read, finalize_write) = pipe_cloexec()?;
-    let (stdout_read, stdout_write) = pipe_cloexec()?;
-    let (stderr_read, stderr_write) = pipe_cloexec()?;
-    let (stdin_target, stdin_parent) = match request.stdin {
-        ProcessStdin::Bytes(_) => {
-            let (target, parent) = pipe_cloexec()?;
-            (target, Some(parent))
-        }
-        ProcessStdin::Null => (open_null_stdin()?, None),
-    };
+    let (stderr_read, pipe_stderr_write) = pipe_cloexec()?;
+    let (stdin_target, stdin_parent, stdout_read, stdout_write, stderr_write, pty_control) =
+        if let Some((cols, rows)) = pty {
+            let (master, slave) = open_pty(cols, rows)?;
+            let input = master.try_clone()?;
+            let resize = master.try_clone()?;
+            (
+                slave.try_clone()?,
+                Some(input),
+                master,
+                slave.try_clone()?,
+                slave,
+                Some(resize),
+            )
+        } else {
+            let (stdout_read, stdout_write) = pipe_cloexec()?;
+            let (stdin_target, stdin_parent) = match request.stdin {
+                ProcessStdin::Bytes(_) => {
+                    let (target, parent) = pipe_cloexec()?;
+                    (target, Some(parent))
+                }
+                ProcessStdin::Null => (open_null_stdin()?, None),
+            };
+            (
+                stdin_target,
+                stdin_parent,
+                stdout_read,
+                stdout_write,
+                pipe_stderr_write,
+                None,
+            )
+        };
     let fds = GuardianFds {
+        terminal: pty.is_some(),
         liveness_read: liveness_read.as_raw_fd(),
         ready_write: ready_write.as_raw_fd(),
         status_write: status_write.as_raw_fd(),
@@ -477,6 +649,7 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
         stdin: stdin_parent,
         stdout: stdout_read,
         stderr: stderr_read,
+        pty_control,
         ready: ready_read,
         status: status_read,
         exec_error: exec_error_read,
@@ -484,6 +657,35 @@ fn spawn_raw(request: &ProcessRequest) -> io::Result<RawGuardianChild> {
         finalize: finalize_write,
         liveness: liveness_write,
     })
+}
+
+fn open_pty(cols: u16, rows: u16) -> io::Result<(OwnedFd, OwnedFd)> {
+    let mut master = -1;
+    let mut slave = -1;
+    let mut size = libc::winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    // SAFETY: both output pointers and the winsize are valid for the duration of the call.
+    if unsafe {
+        libc::openpty(
+            &raw mut master,
+            &raw mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &raw mut size,
+        )
+    } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful openpty returned two uniquely owned descriptors.
+    let (master, slave) = unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+    set_cloexec(&master)?;
+    set_cloexec(&slave)?;
+    Ok((master, slave))
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -521,7 +723,6 @@ fn pipe_cloexec() -> io::Result<(OwnedFd, OwnedFd)> {
     Ok((read, write))
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn set_cloexec(fd: &OwnedFd) -> io::Result<()> {
     // SAFETY: `fd` is valid for its whole borrow.
     let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
@@ -644,12 +845,12 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     }
     unsafe { libc::close(fds.target_ready_write) };
     let Some(target_pgid) = (unsafe { read_status_raw(fds.target_ready_read) }) else {
-        kill_target_and_guardian_and_exit(target, guardian_pgid);
+        kill_target_and_guardian_and_exit(target, guardian_pgid, fds.terminal);
     };
     unsafe { libc::close(fds.target_ready_read) };
     if target_pgid != target || !unsafe { write_status_raw(fds.watchdog_target_write, target_pgid) }
     {
-        kill_target_and_guardian_and_exit(target, guardian_pgid);
+        kill_target_and_guardian_and_exit(target, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.watchdog_target_write) };
     unsafe {
@@ -659,7 +860,7 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
         )
     };
     if !write_ready_raw(fds.ready_write, target_pgid) {
-        kill_target_and_guardian_and_exit(target, guardian_pgid);
+        kill_target_and_guardian_and_exit(target, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.ready_write) };
 
@@ -668,19 +869,32 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     // can never redirect a later `kill(-target_pgid, ...)` at an unrelated process.
     let status = wait_unreaped_raw(target);
     if !write_status_raw(fds.status_write, status) {
-        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
+        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.status_write) };
     // The parent either acknowledges bounded capture or disappears. In both cases, terminate
     // every ordinary descendant before the guardian exits. The watchdog stays alive during this
     // wait, so a runtime SIGKILL cannot open a leader-exit cleanup gap.
     if read_one_raw(fds.finalize_read) != Some(FINALIZE) {
-        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
+        kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.finalize_read) };
     unsafe { libc::kill(-target_pgid, libc::SIGKILL) };
+    if fds.terminal && !unsafe { kill_session_members(target_pgid) } {
+        // Take the watchdog down while the target is still unreaped. A bare exit would leave it
+        // waiting on the liveness pipe, and it would later signal a PID that may be reused.
+        kill_guardian_group_and_exit(guardian_pgid);
+    }
     let _ = unsafe { wait_raw(target) };
-    wait_group_empty(target_pgid);
+    if !fds.terminal
+        || cfg!(not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos"
+        )))
+    {
+        wait_group_empty(target_pgid);
+    }
     unsafe { libc::kill(watchdog, libc::SIGKILL) };
     let _ = unsafe { wait_raw(watchdog) };
     unsafe { libc::_exit(0) }
@@ -701,13 +915,13 @@ unsafe fn watchdog_main(fds: GuardianFds, guardian_pgid: libc::pid_t) -> ! {
         let mut byte = 0;
         let read = unsafe { libc::read(fds.liveness_read, (&raw mut byte).cast(), 1) };
         if read == 0 {
-            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
+            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
         }
         if read < 0 && unsafe { errno_raw() } == libc::EINTR {
             continue;
         }
         if read < 0 {
-            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid);
+            kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
         }
     }
 }
@@ -726,7 +940,13 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
             fds.descriptor_limit,
         )
     };
-    if unsafe { libc::setpgid(0, 0) } != 0 {
+    if fds.terminal {
+        if unsafe { libc::setsid() } < 0
+            || unsafe { libc::ioctl(fds.stdin_target, libc::c_ulong::from(libc::TIOCSCTTY), 0) } < 0
+        {
+            exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
+        }
+    } else if unsafe { libc::setpgid(0, 0) } != 0 {
         exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
     }
     if !unsafe { write_status_raw(fds.target_ready_write, libc::getpid()) } {
@@ -959,6 +1179,359 @@ unsafe fn wait_group_empty(process_group: libc::pid_t) {
     }
 }
 
+/// Kills every live member of the terminal's session, including job-control groups that do not
+/// share the shell's process group. The leader stays unreaped while this runs, pinning its SID.
+/// A process that deliberately creates another session is outside terminal containment.
+unsafe fn kill_session_members(session: libc::pid_t) -> bool {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } < 0 {
+        return false;
+    }
+    let deadline = now.tv_sec.saturating_add(TERMINAL_SESSION_CLEANUP_SECONDS);
+    loop {
+        if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } < 0
+            || now.tv_sec >= deadline
+        {
+            return false;
+        }
+        let Some(live) = (unsafe { kill_session_members_once(session) }) else {
+            return false;
+        };
+        if !live {
+            return true;
+        }
+        unsafe { pause_between_group_probes() };
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn kill_session_members_once(session: libc::pid_t) -> Option<bool> {
+    let directory = unsafe {
+        libc::open(
+            c"/proc".as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if directory < 0 {
+        return None;
+    }
+    let mut live = false;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let size = unsafe {
+            libc::syscall(
+                libc::SYS_getdents64,
+                directory,
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            )
+        };
+        if size == 0 {
+            break;
+        }
+        if size < 0 {
+            if unsafe { errno_raw() } == libc::EINTR {
+                continue;
+            }
+            unsafe { libc::close(directory) };
+            return None;
+        }
+        let mut offset = 0;
+        while offset < size as usize {
+            if offset + 19 > size as usize {
+                unsafe { libc::close(directory) };
+                return None;
+            }
+            let length = usize::from(u16::from_ne_bytes([
+                buffer[offset + 16],
+                buffer[offset + 17],
+            ]));
+            if length < 20 || offset + length > size as usize {
+                unsafe { libc::close(directory) };
+                return None;
+            }
+            let name = &buffer[offset + 19..offset + length];
+            if let Some(pid) = parse_proc_pid(name)
+                && pid != session
+                && unsafe { libc::getsid(pid) } == session
+            {
+                let pinned = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+                if pinned < 0 {
+                    let error = unsafe { errno_raw() };
+                    if matches!(error, libc::ENOSYS | libc::EPERM) {
+                        // Older kernels and seccomp profiles can lack pidfds. Recheck the
+                        // process birth time and session immediately before signaling it.
+                        let Some(state) = (unsafe { proc_pid_state(directory, name) }) else {
+                            unsafe { libc::close(directory) };
+                            return None;
+                        };
+                        if state.running {
+                            live = true;
+                            if !unsafe {
+                                kill_unpinned_linux_pid(
+                                    directory,
+                                    name,
+                                    pid,
+                                    session,
+                                    state.start_time,
+                                )
+                            } {
+                                unsafe { libc::close(directory) };
+                                return None;
+                            }
+                        }
+                    } else if error != libc::ESRCH {
+                        unsafe { libc::close(directory) };
+                        return None;
+                    }
+                } else {
+                    let pinned = pinned as RawFd;
+                    let member = unsafe { libc::getsid(pid) } == session;
+                    let state = if member {
+                        unsafe { proc_pid_state(directory, name) }
+                    } else {
+                        Some(ProcPidState {
+                            running: false,
+                            start_time: 0,
+                        })
+                    };
+                    let Some(state) = state else {
+                        unsafe { libc::close(pinned) };
+                        unsafe { libc::close(directory) };
+                        return None;
+                    };
+                    if state.running {
+                        live = true;
+                        if !unsafe {
+                            finish_pidfd_signal(
+                                kill_pinned_linux_pid(pinned),
+                                directory,
+                                name,
+                                pid,
+                                session,
+                                state.start_time,
+                            )
+                        } {
+                            unsafe { libc::close(pinned) };
+                            unsafe { libc::close(directory) };
+                            return None;
+                        }
+                    }
+                    unsafe { libc::close(pinned) };
+                }
+            }
+            offset += length;
+        }
+    }
+    unsafe { libc::close(directory) };
+    Some(live)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn parse_proc_pid(name: &[u8]) -> Option<libc::pid_t> {
+    if !name.first()?.is_ascii_digit() {
+        return None;
+    }
+    let mut pid = 0_i32;
+    for byte in name {
+        if *byte == 0 {
+            return Some(pid);
+        }
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        pid = pid.checked_mul(10)?.checked_add(i32::from(*byte - b'0'))?;
+    }
+    None
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[derive(Clone, Copy)]
+struct ProcPidState {
+    running: bool,
+    start_time: u64,
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn proc_pid_state(directory: RawFd, name: &[u8]) -> Option<ProcPidState> {
+    let mut path = [0_u8; 32];
+    let end = name.iter().position(|byte| *byte == 0)?;
+    if end + b"/stat\0".len() > path.len() {
+        return None;
+    }
+    path[..end].copy_from_slice(&name[..end]);
+    path[end..end + b"/stat\0".len()].copy_from_slice(b"/stat\0");
+    let file = unsafe {
+        libc::openat(
+            directory,
+            path.as_ptr().cast(),
+            libc::O_RDONLY | libc::O_CLOEXEC,
+        )
+    };
+    if file < 0 {
+        return (unsafe { errno_raw() } == libc::ENOENT).then_some(ProcPidState {
+            running: false,
+            start_time: 0,
+        });
+    }
+    let mut stat = [0_u8; 512];
+    let read = unsafe { libc::read(file, stat.as_mut_ptr().cast(), stat.len()) };
+    unsafe { libc::close(file) };
+    if read <= 0 {
+        return None;
+    }
+    parse_proc_pid_state(&stat[..read as usize])
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn parse_proc_pid_state(stat: &[u8]) -> Option<ProcPidState> {
+    let end = stat.iter().rposition(|byte| *byte == b')')?;
+    let mut fields = stat
+        .get(end + 1..)?
+        .split(|byte| byte.is_ascii_whitespace())
+        .filter(|field| !field.is_empty());
+    let state = *fields.next()?.first()?;
+    let start_time = fields.nth(18)?;
+    let mut parsed = 0_u64;
+    for byte in start_time {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        parsed = parsed
+            .checked_mul(10)?
+            .checked_add(u64::from(*byte - b'0'))?;
+    }
+    Some(ProcPidState {
+        running: !matches!(state, b'Z' | b'X'),
+        start_time: parsed,
+    })
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn kill_unpinned_linux_pid(
+    directory: RawFd,
+    name: &[u8],
+    pid: libc::pid_t,
+    session: libc::pid_t,
+    start_time: u64,
+) -> bool {
+    let Some(state) = (unsafe { proc_pid_state(directory, name) }) else {
+        return false;
+    };
+    if !state.running || state.start_time != start_time {
+        return true;
+    }
+    let observed_session = unsafe { libc::getsid(pid) };
+    if observed_session != session {
+        return observed_session > 0 || unsafe { errno_raw() } == libc::ESRCH;
+    }
+    // Unlike a pidfd, this leaves a narrow PID-reuse race between the final SID check and kill.
+    // The session leader stays unreaped and pins its SID, limiting accidental cross-session hits.
+    let result = unsafe { libc::kill(pid, libc::SIGKILL) };
+    result == 0 || unsafe { errno_raw() } == libc::ESRCH
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn kill_pinned_linux_pid(pinned: RawFd) -> Result<(), libc::c_int> {
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            pinned,
+            libc::SIGKILL,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        )
+    };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = unsafe { errno_raw() };
+    if error == libc::ESRCH {
+        return Ok(());
+    }
+    Err(error)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn finish_pidfd_signal(
+    attempt: Result<(), libc::c_int>,
+    directory: RawFd,
+    name: &[u8],
+    pid: libc::pid_t,
+    session: libc::pid_t,
+    start_time: u64,
+) -> bool {
+    match attempt {
+        Ok(()) => true,
+        Err(libc::ENOSYS | libc::EPERM) => unsafe {
+            kill_unpinned_linux_pid(directory, name, pid, session, start_time)
+        },
+        Err(_) => false,
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn kill_session_members_once(session: libc::pid_t) -> Option<bool> {
+    // libproc is a thin kernel wrapper here, but Apple does not formally promise these calls are
+    // async-signal-safe. Keep all storage on this guardian's stack and avoid allocator use.
+    let mut pids = [0_i32; 65_536];
+    let count = unsafe {
+        libc::proc_listallpids(
+            pids.as_mut_ptr().cast(),
+            i32::try_from(std::mem::size_of_val(&pids)).ok()?,
+        )
+    };
+    if count <= 0 || count as usize >= pids.len() {
+        return None;
+    }
+    let mut live = false;
+    for pid in pids[..count as usize].iter().copied() {
+        if pid <= 0 || pid == session || unsafe { libc::getsid(pid) } != session {
+            continue;
+        }
+        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        if unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
+        } != size
+        {
+            if unsafe { libc::getsid(pid) } == session {
+                return None;
+            }
+            continue;
+        }
+        let info = unsafe { info.assume_init() };
+        if info.pbi_status == libc::SZOMB {
+            continue;
+        }
+        live = true;
+        // macOS has no public pidfd equivalent. Recheck SID immediately before signaling this
+        // process, though PID reuse between the check and kill remains possible.
+        if unsafe { libc::getsid(pid) } == session
+            && unsafe { libc::kill(pid, libc::SIGKILL) } < 0
+            && unsafe { errno_raw() } != libc::ESRCH
+        {
+            return None;
+        }
+    }
+    Some(live)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
+unsafe fn kill_session_members_once(_session: libc::pid_t) -> Option<bool> {
+    // Other Unix targets retain the existing process-group containment behavior.
+    Some(false)
+}
+
 /// Waits between group probes in [`wait_group_empty`].
 ///
 /// `nanosleep` is async-signal-safe, which is what this post-`fork` guardian is restricted to, and
@@ -984,8 +1557,12 @@ unsafe fn kill_guardian_group_and_exit(guardian_pgid: libc::pid_t) -> ! {
 unsafe fn kill_target_and_guardian_and_exit(
     target_pgid: libc::pid_t,
     guardian_pgid: libc::pid_t,
+    terminal: bool,
 ) -> ! {
     unsafe { libc::kill(-target_pgid, libc::SIGKILL) };
+    if terminal {
+        let _ = unsafe { kill_session_members(target_pgid) };
+    }
     unsafe { libc::kill(-guardian_pgid, libc::SIGKILL) };
     unsafe { libc::_exit(127) }
 }
@@ -1059,6 +1636,139 @@ mod tests {
     use std::ffi::OsString;
 
     use super::collect_inheritable;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn proc_pid_parser_accepts_only_bounded_decimal_entries() {
+        use super::parse_proc_pid;
+
+        assert_eq!(parse_proc_pid(b"1234\0"), Some(1234));
+        assert_eq!(parse_proc_pid(b".\0"), None);
+        assert_eq!(parse_proc_pid(b"12x\0"), None);
+        assert_eq!(parse_proc_pid(b"999999999999\0"), None);
+        assert_eq!(parse_proc_pid(b"12"), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn proc_stat_parser_uses_birth_time_after_last_command_parenthesis() {
+        let stat =
+            b"123 (shell ) child) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 987654 20\n";
+        let parsed = super::parse_proc_pid_state(stat).expect("valid proc stat");
+        assert!(parsed.running);
+        assert_eq!(parsed.start_time, 987654);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn unpinned_linux_session_member_is_killed_with_matching_birth_time() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::{CommandExt, ExitStatusExt};
+
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.arg("60");
+        // SAFETY: only the direct libc setsid syscall runs between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().expect("spawn isolated session member");
+        let pid = child.id() as libc::pid_t;
+        let directory = std::fs::File::open("/proc").expect("open proc directory");
+        let name = format!("{pid}\0");
+        // SAFETY: the test child is alive and the /proc descriptor remains open.
+        let state = unsafe { super::proc_pid_state(directory.as_raw_fd(), name.as_bytes()) }
+            .expect("read child identity");
+        let stale_identity = unsafe {
+            super::kill_unpinned_linux_pid(
+                directory.as_raw_fd(),
+                name.as_bytes(),
+                pid,
+                pid,
+                state.start_time + 1,
+            )
+        };
+        let stale_child_alive = child.try_wait().expect("check child").is_none();
+        let killed = unsafe {
+            super::kill_unpinned_linux_pid(
+                directory.as_raw_fd(),
+                name.as_bytes(),
+                pid,
+                pid,
+                state.start_time,
+            )
+        };
+        if !killed {
+            let _ = child.kill();
+        }
+        let status = child.wait().expect("reap child");
+        assert!(stale_identity, "stale identity needs no signal");
+        assert!(stale_child_alive, "stale identity must not signal child");
+        assert!(killed, "fallback signals the matching session member");
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn unavailable_pidfd_signal_falls_back_to_checked_pid_signal() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::{CommandExt, ExitStatusExt};
+
+        for error in [libc::EPERM, libc::ENOSYS] {
+            let mut command = std::process::Command::new("/bin/sleep");
+            command.arg("60");
+            // SAFETY: only the direct libc setsid syscall runs between fork and exec.
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+            let mut child = command.spawn().expect("spawn isolated session member");
+            let pid = child.id() as libc::pid_t;
+            let directory = std::fs::File::open("/proc").expect("open proc directory");
+            let name = format!("{pid}\0");
+            let state = unsafe { super::proc_pid_state(directory.as_raw_fd(), name.as_bytes()) }
+                .expect("read child identity");
+
+            // Inject the syscall result without installing a process-wide seccomp profile.
+            let fatal = unsafe {
+                super::finish_pidfd_signal(
+                    Err(libc::EIO),
+                    directory.as_raw_fd(),
+                    name.as_bytes(),
+                    pid,
+                    pid,
+                    state.start_time,
+                )
+            };
+            let alive_after_fatal = child.try_wait().expect("check child").is_none();
+            let killed = unsafe {
+                super::finish_pidfd_signal(
+                    Err(error),
+                    directory.as_raw_fd(),
+                    name.as_bytes(),
+                    pid,
+                    pid,
+                    state.start_time,
+                )
+            };
+            if !killed {
+                let _ = child.kill();
+            }
+            let status = child.wait().expect("reap child");
+            assert!(!fatal, "unrelated pidfd errors must remain cleanup errors");
+            assert!(alive_after_fatal, "unrelated errors must not signal by PID");
+            assert!(killed, "pidfd_send_signal errno={error} must fall back");
+            assert_eq!(status.signal(), Some(libc::SIGKILL));
+        }
+    }
 
     /// Regression test: this snapshot used to `.expect("OS environment has no NUL")` on every
     /// entry, so a single name `environment_entry` refuses — a leading `=`, which

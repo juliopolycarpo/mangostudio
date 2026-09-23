@@ -279,6 +279,29 @@ describe('terminal socket relay', () => {
     expect(viewer.messages.at(-1)).toMatchObject({ type: 'exit', exit: { exitCode: 0 } });
   });
 
+  it('relays a consent-revoked exit reason to the viewer', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+
+    runtime.emitOutput(session.id, {
+      kind: 'exit',
+      exitCode: null,
+      signal: 'SIGKILL',
+      reason: 'consent-revoked',
+    });
+
+    expect(await viewer.nextMessage((message) => message.type === 'exit')).toEqual({
+      type: 'exit',
+      exit: { exitCode: null, signal: 'SIGKILL', reason: 'consent-revoked' },
+    });
+    expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+  });
+
   it('forwards a client write to terminal.write, base64-encoded', async () => {
     const user = await insertTestUser();
     const runtime = new FakeTerminalRuntimeClient();

@@ -7,7 +7,7 @@
 //! - **`features`**: absent means **granted**. An older peer that predates a
 //!   feature flag is assumed to have it, so it is not silently stripped of
 //!   tools a hub already trusted.
-//! - **The optional top-level members** (`gh`, `terminal`, `identityIsolation`,
+//! - **The optional top-level members** (`gh`, `terminal`, `terminalCloseAfterRevocation`, `identityIsolation`,
 //!   `externalAgents`, and friends): absent means **unavailable**. A peer that
 //!   never ran the probe has not answered "yes".
 //!
@@ -295,6 +295,12 @@ pub struct RuntimeCapabilityManifest {
     /// unavailable, not merely unannounced.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub terminal: Option<bool>,
+    /// Positive attestation that this build keeps `terminal.close` available after shell
+    /// consent is revoked and terminates owned sessions when revocation is observed.
+    /// Absent means this behavior is unproven. Unlike `terminal`, it is independent of
+    /// current shell consent and shell discovery, so a later regrant needs no reconnect.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub terminal_close_after_revocation: Option<bool>,
     /// Whether this runtime re-checks the paths a hub names against the
     /// path filter a call carried. Absent means `false`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -404,6 +410,7 @@ impl RuntimeCapabilityManifest {
             external_agents: None,
             identity_isolation: None,
             terminal: None,
+            terminal_close_after_revocation: None,
             enforces_path_policy: None,
             publishes_windows_slot: None,
             directory_hash_domain: None,
@@ -454,6 +461,7 @@ mod tests {
         assert!(manifest.external_agents.is_none());
         assert!(manifest.identity_isolation.is_none());
         assert!(manifest.terminal.is_none());
+        assert!(manifest.terminal_close_after_revocation.is_none());
         assert!(manifest.enforces_path_policy.is_none());
         assert!(manifest.publishes_windows_slot.is_none());
         assert!(manifest.directory_hash_domain.is_none());
@@ -464,6 +472,16 @@ mod tests {
     #[test]
     fn a_minimal_manifest_validates_against_manifest_schema_json() {
         let value = to_value(minimal()).expect("serialises");
+        assert!(validate_manifest(&value).is_ok(), "{value}");
+    }
+
+    #[test]
+    fn positive_terminal_cleanup_attestation_uses_the_wire_name() {
+        let mut manifest = minimal();
+        manifest.terminal_close_after_revocation = Some(true);
+
+        let value = to_value(manifest).expect("serialises");
+        assert_eq!(value["terminalCloseAfterRevocation"], true);
         assert!(validate_manifest(&value).is_ok(), "{value}");
     }
 
