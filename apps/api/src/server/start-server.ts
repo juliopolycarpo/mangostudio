@@ -86,6 +86,9 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
       .reapScope({ userId, environmentId }, 'consent-revoked')
       .catch(() => undefined);
   });
+  getRuntimeConnectionManager().onTerminalsRevoked((userId, environmentId) => {
+    terminalSessionService.revokeScope(userId, environmentId);
+  });
   // Populated only by src/dev.ts, before startServer() runs — never by the
   // binary entry. It is an override for getSourceFrontendDir() alone: the dev
   // build lands in apps/frontend/dist, which that helper resolves against the

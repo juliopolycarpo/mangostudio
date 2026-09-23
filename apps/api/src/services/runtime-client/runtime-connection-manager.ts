@@ -173,6 +173,7 @@ export interface RuntimeConnectionManagerOptions {
  * that already depends on this file.
  */
 export type ExternalAgentsRevokedObserver = (userId: string, environmentId: string) => void;
+export type TerminalsRevokedObserver = (userId: string, environmentId: string) => void;
 
 interface RuntimeConnectionEntry {
   /** Who this connection belongs to, so a status sweep never crosses accounts. */
@@ -454,6 +455,7 @@ export class RuntimeConnectionManager {
   readonly #resolveEnvironment: RuntimeEnvironmentResolver;
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
+  #terminalsRevoked: TerminalsRevokedObserver | undefined;
 
   constructor(options: RuntimeConnectionManagerOptions) {
     this.#connectors = options.connectors;
@@ -500,6 +502,11 @@ export class RuntimeConnectionManager {
   /** Replaces any previous observer; the hub registers one at startup. */
   onExternalAgentsRevoked(observer: ExternalAgentsRevokedObserver | undefined): void {
     this.#externalAgentsRevoked = observer;
+  }
+
+  /** Reports a terminal capability withdrawn on a live connection. */
+  onTerminalsRevoked(observer: TerminalsRevokedObserver | undefined): void {
+    this.#terminalsRevoked = observer;
   }
 
   getStatus(userId: string, environmentId: string): EnvironmentConnectionStatus {
@@ -1056,6 +1063,9 @@ export class RuntimeConnectionManager {
     const externalAgentsRevoked =
       entry.status.manifest?.features.externalAgents === true &&
       manifest.features.externalAgents !== true;
+    const terminalsRevoked =
+      (entry.status.manifest?.features.shell === true && manifest.features.shell !== true) ||
+      (entry.status.manifest?.terminal === true && manifest.terminal !== true);
     entry.status = {
       ...entry.status,
       state: 'connected',
@@ -1063,6 +1073,7 @@ export class RuntimeConnectionManager {
       ...peerRelease(client.runtimeVersion),
     };
     if (externalAgentsRevoked) this.#externalAgentsRevoked?.(userId, environmentId);
+    if (terminalsRevoked) this.#terminalsRevoked?.(userId, environmentId);
     // Only a real change publishes. The environment read that triggers the
     // background refresh is itself woken by this invalidation, so publishing
     // an identical manifest would make the card refetch on every window.

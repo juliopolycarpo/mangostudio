@@ -238,6 +238,28 @@ describe('terminal socket relay', () => {
     expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
   });
 
+  it('delivers a full exited scrollback before the socket closes', async () => {
+    const user = await insertTestUser();
+    const scrollback = Buffer.alloc(256 * 1024, 65);
+    const runtime = new FakeTerminalRuntimeClient({
+      attachResult: {
+        status: 'exited',
+        exitCode: 0,
+        scrollback: scrollback.toString('base64'),
+      },
+    });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const viewer = await openViewer(service, user.id, session.id);
+
+    expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+    const data = viewer.messages.flatMap((message) =>
+      message.type === 'data' ? [Buffer.from(message.data)] : []
+    );
+    expect(Buffer.concat(data)).toEqual(scrollback);
+    expect(viewer.messages.at(-1)).toMatchObject({ type: 'exit', exit: { exitCode: 0 } });
+  });
+
   it('forwards a client write to terminal.write, base64-encoded', async () => {
     const user = await insertTestUser();
     const runtime = new FakeTerminalRuntimeClient();

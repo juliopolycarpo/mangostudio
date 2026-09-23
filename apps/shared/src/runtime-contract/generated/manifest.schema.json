@@ -214,6 +214,9 @@
     "terminal": {
       "type": "boolean"
     },
+    "terminalCloseAfterRevocation": {
+      "type": "boolean"
+    },
     "enforcesPathPolicy": {
       "type": "boolean"
     },

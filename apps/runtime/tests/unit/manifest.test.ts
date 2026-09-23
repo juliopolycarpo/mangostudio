@@ -108,6 +108,7 @@ describe('createLocalRuntimeManifest', () => {
     // A shell binary is what CI actually has, so this is asserted as agreement
     // with `supportsPty()` rather than a hard-coded `true`.
     expect(manifest.terminal).toBe(manifest.shells.length > 0 && supportsPty());
+    expect(manifest.terminalCloseAfterRevocation).toBe(true);
   });
 
   it('advertises readonly without shell or write', () => {
