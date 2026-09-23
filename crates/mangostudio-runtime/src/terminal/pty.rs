@@ -22,7 +22,7 @@ use crate::subprocess::{
 pub type PtyFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The number of interactive child trees this runtime will own at once.
-pub const MAX_PTY_CHILDREN: usize = 4;
+pub const MAX_PTY_CHILDREN: usize = 16;
 const MAX_PTY_COMMANDS: usize = 16;
 const MAX_PTY_WRITES: usize = 16;
 

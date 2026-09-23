@@ -28,6 +28,12 @@ use crate::registry::Registry;
 use crate::subprocess::LaunchCheck;
 
 const MAX_TERMINAL_SESSIONS: usize = 16;
+// The PTY pool is process-wide; a smaller one refuses, with `UNAVAILABLE`, a session this
+// service and the hub (8 per user by default) already admitted.
+const _: () = assert!(
+    super::pty::MAX_PTY_CHILDREN >= MAX_TERMINAL_SESSIONS,
+    "expected the PTY pool to admit at least MAX_TERMINAL_SESSIONS children"
+);
 const MAX_WRITE_BYTES: usize = 16 * 1024 - 1;
 const CONSENT_POLL: Duration = Duration::from_millis(100);
 
