@@ -116,9 +116,7 @@ fn a_sigint_sent_before_any_handshake_still_exits_cleanly_not_killed() {
     )
     .expect("this test process may signal its own child");
 
-    let status = child
-        .wait()
-        .expect("waiting on a child this process spawned cannot fail");
+    let status = wait_bounded(&mut child, SIGNALLED_EXIT_BOUND);
     assert_eq!(
         status.signal(),
         None,
@@ -196,4 +194,96 @@ async fn end_of_input_lets_a_running_install_step_finish_past_the_handler_grace(
         Some("run\n"),
         "expected the step to finish before the runtime exited | received no completed effect"
     );
+}
+
+/// How long a signalled stdio child may take to exit. Generous against a
+/// loaded CI runner, and still far below "hung until the job times out".
+#[cfg(unix)]
+const SIGNALLED_EXIT_BOUND: Duration = Duration::from_secs(10);
+
+/// Waits for `child` to exit within `bound`, killing it and failing the test
+/// with the elapsed time instead of hanging the whole test binary.
+#[cfg(unix)]
+fn wait_bounded(child: &mut std::process::Child, bound: Duration) -> std::process::ExitStatus {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .expect("polling a child this process spawned cannot fail")
+        {
+            return status;
+        }
+        if started.elapsed() >= bound {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "expected the signalled stdio child to exit within {bound:?} | received: still \
+                 running after {:?}, killed by the test",
+                started.elapsed()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A shutdown signal that arrives once the child has said `hello` and is
+/// waiting on the hub, while the hub still holds the child's stdin open,
+/// must end the process. Before the fix the session closed, but dropping the
+/// async runtime then waited on its blocking stdin reader, so the process
+/// stayed alive until the parent happened to close the pipe.
+#[cfg(unix)]
+fn assert_exits_after_hello_on(signal: nix::sys::signal::Signal) {
+    use std::io::BufRead as _;
+    use std::os::unix::process::ExitStatusExt as _;
+
+    let home = scratch_home(&format!("signal-after-hello-{}", signal.as_str()));
+    let mut child = std::process::Command::new(binary_path())
+        .arg("stdio")
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the binary runs");
+    // Held until the end of the test: the hub has not gone away.
+    let _stdin = child.stdin.take().expect("stdin is piped");
+    let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let mut hello = String::new();
+    stdout
+        .read_line(&mut hello)
+        .expect("the child writes its hello frame");
+    assert!(
+        hello.contains("hello"),
+        "expected the first stdout line to be the hello frame | received {hello:?}"
+    );
+    // The child starts reading stdin for the hub's reply right after writing
+    // `hello`; give that read time to block so the signal lands in the window
+    // this test exists for, not just before it.
+    std::thread::sleep(Duration::from_millis(300));
+
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(child.id().try_into().expect("a pid fits in i32")),
+        signal,
+    )
+    .expect("this test process may signal its own child");
+
+    let status = wait_bounded(&mut child, SIGNALLED_EXIT_BOUND);
+    assert_eq!(
+        (status.signal(), status.code()),
+        (None, Some(0)),
+        "expected a clean exit 0 through the runtime's own handler after {signal} | received \
+         {status:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_sigint_after_hello_exits_while_the_hub_keeps_stdin_open() {
+    assert_exits_after_hello_on(nix::sys::signal::Signal::SIGINT);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_sigterm_after_hello_exits_while_the_hub_keeps_stdin_open() {
+    assert_exits_after_hello_on(nix::sys::signal::Signal::SIGTERM);
 }
