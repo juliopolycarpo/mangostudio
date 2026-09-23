@@ -6,6 +6,7 @@
 
 mod client;
 mod consent;
+mod content;
 #[cfg(test)]
 mod fake_http;
 mod http;

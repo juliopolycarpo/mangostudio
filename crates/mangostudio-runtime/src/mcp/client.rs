@@ -1,11 +1,12 @@
 //! The project-owned MCP client seam. The service speaks only these traits; `sdk.rs` is the one
 //! implementation that depends on `rmcp`, and tests implement them with named fakes.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::types::{McpConfig, McpFailure, McpSecrets, RequestOptions, ServerCapabilities};
@@ -22,6 +23,26 @@ pub(crate) trait McpClient: Send + Sync {
     fn capabilities(&self) -> ServerCapabilities;
     /// Every tool descriptor across all pages, in the hub's `McpToolDescriptor` shape.
     fn list_tools(&self, options: RequestOptions) -> ClientFuture<'_, Vec<Value>>;
+    /// Calls one tool; the result is a capped `RuntimeMcpCallResult`.
+    fn call_tool(
+        &self,
+        name: String,
+        arguments: Map<String, Value>,
+        options: RequestOptions,
+    ) -> ClientFuture<'_, Value>;
+    /// Every resource descriptor across all pages (`McpResourceDescriptor`).
+    fn list_resources(&self, options: RequestOptions) -> ClientFuture<'_, Vec<Value>>;
+    /// The contents of one resource (`RuntimeMcpResourceContents[]`).
+    fn read_resource(&self, uri: String, options: RequestOptions) -> ClientFuture<'_, Vec<Value>>;
+    /// Every prompt descriptor across all pages (`McpPromptDescriptor`).
+    fn list_prompts(&self, options: RequestOptions) -> ClientFuture<'_, Vec<Value>>;
+    /// One resolved prompt (`RuntimeMcpPromptResult`).
+    fn get_prompt(
+        &self,
+        name: String,
+        arguments: Option<BTreeMap<String, String>>,
+        options: RequestOptions,
+    ) -> ClientFuture<'_, Value>;
     /// Ends the session and releases everything it owns, including a stdio server's process
     /// tree. Repeated calls are harmless.
     fn close(&self) -> ClientFuture<'_, ()>;

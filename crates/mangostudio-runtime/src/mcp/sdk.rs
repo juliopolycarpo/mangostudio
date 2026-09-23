@@ -1,13 +1,15 @@
 //! The only module that depends on `rmcp`: it opens SDK sessions and maps every SDK result and
 //! error onto the project types in [`super::types`].
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use rmcp::model::{
-    CancelledNotificationParam, ClientCapabilities, ClientConfig, ClientRequest, Implementation,
-    ListToolsRequest, PaginatedRequestParams, ProtocolVersion, ServerResult,
+    CallToolRequest, CallToolRequestParams, CancelledNotificationParam, ClientCapabilities,
+    ClientConfig, ClientRequest, GetPromptRequest, GetPromptRequestParams, Implementation,
+    ListPromptsRequest, ListResourcesRequest, ListToolsRequest, PaginatedRequestParams,
+    ProtocolVersion, ReadResourceRequest, ReadResourceRequestParams, ServerResult,
 };
 use rmcp::service::{
     ClientInitializeError, Peer, PeerRequestOptions, RunningService, ServiceError,
@@ -17,11 +19,12 @@ use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
 use rmcp::{RoleClient, ServiceExt};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use super::client::{ClientFuture, ConnectContext, McpClient, McpConnector};
+use super::content;
 use super::http::{McpHttp, endpoint_url, header_map, http_client, should_fall_back_to_sse};
 use super::process::{GuardedStdioSpawner, ProcessOwner, StartError, StdioSpawner};
 use super::sse::LegacySse;
@@ -285,40 +288,138 @@ impl McpClient for SdkClient {
     }
 
     fn list_tools(&self, options: RequestOptions) -> ClientFuture<'_, Vec<Value>> {
-        Box::pin(async move {
-            let mut tools = Vec::new();
-            let mut cursor = None;
-            let mut seen = HashSet::new();
-            for _ in 0..MAX_PAGES {
+        Box::pin(paginate(
+            &self.peer,
+            options,
+            "tools/list",
+            |cursor| {
                 let params = PaginatedRequestParams::default().with_cursor(cursor);
-                let request = ClientRequest::ListToolsRequest(ListToolsRequest::with_param(params));
-                let ServerResult::ListToolsResult(page) =
-                    request_once(&self.peer, request, &options).await?
-                else {
-                    return Err(unexpected("tools/list"));
-                };
-                tools.extend(page.tools.into_iter().map(|tool| {
-                    json!({
-                        "name": tool.name,
-                        "description": tool.description.as_deref().unwrap_or_default(),
-                        "inputSchema": Value::Object((*tool.input_schema).clone()),
-                    })
-                }));
-                let Some(next) = page.next_cursor else {
-                    return Ok(tools);
-                };
-                if !seen.insert(next.clone()) {
-                    return Err(McpFailure::call(
-                        CallFailure::Other,
-                        format!("MCP tools/list repeated cursor \"{next}\"; expected a new cursor"),
-                    ));
-                }
-                cursor = Some(next);
+                ClientRequest::ListToolsRequest(ListToolsRequest::with_param(params))
+            },
+            |result| match result {
+                ServerResult::ListToolsResult(page) => Some((
+                    page.tools
+                        .into_iter()
+                        .map(|tool| {
+                            json!({
+                                "name": tool.name,
+                                "description": tool.description.as_deref().unwrap_or_default(),
+                                "inputSchema": Value::Object((*tool.input_schema).clone()),
+                            })
+                        })
+                        .collect(),
+                    page.next_cursor,
+                )),
+                _ => None,
+            },
+        ))
+    }
+
+    fn call_tool(
+        &self,
+        name: String,
+        arguments: Map<String, Value>,
+        options: RequestOptions,
+    ) -> ClientFuture<'_, Value> {
+        Box::pin(async move {
+            let params = CallToolRequestParams::new(name).with_arguments(arguments);
+            let request = ClientRequest::CallToolRequest(CallToolRequest::new(params));
+            // Anything but a well-formed tool result is a failed call, as the TypeScript SDK's
+            // result validation makes it; the result's content is then normalized, not trusted.
+            let ServerResult::CallToolResult(result) =
+                request_once(&self.peer, request, &options).await?
+            else {
+                return Err(unexpected("tools/call"));
+            };
+            Ok(content::call_result(&as_json(&result)))
+        })
+    }
+
+    fn list_resources(&self, options: RequestOptions) -> ClientFuture<'_, Vec<Value>> {
+        Box::pin(paginate(
+            &self.peer,
+            options,
+            "resources/list",
+            |cursor| {
+                let params = PaginatedRequestParams::default().with_cursor(cursor);
+                ClientRequest::ListResourcesRequest(ListResourcesRequest::with_param(params))
+            },
+            |result| match result {
+                ServerResult::ListResourcesResult(page) => Some((
+                    page.resources
+                        .iter()
+                        .map(|resource| content::resource_descriptor(&as_json(resource)))
+                        .collect(),
+                    page.next_cursor,
+                )),
+                _ => None,
+            },
+        ))
+    }
+
+    fn read_resource(&self, uri: String, options: RequestOptions) -> ClientFuture<'_, Vec<Value>> {
+        Box::pin(async move {
+            let request = ClientRequest::ReadResourceRequest(ReadResourceRequest::new(
+                ReadResourceRequestParams::new(uri),
+            ));
+            let ServerResult::ReadResourceResult(result) =
+                request_once(&self.peer, request, &options).await?
+            else {
+                return Err(unexpected("resources/read"));
+            };
+            Ok(result
+                .contents
+                .iter()
+                .map(|entry| content::resource_contents(&as_json(entry)))
+                .collect())
+        })
+    }
+
+    fn list_prompts(&self, options: RequestOptions) -> ClientFuture<'_, Vec<Value>> {
+        Box::pin(paginate(
+            &self.peer,
+            options,
+            "prompts/list",
+            |cursor| {
+                let params = PaginatedRequestParams::default().with_cursor(cursor);
+                ClientRequest::ListPromptsRequest(ListPromptsRequest::with_param(params))
+            },
+            |result| match result {
+                ServerResult::ListPromptsResult(page) => Some((
+                    page.prompts
+                        .iter()
+                        .map(|prompt| content::prompt_descriptor(&as_json(prompt)))
+                        .collect(),
+                    page.next_cursor,
+                )),
+                _ => None,
+            },
+        ))
+    }
+
+    fn get_prompt(
+        &self,
+        name: String,
+        arguments: Option<BTreeMap<String, String>>,
+        options: RequestOptions,
+    ) -> ClientFuture<'_, Value> {
+        Box::pin(async move {
+            let mut params = GetPromptRequestParams::new(name);
+            if let Some(arguments) = arguments {
+                params = params.with_arguments(
+                    arguments
+                        .into_iter()
+                        .map(|(key, value)| (key, Value::String(value)))
+                        .collect(),
+                );
             }
-            Err(McpFailure::call(
-                CallFailure::Other,
-                format!("MCP tools/list exceeded {MAX_PAGES} pages; expected a final page"),
-            ))
+            let request = ClientRequest::GetPromptRequest(GetPromptRequest::new(params));
+            let ServerResult::GetPromptResult(result) =
+                request_once(&self.peer, request, &options).await?
+            else {
+                return Err(unexpected("prompts/get"));
+            };
+            Ok(content::prompt_result(&as_json(&result)))
         })
     }
 
@@ -339,6 +440,43 @@ impl McpClient for SdkClient {
             Ok(())
         })
     }
+}
+
+/// Serializes an SDK model back to the JSON the server sent, so mapping stays SDK-free.
+fn as_json<T: serde::Serialize>(value: &T) -> Value {
+    serde_json::to_value(value).unwrap_or(Value::Null)
+}
+
+/// Reads every page of a list method, refusing a repeated cursor or more than [`MAX_PAGES`].
+async fn paginate(
+    peer: &Peer<RoleClient>,
+    options: RequestOptions,
+    method: &'static str,
+    request: impl Fn(Option<String>) -> ClientRequest,
+    page: impl Fn(ServerResult) -> Option<(Vec<Value>, Option<String>)>,
+) -> Result<Vec<Value>, McpFailure> {
+    let mut items = Vec::new();
+    let mut cursor = None;
+    let mut seen = HashSet::new();
+    for _ in 0..MAX_PAGES {
+        let result = request_once(peer, request(cursor), &options).await?;
+        let (entries, next) = page(result).ok_or_else(|| unexpected(method))?;
+        items.extend(entries);
+        let Some(next) = next else {
+            return Ok(items);
+        };
+        if !seen.insert(next.clone()) {
+            return Err(McpFailure::call(
+                CallFailure::Other,
+                format!("MCP {method} repeated cursor \"{next}\"; expected a new cursor"),
+            ));
+        }
+        cursor = Some(next);
+    }
+    Err(McpFailure::call(
+        CallFailure::Other,
+        format!("MCP {method} exceeded {MAX_PAGES} pages; expected a final page"),
+    ))
 }
 
 /// Sends one request, racing the caller's cancellation and the request bound against the reply.
@@ -413,6 +551,7 @@ mod tests {
 
     use super::*;
     use crate::mcp::fake_http::{FakeHttpMcpServer, Mode, Recorded};
+    use crate::mcp::types::FailureKind;
     use crate::subprocess::AlwaysAllow;
 
     fn fixture_config() -> McpConfig {
@@ -456,8 +595,8 @@ mod tests {
             client.capabilities(),
             ServerCapabilities {
                 tools: true,
-                resources: false,
-                prompts: false
+                resources: true,
+                prompts: true
             }
         );
         let tools = client
@@ -491,6 +630,246 @@ mod tests {
             "expected the TypeScript connection message shape | received {}",
             failure.message
         );
+    }
+
+    /// The stdio fixture with its message log enabled.
+    fn logged_fixture(
+        name: &str,
+    ) -> (
+        McpConfig,
+        std::path::PathBuf,
+        crate::test_support::ScratchDir,
+    ) {
+        let directory = crate::test_support::scratch_dir(&format!("mcp-sdk-{name}"));
+        let log = directory.join("received.jsonl");
+        let mut config = fixture_config();
+        config
+            .env
+            .insert("MCP_FIXTURE_LOG".into(), log.to_string_lossy().into_owned());
+        (config, log, directory)
+    }
+
+    fn received(log: &std::path::Path) -> Vec<Value> {
+        std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("the fixture logs JSON lines"))
+            .collect()
+    }
+
+    async fn wait_for_received(
+        log: &std::path::Path,
+        what: &str,
+        found: impl Fn(&Value) -> bool,
+    ) -> Value {
+        for _ in 0..300 {
+            if let Some(message) = received(log).into_iter().find(|message| found(message)) {
+                return message;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "expected the server to receive {what} | received {:?}",
+            received(log)
+        );
+    }
+
+    async fn connected(config: &McpConfig) -> Arc<dyn McpClient> {
+        SdkConnector::new("1.2.3")
+            .connect(config, &McpSecrets::default(), allowed())
+            .await
+            .unwrap_or_else(|failure| panic!("expected a connected fixture | received {failure:?}"))
+    }
+
+    #[tokio::test]
+    async fn the_handshake_is_a_legacy_initialize_pinned_to_the_typescript_revision() {
+        let (config, log, _dir) = logged_fixture("initialize");
+        let client = connected(&config).await;
+        let first = received(&log)
+            .into_iter()
+            .next()
+            .expect("the server received a first frame");
+        assert_eq!(
+            first["method"],
+            json!("initialize"),
+            "expected initialize, not server/discover"
+        );
+        assert_eq!(first["params"]["protocolVersion"], json!("2025-11-25"));
+        assert_eq!(
+            first["params"]["clientInfo"],
+            json!({ "name": "mangostudio", "version": "1.2.3" })
+        );
+        client.close().await.expect("closes");
+    }
+
+    #[tokio::test]
+    async fn tools_resources_and_prompts_round_trip_over_stdio() {
+        let (config, _log, _dir) = logged_fixture("round-trip");
+        let client = connected(&config).await;
+        let echo = client
+            .call_tool(
+                "echo".into(),
+                serde_json::from_value(json!({ "text": "hi" })).unwrap(),
+                options(),
+            )
+            .await
+            .expect("echo succeeds");
+        assert_eq!(
+            echo,
+            json!({ "contentText": "hi", "isError": false, "rawContentKinds": ["text"], "content": [{ "type": "text", "text": "hi" }] })
+        );
+        let big = client
+            .call_tool("big".into(), Map::new(), options())
+            .await
+            .expect("big succeeds");
+        let text = big["contentText"].as_str().expect("text");
+        assert!(
+            text.ends_with(content::MCP_RESULT_TRUNCATION_MARKER),
+            "expected the truncation marker"
+        );
+        assert!(
+            text.len() < 70 * 1024,
+            "expected a capped result | received {} bytes",
+            text.len()
+        );
+        let boom = client
+            .call_tool("boom".into(), Map::new(), options())
+            .await
+            .expect("boom answers");
+        assert_eq!(
+            (boom["isError"].clone(), boom["contentText"].clone()),
+            (json!(true), json!("tool exploded"))
+        );
+        let unusual = client
+            .call_tool("unusual".into(), Map::new(), options())
+            .await
+            .expect_err("expected a malformed result refused like the SDK's validation");
+        assert_eq!(unusual.kind, FailureKind::Call(CallFailure::Other));
+        let unknown = client
+            .call_tool("missing".into(), Map::new(), options())
+            .await
+            .expect_err("expected the server's JSON-RPC error");
+        assert_eq!(unknown.message, "MCP error -32602: Unknown tool: missing");
+        assert_eq!(
+            client
+                .list_resources(options())
+                .await
+                .expect("resources/list"),
+            vec![
+                json!({ "uri": "file:///one", "name": "One" }),
+                json!({ "uri": "file:///two", "name": "two", "mimeType": "text/plain", "sizeBytes": 3 }),
+            ]
+        );
+        assert_eq!(
+            client
+                .read_resource("file:///one".into(), options())
+                .await
+                .expect("resources/read"),
+            vec![
+                json!({ "uri": "file:///one", "mimeType": "text/plain", "text": "content of file:///one" })
+            ]
+        );
+        assert_eq!(
+            client.list_prompts(options()).await.expect("prompts/list"),
+            vec![
+                json!({ "name": "greet", "description": "Say hi", "arguments": [{ "name": "who", "required": true }] })
+            ]
+        );
+        assert_eq!(
+            client
+                .get_prompt(
+                    "greet".into(),
+                    Some(BTreeMap::from([("who".into(), "Ada".into())])),
+                    options()
+                )
+                .await
+                .expect("prompts/get"),
+            json!({ "description": "Greeting", "messages": [{ "role": "user", "text": "Hello Ada" }] })
+        );
+        client.close().await.expect("closes");
+    }
+
+    #[tokio::test]
+    async fn a_timed_out_call_reports_timeout_and_tells_the_server() {
+        let (config, log, _dir) = logged_fixture("timeout");
+        let client = connected(&config).await;
+        let failure = client
+            .call_tool(
+                "hang".into(),
+                Map::new(),
+                RequestOptions {
+                    timeout: Duration::from_millis(200),
+                    cancel: CancellationToken::new(),
+                },
+            )
+            .await
+            .expect_err("expected a timeout");
+        assert_eq!(
+            failure,
+            McpFailure::call(CallFailure::Timeout, "MCP error -32001: Request timed out")
+        );
+        let notice = wait_for_received(&log, "a cancellation notice", |message| {
+            message["method"] == "notifications/cancelled"
+        })
+        .await;
+        assert_eq!(notice["params"]["reason"], json!("request timeout"));
+        client.close().await.expect("closes");
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_call_settles_once_and_tells_the_server() {
+        let (config, log, _dir) = logged_fixture("cancel");
+        let client = connected(&config).await;
+        let cancel = CancellationToken::new();
+        let trigger = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            trigger.cancel();
+        });
+        let failure = client
+            .call_tool(
+                "hang".into(),
+                Map::new(),
+                RequestOptions {
+                    timeout: Duration::from_secs(10),
+                    cancel,
+                },
+            )
+            .await
+            .expect_err("expected a cancellation");
+        assert_eq!(failure.kind, FailureKind::Cancelled);
+        let notice = wait_for_received(&log, "a cancellation notice", |message| {
+            message["method"] == "notifications/cancelled"
+        })
+        .await;
+        assert_eq!(notice["params"]["reason"], json!("cancelled"));
+        // The session outlives one cancelled call.
+        let echo = client
+            .call_tool(
+                "echo".into(),
+                serde_json::from_value(json!({ "text": "again" })).unwrap(),
+                options(),
+            )
+            .await
+            .expect("the session still answers");
+        assert_eq!(echo["contentText"], json!("again"));
+        client.close().await.expect("closes");
+    }
+
+    #[tokio::test]
+    async fn losing_the_server_mid_call_is_server_closed_and_cleanup_still_completes() {
+        let (config, _log, _dir) = logged_fixture("crash");
+        let client = connected(&config).await;
+        let failure = client
+            .call_tool("crash".into(), Map::new(), options())
+            .await
+            .expect_err("expected the call to fail with the server");
+        assert_eq!(failure.kind, FailureKind::Call(CallFailure::ServerClosed));
+        assert_eq!(failure.message, "MCP error -32000: Connection closed");
+        client
+            .close()
+            .await
+            .expect("cleanup of an exited server succeeds");
     }
 
     fn http_config(url: &str) -> McpConfig {

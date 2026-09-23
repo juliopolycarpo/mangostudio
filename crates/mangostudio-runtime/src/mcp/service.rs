@@ -4,7 +4,7 @@
 //! under a short synchronous lock, and only connects to the *same* server id are serialized, so
 //! one busy or hung server cannot stall another server, a disconnect, or an answer to a question.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -12,13 +12,15 @@ use std::time::Duration;
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::{CallContext, Session};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::client::{ConnectContext, McpClient, McpConnector};
 use super::consent::{FreshMcpLaunch, McpConsent};
 use super::sdk::SdkConnector;
-use super::types::{FailureKind, McpConfig, McpFailure, McpSecrets, RequestOptions, timeout_from};
+use super::types::{
+    CallFailure, FailureKind, McpConfig, McpFailure, McpSecrets, RequestOptions, timeout_from,
+};
 use crate::consent::source::ConsentSource;
 use crate::registry::Registry;
 
@@ -39,6 +41,49 @@ struct ServerParams {
     server_id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CallToolParams {
+    server_id: String,
+    tool_name: String,
+    args: Map<String, Value>,
+    #[serde(default)]
+    timeout_ms: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadResourceParams {
+    server_id: String,
+    uri: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetPromptParams {
+    server_id: String,
+    prompt_name: String,
+    #[serde(default)]
+    args: Option<BTreeMap<String, String>>,
+}
+
+/// One fair async lock per key, dropped from the map once nobody holds or awaits it.
+#[derive(Default)]
+struct KeyedLocks(Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>);
+
+impl KeyedLocks {
+    fn get(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        if let Some(lock) = locks.get(key).and_then(Weak::upgrade) {
+            return lock;
+        }
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        locks.insert(key.to_owned(), Arc::downgrade(&lock));
+        lock
+    }
+}
+
 /// One open session and the row it was opened for.
 struct Entry {
     config: McpConfig,
@@ -52,7 +97,11 @@ struct Service {
     sessions: Mutex<HashMap<String, Arc<Entry>>>,
     /// Serializes connect/replace per server id so concurrent connects cannot leak a session.
     /// Tokio's mutex is fair, so waiters are admitted in arrival order.
-    connects: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
+    connects: KeyedLocks,
+    /// The FIFO gate for `mcp.call-tool` per server id; discovery, resources and prompts stay
+    /// parallel, as in the TypeScript host. Keyed by server id, not by session, so a queued call
+    /// is answered by whichever session is live when its turn comes.
+    calls: KeyedLocks,
     /// Set once the hub session is gone: nothing new may be registered after teardown.
     closed: AtomicBool,
     watcher_started: AtomicBool,
@@ -64,7 +113,8 @@ impl Service {
             connector,
             consent,
             sessions: Mutex::new(HashMap::new()),
-            connects: Mutex::new(HashMap::new()),
+            connects: KeyedLocks::default(),
+            calls: KeyedLocks::default(),
             closed: AtomicBool::new(false),
             watcher_started: AtomicBool::new(false),
         }
@@ -74,20 +124,6 @@ impl Service {
         self.sessions
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
-    }
-
-    fn connect_lock(&self, server_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-        let mut locks = self
-            .connects
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if let Some(lock) = locks.get(server_id).and_then(Weak::upgrade) {
-            return lock;
-        }
-        locks.retain(|_, lock| lock.strong_count() > 0);
-        let lock = Arc::new(tokio::sync::Mutex::new(()));
-        locks.insert(server_id.to_owned(), Arc::downgrade(&lock));
-        lock
     }
 
     fn entry(&self, server_id: &str) -> Result<Arc<Entry>, RemoteError> {
@@ -103,7 +139,7 @@ impl Service {
         cancel: &CancellationToken,
     ) -> Result<Value, RemoteError> {
         let config = params.config;
-        let lock = self.connect_lock(&config.id);
+        let lock = self.connects.get(&config.id);
         let _turn = tokio::select! {
             biased;
             () = cancel.cancelled() => return Err(cancelled("mcp.connect")),
@@ -169,13 +205,122 @@ impl Service {
         let entry = self.entry(&params.server_id)?;
         let tools = entry
             .client
-            .list_tools(RequestOptions {
-                timeout: entry.timeout,
-                cancel: cancel.clone(),
-            })
+            .list_tools(Self::options(&entry, cancel))
             .await
             .map_err(|failure| self.remote("mcp.list-tools", &entry.config, failure))?;
         Ok(json!({ "tools": tools }))
+    }
+
+    fn options(entry: &Entry, cancel: &CancellationToken) -> RequestOptions {
+        RequestOptions {
+            timeout: entry.timeout,
+            cancel: cancel.clone(),
+        }
+    }
+
+    async fn call_tool(
+        &self,
+        params: CallToolParams,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        // Resolved up front so a call for a server with no session fails immediately rather than
+        // after waiting out the queue.
+        self.entry(&params.server_id)?;
+        let lock = self.calls.get(&params.server_id);
+        // A caller that gives up while queued leaves at once; it never reaches the server, and
+        // the queue only advances when the call ahead of it has actually finished.
+        let _turn = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(cancelled("mcp.call-tool")),
+            turn = lock.lock() => turn,
+        };
+        if cancel.is_cancelled() {
+            return Err(cancelled("mcp.call-tool"));
+        }
+        // Re-read rather than reusing the entry resolved above: a disconnect or a reconnect while
+        // this call sat in the queue must not be answered by a closed or superseded session.
+        let entry = self.entry(&params.server_id)?;
+        let timeout = match params.timeout_ms {
+            Some(raw) => timeout_from(Some(raw), &entry.config.slug).map_err(|message| {
+                self.remote(
+                    "mcp.call-tool",
+                    &entry.config,
+                    McpFailure::call(CallFailure::Other, message),
+                )
+            })?,
+            None => entry.timeout,
+        };
+        entry
+            .client
+            .call_tool(
+                params.tool_name,
+                params.args,
+                RequestOptions {
+                    timeout,
+                    cancel: cancel.clone(),
+                },
+            )
+            .await
+            .map_err(|failure| self.remote("mcp.call-tool", &entry.config, failure))
+    }
+
+    async fn list_resources(
+        &self,
+        params: ServerParams,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let entry = self.entry(&params.server_id)?;
+        let resources = entry
+            .client
+            .list_resources(Self::options(&entry, cancel))
+            .await
+            .map_err(|failure| self.remote("mcp.list-resources", &entry.config, failure))?;
+        Ok(json!({ "resources": resources }))
+    }
+
+    async fn read_resource(
+        &self,
+        params: ReadResourceParams,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let entry = self.entry(&params.server_id)?;
+        let contents = entry
+            .client
+            .read_resource(params.uri, Self::options(&entry, cancel))
+            .await
+            .map_err(|failure| self.remote("mcp.read-resource", &entry.config, failure))?;
+        Ok(json!({ "contents": contents }))
+    }
+
+    async fn list_prompts(
+        &self,
+        params: ServerParams,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let entry = self.entry(&params.server_id)?;
+        let prompts = entry
+            .client
+            .list_prompts(Self::options(&entry, cancel))
+            .await
+            .map_err(|failure| self.remote("mcp.list-prompts", &entry.config, failure))?;
+        Ok(json!({ "prompts": prompts }))
+    }
+
+    async fn get_prompt(
+        &self,
+        params: GetPromptParams,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let entry = self.entry(&params.server_id)?;
+        entry
+            .client
+            .get_prompt(
+                params.prompt_name,
+                params.args,
+                Self::options(&entry, cancel),
+            )
+            .await
+            .map_err(|failure| self.remote("mcp.get-prompt", &entry.config, failure))
     }
 
     async fn disconnect(&self, params: ServerParams) -> Value {
@@ -249,6 +394,25 @@ fn missing(server_id: &str) -> RemoteError {
     .with_detail("serverId", server_id)
 }
 
+type Handled =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RemoteError>> + Send>>;
+
+/// Installs one request handler that shares `service` and passes the call's cancellation.
+fn serve<P>(
+    registry: Registry,
+    service: &Arc<Service>,
+    method: &'static str,
+    handle: fn(Arc<Service>, P, CancellationToken) -> Handled,
+) -> Registry
+where
+    P: serde::de::DeserializeOwned + Send + 'static,
+{
+    let service = Arc::clone(service);
+    registry.implement(method, move |params: P, context: CallContext| {
+        handle(Arc::clone(&service), params, context.cancel().clone())
+    })
+}
+
 /// Registers the working MCP methods. The manifest advertises `mcp` only once every catalog
 /// method in the family has a handler here.
 ///
@@ -286,12 +450,50 @@ fn register_with_connector(
             }
         },
     );
-    let list = Arc::clone(&service);
-    let registry = registry.implement(
+    let registry = serve(
+        registry,
+        &service,
         "mcp.list-tools",
-        move |params: ServerParams, context: CallContext| {
-            let service = Arc::clone(&list);
-            async move { service.list_tools(params, context.cancel()).await }
+        |service, params, cancel| {
+            Box::pin(async move { service.list_tools(params, &cancel).await })
+        },
+    );
+    let registry = serve(
+        registry,
+        &service,
+        "mcp.call-tool",
+        |service, params, cancel| Box::pin(async move { service.call_tool(params, &cancel).await }),
+    );
+    let registry = serve(
+        registry,
+        &service,
+        "mcp.list-resources",
+        |service, params, cancel| {
+            Box::pin(async move { service.list_resources(params, &cancel).await })
+        },
+    );
+    let registry = serve(
+        registry,
+        &service,
+        "mcp.read-resource",
+        |service, params, cancel| {
+            Box::pin(async move { service.read_resource(params, &cancel).await })
+        },
+    );
+    let registry = serve(
+        registry,
+        &service,
+        "mcp.list-prompts",
+        |service, params, cancel| {
+            Box::pin(async move { service.list_prompts(params, &cancel).await })
+        },
+    );
+    let registry = serve(
+        registry,
+        &service,
+        "mcp.get-prompt",
+        |service, params, cancel| {
+            Box::pin(async move { service.get_prompt(params, &cancel).await })
         },
     );
     registry.implement(
@@ -311,22 +513,28 @@ mod tests {
     use crate::manifest::build_features;
     use crate::mcp::client::ClientFuture;
     use crate::mcp::consent::fakes::SwitchableConsent;
-    use crate::mcp::types::{CallFailure, ServerCapabilities};
+    use crate::mcp::types::ServerCapabilities;
     use crate::registry::Classification;
     use mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow;
 
-    /// Named fake session: counts closes and can park `list_tools` until released.
+    /// Named fake session: counts closes, records tool calls in the order the "server" received
+    /// them, and can park `list_tools` or every `call_tool` until a test releases it.
     struct FakeClient {
+        generation: usize,
         closes: Arc<AtomicUsize>,
         hold: Option<Arc<tokio::sync::Notify>>,
+        calls: Arc<Mutex<Vec<String>>>,
+        timeouts: Arc<Mutex<Vec<Duration>>>,
+        gate: Option<Arc<tokio::sync::Semaphore>>,
+        closed: CancellationToken,
     }
 
     impl McpClient for FakeClient {
         fn capabilities(&self) -> ServerCapabilities {
             ServerCapabilities {
                 tools: true,
-                resources: false,
-                prompts: false,
+                resources: true,
+                prompts: true,
             }
         }
 
@@ -349,14 +557,72 @@ mod tests {
             })
         }
 
+        fn call_tool(
+            &self,
+            name: String,
+            _arguments: Map<String, Value>,
+            options: RequestOptions,
+        ) -> ClientFuture<'_, Value> {
+            Box::pin(async move {
+                self.calls.lock().unwrap().push(name.clone());
+                self.timeouts.lock().unwrap().push(options.timeout);
+                if let Some(gate) = &self.gate {
+                    tokio::select! {
+                        permit = gate.acquire() => permit.expect("gate open").forget(),
+                        () = options.cancel.cancelled() => {
+                            return Err(McpFailure::cancelled("cancelled"));
+                        }
+                        () = self.closed.cancelled() => {
+                            return Err(McpFailure::call(
+                                CallFailure::ServerClosed,
+                                "MCP error -32000: Connection closed",
+                            ));
+                        }
+                    }
+                }
+                Ok(json!({ "contentText": format!("{name}@{}", self.generation) }))
+            })
+        }
+
+        fn list_resources(&self, _options: RequestOptions) -> ClientFuture<'_, Vec<Value>> {
+            Box::pin(async { Ok(vec![json!({ "uri": "file:///a", "name": "a" })]) })
+        }
+
+        fn read_resource(
+            &self,
+            uri: String,
+            _options: RequestOptions,
+        ) -> ClientFuture<'_, Vec<Value>> {
+            Box::pin(async move { Ok(vec![json!({ "uri": uri, "text": "body" })]) })
+        }
+
+        fn list_prompts(&self, _options: RequestOptions) -> ClientFuture<'_, Vec<Value>> {
+            Box::pin(async { Ok(vec![json!({ "name": "greet", "arguments": [] })]) })
+        }
+
+        fn get_prompt(
+            &self,
+            name: String,
+            arguments: Option<BTreeMap<String, String>>,
+            _options: RequestOptions,
+        ) -> ClientFuture<'_, Value> {
+            Box::pin(async move {
+                let who = arguments
+                    .and_then(|arguments| arguments.get("who").cloned())
+                    .unwrap_or_default();
+                Ok(json!({ "messages": [{ "role": "user", "text": format!("{name} {who}") }] }))
+            })
+        }
+
         fn close(&self) -> ClientFuture<'_, ()> {
             self.closes.fetch_add(1, Ordering::SeqCst);
+            self.closed.cancel();
             Box::pin(async { Ok(()) })
         }
     }
 
     /// Named fake connector: opens [`FakeClient`]s, optionally parking one server id's connect,
-    /// or failing with a fixed [`McpFailure`].
+    /// cancelling the caller mid-connect, or failing with a fixed [`McpFailure`].
     #[derive(Default)]
     struct FakeConnector {
         closes: Arc<AtomicUsize>,
@@ -365,6 +631,10 @@ mod tests {
         entered: Arc<tokio::sync::Notify>,
         release: Arc<tokio::sync::Notify>,
         hold_lists: Option<Arc<tokio::sync::Notify>>,
+        calls: Arc<Mutex<Vec<String>>>,
+        timeouts: Arc<Mutex<Vec<Duration>>>,
+        gate: Option<Arc<tokio::sync::Semaphore>>,
+        cancel_during_connect: bool,
         fail: Option<McpFailure>,
     }
 
@@ -373,10 +643,10 @@ mod tests {
             &'a self,
             config: &'a McpConfig,
             _secrets: &'a McpSecrets,
-            _context: ConnectContext,
+            context: ConnectContext,
         ) -> ClientFuture<'a, Arc<dyn McpClient>> {
             Box::pin(async move {
-                self.connects.fetch_add(1, Ordering::SeqCst);
+                let generation = self.connects.fetch_add(1, Ordering::SeqCst) + 1;
                 // A real connect always suspends; yielding lets concurrent connects interleave.
                 tokio::task::yield_now().await;
                 if let Some(failure) = &self.fail {
@@ -386,9 +656,17 @@ mod tests {
                     self.entered.notify_one();
                     self.release.notified().await;
                 }
+                if self.cancel_during_connect {
+                    context.cancel.cancel();
+                }
                 Ok(Arc::new(FakeClient {
+                    generation,
                     closes: Arc::clone(&self.closes),
                     hold: self.hold_lists.clone(),
+                    calls: Arc::clone(&self.calls),
+                    timeouts: Arc::clone(&self.timeouts),
+                    gate: self.gate.clone(),
+                    closed: CancellationToken::new(),
                 }) as Arc<dyn McpClient>)
             })
         }
@@ -435,7 +713,7 @@ mod tests {
         let cancel = CancellationToken::new();
         assert_eq!(
             service.connect(params("server-1"), &cancel).await.unwrap(),
-            json!({"capabilities": {"tools": true, "resources": false, "prompts": false}})
+            json!({"capabilities": {"tools": true, "resources": true, "prompts": true}})
         );
         assert_eq!(
             service
@@ -691,6 +969,263 @@ mod tests {
         assert!(service.sessions().is_empty());
     }
 
+    fn call(server_id: &str, tool: &str) -> CallToolParams {
+        CallToolParams {
+            server_id: server_id.into(),
+            tool_name: tool.into(),
+            args: Map::new(),
+            timeout_ms: None,
+        }
+    }
+
+    /// Spawns a call and waits until the fake server has received it (or it is queued behind a
+    /// call that has), so tests submit in a known order.
+    async fn spawn_call(
+        service: &Arc<Service>,
+        params: CallToolParams,
+        cancel: CancellationToken,
+    ) -> tokio::task::JoinHandle<Result<Value, RemoteError>> {
+        let service = Arc::clone(service);
+        let task = tokio::spawn(async move { service.call_tool(params, &cancel).await });
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        task
+    }
+
+    fn gated() -> (
+        FakeConnector,
+        Arc<tokio::sync::Semaphore>,
+        Arc<Mutex<Vec<String>>>,
+    ) {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let connector = FakeConnector {
+            gate: Some(Arc::clone(&gate)),
+            ..FakeConnector::default()
+        };
+        let calls = Arc::clone(&connector.calls);
+        (connector, gate, calls)
+    }
+
+    #[tokio::test]
+    async fn tool_calls_reach_the_server_one_at_a_time_in_submission_order() {
+        let (connector, gate, calls) = gated();
+        let service = service(connector);
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let mut tasks = Vec::new();
+        for tool in ["first", "second", "third"] {
+            tasks
+                .push(spawn_call(&service, call("server-1", tool), CancellationToken::new()).await);
+        }
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec!["first".to_owned()],
+            "expected only the head of the queue at the server"
+        );
+        for (index, task) in tasks.into_iter().enumerate() {
+            gate.add_permits(1);
+            let result = task.await.unwrap().expect("each call succeeds in turn");
+            assert_eq!(
+                result["contentText"],
+                json!(format!("{}@1", ["first", "second", "third"][index]))
+            );
+        }
+        assert_eq!(*calls.lock().unwrap(), vec!["first", "second", "third"]);
+    }
+
+    #[tokio::test]
+    async fn a_queued_call_is_answered_by_the_session_live_when_it_runs() {
+        let (connector, _gate, _calls) = gated();
+        let service = service(connector);
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let held = spawn_call(&service, call("server-1", "held"), CancellationToken::new()).await;
+        let queued = spawn_call(
+            &service,
+            call("server-1", "queued"),
+            CancellationToken::new(),
+        )
+        .await;
+        service.disconnect(server("server-1")).await;
+        // The in-flight head goes down with the session it was already running on.
+        let head = held
+            .await
+            .unwrap()
+            .expect_err("expected the head to fail with its session");
+        assert_eq!(detail(&head, "kind"), Some(&json!("mcp_call")));
+        assert_eq!(detail(&head, "mcpFailure"), Some(&json!("server_closed")));
+        // The queued call never started, so the registry answers it, not a closed session.
+        let queued = queued
+            .await
+            .unwrap()
+            .expect_err("expected the queued call refused");
+        assert_eq!(detail(&queued, "kind"), Some(&json!("mcp_session_missing")));
+    }
+
+    #[tokio::test]
+    async fn an_aborted_queued_caller_leaves_while_the_call_ahead_still_runs() {
+        let (connector, gate, calls) = gated();
+        let service = service(connector);
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let held = spawn_call(&service, call("server-1", "held"), CancellationToken::new()).await;
+        let abort = CancellationToken::new();
+        let queued = spawn_call(&service, call("server-1", "abandoned"), abort.clone()).await;
+        abort.cancel();
+        let left = tokio::time::timeout(Duration::from_millis(500), queued)
+            .await
+            .expect("expected the aborted caller answered while the head is still blocked")
+            .unwrap()
+            .expect_err("expected a cancellation");
+        assert_eq!(left.code, codes::CANCELLED);
+        assert!(!held.is_finished(), "expected the head still running");
+        gate.add_permits(1);
+        held.await.unwrap().expect("the head completes");
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec!["held"],
+            "expected the abandoned call never sent"
+        );
+        gate.add_permits(1);
+        let next = service
+            .call_tool(call("server-1", "next"), &CancellationToken::new())
+            .await
+            .expect("the queue still moves");
+        assert_eq!(next["contentText"], json!("next@1"));
+    }
+
+    #[tokio::test]
+    async fn discovery_resources_and_prompts_do_not_wait_behind_a_parked_call() {
+        let (connector, gate, _calls) = gated();
+        let service = service(connector);
+        let cancel = CancellationToken::new();
+        service.connect(params("server-1"), &cancel).await.unwrap();
+        let held = spawn_call(&service, call("server-1", "held"), CancellationToken::new()).await;
+        let parallel = tokio::time::timeout(Duration::from_millis(500), async {
+            (
+                service
+                    .list_tools(server("server-1"), &cancel)
+                    .await
+                    .unwrap(),
+                service
+                    .list_resources(server("server-1"), &cancel)
+                    .await
+                    .unwrap(),
+                service
+                    .read_resource(
+                        ReadResourceParams {
+                            server_id: "server-1".into(),
+                            uri: "file:///a".into(),
+                        },
+                        &cancel,
+                    )
+                    .await
+                    .unwrap(),
+                service
+                    .list_prompts(server("server-1"), &cancel)
+                    .await
+                    .unwrap(),
+                service
+                    .get_prompt(
+                        GetPromptParams {
+                            server_id: "server-1".into(),
+                            prompt_name: "greet".into(),
+                            args: Some(BTreeMap::from([("who".into(), "you".into())])),
+                        },
+                        &cancel,
+                    )
+                    .await
+                    .unwrap(),
+            )
+        })
+        .await
+        .expect("expected discovery to proceed while a tool call is parked");
+        assert_eq!(
+            parallel.1,
+            json!({ "resources": [{ "uri": "file:///a", "name": "a" }] })
+        );
+        assert_eq!(
+            parallel.2,
+            json!({ "contents": [{ "uri": "file:///a", "text": "body" }] })
+        );
+        assert_eq!(
+            parallel.3,
+            json!({ "prompts": [{ "name": "greet", "arguments": [] }] })
+        );
+        assert_eq!(
+            parallel.4,
+            json!({ "messages": [{ "role": "user", "text": "greet you" }] })
+        );
+        gate.add_permits(1);
+        held.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_call_timeout_overrides_the_row_timeout_and_invalid_values_are_refused() {
+        let connector = FakeConnector::default();
+        let timeouts = Arc::clone(&connector.timeouts);
+        let service = service(connector);
+        let cancel = CancellationToken::new();
+        let mut row = params("server-1");
+        row.config.timeout_ms = Some(2_000.0);
+        service.connect(row, &cancel).await.unwrap();
+        service
+            .call_tool(call("server-1", "default"), &cancel)
+            .await
+            .unwrap();
+        let mut quick = call("server-1", "quick");
+        quick.timeout_ms = Some(150.0);
+        service.call_tool(quick, &cancel).await.unwrap();
+        assert_eq!(
+            *timeouts.lock().unwrap(),
+            vec![Duration::from_millis(2_000), Duration::from_millis(150)]
+        );
+        let mut invalid = call("server-1", "invalid");
+        invalid.timeout_ms = Some(-5.0);
+        let error = service.call_tool(invalid, &cancel).await.unwrap_err();
+        assert_eq!(detail(&error, "kind"), Some(&json!("mcp_call")));
+        assert!(
+            error.message.contains("timeoutMs -5"),
+            "expected the value named | received {}",
+            error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn a_connect_cancelled_after_the_server_answered_leaves_no_session() {
+        let connector = FakeConnector {
+            cancel_during_connect: true,
+            ..FakeConnector::default()
+        };
+        let closes = Arc::clone(&connector.closes);
+        let service = service(connector);
+        let error = service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
+        assert_eq!(
+            closes.load(Ordering::SeqCst),
+            1,
+            "expected the late session closed"
+        );
+        let missing = service
+            .list_tools(server("server-1"), &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            detail(&missing, "kind"),
+            Some(&json!("mcp_session_missing"))
+        );
+    }
+
     #[test]
     fn partial_family_is_registered_but_never_advertised_as_mcp() {
         let registry = register_with_connector(
@@ -698,9 +1233,22 @@ mod tests {
             Arc::new(FakeConnector::default()),
             SwitchableConsent::granted(),
         );
-        for method in ["mcp.connect", "mcp.list-tools", "mcp.disconnect"] {
+        for method in [
+            "mcp.connect",
+            "mcp.list-tools",
+            "mcp.call-tool",
+            "mcp.list-resources",
+            "mcp.read-resource",
+            "mcp.list-prompts",
+            "mcp.get-prompt",
+            "mcp.disconnect",
+        ] {
             assert_eq!(registry.classify(method), Classification::Implemented);
         }
+        assert_eq!(
+            registry.classify("mcp.elicit-response"),
+            Classification::KnownUnimplemented
+        );
         let allow = RuntimeCapabilityAllow {
             fs_read: false,
             fs_write: false,
