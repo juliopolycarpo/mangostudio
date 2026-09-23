@@ -377,13 +377,18 @@ impl MutationService {
                     Err(RemoteError::new(codes::INTERNAL, error.message)
                         .with_detail("kind", "path_access"))
                 }
-                Err(UndoError::Interrupted(Interrupt::Cancelled)) => Err(cancelled()),
-                Err(UndoError::Interrupted(Interrupt::ConsentWithdrawn)) => {
-                    Err(authorize(&consent, "library.undo")
-                        .err()
-                        .unwrap_or_else(|| {
-                            RemoteError::new(codes::DENIED, Interrupt::ConsentWithdrawn.message())
-                        }))
+                Err(UndoError::Interrupted(interrupt, partial)) => {
+                    let error = match interrupt {
+                        Interrupt::Cancelled => cancelled(),
+                        Interrupt::ConsentWithdrawn => authorize(&consent, "library.undo")
+                            .err()
+                            .unwrap_or_else(|| {
+                                RemoteError::new(codes::DENIED, interrupt.message())
+                            }),
+                    };
+                    // What already landed stays landed; say so rather than
+                    // answer a bare refusal for an undo that half happened.
+                    Err(error.with_detail("partial", encode(&partial)?))
                 }
                 Err(UndoError::Failed(message)) => Err(RemoteError::new(codes::INTERNAL, message)),
             },

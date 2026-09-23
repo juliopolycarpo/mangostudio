@@ -61,8 +61,8 @@ pub(crate) enum UndoError {
     /// An entry left its location; see the module docs.
     Refused(WriteError),
     /// Stopped at a boundary between entries. Entries already handled stay
-    /// handled; the rest are untouched.
-    Interrupted(Interrupt),
+    /// handled — the partial report says which — and the rest are untouched.
+    Interrupted(Interrupt, UndoResult),
     /// An I/O failure, including a manifest that exists but cannot be read.
     Failed(String),
 }
@@ -101,7 +101,7 @@ pub(crate) fn execute_undo(
     };
     for entry in manifest.entries.iter().rev() {
         if let Some(interrupt) = interrupted() {
-            return Err(UndoError::Interrupted(interrupt));
+            return Err(UndoError::Interrupted(interrupt, report));
         }
         assert_contained_in_location(entry, env).map_err(UndoError::Refused)?;
         let location = UndoEntry {

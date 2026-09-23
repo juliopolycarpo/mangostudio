@@ -141,16 +141,57 @@ fn a_pruned_copy_is_skipped_and_an_interrupt_stops_between_entries() {
         "received {report:?}"
     );
     let interrupted = || Some(Interrupt::Cancelled);
-    assert_eq!(
-        execute_undo(
-            "set",
-            &home.store,
-            home.hasher.as_ref(),
-            &home.env,
-            &interrupted
-        ),
-        Err(UndoError::Interrupted(Interrupt::Cancelled))
+    let stopped = execute_undo(
+        "set",
+        &home.store,
+        home.hasher.as_ref(),
+        &home.env,
+        &interrupted,
     );
+    assert!(
+        matches!(&stopped, Err(UndoError::Interrupted(Interrupt::Cancelled, partial)) if partial.skipped.is_empty()),
+        "expected an interruption before the first entry | received {stopped:?}"
+    );
+}
+
+/// An undo interrupted between entries reports what it already restored.
+#[test]
+fn an_interrupted_undo_reports_what_it_already_restored() {
+    let home = Home::new("undo-interrupted-partial");
+    let first = home.skill(&home.path(&[".claude", "skills", "gh"]), "one");
+    let second = home.skill(&home.path(&[".agents", "skills", "gh"]), "two");
+    let mut entries = vec![removal_set(&home, "set", &first)];
+    let mut agents = removal_set(&home, "set-agents", &second);
+    agents.location_id = "agents-skills".into();
+    entries.push(agents);
+    std::fs::remove_dir_all(&first).unwrap();
+    std::fs::remove_dir_all(&second).unwrap();
+    write(&home, "set", entries);
+    let checks = std::sync::atomic::AtomicUsize::new(0);
+    let interrupted = || {
+        (checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1)
+            .then_some(Interrupt::Cancelled)
+    };
+    let stopped = execute_undo(
+        "set",
+        &home.store,
+        home.hasher.as_ref(),
+        &home.env,
+        &interrupted,
+    );
+    let Err(UndoError::Interrupted(Interrupt::Cancelled, partial)) = stopped else {
+        panic!("expected an interrupted undo | received {stopped:?}");
+    };
+    assert_eq!(
+        partial
+            .restored
+            .iter()
+            .map(|entry| entry.location_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["agents-skills"],
+        "entries are undone newest first, and the report names the one that landed"
+    );
+    assert!(second.exists() && !first.exists());
 }
 
 #[test]
