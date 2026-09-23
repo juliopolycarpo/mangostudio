@@ -138,6 +138,7 @@ interface TerminalSessionEntry {
   ownerUserId: string;
   client: TerminalRuntimeClient;
   viewer: TerminalSessionViewer | null;
+  cleanupPending: boolean;
 }
 
 interface TerminalReservation {
@@ -145,7 +146,7 @@ interface TerminalReservation {
   readonly environmentId: string;
   client: TerminalRuntimeClient | null;
   canceled: boolean;
-  scopeEnded: boolean;
+  scopeEnded: 'runtime-disconnected' | 'revoked' | 'shutdown' | null;
   openSent: boolean;
 }
 
@@ -196,9 +197,12 @@ export function createTerminalSessionService(
     return count;
   }
 
-  function cancelReservation(reservation: TerminalReservation): void {
+  function cancelReservation(
+    reservation: TerminalReservation,
+    reason: 'runtime-disconnected' | 'shutdown'
+  ): void {
     reservation.canceled = true;
-    reservation.scopeEnded = true;
+    reservation.scopeEnded = reason;
     reservations.delete(reservation);
   }
 
@@ -245,7 +249,7 @@ export function createTerminalSessionService(
   /** Ends every session on a client that just lost its runtime connection. */
   function handleRuntimeDisconnected(client: TerminalRuntimeClient): void {
     for (const reservation of reservations) {
-      if (reservation.client === client) cancelReservation(reservation);
+      if (reservation.client === client) cancelReservation(reservation, 'runtime-disconnected');
     }
     for (const [id, entry] of sessions) {
       if (entry.client !== client) continue;
@@ -350,7 +354,7 @@ export function createTerminalSessionService(
         environmentId: body.environmentId,
         client: null,
         canceled: false,
-        scopeEnded: false,
+        scopeEnded: null,
         openSent: false,
       };
       reservations.add(reservation);
@@ -401,7 +405,11 @@ export function createTerminalSessionService(
           d.resolveToolchain(userId, body.environmentId)
         );
         requireReservation();
-        const registerSession = (shell: TerminalSession['shell'], sessionCwd: string) => {
+        const registerSession = (
+          shell: TerminalSession['shell'],
+          sessionCwd: string,
+          status: TerminalSession['status'] = 'running'
+        ) => {
           const now = d.now();
           const session: TerminalSession = {
             id: sessionId,
@@ -412,13 +420,20 @@ export function createTerminalSessionService(
             cwd: sessionCwd,
             cols,
             rows,
-            status: 'running',
+            status,
             attached: false,
             createdAt: now,
             lastActivityAt: now,
+            ...(status === 'exited' ? { exit: { exitCode: null, signal: null } } : {}),
           };
           reservations.delete(reservation);
-          sessions.set(sessionId, { session, ownerUserId: userId, client, viewer: null });
+          sessions.set(sessionId, {
+            session,
+            ownerUserId: userId,
+            client,
+            viewer: null,
+            cleanupPending: status === 'exited',
+          });
           return session;
         };
         const closeUnclaimed = async (): Promise<boolean> => {
@@ -451,18 +466,18 @@ export function createTerminalSessionService(
           );
         } catch (error) {
           // A timeout or lost response cannot prove that the runtime refused
-          // the open. Close by id; if that also fails, keep a visible cap seat.
-          if (!(await closeUnclaimed()) && !reservation.scopeEnded) {
+          // the open. Close by id; retain an ambiguous live PTY if cleanup fails.
+          const consentDenied =
+            error instanceof RuntimeConsentDeniedError ||
+            (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.DENIED);
+          if (!(await closeUnclaimed()) && !reservation.scopeEnded && !consentDenied) {
             registerSession(
               body.shell ?? client.manifest.shells[0] ?? 'bash',
               cwd ?? client.manifest.homeDir
             );
           }
           if (reservation.canceled) requireReservation();
-          if (
-            error instanceof RuntimeConsentDeniedError ||
-            (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.DENIED)
-          ) {
+          if (consentDenied) {
             throw new TerminalUnavailableError(
               'unavailable',
               `Environment "${body.environmentId}" no longer grants terminal access.`
@@ -480,8 +495,14 @@ export function createTerminalSessionService(
           throw error;
         }
         if (reservation.canceled) {
-          if (!(await closeUnclaimed()) && !reservation.scopeEnded) {
-            registerSession(openResult.shell, openResult.cwd);
+          if (!(await closeUnclaimed())) {
+            // Revocation already removed the live seat. Keep a cleanup handle
+            // for an accepted PTY without reviving capacity while consent is off.
+            if (reservation.scopeEnded === 'revoked') {
+              registerSession(openResult.shell, openResult.cwd, 'exited');
+            } else if (!reservation.scopeEnded) {
+              registerSession(openResult.shell, openResult.cwd);
+            }
           }
           requireReservation();
         }
@@ -500,13 +521,14 @@ export function createTerminalSessionService(
           continue;
         }
         reservation.canceled = true;
-        reservation.scopeEnded = true;
+        reservation.scopeEnded = 'revoked';
         if (!reservation.openSent) reservations.delete(reservation);
       }
       for (const entry of sessions.values()) {
         if (entry.ownerUserId !== userId || entry.session.environmentId !== environmentId) {
           continue;
         }
+        entry.cleanupPending = true;
         if (entry.session.status === 'exited') continue;
         entry.session.status = 'exited';
         entry.session.exit = { exitCode: null, signal: null };
@@ -592,7 +614,14 @@ export function createTerminalSessionService(
 
     getForAttach(userId, sessionId) {
       const entry = sessions.get(sessionId);
-      if (!entry || entry.ownerUserId !== userId || reaping.has(sessionId)) return null;
+      if (
+        !entry ||
+        entry.ownerUserId !== userId ||
+        entry.cleanupPending ||
+        reaping.has(sessionId)
+      ) {
+        return null;
+      }
       return { session: entry.session, client: entry.client };
     },
 
@@ -650,7 +679,7 @@ export function createTerminalSessionService(
 
     async closeAll() {
       shuttingDown = true;
-      for (const reservation of reservations) cancelReservation(reservation);
+      for (const reservation of reservations) cancelReservation(reservation, 'shutdown');
       const entries = [...sessions.values()];
       sessions.clear();
       await Promise.all(

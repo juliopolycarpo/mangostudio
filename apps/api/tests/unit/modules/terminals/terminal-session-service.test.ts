@@ -244,6 +244,51 @@ describe('terminalSessionService.open', () => {
     });
   }
 
+  test('keeps a confirmed late PTY as a retryable exited record after revocation', async () => {
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({
+      gateFirstOpen: () => gate.promise,
+      failFirstClose: new RuntimeConsentDeniedError('shell access withdrawn'),
+    });
+    const { service, now } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+    const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    await client.waitForCall('open');
+    service.revokeScope(USER_ID, ENVIRONMENT_ID);
+    gate.release();
+
+    await expect(opening).rejects.toBeInstanceOf(TerminalUnavailableError);
+    const retained = service.list(USER_ID);
+    expect(retained).toMatchObject([
+      {
+        id: client.calls.open[0]?.sessionId,
+        status: 'exited',
+        exit: { exitCode: null, signal: null },
+      },
+    ]);
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+    expect(service.getForAttach(USER_ID, retained[0]?.id ?? '')).toBeNull();
+    now.value += 31 * 60_000;
+    service.reapIdle();
+    await Promise.resolve();
+    expect(client.calls.close).toHaveLength(2);
+    expect(service.list(USER_ID)).toHaveLength(0);
+  });
+
+  test('does not retain a phantom seat when consent refused the open itself', async () => {
+    const client = new FakeTerminalRuntimeClient({
+      failFirstOpen: new RuntimeConsentDeniedError('shell access withdrawn'),
+      failFirstClose: new RuntimeConsentDeniedError('shell access withdrawn'),
+    });
+    const { service } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
+      TerminalUnavailableError
+    );
+    expect(client.calls.close).toHaveLength(1);
+    expect(service.list(USER_ID)).toHaveLength(0);
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+  });
+
   test.each([
     new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime disconnected'),
     new RuntimeConsentDeniedError('shell access withdrawn'),
