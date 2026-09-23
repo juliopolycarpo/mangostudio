@@ -77,9 +77,17 @@ fn a_console_close_after_hello_exits_while_the_hub_keeps_stdin_open() {
     // Same window as the signal tests: let the stdin read block first.
     std::thread::sleep(Duration::from_millis(300));
 
+    let closer = console.close();
+    // The bound starts only once the closing thread is issuing the call, so
+    // a slow scheduler cannot eat into it.
     let started = Instant::now();
-    console.close();
-    let code = child.wait_bounded(SIGNALLED_EXIT_BOUND);
+    let waited = child.wait_bounded(SIGNALLED_EXIT_BOUND);
+    // Joined on every path, before any assertion can fail: the call returns
+    // once the child is gone, whether it exited or the bound terminated it.
+    closer
+        .join()
+        .expect("the ClosePseudoConsole thread does not panic");
+    let code = waited.unwrap_or_else(|failure| panic!("{failure}"));
     assert_eq!(
         code,
         0,
@@ -141,24 +149,35 @@ impl PseudoConsole {
         }
     }
 
-    /// Delivers `CTRL_CLOSE_EVENT` to every attached client.
-    fn close(self) {
+    /// Delivers `CTRL_CLOSE_EVENT` to every attached client, returning once
+    /// the closing thread is about to issue the call. The caller joins the
+    /// returned handle after the child has exited.
+    ///
+    /// The call runs on its own thread because `ClosePseudoConsole` may wait
+    /// for attached clients to exit; the exit bound is what this test
+    /// measures, not this call.
+    fn close(self) -> std::thread::JoinHandle<()> {
         let handle = self.handle;
-        // `ClosePseudoConsole` may wait for attached clients on older builds;
-        // the exit bound below is what this test measures, not this call.
-        std::thread::spawn(move || {
+        let (issuing, issued) = std::sync::mpsc::channel();
+        let closer = std::thread::spawn(move || {
+            let _ = issuing.send(());
             // SAFETY: `handle` came from `CreatePseudoConsole` and is closed once.
             unsafe { ClosePseudoConsole(handle) };
         });
+        issued
+            .recv()
+            .expect("expected the ClosePseudoConsole thread to start | received a closed channel");
+        closer
     }
 }
 
 struct AttachedChild(OwnedHandle);
 
 impl AttachedChild {
-    /// Waits for the child's exit code, terminating it and failing the test
-    /// with the elapsed time if `bound` expires first.
-    fn wait_bounded(&self, bound: Duration) -> u32 {
+    /// Waits for the child's exit code, terminating it if `bound` expires
+    /// first. A failure is returned, not raised, so the caller can join its
+    /// closing thread before failing the test.
+    fn wait_bounded(&self, bound: Duration) -> Result<u32, String> {
         let process = self.0.as_raw_handle() as HANDLE;
         let millis = u32::try_from(bound.as_millis()).expect("the bound fits u32 milliseconds");
         // SAFETY: `process` is a live process handle this test owns.
@@ -166,27 +185,33 @@ impl AttachedChild {
         if waited == WAIT_TIMEOUT {
             // SAFETY: as above.
             unsafe { TerminateProcess(process, 1) };
-            panic!(
+            // Let the terminated child go so `ClosePseudoConsole` can return.
+            // SAFETY: as above.
+            unsafe { WaitForSingleObject(process, millis) };
+            return Err(format!(
                 "expected the console-closed stdio child to exit within {bound:?} | received: \
                  still running, terminated by the test"
-            );
+            ));
         }
-        assert_eq!(
-            waited,
-            WAIT_OBJECT_0,
-            "expected WaitForSingleObject to report the child exited | received {waited:#x} ({})",
-            std::io::Error::last_os_error()
-        );
+        if waited != WAIT_OBJECT_0 {
+            let error = std::io::Error::last_os_error();
+            // SAFETY: as above.
+            unsafe { TerminateProcess(process, 1) };
+            return Err(format!(
+                "expected WaitForSingleObject to report the child exited | received \
+                 {waited:#x} ({error})"
+            ));
+        }
         let mut code = 0u32;
         // SAFETY: as above; `code` is a valid out pointer.
         let ok = unsafe { GetExitCodeProcess(process, &mut code) };
-        assert_ne!(
-            ok,
-            0,
-            "expected GetExitCodeProcess to succeed | received {}",
-            std::io::Error::last_os_error()
-        );
-        code
+        if ok == 0 {
+            return Err(format!(
+                "expected GetExitCodeProcess to succeed | received {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(code)
     }
 }
 
