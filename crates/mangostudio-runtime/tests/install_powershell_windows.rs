@@ -4,8 +4,9 @@
 //! zero capture cap, and an output tap.
 //!
 //! When the install shape fails, the assertion names (never prints the values of) the variables
-//! the allowlist drops here and bisects them for the one PowerShell needs, so a failure on a
-//! Windows runner names the variable.
+//! the allowlist drops here and runs variants that separate the `PATH` key's casing,
+//! `PSModulePath`, and the other dropped variables, so a failure on a Windows runner names the
+//! difference.
 #![cfg(windows)]
 
 use std::collections::BTreeMap;
@@ -177,43 +178,84 @@ fn allowlist_report(full: &BTreeMap<OsString, OsString>) -> (Vec<OsString>, Stri
     (dropped, report)
 }
 
-/// The install shape with the allowlist plus `extra` variables from `full`, with a short bound.
-async fn streams_with(full: &BTreeMap<OsString, OsString>, extra: &[OsString]) -> (bool, String) {
-    let mut shape = Shape::install("Write-Output x");
-    for key in extra {
-        shape.env.insert(key.clone(), full[key].clone());
+/// Renames whichever key spells `PATH` to `name`, keeping its value.
+fn with_path_key(
+    mut env: BTreeMap<OsString, OsString>,
+    name: &str,
+) -> BTreeMap<OsString, OsString> {
+    let key = env
+        .keys()
+        .find(|key| key.to_string_lossy().eq_ignore_ascii_case("PATH"))
+        .cloned();
+    if let Some(key) = key {
+        let value = env.remove(&key).expect("the key was just found");
+        env.insert(OsString::from(name), value);
     }
-    let (stdout, report) = run(&shape, Duration::from_secs(8)).await;
-    (stdout.contains('x'), report)
+    env
 }
 
-/// Bisects the dropped variables for one whose addition lets the install shape stream.
-async fn bisect(full: &BTreeMap<OsString, OsString>, dropped: Vec<OsString>) -> String {
-    let mut steps = Vec::new();
-    let (all, report) = streams_with(full, &dropped).await;
-    steps.push(format!(
-        "allowlist + all {} dropped: {report}",
-        dropped.len()
-    ));
-    if !all {
-        return steps.join("\n");
-    }
-    let mut candidates = dropped;
-    while candidates.len() > 1 {
-        let half = candidates.split_off(candidates.len() / 2);
-        let (first, report) = streams_with(full, &candidates).await;
-        let names: Vec<_> = candidates.iter().map(|key| key.to_string_lossy()).collect();
-        steps.push(format!("allowlist + {names:?}: {report}"));
-        if !first {
-            candidates = half;
+/// Runs the install command under `env` with a 15-second bound and reports it under `label`.
+async fn under(label: &'static str, env: BTreeMap<OsString, OsString>) -> String {
+    let mut shape = Shape::install("Write-Output x");
+    shape.label = label;
+    shape.env = env;
+    run(&shape, Duration::from_secs(15)).await.1
+}
+
+/// Separates the three differences between the allowlist and the full environment that
+/// streamed: the casing of the `PATH` key, `PSModulePath`, and the other dropped variables.
+async fn discriminate(full: &BTreeMap<OsString, OsString>, dropped: &[OsString]) -> String {
+    let full_path_key = full
+        .keys()
+        .find(|key| key.to_string_lossy().eq_ignore_ascii_case("PATH"))
+        .map_or_else(
+            || "PATH".to_owned(),
+            |key| key.to_string_lossy().into_owned(),
+        );
+    let psmodulepath = |mut env: BTreeMap<OsString, OsString>| {
+        if let Some(value) = full.get(&OsString::from("PSModulePath")) {
+            env.insert(OsString::from("PSModulePath"), value.clone());
         }
-    }
-    let (single, report) = streams_with(full, &candidates).await;
-    steps.push(format!(
-        "allowlist + {:?} alone streams={single}: {report}",
-        candidates.first().map(|key| key.to_string_lossy())
-    ));
-    steps.join("\n")
+        env
+    };
+    let everything = |mut env: BTreeMap<OsString, OsString>| {
+        for key in dropped {
+            env.insert(key.clone(), full[key].clone());
+        }
+        env
+    };
+    let mut full_without_psmodulepath = full.clone();
+    full_without_psmodulepath.remove(&OsString::from("PSModulePath"));
+    [
+        under("full environment (control)", full.clone()).await,
+        under(
+            "full environment, Path key spelled PATH",
+            with_path_key(full.clone(), "PATH"),
+        )
+        .await,
+        under(
+            "full environment without PSModulePath",
+            full_without_psmodulepath,
+        )
+        .await,
+        under(
+            "allowlist, PATH key spelled as the host does",
+            with_path_key(install_env(), &full_path_key),
+        )
+        .await,
+        under("allowlist + PSModulePath", psmodulepath(install_env())).await,
+        under(
+            "allowlist + PSModulePath, host PATH spelling",
+            with_path_key(psmodulepath(install_env()), &full_path_key),
+        )
+        .await,
+        under(
+            "allowlist + every dropped variable",
+            everything(install_env()),
+        )
+        .await,
+    ]
+    .join("\n")
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -224,9 +266,9 @@ async fn powershell_streams_stdout_under_the_install_request_shape() {
     }
     let full: BTreeMap<OsString, OsString> = std::env::vars_os().collect();
     let (dropped, names) = allowlist_report(&full);
-    let search = bisect(&full, dropped).await;
+    let search = discriminate(&full, &dropped).await;
     panic!(
         "expected a PowerShell recipe child to stream stdout \"x\" under the install request \
-         shape | received none.\n{report}\n{names}\nsearch:\n{search}"
+         shape | received none.\n{report}\n{names}\ndiscrimination (15 s bound each):\n{search}"
     );
 }
