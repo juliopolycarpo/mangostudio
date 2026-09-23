@@ -76,6 +76,8 @@ pub struct ProcessRequest {
     pub stdin: ProcessStdin,
     /// Deadline and capture limits applied to this owned process.
     pub budget: ProcessBudget,
+    /// Receives every chunk read from stdout and stderr while the process runs.
+    pub output_tap: Option<ProcessOutputTap>,
 }
 
 impl ProcessRequest {
@@ -101,7 +103,25 @@ impl ProcessRequest {
             cwd: None,
             stdin: ProcessStdin::Null,
             budget: ProcessBudget::new(Duration::from_secs(5), 64 * 1024, 64 * 1024),
+            output_tap: None,
         }
+    }
+
+    /// Streams every chunk read from the child's stdout and stderr to `tap`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::subprocess::{ProcessOutputTap, ProcessRequest};
+    ///
+    /// let (tap, _chunks) = ProcessOutputTap::channel(8);
+    /// let request = ProcessRequest::new("git", ["--version"]).with_output_tap(tap);
+    /// assert!(request.output_tap.is_some());
+    /// ```
+    #[must_use]
+    pub fn with_output_tap(mut self, tap: ProcessOutputTap) -> Self {
+        self.output_tap = Some(tap);
+        self
     }
 
     /// Replaces the stdin policy.
@@ -116,6 +136,55 @@ impl ProcessRequest {
     pub fn with_budget(mut self, budget: ProcessBudget) -> Self {
         self.budget = budget;
         self
+    }
+}
+
+/// Which child pipe a tapped chunk was read from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProcessStream {
+    /// Standard output.
+    Stdout,
+    /// Standard error.
+    Stderr,
+}
+
+/// One chunk read from a child pipe, forwarded whether or not the capture cap kept it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProcessOutputChunk {
+    /// The pipe the bytes came from.
+    pub stream: ProcessStream,
+    /// The bytes exactly as one read returned them.
+    pub bytes: Vec<u8>,
+}
+
+/// A bounded stream of output chunks for callers that report output while a process runs.
+///
+/// Sends apply backpressure to the pipe reader, so a slow consumer slows the child instead of
+/// growing memory. A forced stop still ends a reader blocked on a full tap. Once the receiver is
+/// dropped, readers keep draining their pipes to EOF without forwarding.
+#[derive(Clone, Debug)]
+pub struct ProcessOutputTap(mpsc::Sender<ProcessOutputChunk>);
+
+impl ProcessOutputTap {
+    /// Creates a tap holding at most `capacity` unread chunks, and its receiver.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::subprocess::ProcessOutputTap;
+    ///
+    /// let (_tap, chunks) = ProcessOutputTap::channel(4);
+    /// assert!(chunks.is_empty());
+    /// ```
+    #[must_use]
+    pub fn channel(capacity: usize) -> (Self, mpsc::Receiver<ProcessOutputChunk>) {
+        let (sender, receiver) = mpsc::channel(capacity);
+        (Self(sender), receiver)
+    }
+    /// The underlying sender, so a test's [`ProcessSpawner`] fake can forward chunks itself.
+    #[cfg(test)]
+    pub(crate) fn into_sender(self) -> mpsc::Sender<ProcessOutputChunk> {
+        self.0
     }
 }
 
@@ -374,6 +443,22 @@ impl ProcessControl {
         }
     }
 
+    /// Builds a still-running control and the settler that later publishes its terminal record.
+    ///
+    /// Test-only: lets a named [`ProcessSpawner`] fake hold a step "running" across a barrier.
+    #[cfg(test)]
+    pub(crate) fn pending() -> (Self, PendingSettler) {
+        let (commands, _receiver) = mpsc::channel(MAX_PROCESS_CONTROL_COMMANDS);
+        let (terminal, _) = watch::channel(None);
+        let shared = Arc::new(Shared { commands, terminal });
+        (
+            Self {
+                shared: Arc::clone(&shared),
+            },
+            PendingSettler(shared),
+        )
+    }
+
     /// Waits for terminal cleanup. Dropping this future does not affect the owned child.
     pub fn wait(&self) -> ProcessFuture<'_, ProcessTerminal> {
         let mut terminal = self.shared.terminal.subscribe();
@@ -435,6 +520,18 @@ impl ProcessControl {
                 },
             }
         })
+    }
+}
+
+/// Publishes the terminal record of a [`ProcessControl::pending`] test control.
+#[cfg(test)]
+pub(crate) struct PendingSettler(Arc<Shared>);
+
+#[cfg(test)]
+impl PendingSettler {
+    /// Settles every current and future waiter with `terminal`.
+    pub(crate) fn settle(&self, terminal: ProcessTerminal) {
+        self.0.terminal.send_replace(Some(terminal));
     }
 }
 
@@ -514,6 +611,7 @@ async fn supervise_start(
     };
 
     let budget = request.budget;
+    let output_tap = request.output_tap.take();
     // Every spawner reads only which stdin variant was asked for; the payload itself is written
     // by `supervise_child` once the child runs, so it moves there instead of into the launch.
     let stdin = match &mut request.stdin {
@@ -580,19 +678,65 @@ async fn supervise_start(
     } else {
         None
     };
-    supervise_child(
-        child,
-        budget,
-        stdin,
-        deadline,
-        started,
-        command_rx,
-        shared,
-        initial_stop,
-        permit,
-        admission,
+    own_terminal(
+        Arc::clone(&shared),
+        supervise_child(
+            child,
+            budget,
+            stdin,
+            output_tap,
+            deadline,
+            started,
+            command_rx,
+            shared,
+            initial_stop,
+            permit,
+            admission,
+        ),
     )
     .await;
+}
+
+/// Runs one process worker as the owner of `shared`'s terminal record.
+///
+/// Every [`ProcessControl`] clone holds the same `Arc<Shared>`, so the watch sender outlives a
+/// worker that unwinds, and a waiter would otherwise stay pending forever. The guard publishes the
+/// vanished-worker record [`wait_for_terminal`] already uses when the worker ends without one.
+///
+/// # Example
+///
+/// ```ignore
+/// own_terminal(Arc::clone(&shared), supervise_child(/* ... */)).await;
+/// ```
+async fn own_terminal(shared: Arc<Shared>, worker: impl Future<Output = ()>) {
+    let _settle = SettleOnUnwind(shared);
+    worker.await;
+}
+
+/// Publishes a forced, incomplete terminal record if its worker never published one.
+struct SettleOnUnwind(Arc<Shared>);
+
+impl Drop for SettleOnUnwind {
+    fn drop(&mut self) {
+        self.0.terminal.send_if_modified(|terminal| {
+            if terminal.is_some() {
+                return false;
+            }
+            *terminal = Some(vanished_worker_terminal());
+            true
+        });
+    }
+}
+
+/// The record reported for a worker that ended without publishing its own.
+fn vanished_worker_terminal() -> ProcessTerminal {
+    ProcessTerminal {
+        cause: ProcessTerminalCause::Forced,
+        exit: None,
+        elapsed: Duration::ZERO,
+        stdout: ProcessCapture::incomplete(),
+        stderr: ProcessCapture::incomplete(),
+    }
 }
 
 /// Reclaims a child that never became a public [`ProcessControl`].
@@ -857,6 +1001,7 @@ async fn supervise_child(
     mut child: OwnedChild,
     budget: ProcessBudget,
     stdin: Option<Vec<u8>>,
+    output_tap: Option<ProcessOutputTap>,
     deadline: Instant,
     started: Instant,
     mut commands: mpsc::Receiver<ControlCommand>,
@@ -870,15 +1015,17 @@ async fn supervise_child(
     let stderr = child.take_stderr().expect("stderr is piped");
     let stdout_stop = CancellationToken::new();
     let stderr_stop = CancellationToken::new();
-    let mut stdout_reader = tokio::spawn(read_capped(
+    let mut stdout_reader = tokio::spawn(read_capped_tapped(
         stdout,
         budget.max_stdout_bytes,
         stdout_stop.clone(),
+        output_tap.clone().map(|tap| (tap, ProcessStream::Stdout)),
     ));
-    let mut stderr_reader = tokio::spawn(read_capped(
+    let mut stderr_reader = tokio::spawn(read_capped_tapped(
         stderr,
         budget.max_stderr_bytes,
         stderr_stop.clone(),
+        output_tap.map(|tap| (tap, ProcessStream::Stderr)),
     ));
     let stdin_writer = stdin.and_then(|bytes| {
         child.take_stdin().map(|mut stdin| {
@@ -994,7 +1141,9 @@ async fn supervise_child(
              cleanup to the parent-death lease"
         );
     }
-    let _ = shared.terminal.send(Some(ProcessTerminal {
+    // `send_replace`, not `send`: the latter drops the value when no caller happens to be
+    // inside `wait` at this instant, and a later `wait` would then never see this record.
+    shared.terminal.send_replace(Some(ProcessTerminal {
         cause,
         exit: status.map(process_exit),
         elapsed: started.elapsed(),
@@ -1108,7 +1257,21 @@ impl ProcessCapture {
 /// at the cap: `shell.run` asks for 8 MiB per stream, which a cap-sized allocation would hold
 /// for the whole call on every invocation — both streams, four children at a time — however
 /// little the child printed.
-async fn read_capped<R>(mut reader: R, max_bytes: usize, stop: CancellationToken) -> ProcessCapture
+#[cfg(test)]
+async fn read_capped<R>(reader: R, max_bytes: usize, stop: CancellationToken) -> ProcessCapture
+where
+    R: AsyncRead + Unpin,
+{
+    read_capped_tapped(reader, max_bytes, stop, None).await
+}
+
+/// [`read_capped`], additionally forwarding every chunk read to `tap` before the next read.
+async fn read_capped_tapped<R>(
+    mut reader: R,
+    max_bytes: usize,
+    stop: CancellationToken,
+    mut tap: Option<(ProcessOutputTap, ProcessStream)>,
+) -> ProcessCapture
 where
     R: AsyncRead + Unpin,
 {
@@ -1142,8 +1305,29 @@ where
                     incomplete: false,
                 };
             }
-            Ok(read) if capturing => bytes.extend_from_slice(&chunk[..read]),
-            Ok(_) => truncated = true,
+            Ok(read) => {
+                if capturing {
+                    bytes.extend_from_slice(&chunk[..read]);
+                } else {
+                    truncated = true;
+                }
+                if let Some((sender, stream)) = &tap {
+                    let forwarded = ProcessOutputChunk {
+                        stream: *stream,
+                        bytes: chunk[..read].to_vec(),
+                    };
+                    tokio::select! {
+                        () = stop.cancelled() => {
+                            return ProcessCapture { bytes, truncated, incomplete: true };
+                        },
+                        sent = sender.0.send(forwarded) => {
+                            if sent.is_err() {
+                                tap = None;
+                            }
+                        }
+                    }
+                }
+            }
             Err(_) => {
                 return ProcessCapture {
                     bytes,
@@ -1172,13 +1356,7 @@ async fn wait_for_terminal(
             return terminal;
         }
         if receiver.changed().await.is_err() {
-            return ProcessTerminal {
-                cause: ProcessTerminalCause::Forced,
-                exit: None,
-                elapsed: Duration::ZERO,
-                stdout: ProcessCapture::incomplete(),
-                stderr: ProcessCapture::incomplete(),
-            };
+            return vanished_worker_terminal();
         }
     }
 }
@@ -1255,11 +1433,182 @@ mod stop_requests {
     }
 }
 
+/// A worker that unwinds must still settle every [`ProcessControl::wait`] caller.
+#[cfg(test)]
+mod worker_unwind {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio::sync::{mpsc, watch};
+
+    use super::{
+        MAX_PROCESS_CONTROL_COMMANDS, ProcessControl, ProcessTerminalCause, Shared, own_terminal,
+    };
+
+    #[tokio::test]
+    async fn a_pending_test_control_stays_running_until_its_settler_publishes() {
+        let (control, settler) = ProcessControl::pending();
+        let waiter = tokio::spawn({
+            let control = control.clone();
+            async move { control.wait().await }
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !waiter.is_finished(),
+            "expected a pending control to keep its waiter running | received a settled waiter"
+        );
+
+        settler.settle(super::vanished_worker_terminal());
+
+        let terminal = tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .expect("expected the settler to release the waiter | received: still pending")
+            .unwrap();
+        assert_eq!(terminal.cause, ProcessTerminalCause::Forced);
+    }
+
+    #[tokio::test]
+    async fn a_panicking_worker_cannot_leave_a_waiter_pending() {
+        let (commands, _receiver) = mpsc::channel(MAX_PROCESS_CONTROL_COMMANDS);
+        let (terminal, _) = watch::channel(None);
+        let shared = Arc::new(Shared { commands, terminal });
+        let control = ProcessControl {
+            shared: Arc::clone(&shared),
+        };
+        let worker = tokio::spawn(own_terminal(shared, async {
+            panic!("worker panicked before publishing its terminal record")
+        }));
+        assert!(
+            worker.await.is_err_and(|error| error.is_panic()),
+            "expected the named worker to panic | received a worker that settled normally"
+        );
+
+        let terminal = tokio::time::timeout(Duration::from_secs(2), control.wait()).await;
+
+        let terminal = terminal.unwrap_or_else(|_| {
+            panic!(
+                "expected wait to settle after the worker panicked | received: still pending \
+                 after 2s"
+            )
+        });
+        assert_eq!(
+            (terminal.cause, terminal.exit.is_none()),
+            (ProcessTerminalCause::Forced, true),
+            "expected the vanished-worker record (Forced, no exit) | received {terminal:?}"
+        );
+        assert!(
+            terminal.stdout.incomplete && terminal.stderr.incomplete,
+            "expected both captures marked incomplete | received {terminal:?}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod capped_reads {
+    use std::time::Duration;
+
+    use tokio::io::AsyncWriteExt;
     use tokio_util::sync::CancellationToken;
 
-    use super::read_capped;
+    use super::{
+        ProcessOutputChunk, ProcessOutputTap, ProcessStream, read_capped, read_capped_tapped,
+    };
+
+    #[tokio::test]
+    async fn a_tap_receives_every_byte_including_those_past_the_cap() {
+        let source = vec![b'y'; 20_000];
+        let (tap, mut chunks) = ProcessOutputTap::channel(64);
+
+        let capture = read_capped_tapped(
+            source.as_slice(),
+            4,
+            CancellationToken::new(),
+            Some((tap, ProcessStream::Stderr)),
+        )
+        .await;
+
+        let mut forwarded = Vec::new();
+        while let Ok(ProcessOutputChunk { stream, bytes }) = chunks.try_recv() {
+            assert_eq!(
+                stream,
+                ProcessStream::Stderr,
+                "expected every chunk labelled stderr | received {stream:?}"
+            );
+            forwarded.extend(bytes);
+        }
+        assert_eq!(
+            (forwarded.len(), capture.bytes.len(), capture.truncated),
+            (20_000, 4, true),
+            "expected all 20000 bytes forwarded while the capture kept 4 and reported truncation \
+             | received {} forwarded, {} kept, truncated={}",
+            forwarded.len(),
+            capture.bytes.len(),
+            capture.truncated
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_tap_receiver_keeps_draining_to_eof() {
+        let source = vec![b'z'; 50_000];
+        let (tap, chunks) = ProcessOutputTap::channel(1);
+        drop(chunks);
+
+        let capture = read_capped_tapped(
+            source.as_slice(),
+            100,
+            CancellationToken::new(),
+            Some((tap, ProcessStream::Stdout)),
+        )
+        .await;
+
+        assert_eq!(
+            (capture.bytes.len(), capture.truncated, capture.incomplete),
+            (100, true, false),
+            "expected the reader to keep draining to EOF after the receiver left | received \
+             kept={} truncated={} incomplete={}",
+            capture.bytes.len(),
+            capture.truncated,
+            capture.incomplete
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stop_ends_a_reader_blocked_on_a_full_tap() {
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let (tap, mut chunks) = ProcessOutputTap::channel(1);
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(read_capped_tapped(
+            reader,
+            1_024,
+            stop.clone(),
+            Some((tap, ProcessStream::Stdout)),
+        ));
+        // Capacity one: "first" fills the tap, so the reader blocks sending "second".
+        writer.write_all(b"first").await.unwrap();
+        writer.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        writer.write_all(b"second").await.unwrap();
+        writer.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        stop.cancel();
+        let capture = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap_or_else(|_| {
+                panic!("expected a stop to end the reader blocked on its full tap | received: still blocked after 2s")
+            })
+            .unwrap();
+
+        assert!(
+            capture.incomplete && capture.bytes == b"firstsecond",
+            "expected an incomplete capture that kept every read byte | received {capture:?}"
+        );
+        assert_eq!(
+            chunks.try_recv().map(|chunk| chunk.bytes).ok(),
+            Some(b"first".to_vec()),
+            "expected only the chunk that fit the tap to be forwarded"
+        );
+    }
 
     #[tokio::test]
     async fn output_matching_the_cap_exactly_is_kept_whole_and_not_truncated() {
@@ -1393,6 +1742,85 @@ mod tests {
         );
         assert!(!terminal.stdout.truncated);
         assert!(!terminal.stdout.incomplete);
+    }
+
+    /// A worker that publishes while no caller is inside `wait` must still leave the record.
+    #[tokio::test]
+    async fn a_terminal_published_with_no_waiter_subscribed_is_kept_for_a_later_wait() {
+        let _guard = process_test_guard().await;
+        let dir = scratch_dir("process-late-wait");
+        let done = dir.join("done");
+        let sh = script(
+            &dir,
+            "exit.sh",
+            &format!("printf x > {}; exit 7", done.display()),
+        );
+
+        let control = DefaultProcessSpawner
+            .start(request(sh), Arc::new(AlwaysAllow), CancellationToken::new())
+            .await
+            .expect("script starts");
+        wait_for_file(&done).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let terminal = tokio::time::timeout(Duration::from_secs(5), control.wait())
+            .await
+            .expect("expected a later wait to settle | received: still pending after 5s");
+
+        assert_eq!(
+            (
+                terminal.cause,
+                terminal.exit.as_ref().and_then(|exit| exit.code)
+            ),
+            (ProcessTerminalCause::Exited, Some(7)),
+            "expected the worker's own record (Exited, code 7) | received {terminal:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tapped_child_streams_both_pipes_while_the_capture_stays_bounded() {
+        let _guard = process_test_guard().await;
+        let dir = scratch_dir("process-tap");
+        let sh = script(
+            &dir,
+            "both.sh",
+            "printf 'out-line\\n'; printf 'err-line\\n' >&2",
+        );
+        let (tap, mut chunks) = super::ProcessOutputTap::channel(16);
+        let request = request(sh)
+            .with_budget(ProcessBudget::new(Duration::from_secs(10), 0, 0))
+            .with_output_tap(tap);
+
+        let terminal = DefaultProcessSpawner
+            .start(request, Arc::new(AlwaysAllow), CancellationToken::new())
+            .await
+            .expect("script starts")
+            .wait()
+            .await;
+
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        while let Ok(chunk) = chunks.try_recv() {
+            match chunk.stream {
+                super::ProcessStream::Stdout => stdout.extend(chunk.bytes),
+                super::ProcessStream::Stderr => stderr.extend(chunk.bytes),
+            }
+        }
+        assert_eq!(
+            (stdout.as_slice(), stderr.as_slice(), terminal.cause),
+            (
+                &b"out-line\n"[..],
+                &b"err-line\n"[..],
+                ProcessTerminalCause::Exited
+            ),
+            "expected each pipe streamed through the tap and a normal exit | received stdout={:?} \
+             stderr={:?} cause={:?}",
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr),
+            terminal.cause
+        );
+        assert!(
+            terminal.stdout.bytes.is_empty() && terminal.stderr.bytes.is_empty(),
+            "expected a zero capture cap to retain nothing | received {terminal:?}"
+        );
     }
 
     #[tokio::test]

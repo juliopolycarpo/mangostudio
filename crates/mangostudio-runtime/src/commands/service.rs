@@ -486,7 +486,14 @@ fn shell_exit(terminal: &ProcessTerminal, windows: bool) -> (Option<i32>, Option
     (exit, signal)
 }
 
-fn cli_exit(terminal: &ProcessTerminal, windows: bool) -> Option<i32> {
+/// The exit code Bun reports for `terminal`: the code, else `128 + signal`, else Windows' `1`.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(cli_exit(&sigkilled_terminal, false), Some(137));
+/// ```
+pub(crate) fn cli_exit(terminal: &ProcessTerminal, windows: bool) -> Option<i32> {
     let (exit, _) = shell_exit(terminal, windows);
     exit.or_else(|| {
         terminal

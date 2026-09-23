@@ -84,8 +84,9 @@ export function assertRustRuntimeFeatureCeiling(
     readonly mcp: boolean;
   }
 ): void {
-  // The shell feature includes install methods that are not implemented yet.
-  const shell = false;
+  // Every shell-capability method (shell.run, gh.mutate, install.*, terminal.*) is implemented,
+  // so the feature follows shell consent alone.
+  const shell = manifest.allow?.shell === true;
   const git = manifest.allow?.git === true && manifest.git.available;
   expect(manifest.features).toEqual({
     tools:

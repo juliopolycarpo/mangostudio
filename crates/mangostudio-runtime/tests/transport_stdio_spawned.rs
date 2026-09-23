@@ -126,3 +126,74 @@ fn a_sigint_sent_before_any_handshake_still_exits_cleanly_not_killed() {
          disposition (status: {status:?})"
     );
 }
+
+/// End of stdio input means the hub went away, not that the machine mutation should die with the
+/// runtime: an install step that outlives the session's 5-second handler grace still finishes
+/// before the process exits. The launcher's own terminate grace is stretched so no signal
+/// arrives, as when the hub process itself dies.
+#[cfg(unix)]
+#[tokio::test]
+async fn end_of_input_lets_a_running_install_step_finish_past_the_handler_grace() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = scratch_home("install-eof");
+    let work = scratch_home("install-eof-work");
+    std::fs::create_dir_all(&*work).unwrap();
+    let started = work.join("started");
+    let marker = work.join("installed");
+    let installer = work.join("installer.sh");
+    std::fs::write(
+        &installer,
+        format!(
+            "#!/bin/sh\necho started > '{}'\nsleep 6\necho run >> '{}'\n",
+            started.display(),
+            marker.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let env = sanitized_env([(
+        "MANGO_HOME".to_string(),
+        home.to_string_lossy().into_owned(),
+    )]);
+    let mut options = SpawnOptions::new([binary_path(), "stdio".to_string()]).with_env(env);
+    options.terminate_grace = Duration::from_secs(60);
+    let (port, launched) = spawn_port(options).expect("the argv names a real binary");
+    let (session, driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    tokio::time::timeout(Duration::from_secs(10), session.ready())
+        .await
+        .expect("the child must say hello within the timeout")
+        .expect("the handshake succeeds");
+    let request = tokio::spawn({
+        let session = session.clone();
+        let params = serde_json::json!({
+            "runId": "eof-install",
+            "argv": [installer],
+            "timeoutMs": 30_000,
+            "logPath": work.join("install.log"),
+        });
+        async move { session.request("install.run", params).await }
+    });
+    for _ in 0..500 {
+        if started.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(started.exists(), "expected the installer to start");
+
+    session
+        .close(close_codes::RELEASED, Some("the hub went away"))
+        .await;
+    let _ = driver.await;
+    let _ = request.await;
+    tokio::time::timeout(Duration::from_secs(30), launched.exited())
+        .await
+        .expect("expected the runtime to exit once the step settled | received: still running");
+
+    assert_eq!(
+        std::fs::read_to_string(&marker).ok().as_deref(),
+        Some("run\n"),
+        "expected the step to finish before the runtime exited | received no completed effect"
+    );
+}

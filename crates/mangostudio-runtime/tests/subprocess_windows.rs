@@ -421,14 +421,22 @@ fn kill_fixture_parent(parent: &mut Child) {
     );
 }
 
+/// Waits until a fixture's pid file holds a whole pid. `[IO.File]::WriteAllText` creates the
+/// file before it writes the content, so existence alone can race a cancel that kills the
+/// fixture mid-write and leaves the file empty.
 async fn wait_for_file(path: &Path) {
+    let mut contents = String::new();
     for _ in 0..500 {
-        if path.exists() {
+        contents = std::fs::read_to_string(path).unwrap_or_default();
+        if contents.trim().parse::<u32>().is_ok() {
             return;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    panic!("{} was never created", path.display());
+    panic!(
+        "expected a numeric pid in {} | received {contents:?}",
+        path.display()
+    );
 }
 
 async fn assert_process_is_gone(pid_file: &Path) {

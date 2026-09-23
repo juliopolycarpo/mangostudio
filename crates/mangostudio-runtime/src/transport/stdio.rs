@@ -75,16 +75,26 @@ pub(crate) async fn run_with_signals(
     // signal that arrives first releases the session cooperatively (a
     // command sent through the same channel every other close path uses)
     // rather than aborting the driver task outright.
-    let closure = tokio::select! {
+    let (closure, signalled) = tokio::select! {
         biased;
         () = signals.wait() => {
             session.close_now(close_codes::RELEASED, Some("the host signalled this runtime"));
-            join_owned(driver_handle).await
+            (join_owned(driver_handle).await, true)
         }
         result = &mut driver_handle => {
-            result.expect("the session driver must run to completion, never be aborted or panic")
+            (result.expect("the session driver must run to completion, never be aborted or panic"), false)
         }
     };
+    // End of input means the hub went away, not that this process must: a running install step
+    // finishes within its own deadline first. A signal still ends the process at once, and the
+    // supervisor's parent-death lease then terminates whatever a step still owns.
+    if !signalled {
+        tokio::select! {
+            biased;
+            () = signals.wait() => {}
+            () = crate::install::settled() => {}
+        }
+    }
     Ok(exit_code(&closure))
 }
 
