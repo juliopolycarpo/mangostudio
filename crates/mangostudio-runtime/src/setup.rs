@@ -31,7 +31,7 @@ use mangostudio_runtime_contract::manifest::{ManifestProfile, capability_keys};
 
 use crate::consent::presets::{ResolvedCapabilityAllow, consent_preset};
 use crate::ports::wall_clock::{WallClock, format_iso8601_millis};
-use crate::runtime_home::{RuntimeSlot, WriteError, write_runtime_slot_config};
+use crate::runtime_home::{RuntimeSlot, SlotFileError, WriteError, write_runtime_slot_config};
 
 /// Who answered the consent question, mirroring `RuntimeSetupAuthoritySchema`.
 /// `Cli` and `Env` are the two this module can produce; `Launch` and
@@ -282,7 +282,7 @@ pub fn resolve_profile_source_from_raw_env(
 }
 
 /// What a non-interactive setup call actually wrote.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct SetupOutcome {
     /// The profile the merged `allow` set now names.
     pub profile: ManifestProfile,
@@ -290,6 +290,8 @@ pub struct SetupOutcome {
     pub allow: ResolvedCapabilityAllow,
     /// Who answered.
     pub by: SetupAuthority,
+    /// An unusable `runtime.json` that this setup replaced.
+    pub replaced_unusable: Option<SlotFileError>,
 }
 
 impl SetupOutcome {
@@ -393,7 +395,7 @@ pub fn run_non_interactive_setup(
         "by": by.as_str(),
     });
 
-    write_runtime_slot_config(
+    let write = write_runtime_slot_config(
         request.slot,
         mango_home,
         &[
@@ -404,7 +406,12 @@ pub fn run_non_interactive_setup(
     )
     .map_err(SetupError::Write)?;
 
-    Ok(SetupOutcome { profile, allow, by })
+    Ok(SetupOutcome {
+        profile,
+        allow,
+        by,
+        replaced_unusable: write.replaced_unusable,
+    })
 }
 
 #[cfg(test)]

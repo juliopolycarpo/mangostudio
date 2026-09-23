@@ -27,7 +27,7 @@ use crate::config::{EnvSource, RuntimeConfig};
 use crate::consent::invocation::{consent_by_invocation, setup_command};
 use crate::ports::wall_clock::SystemWallClock;
 use crate::runtime_home::{
-    RuntimeSlot, read_runtime_slot_config, resolve_runtime_slot_for_current_exe,
+    RuntimeSlot, SlotFileError, read_runtime_slot_config, resolve_runtime_slot_for_current_exe,
     write_runtime_slot_config,
 };
 use crate::setup::{self, NonInteractiveSetupRequest, SetupAuthority, parse_allow_overrides};
@@ -323,6 +323,7 @@ fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
     };
     match setup::run_non_interactive_setup(&request, &home, &SystemWallClock) {
         Ok(outcome) => {
+            report_replaced_unusable(outcome.replaced_unusable.as_ref());
             println!(
                 "Configured the {slot} runtime as {}.",
                 outcome.profile.as_str()
@@ -334,6 +335,22 @@ fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
             i32::from(error.exit_code())
         }
     }
+}
+
+/// Reports a replacement using only its path and failure category. A schema
+/// violation can contain stored values, including credentials.
+fn report_replaced_unusable(replaced: Option<&SlotFileError>) {
+    let Some((path, reason)) = replaced.map(|error| match error {
+        SlotFileError::Unreadable { path, .. } => (path, "unreadable file"),
+        SlotFileError::Malformed { path, .. } => (path, "malformed JSON"),
+        SlotFileError::SchemaInvalid { path, .. } => (path, "invalid schema"),
+    }) else {
+        return;
+    };
+    eprintln!(
+        "mangostudio-runtime: warning: replaced unusable {} ({reason}). Review this slot's permissions and credentials.",
+        path.display()
+    );
 }
 
 fn mango_home_or_report(env: &impl EnvSource) -> Option<PathBuf> {
@@ -485,7 +502,8 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         // fresh credential — mirrors `resolveServeToken`'s own precedence.
         None if args.token_source == TokenSource::EnvOrStored => {
             match crate::runtime_home::bootstrap_serve_token(RuntimeSlot::Remote, &home) {
-                Ok((token, restricted)) => {
+                Ok((token, outcome, restricted)) => {
+                    report_replaced_unusable(outcome.replaced_unusable.as_ref());
                     if !restricted {
                         eprintln!(
                             "mangostudio-runtime: warning: the serve token file could not be \
@@ -504,13 +522,16 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         None => unreachable!("an explicit empty token source returned before consent"),
     };
 
-    if let Err(error) = write_runtime_slot_config(
+    match write_runtime_slot_config(
         RuntimeSlot::Remote,
         &home,
         &[("serveListen", Some(serde_json::Value::String(raw_listen)))],
     ) {
-        eprintln!("mangostudio-runtime: {error}");
-        return 1;
+        Ok(outcome) => report_replaced_unusable(outcome.replaced_unusable.as_ref()),
+        Err(error) => {
+            eprintln!("mangostudio-runtime: {error}");
+            return 1;
+        }
     }
 
     let Ok(runtime) = build_runtime() else {
@@ -600,13 +621,16 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         return 1;
     }
 
-    if let Err(error) = write_runtime_slot_config(
+    match write_runtime_slot_config(
         RuntimeSlot::Remote,
         &home,
         &[("hubUrl", Some(serde_json::Value::String(hub_url.clone())))],
     ) {
-        eprintln!("mangostudio-runtime: {error}");
-        return 1;
+        Ok(outcome) => report_replaced_unusable(outcome.replaced_unusable.as_ref()),
+        Err(error) => {
+            eprintln!("mangostudio-runtime: {error}");
+            return 1;
+        }
     }
     match crate::runtime_home::write_runtime_slot_credentials(
         RuntimeSlot::Remote,
@@ -616,7 +640,8 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
             Some(serde_json::Value::String(token.clone())),
         )],
     ) {
-        Ok((_, restricted)) => {
+        Ok((outcome, restricted)) => {
+            report_replaced_unusable(outcome.replaced_unusable.as_ref());
             if !restricted {
                 eprintln!(
                     "mangostudio-runtime: warning: the pairing token file could not be \
@@ -683,6 +708,7 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
 /// returns whether this invocation may serve.
 fn remote_invocation_consent(home: &std::path::Path) -> bool {
     let consent = consent_by_invocation(RuntimeSlot::Remote, home, VERSION, &SystemWallClock);
+    report_replaced_unusable(consent.replaced_unusable.as_ref());
     if !consent.granted {
         if let Some(reason) = &consent.reason {
             eprintln!("mangostudio-runtime: {reason}");

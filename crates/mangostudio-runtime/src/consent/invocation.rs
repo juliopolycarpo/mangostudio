@@ -107,12 +107,14 @@ pub fn setup_pending_message() -> String {
 }
 
 /// What one [`consent_by_invocation`] call decided.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InvocationConsent {
     /// Whether this invocation may serve.
     pub granted: bool,
     /// Whether answering this invocation wrote a new `runtime.json`.
     pub recorded: bool,
+    /// An unusable config replaced while recording this grant.
+    pub replaced_unusable: Option<crate::runtime_home::SlotFileError>,
     /// Set on a refusal: an unreadable/malformed config, naming the path.
     /// `None` on a plain "not configured yet" refusal, which prints
     /// [`setup_pending_message`] alone.
@@ -185,6 +187,7 @@ fn decide_and_record(
         return InvocationConsent {
             granted,
             recorded: false,
+            replaced_unusable: None,
             reason: None,
             allow,
         };
@@ -194,6 +197,7 @@ fn decide_and_record(
         DefaultSetupState::Configured => InvocationConsent {
             granted: true,
             recorded: false,
+            replaced_unusable: None,
             reason: None,
             allow: resolve_allow(slot, stored),
         },
@@ -250,16 +254,19 @@ fn record_launch_grant(
             )),
         ),
     ];
-    let _ = merge_write(
+    let replaced_unusable = merge_write(
         &path,
         RuntimeHomeDocument::SlotConfig,
         &fixed,
         &update,
         None,
-    );
+    )
+    .ok()
+    .and_then(|outcome| outcome.replaced_unusable);
     InvocationConsent {
         granted: true,
         recorded: true,
+        replaced_unusable,
         reason: None,
         allow,
     }
@@ -271,6 +278,7 @@ fn refused(reason: Option<String>) -> InvocationConsent {
     InvocationConsent {
         granted: false,
         recorded: false,
+        replaced_unusable: None,
         reason,
         allow: consent_preset(ManifestProfile::None),
     }
