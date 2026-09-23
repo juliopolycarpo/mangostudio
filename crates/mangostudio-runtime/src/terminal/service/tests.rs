@@ -375,9 +375,29 @@ async fn slow_consent_at_terminal_open_refuses_the_launch() {
         .len();
     assert_eq!(
         (refused.code.as_str(), closes, listed),
-        (codes::DENIED, 1, 0),
-        "expected (error code, spawned handle closes, listed sessions): (DENIED, 1, 0) | \
+        (codes::UNAVAILABLE, 1, 0),
+        "expected (error code, spawned handle closes, listed sessions): (UNAVAILABLE, 1, 0) | \
          received ({}, {closes}, {listed})",
+        refused.code
+    );
+}
+
+#[tokio::test]
+async fn explicit_shell_denial_at_terminal_open_refuses_with_denied() {
+    let (_scratch, service, state) = prepared_service_with(|service| {
+        service.shell_read = Arc::new(|| false);
+    });
+
+    let refused = service
+        .open(open_params(), fake_session(), CancellationToken::new())
+        .await
+        .expect_err("expected an explicit shell denial to refuse terminal.open");
+
+    let closes = state.lock().unwrap().closes;
+    assert_eq!(
+        (refused.code.as_str(), closes),
+        (codes::DENIED, 1),
+        "expected (error code, spawned handle closes): (DENIED, 1) | received ({}, {closes})",
         refused.code
     );
 }

@@ -9,8 +9,9 @@
 //!   [`ConsentRead::Denied`]: the file was read and the capability is off. `Unknown` keeps the
 //!   current state and the next poll reads again — see [`ConsentRead::revokes`].
 //! - **Launch checks** (a fresh read immediately before an OS effect) proceed only on
-//!   [`ConsentRead::Granted`]: `Unknown` refuses the effect with the caller's existing error,
-//!   so nothing starts on consent that could not be confirmed — see [`ConsentRead::allows`].
+//!   [`ConsentRead::Granted`]: `Unknown` refuses the effect (a retryable `UNAVAILABLE` where
+//!   the caller has one, never a consent denial), so nothing starts on consent that could not
+//!   be confirmed — see [`ConsentRead::allows`].
 //!
 //! A read that finishes but cannot parse the file is still a denial: [`super::source`] fails
 //! closed to `none` for an unreadable or malformed file, and that is an explicit answer.
@@ -175,8 +176,8 @@ impl ConsentReader {
             // A panicking read unwinds past both lines, so `clear` still clears on drop and
             // the dropped sender leaves every waiter with Unknown.
             let _ = sender.send(Some(granted));
-        });
             drop(clear);
+        });
         answer
     }
 
@@ -302,7 +303,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[allow(
         clippy::await_holding_lock,
@@ -338,6 +338,7 @@ mod tests {
         );
     }
 
+    #[tokio::test]
     async fn a_panicking_read_is_unknown_and_frees_the_reader() {
         let reader = ConsentReader::new("mcp");
         let panicked = reader
