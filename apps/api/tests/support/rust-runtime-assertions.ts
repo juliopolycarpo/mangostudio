@@ -105,6 +105,8 @@ export function assertRustRuntimeFeatureCeiling(
   });
   expect(manifest.enforcesPathPolicy).toBe(true);
   expect(manifest.terminal).toBe(manifest.allow?.shell === true && manifest.shells.length > 0);
+  // The hub refuses every terminal from a runtime that does not attest revocation-safe close.
+  expect(manifest.terminalCloseAfterRevocation).toBe(true);
 }
 
 /**
