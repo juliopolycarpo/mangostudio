@@ -14,8 +14,8 @@
  */
 
 import { expect } from 'bun:test';
-import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInstallRunner } from '../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
@@ -229,13 +229,29 @@ export async function expectAppliedOnce(
   installer: FakeInstaller,
   run?: Pick<RelayedInstall, 'describe'>
 ): Promise<void> {
+  let lines: string[] = [];
+  let lastRead = 'the marker does not exist yet';
+  // The marker appears before the installer has finished writing it, and on Windows reading it while
+  // the writer still holds it open fails with EBUSY. Wait for a complete line instead of existence.
   await waitUntil(
-    () => existsSync(installer.marker),
+    () => {
+      try {
+        const text = readFileSync(installer.marker, 'utf8');
+        lines = text.split(/\r?\n/).filter(Boolean);
+        lastRead = JSON.stringify(text);
+        return text.endsWith('\n');
+      } catch (error) {
+        // Not created yet, or still held open by the writer (Windows sharing violation).
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT' && code !== 'EBUSY') throw error;
+        lastRead = error instanceof Error ? error.message : String(error);
+        return false;
+      }
+    },
     'the installer effect',
     10_000,
-    run?.describe
+    () => [run?.describe(), `last marker read: ${lastRead}`].filter(Boolean).join('; ')
   );
-  const lines = (await readFile(installer.marker, 'utf8')).split(/\r?\n/).filter(Boolean);
   expect(lines).toEqual(['run']);
 }
 
