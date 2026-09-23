@@ -8,7 +8,10 @@
 //! not grant.
 //!
 //! A read that does not finish within the consent read timeout is inconclusive, not a denial.
-//! Every declared capability is reported missing on it. Reads are coalesced through one
+//! An effect-producing method still fails closed on it (every declared capability is reported
+//! missing), but a stop-only method (listed in `consent::stop_only`) proceeds: it only ends
+//! something the live-resource watchers keep alive through the same inconclusive read, so
+//! refusing it would leave the caller unable to stop what consent cannot confirm. Reads are coalesced through one
 //! `ConsentReader`, so a hung store holds one blocking permit however many calls wait on it.
 
 use std::future::Future;
@@ -19,6 +22,7 @@ use std::time::Duration;
 use crate::consent::presets::ResolvedCapabilityAllow;
 use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentReader};
 use crate::consent::source::ConsentSource;
+use crate::consent::stop_only::is_stop_only;
 use crate::ports::authorization::Authorization;
 use crate::runtime_home::RuntimeSlot;
 
@@ -90,7 +94,7 @@ impl ConsentAuthorization {
 impl Authorization for ConsentAuthorization {
     fn missing_capabilities<'a>(
         &'a self,
-        _method: &'a str,
+        method: &'a str,
         capabilities: &'a [String],
     ) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + 'a>> {
         Box::pin(async move {
@@ -99,7 +103,7 @@ impl Authorization for ConsentAuthorization {
             }
             let read = Arc::clone(&self.read);
             let Some(allow) = self.reader.read_value(self.timeout, move || read()).await else {
-                return capabilities.to_vec();
+                return missing_when_inconclusive(method, capabilities);
             };
             capabilities
                 .iter()
@@ -108,6 +112,15 @@ impl Authorization for ConsentAuthorization {
                 .collect()
         })
     }
+}
+
+/// What an inconclusive read reports missing: nothing for a stop-only method, everything the
+/// method declares otherwise.
+fn missing_when_inconclusive(method: &str, capabilities: &[String]) -> Vec<String> {
+    if is_stop_only(method) {
+        return Vec::new();
+    }
+    capabilities.to_vec()
 }
 
 #[cfg(test)]
@@ -125,6 +138,9 @@ mod tests {
     use std::time::Duration;
 
     use crate::consent::presets::consent_preset;
+    use crate::consent::read::ConsentReader;
+    use crate::consent::stop_only::STOP_ONLY_METHODS;
+    use mangostudio_runtime_contract::catalog::catalog;
 
     const BOUND: Duration = Duration::from_millis(50);
     const STALL: Duration = Duration::from_millis(600);
@@ -157,6 +173,86 @@ mod tests {
         fn reads(&self) -> usize {
             self.started.load(Ordering::SeqCst)
         }
+    }
+
+    #[tokio::test]
+    async fn a_stalled_store_lets_stop_only_methods_stop_what_the_watchers_keep_alive() {
+        let store = StalledStore::new();
+        let authorization = store.authorization();
+        let shell = vec!["shell".to_string()];
+        let mcp = vec!["mcp".to_string()];
+        let cancel = authorization
+            .missing_capabilities("install.cancel", &shell)
+            .await;
+        let disconnect = authorization
+            .missing_capabilities("mcp.disconnect", &mcp)
+            .await;
+        // The watcher polling the same stalled store keeps the chain/session alive.
+        let watcher = ConsentReader::new("shell")
+            .read(BOUND, || {
+                std::thread::sleep(STALL);
+                true
+            })
+            .await;
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(
+            (cancel.as_slice(), disconnect.as_slice(), watcher.revokes()),
+            (empty.as_slice(), empty.as_slice(), false),
+            "expected (install.cancel missing, mcp.disconnect missing, watcher revokes) =              ([], [], false) during a stall | received ({cancel:?}, {disconnect:?}, {watcher:?})"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_stalled_store_still_refuses_every_effect_producing_method() {
+        let store = StalledStore::new();
+        let authorization = Arc::new(store.authorization());
+        // Spawned together so every check lands inside the one stalled read.
+        let checks: Vec<_> = catalog()
+            .methods
+            .iter()
+            .filter(|method| {
+                !method.capabilities.is_empty()
+                    && !STOP_ONLY_METHODS.contains(&method.name.as_str())
+            })
+            .map(|method| {
+                let authorization = Arc::clone(&authorization);
+                tokio::spawn(async move {
+                    let missing = authorization
+                        .missing_capabilities(&method.name, &method.capabilities)
+                        .await;
+                    (method.name.as_str(), missing == method.capabilities)
+                })
+            })
+            .collect();
+        let mut admitted = Vec::new();
+        for check in checks {
+            let (name, refused) = check.await.unwrap();
+            if !refused {
+                admitted.push(name);
+            }
+        }
+        let reads = store.reads();
+        assert_eq!(
+            (admitted.as_slice(), reads),
+            ([].as_slice(), 1),
+            "expected (effect-producing methods admitted, reads started) = ([], 1) on an \
+             inconclusive read | received ({admitted:?}, {reads})"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_explicit_denial_still_refuses_a_stop_only_method() {
+        let home = scratch_home("stop-only-denied");
+        let authorization =
+            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Remote, home.to_path_buf()));
+        let missing = authorization
+            .missing_capabilities("install.cancel", &["shell".to_string()])
+            .await;
+        assert_eq!(
+            missing,
+            vec!["shell".to_string()],
+            "expected a denied read to refuse install.cancel | received {missing:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
