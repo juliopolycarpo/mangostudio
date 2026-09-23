@@ -123,6 +123,10 @@ tokio-util = { version = "0.7", default-features = false }
 # Codex subagent's `name`/`description`, mirroring `smol-toml`'s parse in
 # `apps/shared/src/library/machine/instance-reader.ts`.
 toml = { version = "1.1", default-features = false, features = ["std", "parse", "serde"] }
+# The event parser the `toml` crate itself builds on (same version, already
+# locked): `src/library/smol_toml.rs` walks its events to judge each bare
+# scalar the way `smol-toml` does before the `toml` crate parses the document.
+toml_parser = { version = "1.1", default-features = false, features = ["std"] }
 webpki-roots = "1"
 
 [dev-dependencies]
