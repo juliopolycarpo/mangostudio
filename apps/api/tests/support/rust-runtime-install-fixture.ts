@@ -7,6 +7,12 @@
  * inside a scratch directory, so a test can prove the effect happened exactly
  * once. Paths are written into the script text rather than passed through the
  * environment, because the runtime forwards only its install allowlist.
+ *
+ * On Windows the fake installer is a `cmd.exe` batch file, not a PowerShell
+ * script: a PowerShell host whose stdout is an anonymous pipe can stall on its
+ * first stdout write under the runtime's Job spawner on CI (recorded in
+ * `crates/mangostudio-runtime/tests/subprocess_windows.rs`), while `cmd.exe`
+ * is that suite's known-good stdout control.
  */
 
 import { expect } from 'bun:test';
@@ -56,36 +62,27 @@ export async function writeFakeInstaller(
   const logPath = join(directory, `${name}.log`);
   if (isWindows) {
     if (mode === 'grandchild') throw new Error('The grandchild installer is POSIX-only.');
-    const script = join(directory, `${name}.ps1`);
+    const script = join(directory, `${name}.cmd`);
+    // `ping -n 2` to loopback is cmd's portable one-second sleep; `timeout.exe`
+    // refuses to run without console input.
     const wait =
       mode === 'waits'
-        ? `while (-not (Test-Path -LiteralPath '${release}')) { Start-Sleep -Milliseconds 50 }`
-        : 'Start-Sleep -Seconds 1';
+        ? [':wait', `if exist "${release}" goto go`, 'ping -n 2 127.0.0.1 >nul', 'goto wait', ':go']
+        : ['ping -n 2 127.0.0.1 >nul'];
     await writeFile(
       script,
       [
-        "Write-Output 'waiting'",
-        "[Console]::Error.WriteLine('warn')",
-        wait,
-        `Add-Content -LiteralPath '${marker}' -Value 'run'`,
-        "Write-Output 'done'",
+        '@echo off',
+        'echo waiting',
+        '1>&2 echo warn',
+        ...wait,
+        `echo run>>"${marker}"`,
+        'echo done',
+        'exit /b 0',
+        '',
       ].join('\r\n')
     );
-    return {
-      argv: [
-        'powershell',
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        script,
-      ],
-      marker,
-      release,
-      logPath,
-      pidFile,
-    };
+    return { argv: ['cmd.exe', '/d', '/c', script], marker, release, logPath, pidFile };
   }
   const script = join(directory, `${name}.sh`);
   const body: Record<FakeInstallerMode, string> = {
@@ -100,6 +97,8 @@ export async function writeFakeInstaller(
 /** One run's relayed output, as the Hub's install service receives it. */
 export interface RelayedInstall {
   readonly lines: Array<{ readonly stream: string; readonly line: string }>;
+  /** Everything relayed so far plus the run's status and exit code, for failure messages. */
+  describe(): string;
   readonly result: ReturnType<ReturnType<typeof createInstallRunner>['run']>;
   /** Resolves once a relayed line on `stream` contains `text`. */
   waitForLine(stream: string, text: string, timeoutMs?: number): Promise<void>;
@@ -133,14 +132,29 @@ export function startRelayedInstall(
     },
     { signal: options.signal, onLog: (event) => lines.push(event) }
   );
+  let settled: unknown = 'pending';
+  result.then(
+    (value) => {
+      settled = value;
+    },
+    (error: unknown) => {
+      settled = `rejected: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  );
+  const describe = () =>
+    `installer argv=${JSON.stringify(installer.argv)}; relayed lines (stdout, stderr and the ` +
+    `runtime's system lines)=${JSON.stringify(lines)}; run result (status, exitCode)=` +
+    `${JSON.stringify(settled)}`;
   return {
     lines,
     result,
-    waitForLine: (stream, text, timeoutMs = 10_000) =>
+    describe,
+    waitForLine: (stream, text, timeoutMs = 20_000) =>
       waitUntil(
         () => lines.some((entry) => entry.stream === stream && entry.line.includes(text)),
         `a relayed ${stream} line containing "${text}"`,
-        timeoutMs
+        timeoutMs,
+        describe
       ),
   };
 }
@@ -154,25 +168,36 @@ export function startRelayedInstall(
 export async function waitUntil(
   condition: () => boolean,
   what: string,
-  timeoutMs = 10_000
+  timeoutMs = 10_000,
+  context?: () => string
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition()) {
     if (Date.now() >= deadline) {
-      throw new Error(`expected ${what} | received: nothing within ${timeoutMs}ms`);
+      const detail = context ? `; ${context()}` : '';
+      throw new Error(`expected ${what} | received: nothing within ${timeoutMs}ms${detail}`);
     }
     await Bun.sleep(20);
   }
 }
 
 /**
- * Asserts the fake installer applied its effect exactly once.
+ * Asserts the fake installer applied its effect exactly once; `run`, when given,
+ * explains a missing effect with what the run relayed and how it ended.
  *
  * @example
- * await expectAppliedOnce(installer);
+ * await expectAppliedOnce(installer, run);
  */
-export async function expectAppliedOnce(installer: FakeInstaller): Promise<void> {
-  await waitUntil(() => existsSync(installer.marker), 'the installer effect');
+export async function expectAppliedOnce(
+  installer: FakeInstaller,
+  run?: Pick<RelayedInstall, 'describe'>
+): Promise<void> {
+  await waitUntil(
+    () => existsSync(installer.marker),
+    'the installer effect',
+    10_000,
+    run?.describe
+  );
   const lines = (await readFile(installer.marker, 'utf8')).split(/\r?\n/).filter(Boolean);
   expect(lines).toEqual(['run']);
 }

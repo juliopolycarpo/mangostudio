@@ -400,7 +400,7 @@ describe('Real Rust runtime qualification', () => {
           const result = await run.result;
           expect(result).toMatchObject({ status: 'succeeded', exitCode: 0, truncated: false });
           expect(run.lines).toContainEqual({ stream: 'stdout', line: 'done' });
-          await expectAppliedOnce(installer);
+          await expectAppliedOnce(installer, run);
           const log = await readFile(installer.logPath, 'utf8');
           expect(log).toContain('waiting');
           expect(log).toContain('done');
@@ -457,7 +457,7 @@ describe('Real Rust runtime qualification', () => {
           // wait past the protocol handler grace is proved by the crate's spawned-stdio test.
           await connection.close();
           await run.result;
-          await expectAppliedOnce(installer);
+          await expectAppliedOnce(installer, run);
           expect(await readFile(installer.logPath, 'utf8')).toContain('done');
         } finally {
           await connection.close();
@@ -758,7 +758,7 @@ describe('Real Rust runtime qualification', () => {
           disconnect();
           await run.result;
           await writeFile(installer.release, '');
-          await expectAppliedOnce(installer);
+          await expectAppliedOnce(installer, run);
           await waitUntil(
             () => Bun.file(installer.logPath).size > 0,
             'the install log to keep the unobserved output'
