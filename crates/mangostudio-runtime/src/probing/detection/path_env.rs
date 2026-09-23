@@ -191,9 +191,191 @@ pub fn dirname_path(platform: &str, path: &str) -> String {
     }
 }
 
+/// `path`, with `.`/`..` segments and duplicate separators resolved the way
+/// `node:path`'s `posix.normalize`/`win32.normalize` resolve them for
+/// `platform` — including their one surprising rule: a trailing separator
+/// survives (`/a/b/../c/` normalizes to `/a/c/`).
+///
+/// [`join_path`] deliberately never does this (no path a detector joins
+/// carries a `.` segment); this exists for the one place a *user-supplied*
+/// path enters resolution, `registry.ts`'s `resolveEnvPath`, where the
+/// TypeScript host normalizes and this crate therefore has to as well.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::probing::detection::path_env::normalize_path;
+///
+/// assert_eq!(normalize_path("linux", "/a/b/../c/"), "/a/c/");
+/// assert_eq!(normalize_path("win32", "D:/a/../b/"), "D:\\b\\");
+/// ```
+#[must_use]
+pub fn normalize_path(platform: &str, path: &str) -> String {
+    let sep = separator(platform);
+    let seps = separator_chars(platform);
+    let (prefix, rooted, rest) = split_root(platform, seps, path);
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in rest.split(seps) {
+        match segment {
+            "" | "." => {}
+            ".." if segments.last().is_some_and(|last| *last != "..") => {
+                segments.pop();
+            }
+            ".." if rooted => {}
+            other => segments.push(other),
+        }
+    }
+    let mut normalized = prefix;
+    if rooted {
+        normalized.push(sep);
+    }
+    normalized.push_str(&segments.join(&sep.to_string()));
+    if segments.is_empty() {
+        if normalized.is_empty() {
+            normalized.push('.');
+        }
+        return normalized;
+    }
+    if path.ends_with(seps) {
+        normalized.push(sep);
+    }
+    normalized
+}
+
+/// `value` resolved against `base` the way `registry.ts`'s `resolveEnvPath`
+/// does: an absolute `value` is [`normalize_path`]d, a relative one is
+/// resolved onto `base` (`posix.resolve`/`win32.resolve`), which — unlike
+/// normalize — never keeps a trailing separator.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::probing::detection::path_env::resolve_path;
+///
+/// assert_eq!(resolve_path("linux", "/home/u", "./skills/"), "/home/u/skills");
+/// assert_eq!(resolve_path("linux", "/home/u", "/a/b/../c/"), "/a/c/");
+/// ```
+#[must_use]
+pub fn resolve_path(platform: &str, base: &str, value: &str) -> String {
+    if is_absolute(platform, value) {
+        return normalize_path(platform, value);
+    }
+    let joined = format!("{base}{}{value}", separator(platform));
+    let normalized = normalize_path(platform, &joined);
+    let root_len = root_length(platform, &normalized);
+    let trimmed = normalized.trim_end_matches(separator_chars(platform));
+    if trimmed.len() < root_len {
+        return normalized[..root_len].to_string();
+    }
+    trimmed.to_string()
+}
+
+/// Whether `value` is absolute for `platform`, the way
+/// `path.posix.isAbsolute`/`path.win32.isAbsolute` answer: a leading
+/// separator, or (win32 only) a drive letter followed by a separator.
+#[must_use]
+pub fn is_absolute(platform: &str, value: &str) -> bool {
+    let seps = separator_chars(platform);
+    if value.starts_with(seps) {
+        return true;
+    }
+    if platform != "win32" {
+        return false;
+    }
+    let bytes = value.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+}
+
+/// Splits `path` into its root prefix (a win32 drive or UNC share, emitted
+/// with `platform`'s separator), whether that root is followed by a
+/// separator, and the remainder to normalize.
+fn split_root<'a>(platform: &str, seps: &[char], path: &'a str) -> (String, bool, &'a str) {
+    if platform == "win32" {
+        let bytes = path.as_bytes();
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            let rest = &path[2..];
+            let rooted = rest.starts_with(seps);
+            return (path[..2].to_string(), rooted, rest);
+        }
+        if let Some((share, rest)) = unc_share(seps, path) {
+            return (share, true, rest);
+        }
+    }
+    let rooted = path.starts_with(seps);
+    (String::new(), rooted, path)
+}
+
+/// `\\server\share` and the remainder after it, when `path` is a UNC path.
+fn unc_share<'a>(seps: &[char], path: &'a str) -> Option<(String, &'a str)> {
+    let without = path.strip_prefix(seps)?.strip_prefix(seps)?;
+    let mut parts = without.splitn(3, seps);
+    let server = parts.next().filter(|part| !part.is_empty())?;
+    let share = parts.next().filter(|part| !part.is_empty())?;
+    let rest = &without[server.len() + 1 + share.len()..];
+    Some((format!("\\\\{server}\\{share}"), rest))
+}
+
+/// Byte length of `normalized`'s root (`/`, `C:\`, `\\server\share\`), so
+/// trimming a trailing separator never eats the root itself.
+fn root_length(platform: &str, normalized: &str) -> usize {
+    let seps = separator_chars(platform);
+    let (prefix, rooted, _) = split_root(platform, seps, normalized);
+    prefix.len() + usize::from(rooted)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PathEnv, dirname_path, join_path};
+    use super::{PathEnv, dirname_path, join_path, normalize_path, resolve_path};
+
+    /// Every expected value below is what `bun -e` printed for
+    /// `isAbsolute(v) ? normalize(v) : resolve(home, v)` from `node:path`.
+    #[test]
+    fn resolve_path_matches_node_for_the_registry_override_corpus() {
+        let cases = [
+            ("linux", "/home/u", "./skills/", "/home/u/skills"),
+            ("linux", "/home/u", "/a/b/../c/", "/a/c/"),
+            ("linux", "/home/u", "skills", "/home/u/skills"),
+            ("linux", "/home/u", "../x", "/home/x"),
+            ("linux", "/home/u", "/a//b/./c", "/a/b/c"),
+            ("linux", "/home/u", "/../a", "/a"),
+            ("linux", "/home/u", "/", "/"),
+            ("linux", "/home/u", "a/../..", "/home"),
+            ("win32", "C:\\Users\\u", "D:/a/../b/", "D:\\b\\"),
+            (
+                "win32",
+                "C:\\Users\\u",
+                "skills\\x",
+                "C:\\Users\\u\\skills\\x",
+            ),
+            ("win32", "C:\\Users\\u", "..\\x", "C:\\Users\\x"),
+            (
+                "win32",
+                "C:\\Users\\u",
+                "\\\\srv\\share\\a\\..\\b",
+                "\\\\srv\\share\\b",
+            ),
+            ("win32", "C:\\Users\\u", "C:\\", "C:\\"),
+            ("win32", "C:\\Users\\u", "\\foo", "\\foo"),
+            ("win32", "C:\\Users\\u", "c:/A//b", "c:\\A\\b"),
+        ];
+        for (platform, home, value, expected) in cases {
+            let received = resolve_path(platform, home, value);
+            assert_eq!(
+                received, expected,
+                "resolve_path({platform}, {home:?}, {value:?}): expected {expected:?} | received {received:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_path_keeps_relative_leading_parent_segments() {
+        assert_eq!(normalize_path("linux", "a/../../b"), "../b");
+        assert_eq!(normalize_path("linux", ""), ".");
+        assert_eq!(normalize_path("linux", "./"), ".");
+    }
 
     #[test]
     fn env_var_reads_an_exact_case_sensitive_key() {

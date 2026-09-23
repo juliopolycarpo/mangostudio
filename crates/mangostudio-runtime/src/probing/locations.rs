@@ -42,7 +42,7 @@
 use serde::Serialize;
 
 use super::detection::agent_cli_definitions::AgentTargetId;
-use super::detection::path_env::{PathEnv, dirname_path, join_path};
+use super::detection::path_env::{PathEnv, dirname_path, join_path, resolve_path};
 
 /// How a [`LocationDefinition`]'s path is organised on disk — decides
 /// whether [`describe_location`] even attempts an entry count.
@@ -318,32 +318,14 @@ fn supports_home_locations(env: &PathEnv) -> bool {
     matches!(env.platform.as_str(), "linux" | "darwin" | "win32")
 }
 
-/// Whether `value` is an absolute path for `platform`, mirroring
-/// `path.posix.isAbsolute`/`path.win32.isAbsolute` closely enough for this
-/// module's own needs (a leading separator on POSIX; a leading separator
-/// or a drive letter on win32) — see [`super::detection::path_env`]'s own
-/// module docs for why this crate cannot use [`std::path::Path`] for this.
-fn is_absolute_path(platform: &str, value: &str) -> bool {
-    if platform == "win32" {
-        let bytes = value.as_bytes();
-        (!bytes.is_empty() && (bytes[0] == b'/' || bytes[0] == b'\\'))
-            || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
-    } else {
-        value.starts_with('/')
-    }
-}
-
 /// `value`, resolved against `home_dir` for `platform` — mirrors
-/// `registry.ts`'s `resolveEnvPath`. An absolute `value` is returned as
-/// given (this crate's [`super::detection::path_env`] module does not
-/// resolve `.`/`..` segments anywhere else either, so neither does this);
-/// a relative one is joined onto `home_dir`.
+/// `registry.ts`'s `resolveEnvPath` exactly: an absolute `value` is
+/// normalized (`path.normalize`, trailing separator kept), a relative one is
+/// resolved onto `home_dir` (`path.resolve`). Both go through
+/// [`resolve_path`], so an override spelled `./skills/` or `/a/b/../c`
+/// names the same directory the TypeScript host would.
 fn resolve_env_path(platform: &str, home_dir: &str, value: &str) -> String {
-    if is_absolute_path(platform, value) {
-        value.to_string()
-    } else {
-        join_path(platform, &[home_dir, value])
-    }
+    resolve_path(platform, home_dir, value)
 }
 
 /// `env.env[variable]`, resolved as an absolute-or-relative-to-home
@@ -859,6 +841,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `registry.ts`'s `resolveEnvPath` normalizes an absolute override and
+    /// resolves a relative one (`node:path`), so a `SKILLS_DIR` spelled with
+    /// `.`/`..` segments names the same directory on both hosts. Expected
+    /// values are what `bun -e` printed through the TypeScript registry.
+    #[test]
+    fn configured_overrides_are_normalized_like_node_path() {
+        let relative = env("linux", "/home/tester", &[("SKILLS_DIR", "./skills/")]);
+        let received = mango_skills_path(&relative);
+        assert_eq!(
+            received.as_deref(),
+            Some("/home/tester/skills"),
+            "expected a relative SKILLS_DIR resolved under home | received {received:?}"
+        );
+        let dotted = env("linux", "/home/tester", &[("CODEX_HOME", "/a/b/../c/")]);
+        let received = codex_config_home(&dotted);
+        assert_eq!(
+            received, "/a/c/",
+            "expected an absolute CODEX_HOME normalized with its trailing slash | received {received:?}"
+        );
+        let windows = env(
+            "win32",
+            "C:\\Users\\tester",
+            &[("CLAUDE_CONFIG_DIR", "..\\shared\\claude")],
+        );
+        let received = claude_config_home(&windows);
+        assert_eq!(
+            received, "C:\\Users\\shared\\claude",
+            "expected a relative win32 override resolved against home | received {received:?}"
+        );
     }
 
     #[test]
