@@ -238,13 +238,31 @@ impl InstallEvents for RecordingEvents {
     }
 }
 
-/// Shell consent that a test can withdraw; counts reads.
+/// Shell consent that a test can withdraw, or stall to model a contended `runtime.json`.
 struct SwitchableConsent {
     granted: AtomicBool,
+    stalled: AtomicBool,
 }
+
+impl SwitchableConsent {
+    fn granted() -> Self {
+        Self {
+            granted: AtomicBool::new(true),
+            stalled: AtomicBool::new(false),
+        }
+    }
+}
+
+/// How long a stalled read blocks: well past [`TEST_CONSENT_READ_TIMEOUT`].
+const STALLED_READ: Duration = Duration::from_millis(600);
+/// The harness's consent-read bound, short so a stalled read times out quickly.
+const TEST_CONSENT_READ_TIMEOUT: Duration = Duration::from_millis(100);
 
 impl InstallConsent for SwitchableConsent {
     fn check(&self) -> Result<(), RemoteError> {
+        if self.stalled.load(Ordering::SeqCst) {
+            std::thread::sleep(STALLED_READ);
+        }
         if self.granted.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -371,9 +389,7 @@ fn harness_with(
     host: PathEnv,
 ) -> Harness {
     let spawner = Arc::new(ScriptedSpawner::new(scripts));
-    let consent = Arc::new(SwitchableConsent {
-        granted: AtomicBool::new(true),
-    });
+    let consent = Arc::new(SwitchableConsent::granted());
     let log = Arc::new(log);
     let audit = Arc::new(RecordingAudit::default());
     let diagnostics = Arc::new(RecordingDiagnostics::default());
@@ -396,6 +412,7 @@ fn harness_with(
             runs: Arc::clone(&runs),
             runtime_home: PathBuf::from("/mango/runtime"),
         },
+        consent_read_timeout: TEST_CONSENT_READ_TIMEOUT,
     });
     Harness {
         service,
@@ -1283,6 +1300,36 @@ async fn revocation_during_a_step_is_handled_locally_and_blocks_the_next_launch(
     assert!(harness.events.has_line("system", "nothing was launched"));
 }
 
+/// A consent read that cannot finish is unknown, not a withdrawal: a contended `runtime.json`
+/// leaves a healthy step running and the chain free to launch its next step.
+#[tokio::test]
+async fn slow_consent_store_does_not_stop_a_healthy_install_step() {
+    let harness = harness(vec![Script::Running, hello_world_exit()]);
+    let run = harness.spawn_run(command("run-a"), CancellationToken::new());
+    harness.wait_launched().await;
+
+    harness.consent.stalled.store(true, Ordering::SeqCst);
+    tokio::time::sleep(STALLED_READ * 2).await;
+    let withdrawn = harness
+        .events
+        .has_line("system", "Shell consent was withdrawn");
+    assert!(
+        !withdrawn,
+        "expected no withdrawal notice while consent reads stall | received one: {:?}",
+        harness.events.lines()
+    );
+    harness.consent.stalled.store(false, Ordering::SeqCst);
+    harness.spawner.settle(exited(0));
+    let first = within("the step to settle", run).await.unwrap().unwrap();
+    let second = harness.run(command("run-b")).await.unwrap();
+
+    assert_eq!(
+        (status(&first), status(&second)),
+        ("succeeded", "succeeded"),
+        "expected (first, second) status: (succeeded, succeeded) | received ({first}, {second})"
+    );
+}
+
 /// Consent is rechecked immediately before launch, not only at the guard.
 #[tokio::test]
 async fn consent_withdrawn_before_launch_prevents_the_launch() {
@@ -1461,7 +1508,6 @@ fn the_source_consent_adapter_follows_the_stored_shell_grant() {
 mod real {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
     use std::time::{Duration, UNIX_EPOCH};
 
     use serde_json::{Value, json};
@@ -1491,9 +1537,7 @@ mod real {
         Arc::new(Service {
             ports: Ports {
                 spawner: Arc::new(DefaultProcessSpawner),
-                consent: Arc::new(SwitchableConsent {
-                    granted: AtomicBool::new(true),
-                }),
+                consent: Arc::new(SwitchableConsent::granted()),
                 log: Arc::new(FileInstallLog),
                 host: Arc::new(|| PathEnv {
                     platform: "linux".into(),
@@ -1516,6 +1560,7 @@ mod real {
                 runs: Arc::clone(runs),
                 runtime_home: PathBuf::from("/nonexistent-runtime-home"),
             },
+            consent_read_timeout: crate::consent::read::CONSENT_READ_TIMEOUT,
         })
     }
 
@@ -1699,9 +1744,7 @@ mod windows_powershell {
         let service = Arc::new(Service {
             ports: Ports {
                 spawner: Arc::new(DefaultProcessSpawner),
-                consent: Arc::new(SwitchableConsent {
-                    granted: AtomicBool::new(true),
-                }),
+                consent: Arc::new(SwitchableConsent::granted()),
                 log: Arc::new(FileInstallLog),
                 host: Arc::new(|| crate::probing::host::build_runtime_path_env(None)),
                 toolchain_fs: Arc::new(NativeToolchainFs),
@@ -1711,6 +1754,7 @@ mod windows_powershell {
                 runs: Arc::new(InstallRuns::default()),
                 runtime_home: PathBuf::from(&*dir),
             },
+            consent_read_timeout: crate::consent::read::CONSENT_READ_TIMEOUT,
         });
         let events = RecordingEvents::open();
 

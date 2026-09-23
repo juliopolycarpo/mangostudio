@@ -19,6 +19,7 @@ use super::output::{LineDecoder, OutputLimit};
 use super::runs::{AlreadyActive, InstallRuns, RunControl, RunLease, StopReason};
 use crate::blocking::run_blocking;
 use crate::commands::toolchain::{self, NativeToolchainFs, ToolchainFs};
+use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentRead, ConsentReader};
 use crate::consent::source::ConsentSource;
 use crate::ports::audit::{Audit, AuditEntry, Outcome};
 use crate::ports::authorization::consent_denial;
@@ -45,9 +46,6 @@ const DEFAULT_OUTPUT_LIMIT_BYTES: usize = 1024 * 1024;
 
 /// How often a running step rechecks shell consent — the terminal service's cadence.
 const CONSENT_POLL: Duration = Duration::from_millis(100);
-
-/// How long one consent read may take before it counts as withdrawn.
-const CONSENT_READ_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Unread output chunks one run may hold before the pipe reader waits for the owner.
 const OUTPUT_TAP_CHUNKS: usize = 64;
@@ -137,6 +135,7 @@ pub(crate) fn register(
             runs: InstallRuns::process(),
             runtime_home: mango_home.join("runtime"),
         },
+        consent_read_timeout: CONSENT_READ_TIMEOUT,
     });
     for method in INSTALL_METHODS {
         let service = Arc::clone(&service);
@@ -230,6 +229,8 @@ impl RunPlan {
 /// The install handlers over one set of [`Ports`].
 pub(crate) struct Service {
     ports: Ports,
+    /// Bound on one running-step consent read; [`CONSENT_READ_TIMEOUT`] outside tests.
+    consent_read_timeout: Duration,
 }
 
 impl Service {
@@ -400,6 +401,7 @@ impl Service {
         consent_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         consent_poll.tick().await;
         let mut watching_consent = true;
+        let consent_reader = ConsentReader::new("shell");
         let terminal = loop {
             tokio::select! {
                 biased;
@@ -420,7 +422,7 @@ impl Service {
                     }
                 }
                 _ = consent_poll.tick(), if watching_consent => {
-                    if !self.consent_granted().await {
+                    if self.consent_read(&consent_reader).await.revokes() {
                         watching_consent = false;
                         control.request_stop(StopReason::ConsentRevoked);
                     }
@@ -447,15 +449,13 @@ impl Service {
         }
     }
 
-    /// A fresh consent read, bounded; a read that cannot finish counts as withdrawn.
-    async fn consent_granted(&self) -> bool {
+    /// A fresh consent read for the running-step watcher, bounded; a read that cannot finish is
+    /// [`ConsentRead::Unknown`], which leaves the step running until the next poll.
+    async fn consent_read(&self, reader: &ConsentReader) -> ConsentRead {
         let consent = Arc::clone(&self.ports.consent);
-        tokio::time::timeout(
-            CONSENT_READ_TIMEOUT,
-            run_blocking(move || consent.check().is_ok()),
-        )
-        .await
-        .unwrap_or(false)
+        reader
+            .read(self.consent_read_timeout, move || consent.check().is_ok())
+            .await
     }
 
     /// Records a run whose request is gone: the audit line its handler never wrote, and the

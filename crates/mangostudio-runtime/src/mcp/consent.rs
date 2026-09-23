@@ -50,28 +50,46 @@ impl LaunchCheck for FreshMcpLaunch {
 
 #[cfg(test)]
 pub(crate) mod fakes {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::time::Duration;
 
     use mango_protocol::error::codes;
 
     use super::*;
 
-    /// Named fake whose grant a test flips to model revocation.
-    pub(crate) struct SwitchableConsent(pub AtomicBool);
+    /// Named fake whose grant a test flips to model revocation, and whose reads a test can
+    /// stall to model a slow or contended consent store.
+    pub(crate) struct SwitchableConsent {
+        granted: AtomicBool,
+        stall_ms: AtomicU64,
+    }
 
     impl SwitchableConsent {
         pub(crate) fn granted() -> Arc<Self> {
-            Arc::new(Self(AtomicBool::new(true)))
+            Arc::new(Self {
+                granted: AtomicBool::new(true),
+                stall_ms: AtomicU64::new(0),
+            })
         }
 
         pub(crate) fn revoke(&self) {
-            self.0.store(false, Ordering::SeqCst);
+            self.granted.store(false, Ordering::SeqCst);
+        }
+
+        /// Makes every later read block for `stall` before answering.
+        pub(crate) fn stall(&self, stall: Duration) {
+            let millis = u64::try_from(stall.as_millis()).unwrap_or(u64::MAX);
+            self.stall_ms.store(millis, Ordering::SeqCst);
         }
     }
 
     impl McpConsent for SwitchableConsent {
         fn granted(&self) -> bool {
-            self.0.load(Ordering::SeqCst)
+            let stall = self.stall_ms.load(Ordering::SeqCst);
+            if stall > 0 {
+                std::thread::sleep(Duration::from_millis(stall));
+            }
+            self.granted.load(Ordering::SeqCst)
         }
 
         fn denial(&self, method: &str) -> RemoteError {

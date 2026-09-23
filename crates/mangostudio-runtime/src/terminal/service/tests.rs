@@ -128,6 +128,22 @@ fn fake_session() -> Session {
 }
 
 fn prepared_service() -> (ScratchDir, Arc<Service>, Arc<Mutex<RecordingPtyState>>) {
+    prepared_service_with(|_| {})
+}
+
+/// A consent read that blocks well past [`SHORT_READ_TIMEOUT`], then grants.
+fn slow_grant() -> super::ShellRead {
+    Arc::new(|| {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        true
+    })
+}
+
+const SHORT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(20);
+
+fn prepared_service_with(
+    adjust: impl FnOnce(&mut Service),
+) -> (ScratchDir, Arc<Service>, Arc<Mutex<RecordingPtyState>>) {
     let scratch = ScratchDir::created("terminal-service-fake-pty");
     let shell = scratch.join(if cfg!(windows) { "bash.exe" } else { "bash" });
     std::fs::write(&shell, b"fake shell").unwrap();
@@ -144,12 +160,13 @@ fn prepared_service() -> (ScratchDir, Arc<Service>, Arc<Mutex<RecordingPtyState>
     };
     let consent = Arc::new(ConsentSource::new(RuntimeSlot::Host, scratch.join("home")));
     let state = Arc::new(Mutex::new(RecordingPtyState::default()));
-    let service = Arc::new(Service::new(
+    let mut service = Service::new(
         consent,
         Arc::new(RecordingPtySpawner(Arc::clone(&state))),
         Arc::new(move || host.clone()),
-    ));
-    (scratch, service, state)
+    );
+    adjust(&mut service);
+    (scratch, Arc::new(service), state)
 }
 
 fn open_params() -> OpenParams {
@@ -269,6 +286,99 @@ async fn revocation_closes_each_live_session() {
             .as_array()
             .unwrap()
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn slow_consent_store_does_not_close_terminals() {
+    let closes = Arc::new(Mutex::new(0));
+    let mut service = service_with_live_entry(Arc::clone(&closes));
+    service.shell_read = slow_grant();
+    service.consent_read_timeout = SHORT_READ_TIMEOUT;
+
+    service.poll_consent().await;
+
+    let closed = *closes.lock().unwrap();
+    let listed = service.list().unwrap()["sessions"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(
+        (closed, listed),
+        (0, 1),
+        "expected (closes, listed sessions) after a slow consent read: (0, 1) | received \
+         ({closed}, {listed})"
+    );
+}
+
+#[tokio::test]
+async fn explicit_shell_denial_on_the_watcher_poll_closes_terminals() {
+    let closes = Arc::new(Mutex::new(0));
+    let mut service = service_with_live_entry(Arc::clone(&closes));
+    let entry = service.require("one").unwrap();
+    service.shell_read = Arc::new(|| false);
+
+    service.poll_consent().await;
+
+    let closed = *closes.lock().unwrap();
+    let revoked = entry
+        .consent_revoked
+        .load(std::sync::atomic::Ordering::Acquire);
+    assert_eq!(
+        (closed, revoked),
+        (1, true),
+        "expected (closes, consent_revoked) after an explicit denial: (1, true) | received \
+         ({closed}, {revoked})"
+    );
+}
+
+#[tokio::test]
+async fn slow_consent_on_write_refuses_the_write_without_closing_the_terminal() {
+    let closes = Arc::new(Mutex::new(0));
+    let mut service = service_with_live_entry(Arc::clone(&closes));
+    service.shell_read = slow_grant();
+    service.consent_read_timeout = SHORT_READ_TIMEOUT;
+
+    let refused = service
+        .write(WriteParams {
+            session_id: "one".into(),
+            data: "YQ==".into(),
+        })
+        .await
+        .expect_err("expected an unconfirmed consent read to refuse the write");
+
+    let closed = *closes.lock().unwrap();
+    assert_eq!(
+        (refused.code.as_str(), closed),
+        (codes::UNAVAILABLE, 0),
+        "expected (error code, closes): (UNAVAILABLE, 0) | received ({}, {closed})",
+        refused.code
+    );
+}
+
+#[tokio::test]
+async fn slow_consent_at_terminal_open_refuses_the_launch() {
+    let (_scratch, service, state) = prepared_service_with(|service| {
+        service.shell_read = slow_grant();
+        service.consent_read_timeout = SHORT_READ_TIMEOUT;
+    });
+
+    let refused = service
+        .open(open_params(), fake_session(), CancellationToken::new())
+        .await
+        .expect_err("expected an unconfirmed consent read to refuse terminal.open");
+
+    let closes = state.lock().unwrap().closes;
+    let listed = service.list().unwrap()["sessions"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(
+        (refused.code.as_str(), closes, listed),
+        (codes::DENIED, 1, 0),
+        "expected (error code, spawned handle closes, listed sessions): (DENIED, 1, 0) | \
+         received ({}, {closes}, {listed})",
+        refused.code
     );
 }
 

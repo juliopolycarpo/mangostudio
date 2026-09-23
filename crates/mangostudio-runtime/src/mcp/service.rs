@@ -31,7 +31,7 @@ use super::sdk::SdkConnector;
 use super::types::{
     CallFailure, FailureKind, McpConfig, McpFailure, McpSecrets, RequestOptions, timeout_from,
 };
-use crate::blocking::run_blocking;
+use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentRead, ConsentReader};
 use crate::consent::source::ConsentSource;
 use crate::registry::Registry;
 
@@ -42,9 +42,6 @@ pub(crate) const MAX_SESSIONS: usize = 64;
 pub(crate) const MAX_PENDING_ELICITATIONS: usize = 64;
 /// How often live sessions re-read `mcp` consent, matching the terminal service's poll.
 const CONSENT_POLL: Duration = Duration::from_millis(100);
-/// Bound on one consent read; a read that cannot finish is treated as a withdrawal, as the
-/// terminal service treats it.
-const CONSENT_READ_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Every method [`register`] installs; the manifest attests them as one unit.
 #[cfg(test)]
@@ -160,6 +157,8 @@ struct Service {
     closed: AtomicBool,
     watcher_started: AtomicBool,
     consent_poll: Duration,
+    consent_read_timeout: Duration,
+    consent_reader: ConsentReader,
 }
 
 impl Service {
@@ -176,6 +175,8 @@ impl Service {
             closed: AtomicBool::new(false),
             watcher_started: AtomicBool::new(false),
             consent_poll: CONSENT_POLL,
+            consent_read_timeout: CONSENT_READ_TIMEOUT,
+            consent_reader: ConsentReader::new("mcp"),
         }
     }
 
@@ -672,15 +673,13 @@ impl Service {
         tokio::spawn(async move { watch_connection(service, session, poll).await });
     }
 
-    /// Re-reads `mcp` consent off the executor; a read that cannot finish counts as withdrawn.
-    async fn consent_granted(&self) -> bool {
+    /// Re-reads `mcp` consent off the executor for the revocation watcher; a read that cannot
+    /// finish is [`ConsentRead::Unknown`], which keeps sessions open until the next poll.
+    async fn consent_read(&self) -> ConsentRead {
         let consent = Arc::clone(&self.consent);
-        tokio::time::timeout(
-            CONSENT_READ_TIMEOUT,
-            run_blocking(move || consent.granted()),
-        )
-        .await
-        .unwrap_or(false)
+        self.consent_reader
+            .read(self.consent_read_timeout, move || consent.granted())
+            .await
     }
 
     fn has_work(&self) -> bool {
@@ -718,7 +717,7 @@ async fn watch_connection(service: Weak<Service>, session: Session, poll: Durati
             }
             _ = ticks.tick() => {
                 let Some(service) = service.upgrade() else { return; };
-                if service.has_work() && !service.consent_granted().await {
+                if service.has_work() && service.consent_read().await.revokes() {
                     // Revocation cannot depend on an RPC the hub would now be denied: close
                     // here, settle every question, and tell the hub each session is gone.
                     service.close_all(true).await;
@@ -1962,6 +1961,60 @@ mod tests {
             vec![json!({ "serverId": "server-1", "change": "closed" })]
         );
         assert!(service.sessions().is_empty() && service.pending().is_empty());
+    }
+
+    /// A consent read that outlives its bound is unknown, not a withdrawal: the session stays
+    /// open through the slow reads, and an explicit denial afterwards still revokes it.
+    #[tokio::test]
+    async fn slow_consent_store_does_not_revoke_mcp_sessions() {
+        use mango_protocol::frame::PeerInfo;
+        use mango_protocol::port::port_pair;
+        use mango_protocol::session::SessionOptions;
+
+        let events = Arc::new(RecordingEvents::new(true));
+        let consent = SwitchableConsent::granted();
+        let connector = FakeConnector::default();
+        let closes = Arc::clone(&connector.closes);
+        let mut inner = Service::new(Arc::new(connector), consent.clone());
+        inner.consent_poll = Duration::from_millis(10);
+        inner.consent_read_timeout = Duration::from_millis(20);
+        *inner.events.lock().unwrap() = Some(Arc::clone(&events) as Arc<dyn McpEvents>);
+        let service = Arc::new(inner);
+        let peer = |name: &str| PeerInfo {
+            name: name.into(),
+            version: "0.0.0".into(),
+            role: name.into(),
+        };
+        let (runtime_port, _hub_port) = port_pair();
+        let (runtime, _driver) = Session::spawn(runtime_port, SessionOptions::new(peer("runtime")));
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        consent.stall(Duration::from_millis(120));
+        service.watch(&runtime);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+
+        let closed = closes.load(Ordering::SeqCst);
+        let open = service.sessions().len();
+        assert_eq!(
+            (closed, open),
+            (0, 1),
+            "expected (closes, open sessions) after slow consent reads: (0, 1) | received \
+             ({closed}, {open})"
+        );
+        assert!(
+            events.published(SESSION_TOPIC).is_empty(),
+            "expected no session-closed event | received {:?}",
+            events.published(SESSION_TOPIC)
+        );
+
+        consent.stall(Duration::ZERO);
+        consent.revoke();
+        wait_until("the explicitly denied session closed", || {
+            closes.load(Ordering::SeqCst) == 1
+        })
+        .await;
     }
 
     #[tokio::test]
