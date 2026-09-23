@@ -1671,3 +1671,76 @@ mod real {
         assert!(events.has_line("stdout", "done"));
     }
 }
+
+/// Every Windows recipe runs `powershell`; its pipeline output must stream through the real
+/// `install.run` path: host environment snapshot, install allowlist, supervisor and tap.
+#[cfg(windows)]
+mod windows_powershell {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::time::UNIX_EPOCH;
+
+    use serde_json::json;
+    use tokio_util::sync::CancellationToken;
+
+    use super::{RecordingAudit, RecordingEvents, SwitchableConsent, status};
+    use crate::commands::toolchain::NativeToolchainFs;
+    use crate::install::log::FileInstallLog;
+    use crate::install::runs::InstallRuns;
+    use crate::install::service::{InstallEvents, Ports, Service};
+    use crate::ports::wall_clock::FixedWallClock;
+    use crate::subprocess::DefaultProcessSpawner;
+    use crate::test_support::ScratchDir;
+
+    #[tokio::test]
+    async fn a_powershell_recipe_streams_write_output_through_install_run() {
+        let dir = ScratchDir::created("install-windows-powershell");
+        let service = Arc::new(Service {
+            ports: Ports {
+                spawner: Arc::new(DefaultProcessSpawner),
+                consent: Arc::new(SwitchableConsent {
+                    granted: AtomicBool::new(true),
+                }),
+                log: Arc::new(FileInstallLog),
+                host: Arc::new(|| crate::probing::host::build_runtime_path_env(None)),
+                toolchain_fs: Arc::new(NativeToolchainFs),
+                clock: Arc::new(FixedWallClock::new(UNIX_EPOCH)),
+                audit: Arc::new(RecordingAudit::default()),
+                diagnostics: Arc::new(|_, _| {}),
+                runs: Arc::new(InstallRuns::default()),
+                runtime_home: PathBuf::from(&*dir),
+            },
+        });
+        let events = RecordingEvents::open();
+
+        let result = service
+            .run(
+                json!({
+                    "runId": "windows-powershell",
+                    "argv": [
+                        "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                        "Bypass", "-Command", "Write-Output x",
+                    ],
+                    "timeoutMs": 60_000,
+                    "logPath": dir.join("install.log"),
+                }),
+                Arc::clone(&events) as Arc<dyn InstallEvents>,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let mut host_only: Vec<String> = crate::probing::host::build_runtime_path_env(None)
+            .env
+            .into_keys()
+            .collect();
+        host_only.sort();
+        assert!(
+            status(&result) == "succeeded" && events.has_line("stdout", "x"),
+            "expected a PowerShell recipe to stream stdout \"x\" and succeed | received {result} \
+             with lines {:?}; host variable names (the allowlist forwards a subset): {host_only:?}",
+            events.lines()
+        );
+    }
+}
