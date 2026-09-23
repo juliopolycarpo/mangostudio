@@ -290,10 +290,16 @@ fails silently:
   resolves to here. The hub's `destinationRoot` is where the user was told the
   bytes were going; the runtime's own `PathEnv` is where they would actually
   land. Those agree in-process and are allowed to disagree between machines.
+  The hub sends its MangoStudio directory pins (`SKILLS_DIR`/`AGENTS_DIR`) to
+  Local only — for writes, remote source reads and undo exactly as for scans
+  (`libraryWritePathEnv`) — so a remote machine resolves its own.
 - **The manifest is untrusted input.** `library.undo` drives `rm -rf` and
   overwriting copies from a JSON file under a caller-supplied root, so every
   entry has to resolve inside the registry location it names and every backup
-  path under the backup root. A corrupt or forged set refuses whole.
+  path under the backup root. A corrupt or forged set refuses whole. Retention
+  on the Rust host also never evicts a set without a readable manifest — one
+  still being written, possibly by another runtime sharing the store, or one a
+  failed commit left as the only copy; an explicit purge still can.
 - **Cancellation is cooperative and honoured.** The hub sets an explicit
   `timeoutMs` on every write RPC; the engines check the abort between
   operations and fall into their existing compensation path, so the disk agrees
