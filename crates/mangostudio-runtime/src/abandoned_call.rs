@@ -99,6 +99,7 @@ impl Drop for AbandonedCall {
 /// task when a Tokio runtime is present. A panicking sink is contained:
 /// a panic inside `Drop` during an unwind would abort the process.
 fn record_detached(audit: Arc<dyn Audit>, entry: AuditEntry) {
+    let method = entry.method.clone();
     let mut future: Pin<Box<dyn Future<Output = ()> + Send>> =
         Box::pin(async move { audit.record(entry).await });
     let mut context = Context::from_waker(Waker::noop());
@@ -106,15 +107,28 @@ fn record_detached(audit: Arc<dyn Audit>, entry: AuditEntry) {
     if !matches!(polled, Ok(Poll::Pending)) {
         return;
     }
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(async move {
-            let _ = crate::panic::catch_panics(async move {
-                future.await;
-                Ok::<(), mango_protocol::RemoteError>(())
-            })
-            .await;
-        });
-    }
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        // Only reachable when a handler future is dropped off any Tokio
+        // runtime while its sink is still pending: say so rather than lose
+        // the entry silently.
+        eprintln!(
+            "mangostudio-runtime: audit_abandoned_entry_lost {}",
+            serde_json::json!({ "method": method })
+        );
+        debug_assert!(
+            false,
+            "expected a Tokio runtime to finish the abandoned \"{method}\" audit entry | \
+             received: no runtime"
+        );
+        return;
+    };
+    handle.spawn(async move {
+        let _ = crate::panic::catch_panics(async move {
+            future.await;
+            Ok::<(), mango_protocol::RemoteError>(())
+        })
+        .await;
+    });
 }
 
 #[cfg(test)]
@@ -236,6 +250,16 @@ mod tests {
             1,
             "expected one detached entry | received: {received:?}"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "received: no runtime")]
+    fn a_pending_sink_with_no_runtime_is_reported_not_lost_silently() {
+        let sink = Arc::new(RecordingSink {
+            yields_first: true,
+            ..RecordingSink::default()
+        });
+        drop(arm(Arc::clone(&sink) as _, AbandonAudit::Record));
     }
 
     #[test]
