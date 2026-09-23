@@ -17,6 +17,7 @@ use super::log::{FileInstallLog, InstallLog, resolve_log_path};
 use super::outcome::{RunOutcome, RunStatus, launched_status};
 use super::output::{LineDecoder, OutputLimit};
 use super::runs::{AlreadyActive, InstallRuns, RunControl, RunLease, StopReason};
+use crate::abandoned_call::AbandonAudit;
 use crate::blocking::run_blocking;
 use crate::commands::toolchain::{self, NativeToolchainFs, ToolchainFs};
 use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentRead, ConsentReader};
@@ -139,19 +140,43 @@ pub(crate) fn register(
     });
     for method in INSTALL_METHODS {
         let service = Arc::clone(&service);
-        registry = registry.implement(method, move |params: Value, context: CallContext| {
-            let service = Arc::clone(&service);
-            async move {
-                if method == "install.cancel" {
-                    return service.cancel(params);
+        let register = match abandon_policy(method) {
+            AbandonAudit::OwnedByHandler => Registry::implement_owning_abandon_audit,
+            AbandonAudit::Record => Registry::implement,
+        };
+        registry = register(
+            registry,
+            method,
+            move |params: Value, context: CallContext| {
+                let service = Arc::clone(&service);
+                async move {
+                    if method == "install.cancel" {
+                        return service.cancel(params);
+                    }
+                    let events: Arc<dyn InstallEvents> =
+                        Arc::new(SessionEvents(context.session().clone()));
+                    service.run(params, events, context.cancel().clone()).await
                 }
-                let events: Arc<dyn InstallEvents> =
-                    Arc::new(SessionEvents(context.session().clone()));
-                service.run(params, events, context.cancel().clone()).await
-            }
-        });
+            },
+        );
     }
     registry
+}
+
+/// Who audits an install call whose request is dropped unfinished.
+///
+/// `install.run`'s owner task already records such a run (`record_unobserved`), so the registry
+/// wrapper must not record it a second time; `install.cancel` never outlives its request.
+///
+/// ```ignore
+/// assert_eq!(abandon_policy("install.run"), AbandonAudit::OwnedByHandler);
+/// ```
+fn abandon_policy(method: &str) -> AbandonAudit {
+    if method == "install.run" {
+        AbandonAudit::OwnedByHandler
+    } else {
+        AbandonAudit::Record
+    }
 }
 
 #[derive(Deserialize)]

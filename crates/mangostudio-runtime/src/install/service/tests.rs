@@ -1787,3 +1787,17 @@ mod windows_powershell {
         );
     }
 }
+
+/// `install.run`'s owner audits an abandoned run itself, so the registry wrapper must not.
+#[test]
+fn only_install_run_owns_its_abandoned_audit() {
+    use crate::abandoned_call::AbandonAudit;
+    assert_eq!(
+        (
+            super::abandon_policy("install.run"),
+            super::abandon_policy("install.cancel")
+        ),
+        (AbandonAudit::OwnedByHandler, AbandonAudit::Record),
+        "expected install.run: OwnedByHandler, install.cancel: Record"
+    );
+}
