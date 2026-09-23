@@ -576,3 +576,32 @@ mod tests {
         assert_eq!(third.process.close().await, Ok(()));
     }
 }
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use crate::subprocess::AlwaysAllow;
+
+    /// A long-lived stdio server inside the kill-on-close Job: close must return after the Job
+    /// has terminated it, well before the child would have exited on its own.
+    #[tokio::test]
+    async fn close_terminates_a_job_owned_server_and_awaits_its_cleanup() {
+        let launch = StdioLaunch {
+            program: PathBuf::from("cmd.exe"),
+            args: vec!["/d".into(), "/c".into(), "ping -n 60 127.0.0.1 >nul".into()],
+            env: BTreeMap::from([("SystemRoot".to_owned(), "C:\\Windows".to_owned())]),
+        };
+        let owned = GuardedStdioSpawner::default()
+            .start(launch, Arc::new(AlwaysAllow), CancellationToken::new())
+            .await
+            .unwrap_or_else(|error| panic!("expected a Job-owned server | received {error:?}"));
+        drop(owned.stdin);
+        let started = std::time::Instant::now();
+        assert_eq!(owned.process.close().await, Ok(()));
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "expected the Job to end the server promptly | received {:?}",
+            started.elapsed()
+        );
+    }
+}
