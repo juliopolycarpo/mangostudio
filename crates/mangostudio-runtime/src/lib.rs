@@ -121,6 +121,7 @@ pub mod event_check;
 mod file_identity;
 pub mod filesystem;
 pub mod health;
+mod library;
 pub mod manifest;
 pub mod panic;
 pub mod ports;

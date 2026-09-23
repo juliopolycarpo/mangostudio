@@ -49,6 +49,12 @@ getrandom = { version = "0.3", default-features = false }
 # `fs.glob` uses its brace, character-class, and recursive-wildcard parser,
 # while this crate owns traversal, dotfile rules, ordering, and path policy.
 globset = { version = "0.4.19", default-features = false }
+# `library.scan` sorts a directory resource's files with the TypeScript
+# host's `String.prototype.localeCompare` (ICU root collation) before
+# hashing their whitespace digests and before `library.read-tree` returns
+# them; that order is wire-visible, so it needs a real collator rather than a
+# byte comparison. Wrapped by `crate::library::collation`.
+icu_collator = "2.3"
 # This crate's own contact point with `jsonschema`, matching both
 # `mango-protocol`'s and `mangostudio-runtime-contract`'s compile options
 # exactly (draft 2020-12, offline, format assertions on): the result-check
@@ -91,6 +97,10 @@ tokio = { version = "1.53", default-features = false, features = ["fs", "io-util
 # and `connect`'s dial loop both watch. Same version `mango-protocol` itself
 # pins, so `cargo deny`'s duplicate-version check has nothing new to catch.
 tokio-util = { version = "0.7", default-features = false }
+# `library.scan` validates `toml-agent`/`toml-settings` instances and reads a
+# Codex subagent's `name`/`description`, mirroring `smol-toml`'s parse in
+# `apps/shared/src/library/machine/instance-reader.ts`.
+toml = { version = "1.1", default-features = false, features = ["std", "parse", "serde"] }
 
 [dev-dependencies]
 # Only this crate's own tests use the spawn launcher, standing in for a hub
