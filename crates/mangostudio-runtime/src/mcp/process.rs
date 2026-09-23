@@ -151,7 +151,7 @@ impl Default for GuardedStdioSpawner {
 impl GuardedStdioSpawner {
     /// A spawner whose owners report to `release` instead of the process-wide tracker, so a test
     /// can begin its own shutdown without stopping every other test's servers.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn with_release(release: &'static Release) -> Self {
         Self {
             release,
