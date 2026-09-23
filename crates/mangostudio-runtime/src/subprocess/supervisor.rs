@@ -580,19 +580,64 @@ async fn supervise_start(
     } else {
         None
     };
-    supervise_child(
-        child,
-        budget,
-        stdin,
-        deadline,
-        started,
-        command_rx,
-        shared,
-        initial_stop,
-        permit,
-        admission,
+    own_terminal(
+        Arc::clone(&shared),
+        supervise_child(
+            child,
+            budget,
+            stdin,
+            deadline,
+            started,
+            command_rx,
+            shared,
+            initial_stop,
+            permit,
+            admission,
+        ),
     )
     .await;
+}
+
+/// Runs one process worker as the owner of `shared`'s terminal record.
+///
+/// Every [`ProcessControl`] clone holds the same `Arc<Shared>`, so the watch sender outlives a
+/// worker that unwinds, and a waiter would otherwise stay pending forever. The guard publishes the
+/// vanished-worker record [`wait_for_terminal`] already uses when the worker ends without one.
+///
+/// # Example
+///
+/// ```ignore
+/// own_terminal(Arc::clone(&shared), supervise_child(/* ... */)).await;
+/// ```
+async fn own_terminal(shared: Arc<Shared>, worker: impl Future<Output = ()>) {
+    let _settle = SettleOnUnwind(shared);
+    worker.await;
+}
+
+/// Publishes a forced, incomplete terminal record if its worker never published one.
+struct SettleOnUnwind(Arc<Shared>);
+
+impl Drop for SettleOnUnwind {
+    fn drop(&mut self) {
+        self.0.terminal.send_if_modified(|terminal| {
+            if terminal.is_some() {
+                return false;
+            }
+            *terminal = Some(vanished_worker_terminal());
+            true
+        });
+    }
+}
+
+/// The record reported for a worker that ended without publishing its own.
+fn vanished_worker_terminal() -> ProcessTerminal {
+    ProcessTerminal {
+        cause: ProcessTerminalCause::Forced,
+        exit: None,
+        elapsed: Duration::ZERO,
+        stdout: ProcessCapture::incomplete(),
+        stderr: ProcessCapture::incomplete(),
+    }
 }
 
 /// Reclaims a child that never became a public [`ProcessControl`].
@@ -1172,13 +1217,7 @@ async fn wait_for_terminal(
             return terminal;
         }
         if receiver.changed().await.is_err() {
-            return ProcessTerminal {
-                cause: ProcessTerminalCause::Forced,
-                exit: None,
-                elapsed: Duration::ZERO,
-                stdout: ProcessCapture::incomplete(),
-                stderr: ProcessCapture::incomplete(),
-            };
+            return vanished_worker_terminal();
         }
     }
 }
@@ -1252,6 +1291,54 @@ mod stop_requests {
         assert!(StopRequest::Force.is_forceful());
         assert!(StopRequest::Cancel.is_forceful());
         assert!(StopRequest::Timeout.is_forceful());
+    }
+}
+
+/// A worker that unwinds must still settle every [`ProcessControl::wait`] caller.
+#[cfg(test)]
+mod worker_unwind {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio::sync::{mpsc, watch};
+
+    use super::{
+        MAX_PROCESS_CONTROL_COMMANDS, ProcessControl, ProcessTerminalCause, Shared, own_terminal,
+    };
+
+    #[tokio::test]
+    async fn a_panicking_worker_cannot_leave_a_waiter_pending() {
+        let (commands, _receiver) = mpsc::channel(MAX_PROCESS_CONTROL_COMMANDS);
+        let (terminal, _) = watch::channel(None);
+        let shared = Arc::new(Shared { commands, terminal });
+        let control = ProcessControl {
+            shared: Arc::clone(&shared),
+        };
+        let worker = tokio::spawn(own_terminal(shared, async {
+            panic!("worker panicked before publishing its terminal record")
+        }));
+        assert!(
+            worker.await.is_err_and(|error| error.is_panic()),
+            "expected the named worker to panic | received a worker that settled normally"
+        );
+
+        let terminal = tokio::time::timeout(Duration::from_secs(2), control.wait()).await;
+
+        let terminal = terminal.unwrap_or_else(|_| {
+            panic!(
+                "expected wait to settle after the worker panicked | received: still pending \
+                 after 2s"
+            )
+        });
+        assert_eq!(
+            (terminal.cause, terminal.exit.is_none()),
+            (ProcessTerminalCause::Forced, true),
+            "expected the vanished-worker record (Forced, no exit) | received {terminal:?}"
+        );
+        assert!(
+            terminal.stdout.incomplete && terminal.stderr.incomplete,
+            "expected both captures marked incomplete | received {terminal:?}"
+        );
     }
 }
 
