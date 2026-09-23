@@ -1787,3 +1787,111 @@ mod windows_powershell {
         );
     }
 }
+
+/// `install.run`'s owner audits an abandoned run itself, so the registry wrapper must not.
+#[test]
+fn only_install_run_owns_its_abandoned_audit() {
+    use crate::abandoned_call::AbandonAudit;
+    assert_eq!(
+        (
+            super::abandon_policy("install.run"),
+            super::abandon_policy("install.cancel")
+        ),
+        (AbandonAudit::OwnedByHandler, AbandonAudit::Record),
+        "expected install.run: OwnedByHandler, install.cancel: Record"
+    );
+}
+
+/// Session teardown aborts an in-flight `install.run` after the handler grace; the owner still
+/// finishes the step and writes the only audit line (`record_unobserved`), and the registry's
+/// abandoned-call guard writes none.
+#[tokio::test]
+async fn an_install_run_aborted_at_teardown_is_audited_once_by_its_owner() {
+    use crate::ports::authorization::Authorization;
+    use crate::ports::clock::SystemClock;
+    use crate::registry::Registry;
+    use mango_protocol::contract::Contract;
+    use mango_protocol::frame::PeerInfo;
+    use mango_protocol::port::port_pair;
+    use mango_protocol::session::{Session, SessionOptions};
+    use mangostudio_runtime_contract::catalog::catalog;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    struct GrantsAll;
+    impl Authorization for GrantsAll {
+        fn missing_capabilities<'a>(
+            &'a self,
+            _method: &'a str,
+            _capabilities: &'a [String],
+        ) -> Pin<Box<dyn Future<Output = Vec<String>> + Send + 'a>> {
+            Box::pin(async { Vec::new() })
+        }
+    }
+    fn peer(role: &str) -> PeerInfo {
+        PeerInfo {
+            name: format!("test-{role}"),
+            version: "0.0.0".to_owned(),
+            role: role.to_owned(),
+        }
+    }
+
+    let harness = harness(vec![Script::Running]);
+    let registry = super::register_service(
+        Registry::with_ports(
+            Arc::clone(&harness.audit) as Arc<dyn Audit>,
+            Arc::new(SystemClock),
+        ),
+        &harness.service,
+    );
+    let (port_hub, port_runtime) = port_pair();
+    let (hub, _hub_driver) = Session::spawn(port_hub, SessionOptions::new(peer("hub")));
+    let (runtime, _runtime_driver) = Session::spawn(
+        port_runtime,
+        SessionOptions::new(peer("runtime")).with_handler_grace(Duration::from_millis(50)),
+    );
+    within("the hub handshake", hub.ready()).await.unwrap();
+    within("the runtime handshake", runtime.ready())
+        .await
+        .unwrap();
+    let contract = Contract::from_catalog(catalog().clone()).unwrap();
+    crate::serve::serve(&contract, &runtime, registry, Arc::new(GrantsAll), "host")
+        .unwrap()
+        .persist();
+
+    let request = tokio::spawn({
+        let hub = hub.clone();
+        async move { hub.request("install.run", command("run-1")).await }
+    });
+    harness.wait_launched().await;
+    let closure = within("the runtime session to close", runtime.close(1000, None)).await;
+    assert_eq!(
+        closure.unfinished_handlers, 1,
+        "expected install.run still in flight at teardown: 1 | received: {}",
+        closure.unfinished_handlers
+    );
+    request.abort();
+    harness.spawner.settle(exited(0));
+    within("every run to settle", harness.runs.settled()).await;
+
+    let received: Vec<(String, Outcome, Option<String>)> = harness
+        .audit
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|entry| (entry.method.clone(), entry.outcome, entry.code.clone()))
+        .collect();
+    assert_eq!(
+        received,
+        vec![("install.run".to_owned(), Outcome::Ok, None)],
+        "expected only the owner's record_unobserved line | received: {received:?}"
+    );
+    assert!(
+        harness
+            .diagnostics
+            .named("install_run_settled_unobserved")
+            .is_some(),
+        "expected the owner to report the unobserved run"
+    );
+}

@@ -17,6 +17,7 @@ use super::log::{FileInstallLog, InstallLog, resolve_log_path};
 use super::outcome::{RunOutcome, RunStatus, launched_status};
 use super::output::{LineDecoder, OutputLimit};
 use super::runs::{AlreadyActive, InstallRuns, RunControl, RunLease, StopReason};
+use crate::abandoned_call::AbandonAudit;
 use crate::blocking::run_blocking;
 use crate::commands::toolchain::{self, NativeToolchainFs, ToolchainFs};
 use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentRead, ConsentReader};
@@ -115,11 +116,7 @@ pub(crate) struct Ports {
 }
 
 /// Registers `install.run` and `install.cancel` against the process-wide run table.
-pub(crate) fn register(
-    mut registry: Registry,
-    consent: ConsentSource,
-    mango_home: &Path,
-) -> Registry {
+pub(crate) fn register(registry: Registry, consent: ConsentSource, mango_home: &Path) -> Registry {
     let service = Arc::new(Service {
         ports: Ports {
             spawner: Arc::new(DefaultProcessSpawner),
@@ -137,21 +134,51 @@ pub(crate) fn register(
         },
         consent_read_timeout: CONSENT_READ_TIMEOUT,
     });
+    register_service(registry, &service)
+}
+
+/// Registers `install.run` and `install.cancel` over an already-built [`Service`], so a test
+/// can drive the real registry wiring against fake ports.
+fn register_service(mut registry: Registry, service: &Arc<Service>) -> Registry {
     for method in INSTALL_METHODS {
-        let service = Arc::clone(&service);
-        registry = registry.implement(method, move |params: Value, context: CallContext| {
-            let service = Arc::clone(&service);
-            async move {
-                if method == "install.cancel" {
-                    return service.cancel(params);
+        let service = Arc::clone(service);
+        let register = match abandon_policy(method) {
+            AbandonAudit::OwnedByHandler => Registry::implement_owning_abandon_audit,
+            AbandonAudit::Record => Registry::implement,
+        };
+        registry = register(
+            registry,
+            method,
+            move |params: Value, context: CallContext| {
+                let service = Arc::clone(&service);
+                async move {
+                    if method == "install.cancel" {
+                        return service.cancel(params);
+                    }
+                    let events: Arc<dyn InstallEvents> =
+                        Arc::new(SessionEvents(context.session().clone()));
+                    service.run(params, events, context.cancel().clone()).await
                 }
-                let events: Arc<dyn InstallEvents> =
-                    Arc::new(SessionEvents(context.session().clone()));
-                service.run(params, events, context.cancel().clone()).await
-            }
-        });
+            },
+        );
     }
     registry
+}
+
+/// Who audits an install call whose request is dropped unfinished.
+///
+/// `install.run`'s owner task already records such a run (`record_unobserved`), so the registry
+/// wrapper must not record it a second time; `install.cancel` never outlives its request.
+///
+/// ```ignore
+/// assert_eq!(abandon_policy("install.run"), AbandonAudit::OwnedByHandler);
+/// ```
+fn abandon_policy(method: &str) -> AbandonAudit {
+    if method == "install.run" {
+        AbandonAudit::OwnedByHandler
+    } else {
+        AbandonAudit::Record
+    }
 }
 
 #[derive(Deserialize)]

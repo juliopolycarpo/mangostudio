@@ -20,6 +20,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use crate::abandoned_call::{AbandonAudit, AbandonedCall, CallParts};
 use mango_protocol::contract::ContractHandlers;
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
@@ -166,7 +167,44 @@ impl Registry {
     /// assert_eq!(registry.implemented_methods(), vec!["runtime.health"]);
     /// ```
     #[must_use]
-    pub fn implement<P, R, F, Fut>(mut self, method_name: impl Into<String>, handler: F) -> Self
+    pub fn implement<P, R, F, Fut>(self, method_name: impl Into<String>, handler: F) -> Self
+    where
+        P: DeserializeOwned + Send + 'static,
+        R: Serialize + Send + 'static,
+        F: Fn(P, CallContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<R, RemoteError>> + Send + 'static,
+    {
+        self.implement_with(method_name, AbandonAudit::Record, handler)
+    }
+
+    /// [`Registry::implement`] for a handler that already audits its own
+    /// abandoned calls — `install.run`, whose detached owner task records the
+    /// run once no request is left to answer.
+    ///
+    /// ```ignore
+    /// registry.implement_owning_abandon_audit("install.run", handler)
+    /// ```
+    #[must_use]
+    pub(crate) fn implement_owning_abandon_audit<P, R, F, Fut>(
+        self,
+        method_name: impl Into<String>,
+        handler: F,
+    ) -> Self
+    where
+        P: DeserializeOwned + Send + 'static,
+        R: Serialize + Send + 'static,
+        F: Fn(P, CallContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<R, RemoteError>> + Send + 'static,
+    {
+        self.implement_with(method_name, AbandonAudit::OwnedByHandler, handler)
+    }
+
+    fn implement_with<P, R, F, Fut>(
+        mut self,
+        method_name: impl Into<String>,
+        abandon: AbandonAudit,
+        handler: F,
+    ) -> Self
     where
         P: DeserializeOwned + Send + 'static,
         R: Serialize + Send + 'static,
@@ -218,6 +256,16 @@ impl Registry {
                 let call_id = context.id().to_string();
                 async move {
                     let started = clock.now();
+                    // Settles the call if this future is dropped before it
+                    // finishes — e.g. aborted after the session's handler
+                    // grace. Disarmed below, once this path takes over.
+                    let abandoned = AbandonedCall::arm(CallParts {
+                        method: method_name.clone(),
+                        started,
+                        audit: Arc::clone(&audit),
+                        clock: Arc::clone(&clock),
+                        policy: abandon,
+                    });
                     // Parameter decoding, the handler, its serialisation,
                     // and the result check are inside this catch: a panic
                     // here becomes the wire result. Recording is
@@ -254,6 +302,7 @@ impl Registry {
                         }
                     })
                     .await;
+                    abandoned.disarm();
 
                     // The claim `AuthorizationGuard` took for this call is
                     // released here, unconditionally — success, a handler

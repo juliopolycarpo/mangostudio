@@ -110,6 +110,7 @@
 //! [`runtime_home::DefaultSetupState`], which slots start pre-consented —
 //! and [`consent`] builds the rest on top of it rather than duplicating it.
 
+mod abandoned_call;
 pub mod audit;
 pub mod blocking;
 pub mod cli;

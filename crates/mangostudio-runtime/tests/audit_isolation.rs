@@ -18,8 +18,12 @@ use mangostudio_runtime::ports::authorization::DenyingAuthorization;
 use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::registry::Registry;
 use serde_json::json;
+use std::time::Duration;
+
+use mango_protocol::session::SessionOptions;
 use support::{
-    PanickingAudit, PanickingAuthorization, RecordingAudit, health_result, serve_pair, within,
+    PanickingAudit, PanickingAuthorization, RecordingAudit, health_result, peer, serve_pair,
+    serve_pair_with_runtime_options, within,
 };
 
 #[tokio::test]
@@ -206,5 +210,72 @@ async fn a_panicking_authorization_port_records_error_not_denied() {
         entries[0].outcome,
         Outcome::Error,
         "a panic in the authorization check is not a real denial"
+    );
+}
+
+/// A handler still running when its session tears down is aborted after the
+/// handler grace; the call must still leave exactly one audit line — an
+/// `error` with `CANCELLED`, the same shape `consent-gate.ts` records for an
+/// aborted call — since the effect it started may yet complete.
+#[tokio::test]
+async fn a_handler_aborted_after_the_handler_grace_is_still_audited_once() {
+    let audit = Arc::new(RecordingAudit::new());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+    let started_tx = Arc::new(std::sync::Mutex::new(Some(started_tx)));
+    let registry = Registry::with_ports(Arc::clone(&audit) as _, Arc::new(SystemClock)).implement(
+        "runtime.health",
+        move |_params: serde_json::Value, _context| {
+            let started_tx = Arc::clone(&started_tx);
+            async move {
+                if let Some(tx) = started_tx.lock().unwrap().take() {
+                    let _ = tx.send(());
+                }
+                // Ignores its cancellation token: outlives any grace.
+                std::future::pending::<()>().await;
+                Ok::<_, mango_protocol::RemoteError>(health_result())
+            }
+        },
+    );
+    let options =
+        SessionOptions::new(peer("runtime")).with_handler_grace(Duration::from_millis(50));
+    let (hub, runtime) =
+        serve_pair_with_runtime_options(registry, Arc::new(DenyingAuthorization), options).await;
+
+    let pending = tokio::spawn({
+        let hub = hub.clone();
+        async move { hub.request("runtime.health", json!({})).await }
+    });
+    within("the handler to start", started_rx)
+        .await
+        .expect("the handler starts");
+    let closure = within("the runtime session to close", runtime.close(1000, None)).await;
+    assert_eq!(
+        closure.unfinished_handlers, 1,
+        "expected unfinished handlers after grace: 1 | received: {}",
+        closure.unfinished_handlers
+    );
+    pending.abort();
+
+    // The entry may land on a detached task: poll briefly, then settle so a
+    // duplicate would also be visible before asserting.
+    for _ in 0..100 {
+        if !audit.entries().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let entries = audit.entries();
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected exactly one audit entry for the abandoned call | received: {entries:?}"
+    );
+    assert_eq!(entries[0].method, "runtime.health");
+    assert_eq!(
+        (entries[0].outcome, entries[0].code.as_deref()),
+        (Outcome::Error, Some(codes::CANCELLED)),
+        "expected outcome: (Error, CANCELLED) | received: {:?}",
+        entries[0]
     );
 }

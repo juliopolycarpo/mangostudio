@@ -60,9 +60,16 @@ pub fn peer(role: &str) -> PeerInfo {
 /// handshakes, so a test can register handlers on `runtime` and issue
 /// requests from `hub` without repeating the handshake boilerplate.
 pub async fn open_pair() -> (Session, Session) {
+    open_pair_with_runtime_options(SessionOptions::new(peer("runtime"))).await
+}
+
+/// [`open_pair`] with the runtime side's own [`SessionOptions`] — e.g. a
+/// shortened `handler_grace`, so a teardown test need not wait the 5 s
+/// default before the session aborts a still-running handler.
+pub async fn open_pair_with_runtime_options(runtime_options: SessionOptions) -> (Session, Session) {
     let (port_a, port_b) = port_pair();
     let (hub, _driver_a) = Session::spawn(port_a, SessionOptions::new(peer("hub")));
-    let (runtime, _driver_b) = Session::spawn(port_b, SessionOptions::new(peer("runtime")));
+    let (runtime, _driver_b) = Session::spawn(port_b, runtime_options);
     within("hub's ready()", hub.ready())
         .await
         .expect("handshake succeeds");
@@ -85,7 +92,21 @@ pub async fn serve_pair(
     registry: Registry,
     authorization: Arc<dyn Authorization>,
 ) -> (Session, Session) {
-    let (hub, runtime) = open_pair().await;
+    serve_pair_with_runtime_options(
+        registry,
+        authorization,
+        SessionOptions::new(peer("runtime")),
+    )
+    .await
+}
+
+/// [`serve_pair`] over [`open_pair_with_runtime_options`].
+pub async fn serve_pair_with_runtime_options(
+    registry: Registry,
+    authorization: Arc<dyn Authorization>,
+    runtime_options: SessionOptions,
+) -> (Session, Session) {
+    let (hub, runtime) = open_pair_with_runtime_options(runtime_options).await;
     mangostudio_runtime::serve::serve(&CONTRACT, &runtime, registry, authorization, "host")
         .expect("every method a test registry implements is declared by the catalog")
         .persist();
