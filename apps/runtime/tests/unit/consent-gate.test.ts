@@ -58,7 +58,7 @@ describe('the contract capability table', () => {
     expect(RUNTIME_CONSENT_PRESETS.readonly.shell).toBe(false);
   });
 
-  it('puts every terminal leg behind shell, reads included', () => {
+  it('gates terminal access but permits closing a PTY after consent is withdrawn', () => {
     // A `readonly` machine refuses `shell`, and an interactive PTY is broader
     // than any single command. Listing and attaching are gated too: there is
     // nothing to list on a machine that could never have opened one.
@@ -69,11 +69,11 @@ describe('the contract capability table', () => {
       'terminal.write',
       'terminal.resize',
       'terminal.ack',
-      'terminal.close',
       'terminal.list',
     ]) {
       expect(capabilities[method]).toEqual(['shell']);
     }
+    expect(capabilities['terminal.close']).toEqual([]);
   });
 
   it('requires a write capability for everything that writes', () => {
@@ -154,7 +154,7 @@ describe('gateHandlers consent', () => {
     });
   });
 
-  it('refuses everything but health under the none profile', async () => {
+  it('refuses ordinary methods but permits health and terminal cleanup under none', async () => {
     const gated = gate(RUNTIME_CONSENT_PRESETS.none, 'remote');
 
     for (const method of [
@@ -165,10 +165,10 @@ describe('gateHandlers consent', () => {
     ] as const) {
       await expect(call(gated, method)).rejects.toThrow(/is refused/);
     }
-    // Health answers under every profile; it is the one method with no
-    // capability, and a machine that cannot be asked how it is is a machine
-    // nobody can diagnose.
+    // Health answers under every profile so a denied machine remains diagnosable;
+    // terminal cleanup also stays available after its shell grant is withdrawn.
     expect(await call(gated, 'runtime.health')).toEqual({ ok: true });
+    expect(await call(gated, 'terminal.close')).toEqual({ ok: true });
   });
 
   it('re-reads consent on every call so a mid-connection setup takes effect', async () => {
@@ -181,5 +181,20 @@ describe('gateHandlers consent', () => {
     expect(await call(gated, 'shell.run')).toEqual({ ok: true });
     allow = { ...allow, shell: false };
     await expect(call(gated, 'shell.run')).rejects.toThrow(/has not granted shell/);
+  });
+
+  it('allows terminal cleanup after shell consent is withdrawn', async () => {
+    let allow = { ...RUNTIME_CONSENT_PRESETS.full };
+    const gated = gateHandlers(new FakeRuntimeHandlers().map, {
+      consent: { slot: 'host', current: () => allow, refresh: async () => allow },
+      isUpdateActive: () => false,
+    });
+
+    expect(await call(gated, 'terminal.open')).toEqual({ ok: true });
+    allow = { ...allow, shell: false };
+    await expect(call(gated, 'terminal.open')).rejects.toThrow(/has not granted shell/);
+    await expect(call(gated, 'terminal.write')).rejects.toThrow(/has not granted shell/);
+    await expect(call(gated, 'terminal.list')).rejects.toThrow(/has not granted shell/);
+    expect(await call(gated, 'terminal.close')).toEqual({ ok: true });
   });
 });

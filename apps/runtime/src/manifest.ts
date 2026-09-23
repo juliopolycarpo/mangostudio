@@ -144,6 +144,7 @@ export function createLocalRuntimeManifest(
     // `shell`, or that has no shell to run, or a Bun without a PTY, all answer
     // false rather than advertising a panel that every open would refuse.
     terminal: allow.shell && shells.length > 0 && supportsPty(),
+    terminalCloseAfterRevocation: true,
     profile: profileForAllow(allow),
     // Every filesystem method in this build re-checks its own targets against
     // the call's `pathPolicy` (see `services/fs.ts`). Stated rather than

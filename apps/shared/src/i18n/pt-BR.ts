@@ -2054,6 +2054,8 @@ export const messages = {
         'O runtime Local compartilha a conta do hub com outros usuários, então os terminais ficam desligados nele.',
       unavailable:
         'Este ambiente não pode abrir um terminal. Ele precisa de um shell e da permissão de shell.',
+      runtimeUpdateRequired:
+        'O runtime deste ambiente precisa de uma atualização antes que os terminais possam ser abertos com segurança.',
       disconnected: 'O ambiente não está conectado.',
     },
     page: {

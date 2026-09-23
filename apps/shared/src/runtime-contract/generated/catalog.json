@@ -7788,9 +7788,7 @@
           }
         }
       },
-      "capabilities": [
-        "shell"
-      ]
+      "capabilities": []
     },
     {
       "name": "terminal.list",
@@ -11939,6 +11937,9 @@
         "additionalProperties": false
       },
       "terminal": {
+        "type": "boolean"
+      },
+      "terminalCloseAfterRevocation": {
         "type": "boolean"
       },
       "enforcesPathPolicy": {

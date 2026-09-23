@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
@@ -121,6 +122,130 @@ describe('terminal HTTP routes with a fake runtime', () => {
     routes = createTerminalRoutes(service);
   });
 
+  it('returns 409 for an older peer without revocation-safe close, while a current peer opens', async () => {
+    const user = await insertTestUser();
+    const app = authedApp(routes, user);
+    const { terminalCloseAfterRevocation: _unproven, ...oldManifest } = FAKE_TERMINAL_MANIFEST;
+    client = new FakeTerminalRuntimeClient({ manifest: oldManifest });
+
+    const unavailable = await app.handle(
+      jsonRequest(`/terminals/availability?environmentId=${LOCAL_ENVIRONMENT_ID}`, 'GET')
+    );
+    expect((await unavailable.json()) as TerminalAvailability).toMatchObject({
+      available: false,
+      reason: 'runtime-update-required',
+    });
+    const refused = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: ERROR_CODES.UNSUPPORTED,
+      error: expect.stringContaining('needs a runtime update'),
+      details: { reason: 'runtime-update-required' },
+    });
+    expect(client.calls.open).toHaveLength(0);
+
+    client = new FakeTerminalRuntimeClient();
+    const opened = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    expect(opened.status).toBe(201);
+    expect(client.calls.open).toHaveLength(1);
+  });
+
+  it('admits only one of two concurrent POST requests at a one-session cap', async () => {
+    const user = await insertTestUser();
+    let releaseOpen!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    client = new FakeTerminalRuntimeClient({ gateFirstOpen: () => gate });
+    service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(client),
+      isIdentityAttested: () => true,
+    });
+    const app = authedApp(createTerminalRoutes(service), user);
+    const calledOpen = client.waitForCall('open');
+    const first = app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    await calledOpen;
+
+    const availability = await app.handle(
+      jsonRequest(`/terminals/availability?environmentId=${LOCAL_ENVIRONMENT_ID}`, 'GET')
+    );
+    expect((await availability.json()) as TerminalAvailability).toMatchObject({
+      available: false,
+      reason: 'limit',
+      openSessions: 1,
+    });
+    const second = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { code: string }).code).toBe(ERROR_CODES.TERMINAL_LIMIT);
+    releaseOpen();
+    expect((await first).status).toBe(201);
+    expect(client.calls.open).toHaveLength(1);
+  });
+
+  it('maps an aborted runtime open to a terminal refusal instead of a server error', async () => {
+    const user = await insertTestUser();
+    client = new FakeTerminalRuntimeClient({
+      failFirstOpen: new DOMException('Runtime open canceled.', 'AbortError'),
+    });
+    service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(client),
+      isIdentityAttested: () => true,
+    });
+    const app = authedApp(createTerminalRoutes(service), user);
+    const response = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
+  });
+
+  it('maps a dropped runtime open to 409 instead of an internal error', async () => {
+    const user = await insertTestUser();
+    client = new FakeTerminalRuntimeClient({
+      failFirstOpen: new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime disconnected'),
+    });
+    service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(client),
+      isIdentityAttested: () => true,
+    });
+    const app = authedApp(createTerminalRoutes(service), user);
+
+    const response = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
+    expect(service.list(user.id)).toHaveLength(0);
+  });
+
   it('defaults cwd to the chat workdir and stamps MANGOSTUDIO_CHAT_ID', async () => {
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
@@ -195,6 +320,35 @@ describe('terminal HTTP routes with a fake runtime', () => {
     expect(client.calls.close.map((call) => call.sessionId)).toContain(session.id);
   });
 
+  it('returns 409 and keeps the session visible when runtime close fails', async () => {
+    const user = await insertTestUser();
+    client = new FakeTerminalRuntimeClient({ failFirstClose: new Error('close failed') });
+    service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(client),
+      isIdentityAttested: () => true,
+    });
+    const app = authedApp(createTerminalRoutes(service), user);
+    const opened = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    const { session } = (await opened.json()) as TerminalSessionResponse;
+
+    const failed = await app.handle(jsonRequest(`/terminals/${session.id}`, 'DELETE'));
+    expect(failed.status).toBe(409);
+    expect(((await failed.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
+    const listed = await app.handle(jsonRequest('/terminals', 'GET'));
+    expect((await listed.json()) as { sessions: unknown[] }).toMatchObject({
+      sessions: [{ id: session.id }],
+    });
+    expect((await app.handle(jsonRequest(`/terminals/${session.id}`, 'DELETE'))).status).toBe(200);
+  });
+
   it('reports availability reasons the schema defines', async () => {
     const user = await insertTestUser();
     const app = authedApp(routes, user);
@@ -203,6 +357,22 @@ describe('terminal HTTP routes with a fake runtime', () => {
       jsonRequest(`/terminals/availability?environmentId=${LOCAL_ENVIRONMENT_ID}`, 'GET')
     );
     expect(((await available.json()) as TerminalAvailability).available).toBe(true);
+  });
+
+  it('lists a detached exit from the runtime before reporting session status', async () => {
+    const user = await insertTestUser();
+    const app = authedApp(routes, user);
+    const opened = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    const { session } = (await opened.json()) as TerminalSessionResponse;
+    client.setSessionExit(session.id, 4);
+
+    const listed = await app.handle(jsonRequest('/terminals', 'GET'));
+    expect(listed.status).toBe(200);
+    expect((await listed.json()) as { sessions: unknown[] }).toMatchObject({
+      sessions: [{ id: session.id, status: 'exited', exit: { exitCode: 4, signal: null } }],
+    });
   });
 });
 

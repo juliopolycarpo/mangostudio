@@ -14,6 +14,11 @@
  * dropped the frame — with the shared `closeOnBackpressureLimit: true`, that
  * is the socket closing anyway, so the relay closes it with a typed reason.
  *
+ * A terminal exit stops new frames, then waits for the relay queue and Bun's
+ * socket buffer to empty before closing. A viewer that never drains gets five
+ * seconds; the socket then closes with its requested code while the exited
+ * session record and its runtime scrollback remain available for a new attach.
+ *
  * // Usage:
  * //   const relay = createTerminalSocketRelay({ send, getBufferedAmount, close, buildOverflowNotice });
  * //   relay.push(dataFrame);
@@ -38,6 +43,12 @@ export interface TerminalSocketRelayDeps {
   readonly highWaterBytes?: number;
   /** Defaults to `TERMINAL_HUB_QUEUE_MAX_BYTES`. */
   readonly maxQueueBytes?: number;
+  /** Final-output drain is bounded to five seconds by default. */
+  readonly closeDeadlineMs?: number;
+  readonly closePollMs?: number;
+  readonly now?: () => number;
+  readonly schedule?: (run: () => void, delayMs: number) => unknown;
+  readonly cancelScheduled?: (handle: unknown) => void;
 }
 
 export interface TerminalSocketRelay {
@@ -45,11 +56,15 @@ export interface TerminalSocketRelay {
   push(frame: Uint8Array): void;
   /** Resumes flushing the queue; call this from the socket's `drain` handler. */
   drain(): void;
+  /** Stops accepting frames and closes once both queues drain, or at the deadline. */
+  closeAfterDrain(code: number, reason: string): void;
   /** Bytes currently queued and not yet handed to `send`. */
   queuedBytes(): number;
 }
 
 const DROPPED_CLOSE_REASON = 'Send buffer exceeded';
+const DEFAULT_CLOSE_DEADLINE_MS = 5_000;
+const DEFAULT_CLOSE_POLL_MS = 25;
 
 export function createTerminalSocketRelay(deps: TerminalSocketRelayDeps): TerminalSocketRelay {
   const highWaterBytes = deps.highWaterBytes ?? TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES;
@@ -57,12 +72,54 @@ export function createTerminalSocketRelay(deps: TerminalSocketRelayDeps): Termin
   const queue: Uint8Array[] = [];
   let queuedBytes = 0;
   let closed = false;
+  let closing: { code: number; reason: string; deadline: number } | null = null;
+  let closeCheck: unknown = null;
+  const now = deps.now ?? Date.now;
+  const schedule =
+    deps.schedule ?? ((run: () => void, delayMs: number) => setTimeout(run, delayMs));
+  const cancelScheduled =
+    deps.cancelScheduled ??
+    ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   // Set on a `-1` result and cleared only by `drain()`. `getBufferedAmount()`
   // ought to reflect the same backpressure on a real socket, but this flag is
   // the relay's own memory of "stop until told to resume" rather than a
   // re-derivation of it — a `send` a caller stubbed without also growing its
   // buffered-amount report must not be reattempted before `drain()` says so.
   let waitingForDrain = false;
+
+  function finishClose(code: number, reason: string): void {
+    if (closed) return;
+    closed = true;
+    if (closeCheck !== null) cancelScheduled(closeCheck);
+    closeCheck = null;
+    deps.close(code, reason);
+  }
+
+  function finishIfDrained(): void {
+    if (!closing || waitingForDrain || queue.length > 0 || deps.getBufferedAmount() > 0) return;
+    finishClose(closing.code, closing.reason);
+  }
+
+  function scheduleCloseCheck(): void {
+    if (closed || !closing || closeCheck !== null) return;
+    const delay = Math.min(deps.closePollMs ?? DEFAULT_CLOSE_POLL_MS, closing.deadline - now());
+    closeCheck = schedule(
+      () => {
+        closeCheck = null;
+        if (!closing || closed) return;
+        if (now() >= closing.deadline) {
+          // The viewer stopped draining. The runtime session remains recorded;
+          // only this browser socket is bounded by the deadline.
+          finishClose(closing.code, closing.reason);
+          return;
+        }
+        pump();
+        finishIfDrained();
+        scheduleCloseCheck();
+      },
+      Math.max(0, delay)
+    );
+  }
 
   function pump(): void {
     if (waitingForDrain) return;
@@ -75,8 +132,7 @@ export function createTerminalSocketRelay(deps: TerminalSocketRelayDeps): Termin
       queuedBytes -= next.byteLength;
 
       if (result === 0) {
-        closed = true;
-        deps.close(TERMINAL_SOCKET_CLOSE_CODES.INTERNAL_ERROR, DROPPED_CLOSE_REASON);
+        finishClose(TERMINAL_SOCKET_CLOSE_CODES.INTERNAL_ERROR, DROPPED_CLOSE_REASON);
         return;
       }
       if (result < 0) {
@@ -84,6 +140,7 @@ export function createTerminalSocketRelay(deps: TerminalSocketRelayDeps): Termin
         return;
       }
     }
+    finishIfDrained();
   }
 
   function discardOldestUntilWithinBudget(incomingBytes: number): void {
@@ -101,7 +158,7 @@ export function createTerminalSocketRelay(deps: TerminalSocketRelayDeps): Termin
 
   return {
     push(frame) {
-      if (closed) return;
+      if (closed || closing) return;
       discardOldestUntilWithinBudget(frame.byteLength);
       queue.push(frame);
       queuedBytes += frame.byteLength;
@@ -110,6 +167,17 @@ export function createTerminalSocketRelay(deps: TerminalSocketRelayDeps): Termin
     drain() {
       waitingForDrain = false;
       pump();
+    },
+    closeAfterDrain(code, reason) {
+      if (closed || closing) return;
+      closing = {
+        code,
+        reason,
+        deadline: now() + (deps.closeDeadlineMs ?? DEFAULT_CLOSE_DEADLINE_MS),
+      };
+      pump();
+      finishIfDrained();
+      scheduleCloseCheck();
     },
     queuedBytes() {
       return queuedBytes;

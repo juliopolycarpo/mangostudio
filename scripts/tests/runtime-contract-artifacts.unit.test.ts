@@ -85,11 +85,10 @@ describe('runtime contract artifacts', () => {
   });
 
   /**
-   * `runtime.health` is the deliberate exception: it answers what a machine is
-   * allowed to do, so gating it on a capability would make the answer
-   * unreachable for exactly the machine whose answer matters.
+   * Health must answer regardless of consent, and terminal.close must still
+   * terminate an existing PTY after shell consent has been withdrawn.
    */
-  test('every method declares a capability list, and only health is empty', () => {
+  test('every method declares a capability list, with health and terminal cleanup ungated', () => {
     const withoutList = renderedCatalog()
       .methods.filter((method) => method.capabilities === undefined)
       .map((method) => method.name);
@@ -98,7 +97,7 @@ describe('runtime contract artifacts', () => {
     const ungated = renderedCatalog()
       .methods.filter((method) => (method.capabilities ?? []).length === 0)
       .map((method) => method.name);
-    expect(ungated).toEqual(['runtime.health']);
+    expect(ungated).toEqual(['terminal.close', 'runtime.health']);
   });
 
   test('the catalog carries the events and the manifest a peer negotiates with', () => {

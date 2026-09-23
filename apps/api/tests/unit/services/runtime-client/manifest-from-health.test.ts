@@ -126,11 +126,13 @@ describe('capabilityManifestFromHealth', () => {
       enforcesPathPolicy: true,
       publishesWindowsSlot: true,
       directoryHashDomain: 2,
+      terminalCloseAfterRevocation: true,
     });
 
     expect(refreshed.enforcesPathPolicy).toBe(true);
     expect(refreshed.publishesWindowsSlot).toBe(true);
     expect(refreshed.directoryHashDomain).toBe(2);
+    expect(refreshed.terminalCloseAfterRevocation).toBe(true);
   });
 
   it('does not invent build facts a handshake never claimed', () => {
@@ -145,6 +147,7 @@ describe('capabilityManifestFromHealth', () => {
     expect(refreshed.enforcesPathPolicy).toBeUndefined();
     expect(refreshed.publishesWindowsSlot).toBeUndefined();
     expect(refreshed.directoryHashDomain).toBeUndefined();
+    expect(refreshed.terminalCloseAfterRevocation).toBeUndefined();
   });
 
   it('keeps the handshake implementation ceiling while applying later consent changes', () => {

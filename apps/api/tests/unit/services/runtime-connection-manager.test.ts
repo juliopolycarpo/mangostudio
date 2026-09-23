@@ -1287,6 +1287,34 @@ describe('RuntimeConnectionManager', () => {
     expect(revocations).toEqual(['user-1:devbox']);
   });
 
+  it('reports terminal consent withdrawal once when the manifest refreshes', async () => {
+    const consented = capabilityManifestFromHealth({ ...HEALTH_REPORT, terminal: true });
+    const revoked: RuntimeHealthReport = {
+      ...HEALTH_REPORT,
+      terminal: false,
+      allow: { ...HEALTH_REPORT.allow, shell: false },
+    };
+    const probe = healthProbe(consented, () => Promise.resolve(revoked));
+    const revocations: string[] = [];
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => Promise.resolve({ client: probe.client, close: () => undefined }),
+      },
+    });
+    manager.onTerminalsRevoked((userId, environmentId) => {
+      revocations.push(`${userId}:${environmentId}`);
+    });
+
+    await manager.connect('user-1', 'devbox');
+    await manager.refreshManifest('user-1', 'devbox');
+    expect(revocations).toEqual(['user-1:devbox']);
+    expect(manager.getStatus('user-1', 'devbox').manifest?.terminal).toBe(false);
+
+    await manager.refreshManifest('user-1', 'devbox');
+    expect(revocations).toEqual(['user-1:devbox']);
+  });
+
   it('publishes nothing when the machine answers exactly what was cached', async () => {
     // A card polling this endpoint is woken by the invalidation a refresh
     // publishes. Publishing an unchanged manifest would make every window

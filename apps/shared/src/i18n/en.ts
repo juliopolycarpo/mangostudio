@@ -2033,6 +2033,8 @@ export const messages: Messages = {
         'The Local runtime shares the hub’s account with other users, so terminals stay off there.',
       unavailable:
         'This environment cannot open a terminal. It needs a shell and the shell permission.',
+      runtimeUpdateRequired:
+        'This environment’s runtime needs an update before terminals can open safely.',
       disconnected: 'The environment is not connected.',
     },
     page: {
