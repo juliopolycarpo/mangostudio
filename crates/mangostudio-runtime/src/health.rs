@@ -213,25 +213,24 @@ pub(crate) async fn build_capability_manifest(
         git.clone(),
     );
     manifest.features = crate::manifest::build_features(registry, &allow, git.available);
-    manifest.terminal = Some(
-        allow.shell
-            && !manifest.shells.is_empty()
-            && cfg!(any(unix, windows))
-            && [
-                "terminal.open",
-                "terminal.attach",
-                "terminal.detach",
-                "terminal.write",
-                "terminal.resize",
-                "terminal.ack",
-                "terminal.close",
-                "terminal.list",
-            ]
-            .iter()
-            .all(|method| {
-                registry.classify(method) == crate::registry::Classification::Implemented
-            }),
-    );
+    // `terminal::register` installs these methods together with the consent watcher. Its
+    // close handler remains callable after shell consent is revoked. Attest that invariant
+    // independently of current consent or shell discovery, which can change after hello.
+    let terminal_implementation = cfg!(any(unix, windows))
+        && [
+            "terminal.open",
+            "terminal.attach",
+            "terminal.detach",
+            "terminal.write",
+            "terminal.resize",
+            "terminal.ack",
+            "terminal.close",
+            "terminal.list",
+        ]
+        .iter()
+        .all(|method| registry.classify(method) == crate::registry::Classification::Implemented);
+    manifest.terminal_close_after_revocation = terminal_implementation.then_some(true);
+    manifest.terminal = Some(allow.shell && !manifest.shells.is_empty() && terminal_implementation);
     manifest.gh = Some(gh_probe.unwrap_or_else(|_| unavailable_git()));
     manifest.profile = Some(resolved.profile);
     manifest.allow = Some(allow);
@@ -1101,6 +1100,7 @@ mod tests {
         assert!(manifest.features.toolchain, "toolchain is unconditional");
 
         let wire = serde_json::to_value(&manifest).expect("serialises");
+        assert!(wire.get("terminalCloseAfterRevocation").is_none());
         assert!(
             mangostudio_runtime_contract::schemas::validate_manifest(&wire).is_ok(),
             "a manifest this crate builds for `hello` must validate against the same schema the \
@@ -1121,6 +1121,34 @@ mod tests {
         .await;
         assert!(!manifest.shells.is_empty());
         assert_eq!(manifest.terminal, Some(true));
+        let wire = serde_json::to_value(&manifest).expect("serialises");
+        assert_eq!(
+            wire["terminalCloseAfterRevocation"], true,
+            "terminal support must attest close remains usable after revocation"
+        );
+    }
+
+    #[tokio::test]
+    async fn denied_shell_keeps_the_terminal_cleanup_attestation() {
+        let home = scratch_home("terminal-revocation-capabilities-host");
+        crate::runtime_home::write_runtime_slot_config(
+            RuntimeSlot::Host,
+            &home,
+            &[("allow", Some(serde_json::json!({ "shell": false })))],
+        )
+        .expect("deny shell consent");
+        let host = crate::transport::build_host(RuntimeSlot::Host, &home, "0.1.0");
+        let manifest = build_capability_manifest(
+            RuntimeSlot::Host,
+            &home,
+            &host.registry,
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(manifest.terminal, Some(false));
+        assert_eq!(manifest.terminal_close_after_revocation, Some(true));
+        assert!(manifest.shells.is_empty());
     }
 
     /// Shell discovery and `git --version` do not depend on one another, but
