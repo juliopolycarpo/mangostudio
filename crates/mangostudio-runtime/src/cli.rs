@@ -352,6 +352,29 @@ fn build_runtime() -> std::io::Result<tokio::runtime::Runtime> {
         .build()
 }
 
+/// How long exiting waits for blocking work that is still running once a
+/// host's session or loop has ended.
+///
+/// Dropping a Tokio runtime waits for every blocking task without limit. The
+/// stdio transport's stdin reader stays blocked in `read` for as long as the
+/// parent holds the pipe open, so a signalled stdio runtime never exited. Work
+/// still running after this grace ends with the process, like every other
+/// resource.
+const RUNTIME_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Shuts `runtime` down without waiting on blocking work past
+/// [`RUNTIME_SHUTDOWN_GRACE`].
+///
+/// # Example
+///
+/// ```ignore
+/// let code = runtime.block_on(session);
+/// shut_down(runtime);
+/// ```
+fn shut_down(runtime: tokio::runtime::Runtime) {
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_GRACE);
+}
+
 fn run_stdio(env: &impl EnvSource) -> i32 {
     let Some(home) = mango_home_or_report(env) else {
         return 1;
@@ -368,9 +391,11 @@ fn run_stdio(env: &impl EnvSource) -> i32 {
         eprintln!("mangostudio-runtime: could not install signal handlers.");
         return 1;
     };
-    match runtime.block_on(crate::transport::stdio::run_with_signals(
+    let result = runtime.block_on(crate::transport::stdio::run_with_signals(
         VERSION, &home, signals,
-    )) {
+    ));
+    shut_down(runtime);
+    match result {
         Ok(code) => code,
         Err(error) => {
             eprintln!("mangostudio-runtime: {error}");
@@ -468,7 +493,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         eprintln!("mangostudio-runtime: could not start the async runtime.");
         return 1;
     };
-    runtime.block_on(async move {
+    let code = runtime.block_on(async move {
         // Installed before anything else in this block, including the bind
         // below: a signal is eagerly registered here (never lazily, inside
         // a `select!` reached after setup work — see
@@ -513,7 +538,9 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         // — never a wait on a signal that may never come.
         let _ = crate::supervisor::join_owned(signal_task).await;
         code
-    })
+    });
+    shut_down(runtime);
+    code
 }
 
 fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
@@ -582,7 +609,7 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         eprintln!("mangostudio-runtime: could not start the async runtime.");
         return 1;
     };
-    runtime.block_on(async move {
+    let code = runtime.block_on(async move {
         // See the identical comment in `run_serve`: installed first, always.
         let Ok(signals) = crate::supervisor::ShutdownSignals::install() else {
             eprintln!("mangostudio-runtime: could not install signal handlers.");
@@ -613,15 +640,16 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
                 // The process is exiting on the hub's refusal, not the
                 // signal — `signal_task` may never resolve at all now, so
                 // awaiting it here would hang. It is not aborted either:
-                // simply dropping the handle detaches it, and the runtime
-                // this function's own local `runtime` is about to drop
-                // reclaims it the same way process exit reclaims every
+                // simply dropping the handle detaches it, and `shut_down`
+                // below reclaims it the same way process exit reclaims every
                 // other resource, never a task this code chose to abandon
                 // while it still had something left to do.
                 1
             }
         }
-    })
+    });
+    shut_down(runtime);
+    code
 }
 
 /// The remote slot's "invocation is consent" gate shared by `serve` and
