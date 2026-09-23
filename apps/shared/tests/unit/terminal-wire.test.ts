@@ -13,6 +13,7 @@ import {
   TERMINAL_INFLIGHT_WINDOW_BYTES,
   TERMINAL_SERVER_FRAME,
   TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES,
+  TerminalAvailabilitySchema,
   TerminalOpenBodySchema,
   TerminalSessionSchema,
   TerminalWireError,
@@ -142,6 +143,19 @@ describe('terminal limits', () => {
 });
 
 describe('terminal schemas', () => {
+  it('accepts an update-required terminal availability without treating it as shell denial', () => {
+    expect(
+      Value.Check(TerminalAvailabilitySchema, {
+        environmentId: 'remote',
+        available: false,
+        reason: 'runtime-update-required',
+        shells: [],
+        openSessions: 0,
+        maxSessions: 8,
+      })
+    ).toBe(true);
+  });
+
   it('accepts a running session and an exited one', () => {
     const running = {
       id: 'sess-1',

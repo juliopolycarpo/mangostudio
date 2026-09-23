@@ -80,7 +80,11 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
         query: TerminalListQuerySchema,
         response: { 200: TerminalListResponseSchema },
       },
-      ({ query, user }) => ({ sessions: service.list(user?.id ?? '', query) })
+      async ({ query, user }) => {
+        const userId = user?.id ?? '';
+        await service.reconcile(userId);
+        return { sessions: service.list(userId, query) };
+      }
     )
     .post(
       '/terminals',
@@ -93,12 +97,20 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
           409: ApiErrorResponseSchema,
         },
       },
-      async ({ body, set, user }) => {
+      async ({ body, request, set, user }) => {
         try {
-          const session = await service.open(user?.id ?? '', body);
+          const session = await service.open(user?.id ?? '', body, request.signal);
           set.status = 201;
           return { session };
         } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            set.status = 409;
+            return {
+              error: 'Terminal open canceled.',
+              code: ERROR_CODES.UNSUPPORTED,
+              details: { reason: 'disconnected' },
+            };
+          }
           return mapTerminalError(error, set);
         }
       }
@@ -122,7 +134,11 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
       '/terminals/:id',
       {
         params: idParams,
-        response: { 200: OkResponseSchema, 404: ApiErrorResponseSchema },
+        response: {
+          200: OkResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+        },
       },
       async ({ params, set, user }) => {
         try {

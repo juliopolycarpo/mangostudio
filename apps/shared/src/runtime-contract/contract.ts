@@ -331,10 +331,11 @@ const RUNTIME_METHODS = {
   'terminal.ack': method(Methods.RuntimeTerminalAckParamsSchema, Methods.RuntimeAckResultSchema, [
     'shell',
   ]),
+  // Closing an existing PTY must remain possible after shell consent is revoked.
   'terminal.close': method(
     Methods.RuntimeTerminalCloseParamsSchema,
     Methods.RuntimeAckResultSchema,
-    ['shell']
+    []
   ),
   'terminal.list': method(Methods.RuntimeNoParamsSchema, Methods.RuntimeTerminalListResultSchema, [
     'shell',

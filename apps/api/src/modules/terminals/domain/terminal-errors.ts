@@ -33,10 +33,13 @@ export class TerminalNotIsolatedError extends Error {
   }
 }
 
-/** `reason` is always one of the two `UNSUPPORTED` cases the schema documents. */
+/** `reason` is an `UNSUPPORTED` refusal the terminal schema documents. */
 export class TerminalUnavailableError extends Error {
   constructor(
-    readonly reason: Extract<TerminalRefusalReason, 'disconnected' | 'unavailable'>,
+    readonly reason: Extract<
+      TerminalRefusalReason,
+      'disconnected' | 'unavailable' | 'runtime-update-required'
+    >,
     message: string
   ) {
     super(message);
