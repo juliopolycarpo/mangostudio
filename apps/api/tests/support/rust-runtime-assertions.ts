@@ -72,7 +72,7 @@ export function assertRustRuntimeHealthShape(
  * Pins the real Rust host's implemented methods and their consent gates.
  *
  * @example
- * assertRustRuntimeFeatureCeiling(client.manifest, { probing: true, fsRead: true, fsWrite: true, checkpoints: true });
+ * assertRustRuntimeFeatureCeiling(client.manifest, { probing: true, fsRead: true, fsWrite: true, checkpoints: true, mcp: true });
  */
 export function assertRustRuntimeFeatureCeiling(
   manifest: RuntimeCapabilityManifest,
@@ -81,6 +81,7 @@ export function assertRustRuntimeFeatureCeiling(
     readonly fsRead: boolean;
     readonly fsWrite: boolean;
     readonly checkpoints: boolean;
+    readonly mcp: boolean;
   }
 ): void {
   // The shell feature includes install methods that are not implemented yet.
@@ -93,10 +94,11 @@ export function assertRustRuntimeFeatureCeiling(
       expected.probing ||
       expected.fsRead ||
       expected.fsWrite ||
-      expected.checkpoints,
+      expected.checkpoints ||
+      expected.mcp,
     git,
     probing: expected.probing,
-    mcp: false,
+    mcp: expected.mcp,
     library: false,
     checkpoints: expected.checkpoints,
     fsRead: expected.fsRead,

@@ -36,10 +36,14 @@ path = "src/main.rs"
 # via the launcher's own chain, at this exact version, so a direct dependency
 # on it adds no new version for `cargo deny`'s duplicate check to catch.
 base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+# Types the SDK's HTTP client trait is written against, plus SSE parsing for
+# both HTTP transports; all already in the graph through `rmcp`.
+bytes = "1"
 # Object-bound filesystem access for restricted path-policy operations. Version
 # 4.0.3 supports this workspace's Rust 1.97 MSRV on Linux, macOS, and Windows.
 cap-fs-ext = { version = "4.0.3", default-features = false, features = ["std"] }
 cap-std = { version = "4.0.3", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 # The CSPRNG behind `generate_serve_token` (see the `base64` comment above).
 # Already in the workspace graph at this exact version (ring 0.17's RNG shim
 # pins 0.2, rand 0.10 pins 0.4; this crate is the uncontested consumer of 0.3,
@@ -49,6 +53,7 @@ getrandom = { version = "0.3", default-features = false }
 # `fs.glob` uses its brace, character-class, and recursive-wildcard parser,
 # while this crate owns traversal, dotfile rules, ordering, and path policy.
 globset = { version = "0.4.19", default-features = false }
+http = "1"
 # `library.scan` sorts a directory resource's files with the TypeScript
 # host's `String.prototype.localeCompare` (ICU root collation) before
 # hashing their whitespace digests and before `library.read-tree` returns
@@ -75,12 +80,29 @@ mangostudio-runtime-contract.workspace = true
 # `commands`, and for the audit log's credential-shape redaction, which needs
 # the same fixed set of patterns `apps/runtime/src/audit-log.ts` masks with.
 regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
+# MCP over HTTP (`mcp/http.rs`, `mcp/sse.rs`). `rustls-no-provider` rather than
+# reqwest's default `rustls`, which enables `aws-lc-rs`: the client is handed a
+# preconfigured `ring` config with the webpki root store, the same TLS policy
+# `mango-protocol`'s WebSocket dialler uses.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"] }
+# MCP SDK access stays inside `mcp/`; the host owns the session and wire
+# mapping. Pin this version while the 2026-07-28 client API is integrated.
+# No `transport-child-process`: stdio servers are launched by the shared
+# guardian/Job supervisor and the SDK only receives their pipes
+# (`transport-async-rw`).
+# `transport-streamable-http-client` without the SDK's own reqwest backend:
+# `mcp/http.rs` implements the SDK's HTTP client trait so it owns status
+# handling (the legacy SSE fallback needs the initialize POST's status) and
+# the TLS provider.
+rmcp = { version = "=3.4.0", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"] }
 # `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
 # code units, named captures, and an engine interrupt hook for its hard deadline.
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
 sha2 = "0.11"
+sse-stream = "0.2"
 # A normal dependency, not a dev one: `main.rs` builds its own multi-thread
 # runtime for `stdio`/`serve`/`connect` (never `#[tokio::main]` — the
 # consent/setup/token/lock work those subcommands do first is synchronous by
@@ -101,6 +123,7 @@ tokio-util = { version = "0.7", default-features = false }
 # Codex subagent's `name`/`description`, mirroring `smol-toml`'s parse in
 # `apps/shared/src/library/machine/instance-reader.ts`.
 toml = { version = "1.1", default-features = false, features = ["std", "parse", "serde"] }
+webpki-roots = "1"
 
 [dev-dependencies]
 # Only this crate's own tests use the spawn launcher, standing in for a hub

@@ -182,8 +182,20 @@ impl WindowsJobChild {
 pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     let job = Arc::new(create_killing_job()?);
     let pipes = ChildPipes::from_request(request)?;
-    let application = application_name(request.program.as_os_str())?;
-    let mut command_line = command_line(request)?;
+    // A batch file is run by cmd.exe, which does not understand the MSVC quoting below; it gets
+    // its own interpreter path and cmd.exe-safe command line (see `super::batch`).
+    let (application, mut command_line) = if super::batch::is_batch(&request.program) {
+        let launch = super::batch::BatchLaunch::new(request)?;
+        (
+            Some(wide_nul(launch.interpreter.as_os_str(), "program")?),
+            wide_nul(OsStr::new(&launch.command_line), "command line")?,
+        )
+    } else {
+        (
+            application_name(request.program.as_os_str())?,
+            command_line(request)?,
+        )
+    };
     let current_directory = request.cwd.as_deref().map(path_wide_nul).transpose()?;
     let environment = request.env.as_ref().map(environment_block).transpose()?;
 
