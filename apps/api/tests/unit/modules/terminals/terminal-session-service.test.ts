@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import {
   DEFAULT_TOOLCHAIN_SELECTION,
   LOCAL_ENVIRONMENT_ID,
   type ToolchainSelection,
 } from '@mangostudio/shared/environments';
+import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+import { TERMINAL_SOCKET_CLOSE_CODES } from '@mangostudio/shared/terminal';
 import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
 import {
   createTerminalSessionService,
@@ -19,6 +22,7 @@ import {
   TerminalSessionNotFoundError,
   TerminalUnavailableError,
 } from '../../../../src/modules/terminals/domain/terminal-errors';
+import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 import {
   FAKE_TERMINAL_MANIFEST,
   FakeTerminalRuntimeClient,
@@ -34,6 +38,14 @@ function barrier(): { promise: Promise<void>; release: () => void } {
     release = resolve;
   });
   return { promise, release };
+}
+
+function failureGate(): { promise: Promise<void>; reject: (error: Error) => void } {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((_, fail) => {
+    reject = fail;
+  });
+  return { promise, reject };
 }
 
 function defaultConfig(overrides: Partial<TerminalConfig> = {}): TerminalConfig {
@@ -197,6 +209,53 @@ describe('terminalSessionService.open', () => {
     await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
       TerminalUnavailableError
     );
+  });
+
+  test('shutdown gives each runtime close an explicit deadline', async () => {
+    const { service, client } = createHarness();
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+
+    await service.closeAll();
+
+    expect(client.calls.close).toEqual([{ sessionId: session.id }]);
+    expect(client.requestOptions.close[0]?.timeoutMs).toBeGreaterThan(0);
+  });
+
+  for (const scenario of ['disconnect', 'revocation', 'shutdown'] as const) {
+    test(`${scenario} cannot recreate a seat when a rejected open also fails cleanup`, async () => {
+      const gate = failureGate();
+      const client = new FakeTerminalRuntimeClient({
+        gateFirstOpen: () => gate.promise,
+        failFirstClose: new Error('close failed'),
+      });
+      const { service } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+      const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+      await client.waitForCall('open');
+
+      if (scenario === 'disconnect') client.fireClose();
+      if (scenario === 'revocation') service.revokeScope(USER_ID, ENVIRONMENT_ID);
+      if (scenario === 'shutdown') await service.closeAll();
+      gate.reject(new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime disconnected'));
+
+      await expect(opening).rejects.toBeInstanceOf(TerminalUnavailableError);
+      expect(client.calls.close).toHaveLength(1);
+      expect(service.list(USER_ID)).toHaveLength(0);
+      expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+    });
+  }
+
+  test.each([
+    new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime disconnected'),
+    new RuntimeConsentDeniedError('shell access withdrawn'),
+    new ToolExecutionTimedOutError('terminal.open timed out'),
+  ])('maps an open refusal to TerminalUnavailableError: %s', async (failure) => {
+    const client = new FakeTerminalRuntimeClient({ failFirstOpen: failure });
+    const { service } = createHarness({ client });
+
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
+      TerminalUnavailableError
+    );
+    expect(service.list(USER_ID)).toHaveLength(0);
   });
 
   test('reconciles detached exits at the cap without evicting running sessions', async () => {
@@ -484,6 +543,29 @@ describe('terminalSessionService runtime disconnect', () => {
 });
 
 describe('terminalSessionService.reapIdle', () => {
+  test('refuses a new attach during idle close and closes a racing viewer after it', async () => {
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({ gateFirstClose: () => gate.promise });
+    const { service, now } = createHarness({ client, config: { idleTimeoutMinutes: 5 } });
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    const alreadyAuthorized = service.getForAttach(USER_ID, session.id);
+    expect(alreadyAuthorized).not.toBeNull();
+    now.value += 6 * 60_000;
+
+    const calledClose = client.waitForCall('close');
+    service.reapIdle();
+    await calledClose;
+    expect(service.getForAttach(USER_ID, session.id)).toBeNull();
+    const viewer = new RecordingViewer();
+    service.attachViewer(session.id, viewer);
+    gate.release();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(viewer.closed?.code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+    expect(service.list(USER_ID)).toHaveLength(0);
+  });
+
   test('closes a viewer-less session once it has been idle past the configured timeout', async () => {
     const { service, client, now } = createHarness({ config: { idleTimeoutMinutes: 5 } });
     const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });

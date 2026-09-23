@@ -53,6 +53,8 @@ export interface FakeTerminalRuntimeClientOptions {
   readonly gateFirstOpen?: () => Promise<unknown>;
   readonly failFirstOpen?: Error;
   readonly failFirstClose?: Error;
+  /** Awaited before the first close settles, after recording its request. */
+  readonly gateFirstClose?: () => Promise<unknown>;
   readonly gateFirstList?: () => Promise<unknown>;
   /** Awaited before the *first* `terminal.detach` call resolves; later calls are immediate. */
   readonly gateFirstDetach?: () => Promise<unknown>;
@@ -99,6 +101,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
   #gateFirstOpen: (() => Promise<unknown>) | undefined;
   #failFirstOpen: Error | undefined;
   #failFirstClose: Error | undefined;
+  #gateFirstClose: (() => Promise<unknown>) | undefined;
   #gateFirstList: (() => Promise<unknown>) | undefined;
   readonly #sessions = new Map<string, RuntimeTerminalSessionSummary>();
   readonly requestOptions = {
@@ -118,6 +121,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     this.#gateFirstOpen = options.gateFirstOpen;
     this.#failFirstOpen = options.failFirstOpen;
     this.#failFirstClose = options.failFirstClose;
+    this.#gateFirstClose = options.gateFirstClose;
     this.#gateFirstList = options.gateFirstList;
     this.#gateFirstDetach = options.gateFirstDetach;
     this.#gateFirstWrite = options.gateFirstWrite;
@@ -226,14 +230,17 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
       this.#record('ack', params);
       return Promise.resolve({ ok: true as const });
     },
-    close: (params, options) => {
+    close: async (params, options) => {
       this.#record('close', params);
       this.requestOptions.close.push(options);
+      const gate = this.#gateFirstClose;
+      this.#gateFirstClose = undefined;
+      if (gate) await gate();
       const failure = this.#failFirstClose;
       this.#failFirstClose = undefined;
-      if (failure) return Promise.reject(failure);
+      if (failure) throw failure;
       this.#sessions.delete(params.sessionId);
-      return Promise.resolve({ ok: true as const });
+      return { ok: true as const };
     },
     list: async (options) => {
       this.requestOptions.list.push(options);

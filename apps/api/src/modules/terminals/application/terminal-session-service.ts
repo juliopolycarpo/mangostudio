@@ -8,7 +8,9 @@
  * connection, and a restarted hub has none.
  */
 
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID, type ToolchainSelection } from '@mangostudio/shared/environments';
+import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import {
   TERMINAL_DEFAULT_COLS,
   TERMINAL_DEFAULT_ROWS,
@@ -29,6 +31,7 @@ import {
   getRuntimeClient as getRuntimeClientDefault,
   getRuntimeConnectionManager,
 } from '../../../services/runtime-client/runtime-connection-manager';
+import { ToolExecutionTimedOutError } from '../../../services/tools/execution-timeout';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
 import {
@@ -142,6 +145,7 @@ interface TerminalReservation {
   readonly environmentId: string;
   client: TerminalRuntimeClient | null;
   canceled: boolean;
+  scopeEnded: boolean;
   openSent: boolean;
 }
 
@@ -194,6 +198,7 @@ export function createTerminalSessionService(
 
   function cancelReservation(reservation: TerminalReservation): void {
     reservation.canceled = true;
+    reservation.scopeEnded = true;
     reservations.delete(reservation);
   }
 
@@ -303,7 +308,14 @@ export function createTerminalSessionService(
             { sessionId: id },
             { timeoutMs: TERMINAL_CLOSE_TIMEOUT_MS }
           );
-          if (sessions.get(id) === entry) sessions.delete(id);
+          if (sessions.get(id) !== entry) return;
+          if (entry.viewer) {
+            entry.session.status = 'exited';
+            entry.session.exit = { exitCode: null, signal: null };
+            entry.session.lastActivityAt = d.now();
+            entry.viewer.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session closed while idle');
+          }
+          sessions.delete(id);
         } catch (error) {
           logger.warn('idle_close_failed', {
             sessionId: id,
@@ -338,6 +350,7 @@ export function createTerminalSessionService(
         environmentId: body.environmentId,
         client: null,
         canceled: false,
+        scopeEnded: false,
         openSent: false,
       };
       reservations.add(reservation);
@@ -439,16 +452,37 @@ export function createTerminalSessionService(
         } catch (error) {
           // A timeout or lost response cannot prove that the runtime refused
           // the open. Close by id; if that also fails, keep a visible cap seat.
-          if (!(await closeUnclaimed())) {
+          if (!(await closeUnclaimed()) && !reservation.scopeEnded) {
             registerSession(
               body.shell ?? client.manifest.shells[0] ?? 'bash',
               cwd ?? client.manifest.homeDir
             );
           }
+          if (reservation.canceled) requireReservation();
+          if (
+            error instanceof RuntimeConsentDeniedError ||
+            (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.DENIED)
+          ) {
+            throw new TerminalUnavailableError(
+              'unavailable',
+              `Environment "${body.environmentId}" no longer grants terminal access.`
+            );
+          }
+          if (
+            error instanceof ToolExecutionTimedOutError ||
+            (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE)
+          ) {
+            throw new TerminalUnavailableError(
+              'disconnected',
+              `Environment "${body.environmentId}" did not complete the terminal open.`
+            );
+          }
           throw error;
         }
         if (reservation.canceled) {
-          if (!(await closeUnclaimed())) registerSession(openResult.shell, openResult.cwd);
+          if (!(await closeUnclaimed()) && !reservation.scopeEnded) {
+            registerSession(openResult.shell, openResult.cwd);
+          }
           requireReservation();
         }
         return registerSession(openResult.shell, openResult.cwd);
@@ -466,6 +500,7 @@ export function createTerminalSessionService(
           continue;
         }
         reservation.canceled = true;
+        reservation.scopeEnded = true;
         if (!reservation.openSent) reservations.delete(reservation);
       }
       for (const entry of sessions.values()) {
@@ -557,7 +592,7 @@ export function createTerminalSessionService(
 
     getForAttach(userId, sessionId) {
       const entry = sessions.get(sessionId);
-      if (!entry || entry.ownerUserId !== userId) return null;
+      if (!entry || entry.ownerUserId !== userId || reaping.has(sessionId)) return null;
       return { session: entry.session, client: entry.client };
     },
 
@@ -620,7 +655,9 @@ export function createTerminalSessionService(
       sessions.clear();
       await Promise.all(
         entries.map((entry) =>
-          entry.client.terminal.close({ sessionId: entry.session.id }).catch(() => undefined)
+          entry.client.terminal
+            .close({ sessionId: entry.session.id }, { timeoutMs: TERMINAL_CLOSE_TIMEOUT_MS })
+            .catch(() => undefined)
         )
       );
     },

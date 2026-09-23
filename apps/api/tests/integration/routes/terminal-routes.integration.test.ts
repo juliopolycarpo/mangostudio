@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
@@ -185,6 +186,32 @@ describe('terminal HTTP routes with a fake runtime', () => {
 
     expect(response.status).toBe(409);
     expect(((await response.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
+  });
+
+  it('maps a dropped runtime open to 409 instead of an internal error', async () => {
+    const user = await insertTestUser();
+    client = new FakeTerminalRuntimeClient({
+      failFirstOpen: new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime disconnected'),
+    });
+    service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(client),
+      isIdentityAttested: () => true,
+    });
+    const app = authedApp(createTerminalRoutes(service), user);
+
+    const response = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
+    expect(service.list(user.id)).toHaveLength(0);
   });
 
   it('defaults cwd to the chat workdir and stamps MANGOSTUDIO_CHAT_ID', async () => {
