@@ -52,6 +52,7 @@ export interface FakeTerminalRuntimeClientOptions {
   /** Awaited before the first open resolves, after recording its request. */
   readonly gateFirstOpen?: () => Promise<unknown>;
   readonly failFirstOpen?: Error;
+  readonly failFirstClose?: Error;
   readonly gateFirstList?: () => Promise<unknown>;
   /** Awaited before the *first* `terminal.detach` call resolves; later calls are immediate. */
   readonly gateFirstDetach?: () => Promise<unknown>;
@@ -97,8 +98,14 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
   #gateFirstAttach: (() => Promise<unknown>) | undefined;
   #gateFirstOpen: (() => Promise<unknown>) | undefined;
   #failFirstOpen: Error | undefined;
+  #failFirstClose: Error | undefined;
   #gateFirstList: (() => Promise<unknown>) | undefined;
   readonly #sessions = new Map<string, RuntimeTerminalSessionSummary>();
+  readonly requestOptions = {
+    open: [] as Array<{ timeoutMs?: number } | undefined>,
+    close: [] as Array<{ timeoutMs?: number } | undefined>,
+    list: [] as Array<{ timeoutMs?: number } | undefined>,
+  };
   #gateFirstDetach: (() => Promise<unknown>) | undefined;
   #gateFirstWrite: (() => Promise<unknown>) | undefined;
   #outputWithAttachResponse: readonly RuntimeTerminalOutputEvent[] | undefined;
@@ -110,6 +117,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     this.#gateFirstAttach = options.gateFirstAttach;
     this.#gateFirstOpen = options.gateFirstOpen;
     this.#failFirstOpen = options.failFirstOpen;
+    this.#failFirstClose = options.failFirstClose;
     this.#gateFirstList = options.gateFirstList;
     this.#gateFirstDetach = options.gateFirstDetach;
     this.#gateFirstWrite = options.gateFirstWrite;
@@ -142,8 +150,9 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
   }
 
   readonly terminal: TerminalRuntimeTerminalClient = {
-    open: async (params) => {
+    open: async (params, options) => {
       this.#record('open', params);
+      this.requestOptions.open.push(options);
       const gate = this.#gateFirstOpen;
       this.#gateFirstOpen = undefined;
       if (gate) await gate();
@@ -217,12 +226,17 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
       this.#record('ack', params);
       return Promise.resolve({ ok: true as const });
     },
-    close: (params) => {
+    close: (params, options) => {
       this.#record('close', params);
+      this.requestOptions.close.push(options);
+      const failure = this.#failFirstClose;
+      this.#failFirstClose = undefined;
+      if (failure) return Promise.reject(failure);
       this.#sessions.delete(params.sessionId);
       return Promise.resolve({ ok: true as const });
     },
-    list: async () => {
+    list: async (options) => {
+      this.requestOptions.list.push(options);
       const sessions = [...this.#sessions.values()].map((session) => ({ ...session }));
       const gate = this.#gateFirstList;
       this.#gateFirstList = undefined;

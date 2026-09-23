@@ -87,6 +87,8 @@ export interface TerminalSessionService {
   open(userId: string, body: TerminalOpenBody, signal?: AbortSignal): Promise<TerminalSession>;
   /** Refresh detached status from runtime.list. // Usage: await service.reconcile(userId) */
   reconcile(userId: string): Promise<void>;
+  /** Ends sessions after terminal consent is withdrawn. // Usage: service.revokeScope(userId, envId) */
+  revokeScope(userId: string, environmentId: string): void;
   list(userId: string, filter?: TerminalListQuery): TerminalSession[];
   rename(userId: string, id: string, body: TerminalRenameBody): TerminalSession;
   close(userId: string, id: string): Promise<void>;
@@ -137,12 +139,16 @@ interface TerminalSessionEntry {
 
 interface TerminalReservation {
   readonly ownerUserId: string;
+  readonly environmentId: string;
   client: TerminalRuntimeClient | null;
   canceled: boolean;
   openSent: boolean;
 }
 
 const DEFAULT_IDLE_REAPER_INTERVAL_MS = 60_000;
+const TERMINAL_LIST_TIMEOUT_MS = 5_000;
+const TERMINAL_OPEN_TIMEOUT_MS = 30_000;
+const TERMINAL_CLOSE_TIMEOUT_MS = 10_000;
 
 async function defaultResolveChat(chatId: string, userId: string): Promise<TerminalChatResolution> {
   const chat = await getOwnedChat(chatId, userId, getDb());
@@ -170,6 +176,7 @@ export function createTerminalSessionService(
   const d = { ...defaultDeps(), ...deps };
   const sessions = new Map<string, TerminalSessionEntry>();
   const reservations = new Set<TerminalReservation>();
+  const reaping = new Set<string>();
   const clientsWithCloseHandler = new WeakSet<TerminalRuntimeClient>();
   let shuttingDown = false;
 
@@ -205,7 +212,7 @@ export function createTerminalSessionService(
       [...byClient].map(async ([client, entries]) => {
         let listed: Awaited<ReturnType<TerminalRuntimeClient['terminal']['list']>>;
         try {
-          listed = await client.terminal.list();
+          listed = await client.terminal.list({ timeoutMs: TERMINAL_LIST_TIMEOUT_MS });
         } catch (error) {
           logger.warn('reconcile_failed', {
             error: error instanceof Error ? error.message : String(error),
@@ -272,7 +279,7 @@ export function createTerminalSessionService(
   }
 
   function requireTerminalCapable(client: TerminalRuntimeClient, environmentId: string): void {
-    if (client.manifest.terminal === true) return;
+    if (client.manifest.terminal === true && client.manifest.features.shell !== false) return;
     throw new TerminalUnavailableError(
       'unavailable',
       `Environment "${environmentId}" does not offer a terminal.`
@@ -288,9 +295,24 @@ export function createTerminalSessionService(
   function reapIdleNow(): void {
     const cutoff = d.now() - d.getConfig().idleTimeoutMinutes * 60_000;
     for (const [id, entry] of sessions) {
-      if (entry.viewer || entry.session.lastActivityAt > cutoff) continue;
-      sessions.delete(id);
-      void entry.client.terminal.close({ sessionId: id }).catch(() => undefined);
+      if (entry.viewer || entry.session.lastActivityAt > cutoff || reaping.has(id)) continue;
+      reaping.add(id);
+      void (async () => {
+        try {
+          await entry.client.terminal.close(
+            { sessionId: id },
+            { timeoutMs: TERMINAL_CLOSE_TIMEOUT_MS }
+          );
+          if (sessions.get(id) === entry) sessions.delete(id);
+        } catch (error) {
+          logger.warn('idle_close_failed', {
+            sessionId: id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          reaping.delete(id);
+        }
+      })();
     }
   }
 
@@ -313,6 +335,7 @@ export function createTerminalSessionService(
       // holds this seat until a registered session replaces it or open fails.
       const reservation: TerminalReservation = {
         ownerUserId: userId,
+        environmentId: body.environmentId,
         client: null,
         canceled: false,
         openSent: false,
@@ -327,7 +350,15 @@ export function createTerminalSessionService(
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) onAbort();
       const requireReservation = (): void => {
-        if (reservation.canceled) throw new DOMException('Terminal open canceled.', 'AbortError');
+        if (!reservation.canceled) return;
+        if (signal?.aborted) throw new DOMException('Terminal open canceled.', 'AbortError');
+        if (shuttingDown) {
+          throw new TerminalUnavailableError('disconnected', 'Terminal service is shutting down.');
+        }
+        throw new TerminalUnavailableError(
+          'disconnected',
+          `Environment "${body.environmentId}" disconnected before the terminal opened.`
+        );
       };
 
       try {
@@ -357,45 +388,70 @@ export function createTerminalSessionService(
           d.resolveToolchain(userId, body.environmentId)
         );
         requireReservation();
-        reservation.openSent = true;
-        const openResult = await client.terminal.open({
-          sessionId,
-          cols,
-          rows,
-          scrollbackBytes: config.scrollbackKib * 1024,
-          ...(body.shell ? { shell: body.shell } : {}),
-          ...(cwd ? { cwd } : {}),
-          ...(chatId ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
-          ...toolchain,
-        });
-        if (reservation.canceled) {
-          await client.terminal.close({ sessionId }).catch((error: unknown) => {
+        const registerSession = (shell: TerminalSession['shell'], sessionCwd: string) => {
+          const now = d.now();
+          const session: TerminalSession = {
+            id: sessionId,
+            environmentId: body.environmentId,
+            chatId,
+            title: body.title ?? shell,
+            shell,
+            cwd: sessionCwd,
+            cols,
+            rows,
+            status: 'running',
+            attached: false,
+            createdAt: now,
+            lastActivityAt: now,
+          };
+          reservations.delete(reservation);
+          sessions.set(sessionId, { session, ownerUserId: userId, client, viewer: null });
+          return session;
+        };
+        const closeUnclaimed = async (): Promise<boolean> => {
+          try {
+            await client.terminal.close({ sessionId }, { timeoutMs: TERMINAL_CLOSE_TIMEOUT_MS });
+            return true;
+          } catch (error) {
             logger.warn('late_open_close_failed', {
               sessionId,
               error: error instanceof Error ? error.message : String(error),
             });
-          });
+            return false;
+          }
+        };
+        reservation.openSent = true;
+        let openResult: Awaited<ReturnType<TerminalRuntimeClient['terminal']['open']>>;
+        try {
+          openResult = await client.terminal.open(
+            {
+              sessionId,
+              cols,
+              rows,
+              scrollbackBytes: config.scrollbackKib * 1024,
+              ...(body.shell ? { shell: body.shell } : {}),
+              ...(cwd ? { cwd } : {}),
+              ...(chatId ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
+              ...toolchain,
+            },
+            { timeoutMs: TERMINAL_OPEN_TIMEOUT_MS }
+          );
+        } catch (error) {
+          // A timeout or lost response cannot prove that the runtime refused
+          // the open. Close by id; if that also fails, keep a visible cap seat.
+          if (!(await closeUnclaimed())) {
+            registerSession(
+              body.shell ?? client.manifest.shells[0] ?? 'bash',
+              cwd ?? client.manifest.homeDir
+            );
+          }
+          throw error;
+        }
+        if (reservation.canceled) {
+          if (!(await closeUnclaimed())) registerSession(openResult.shell, openResult.cwd);
           requireReservation();
         }
-
-        const now = d.now();
-        const session: TerminalSession = {
-          id: sessionId,
-          environmentId: body.environmentId,
-          chatId,
-          title: body.title ?? openResult.shell,
-          shell: openResult.shell,
-          cwd: openResult.cwd,
-          cols,
-          rows,
-          status: 'running',
-          attached: false,
-          createdAt: now,
-          lastActivityAt: now,
-        };
-        reservations.delete(reservation);
-        sessions.set(sessionId, { session, ownerUserId: userId, client, viewer: null });
-        return session;
+        return registerSession(openResult.shell, openResult.cwd);
       } finally {
         signal?.removeEventListener('abort', onAbort);
         reservations.delete(reservation);
@@ -403,6 +459,26 @@ export function createTerminalSessionService(
     },
 
     reconcile: reconcileDetached,
+
+    revokeScope(userId, environmentId) {
+      for (const reservation of reservations) {
+        if (reservation.ownerUserId !== userId || reservation.environmentId !== environmentId) {
+          continue;
+        }
+        reservation.canceled = true;
+        if (!reservation.openSent) reservations.delete(reservation);
+      }
+      for (const entry of sessions.values()) {
+        if (entry.ownerUserId !== userId || entry.session.environmentId !== environmentId) {
+          continue;
+        }
+        if (entry.session.status === 'exited') continue;
+        entry.session.status = 'exited';
+        entry.session.exit = { exitCode: null, signal: null };
+        entry.session.lastActivityAt = d.now();
+        entry.viewer?.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Terminal access revoked');
+      }
+    },
 
     list(userId, filter = {}) {
       const results: TerminalSession[] = [];
@@ -425,14 +501,23 @@ export function createTerminalSessionService(
     async close(userId, id) {
       const entry = sessions.get(id);
       if (!entry || entry.ownerUserId !== userId) throw new TerminalSessionNotFoundError(id);
-      sessions.delete(id);
-      entry.viewer?.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session closed');
-      await entry.client.terminal.close({ sessionId: id }).catch((error: unknown) => {
+      try {
+        await entry.client.terminal.close(
+          { sessionId: id },
+          { timeoutMs: TERMINAL_CLOSE_TIMEOUT_MS }
+        );
+      } catch (error) {
         logger.warn('close_failed', {
           sessionId: id,
           error: error instanceof Error ? error.message : String(error),
         });
-      });
+        throw new TerminalUnavailableError(
+          'disconnected',
+          `Terminal "${id}" could not be closed on its runtime.`
+        );
+      }
+      if (sessions.get(id) === entry) sessions.delete(id);
+      entry.viewer?.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session closed');
     },
 
     async availability(userId, environmentId) {
@@ -461,7 +546,9 @@ export function createTerminalSessionService(
       } catch {
         return refuse('disconnected');
       }
-      if (client.manifest.terminal !== true) return refuse('unavailable');
+      if (client.manifest.terminal !== true || client.manifest.features.shell === false) {
+        return refuse('unavailable');
+      }
       if (environmentId === LOCAL_ENVIRONMENT_ID && !d.isIdentityAttested(userId, environmentId)) {
         return refuse('not-isolated');
       }

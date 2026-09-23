@@ -163,6 +163,30 @@ describe('terminal HTTP routes with a fake runtime', () => {
     expect(client.calls.open).toHaveLength(1);
   });
 
+  it('maps an aborted runtime open to a terminal refusal instead of a server error', async () => {
+    const user = await insertTestUser();
+    client = new FakeTerminalRuntimeClient({
+      failFirstOpen: new DOMException('Runtime open canceled.', 'AbortError'),
+    });
+    service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(client),
+      isIdentityAttested: () => true,
+    });
+    const app = authedApp(createTerminalRoutes(service), user);
+    const response = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
+  });
+
   it('defaults cwd to the chat workdir and stamps MANGOSTUDIO_CHAT_ID', async () => {
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
@@ -235,6 +259,35 @@ describe('terminal HTTP routes with a fake runtime', () => {
     const closed = await ownerAgain.handle(jsonRequest(`/terminals/${session.id}`, 'DELETE'));
     expect(closed.status).toBe(200);
     expect(client.calls.close.map((call) => call.sessionId)).toContain(session.id);
+  });
+
+  it('returns 409 and keeps the session visible when runtime close fails', async () => {
+    const user = await insertTestUser();
+    client = new FakeTerminalRuntimeClient({ failFirstClose: new Error('close failed') });
+    service = createTerminalSessionService({
+      getConfig: () => ({
+        enabled: true,
+        idleTimeoutMinutes: 30,
+        maxSessionsPerUser: 1,
+        scrollbackKib: 256,
+      }),
+      getRuntimeClient: () => Promise.resolve(client),
+      isIdentityAttested: () => true,
+    });
+    const app = authedApp(createTerminalRoutes(service), user);
+    const opened = await app.handle(
+      jsonRequest('/terminals', 'POST', { environmentId: LOCAL_ENVIRONMENT_ID })
+    );
+    const { session } = (await opened.json()) as TerminalSessionResponse;
+
+    const failed = await app.handle(jsonRequest(`/terminals/${session.id}`, 'DELETE'));
+    expect(failed.status).toBe(409);
+    expect(((await failed.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
+    const listed = await app.handle(jsonRequest('/terminals', 'GET'));
+    expect((await listed.json()) as { sessions: unknown[] }).toMatchObject({
+      sessions: [{ id: session.id }],
+    });
+    expect((await app.handle(jsonRequest(`/terminals/${session.id}`, 'DELETE'))).status).toBe(200);
   });
 
   it('reports availability reasons the schema defines', async () => {

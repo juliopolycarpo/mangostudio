@@ -178,7 +178,7 @@ describe('terminalSessionService.open', () => {
     client.fireClose();
     expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
     gate.release();
-    await expect(opening).rejects.toBeDefined();
+    await expect(opening).rejects.toBeInstanceOf(TerminalUnavailableError);
     expect(client.calls.close).toHaveLength(1);
     expect(service.list(USER_ID)).toHaveLength(0);
   });
@@ -191,7 +191,7 @@ describe('terminalSessionService.open', () => {
     await client.waitForCall('open');
     await service.closeAll();
     gate.release();
-    await expect(opening).rejects.toBeDefined();
+    await expect(opening).rejects.toBeInstanceOf(TerminalUnavailableError);
     expect(client.calls.close).toEqual([{ sessionId: client.calls.open[0]?.sessionId }]);
     expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
     await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
@@ -216,6 +216,42 @@ describe('terminalSessionService.open', () => {
       expect.objectContaining({ id: running.id, status: 'running' }),
     ]);
     await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+  });
+
+  test('retains a late PTY and its seat when cancellation cleanup fails', async () => {
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({
+      gateFirstOpen: () => gate.promise,
+      failFirstClose: new Error('close failed'),
+    });
+    const { service } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+    const request = new AbortController();
+    const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID }, request.signal);
+    await client.waitForCall('open');
+    request.abort();
+    gate.release();
+    await expect(opening).rejects.toBeDefined();
+    const retained = service.list(USER_ID);
+    expect(retained).toHaveLength(1);
+    expect(retained[0]?.id).toBe(client.calls.open[0]?.sessionId);
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(1);
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
+      TerminalLimitError
+    );
+    await service.close(USER_ID, retained[0]?.id ?? '');
+    expect(client.calls.close).toHaveLength(2);
+  });
+
+  test('sets explicit deadlines for open, cleanup, and detached reconciliation', async () => {
+    const client = new FakeTerminalRuntimeClient();
+    const { service } = createHarness({ client });
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    await service.reconcile(USER_ID);
+    await service.close(USER_ID, session.id);
+
+    expect(client.requestOptions.open[0]?.timeoutMs).toBeGreaterThan(0);
+    expect(client.requestOptions.list[0]?.timeoutMs).toBeGreaterThan(0);
+    expect(client.requestOptions.close[0]?.timeoutMs).toBeGreaterThan(0);
   });
 
   test('a stale runtime list reply cannot retire a session opened after its snapshot', async () => {
@@ -405,6 +441,31 @@ describe('terminalSessionService.open', () => {
 });
 
 describe('terminalSessionService runtime disconnect', () => {
+  test('shell revocation ends detached sessions and releases their capacity', async () => {
+    const { service } = createHarness({ config: { maxSessionsPerUser: 1 } });
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+
+    service.revokeScope(USER_ID, ENVIRONMENT_ID);
+
+    expect(service.list(USER_ID)).toMatchObject([{ id: session.id, status: 'exited' }]);
+    expect((await service.availability(USER_ID, ENVIRONMENT_ID)).openSessions).toBe(0);
+  });
+
+  test('shell revocation cancels an in-flight open and closes its late PTY', async () => {
+    const gate = barrier();
+    const client = new FakeTerminalRuntimeClient({ gateFirstOpen: () => gate.promise });
+    const { service } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+    const opening = service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    await client.waitForCall('open');
+
+    service.revokeScope(USER_ID, ENVIRONMENT_ID);
+    gate.release();
+
+    await expect(opening).rejects.toBeInstanceOf(TerminalUnavailableError);
+    expect(client.calls.close).toEqual([{ sessionId: client.calls.open[0]?.sessionId }]);
+    expect(service.list(USER_ID)).toHaveLength(0);
+  });
+
   test('ends every session on a client that closes, notifying its attached viewer', async () => {
     const { service, client } = createHarness();
     const first = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
@@ -433,8 +494,30 @@ describe('terminalSessionService.reapIdle', () => {
 
     now.value += 2 * 60_000;
     service.reapIdle();
+    await Promise.resolve();
     expect(service.list(USER_ID)).toHaveLength(0);
     expect(client.calls.close.map((call) => call.sessionId)).toContain(session.id);
+  });
+
+  test('retains an idle session when the runtime fails to close it', async () => {
+    const client = new FakeTerminalRuntimeClient({ failFirstClose: new Error('close failed') });
+    const { service, now } = createHarness({
+      client,
+      config: { idleTimeoutMinutes: 5, maxSessionsPerUser: 1 },
+    });
+    await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+    now.value += 6 * 60_000;
+
+    service.reapIdle();
+    await Promise.resolve();
+    expect(service.list(USER_ID)).toHaveLength(1);
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
+      TerminalLimitError
+    );
+    service.reapIdle();
+    await Promise.resolve();
+    expect(service.list(USER_ID)).toHaveLength(0);
+    expect(client.calls.close).toHaveLength(2);
   });
 
   test('never reaps a session with an attached viewer', async () => {
@@ -502,6 +585,22 @@ describe('terminalSessionService.availability', () => {
 });
 
 describe('terminalSessionService ownership', () => {
+  test('a failed close keeps the session and its capacity slot until retry succeeds', async () => {
+    const client = new FakeTerminalRuntimeClient({ failFirstClose: new Error('close failed') });
+    const { service } = createHarness({ client, config: { maxSessionsPerUser: 1 } });
+    const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+
+    await expect(service.close(USER_ID, session.id)).rejects.toBeInstanceOf(
+      TerminalUnavailableError
+    );
+    expect(service.list(USER_ID)).toHaveLength(1);
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
+      TerminalLimitError
+    );
+    await service.close(USER_ID, session.id);
+    expect(service.list(USER_ID)).toHaveLength(0);
+  });
+
   test('getForAttach never distinguishes a missing session from one owned by someone else', async () => {
     const { service } = createHarness();
     const session = await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });

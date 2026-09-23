@@ -103,6 +103,14 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
           set.status = 201;
           return { session };
         } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            set.status = 409;
+            return {
+              error: 'Terminal open canceled.',
+              code: ERROR_CODES.UNSUPPORTED,
+              details: { reason: 'disconnected' },
+            };
+          }
           return mapTerminalError(error, set);
         }
       }
@@ -126,7 +134,11 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
       '/terminals/:id',
       {
         params: idParams,
-        response: { 200: OkResponseSchema, 404: ApiErrorResponseSchema },
+        response: {
+          200: OkResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+        },
       },
       async ({ params, set, user }) => {
         try {
