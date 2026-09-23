@@ -21,6 +21,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::blocking::run_blocking;
+use crate::release::{EOF_CUTOFF, Owner, Release, TERM_CUTOFF};
 use crate::subprocess::{LaunchCheck, PipeChild, ProcessRequest};
 
 /// Process-wide ceiling on live stdio MCP servers.
@@ -159,7 +160,14 @@ impl StdioSpawner for GuardedStdioSpawner {
             // Dropping this future before a result arrives abandons the start, never the child:
             // the owner task sees the cancellation and cleans up whatever it already launched.
             let abandon = start_cancel.clone().drop_guard();
-            tokio::spawn(own(launch, check, start_cancel.clone(), ready_tx, permit));
+            let owner = Release::process().own();
+            tokio::spawn(own(
+                launch,
+                check,
+                start_cancel.clone(),
+                ready_tx,
+                (permit, owner),
+            ));
             let result = ready_rx.await.unwrap_or(Err(StartError::Unavailable));
             let _ = abandon.disarm();
             result
@@ -172,7 +180,7 @@ async fn own(
     check: Arc<dyn LaunchCheck>,
     cancel: CancellationToken,
     ready: oneshot::Sender<Result<OwnedStdio, StartError>>,
-    _permit: OwnedSemaphorePermit,
+    _held: (OwnedSemaphorePermit, Owner),
 ) {
     let mut request =
         ProcessRequest::new(launch.program, launch.args.into_iter().map(OsString::from));
@@ -254,10 +262,14 @@ async fn release(child: &mut PipeChild, cancel: &CancellationToken) -> Result<()
 }
 
 /// Owns a running server until it exits or a close is requested, then proves the tree gone.
+///
+/// Process shutdown past [`EOF_CUTOFF`] counts as a close request too: a server whose session
+/// nobody closed (a connect that landed during teardown) is still stopped inside the budget.
 async fn run(mut child: PipeChild, close: &CancellationToken) -> Result<(), String> {
     let exited = tokio::select! {
         status = child.wait_target() => Some(status),
         () = close.cancelled() => None,
+        () = Release::process().cutoff(EOF_CUTOFF) => None,
     };
     let exited = match exited {
         Some(status) => Some(status),
@@ -267,16 +279,33 @@ async fn run(mut child: PipeChild, close: &CancellationToken) -> Result<(), Stri
 }
 
 /// EOF grace, SIGTERM grace, then a forced tree kill; returns the target status once seen.
+///
+/// Once process shutdown has begun, each grace also ends at its shutdown cut-off
+/// ([`EOF_CUTOFF`], [`TERM_CUTOFF`]), so every server's stop fits the Hub's window however late
+/// it started; see [`crate::release`] for the arithmetic.
 async fn stop(child: &mut PipeChild) -> Option<io::Result<std::process::ExitStatus>> {
-    if let Ok(status) = tokio::time::timeout(EOF_GRACE, child.wait_target()).await {
+    if let Some(status) = wait_within(child, EOF_GRACE, EOF_CUTOFF).await {
         return Some(status);
     }
     if child.interrupt().is_ok()
-        && let Ok(status) = tokio::time::timeout(TERM_GRACE, child.wait_target()).await
+        && let Some(status) = wait_within(child, TERM_GRACE, TERM_CUTOFF).await
     {
         return Some(status);
     }
     None
+}
+
+/// Waits for the target to exit, for at most `grace` or until the shutdown `cutoff`.
+async fn wait_within(
+    child: &mut PipeChild,
+    grace: Duration,
+    cutoff: Duration,
+) -> Option<io::Result<std::process::ExitStatus>> {
+    tokio::select! {
+        status = child.wait_target() => Some(status),
+        () = tokio::time::sleep(grace) => None,
+        () = Release::process().cutoff(cutoff) => None,
+    }
 }
 
 /// Forces whatever is left of the tree, acknowledges final cleanup, and waits for the owner's

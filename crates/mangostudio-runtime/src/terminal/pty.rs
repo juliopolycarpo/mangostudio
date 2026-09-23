@@ -189,8 +189,17 @@ impl PtySpawner for DefaultPtySpawner {
                 token: cancel.clone(),
                 armed: true,
             };
+            // Counted before the spawn so a host shutting down never sees this terminal as
+            // released before its supervisor has even started.
+            let owner = crate::release::Release::process().own();
             tokio::spawn(supervise_pty(
-                request, check, on_data, on_exit, cancel, tx, permit,
+                request,
+                check,
+                on_data,
+                on_exit,
+                cancel,
+                tx,
+                (permit, owner),
             ));
             let result = rx.await.unwrap_or(Err(PtyError::SupervisorUnavailable));
             drop_guard.armed = false;
@@ -311,7 +320,7 @@ async fn supervise_pty(
     on_exit: Arc<dyn Fn(PtyExit) + Send + Sync>,
     cancel: CancellationToken,
     ready: oneshot::Sender<Result<Arc<dyn PtyHandle>, PtyError>>,
-    _permit: tokio::sync::OwnedSemaphorePermit,
+    _held: (tokio::sync::OwnedSemaphorePermit, crate::release::Owner),
 ) {
     let cols = request.cols;
     let rows = request.rows;
