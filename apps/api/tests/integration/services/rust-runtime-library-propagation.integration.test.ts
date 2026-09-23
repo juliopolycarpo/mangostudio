@@ -622,11 +622,24 @@ describe('Rust runtime propagation — file-backed resources', () => {
       mkdirSync(join(box.home, '.cursor', 'rules'), { recursive: true });
 
       const taken = await previewOf('instruction:global', ['cursor-rules']);
-      const result = await apply(taken, [
-        adoptAll(taken.entry, winnerFrom(taken.entry, 'claude-instructions'), {
-          strategy: 'mechanical',
-        }),
-      ]);
+      const decision = adoptAll(taken.entry, winnerFrom(taken.entry, 'claude-instructions'), {
+        strategy: 'mechanical',
+      });
+      // `cursor-rules`, the only MDC location, resolves on Linux alone: both
+      // registries (`cursorLinuxOnlyPath`, `cursor_linux_only_path`) give it
+      // no path elsewhere, because Cursor documents no home rules path there.
+      // Off Linux the destination must be offered as blocked and refused.
+      if (process.platform !== 'linux') {
+        expect(taken.entry.destinations.map((d) => [d.locationId, d.blockedReason])).toEqual([
+          ['cursor-rules', 'unsupported-location'],
+        ]);
+        await expect(apply(taken, [decision])).rejects.toMatchObject({ status: 422 });
+        expect({ cursorRule: existsSync(filePath(box, 'cursor-rules')) }).toEqual({
+          cursorRule: false,
+        });
+        return;
+      }
+      const result = await apply(taken, [decision]);
 
       expect(result.failed).toEqual([]);
       expect(readFileSync(filePath(box, 'cursor-rules'), 'utf8')).toBe(
