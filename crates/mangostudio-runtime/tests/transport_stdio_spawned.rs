@@ -198,12 +198,12 @@ async fn end_of_input_lets_a_running_install_step_finish_past_the_handler_grace(
 
 /// How long a signalled stdio child may take to exit. Generous against a
 /// loaded CI runner, and still far below "hung until the job times out".
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const SIGNALLED_EXIT_BOUND: Duration = Duration::from_secs(10);
 
 /// Waits for `child` to exit within `bound`, killing it and failing the test
 /// with the elapsed time instead of hanging the whole test binary.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn wait_bounded(child: &mut std::process::Child, bound: Duration) -> std::process::ExitStatus {
     let started = std::time::Instant::now();
     loop {
@@ -286,4 +286,64 @@ fn a_sigint_after_hello_exits_while_the_hub_keeps_stdin_open() {
 #[test]
 fn a_sigterm_after_hello_exits_while_the_hub_keeps_stdin_open() {
     assert_exits_after_hello_on(nix::sys::signal::Signal::SIGTERM);
+}
+
+/// The Windows analogue of the two tests above: a console control event that
+/// arrives after `hello`, while the hub still holds stdin open, must end the
+/// process through the runtime's own handler. The child gets its own process
+/// group because `CTRL_C_EVENT` cannot target one; `CTRL_BREAK_EVENT` can,
+/// and it reaches only that group, never this test process.
+#[cfg(windows)]
+#[test]
+#[allow(unsafe_code)] // One documented FFI call: no safe binding sends a console control event.
+fn a_ctrl_break_after_hello_exits_while_the_hub_keeps_stdin_open() {
+    use std::io::BufRead as _;
+    use std::os::windows::process::CommandExt as _;
+    use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
+    use windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
+
+    let home = scratch_home("signal-after-hello-ctrl-break");
+    let mut child = std::process::Command::new(binary_path())
+        .arg("stdio")
+        .env("MANGO_HOME", &home)
+        .creation_flags(CREATE_NEW_PROCESS_GROUP)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the binary runs");
+    // Held until the end of the test: the hub has not gone away.
+    let _stdin = child.stdin.take().expect("stdin is piped");
+    let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let mut hello = String::new();
+    stdout
+        .read_line(&mut hello)
+        .expect("the child writes its hello frame");
+    assert!(
+        hello.contains("hello"),
+        "expected the first stdout line to be the hello frame | received {hello:?}"
+    );
+    // Same window as the Unix tests: let the stdin read block first.
+    std::thread::sleep(Duration::from_millis(300));
+
+    // SAFETY: plain FFI call with no pointers; the group id is the child's
+    // pid because it was spawned with `CREATE_NEW_PROCESS_GROUP`.
+    let delivered = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()) };
+    if delivered == 0 {
+        let error = std::io::Error::last_os_error();
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!(
+            "expected GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, {}) to succeed | received {error}",
+            child.id()
+        );
+    }
+
+    let status = wait_bounded(&mut child, SIGNALLED_EXIT_BOUND);
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "expected a clean exit 0 through the runtime's own handler after CTRL_BREAK | received \
+         {status:?}"
+    );
 }
