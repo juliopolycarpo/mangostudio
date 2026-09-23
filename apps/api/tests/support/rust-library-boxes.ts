@@ -142,21 +142,30 @@ export async function openLibraryFleet(
         MANGOSTUDIO_RUNTIME_SERVE_TOKEN: token,
       };
       for (const key of LOCATION_OVERRIDES) delete env[key];
-      children.push(
-        Bun.spawn({
-          cmd: [binary.path, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
-          env,
-          stdout: 'ignore',
-          stderr: 'ignore',
-        })
-      );
+      const child = Bun.spawn({
+        cmd: [binary.path, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
+        env,
+        stdout: 'ignore',
+        stderr: 'pipe',
+      });
+      children.push(child);
+      const stderr = keepTail(child.stderr);
       const box: LibraryBox = {
         home,
         backupRoot: join(home, '.mango', 'library-backups'),
         baseUrl: `http://127.0.0.1:${port}`,
         token,
       };
-      await register(environmentId, box);
+      try {
+        await register(environmentId, box);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `expected the serve runtime for "${environmentId}" to accept the hub | received ` +
+            `${reason}; exit=${child.exitCode ?? 'still running'}; stderr=${JSON.stringify(stderr())}`,
+          { cause: error }
+        );
+      }
       return box;
     },
     client: (environmentId) => manager.getClient(user.id, environmentId),
@@ -284,6 +293,25 @@ function reserveEphemeralPort(): number {
 }
 
 /** Retries the real Hub dial until `serve` is listening. */
+/**
+ * Drains a child stream and keeps its last `limit` characters, so a startup failure can quote what
+ * the runtime printed without the pipe ever filling up.
+ *
+ * @example
+ * const stderr = keepTail(child.stderr);
+ * throw new Error(`serve failed: ${stderr()}`);
+ */
+function keepTail(stream: ReadableStream<Uint8Array>, limit = 4_000): () => string {
+  let tail = '';
+  const decoder = new TextDecoder();
+  void (async () => {
+    for await (const chunk of stream) {
+      tail = (tail + decoder.decode(chunk, { stream: true })).slice(-limit);
+    }
+  })().catch(() => undefined);
+  return () => tail;
+}
+
 async function connectUntilListening<T>(attempt: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
