@@ -17,9 +17,12 @@
 
 import { expect } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
+import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
+import { LibraryCache, scanLibraryInstances } from '@mangostudio/shared/library/machine';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
@@ -368,4 +371,113 @@ export async function assertRustRuntimeSnapshotMethods(
   expect(await readFile(path)).toEqual(before);
   expect(await client.snapshot.revert(revert)).toEqual({ revertedFiles: 1 });
   expect(await client.snapshot.hash({ path })).toEqual({ hash: beforeHash });
+}
+
+/**
+ * Exercises the five `library.*` reads over the production client and
+ * diffs the scan against the TypeScript reader on the same tree.
+ *
+ * `features.library` stays false on the Rust host until the write half
+ * ships, so the Hub's own library service refuses it; these calls go
+ * through the typed client directly. `SKILLS_DIR`/`AGENTS_DIR` are pinned
+ * to scratch directories and `locationSettings` enables nothing, so only
+ * the two always-on MangoStudio locations are scanned — never the real
+ * home of the machine running the suite.
+ *
+ * @example
+ * await assertRustRuntimeLibraryMethods(client, scratchDirectory);
+ */
+export async function assertRustRuntimeLibraryMethods(
+  client: RuntimeClient,
+  directory: string
+): Promise<void> {
+  expect(client.manifest.features.library).toBe(false);
+  const skills = join(directory, 'library-skills');
+  const agents = join(directory, 'library-agents');
+  const entrypoint = join(skills, 'qualified', 'SKILL.md');
+  const skillText = '---\nname: qualified\ndescription: Read through the compiled runtime.\n---\n';
+  await mkdir(join(skills, 'qualified'), { recursive: true });
+  await mkdir(join(skills, 'Bad_Name'), { recursive: true });
+  await mkdir(agents, { recursive: true });
+  await writeFile(entrypoint, skillText);
+  await writeFile(join(skills, 'Bad_Name', 'SKILL.md'), skillText);
+  await writeFile(join(agents, 'reviewer.md'), '---\nname: Reviewer\n---\n');
+  await writeFile(join(directory, 'outside.md'), 'not in any location');
+  const env = { SKILLS_DIR: skills, AGENTS_DIR: agents };
+  const pathEnv = { env };
+  const locationSettings = { home: {}, workspace: {} };
+
+  const scan = await client.library.scan({ locationSettings, force: true, pathEnv });
+  const bySlug = <T extends { readonly ref: { readonly slug: string } }>(
+    entries: readonly T[]
+  ): T[] => [...entries].sort((left, right) => left.ref.slug.localeCompare(right.ref.slug));
+  const reference = await scanLibraryInstances({
+    locationSettings,
+    pathEnv: { platform: process.platform, homeDir: homedir(), env },
+    force: true,
+    cache: new LibraryCache(),
+  });
+  expect(bySlug(scan.entries)).toEqual(
+    bySlug(
+      reference.instances.map((entry) => ({
+        ref: entry.ref,
+        instance: entry.instance,
+        ...(entry.whitespaceHash !== undefined && { whitespaceHash: entry.whitespaceHash }),
+      }))
+    )
+  );
+  expect(scan.unreadableEntries).toEqual([...reference.unreadableEntries]);
+  expect(
+    bySlug(scan.entries).map((entry) => [
+      entry.ref.slug,
+      entry.instance.valid,
+      entry.instance.valid ? undefined : entry.instance.invalidReason,
+    ])
+  ).toEqual([
+    ['Bad_Name', false, 'invalid-slug'],
+    ['qualified', true, undefined],
+    ['reviewer', true, undefined],
+  ]);
+
+  const read = await client.library.read({ path: entrypoint, locationId: 'mango-skills', pathEnv });
+  expect(read).toEqual({ content: skillText, truncated: false, sizeBytes: skillText.length });
+  const outside = await client.library.read({
+    path: join(directory, 'outside.md'),
+    locationId: 'mango-skills',
+    pathEnv,
+  });
+  expect(outside.denied).toBe(true);
+
+  expect(
+    await client.library.readTree({
+      path: join(skills, 'qualified'),
+      locationId: 'mango-skills',
+      pathEnv,
+    })
+  ).toEqual({
+    files: [{ relativePath: 'SKILL.md', contentBase64: Buffer.from(skillText).toString('base64') }],
+  });
+
+  const { locations } = await client.library.locations({ pathEnv });
+  expect(locations.map((location) => location.id)).toEqual(
+    LIBRARY_LOCATION_DEFINITIONS.map((location) => location.id)
+  );
+  expect(locations.find((location) => location.id === 'mango-skills')).toMatchObject({
+    path: skills,
+    exists: true,
+    readable: true,
+    entryCount: 2,
+  });
+
+  const sources = await client.library.settingsSources({ pathEnv });
+  expect(sources.sources.map((source) => source.locationId)).toEqual([
+    'mango-settings',
+    'claude-settings',
+    'claude-hooks',
+    'codex-settings',
+    'codex-hooks',
+    'codex-permission-rules',
+    'cursor-settings',
+  ]);
+  expect(typeof sources.homeDir).toBe('string');
 }

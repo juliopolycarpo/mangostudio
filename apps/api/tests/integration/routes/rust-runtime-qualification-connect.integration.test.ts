@@ -48,6 +48,7 @@ import {
   assertRustRuntimeFeatureCeiling,
   assertRustRuntimeFilesystemMethods,
   assertRustRuntimeHealthShape,
+  assertRustRuntimeLibraryMethods,
   assertRustRuntimeProbingMethods,
   assertRustRuntimeSnapshotMethods,
   assertRustRuntimeWorkspaceMethods,
@@ -215,6 +216,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
       await assertRustRuntimeWorkspaceMethods(client, dir);
       await assertRustRuntimeSnapshotMethods(client, dir);
       await assertRustRuntimeCommandMethods(client, dir);
+      await assertRustRuntimeLibraryMethods(client, dir);
       await cleanupMangoHome(dir);
     },
     30_000

@@ -29,20 +29,21 @@
 //!   `describeSelfAgent`), as [`claude_config_home`]/[`codex_config_home`]/
 //!   [`cursor_config_home`]/[`mango_config_home`].
 //!
-//! Deliberately **not** ported: `resourceSlug`/`format` (resource-writer
-//! concerns, never read by a location *status*), `TargetDefinition.reads`
-//! as a general data structure (collapsed into the four fixed lists above),
-//! `resourceEntryName`, `assertLibraryRegistryConsistency`, and everything
-//! in `apps/shared/src/library/schemas.ts`/`machine/` — settings read/
-//! write/merge/conflict-resolution, which is a whole method group
-//! (`library.*`) this plan does not add. If a later location needs more of
-//! that machinery to answer truthfully, it belongs there, not bolted onto
-//! this module.
+//! - Each row's `format` and `resourceSlug`, which this table carries for
+//!   `crate::library`'s reads (`library.scan` matches entries by format and
+//!   names single-file resources by slug) — one location table for both
+//!   method groups, never a second copy that could drift from this one.
+//!
+//! Deliberately **not** ported here: `TargetDefinition.reads` as a general
+//! data structure (collapsed into the four fixed lists above),
+//! `resourceEntryName`, and everything in
+//! `apps/shared/src/library/machine/` — scanning, reading and writing are
+//! `crate::library`'s concern; this module only describes locations.
 
 use serde::Serialize;
 
 use super::detection::agent_cli_definitions::AgentTargetId;
-use super::detection::path_env::{PathEnv, dirname_path, join_path};
+use super::detection::path_env::{PathEnv, dirname_path, join_path, resolve_path};
 
 /// How a [`LocationDefinition`]'s path is organised on disk — decides
 /// whether [`describe_location`] even attempts an entry count.
@@ -85,9 +86,8 @@ pub trait LocationFsProbe: Send + Sync {
 /// One resource location this crate can report a status for. A `const`
 /// table entry, mirroring one row of
 /// `apps/shared/src/library/registry.ts`'s `LIBRARY_LOCATION_DEFINITIONS`
-/// — see this module's own docs for exactly which fields of that row
-/// survive the port (`format`/`resourceSlug` do not, since neither is read
-/// by a location status).
+/// — every field of that row survives the port; `format`/`resource_slug`
+/// are read by `crate::library`'s scan, never by a location status.
 #[derive(Debug, Clone, Copy)]
 pub struct LocationDefinition {
     /// The wire `LibraryLocationId`, e.g. `"claude-skills"`.
@@ -108,8 +108,56 @@ pub struct LocationDefinition {
     pub access: &'static str,
     /// This location's on-disk shape.
     pub layout: LocationLayout,
+    /// The wire `ResourceFormat` of what this location holds — decides
+    /// which entries a `library.scan` matches and how their display
+    /// metadata is parsed.
+    pub format: ResourceFormat,
+    /// Logical slug for a `single-file` layout, where the filename is the
+    /// vendor's choice (`CLAUDE.md` and `AGENTS.md` are both
+    /// `instruction:global`). Directory layouts derive a slug per entry and
+    /// carry `None` — `library_registry_rows_pair_single_files_with_slugs`
+    /// pins that pairing, mirroring `assertLibraryRegistryConsistency`.
+    pub resource_slug: Option<&'static str>,
     /// Every agent-CLI target that reads this location.
     pub read_by: &'static [AgentTargetId],
+}
+
+/// The wire `ResourceFormat` a file-backed location holds, mirroring the
+/// file-backed members of `apps/shared/src/library/schemas.ts`'s
+/// `ResourceFormatSchema` (`agent-profile-db` is not file-backed, so no
+/// location row can name it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceFormat {
+    /// Plain markdown (`.md`), no frontmatter read.
+    MarkdownPlain,
+    /// Markdown with a `---` YAML-subset frontmatter block (`.md`).
+    MarkdownFrontmatter,
+    /// Cursor's markdown rule dialect (`.mdc`), frontmatter like markdown.
+    Mdc,
+    /// A Codex subagent TOML file (`.toml`) carrying `name`/`description`.
+    TomlAgent,
+    /// A TOML settings file (`.toml`).
+    TomlSettings,
+    /// A JSON settings file (`.json`).
+    JsonSettings,
+    /// Codex's permission-rule DSL (`.rules`).
+    RulesDsl,
+}
+
+impl ResourceFormat {
+    /// The wire literal, e.g. `"markdown-frontmatter"`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MarkdownPlain => "markdown-plain",
+            Self::MarkdownFrontmatter => "markdown-frontmatter",
+            Self::Mdc => "mdc",
+            Self::TomlAgent => "toml-agent",
+            Self::TomlSettings => "toml-settings",
+            Self::JsonSettings => "json-settings",
+            Self::RulesDsl => "rules-dsl",
+        }
+    }
 }
 
 /// One [`LocationDefinition`], resolved against a real `env` and probed
@@ -318,32 +366,14 @@ fn supports_home_locations(env: &PathEnv) -> bool {
     matches!(env.platform.as_str(), "linux" | "darwin" | "win32")
 }
 
-/// Whether `value` is an absolute path for `platform`, mirroring
-/// `path.posix.isAbsolute`/`path.win32.isAbsolute` closely enough for this
-/// module's own needs (a leading separator on POSIX; a leading separator
-/// or a drive letter on win32) — see [`super::detection::path_env`]'s own
-/// module docs for why this crate cannot use [`std::path::Path`] for this.
-fn is_absolute_path(platform: &str, value: &str) -> bool {
-    if platform == "win32" {
-        let bytes = value.as_bytes();
-        (!bytes.is_empty() && (bytes[0] == b'/' || bytes[0] == b'\\'))
-            || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
-    } else {
-        value.starts_with('/')
-    }
-}
-
 /// `value`, resolved against `home_dir` for `platform` — mirrors
-/// `registry.ts`'s `resolveEnvPath`. An absolute `value` is returned as
-/// given (this crate's [`super::detection::path_env`] module does not
-/// resolve `.`/`..` segments anywhere else either, so neither does this);
-/// a relative one is joined onto `home_dir`.
+/// `registry.ts`'s `resolveEnvPath` exactly: an absolute `value` is
+/// normalized (`path.normalize`, trailing separator kept), a relative one is
+/// resolved onto `home_dir` (`path.resolve`). Both go through
+/// [`resolve_path`], so an override spelled `./skills/` or `/a/b/../c`
+/// names the same directory the TypeScript host would.
 fn resolve_env_path(platform: &str, home_dir: &str, value: &str) -> String {
-    if is_absolute_path(platform, value) {
-        value.to_string()
-    } else {
-        join_path(platform, &[home_dir, value])
-    }
+    resolve_path(platform, home_dir, value)
 }
 
 /// `env.env[variable]`, resolved as an absolute-or-relative-to-home
@@ -579,6 +609,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: mango_skills_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfDirs,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Mangostudio],
     },
     LocationDefinition {
@@ -588,6 +620,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: agents_skills_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfDirs,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Mangostudio, AgentTargetId::Codex],
     },
     LocationDefinition {
@@ -597,6 +631,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: claude_skills_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfDirs,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Mangostudio, AgentTargetId::Claude],
     },
     LocationDefinition {
@@ -606,6 +642,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: codex_skills_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfDirs,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Codex],
     },
     LocationDefinition {
@@ -615,6 +653,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: cursor_skills_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfDirs,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Cursor],
     },
     LocationDefinition {
@@ -624,6 +664,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: cursor_skills_builtin_path,
         access: "read-only",
         layout: LocationLayout::DirectoryOfDirs,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Cursor],
     },
     LocationDefinition {
@@ -633,6 +675,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: mango_agents_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Mangostudio],
     },
     LocationDefinition {
@@ -642,6 +686,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: claude_agents_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Claude],
     },
     LocationDefinition {
@@ -651,6 +697,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: codex_agents_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::TomlAgent,
+        resource_slug: None,
         read_by: &[AgentTargetId::Codex],
     },
     LocationDefinition {
@@ -660,6 +708,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: cursor_agents_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Cursor],
     },
     LocationDefinition {
@@ -669,6 +719,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: claude_commands_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Claude],
     },
     LocationDefinition {
@@ -678,6 +730,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: codex_prompts_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Codex],
     },
     LocationDefinition {
@@ -687,6 +741,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: cursor_commands_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::MarkdownFrontmatter,
+        resource_slug: None,
         read_by: &[AgentTargetId::Cursor],
     },
     LocationDefinition {
@@ -696,6 +752,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: mango_instructions_path,
         access: "read-write",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::MarkdownPlain,
+        resource_slug: Some("global"),
         read_by: &[AgentTargetId::Mangostudio],
     },
     LocationDefinition {
@@ -705,6 +763,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: claude_instructions_path,
         access: "read-write",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::MarkdownPlain,
+        resource_slug: Some("global"),
         read_by: &[AgentTargetId::Claude],
     },
     LocationDefinition {
@@ -714,6 +774,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: codex_instructions_path,
         access: "read-write",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::MarkdownPlain,
+        resource_slug: Some("global"),
         read_by: &[AgentTargetId::Codex],
     },
     LocationDefinition {
@@ -723,6 +785,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: cursor_rules_path,
         access: "read-write",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::Mdc,
+        resource_slug: None,
         read_by: &[AgentTargetId::Cursor],
     },
     LocationDefinition {
@@ -732,6 +796,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: claude_settings_path,
         access: "read-only",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::JsonSettings,
+        resource_slug: Some("settings"),
         read_by: &[AgentTargetId::Claude],
     },
     LocationDefinition {
@@ -741,6 +807,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: codex_settings_path,
         access: "read-only",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::TomlSettings,
+        resource_slug: Some("settings"),
         read_by: &[AgentTargetId::Codex],
     },
     LocationDefinition {
@@ -750,6 +818,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: cursor_settings_path,
         access: "read-only",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::JsonSettings,
+        resource_slug: Some("settings"),
         read_by: &[AgentTargetId::Cursor],
     },
     LocationDefinition {
@@ -759,6 +829,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: mango_settings_path,
         access: "read-only",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::TomlSettings,
+        resource_slug: Some("settings"),
         read_by: &[AgentTargetId::Mangostudio],
     },
     LocationDefinition {
@@ -768,6 +840,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: codex_hooks_path,
         access: "read-only",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::JsonSettings,
+        resource_slug: Some("hooks"),
         read_by: &[AgentTargetId::Codex],
     },
     LocationDefinition {
@@ -777,6 +851,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: claude_hooks_path,
         access: "read-only",
         layout: LocationLayout::SingleFile,
+        format: ResourceFormat::JsonSettings,
+        resource_slug: Some("hooks"),
         read_by: &[AgentTargetId::Claude],
     },
     LocationDefinition {
@@ -786,6 +862,8 @@ pub const LOCATION_DEFINITIONS: &[LocationDefinition] = &[
         resolve_path: codex_permission_rules_path,
         access: "read-only",
         layout: LocationLayout::DirectoryOfFiles,
+        format: ResourceFormat::RulesDsl,
+        resource_slug: None,
         read_by: &[AgentTargetId::Codex],
     },
 ];
@@ -859,6 +937,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Mirrors `assertLibraryRegistryConsistency`'s slug rule: a single-file
+    /// row names its resource, a directory row derives one per entry.
+    #[test]
+    fn library_registry_rows_pair_single_files_with_slugs() {
+        for definition in LOCATION_DEFINITIONS {
+            let single = definition.layout == LocationLayout::SingleFile;
+            assert_eq!(
+                single,
+                definition.resource_slug.is_some(),
+                "{}: expected resource_slug present exactly for single-file layouts | received layout {:?} with slug {:?}",
+                definition.id,
+                definition.layout,
+                definition.resource_slug
+            );
+        }
+    }
+
+    /// `registry.ts`'s `resolveEnvPath` normalizes an absolute override and
+    /// resolves a relative one (`node:path`), so a `SKILLS_DIR` spelled with
+    /// `.`/`..` segments names the same directory on both hosts. Expected
+    /// values are what `bun -e` printed through the TypeScript registry.
+    #[test]
+    fn configured_overrides_are_normalized_like_node_path() {
+        let relative = env("linux", "/home/tester", &[("SKILLS_DIR", "./skills/")]);
+        let received = mango_skills_path(&relative);
+        assert_eq!(
+            received.as_deref(),
+            Some("/home/tester/skills"),
+            "expected a relative SKILLS_DIR resolved under home | received {received:?}"
+        );
+        let dotted = env("linux", "/home/tester", &[("CODEX_HOME", "/a/b/../c/")]);
+        let received = codex_config_home(&dotted);
+        assert_eq!(
+            received, "/a/c/",
+            "expected an absolute CODEX_HOME normalized with its trailing slash | received {received:?}"
+        );
+        let windows = env(
+            "win32",
+            "C:\\Users\\tester",
+            &[("CLAUDE_CONFIG_DIR", "..\\shared\\claude")],
+        );
+        let received = claude_config_home(&windows);
+        assert_eq!(
+            received, "C:\\Users\\shared\\claude",
+            "expected a relative win32 override resolved against home | received {received:?}"
+        );
     }
 
     #[test]

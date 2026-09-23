@@ -176,6 +176,8 @@ pub(crate) fn build_host(
         crate::commands::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
     let registry =
         crate::terminal::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
+    let registry =
+        crate::library::register(registry, ConsentSource::new(slot, mango_home.to_path_buf()));
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
@@ -523,6 +525,11 @@ mod tests {
                 "gh.exec",
                 "gh.mutate",
                 "git.exec",
+                "library.locations",
+                "library.read",
+                "library.read-tree",
+                "library.scan",
+                "library.settings-sources",
                 "probing.agent-clis",
                 "probing.runtimes",
                 "probing.version-managers",

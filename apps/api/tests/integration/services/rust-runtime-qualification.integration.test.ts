@@ -42,6 +42,7 @@
  * | `apps/runtime/tests/unit/services/workspace-resolve-contained.test.ts` "returns the root-relative path for a file inside the root" | same tests (resolve-contained success case) |
  * | `apps/runtime/tests/unit/services/workspace-resolve-contained.test.ts` "rejects the root itself, which is not a path within the root" (an escape) | same tests (resolve-contained error case) |
  * | `apps/runtime/tests/unit/services/probing/toolchains.test.ts` typed `probing.*` request/result handling | the health tests over stdio and direct URL, through `assertRustRuntimeProbingMethods` |
+ * | `apps/runtime/tests/unit/services/library/library-service.test.ts` "library.read containment" and "library.scan caps" (contained reads, denied outside paths, invalid instances reported) | the workspace tests over stdio, direct URL and paired connect, through `assertRustRuntimeLibraryMethods`, which also diffs the scan against `scanLibraryInstances` on the same tree |
  *
  * **Not yet replaced** — no Rust equivalent exists for `externalAgents`, per
  * `health.rs`'s own module doc. PTY qualification now lives in the stdio test.
@@ -72,6 +73,7 @@ import {
   assertRustRuntimeFeatureCeiling,
   assertRustRuntimeFilesystemMethods,
   assertRustRuntimeHealthShape,
+  assertRustRuntimeLibraryMethods,
   assertRustRuntimeProbingMethods,
   assertRustRuntimeSnapshotMethods,
   assertRustRuntimeWorkspaceMethods,
@@ -335,6 +337,7 @@ describe('Real Rust runtime qualification', () => {
           await assertRustRuntimeWorkspaceMethods(client, dir);
           await assertRustRuntimeSnapshotMethods(client, dir);
           await assertRustRuntimeCommandMethods(client, dir);
+          await assertRustRuntimeLibraryMethods(client, dir);
           await cleanupMangoHome(dir);
         } finally {
           await connection.close();
@@ -575,6 +578,7 @@ describe('Real Rust runtime qualification', () => {
         await assertRustRuntimeWorkspaceMethods(client, dir);
         await assertRustRuntimeSnapshotMethods(client, dir);
         await assertRustRuntimeCommandMethods(client, dir);
+        await assertRustRuntimeLibraryMethods(client, dir);
         await cleanupMangoHome(dir);
       },
       30_000

@@ -79,18 +79,56 @@ use crate::subprocess::{ChildBudget, run_bounded_child};
 /// environment block — so, unlike every other adapter in this module,
 /// this one needs no [`run_blocking`] wrapper.
 pub(crate) fn build_runtime_path_env(overrides: Option<&HashMap<String, String>>) -> PathEnv {
-    let mut env: HashMap<String, String> = std::env::vars().collect();
+    compose_runtime_path_env(
+        std::env::vars().collect(),
+        crate::runtime_home::home_dir()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        crate::health::node_platform(),
+        overrides,
+    )
+}
+
+/// The pure half of [`build_runtime_path_env`]: `overrides` merged over
+/// `process_env`, then the canonical-`PATH`-key pass, with `home_dir` and
+/// `platform` taken as given.
+///
+/// This is the single path-resolution seam every method group that
+/// resolves user-owned paths shares (`probing.*` and `library.*` both
+/// reach it only through [`build_runtime_path_env`]); it exists as a
+/// separate function so tests can describe a relocated home or a
+/// runtime-local override without mutating this process's real
+/// environment. `home_dir` is never read from `overrides` — mirroring
+/// `createRuntimePathEnv`, whose `homeDir` is `os.homedir()` whatever the
+/// hub pins — so a hub can move a configured directory but never this
+/// machine's home.
+///
+/// # Example
+///
+/// ```ignore
+/// let env = compose_runtime_path_env(
+///     HashMap::from([("SKILLS_DIR".into(), "/runtime/skills".into())]),
+///     "/home/relocated".into(),
+///     "linux",
+///     None,
+/// );
+/// assert_eq!(env.home_dir, "/home/relocated");
+/// ```
+pub(crate) fn compose_runtime_path_env(
+    mut process_env: HashMap<String, String>,
+    home_dir: String,
+    platform: &str,
+    overrides: Option<&HashMap<String, String>>,
+) -> PathEnv {
     if let Some(overrides) = overrides {
         for (key, value) in overrides {
-            env.insert(key.clone(), value.clone());
+            process_env.insert(key.clone(), value.clone());
         }
     }
     PathEnv {
-        platform: crate::health::node_platform().to_string(),
-        home_dir: crate::runtime_home::home_dir()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        env: with_canonical_path_key(env),
+        platform: platform.to_string(),
+        home_dir,
+        env: with_canonical_path_key(process_env),
     }
 }
 
@@ -588,6 +626,31 @@ mod tests {
     fn build_runtime_path_env_reports_this_hosts_real_platform() {
         let env = build_runtime_path_env(None);
         assert_eq!(env.platform, crate::health::node_platform());
+    }
+
+    #[test]
+    fn compose_runtime_path_env_lets_an_override_win_but_never_move_home() {
+        let process_env = HashMap::from([
+            ("SKILLS_DIR".to_string(), "/runtime/skills".to_string()),
+            ("AGENTS_DIR".to_string(), "/runtime/agents".to_string()),
+        ]);
+        let overrides = HashMap::from([
+            ("SKILLS_DIR".to_string(), "/hub/skills".to_string()),
+            ("HOME".to_string(), "/hub/home".to_string()),
+        ]);
+        let env = compose_runtime_path_env(
+            process_env,
+            "/home/relocated".to_string(),
+            "linux",
+            Some(&overrides),
+        );
+        assert_eq!(env.env_var("SKILLS_DIR"), Some("/hub/skills"));
+        assert_eq!(env.env_var("AGENTS_DIR"), Some("/runtime/agents"));
+        assert_eq!(
+            env.home_dir, "/home/relocated",
+            "expected home_dir from this host | received {:?}",
+            env.home_dir
+        );
     }
 
     #[cfg(unix)]

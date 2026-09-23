@@ -185,6 +185,10 @@ methods, `snapshot.capture`, `snapshot.hash`, `snapshot.revert`, and the four co
 `shell.run`, `git.exec`, `gh.exec`, and `gh.mutate`. The shell feature remains false until the
 terminal and install methods sharing its capability are implemented. An empty registry still advertises no
 capability-backed features, regardless of consent.
+The five library reads (`library.locations`, `library.settings-sources`, `library.scan`,
+`library.read`, `library.read-tree`) are implemented too. `features.library` stays false until
+the five write and backup methods sharing the capability land, because the Hub gates every
+library surface on that one flag.
 Only the schema fact `toolchain` remains true. The hello capabilities also announce the
 embedded catalog name and version in `contracts`, matching the TypeScript runtime.
 
@@ -262,6 +266,22 @@ environment filtering, Git's accepted nonzero exits, GitHub CLI local help, and 
 rejections. Shared qualification assertions exercise the command methods over stdio, direct URL
 serve, and paired connect. Process containment and parent-death fixtures live under
 `crates/mangostudio-runtime/tests/`.
+
+### Library read behavior
+
+`crates/mangostudio-runtime/src/library/` ports the TypeScript shared readers. Location roots
+come from the runtime's own environment through `probing::host::build_runtime_path_env`, the seam
+`probing.*` also uses. A request's `pathEnv.env` pins apply to that call only, so a remote runtime
+never inherits the Hub's configured directories. Reads open files through
+`filesystem::open_contained_file`, which refuses a handle whose final path left the root.
+
+`apps/runtime/scripts/generate-library-fixtures.ts` records what the TypeScript readers answer for
+a fixed corpus: hash domains, `localeCompare` ordering, frontmatter scalars, scans, bounded reads,
+read-tree, settings sources and location resolution. `library::ts_compat_tests` replays that
+corpus, and the fixture freshness job regenerates it. `assertRustRuntimeLibraryMethods` runs the
+five reads over stdio, direct URL serve and paired connect, and diffs the scan against
+`scanLibraryInstances` on the same tree. `crates/mangostudio-runtime/tests/library_stdio.rs`
+proves the relocated-home and runtime-local-override behavior against the compiled binary.
 
 ### Dispatcher behavior
 
