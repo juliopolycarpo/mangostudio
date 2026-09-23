@@ -2018,6 +2018,7 @@ export const messages: Messages = {
     disconnected: 'Disconnected from the terminal.',
     notFound: 'This terminal session no longer exists.',
     refused: 'This terminal session cannot be opened from here.',
+    openFailed: 'Could not open a terminal. Try again.',
     exited: 'Process exited with code {code}.',
     exitedBySignal: 'Process ended by {signal}.',
     exitedConsentRevoked: 'Terminal closed because shell access was revoked.',
