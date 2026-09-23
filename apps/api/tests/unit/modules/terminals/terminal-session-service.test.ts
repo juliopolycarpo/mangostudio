@@ -594,8 +594,9 @@ describe('terminalSessionService.open', () => {
 
   test('keeps missing shell consent on the unavailable reason even for an older runtime', async () => {
     const { terminalCloseAfterRevocation: _unproven, ...oldManifest } = FAKE_TERMINAL_MANIFEST;
-    // Hand-built inconsistent manifest: `terminal: true` with withdrawn consent. Health refresh
-    // never produces it (an omitted `terminal` is dropped), but the gate must still refuse it.
+    // Hand-built: `terminal: true` with `allow.shell: false`. First-party health derives
+    // `terminal` from consent, so it sends `false` instead. The hub projector still copies an
+    // explicit `true` through, so the gate must refuse it.
     const client = new FakeTerminalRuntimeClient({
       manifest: {
         ...oldManifest,
