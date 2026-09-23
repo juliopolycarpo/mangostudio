@@ -34,6 +34,8 @@ use rmcp::transport::streamable_http_client::{
 };
 use sse_stream::{Sse, SseStream};
 
+use super::elicitation_order::SchemaOrder;
+
 /// Largest single SSE event accepted from a server (the SDK's own default bound).
 pub(crate) const MAX_SSE_EVENT_BYTES: usize = 16 * 1024 * 1024;
 /// Redirect hops followed, matching the Fetch standard's limit.
@@ -169,11 +171,34 @@ pub(crate) fn should_fall_back_to_sse(error: &ClientInitializeError) -> bool {
 #[derive(Clone)]
 pub(crate) struct McpHttp {
     client: reqwest::Client,
+    order: Arc<SchemaOrder>,
 }
 
 impl McpHttp {
-    pub(crate) fn new(client: reqwest::Client) -> Self {
-        Self { client }
+    /// `order` sees every JSON body and SSE event so elicitation field order survives the SDK.
+    pub(crate) fn new(client: reqwest::Client, order: Arc<SchemaOrder>) -> Self {
+        Self { client, order }
+    }
+}
+
+impl McpHttp {
+    /// The bounded event stream, with every event's data shown to the schema-order tap.
+    fn observed(
+        &self,
+        response: reqwest::Response,
+        max_event_bytes: usize,
+    ) -> BoxStream<'static, Result<Sse, SseError>> {
+        let order = Arc::clone(&self.order);
+        bounded_sse(response, max_event_bytes)
+            .inspect(move |event| {
+                if let Ok(Sse {
+                    data: Some(data), ..
+                }) = event
+                {
+                    order.observe(data.as_bytes());
+                }
+            })
+            .boxed()
     }
 }
 
@@ -296,14 +321,18 @@ impl StreamableHttpClient for McpHttp {
             return Ok(StreamableHttpPostResponse::Accepted);
         }
         match content_type(&response) {
-            Some(value) if value.starts_with(EVENT_STREAM_MIME_TYPE) => Ok(
-                StreamableHttpPostResponse::Sse(bounded_sse(response, max_sse_event_size), session),
-            ),
+            Some(value) if value.starts_with(EVENT_STREAM_MIME_TYPE) => {
+                Ok(StreamableHttpPostResponse::Sse(
+                    self.observed(response, max_sse_event_size),
+                    session,
+                ))
+            }
             Some(value) if value.starts_with(JSON_MIME_TYPE) => {
                 let bytes = response
                     .bytes()
                     .await
                     .map_err(|error| StreamableHttpError::Client(error.into()))?;
+                self.order.observe(&bytes);
                 match serde_json::from_slice::<ServerJsonRpcMessage>(&bytes) {
                     Ok(parsed) => Ok(StreamableHttpPostResponse::Json(parsed, session)),
                     Err(_) if expects_no_reply(&message) => {
@@ -392,7 +421,7 @@ impl StreamableHttpClient for McpHttp {
         }
         match content_type(&response) {
             Some(value) if value.starts_with(EVENT_STREAM_MIME_TYPE) => {
-                Ok(bounded_sse(response, max_sse_event_size))
+                Ok(self.observed(response, max_sse_event_size))
             }
             other => Err(StreamableHttpError::UnexpectedContentType(other)),
         }

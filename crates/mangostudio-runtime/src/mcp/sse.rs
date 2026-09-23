@@ -23,6 +23,7 @@ use rmcp::transport::common::http_header::{EVENT_STREAM_MIME_TYPE, JSON_MIME_TYP
 use rmcp::transport::streamable_http_client::SseError;
 use sse_stream::Sse;
 
+use super::elicitation_order::SchemaOrder;
 use super::http::{MAX_SSE_EVENT_BYTES, bounded_sse};
 
 type Events = BoxStream<'static, Result<Sse, SseError>>;
@@ -48,6 +49,7 @@ pub(crate) struct LegacySse {
     protocol: Arc<Mutex<Option<String>>>,
     buffered: VecDeque<ServerJsonRpcMessage>,
     events: Option<Events>,
+    order: Arc<SchemaOrder>,
 }
 
 impl LegacySse {
@@ -62,6 +64,7 @@ impl LegacySse {
         client: reqwest::Client,
         url: reqwest::Url,
         headers: HashMap<HeaderName, HeaderValue>,
+        order: Arc<SchemaOrder>,
     ) -> Result<Self, SseTransportError> {
         let mut request = client
             .get(url.clone())
@@ -113,7 +116,11 @@ impl LegacySse {
                     protocol: Arc::new(Mutex::new(None)),
                     buffered,
                     events: Some(events),
+                    order,
                 });
+            }
+            if let Some(data) = &event.data {
+                order.observe(data.as_bytes());
             }
             if let Some(message) = message_of(&event) {
                 buffered.push_back(message);
@@ -221,6 +228,9 @@ impl Transport<RoleClient> for LegacySse {
                     return None;
                 }
             };
+            if let Some(data) = &event.data {
+                self.order.observe(data.as_bytes());
+            }
             if let Some(message) = message_of(&event) {
                 self.note_protocol(&message);
                 return Some(message);

@@ -3,28 +3,37 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rmcp::model::{
     CallToolRequest, CallToolRequestParams, CancelledNotificationParam, ClientCapabilities,
-    ClientConfig, ClientRequest, GetPromptRequest, GetPromptRequestParams, Implementation,
-    ListPromptsRequest, ListResourcesRequest, ListToolsRequest, PaginatedRequestParams,
-    ProtocolVersion, ReadResourceRequest, ReadResourceRequestParams, ServerResult,
+    ClientConfig, ClientRequest, ElicitRequestParams, ElicitResult,
+    ElicitationAction as RmcpElicitationAction, ErrorData, GetPromptRequest,
+    GetPromptRequestParams, Implementation, ListPromptsRequest, ListResourcesRequest,
+    ListToolsRequest, PaginatedRequestParams, ProtocolVersion, ReadResourceRequest,
+    ReadResourceRequestParams, ServerResult,
 };
 use rmcp::service::{
     ClientInitializeError, Peer, PeerRequestOptions, RunningService, ServiceError,
 };
+use rmcp::service::{NotificationContext, RequestContext, RunningServiceCancellationToken};
 use rmcp::transport::IntoTransport;
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
-use rmcp::{RoleClient, ServiceExt};
+use rmcp::{ClientHandler, RoleClient, ServiceExt};
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use super::client::{ClientFuture, ConnectContext, McpClient, McpConnector};
+use super::client::{
+    ClientFuture, ConnectContext, ElicitationAction, ElicitationAnswer, ElicitationRequest,
+    McpClient, McpConnector, SessionHooks,
+};
 use super::content;
+use super::elicitation_order::{ObservedLines, SchemaOrder};
+use super::elicitation_schema::flatten_elicitation_schema;
 use super::http::{McpHttp, endpoint_url, header_map, http_client, should_fall_back_to_sse};
 use super::process::{GuardedStdioSpawner, ProcessOwner, StartError, StdioSpawner};
 use super::sse::LegacySse;
@@ -42,7 +51,98 @@ const CANCEL_NOTICE_TIMEOUT: Duration = Duration::from_secs(1);
 /// so moving to the Rust runtime never silently changes what servers are told.
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_11_25;
 
-type SdkService = RunningService<RoleClient, ClientConfig>;
+type SdkService = RunningService<RoleClient, Handler>;
+
+/// The tool call a session is currently running, which owns any question the server asks.
+#[derive(Clone)]
+struct ActiveCall {
+    id: String,
+    cancel: CancellationToken,
+}
+
+type Active = Arc<std::sync::Mutex<Option<ActiveCall>>>;
+
+/// The SDK-facing side of one session: answers server requests and forwards notifications.
+struct Handler {
+    info: ClientConfig,
+    slug: String,
+    hooks: SessionHooks,
+    active: Active,
+    order: Arc<SchemaOrder>,
+}
+
+impl ClientHandler for Handler {
+    fn get_info(&self) -> ClientConfig {
+        self.info.clone()
+    }
+
+    /// Mirrors the TypeScript host's `ElicitRequestSchema` handler: only form mode, only inside a
+    /// tool call with a hub-minted id, and the hub's answer (or a withdrawal) goes back as-is.
+    async fn create_elicitation(
+        &self,
+        request: ElicitRequestParams,
+        context: RequestContext<RoleClient>,
+    ) -> Result<ElicitResult, ErrorData> {
+        let order = serde_json::to_string(&context.id)
+            .ok()
+            .and_then(|id| self.order.take(&id));
+        let ElicitRequestParams::FormElicitationParams {
+            message,
+            requested_schema,
+            ..
+        } = request
+        else {
+            (self.hooks.diagnostic)(
+                "mcp_elicitation_unsupported_mode",
+                &[("serverSlug", &self.slug), ("mode", "url")],
+            );
+            return Ok(ElicitResult::new(RmcpElicitationAction::Cancel));
+        };
+        let active = self
+            .active
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone();
+        let Some(active) = active else {
+            (self.hooks.diagnostic)(
+                "mcp_elicitation_outside_tool_call",
+                &[("serverSlug", &self.slug)],
+            );
+            return Ok(ElicitResult::new(RmcpElicitationAction::Cancel));
+        };
+        let schema = serde_json::to_value(&requested_schema).unwrap_or(Value::Null);
+        let cancel = active.cancel.child_token();
+        let mut answer = (self.hooks.elicit)(ElicitationRequest {
+            tool_call_id: active.id,
+            message,
+            fields: flatten_elicitation_schema(&schema, order.as_deref()),
+            cancel: cancel.clone(),
+        });
+        let answer = tokio::select! {
+            answer = &mut answer => answer,
+            // The server withdrew the question (`notifications/cancelled`) or the session ended:
+            // cancel the parked entry and let it settle once through the same path.
+            () = context.ct.cancelled() => {
+                cancel.cancel();
+                answer.await
+            }
+        };
+        Ok(elicit_result(answer))
+    }
+
+    async fn on_tool_list_changed(&self, _context: NotificationContext<RoleClient>) {
+        (self.hooks.tool_list_changed)();
+    }
+}
+
+fn elicit_result(answer: ElicitationAnswer) -> ElicitResult {
+    match answer.action {
+        ElicitationAction::Accept => ElicitResult::new(RmcpElicitationAction::Accept)
+            .with_content(Value::Object(answer.content.unwrap_or_default())),
+        ElicitationAction::Decline => ElicitResult::new(RmcpElicitationAction::Decline),
+        ElicitationAction::Cancel => ElicitResult::new(RmcpElicitationAction::Cancel),
+    }
+}
 
 /// Opens sessions through the pinned SDK: stdio children are owned by the shared guardian or Job
 /// supervisor rather than by the SDK, and HTTP rows use [`McpHttp`] with the legacy SSE fallback.
@@ -65,19 +165,33 @@ impl SdkConnector {
         }
     }
 
-    fn client_config(&self) -> ClientConfig {
-        ClientConfig::new(
-            ClientCapabilities::default(),
-            Implementation::new("mangostudio", &self.runtime_version),
-        )
-        .with_protocol_version(PROTOCOL_VERSION)
+    /// The client identity and capabilities the TypeScript host declares: form elicitation only.
+    fn handler(
+        &self,
+        config: &McpConfig,
+        hooks: &SessionHooks,
+        order: &Arc<SchemaOrder>,
+    ) -> Handler {
+        let capabilities: ClientCapabilities =
+            serde_json::from_value(json!({ "elicitation": { "form": {} } })).unwrap_or_default();
+        Handler {
+            info: ClientConfig::new(
+                capabilities,
+                Implementation::new("mangostudio", &self.runtime_version),
+            )
+            .with_protocol_version(PROTOCOL_VERSION),
+            slug: config.slug.clone(),
+            hooks: hooks.clone(),
+            active: Arc::default(),
+            order: Arc::clone(order),
+        }
     }
 
     /// Runs the MCP `initialize` handshake over `transport`, bounded by the row's timeout and
     /// the caller's cancellation. The inner result is the SDK's own, so the HTTP path can decide
     /// whether a refusal means "retry over SSE".
     async fn initialize<T, E, A>(
-        &self,
+        handler: Handler,
         config: &McpConfig,
         timeout: Duration,
         cancel: &CancellationToken,
@@ -93,7 +207,7 @@ impl SdkConnector {
                 "MCP server \"{}\" connect was cancelled during initialize",
                 config.slug
             ))),
-            result = tokio::time::timeout(timeout, self.client_config().serve(transport)) => {
+            result = tokio::time::timeout(timeout, handler.serve(transport)) => {
                 result.map_err(|_| connect_failure(config)(format!(
                     "the server did not initialize within {} ms",
                     timeout.as_millis()
@@ -119,17 +233,20 @@ impl SdkConnector {
             .await
             .map_err(|error| start_failure(config, &command, error))?;
         let process = owned.process.clone();
-        let initialized = self
-            .initialize(
-                config,
-                timeout,
-                &context.cancel,
-                (owned.stdout, owned.stdin),
-            )
-            .await
-            .and_then(|result| result.map_err(|error| connect_failure(config)(error.to_string())));
+        let order = Arc::new(SchemaOrder::default());
+        let stdout = ObservedLines::new(owned.stdout, Arc::clone(&order));
+        let handler = self.handler(config, &context.hooks, &order);
+        let initialized = Self::initialize(
+            handler,
+            config,
+            timeout,
+            &context.cancel,
+            (stdout, owned.stdin),
+        )
+        .await
+        .and_then(|result| result.map_err(|error| connect_failure(config)(error.to_string())));
         match initialized {
-            Ok(service) => finish(config, service, Some(process)).await,
+            Ok(service) => finish(config, service, Some(process), context.hooks).await,
             Err(failure) => {
                 // The SDK transport, and with it stdin, is already gone on every error path; the
                 // process tree is not until its owner proves it.
@@ -157,17 +274,16 @@ impl SdkConnector {
         let url = endpoint_url(raw).map_err(connect_failure(config))?;
         let headers = header_map(&secrets.headers).map_err(connect_failure(config))?;
         let client = http_client().map_err(connect_failure(config))?;
+        let order = Arc::new(SchemaOrder::default());
         let streamable = StreamableHttpClientTransport::with_client(
-            McpHttp::new(client.clone()),
+            McpHttp::new(client.clone(), Arc::clone(&order)),
             StreamableHttpClientTransportConfig::with_uri(url.as_str())
                 .custom_headers(headers.clone())
                 .reinit_on_expired_session(false),
         );
-        match self
-            .initialize(config, timeout, &context.cancel, streamable)
-            .await?
-        {
-            Ok(service) => return finish(config, service, None).await,
+        let handler = self.handler(config, &context.hooks, &order);
+        match Self::initialize(handler, config, timeout, &context.cancel, streamable).await? {
+            Ok(service) => return finish(config, service, None, context.hooks).await,
             Err(error) if should_fall_back_to_sse(&error) => {}
             Err(error) => return Err(connect_failure(config)(error.to_string())),
         }
@@ -179,7 +295,10 @@ impl SdkConnector {
                     config.slug
                 )));
             }
-            opened = tokio::time::timeout(timeout, LegacySse::open(client, url, headers)) => opened,
+            opened = tokio::time::timeout(
+                timeout,
+                LegacySse::open(client, url, headers, Arc::clone(&order)),
+            ) => opened,
         };
         let legacy = opened
             .map_err(|_| {
@@ -189,19 +308,21 @@ impl SdkConnector {
                 ))
             })?
             .map_err(|error| connect_failure(config)(error.0))?;
-        let service = self
-            .initialize(config, timeout, &context.cancel, legacy)
+        let handler = self.handler(config, &context.hooks, &order);
+        let service = Self::initialize(handler, config, timeout, &context.cancel, legacy)
             .await?
             .map_err(|error| connect_failure(config)(error.to_string()))?;
-        finish(config, service, None).await
+        finish(config, service, None, context.hooks).await
     }
 }
 
-/// Wraps an initialized SDK session in the project-owned client.
+/// Wraps an initialized SDK session in the project-owned client and starts watching for the
+/// session to end on its own.
 async fn finish(
     config: &McpConfig,
     service: SdkService,
     process: Option<ProcessOwner>,
+    hooks: SessionHooks,
 ) -> Result<Arc<dyn McpClient>, McpFailure> {
     let Some(server) = service.peer_info() else {
         let _ = service.cancel().await;
@@ -218,9 +339,24 @@ async fn finish(
         prompts: server.capabilities.prompts.is_some(),
     };
     let peer = service.peer().clone();
+    let active = Arc::clone(&service.service().active);
+    let stop = service.cancellation_token();
+    let closed_by_us = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&closed_by_us);
+    // Only a session that ends without the runtime asking reports `closed`: a server crash, a
+    // dropped socket. A close the runtime started is its own caller's business.
+    let watcher = tokio::spawn(async move {
+        let _ = service.waiting().await;
+        if !flag.load(Ordering::Acquire) {
+            (hooks.closed)();
+        }
+    });
     Ok(Arc::new(SdkClient {
         peer,
-        service: Mutex::new(Some(service)),
+        active,
+        stop: Mutex::new(Some(stop)),
+        watcher: Mutex::new(Some(watcher)),
+        closed_by_us,
         process,
         capabilities,
     }))
@@ -277,7 +413,10 @@ fn start_failure(config: &McpConfig, command: &str, error: StartError) -> McpFai
 /// A connected SDK session plus, for stdio, the owner of its process tree.
 struct SdkClient {
     peer: Peer<RoleClient>,
-    service: Mutex<Option<SdkService>>,
+    active: Active,
+    stop: Mutex<Option<RunningServiceCancellationToken>>,
+    watcher: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    closed_by_us: Arc<AtomicBool>,
     process: Option<ProcessOwner>,
     capabilities: ServerCapabilities,
 }
@@ -319,11 +458,15 @@ impl McpClient for SdkClient {
         &self,
         name: String,
         arguments: Map<String, Value>,
+        tool_call_id: Option<String>,
         options: RequestOptions,
     ) -> ClientFuture<'_, Value> {
         Box::pin(async move {
             let params = CallToolRequestParams::new(name).with_arguments(arguments);
             let request = ClientRequest::CallToolRequest(CallToolRequest::new(params));
+            // The service's FIFO gate runs one call per session at a time, so the active call is
+            // unambiguous; it is cleared on every exit path by the guard below.
+            let _active = ActiveGuard::set(&self.active, tool_call_id, &options.cancel);
             // Anything but a well-formed tool result is a failed call, as the TypeScript SDK's
             // result validation makes it; the result's content is then normalized, not trusted.
             let ServerResult::CallToolResult(result) =
@@ -427,9 +570,13 @@ impl McpClient for SdkClient {
         Box::pin(async move {
             // Stopping the SDK drops its transport, which closes a stdio child's stdin: that EOF
             // is the server's first chance to exit before its owner escalates.
-            let service = self.service.lock().await.take();
-            if let Some(service) = service {
-                let _ = service.cancel().await;
+            self.closed_by_us.store(true, Ordering::Release);
+            if let Some(stop) = self.stop.lock().await.take() {
+                stop.cancel();
+            }
+            let watcher = self.watcher.lock().await.take();
+            if let Some(watcher) = watcher {
+                let _ = watcher.await;
             }
             if let Some(process) = &self.process {
                 process
@@ -439,6 +586,28 @@ impl McpClient for SdkClient {
             }
             Ok(())
         })
+    }
+}
+
+/// Marks a tool call active for elicitation routing and clears it when the call ends.
+struct ActiveGuard<'a>(&'a Active);
+
+impl<'a> ActiveGuard<'a> {
+    fn set(active: &'a Active, id: Option<String>, cancel: &CancellationToken) -> Self {
+        let id = id
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty());
+        *active.lock().unwrap_or_else(|poison| poison.into_inner()) = id.map(|id| ActiveCall {
+            id,
+            cancel: cancel.clone(),
+        });
+        Self(active)
+    }
+}
+
+impl Drop for ActiveGuard<'_> {
+    fn drop(&mut self) {
+        *self.0.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
     }
 }
 
@@ -573,6 +742,7 @@ mod tests {
         ConnectContext {
             launch_check: Arc::new(AlwaysAllow),
             cancel: CancellationToken::new(),
+            hooks: SessionHooks::inert(),
         }
     }
 
@@ -710,6 +880,7 @@ mod tests {
             .call_tool(
                 "echo".into(),
                 serde_json::from_value(json!({ "text": "hi" })).unwrap(),
+                None,
                 options(),
             )
             .await
@@ -719,7 +890,7 @@ mod tests {
             json!({ "contentText": "hi", "isError": false, "rawContentKinds": ["text"], "content": [{ "type": "text", "text": "hi" }] })
         );
         let big = client
-            .call_tool("big".into(), Map::new(), options())
+            .call_tool("big".into(), Map::new(), None, options())
             .await
             .expect("big succeeds");
         let text = big["contentText"].as_str().expect("text");
@@ -733,7 +904,7 @@ mod tests {
             text.len()
         );
         let boom = client
-            .call_tool("boom".into(), Map::new(), options())
+            .call_tool("boom".into(), Map::new(), None, options())
             .await
             .expect("boom answers");
         assert_eq!(
@@ -741,12 +912,12 @@ mod tests {
             (json!(true), json!("tool exploded"))
         );
         let unusual = client
-            .call_tool("unusual".into(), Map::new(), options())
+            .call_tool("unusual".into(), Map::new(), None, options())
             .await
             .expect_err("expected a malformed result refused like the SDK's validation");
         assert_eq!(unusual.kind, FailureKind::Call(CallFailure::Other));
         let unknown = client
-            .call_tool("missing".into(), Map::new(), options())
+            .call_tool("missing".into(), Map::new(), None, options())
             .await
             .expect_err("expected the server's JSON-RPC error");
         assert_eq!(unknown.message, "MCP error -32602: Unknown tool: missing");
@@ -797,6 +968,7 @@ mod tests {
             .call_tool(
                 "hang".into(),
                 Map::new(),
+                None,
                 RequestOptions {
                     timeout: Duration::from_millis(200),
                     cancel: CancellationToken::new(),
@@ -830,6 +1002,7 @@ mod tests {
             .call_tool(
                 "hang".into(),
                 Map::new(),
+                None,
                 RequestOptions {
                     timeout: Duration::from_secs(10),
                     cancel,
@@ -848,6 +1021,7 @@ mod tests {
             .call_tool(
                 "echo".into(),
                 serde_json::from_value(json!({ "text": "again" })).unwrap(),
+                None,
                 options(),
             )
             .await
@@ -861,7 +1035,7 @@ mod tests {
         let (config, _log, _dir) = logged_fixture("crash");
         let client = connected(&config).await;
         let failure = client
-            .call_tool("crash".into(), Map::new(), options())
+            .call_tool("crash".into(), Map::new(), None, options())
             .await
             .expect_err("expected the call to fail with the server");
         assert_eq!(failure.kind, FailureKind::Call(CallFailure::ServerClosed));
@@ -870,6 +1044,263 @@ mod tests {
             .close()
             .await
             .expect("cleanup of an exited server succeeds");
+    }
+
+    /// Named recording hooks: every elicitation, list change, loss, and diagnostic, with a fixed
+    /// answer for every question.
+    #[derive(Default)]
+    struct HookLog {
+        questions: std::sync::Mutex<Vec<(String, String, Vec<Value>)>>,
+        closed: std::sync::atomic::AtomicUsize,
+        list_changed: std::sync::atomic::AtomicUsize,
+        diagnostics: std::sync::Mutex<Vec<String>>,
+    }
+
+    fn recording(answer: ElicitationAnswer) -> (SessionHooks, Arc<HookLog>) {
+        let log = Arc::new(HookLog::default());
+        let hooks = SessionHooks {
+            closed: {
+                let log = Arc::clone(&log);
+                Arc::new(move || {
+                    log.closed.fetch_add(1, Ordering::SeqCst);
+                })
+            },
+            tool_list_changed: {
+                let log = Arc::clone(&log);
+                Arc::new(move || {
+                    log.list_changed.fetch_add(1, Ordering::SeqCst);
+                })
+            },
+            elicit: {
+                let log = Arc::clone(&log);
+                Arc::new(move |request: ElicitationRequest| {
+                    log.questions.lock().unwrap().push((
+                        request.tool_call_id,
+                        request.message,
+                        request.fields,
+                    ));
+                    let answer = answer.clone();
+                    Box::pin(async move { answer }) as super::super::client::ElicitFuture
+                })
+            },
+            diagnostic: {
+                let log = Arc::clone(&log);
+                Arc::new(move |event: &str, _detail: &[(&str, &str)]| {
+                    log.diagnostics.lock().unwrap().push(event.to_owned());
+                })
+            },
+        };
+        (hooks, log)
+    }
+
+    async fn connected_with(config: &McpConfig, hooks: SessionHooks) -> Arc<dyn McpClient> {
+        SdkConnector::new("1.2.3")
+            .connect(
+                config,
+                &McpSecrets::default(),
+                ConnectContext {
+                    launch_check: Arc::new(AlwaysAllow),
+                    cancel: CancellationToken::new(),
+                    hooks,
+                },
+            )
+            .await
+            .unwrap_or_else(|failure| panic!("expected a connected fixture | received {failure:?}"))
+    }
+
+    fn accept_pro() -> ElicitationAnswer {
+        ElicitationAnswer {
+            action: ElicitationAction::Accept,
+            content: Some(serde_json::from_value(json!({ "tier": "pro" })).unwrap()),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_client_declares_form_elicitation_only() {
+        let (config, log, _dir) = logged_fixture("capabilities");
+        let client = connected(&config).await;
+        let first = received(&log)
+            .into_iter()
+            .next()
+            .expect("an initialize frame");
+        assert_eq!(
+            first["params"]["capabilities"],
+            json!({ "elicitation": { "form": {} } })
+        );
+        client.close().await.expect("closes");
+    }
+
+    #[tokio::test]
+    async fn a_form_elicitation_reaches_the_hook_and_the_answer_reaches_the_server() {
+        let (config, _log, _dir) = logged_fixture("elicit");
+        let (hooks, log) = recording(accept_pro());
+        let client = connected_with(&config, hooks).await;
+        let result = client
+            .call_tool("ask".into(), Map::new(), Some(" call-1 ".into()), options())
+            .await
+            .expect("the elicitation round trip completes");
+        assert_eq!(
+            result["contentText"],
+            json!(r#"{"action":"accept","content":{"tier":"pro"}}"#)
+        );
+        let questions = log.questions.lock().unwrap().clone();
+        assert_eq!(
+            questions,
+            vec![(
+                "call-1".to_owned(),
+                "Pick a tier".to_owned(),
+                vec![
+                    json!({ "name": "tier", "required": true, "kind": "enum", "options": [{ "value": "free", "label": "Free" }, { "value": "pro", "label": "Pro" }] })
+                ],
+            )]
+        );
+        client.close().await.expect("closes");
+    }
+
+    #[tokio::test]
+    async fn the_servers_field_order_survives_the_sdk() {
+        let (config, _log, _dir) = logged_fixture("elicit-order");
+        let (hooks, log) = recording(ElicitationAnswer {
+            action: ElicitationAction::Decline,
+            content: None,
+        });
+        let client = connected_with(&config, hooks).await;
+        client
+            .call_tool(
+                "ask-order".into(),
+                Map::new(),
+                Some("call-2".into()),
+                options(),
+            )
+            .await
+            .expect("the ordered question round-trips");
+        let names = log.questions.lock().unwrap()[0]
+            .2
+            .iter()
+            .map(|field| field["name"].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec![json!("zeta"), json!("alpha"), json!("mid")]);
+        client.close().await.expect("closes");
+    }
+
+    #[tokio::test]
+    async fn url_mode_and_questions_outside_a_tool_call_are_cancelled_with_diagnostics() {
+        let (config, _log, _dir) = logged_fixture("elicit-refused");
+        let (hooks, log) = recording(accept_pro());
+        let client = connected_with(&config, hooks).await;
+        let url = client
+            .call_tool(
+                "ask-url".into(),
+                Map::new(),
+                Some("call-3".into()),
+                options(),
+            )
+            .await
+            .expect("the url question is answered");
+        assert_eq!(url["contentText"], json!(r#"{"action":"cancel"}"#));
+        let outside = client
+            .call_tool("ask".into(), Map::new(), Some("   ".into()), options())
+            .await
+            .expect("the unowned question is answered");
+        assert_eq!(outside["contentText"], json!(r#"{"action":"cancel"}"#));
+        assert!(
+            log.questions.lock().unwrap().is_empty(),
+            "expected no question relayed"
+        );
+        assert_eq!(
+            *log.diagnostics.lock().unwrap(),
+            vec![
+                "mcp_elicitation_unsupported_mode",
+                "mcp_elicitation_outside_tool_call"
+            ]
+        );
+        client.close().await.expect("closes");
+    }
+
+    #[tokio::test]
+    async fn list_changes_and_server_loss_reach_the_hooks_but_our_own_close_does_not() {
+        let (config, _log, _dir) = logged_fixture("hooks");
+        let (hooks, log) = recording(accept_pro());
+        let client = connected_with(&config, hooks.clone()).await;
+        client
+            .call_tool("notify".into(), Map::new(), None, options())
+            .await
+            .expect("notify");
+        wait_for(
+            || log.list_changed.load(Ordering::SeqCst) == 1,
+            "a list-changed hook",
+        )
+        .await;
+        client.close().await.expect("closes");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            log.closed.load(Ordering::SeqCst),
+            0,
+            "expected no closed hook for our own close"
+        );
+
+        let (config, _log, _dir) = logged_fixture("hooks-crash");
+        let (hooks, log) = recording(accept_pro());
+        let client = connected_with(&config, hooks).await;
+        let _ = client
+            .call_tool("crash".into(), Map::new(), None, options())
+            .await;
+        wait_for(
+            || log.closed.load(Ordering::SeqCst) == 1,
+            "a closed hook after the crash",
+        )
+        .await;
+        client.close().await.expect("cleanup after loss");
+        assert_eq!(
+            log.closed.load(Ordering::SeqCst),
+            1,
+            "expected the loss reported once"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_question_the_server_withdraws_is_cancelled_through_the_hook() {
+        let (config, _log, _dir) = logged_fixture("withdraw");
+        let withdrawn = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (mut hooks, _log) = recording(accept_pro());
+        hooks.elicit = {
+            let withdrawn = Arc::clone(&withdrawn);
+            Arc::new(move |request: ElicitationRequest| {
+                let withdrawn = Arc::clone(&withdrawn);
+                Box::pin(async move {
+                    request.cancel.cancelled().await;
+                    withdrawn.fetch_add(1, Ordering::SeqCst);
+                    ElicitationAnswer::cancel()
+                }) as super::super::client::ElicitFuture
+            })
+        };
+        let client = connected_with(&config, hooks).await;
+        let result = client
+            .call_tool(
+                "ask-withdraw".into(),
+                Map::new(),
+                Some("call-4".into()),
+                options(),
+            )
+            .await
+            .expect("the call completes after withdrawing its question");
+        assert_eq!(result["contentText"], json!("withdrawn"));
+        wait_for(
+            || withdrawn.load(Ordering::SeqCst) == 1,
+            "the withdrawal to reach the hook",
+        )
+        .await;
+        client.close().await.expect("closes");
+    }
+
+    async fn wait_for(done: impl Fn() -> bool, what: &str) {
+        for _ in 0..300 {
+            if done() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("expected {what} within three seconds | received a timeout");
     }
 
     fn http_config(url: &str) -> McpConfig {

@@ -372,6 +372,7 @@ describe('Real Rust runtime qualification', () => {
             fsRead: true,
             fsWrite: true,
             checkpoints: true,
+            mcp: true,
           });
           await assertRustRuntimeFilesystemMethods(client, directory);
         } finally {
@@ -452,6 +453,7 @@ describe('Real Rust runtime qualification', () => {
           fsRead: true,
           fsWrite: true,
           checkpoints: true,
+          mcp: true,
         });
         await assertRustRuntimeProbingMethods(client);
       },
@@ -499,6 +501,7 @@ describe('Real Rust runtime qualification', () => {
           fsRead: true,
           fsWrite: true,
           checkpoints: true,
+          mcp: true,
         });
         const refreshed = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
         expect(refreshed.state).toBe('connected');
@@ -507,6 +510,7 @@ describe('Real Rust runtime qualification', () => {
           fsRead: true,
           fsWrite: true,
           checkpoints: true,
+          mcp: true,
         });
 
         await setRustRuntimeProfile(mangoHome, 'none');
@@ -520,6 +524,7 @@ describe('Real Rust runtime qualification', () => {
           fsRead: false,
           fsWrite: false,
           checkpoints: false,
+          mcp: false,
         });
 
         await setRustRuntimeProfile(mangoHome, 'full');
@@ -530,6 +535,7 @@ describe('Real Rust runtime qualification', () => {
           fsRead: true,
           fsWrite: true,
           checkpoints: true,
+          mcp: true,
         });
       },
       30_000

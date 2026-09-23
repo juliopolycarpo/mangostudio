@@ -14,8 +14,8 @@
 //! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
 //! `probing.*` (see [`crate::probing`]), `fs.*`, and `snapshot.*` (both see
 //! [`crate::filesystem`]), `shell.run`/`git.exec`/`gh.exec`/`gh.mutate`
-//! (see [`crate::commands`]), `terminal.*` (see [`crate::terminal`]), and the
-//! stdio-only MCP connect/list/disconnect slice (see [`crate::mcp`]) is unimplemented, so
+//! (see [`crate::commands`]), `terminal.*` (see [`crate::terminal`]), and `mcp.*`
+//! (see [`crate::mcp`]) is unimplemented, so
 //! [`crate::registry::Registry`] answers everything else with
 //! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
 //! module's own `hello_capabilities`, which shapes `crate::health`'s
@@ -111,7 +111,7 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
 /// session itself: a [`Registry`] implementing `runtime.health`, the
-/// `workspace.*`, `probing.*`, `fs.*`, `snapshot.*`, `terminal.*`, and three MCP methods (see [`build_host`]
+/// `workspace.*`, `probing.*`, `fs.*`, `snapshot.*`, `terminal.*`, and `mcp.*` methods (see [`build_host`]
 /// for the full list; every other machine method group is out of scope, and
 /// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
 /// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
@@ -133,8 +133,8 @@ pub(crate) struct SessionHost {
 /// `runtime_version` from `runtime.health`, and also implementing
 /// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
 /// `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`, the
-/// eleven filesystem methods, three snapshot methods, eight terminal methods, and stdio MCP
-/// connect/list/disconnect. Other groups remain unsupported.
+/// eleven filesystem methods, three snapshot methods, eight terminal methods, and the nine MCP
+/// methods. Other groups remain unsupported.
 ///
 /// Calls [`Registry::with_ports`], not
 /// [`Registry::with_ports_and_exclusivity`], so every connection this
@@ -536,9 +536,15 @@ mod tests {
                 "library.read-tree",
                 "library.scan",
                 "library.settings-sources",
+                "mcp.call-tool",
                 "mcp.connect",
                 "mcp.disconnect",
+                "mcp.elicit-response",
+                "mcp.get-prompt",
+                "mcp.list-prompts",
+                "mcp.list-resources",
                 "mcp.list-tools",
+                "mcp.read-resource",
                 "probing.agent-clis",
                 "probing.runtimes",
                 "probing.version-managers",

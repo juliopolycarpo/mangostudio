@@ -189,6 +189,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
         fsRead: true,
         fsWrite: true,
         checkpoints: true,
+        mcp: true,
       });
       await assertRustRuntimeProbingMethods(client);
     },

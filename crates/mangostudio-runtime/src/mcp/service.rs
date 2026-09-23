@@ -3,9 +3,14 @@
 //! No lock here is ever held across a request to a server: sessions are shared out as `Arc`s
 //! under a short synchronous lock, and only connects to the *same* server id are serialized, so
 //! one busy or hung server cannot stall another server, a disconnect, or an answer to a question.
+//!
+//! The registry also owns every parked elicitation. Each one settles exactly once — answered,
+//! withdrawn by the server, cancelled with its tool call, or cancelled because its session ended
+//! (disconnect, server loss, consent revocation, or the hub session going away) — so no waiter
+//! outlives what it was waiting on.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -13,20 +18,47 @@ use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::{CallContext, Session};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-use super::client::{ConnectContext, McpClient, McpConnector};
+use super::client::{
+    ConnectContext, ElicitationAction, ElicitationAnswer, ElicitationRequest, McpClient,
+    McpConnector, SessionHooks,
+};
 use super::consent::{FreshMcpLaunch, McpConsent};
+use super::events::{ELICITATION_TOPIC, McpEvents, SESSION_TOPIC, SessionEvents};
 use super::sdk::SdkConnector;
 use super::types::{
     CallFailure, FailureKind, McpConfig, McpFailure, McpSecrets, RequestOptions, timeout_from,
 };
+use crate::blocking::run_blocking;
 use crate::consent::source::ConsentSource;
 use crate::registry::Registry;
 
 /// Live sessions one runtime connection may hold. The hub keeps one per enabled server row, so
 /// this only bounds a misbehaving caller.
 pub(crate) const MAX_SESSIONS: usize = 64;
+/// Parked elicitations one runtime connection may hold; a further question is cancelled.
+pub(crate) const MAX_PENDING_ELICITATIONS: usize = 64;
+/// How often live sessions re-read `mcp` consent, matching the terminal service's poll.
+const CONSENT_POLL: Duration = Duration::from_millis(100);
+/// Bound on one consent read; a read that cannot finish is treated as a withdrawal, as the
+/// terminal service treats it.
+const CONSENT_READ_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Every method [`register`] installs; the manifest attests them as one unit.
+#[cfg(test)]
+const MCP_METHODS: [&str; 9] = [
+    "mcp.connect",
+    "mcp.list-tools",
+    "mcp.call-tool",
+    "mcp.list-resources",
+    "mcp.read-resource",
+    "mcp.list-prompts",
+    "mcp.get-prompt",
+    "mcp.elicit-response",
+    "mcp.disconnect",
+];
 
 #[derive(Deserialize)]
 struct ConnectParams {
@@ -48,6 +80,8 @@ struct CallToolParams {
     tool_name: String,
     args: Map<String, Value>,
     #[serde(default)]
+    tool_call_id: Option<String>,
+    #[serde(default)]
     timeout_ms: Option<f64>,
 }
 
@@ -65,6 +99,15 @@ struct GetPromptParams {
     prompt_name: String,
     #[serde(default)]
     args: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ElicitResponseParams {
+    request_id: String,
+    action: ElicitationAction,
+    #[serde(default)]
+    content: Option<Map<String, Value>>,
 }
 
 /// One fair async lock per key, dropped from the map once nobody holds or awaits it.
@@ -86,9 +129,17 @@ impl KeyedLocks {
 
 /// One open session and the row it was opened for.
 struct Entry {
+    /// Distinguishes this session from an earlier or later one under the same server id.
+    id: u64,
     config: McpConfig,
     client: Arc<dyn McpClient>,
     timeout: Duration,
+}
+
+/// A parked question: which session asked it, and where its single answer goes.
+struct Pending {
+    entry: u64,
+    answer: oneshot::Sender<ElicitationAnswer>,
 }
 
 struct Service {
@@ -102,9 +153,13 @@ struct Service {
     /// parallel, as in the TypeScript host. Keyed by server id, not by session, so a queued call
     /// is answered by whichever session is live when its turn comes.
     calls: KeyedLocks,
+    pending: Mutex<HashMap<String, Pending>>,
+    next_entry: AtomicU64,
+    events: Mutex<Option<Arc<dyn McpEvents>>>,
     /// Set once the hub session is gone: nothing new may be registered after teardown.
     closed: AtomicBool,
     watcher_started: AtomicBool,
+    consent_poll: Duration,
 }
 
 impl Service {
@@ -115,8 +170,12 @@ impl Service {
             sessions: Mutex::new(HashMap::new()),
             connects: KeyedLocks::default(),
             calls: KeyedLocks::default(),
+            pending: Mutex::new(HashMap::new()),
+            next_entry: AtomicU64::new(1),
+            events: Mutex::new(None),
             closed: AtomicBool::new(false),
             watcher_started: AtomicBool::new(false),
+            consent_poll: CONSENT_POLL,
         }
     }
 
@@ -126,6 +185,19 @@ impl Service {
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
+    fn pending(&self) -> std::sync::MutexGuard<'_, HashMap<String, Pending>> {
+        self.pending
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    fn events(&self) -> Option<Arc<dyn McpEvents>> {
+        self.events
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
+    }
+
     fn entry(&self, server_id: &str) -> Result<Arc<Entry>, RemoteError> {
         self.sessions()
             .get(server_id)
@@ -133,8 +205,211 @@ impl Service {
             .ok_or_else(|| missing(server_id))
     }
 
-    async fn connect(
+    /// Whether `entry` is still the session registered under `server_id`.
+    fn is_current(&self, server_id: &str, entry: u64) -> bool {
+        self.sessions()
+            .get(server_id)
+            .is_some_and(|current| current.id == entry)
+    }
+
+    fn diagnostic(&self, event: &str, detail: &[(&str, &str)]) {
+        match self.events() {
+            Some(events) => events.diagnostic(event, detail),
+            None => eprintln!("{}", super::events::diagnostic_line(event, detail)),
+        }
+    }
+
+    /// Announces a session change, or records that nobody heard it. Nothing is unwound when the
+    /// hub cannot carry it: the event is a notification, and what it describes is owned here.
+    fn publish_session(&self, server_id: &str, change: &str) {
+        let delivered = self.events().is_some_and(|events| {
+            events.emit(
+                SESSION_TOPIC,
+                json!({ "serverId": server_id, "change": change }),
+            )
+        });
+        if !delivered {
+            self.diagnostic(
+                "mcp_session_event_unobserved",
+                &[("serverId", server_id), ("change", change)],
+            );
+        }
+    }
+
+    /// Hooks bound to one session: a superseded session's callbacks find it no longer current
+    /// and do nothing, so its teardown can never drop or notify for its replacement.
+    fn hooks(self: &Arc<Self>, config: &McpConfig, entry: u64) -> SessionHooks {
+        let closed = {
+            let service = Arc::downgrade(self);
+            let server_id = config.id.clone();
+            Arc::new(move || {
+                if let Some(service) = service.upgrade() {
+                    service.session_lost(&server_id, entry);
+                }
+            }) as Arc<dyn Fn() + Send + Sync>
+        };
+        let tool_list_changed = {
+            let service = Arc::downgrade(self);
+            let server_id = config.id.clone();
+            Arc::new(move || {
+                if let Some(service) = service.upgrade()
+                    && service.is_current(&server_id, entry)
+                {
+                    service.publish_session(&server_id, "tool-list-changed");
+                }
+            }) as Arc<dyn Fn() + Send + Sync>
+        };
+        let elicit = {
+            let service = Arc::downgrade(self);
+            let server_id = config.id.clone();
+            let slug = config.slug.clone();
+            Arc::new(move |request: ElicitationRequest| {
+                let service = service.clone();
+                let server_id = server_id.clone();
+                let slug = slug.clone();
+                Box::pin(async move {
+                    match service.upgrade() {
+                        Some(service) => service.ask(&server_id, &slug, entry, request).await,
+                        None => ElicitationAnswer::cancel(),
+                    }
+                }) as super::client::ElicitFuture
+            })
+                as Arc<dyn Fn(ElicitationRequest) -> super::client::ElicitFuture + Send + Sync>
+        };
+        let diagnostic = {
+            let service = Arc::downgrade(self);
+            Arc::new(move |event: &str, detail: &[(&str, &str)]| {
+                if let Some(service) = service.upgrade() {
+                    service.diagnostic(event, detail);
+                }
+            }) as super::client::DiagnosticHook
+        };
+        SessionHooks {
+            closed,
+            tool_list_changed,
+            elicit,
+            diagnostic,
+        }
+    }
+
+    /// A session ended on its own (crash, dropped socket): forget it, settle its questions,
+    /// tell the hub, and still let its owner finish cleaning up its process tree.
+    fn session_lost(&self, server_id: &str, entry: u64) {
+        let removed = {
+            let mut sessions = self.sessions();
+            match sessions.get(server_id) {
+                Some(current) if current.id == entry => sessions.remove(server_id),
+                _ => None,
+            }
+        };
+        let Some(removed) = removed else {
+            return;
+        };
+        self.cancel_elicitations(Some(entry));
+        self.publish_session(server_id, "closed");
+        tokio::spawn(async move {
+            let _ = removed.client.close().await;
+        });
+    }
+
+    /// Parks one question, publishes it, and waits for its single answer.
+    ///
+    /// A question nobody received is a question nobody can answer: when the hub session cannot
+    /// carry the event, the question is cancelled at once rather than holding the tool call
+    /// until its own deadline.
+    async fn ask(
         &self,
+        server_id: &str,
+        slug: &str,
+        entry: u64,
+        request: ElicitationRequest,
+    ) -> ElicitationAnswer {
+        if request.cancel.is_cancelled() || !self.is_current(server_id, entry) {
+            return ElicitationAnswer::cancel();
+        }
+        let request_id = new_request_id();
+        let (sender, receiver) = oneshot::channel();
+        {
+            let mut pending = self.pending();
+            if pending.len() >= MAX_PENDING_ELICITATIONS {
+                drop(pending);
+                self.diagnostic(
+                    "mcp_elicitation_limit",
+                    &[
+                        ("serverId", server_id),
+                        ("toolCallId", &request.tool_call_id),
+                    ],
+                );
+                return ElicitationAnswer::cancel();
+            }
+            pending.insert(
+                request_id.clone(),
+                Pending {
+                    entry,
+                    answer: sender,
+                },
+            );
+        }
+        let payload = json!({
+            "requestId": request_id,
+            "serverId": server_id,
+            "serverSlug": slug,
+            "toolCallId": request.tool_call_id,
+            "message": request.message,
+            "fields": request.fields,
+        });
+        let delivered = self
+            .events()
+            .is_some_and(|events| events.emit(ELICITATION_TOPIC, payload));
+        if !delivered {
+            // Ids only: the question's text is the user's, not the operator's.
+            self.diagnostic(
+                "mcp_elicitation_unobserved",
+                &[
+                    ("serverId", server_id),
+                    ("toolCallId", &request.tool_call_id),
+                ],
+            );
+            self.settle(&request_id, ElicitationAnswer::cancel());
+        }
+        tokio::select! {
+            answer = receiver => answer.unwrap_or_else(|_| ElicitationAnswer::cancel()),
+            () = request.cancel.cancelled() => {
+                self.settle(&request_id, ElicitationAnswer::cancel());
+                ElicitationAnswer::cancel()
+            }
+        }
+    }
+
+    /// Delivers the one answer a parked question gets; later answers find nothing to settle.
+    fn settle(&self, request_id: &str, answer: ElicitationAnswer) -> bool {
+        let Some(pending) = self.pending().remove(request_id) else {
+            return false;
+        };
+        let _ = pending.answer.send(answer);
+        true
+    }
+
+    /// Cancels the questions of one session, or of every session.
+    fn cancel_elicitations(&self, entry: Option<u64>) {
+        let stranded = {
+            let mut pending = self.pending();
+            let ids = pending
+                .iter()
+                .filter(|(_, parked)| entry.is_none_or(|entry| parked.entry == entry))
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            ids.into_iter()
+                .filter_map(|id| pending.remove(&id))
+                .collect::<Vec<_>>()
+        };
+        for parked in stranded {
+            let _ = parked.answer.send(ElicitationAnswer::cancel());
+        }
+    }
+
+    async fn connect(
+        self: &Arc<Self>,
         params: ConnectParams,
         cancel: &CancellationToken,
     ) -> Result<Value, RemoteError> {
@@ -165,14 +440,17 @@ impl Service {
         // A reconnect with changed config must not leave the old session running.
         let previous = self.sessions().remove(&config.id);
         if let Some(previous) = previous {
+            self.cancel_elicitations(Some(previous.id));
             let _ = previous.client.close().await;
         }
         if cancel.is_cancelled() {
             return Err(cancelled("mcp.connect"));
         }
+        let entry_id = self.next_entry.fetch_add(1, Ordering::Relaxed);
         let context = ConnectContext {
             launch_check: Arc::new(FreshMcpLaunch(Arc::clone(&self.consent))),
             cancel: cancel.clone(),
+            hooks: self.hooks(&config, entry_id),
         };
         let client = self
             .connector
@@ -185,6 +463,7 @@ impl Service {
         }
         let capabilities = client.capabilities();
         let entry = Arc::new(Entry {
+            id: entry_id,
             config: config.clone(),
             client,
             timeout,
@@ -195,6 +474,13 @@ impl Service {
             "resources": capabilities.resources,
             "prompts": capabilities.prompts,
         }}))
+    }
+
+    fn options(entry: &Entry, cancel: &CancellationToken) -> RequestOptions {
+        RequestOptions {
+            timeout: entry.timeout,
+            cancel: cancel.clone(),
+        }
     }
 
     async fn list_tools(
@@ -211,13 +497,6 @@ impl Service {
         Ok(json!({ "tools": tools }))
     }
 
-    fn options(entry: &Entry, cancel: &CancellationToken) -> RequestOptions {
-        RequestOptions {
-            timeout: entry.timeout,
-            cancel: cancel.clone(),
-        }
-    }
-
     async fn call_tool(
         &self,
         params: CallToolParams,
@@ -228,7 +507,8 @@ impl Service {
         self.entry(&params.server_id)?;
         let lock = self.calls.get(&params.server_id);
         // A caller that gives up while queued leaves at once; it never reaches the server, and
-        // the queue only advances when the call ahead of it has actually finished.
+        // the queue only advances when the call ahead of it has actually finished — even when
+        // that call is parked on a question only a human can answer.
         let _turn = tokio::select! {
             biased;
             () = cancel.cancelled() => return Err(cancelled("mcp.call-tool")),
@@ -255,6 +535,7 @@ impl Service {
             .call_tool(
                 params.tool_name,
                 params.args,
+                params.tool_call_id,
                 RequestOptions {
                     timeout,
                     cancel: cancel.clone(),
@@ -323,23 +604,46 @@ impl Service {
             .map_err(|failure| self.remote("mcp.get-prompt", &entry.config, failure))
     }
 
+    /// Answers one parked question. A late or duplicate answer is not an error: the question may
+    /// already have been cancelled by the tool call ending underneath it.
+    fn respond(&self, params: ElicitResponseParams) -> Value {
+        let answer = match params.action {
+            ElicitationAction::Accept => ElicitationAnswer {
+                action: ElicitationAction::Accept,
+                content: Some(params.content.unwrap_or_default()),
+            },
+            action => ElicitationAnswer {
+                action,
+                content: None,
+            },
+        };
+        self.settle(&params.request_id, answer);
+        json!({ "ok": true })
+    }
+
     async fn disconnect(&self, params: ServerParams) -> Value {
         let entry = self.sessions().remove(&params.server_id);
         if let Some(entry) = entry {
+            self.cancel_elicitations(Some(entry.id));
             let _ = entry.client.close().await;
         }
         json!({ "ok": true })
     }
 
-    /// Closes every session and waits for each to release what it owns.
-    async fn close_all(&self) {
+    /// Closes every session and waits for each to release what it owns. With `announce`, each
+    /// closed server is reported to the hub (revocation); without it the hub is already gone.
+    async fn close_all(&self, announce: bool) {
         let entries = self
             .sessions()
             .drain()
             .map(|(_, entry)| entry)
             .collect::<Vec<_>>();
+        self.cancel_elicitations(None);
         let mut closes = tokio::task::JoinSet::new();
         for entry in entries {
+            if announce {
+                self.publish_session(&entry.config.id, "closed");
+            }
             closes.spawn(async move {
                 let _ = entry.client.close().await;
             });
@@ -347,22 +651,40 @@ impl Service {
         while closes.join_next().await.is_some() {}
     }
 
-    /// Tears every session down once the hub session carrying them ends, so a dropped hub
-    /// connection never strands a server process.
+    /// Starts, once per connection, the task that tears every session down when the hub session
+    /// ends or `mcp` consent is withdrawn, and binds events to that hub session.
     fn watch(self: &Arc<Self>, session: &Session) {
         if self.watcher_started.swap(true, Ordering::AcqRel) {
             return;
         }
+        {
+            let mut events = self
+                .events
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if events.is_none() {
+                *events = Some(Arc::new(SessionEvents(session.clone())));
+            }
+        }
         let service = Arc::downgrade(self);
         let session = session.clone();
-        tokio::spawn(async move {
-            session.closed().await;
-            let Some(service) = service.upgrade() else {
-                return;
-            };
-            service.closed.store(true, Ordering::Release);
-            service.close_all().await;
-        });
+        let poll = self.consent_poll;
+        tokio::spawn(async move { watch_connection(service, session, poll).await });
+    }
+
+    /// Re-reads `mcp` consent off the executor; a read that cannot finish counts as withdrawn.
+    async fn consent_granted(&self) -> bool {
+        let consent = Arc::clone(&self.consent);
+        tokio::time::timeout(
+            CONSENT_READ_TIMEOUT,
+            run_blocking(move || consent.granted()),
+        )
+        .await
+        .unwrap_or(false)
+    }
+
+    fn has_work(&self) -> bool {
+        !self.sessions().is_empty() || !self.pending().is_empty()
     }
 
     /// Maps a client failure onto the TypeScript host's wire error for `method`.
@@ -381,6 +703,51 @@ impl Service {
     }
 }
 
+async fn watch_connection(service: Weak<Service>, session: Session, poll: Duration) {
+    let mut ticks = tokio::time::interval(poll);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticks.tick().await;
+    loop {
+        tokio::select! {
+            _ = session.closed() => {
+                if let Some(service) = service.upgrade() {
+                    service.closed.store(true, Ordering::Release);
+                    service.close_all(false).await;
+                }
+                return;
+            }
+            _ = ticks.tick() => {
+                let Some(service) = service.upgrade() else { return; };
+                if service.has_work() && !service.consent_granted().await {
+                    // Revocation cannot depend on an RPC the hub would now be denied: close
+                    // here, settle every question, and tell the hub each session is gone.
+                    service.close_all(true).await;
+                }
+            }
+        }
+    }
+}
+
+/// A random UUID-v4-shaped id, like the TypeScript host's `crypto.randomUUID()`.
+fn new_request_id() -> String {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).expect("the operating system's CSPRNG must be available");
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
 fn cancelled(method: &str) -> RemoteError {
     RemoteError::new(codes::CANCELLED, format!("{method} was cancelled"))
 }
@@ -397,7 +764,8 @@ fn missing(server_id: &str) -> RemoteError {
 type Handled =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RemoteError>> + Send>>;
 
-/// Installs one request handler that shares `service` and passes the call's cancellation.
+/// Installs one request handler that shares `service`, binds its events to the caller's hub
+/// session, and passes the call's cancellation.
 fn serve<P>(
     registry: Registry,
     service: &Arc<Service>,
@@ -409,12 +777,13 @@ where
 {
     let service = Arc::clone(service);
     registry.implement(method, move |params: P, context: CallContext| {
+        service.watch(context.session());
         handle(Arc::clone(&service), params, context.cancel().clone())
     })
 }
 
-/// Registers the working MCP methods. The manifest advertises `mcp` only once every catalog
-/// method in the family has a handler here.
+/// Registers the nine `mcp.*` methods. The manifest advertises `mcp` because every catalog
+/// method in the family has a handler here, and only while consent grants it.
 ///
 /// # Example
 /// ```ignore
@@ -439,16 +808,11 @@ fn register_with_connector(
     consent: Arc<dyn McpConsent>,
 ) -> Registry {
     let service = Arc::new(Service::new(connector, consent));
-    let connect = Arc::clone(&service);
-    let registry = registry.implement(
+    let registry = serve(
+        registry,
+        &service,
         "mcp.connect",
-        move |params: ConnectParams, context: CallContext| {
-            let service = Arc::clone(&connect);
-            async move {
-                service.watch(context.session());
-                service.connect(params, context.cancel()).await
-            }
-        },
+        |service, params, cancel| Box::pin(async move { service.connect(params, &cancel).await }),
     );
     let registry = serve(
         registry,
@@ -496,12 +860,17 @@ fn register_with_connector(
             Box::pin(async move { service.get_prompt(params, &cancel).await })
         },
     );
-    registry.implement(
+    let registry = serve(
+        registry,
+        &service,
+        "mcp.elicit-response",
+        |service, params, _| Box::pin(async move { Ok(service.respond(params)) }),
+    );
+    serve(
+        registry,
+        &service,
         "mcp.disconnect",
-        move |params: ServerParams, _context: CallContext| {
-            let service = Arc::clone(&service);
-            async move { Ok::<_, RemoteError>(service.disconnect(params).await) }
-        },
+        |service, params, _| Box::pin(async move { Ok(service.disconnect(params).await) }),
     )
 }
 
@@ -513,6 +882,7 @@ mod tests {
     use crate::manifest::build_features;
     use crate::mcp::client::ClientFuture;
     use crate::mcp::consent::fakes::SwitchableConsent;
+    use crate::mcp::events::fakes::RecordingEvents;
     use crate::mcp::types::ServerCapabilities;
     use crate::registry::Classification;
     use mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow;
@@ -521,6 +891,7 @@ mod tests {
     /// them, and can park `list_tools` or every `call_tool` until a test releases it.
     struct FakeClient {
         generation: usize,
+        hooks: SessionHooks,
         closes: Arc<AtomicUsize>,
         hold: Option<Arc<tokio::sync::Notify>>,
         calls: Arc<Mutex<Vec<String>>>,
@@ -561,10 +932,27 @@ mod tests {
             &self,
             name: String,
             _arguments: Map<String, Value>,
+            tool_call_id: Option<String>,
             options: RequestOptions,
         ) -> ClientFuture<'_, Value> {
             Box::pin(async move {
                 self.calls.lock().unwrap().push(name.clone());
+                if name == "ask" {
+                    // The fake server asks one question mid-call, like the TypeScript fixture.
+                    let answer = (self.hooks.elicit)(ElicitationRequest {
+                        tool_call_id: tool_call_id.unwrap_or_default(),
+                        message: "Pick one".into(),
+                        fields: vec![
+                            json!({ "name": "tier", "required": false, "kind": "string" }),
+                        ],
+                        cancel: options.cancel.child_token(),
+                    })
+                    .await;
+                    if options.cancel.is_cancelled() {
+                        return Err(McpFailure::cancelled("cancelled"));
+                    }
+                    return Ok(json!({ "contentText": format!("{:?}", answer.action) }));
+                }
                 self.timeouts.lock().unwrap().push(options.timeout);
                 if let Some(gate) = &self.gate {
                     tokio::select! {
@@ -636,6 +1024,7 @@ mod tests {
         gate: Option<Arc<tokio::sync::Semaphore>>,
         cancel_during_connect: bool,
         fail: Option<McpFailure>,
+        hooks: Arc<Mutex<Vec<SessionHooks>>>,
     }
 
     impl McpConnector for FakeConnector {
@@ -659,8 +1048,10 @@ mod tests {
                 if self.cancel_during_connect {
                     context.cancel.cancel();
                 }
+                self.hooks.lock().unwrap().push(context.hooks.clone());
                 Ok(Arc::new(FakeClient {
                     generation,
+                    hooks: context.hooks,
                     closes: Arc::clone(&self.closes),
                     hold: self.hold_lists.clone(),
                     calls: Arc::clone(&self.calls),
@@ -695,10 +1086,13 @@ mod tests {
     }
 
     fn service(connector: FakeConnector) -> Arc<Service> {
-        Arc::new(Service::new(
-            Arc::new(connector),
-            SwitchableConsent::granted(),
-        ))
+        service_with(connector, Arc::new(RecordingEvents::new(true)))
+    }
+
+    fn service_with(connector: FakeConnector, events: Arc<RecordingEvents>) -> Arc<Service> {
+        let service = Service::new(Arc::new(connector), SwitchableConsent::granted());
+        *service.events.lock().unwrap() = Some(events);
+        Arc::new(service)
     }
 
     fn detail<'a>(error: &'a RemoteError, key: &str) -> Option<&'a Value> {
@@ -902,7 +1296,7 @@ mod tests {
         )
         .await;
         release.notify_one();
-        task.await.unwrap().unwrap();
+        settles("the task call", task).await.unwrap().unwrap();
         result
             .expect("expected a list for one server not to wait for another server's connect")
             .expect("the list succeeds");
@@ -917,7 +1311,7 @@ mod tests {
         for id in ["a", "b", "c"] {
             service.connect(params(id), &cancel).await.unwrap();
         }
-        service.close_all().await;
+        service.close_all(false).await;
         assert_eq!(closes.load(Ordering::SeqCst), 3);
         let error = service.list_tools(server("a"), &cancel).await.unwrap_err();
         assert_eq!(detail(&error, "kind"), Some(&json!("mcp_session_missing")));
@@ -974,6 +1368,7 @@ mod tests {
             server_id: server_id.into(),
             tool_name: tool.into(),
             args: Map::new(),
+            tool_call_id: None,
             timeout_ms: None,
         }
     }
@@ -1027,7 +1422,10 @@ mod tests {
         );
         for (index, task) in tasks.into_iter().enumerate() {
             gate.add_permits(1);
-            let result = task.await.unwrap().expect("each call succeeds in turn");
+            let result = settles("the task call", task)
+                .await
+                .unwrap()
+                .expect("each call succeeds in turn");
             assert_eq!(
                 result["contentText"],
                 json!(format!("{}@1", ["first", "second", "third"][index]))
@@ -1087,7 +1485,10 @@ mod tests {
         assert_eq!(left.code, codes::CANCELLED);
         assert!(!held.is_finished(), "expected the head still running");
         gate.add_permits(1);
-        held.await.unwrap().expect("the head completes");
+        settles("the held call", held)
+            .await
+            .unwrap()
+            .expect("the head completes");
         assert_eq!(
             *calls.lock().unwrap(),
             vec!["held"],
@@ -1164,7 +1565,7 @@ mod tests {
             json!({ "messages": [{ "role": "user", "text": "greet you" }] })
         );
         gate.add_permits(1);
-        held.await.unwrap().unwrap();
+        settles("the held call", held).await.unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -1226,30 +1627,398 @@ mod tests {
         );
     }
 
+    /// Awaits a spawned call, failing clearly instead of hanging when it never settles.
+    async fn settles<T>(
+        what: &str,
+        task: tokio::task::JoinHandle<T>,
+    ) -> Result<T, tokio::task::JoinError> {
+        tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap_or_else(|_| {
+                panic!("expected {what} to settle within 3 seconds | received a timeout")
+            })
+    }
+
+    async fn wait_until(what: &str, done: impl Fn() -> bool) {
+        for _ in 0..500 {
+            if done() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("expected {what} within 2.5 seconds | received a timeout");
+    }
+
+    fn asking(server_id: &str, call_id: &str) -> CallToolParams {
+        CallToolParams {
+            tool_call_id: Some(call_id.into()),
+            ..call(server_id, "ask")
+        }
+    }
+
+    #[tokio::test]
+    async fn an_elicitation_event_carries_the_hub_minted_tool_call_id_and_the_answer_returns() {
+        let events = Arc::new(RecordingEvents::new(true));
+        let service = service_with(FakeConnector::default(), Arc::clone(&events));
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let task = spawn_call(
+            &service,
+            asking("server-1", "call-a"),
+            CancellationToken::new(),
+        )
+        .await;
+        wait_until("an elicitation event", || {
+            !events.published(ELICITATION_TOPIC).is_empty()
+        })
+        .await;
+        let event = events.published(ELICITATION_TOPIC).remove(0);
+        assert_eq!(
+            (
+                &event["serverId"],
+                &event["serverSlug"],
+                &event["toolCallId"],
+                &event["message"]
+            ),
+            (
+                &json!("server-1"),
+                &json!("local"),
+                &json!("call-a"),
+                &json!("Pick one")
+            )
+        );
+        let request_id = event["requestId"]
+            .as_str()
+            .expect("a request id")
+            .to_owned();
+        assert_eq!(
+            request_id.len(),
+            36,
+            "expected a UUID-shaped id | received {request_id}"
+        );
+        let ack = service.respond(ElicitResponseParams {
+            request_id,
+            action: ElicitationAction::Decline,
+            content: None,
+        });
+        assert_eq!(ack, json!({ "ok": true }));
+        let result = settles("the task call", task)
+            .await
+            .unwrap()
+            .expect("the call completes after the answer");
+        assert_eq!(result["contentText"], json!("Decline"));
+    }
+
+    #[tokio::test]
+    async fn host_teardown_mid_question_strands_nothing() {
+        let events = Arc::new(RecordingEvents::new(true));
+        let service = service_with(FakeConnector::default(), Arc::clone(&events));
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let task = spawn_call(
+            &service,
+            asking("server-1", "call-b"),
+            CancellationToken::new(),
+        )
+        .await;
+        wait_until("an elicitation event", || {
+            !events.published(ELICITATION_TOPIC).is_empty()
+        })
+        .await;
+        service.close_all(false).await;
+        let settled = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("expected the parked call to settle when the service closed");
+        assert_eq!(settled.unwrap().unwrap()["contentText"], json!("Cancel"));
+        assert!(
+            service.pending().is_empty(),
+            "expected no parked question left"
+        );
+        let missing = service
+            .list_tools(server("server-1"), &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            detail(&missing, "kind"),
+            Some(&json!("mcp_session_missing"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_question_the_hub_session_cannot_carry_is_cancelled_once_and_recorded() {
+        let events = Arc::new(RecordingEvents::new(false));
+        let service = service_with(FakeConnector::default(), Arc::clone(&events));
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let outcome = tokio::time::timeout(
+            Duration::from_millis(500),
+            service.call_tool(asking("server-1", "call-d"), &CancellationToken::new()),
+        )
+        .await
+        .expect("expected the call to come back on its own, not stay parked");
+        assert_eq!(outcome.unwrap()["contentText"], json!("Cancel"));
+        assert_eq!(
+            events.published(ELICITATION_TOPIC).len(),
+            1,
+            "expected the question asked once"
+        );
+        let diagnostics = events.diagnostics.lock().unwrap().join("\n");
+        assert!(
+            diagnostics.contains("mcp_elicitation_unobserved") && diagnostics.contains("call-d"),
+            "expected a diagnostic naming the call | received {diagnostics}"
+        );
+        assert!(
+            !diagnostics.contains("Pick one"),
+            "expected no question text in diagnostics"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_to_a_forgotten_question_is_a_no_op() {
+        let service = service(FakeConnector::default());
+        assert_eq!(
+            service.respond(ElicitResponseParams {
+                request_id: "gone".into(),
+                action: ElicitationAction::Accept,
+                content: Some(Map::new()),
+            }),
+            json!({ "ok": true })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_call_withdraws_its_question_and_a_late_answer_changes_nothing() {
+        let events = Arc::new(RecordingEvents::new(true));
+        let service = service_with(FakeConnector::default(), Arc::clone(&events));
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let cancel = CancellationToken::new();
+        let task = spawn_call(&service, asking("server-1", "call-e"), cancel.clone()).await;
+        wait_until("an elicitation event", || {
+            !events.published(ELICITATION_TOPIC).is_empty()
+        })
+        .await;
+        let request_id = events.published(ELICITATION_TOPIC)[0]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        cancel.cancel();
+        let error = settles("the task call", task)
+            .await
+            .unwrap()
+            .expect_err("expected the cancelled call to fail once");
+        assert_eq!(error.code, codes::CANCELLED);
+        assert!(
+            service.pending().is_empty(),
+            "expected the question withdrawn with its call"
+        );
+        assert!(
+            !service.settle(&request_id, ElicitationAnswer::cancel()),
+            "expected nothing left to settle"
+        );
+        assert_eq!(
+            service.respond(ElicitResponseParams {
+                request_id,
+                action: ElicitationAction::Accept,
+                content: None
+            }),
+            json!({ "ok": true })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_superseded_sessions_close_is_ignored_and_the_current_one_is_reported() {
+        let events = Arc::new(RecordingEvents::new(true));
+        let connector = FakeConnector::default();
+        let hooks = Arc::clone(&connector.hooks);
+        let closes = Arc::clone(&connector.closes);
+        let service = service_with(connector, Arc::clone(&events));
+        let cancel = CancellationToken::new();
+        service.connect(params("server-1"), &cancel).await.unwrap();
+        service.connect(params("server-1"), &cancel).await.unwrap();
+        let (first, second) = {
+            let hooks = hooks.lock().unwrap();
+            (hooks[0].clone(), hooks[1].clone())
+        };
+        (first.closed)();
+        (first.tool_list_changed)();
+        assert!(
+            events.published(SESSION_TOPIC).is_empty(),
+            "expected the old session silent"
+        );
+        assert!(
+            service
+                .list_tools(server("server-1"), &cancel)
+                .await
+                .is_ok()
+        );
+        (second.tool_list_changed)();
+        (second.closed)();
+        assert_eq!(
+            events.published(SESSION_TOPIC),
+            vec![
+                json!({ "serverId": "server-1", "change": "tool-list-changed" }),
+                json!({ "serverId": "server-1", "change": "closed" }),
+            ]
+        );
+        let missing = service
+            .list_tools(server("server-1"), &cancel)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            detail(&missing, "kind"),
+            Some(&json!("mcp_session_missing"))
+        );
+        wait_until("the lost session's cleanup", || {
+            closes.load(Ordering::SeqCst) == 2
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn server_loss_mid_question_settles_the_question() {
+        let events = Arc::new(RecordingEvents::new(true));
+        let connector = FakeConnector::default();
+        let hooks = Arc::clone(&connector.hooks);
+        let service = service_with(connector, Arc::clone(&events));
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let task = spawn_call(
+            &service,
+            asking("server-1", "call-f"),
+            CancellationToken::new(),
+        )
+        .await;
+        wait_until("an elicitation event", || {
+            !events.published(ELICITATION_TOPIC).is_empty()
+        })
+        .await;
+        let lost = hooks.lock().unwrap()[0].clone();
+        (lost.closed)();
+        let settled = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("expected the call to settle when its server was lost");
+        assert_eq!(settled.unwrap().unwrap()["contentText"], json!("Cancel"));
+        assert!(service.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn revoked_consent_closes_sessions_settles_questions_and_tells_the_hub() {
+        use mango_protocol::frame::PeerInfo;
+        use mango_protocol::port::port_pair;
+        use mango_protocol::session::SessionOptions;
+
+        let events = Arc::new(RecordingEvents::new(true));
+        let consent = SwitchableConsent::granted();
+        let connector = FakeConnector::default();
+        let closes = Arc::clone(&connector.closes);
+        let mut inner = Service::new(Arc::new(connector), consent.clone());
+        inner.consent_poll = Duration::from_millis(10);
+        *inner.events.lock().unwrap() = Some(Arc::clone(&events) as Arc<dyn McpEvents>);
+        let service = Arc::new(inner);
+        let peer = |name: &str| PeerInfo {
+            name: name.into(),
+            version: "0.0.0".into(),
+            role: name.into(),
+        };
+        let (runtime_port, _hub_port) = port_pair();
+        let (runtime, _driver) = Session::spawn(runtime_port, SessionOptions::new(peer("runtime")));
+        service.watch(&runtime);
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let task = spawn_call(
+            &service,
+            asking("server-1", "call-g"),
+            CancellationToken::new(),
+        )
+        .await;
+        wait_until("an elicitation event", || {
+            !events.published(ELICITATION_TOPIC).is_empty()
+        })
+        .await;
+        consent.revoke();
+        let settled = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("expected revocation to settle the parked call");
+        assert_eq!(settled.unwrap().unwrap()["contentText"], json!("Cancel"));
+        wait_until("the revoked session closed", || {
+            closes.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        assert_eq!(
+            events.published(SESSION_TOPIC),
+            vec![json!({ "serverId": "server-1", "change": "closed" })]
+        );
+        assert!(service.sessions().is_empty() && service.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn questions_beyond_the_bound_are_cancelled_with_a_diagnostic() {
+        let events = Arc::new(RecordingEvents::new(true));
+        let service = service_with(FakeConnector::default(), Arc::clone(&events));
+        service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .unwrap();
+        let entry = service.entry("server-1").unwrap().id;
+        let mut parked = Vec::new();
+        for index in 0..MAX_PENDING_ELICITATIONS {
+            let (sender, receiver) = oneshot::channel();
+            service.pending().insert(
+                format!("filler-{index}"),
+                Pending {
+                    entry,
+                    answer: sender,
+                },
+            );
+            parked.push(receiver);
+        }
+        let result = service
+            .call_tool(asking("server-1", "call-h"), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result["contentText"], json!("Cancel"));
+        assert!(
+            events.published(ELICITATION_TOPIC).is_empty(),
+            "expected no event past the bound"
+        );
+        assert!(
+            events
+                .diagnostics
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line.contains("mcp_elicitation_limit"))
+        );
+    }
+
     #[test]
-    fn partial_family_is_registered_but_never_advertised_as_mcp() {
+    fn the_whole_family_is_registered_and_mcp_follows_consent() {
         let registry = register_with_connector(
             Registry::new(),
             Arc::new(FakeConnector::default()),
             SwitchableConsent::granted(),
         );
-        for method in [
-            "mcp.connect",
-            "mcp.list-tools",
-            "mcp.call-tool",
-            "mcp.list-resources",
-            "mcp.read-resource",
-            "mcp.list-prompts",
-            "mcp.get-prompt",
-            "mcp.disconnect",
-        ] {
-            assert_eq!(registry.classify(method), Classification::Implemented);
+        for method in MCP_METHODS {
+            assert_eq!(
+                registry.classify(method),
+                Classification::Implemented,
+                "expected {method} implemented"
+            );
         }
-        assert_eq!(
-            registry.classify("mcp.elicit-response"),
-            Classification::KnownUnimplemented
-        );
-        let allow = RuntimeCapabilityAllow {
+        let mut allow = RuntimeCapabilityAllow {
             fs_read: false,
             fs_write: false,
             shell: false,
@@ -1261,6 +2030,14 @@ mod tests {
             update: false,
             external_agents: None,
         };
-        assert!(!build_features(&registry, &allow, true).mcp);
+        assert!(
+            build_features(&registry, &allow, true).mcp,
+            "expected mcp advertised when granted"
+        );
+        allow.mcp = false;
+        assert!(
+            !build_features(&registry, &allow, true).mcp,
+            "expected mcp withheld when revoked"
+        );
     }
 }

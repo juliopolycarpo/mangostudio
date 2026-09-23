@@ -7,6 +7,9 @@
 mod client;
 mod consent;
 mod content;
+mod elicitation_order;
+mod elicitation_schema;
+mod events;
 #[cfg(test)]
 mod fake_http;
 mod http;

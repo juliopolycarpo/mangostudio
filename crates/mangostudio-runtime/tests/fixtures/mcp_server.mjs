@@ -56,6 +56,16 @@ async function callTool(id, params) {
     });
     return reply(id, text(JSON.stringify(answer.result ?? answer.error)));
   }
+  if (name === 'ask-order') {
+    const answer = await ask('elicitation/create', {
+      message: 'Ordered form',
+      requestedSchema: {
+        type: 'object',
+        properties: { zeta: { type: 'string' }, alpha: { type: 'number' }, mid: { type: 'boolean' } },
+      },
+    });
+    return reply(id, text(JSON.stringify(answer.result ?? answer.error)));
+  }
   if (name === 'ask-url') {
     const answer = await ask('elicitation/create', {
       mode: 'url',
@@ -65,13 +75,15 @@ async function callTool(id, params) {
     });
     return reply(id, text(JSON.stringify(answer.result ?? answer.error)));
   }
-  if (name === 'ask-then-hang') {
-    await ask('elicitation/create', {
-      mode: 'form',
-      message: 'Never answered in time',
+  if (name === 'ask-withdraw') {
+    const requestId = `server-${nextId}`;
+    const asked = ask('elicitation/create', {
+      message: 'Withdrawn soon',
       requestedSchema: { type: 'object', properties: {} },
     });
-    return;
+    setTimeout(() => send({ method: 'notifications/cancelled', params: { requestId } }), 50);
+    const answer = await Promise.race([asked, new Promise((done) => setTimeout(done, 1000, null))]);
+    return reply(id, text(answer === null ? 'withdrawn' : JSON.stringify(answer.result)));
   }
   send({ id, error: { code: -32602, message: `Unknown tool: ${name}` } });
 }
