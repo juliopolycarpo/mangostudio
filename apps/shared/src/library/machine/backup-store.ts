@@ -460,16 +460,20 @@ function selectRetained(
   const retained = new Set<string>();
   if (currentBackupId !== null) retained.add(currentBackupId);
 
+  // The set being written is charged as an ordinary set even before its
+  // manifest lands: the writer prunes between backing up and recording.
+  const current = backupSets.find((backup) => backup.id === currentBackupId);
+  const ordinaryCurrent = current !== undefined && !current.pinned;
   let retainedBytes = 0;
   for (const backup of backupSets) {
-    if (!backup.pinned) continue;
+    if (backup === current && ordinaryCurrent) continue;
+    if (!retainedUnconditionally(backup)) continue;
     retained.add(backup.id);
     retainedBytes += backup.sizeBytes;
   }
 
-  const current = backupSets.find((backup) => backup.id === currentBackupId);
-  if (current && !current.pinned) retainedBytes += current.sizeBytes;
-  let ordinaryCount = current && !current.pinned ? 1 : 0;
+  if (current && ordinaryCurrent) retainedBytes += current.sizeBytes;
+  let ordinaryCount = ordinaryCurrent ? 1 : 0;
 
   for (const backup of backupSets) {
     if (retained.has(backup.id)) continue;
@@ -480,6 +484,21 @@ function selectRetained(
     ordinaryCount += 1;
   }
   return retained;
+}
+
+/**
+ * Kept by retention whatever the budget, and charged first.
+ *
+ * A pinned set holds someone's last copy. A set with no readable manifest is
+ * either still being written — by this process, whose write queue already
+ * keeps `gc` out, or by another runtime sharing the same store, which no
+ * queue here can see — or it is what a failed commit left behind as the only
+ * copy of what was overwritten. Retention may take neither on its own; the
+ * Rust runtime applies the same rule, and `purgeBackupSet` still removes one
+ * on an explicit request.
+ */
+function retainedUnconditionally(backup: BackupSet): boolean {
+  return backup.pinned || !backup.manifestReadable;
 }
 
 /**

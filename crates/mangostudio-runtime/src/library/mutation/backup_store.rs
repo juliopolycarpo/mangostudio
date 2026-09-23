@@ -662,13 +662,18 @@ impl BackupStore {
         if let Some(current) = current {
             retained.insert(current.to_string());
         }
+        // The set being written is charged as an ordinary set even before its
+        // manifest lands: the writer prunes between backing up and recording.
+        let current_set = current.and_then(|id| sets.iter().find(|set| set.id == id));
+        let ordinary_current = current_set.filter(|set| !set.pinned());
         let mut retained_bytes = 0.0;
         for set in sets.iter().filter(|set| set.retained_unconditionally()) {
+            if ordinary_current.is_some_and(|current| current.id == set.id) {
+                continue;
+            }
             retained.insert(set.id.clone());
             retained_bytes += set.size_bytes as f64;
         }
-        let current_set = current.and_then(|id| sets.iter().find(|set| set.id == id));
-        let ordinary_current = current_set.filter(|set| !set.retained_unconditionally());
         if let Some(set) = ordinary_current {
             retained_bytes += set.size_bytes as f64;
         }

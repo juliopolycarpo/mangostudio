@@ -185,13 +185,13 @@ fn the_rust_listing_of_a_typescript_store_matches_typescript() {
     assert_eq!(rows.len(), expected.len(), "received {rows:?}");
     for (row, expected) in rows.iter().zip(expected) {
         let mut actual = serde_json::to_value(row).unwrap();
+        // A set whose manifest was never written charges none.
         let manifest_bytes = std::fs::metadata(
             Path::new(&replay.store.root)
                 .join(&row.backup_id)
                 .join("manifest.json"),
         )
-        .unwrap()
-        .len();
+        .map_or(0, |metadata| metadata.len());
         let size = actual
             .as_object_mut()
             .unwrap()

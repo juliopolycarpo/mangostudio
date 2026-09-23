@@ -137,6 +137,38 @@ describe('manifest v3', () => {
 });
 
 describe('collectBackupGarbage', () => {
+  it('never auto-evicts a manifest-less set, which may still be in flight', async () => {
+    const deps = createBackupStoreDeps({
+      backupRoot,
+      retentionCount: 1,
+      retentionBytes: 1024 ** 3,
+    });
+    // No manifest yet: an apply still filling this set (possibly another
+    // runtime sharing the store), or the only copy a failed commit left.
+    mkdirSync(join(backupRoot, 'in-flight', 'claude-skills', 'gh'), { recursive: true });
+    for (const id of ['set-a', 'set-b']) {
+      mkdirSync(join(backupRoot, id, 'claude-skills', 'gh'), { recursive: true });
+      await writeBackupManifest(
+        { version: 3, backupId: id, createdAtMs: 1, entries: [], operation: 'propagation' },
+        deps
+      );
+    }
+
+    const inFlight = (await listBackupSets(deps)).find((set) => set.backupId === 'in-flight');
+    expect(
+      inFlight?.evictsNext,
+      `expected evictsNext false for a manifest-less set | received ${inFlight?.evictsNext}`
+    ).toBe(false);
+    const collected = await collectBackupGarbage({}, deps);
+    expect(collected.pruned).not.toContain('in-flight');
+    expect((await listBackupSets(deps)).map((set) => set.backupId)).toContain('in-flight');
+
+    // An explicit purge still removes it.
+    const purged = await collectBackupGarbage({ purgeBackupIds: ['in-flight'] }, deps);
+    expect(purged.purged).toEqual(['in-flight']);
+    expect((await listBackupSets(deps)).map((set) => set.backupId)).not.toContain('in-flight');
+  });
+
   it('purges named sets and reports what retention took with them', async () => {
     const deps = createBackupStoreDeps({
       backupRoot,
