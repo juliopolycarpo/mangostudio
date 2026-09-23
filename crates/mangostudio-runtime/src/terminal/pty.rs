@@ -817,9 +817,10 @@ mod tests {
 
     #[tokio::test]
     async fn closing_interactive_shell_kills_background_job_groups() {
-        // The guardian's session sweep is bounded to 10 s (`TERMINAL_SESSION_CLEANUP_SECONDS`);
-        // `close` must resolve within that bound plus scheduling slack, never a tighter one.
-        const CLOSE_BOUND: Duration = Duration::from_secs(15);
+        // `close` resolves after the guardian's bounded session sweep, so allow that bound plus
+        // scheduling slack, never a tighter one.
+        const CLOSE_BOUND: Duration = crate::subprocess::TERMINAL_SESSION_CLEANUP_BOUND
+            .saturating_add(Duration::from_secs(5));
         // Readiness only measures how fast a loaded machine schedules the shell, not a contract.
         const READY_BOUND: Duration = Duration::from_secs(15);
         let _serial = REAL_PTY_TEST.lock().await;
@@ -854,7 +855,10 @@ mod tests {
         if history_ready.is_err() {
             let captured = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
             let close = tokio::time::timeout(CLOSE_BOUND, handle.close()).await;
-            panic!("shell did not disable history expansion; output={captured:?}; close={close:?}");
+            panic!(
+                "expected the shell to report HISTORY_READY within {READY_BOUND:?} | received \
+                 output={captured:?}, close={close:?}"
+            );
         }
         handle
             .write(b"sleep 60 & echo BG1:$!; (trap '' HUP; sleep 60) & echo BG2:$!\n".to_vec())
@@ -878,7 +882,8 @@ mod tests {
                 let captured = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
                 let close = tokio::time::timeout(CLOSE_BOUND, handle.close()).await;
                 panic!(
-                    "shell did not report both background job PIDs; output={captured:?}; close={close:?}"
+                    "expected both background job PIDs within {READY_BOUND:?} | received \
+                     output={captured:?}, close={close:?}"
                 );
             }
         };

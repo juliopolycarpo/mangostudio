@@ -37,7 +37,7 @@ const RELEASE: u8 = b'G';
 const FINALIZE: u8 = b'F';
 const STATUS_BYTES: usize = std::mem::size_of::<libc::c_int>();
 const READY_BYTES: usize = STATUS_BYTES + 1;
-const TERMINAL_SESSION_CLEANUP_SECONDS: libc::time_t = 10;
+pub(super) const TERMINAL_SESSION_CLEANUP_SECONDS: libc::time_t = 10;
 
 pub(crate) struct GuardianChild {
     pid: libc::pid_t,

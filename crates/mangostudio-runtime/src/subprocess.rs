@@ -36,6 +36,12 @@ mod unix_guardian;
 #[cfg(windows)]
 mod windows_job;
 
+/// How long the Unix guardian may sweep a terminal session's job groups before it reports failure.
+/// A PTY `close` resolves only after that sweep, so tests bound `close` by this plus slack.
+#[cfg(all(unix, test))]
+pub(crate) const TERMINAL_SESSION_CLEANUP_BOUND: std::time::Duration =
+    std::time::Duration::from_secs(unix_guardian::TERMINAL_SESSION_CLEANUP_SECONDS.unsigned_abs());
+
 /// PTY child with the same guardian or Job ownership as a bounded process.
 pub(crate) enum PtyChild {
     #[cfg(unix)]
