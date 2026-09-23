@@ -18,6 +18,8 @@
 //!   `cli.ts`'s `stdioConsent`.
 //! - `read` — the bounded, tri-state consent read (granted, denied, or
 //!   unknown) the live-resource watchers and launch checks share.
+//! - `stop_only` — the methods that only end or detach something already running, which
+//!   the guard lets through an inconclusive consent read.
 //! - [`config`] — the fully-resolved, default-filled `runtime.json` shape
 //!   `runtime.health` reports, mirroring `resolveRuntimeSlotConfig`.
 
@@ -27,3 +29,4 @@ pub mod invocation;
 pub mod presets;
 pub(crate) mod read;
 pub mod source;
+pub(crate) mod stop_only;
