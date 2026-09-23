@@ -817,10 +817,18 @@ mod tests {
 
     #[tokio::test]
     async fn closing_interactive_shell_kills_background_job_groups() {
+        // `close` resolves after the guardian's bounded session sweep, so allow that bound plus
+        // scheduling slack, never a tighter one.
+        const CLOSE_BOUND: Duration = crate::subprocess::TERMINAL_SESSION_CLEANUP_BOUND
+            .saturating_add(Duration::from_secs(5));
+        // Readiness only measures how fast a loaded machine schedules the shell, not a contract.
+        const READY_BOUND: Duration = Duration::from_secs(15);
         let _serial = REAL_PTY_TEST.lock().await;
         let output = Arc::new(Mutex::new(Vec::new()));
         let collected = Arc::clone(&output);
-        let request = PtyRequest::new("/bin/bash", ["-i"], 80, 24);
+        // `--norc --noprofile` keeps the developer's startup files (which may block on locks or
+        // the network) out of a test about job-group cleanup; `-i` still enables job control.
+        let request = PtyRequest::new("/bin/bash", ["--norc", "--noprofile", "-i"], 80, 24);
         let handle = DefaultPtySpawner
             .spawn(
                 request,
@@ -834,7 +842,7 @@ mod tests {
             .write(b"set +H; printf 'HISTORY_READY:%s\\n' $$\n".to_vec())
             .await
             .expect("history expansion is disabled before using $!");
-        let history_ready = tokio::time::timeout(Duration::from_secs(5), async {
+        let history_ready = tokio::time::timeout(READY_BOUND, async {
             loop {
                 let text = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
                 if background_pid(&text, "HISTORY_READY:") == Some(handle.pid() as i32) {
@@ -846,14 +854,17 @@ mod tests {
         .await;
         if history_ready.is_err() {
             let captured = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
-            let close = tokio::time::timeout(Duration::from_secs(15), handle.close()).await;
-            panic!("shell did not disable history expansion; output={captured:?}; close={close:?}");
+            let close = tokio::time::timeout(CLOSE_BOUND, handle.close()).await;
+            panic!(
+                "expected the shell to report HISTORY_READY within {READY_BOUND:?} | received \
+                 output={captured:?}, close={close:?}"
+            );
         }
         handle
             .write(b"sleep 60 & echo BG1:$!; (trap '' HUP; sleep 60) & echo BG2:$!\n".to_vec())
             .await
             .expect("jobs start");
-        let pids = tokio::time::timeout(Duration::from_secs(5), async {
+        let pids = tokio::time::timeout(READY_BOUND, async {
             loop {
                 let text = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
                 if let (Some(first), Some(second)) =
@@ -869,9 +880,10 @@ mod tests {
             Ok(pids) => pids,
             Err(_) => {
                 let captured = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
-                let close = tokio::time::timeout(Duration::from_secs(15), handle.close()).await;
+                let close = tokio::time::timeout(CLOSE_BOUND, handle.close()).await;
                 panic!(
-                    "shell did not report both background job PIDs; output={captured:?}; close={close:?}"
+                    "expected both background job PIDs within {READY_BOUND:?} | received \
+                     output={captured:?}, close={close:?}"
                 );
             }
         };
@@ -880,19 +892,27 @@ mod tests {
             .iter()
             .all(|pid| process_group(*pid) != Some(handle.pid() as i32));
         let separate_jobs = process_group(pids[0]) != process_group(pids[1]);
-        let close = tokio::time::timeout(Duration::from_secs(5), handle.close()).await;
+        let close = tokio::time::timeout(CLOSE_BOUND, handle.close()).await;
         let survivors = pids
             .into_iter()
             .filter(|pid| process_running(*pid))
+            .map(|pid| (pid, process_group(pid)))
             .collect::<Vec<_>>();
-        for pid in &survivors {
+        for (pid, _) in &survivors {
             let _ = std::process::Command::new("kill")
                 .args(["-KILL", &pid.to_string()])
                 .status();
         }
-        close
-            .expect("terminal closes")
-            .expect("owned tree cleanup completes");
+        let close = close.unwrap_or_else(|_| {
+            panic!(
+                "expected close within {CLOSE_BOUND:?} | received timeout; survivors (pid, pgid)={survivors:?}"
+            )
+        });
+        if let Err(error) = close {
+            panic!(
+                "expected owned tree cleanup Ok | received {error}; survivors (pid, pgid)={survivors:?}"
+            );
+        }
         assert!(jobs_started, "both jobs must be running before close");
         assert!(
             separate_from_shell && separate_jobs,
@@ -900,7 +920,7 @@ mod tests {
         );
         assert!(
             survivors.is_empty(),
-            "background jobs survived close: {survivors:?}"
+            "expected no background job alive after close | received survivors (pid, pgid)={survivors:?}"
         );
     }
 
