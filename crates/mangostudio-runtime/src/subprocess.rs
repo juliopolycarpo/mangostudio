@@ -178,8 +178,9 @@ pub(crate) use pipe_child::PipeChild;
 pub use supervisor::{
     AlwaysAllow, DefaultProcessSpawner, LaunchCheck, LaunchCheckError,
     MAX_SUPERVISED_PROCESS_REQUESTS, ProcessBudget, ProcessCapture, ProcessControl, ProcessExit,
-    ProcessFuture, ProcessRequest, ProcessSignal, ProcessSpawner, ProcessStartError, ProcessStdin,
-    ProcessStop, ProcessTerminal, ProcessTerminalCause,
+    ProcessFuture, ProcessOutputChunk, ProcessOutputTap, ProcessRequest, ProcessSignal,
+    ProcessSpawner, ProcessStartError, ProcessStdin, ProcessStop, ProcessStream, ProcessTerminal,
+    ProcessTerminalCause,
 };
 
 /// How many children this process runs at once, across every caller.
