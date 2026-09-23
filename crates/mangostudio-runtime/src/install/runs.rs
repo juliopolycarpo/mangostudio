@@ -90,6 +90,9 @@ struct State {
 pub(crate) struct InstallRuns {
     state: Mutex<State>,
     active: watch::Sender<usize>,
+    /// Test-only: runs once where another thread could interleave after the table changed.
+    #[cfg(test)]
+    interleave: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl Default for InstallRuns {
@@ -97,6 +100,8 @@ impl Default for InstallRuns {
         Self {
             state: Mutex::new(State::default()),
             active: watch::channel(0).0,
+            #[cfg(test)]
+            interleave: Mutex::new(None),
         }
     }
 }
@@ -124,7 +129,7 @@ impl InstallRuns {
     /// ```
     pub(crate) fn reserve(self: &Arc<Self>, run_id: &str) -> Result<RunLease, AlreadyActive> {
         let control = Arc::new(RunControl::new());
-        let count = {
+        {
             let mut state = self.lock();
             if state.active.contains_key(run_id) {
                 return Err(AlreadyActive);
@@ -134,9 +139,9 @@ impl InstallRuns {
                 control.request_stop(StopReason::Cancelled);
             }
             state.active.insert(run_id.to_owned(), Arc::clone(&control));
-            state.active.len()
-        };
-        self.active.send_replace(count);
+            self.publish(&state);
+        }
+        self.interleave();
         Ok(RunLease {
             runs: Arc::clone(self),
             run_id: run_id.to_owned(),
@@ -168,7 +173,7 @@ impl InstallRuns {
     }
 
     fn release(&self, run_id: &str, control: &Arc<RunControl>) {
-        let count = {
+        {
             let mut state = self.lock();
             if state
                 .active
@@ -177,9 +182,31 @@ impl InstallRuns {
             {
                 state.active.remove(run_id);
             }
-            state.active.len()
-        };
-        self.active.send_replace(count);
+            self.publish(&state);
+        }
+        self.interleave();
+    }
+
+    /// Publishes the active count while `state`'s guard is still held, so concurrent reserves
+    /// and releases publish in the same order they changed the table and the last value wins
+    /// truthfully. Publishing after the guard dropped let a stale snapshot overwrite a newer one.
+    fn publish(&self, state: &State) {
+        self.active.send_replace(state.active.len());
+    }
+
+    /// Lets a test run another table operation at the point a concurrent caller could.
+    fn interleave(&self) {
+        #[cfg(test)]
+        {
+            let hook = self
+                .interleave
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -332,6 +359,61 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), runs.settled())
             .await
             .expect("expected an idle table to be settled already");
+    }
+
+    /// A release racing a reserve must never leave the count at zero while a run is active, or
+    /// end of stdio input would exit and the parent-death lease would kill that run's installer.
+    #[tokio::test]
+    async fn a_release_racing_a_reserve_never_reports_the_table_empty() {
+        let runs = Arc::new(InstallRuns::default());
+        let released = runs.reserve("b").unwrap();
+        let reserved: Arc<std::sync::Mutex<Option<super::RunLease>>> = Arc::default();
+        *runs.interleave.lock().unwrap() = Some(Box::new({
+            let runs = Arc::clone(&runs);
+            let reserved = Arc::clone(&reserved);
+            move || *reserved.lock().unwrap() = Some(runs.reserve("c").unwrap())
+        }));
+
+        drop(released);
+        let running = reserved
+            .lock()
+            .unwrap()
+            .take()
+            .expect("run c reserved mid-release");
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), runs.settled())
+                .await
+                .is_err(),
+            "expected settled to stay pending while run c is active | received settled"
+        );
+        drop(running);
+        tokio::time::timeout(Duration::from_secs(2), runs.settled())
+            .await
+            .expect("expected settled once run c is released | received: still pending");
+    }
+
+    /// Two racing releases must never leave the count above zero once the table is empty, or end
+    /// of stdio input would wait forever.
+    #[tokio::test]
+    async fn racing_releases_never_leave_the_count_stuck_above_zero() {
+        let runs = Arc::new(InstallRuns::default());
+        let first = runs.reserve("x").unwrap();
+        let second = Arc::new(std::sync::Mutex::new(Some(runs.reserve("y").unwrap())));
+        *runs.interleave.lock().unwrap() = Some(Box::new({
+            let second = Arc::clone(&second);
+            move || drop(second.lock().unwrap().take())
+        }));
+
+        drop(first);
+
+        assert!(
+            second.lock().unwrap().is_none(),
+            "expected run y released mid-release"
+        );
+        tokio::time::timeout(Duration::from_secs(2), runs.settled())
+            .await
+            .expect("expected settled with no run active | received: still pending");
     }
 
     #[test]
