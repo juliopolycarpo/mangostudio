@@ -1116,6 +1116,9 @@ mod tests {
             &[("pairingToken", Some(json!("stored-token")))],
         )
         .unwrap();
+        let slot = home.join("runtime/remote");
+        let config = fs::read(slot.join("runtime.json")).unwrap();
+        let credentials = fs::read(slot.join("credentials.json")).unwrap();
         let no_bus = operate(
             ServiceAction::Install,
             Some(ServiceMode::Connect),
@@ -1146,6 +1149,46 @@ mod tests {
                 "systemctl --user daemon-reload",
                 "systemctl --user enable --now mangostudio-runtime.service",
                 "loginctl enable-linger",
+            ]
+        );
+        let lifecycle_start = fake.0.lock().unwrap().len();
+
+        let status = operate(ServiceAction::Status, None, false, &home, &home, &fake).unwrap();
+        for field in [
+            "installed",
+            "enabled",
+            "running",
+            "execUsesCurrent",
+            "currentBinaryPresent",
+        ] {
+            assert_eq!(status[field], true, "service status {field}");
+        }
+        for action in [
+            ServiceAction::Start,
+            ServiceAction::Restart,
+            ServiceAction::Stop,
+            ServiceAction::Uninstall,
+        ] {
+            operate(action, None, false, &home, &home, &fake).unwrap();
+        }
+        assert!(!unit_path(&home).exists());
+        assert_eq!(fs::read(slot.join("runtime.json")).unwrap(), config);
+        assert_eq!(
+            fs::read(slot.join("credentials.json")).unwrap(),
+            credentials
+        );
+        assert_eq!(
+            &fake.0.lock().unwrap()[lifecycle_start..],
+            [
+                "systemctl --user show-environment",
+                "systemctl --user is-enabled mangostudio-runtime.service",
+                "systemctl --user is-active mangostudio-runtime.service",
+                "systemctl --user start mangostudio-runtime.service",
+                "systemctl --user --no-block restart mangostudio-runtime.service",
+                "systemctl --user stop mangostudio-runtime.service",
+                "systemctl --user disable mangostudio-runtime.service",
+                "systemctl --user --no-block stop mangostudio-runtime.service",
+                "systemctl --user daemon-reload",
             ]
         );
     }

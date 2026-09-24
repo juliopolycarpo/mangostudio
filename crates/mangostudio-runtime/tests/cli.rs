@@ -58,6 +58,80 @@ fn scratch_mango_home(name: &str) -> support::scratch::ScratchDir {
     scratch_path(&format!("runtime-binary-test-{name}"))
 }
 
+#[cfg(unix)]
+#[test]
+fn doctor_reports_a_stale_slot_pointer_and_reinstall_recovers_without_reconfiguring() {
+    use std::os::unix::fs::symlink;
+
+    let home = scratch_mango_home("doctor-stale-slot");
+    let setup = Command::new(binary_path())
+        .args(["setup", "--slot", "host", "--profile", "readonly"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    assert!(setup.status.success());
+
+    let slot = home.join("runtime").join("host");
+    let config = slot.join("runtime.json");
+    let mut configured: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+    let current = slot.join("current");
+    symlink("9.9.9", &current).unwrap();
+
+    let stale = Command::new(binary_path())
+        .args(["doctor", "--json"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    assert_eq!(stale.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&stale.stdout).unwrap();
+    let slot_finding = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["title"] == "Slot")
+        .expect("doctor reports the stale slot pointer");
+    assert_eq!(slot_finding["severity"], "fail");
+    assert!(slot_finding["detail"].as_str().unwrap().contains("9.9.9"));
+    assert_eq!(
+        slot_finding["fix"],
+        "mangostudio-runtime install --slot host"
+    );
+
+    let reinstall = Command::new(binary_path())
+        .args(["install", "--slot", "host", "--json"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    assert!(reinstall.status.success());
+    assert_eq!(
+        std::fs::read_link(&current).unwrap(),
+        std::path::Path::new(env!("CARGO_PKG_VERSION"))
+    );
+    let mut after: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+    for field in ["version", "binaryPath", "digest"] {
+        configured.as_object_mut().unwrap().remove(field);
+        after.as_object_mut().unwrap().remove(field);
+    }
+    assert_eq!(after, configured, "reinstall changed setup or consent");
+
+    let recovered = Command::new(binary_path())
+        .args(["doctor", "--json"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    assert!(recovered.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&recovered.stdout).unwrap();
+    assert!(
+        report["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|finding| finding["title"] != "Slot")
+    );
+}
+
 #[test]
 fn setup_reports_when_it_replaces_an_unusable_runtime_config_without_printing_its_contents() {
     let home = scratch_mango_home("setup-replaced-config");
