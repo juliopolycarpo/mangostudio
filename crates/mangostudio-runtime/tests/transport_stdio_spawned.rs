@@ -62,10 +62,7 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
     let _ = driver.await;
 }
 
-/// `SIGINT` sent as early as this test can manage — before any hub ever
-/// writes a byte, so the child is still somewhere in its own startup
-/// (consent read, host build, contract parse, `Session::open`) rather than
-/// waiting on a `hello` — must still exit through this crate's own
+/// `SIGINT` sent before any hub writes a byte must still exit through this crate's own
 /// controlled path (a normal `exit()`, never the process dying to
 /// `SIGINT`'s default disposition). Checked directly against the child's
 /// real `ExitStatus`, via `ExitStatusExt::signal()`, rather than through a
@@ -74,19 +71,10 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
 /// as an ordinary release, so a closure code alone cannot tell "exited
 /// cleanly" apart from "was killed" — only the OS exit status can.
 ///
-/// The regression this guards: `Signals::install` used to register `SIGTERM`
-/// only, leaving `SIGINT` to a `tokio::signal::ctrl_c()` call inside `wait()`
-/// itself — a future whose own documentation says its listener is installed
-/// "when first polled", not when called. Everything `stdio::run` does
-/// between `Signals::install` and that first poll (consent, `build_host`,
-/// `Contract::from_catalog`, `Session::open`) was an uncovered window.
-///
-/// Best-effort on timing, not a guaranteed race window: nothing in
-/// userspace can register a handler before the OS has even finished
-/// exec'ing the binary, so an adversarially-early signal can still hit the
-/// process's default disposition regardless of this fix — that earlier gap
-/// is not what this test (or the code change) claims to close. What is
-/// closed is the *later* gap this crate's own code controlled.
+/// This exercises the handler registered by `ShutdownSignals::install`
+/// without completing a handshake. The child must first finish process
+/// startup, because no userspace handler can catch a signal sent before the
+/// binary runs.
 #[cfg(unix)]
 #[test]
 fn a_sigint_sent_before_any_handshake_still_exits_cleanly_not_killed() {
@@ -106,10 +94,10 @@ fn a_sigint_sent_before_any_handshake_still_exits_cleanly_not_killed() {
     // runtime's own bootstrap) exists before this crate's code runs at
     // all, and no userspace fix can close it — sending the signal with no
     // delay mostly measures *that* race, not the one this test exists for.
-    // This delay is an empirical compromise: long enough to almost always
-    // land after `Signals::install`, short enough to still land well
-    // before a healthy handshake could ever complete.
-    std::thread::sleep(std::time::Duration::from_millis(15));
+    // Give a contended CI host enough time to execute this binary's handler
+    // registration. No hub bytes are sent, so the handshake still cannot
+    // complete before the signal regardless of this delay.
+    std::thread::sleep(std::time::Duration::from_millis(250));
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(child.id().try_into().expect("a pid fits in i32")),
         nix::sys::signal::Signal::SIGINT,
