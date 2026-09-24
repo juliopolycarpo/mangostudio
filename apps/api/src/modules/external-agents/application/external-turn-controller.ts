@@ -31,6 +31,7 @@
  *    external turn, and the converse is enforced where internal turns start.
  */
 
+import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import type { InteractionMode } from '@mangostudio/shared';
 import {
   type ExternalAgentAttachment,
@@ -53,6 +54,7 @@ import Value from 'typebox/value';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
+import { getRuntimeConnectionManager } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
@@ -71,7 +73,9 @@ import {
   persistTextTurnStart,
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../domain/external-turn-retry-policy';
 import { ExternalTurnTranscript } from '../domain/external-turn-transcript';
+import { sealAttemptsForMessage } from '../infrastructure/external-turn-attempt-repository';
 import { cacheExternalAccountLimitsBestEffort } from './external-account-limits';
 import {
   type AnswerExternalApprovalResult,
@@ -83,10 +87,17 @@ import {
   externalCommandCatalogCache,
 } from './external-command-catalog-cache';
 import {
+  type ExternalSessionConsumer,
   type ExternalSessionHandle,
   type ExternalSessionManager,
   externalSessionManager,
 } from './external-session-manager';
+import {
+  type CancellableSleep,
+  type SubmissionOutcome,
+  sleepUnlessAborted,
+  submitExternalTurn,
+} from './external-turn-submission';
 
 const logger = createDiagnosticLogger('external-turn-controller');
 
@@ -249,6 +260,36 @@ export interface ExternalTurnControllerDependencies {
   readonly newId?: () => string;
   /** Overrides {@link STEER_TERMINATION_GRACE_MS}; a test's only hook for it. */
   readonly steerTerminationGraceMs?: number;
+  /** Backoff, cap and per-attempt deadline for resubmitting a turn. */
+  readonly retryPolicy?: RetryPolicy;
+  /** The backoff wait; a test injects a fake clock here. */
+  readonly sleep?: CancellableSleep;
+  /** Jitter source in [0, 1). */
+  readonly random?: () => number;
+  /** A connect failure that waiting cannot fix. Defaults to a recorded protocol mismatch. */
+  readonly isTerminalConnectFailure?: (
+    error: unknown,
+    scope: { readonly userId: string; readonly environmentId: string }
+  ) => boolean;
+}
+
+/**
+ * A protocol mismatch latches the environment exactly like repeated connect
+ * failures do, and the fast-fail error for both is `UNAVAILABLE` — only the
+ * recorded status still says which one it was. The count latch is a wait, the
+ * mismatch is a refusal.
+ */
+function defaultIsTerminalConnectFailure(
+  error: unknown,
+  scope: { readonly userId: string; readonly environmentId: string }
+): boolean {
+  if (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.PROTOCOL_MISMATCH) {
+    return true;
+  }
+  return (
+    getRuntimeConnectionManager().getStatus(scope.userId, scope.environmentId).errorCode ===
+    RESERVED_ERROR_CODES.PROTOCOL_MISMATCH
+  );
 }
 
 /**
@@ -453,10 +494,11 @@ export interface ExternalTurnController {
 interface LiveExternalTurn {
   readonly transcript: ExternalTurnTranscript;
   readonly writer: ExternalTranscriptWriter;
-  readonly sessionId: string;
+  /** Mutable: a turn still submitting may move to a reopened session. */
+  sessionId: string;
   /** Mutable: the vendor's turn id arrives after the send is registered. */
   readonly external: ActiveExternalTurn;
-  readonly handle: ExternalSessionHandle;
+  handle: ExternalSessionHandle;
   readonly observer: ExternalTurnObserver | undefined;
   /** Who started this turn — `steer` refuses a caller this does not match. */
   readonly userId: string;
@@ -530,6 +572,11 @@ export function createExternalTurnController(
   const newId = dependencies.newId ?? generateId;
   const steerTerminationGraceMs =
     dependencies.steerTerminationGraceMs ?? STEER_TERMINATION_GRACE_MS;
+  const retryPolicy = dependencies.retryPolicy ?? DEFAULT_RETRY_POLICY;
+  const sleep = dependencies.sleep ?? sleepUnlessAborted;
+  const random = dependencies.random ?? Math.random;
+  const isTerminalConnectFailure =
+    dependencies.isTerminalConnectFailure ?? defaultIsTerminalConnectFailure;
   const liveTurns = new Map<string, LiveExternalTurn>();
 
   async function start(
@@ -581,6 +628,24 @@ export function createExternalTurnController(
     return runTurn({ input, db, chat, targetId, handle });
   }
 
+  /** The session inputs `start` opened with, so a resubmission reopens the same binding. */
+  function sessionInputFor(
+    input: StartExternalTurnInput,
+    environmentId: string,
+    targetId: ExternalAgentTargetId
+  ) {
+    return {
+      userId: input.userId,
+      chatId: input.chatId,
+      environmentId,
+      targetId,
+      canonicalWorkspacePath: input.canonicalWorkspacePath,
+      vendorAccountFingerprint: input.vendorAccountFingerprint ?? null,
+      credentialHomeFingerprint: input.credentialHomeFingerprint,
+      configuration: input.configuration,
+    };
+  }
+
   async function runTurn(context: {
     readonly input: StartExternalTurnInput;
     readonly db: Kysely<Database>;
@@ -588,7 +653,18 @@ export function createExternalTurnController(
     readonly targetId: ExternalAgentTargetId;
     readonly handle: ExternalSessionHandle;
   }): Promise<ExternalTurnResult> {
-    const { input, db, handle, targetId } = context;
+    const { input, db, targetId } = context;
+    let handle = context.handle;
+    /**
+     * Aborted by the first terminal writer. The submission loop reads it, so
+     * a stop, a revocation or a shutdown ends every pending retry.
+     */
+    const stop = new AbortController();
+    /**
+     * Until the vendor accepts the turn, a dropped connection is not the end
+     * of it: whether the turn was received is the submission loop's call.
+     */
+    let submitting = !input.review;
     const startedAt = now();
     const userMessageId = newId();
     const assistantMessageId = newId();
@@ -627,6 +703,7 @@ export function createExternalTurnController(
     function terminate(reason: ExternalTurnTerminalReason): void {
       if (terminalReason) return;
       terminalReason = reason;
+      stop.abort();
       const live = liveTurns.get(input.chatId);
       if (live?.transcript === transcript) live.terminating = true;
       // A steer is recorded before its runtime call. Give the in-flight call a
@@ -697,7 +774,7 @@ export function createExternalTurnController(
       });
     }
 
-    const unsubscribe = handle.subscribe({
+    const consumer: ExternalSessionConsumer = {
       onEnvelope(envelope, verdict) {
         if (terminalReason) return;
         switch (verdict.kind) {
@@ -804,9 +881,40 @@ export function createExternalTurnController(
       },
 
       onTeardown(reason) {
+        if (submitting && reason === 'runtime-disconnected') return;
         terminate(reason);
       },
-    });
+    };
+    let unsubscribe = handle.subscribe(consumer);
+    const releaseHold = submitting
+      ? sessions.holdChat(
+          {
+            chatId: input.chatId,
+            userId: input.userId,
+            environmentId: context.chat.environmentId,
+            targetId,
+          },
+          (reason) => terminate(reason)
+        )
+      : () => undefined;
+
+    async function reacquire(): Promise<ExternalSessionHandle> {
+      const next = await sessions.ensureSession(
+        sessionInputFor(input, context.chat.environmentId, targetId)
+      );
+      if (next === handle || next.sessionId === handle.sessionId) return next;
+      unsubscribe();
+      handle = next;
+      unsubscribe = handle.subscribe(consumer);
+      external.sessionId = handle.sessionId;
+      transcript.rebindSession(handle.sessionId);
+      const live = liveTurns.get(input.chatId);
+      if (live?.transcript === transcript) {
+        live.handle = handle;
+        live.sessionId = handle.sessionId;
+      }
+      return handle;
+    }
 
     registerActiveTurn(assistantMessageId, {
       userId: input.userId,
@@ -847,27 +955,19 @@ export function createExternalTurnController(
       );
       input.observer?.onTurnPrepared?.({ userMessageId, assistantMessageId });
 
-      try {
-        const nativeTurnId = input.review
-          ? await startReviewTurn({
-              handle,
-              clientMessageId: userMessageId,
-              target: input.review.target,
-            })
-          : await handle.startTurn({
-              clientMessageId: userMessageId,
-              input: input.prompt,
-              configuration: input.configuration,
-              ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-            });
+      const bindAccepted = (nativeTurnId: string): void => {
+        submitting = false;
+        releaseHold();
         external.nativeTurnId = nativeTurnId;
         transcript.bindNativeTurn(nativeTurnId);
         handle.beginTurn(nativeTurnId);
         for (const request of deferredApprovals.splice(0)) bindApproval(request);
-      } catch (error) {
-        transcript.recordError(
-          vendorErrorFrom(error, input.review ? 'review-start' : 'turn-start')
-        );
+        // The connection may have dropped while the reply was in flight; that
+        // teardown was deferred to the submission and is now the turn's.
+        if (!handle.isLive()) terminate('runtime-disconnected');
+      };
+      const failStart = (error: unknown, code: string): void => {
+        transcript.recordError(vendorErrorFrom(error, code));
         const reason = terminalReasonForCallFailure(error);
         terminate(reason);
         // The runtime no longer has this session, but the manager still caches
@@ -882,6 +982,94 @@ export function createExternalTurnController(
               error: String(reapError),
             });
           });
+        }
+      };
+
+      if (input.review) {
+        try {
+          bindAccepted(
+            await startReviewTurn({
+              handle,
+              clientMessageId: userMessageId,
+              target: input.review.target,
+            })
+          );
+        } catch (error) {
+          failStart(error, 'review-start');
+        }
+      } else {
+        // Not awaited: the turn ends when it is terminated, and a stop must not
+        // wait out an in-flight submission's deadline.
+        void submitExternalTurn({
+          db,
+          messageId: assistantMessageId,
+          chatId: input.chatId,
+          userId: input.userId,
+          environmentId: context.chat.environmentId,
+          turn: {
+            clientMessageId: userMessageId,
+            input: input.prompt,
+            configuration: input.configuration,
+            ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+          },
+          handle,
+          reacquire,
+          isTerminalConnectFailure: (error) =>
+            isTerminalConnectFailure(error, {
+              userId: input.userId,
+              environmentId: context.chat.environmentId,
+            }),
+          signal: stop.signal,
+          policy: retryPolicy,
+          now,
+          newId,
+          random,
+          sleep,
+          onLateAcceptance: (lateHandle, nativeTurnId) => {
+            void lateHandle.cancel(nativeTurnId).catch((error: unknown) => {
+              logger.warn('cancel_failed', {
+                sessionId: lateHandle.sessionId,
+                error: String(error),
+              });
+            });
+          },
+        }).then(
+          (outcome) => applySubmission(outcome),
+          (error: unknown) => {
+            // An unexpected fault in the loop itself — a database error on a
+            // state write. The turn cannot be left spinning.
+            logger.warn('submission_failed', {
+              messageId: assistantMessageId,
+              error: String(error),
+            });
+            if (!terminalReason) failStart(error, 'turn-start');
+          }
+        );
+      }
+
+      function applySubmission(outcome: SubmissionOutcome): void {
+        if (terminalReason) return;
+        switch (outcome.kind) {
+          case 'accepted':
+            bindAccepted(outcome.nativeTurnId);
+            return;
+          case 'unresolved':
+            transcript.recordError({
+              code: 'acceptance-unknown',
+              message:
+                'The runtime connection was lost before it confirmed this turn, so whether the agent received it is unknown.',
+            });
+            terminate('acceptance-unknown');
+            return;
+          case 'receipt-failed':
+            transcript.recordError(vendorErrorFrom(outcome.error, 'turn-receipt'));
+            terminate('vendor-error');
+            return;
+          case 'refused':
+            failStart(outcome.error, 'turn-start');
+            return;
+          case 'stopped':
+            return;
         }
       }
 
@@ -899,6 +1087,8 @@ export function createExternalTurnController(
         startedAt,
       });
     } finally {
+      stop.abort();
+      releaseHold();
       unsubscribe();
       unregisterActiveTurn(assistantMessageId);
       if (liveTurns.get(input.chatId)?.transcript === transcript) liveTurns.delete(input.chatId);
@@ -951,6 +1141,16 @@ export function createExternalTurnController(
     if (!finalized) {
       logger.warn('already_finalized', { messageId: context.assistantMessageId });
     }
+    // Best effort: the message row above is the turn's own terminal record,
+    // and a receipt left open is sealed again by the next boot sweep.
+    await sealAttemptsForMessage(context.assistantMessageId, reason, at, db).catch(
+      (error: unknown) => {
+        logger.warn('attempt_seal_failed', {
+          messageId: context.assistantMessageId,
+          error: String(error),
+        });
+      }
+    );
     // Only the timestamp: an external turn has no MangoStudio agent profile, so
     // nothing that derives one from a completed turn applies to it.
     await updateChatAfterTurn(input.chatId, at, db);

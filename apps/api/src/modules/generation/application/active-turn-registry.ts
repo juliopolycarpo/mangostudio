@@ -9,7 +9,8 @@ import type { TurnInterruptionReasonCode } from '@mangostudio/shared/turn-recove
  * turn recovery keep working on external turns without knowing what one is.
  */
 export interface ActiveExternalTurn {
-  readonly sessionId: string;
+  /** Mutable: a turn still submitting may move to a reopened session. */
+  sessionId: string;
   readonly targetId: ExternalAgentTargetId;
   readonly environmentId: string;
   /** Absent only in the window between registering the turn and the vendor naming it. */
