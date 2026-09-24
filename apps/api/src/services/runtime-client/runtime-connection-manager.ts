@@ -1232,14 +1232,12 @@ export interface LocalRuntimeConnectorOptions {
  * other — the coupling the sentence above describes is enforced by construction
  * rather than by two literals that happen to agree.
  *
- * Note what this trades away. {@link withConnectDeadline} stops the *hub*
- * waiting; it does not cancel the attempt, and the in-process connector ignores
- * its abort signal. So a wedged attempt is still live when the chain releases,
- * and if it later completes it runs `ownerUserId ??= …` and `active.add(…)`
- * alongside the attempt that took its place — the one window in which two users
- * can both observe the owner binding as empty and `multipleOwners` never be
- * set. Damming every user behind one wedged connect was judged the worse
- * failure; closing this properly needs a cancellable in-process connect.
+ * Releasing the chain does not release the attempt's claim. {@link
+ * withConnectDeadline} stops the *hub* waiting; it does not cancel the attempt,
+ * and the in-process connector ignores its abort signal, so an abandoned open
+ * can still complete. Its {@link LocalCredentialClaim} stays reserved until
+ * the open itself settles, which is what lets the next attempt see a second
+ * owner that has not finished connecting yet.
  */
 const LOCAL_CHAIN_DEADLINE_MS = IN_PROCESS_CONNECT_DEADLINE_MS;
 
@@ -1258,14 +1256,34 @@ function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promi
 }
 
 /**
+ * One Local open's hold on the OS credential home, reserved before the open
+ * starts and released only when that open settles.
+ *
+ * Scoped to one attempt rather than to its user, so an older attempt that
+ * settles late releases its own claim and never a newer one by the same user.
+ * `withdrawn` is set, never cleared, once a second owner is known; an open that
+ * completes under a withdrawn claim is closed rather than admitted.
+ */
+interface LocalCredentialClaim {
+  readonly userId: string;
+  withdrawn: boolean;
+}
+
+/**
  * Binds the hub process's OS credential home to one MangoStudio user.
  *
  * Separate Local runtime sessions still share the same OS account. The
  * first authenticated owner may be attested while it is the only owner the
- * process has served. If a second owner appears, every attested connection is
- * closed before that owner connects and this connector permanently falls back
- * to unproven isolation. Local filesystem and shell access keep working for
- * both users, but neither can launch a vendor process through shared credentials.
+ * process has served. If a second owner appears — bound, or still opening —
+ * every attested connection is closed, every pending claim is withdrawn before
+ * that owner connects, and this connector permanently falls back to unproven
+ * isolation. Local filesystem and shell access keep working for both users,
+ * but neither can launch a vendor process through shared credentials.
+ *
+ * @example
+ * const connector = createLocalRuntimeConnector();
+ * const connection = await connector(localDefinition, onUnavailable, context);
+ * if (connection.identityAttested) { ... }
  */
 export function createLocalRuntimeConnector(
   options: LocalRuntimeConnectorOptions = {}
@@ -1276,24 +1294,95 @@ export function createLocalRuntimeConnector(
   let ownerUserId: string | undefined;
   let multipleOwners = false;
   let connectSerial: Promise<void> = Promise.resolve();
+  const claims = new Set<LocalCredentialClaim>();
   const active = new Set<{
     readonly connection: ManagedRuntimeConnection;
     readonly identityAttested: boolean;
     readonly onUnavailable: () => void;
   }>();
 
+  const hasOtherOwner = (userId: string): boolean =>
+    (ownerUserId !== undefined && ownerUserId !== userId) ||
+    [...claims].some((claim) => claim.userId !== userId);
+
+  const withdrawAttestation = async (): Promise<void> => {
+    for (const claim of claims) {
+      claim.withdrawn = true;
+    }
+    const attested = [...active].filter((entry) => entry.identityAttested);
+    const closed = await Promise.allSettled(
+      attested.map(async (entry) => {
+        try {
+          await entry.connection.close('released');
+        } finally {
+          entry.onUnavailable();
+        }
+      })
+    );
+    if (closed.some((result) => result.status === 'rejected')) {
+      throw unavailable('Could not revoke Local single-user-host attestation.');
+    }
+    for (const entry of attested) {
+      active.delete(entry);
+    }
+  };
+
+  const admit = async (
+    definition: RuntimeEnvironmentDefinition & { readonly userId: string },
+    onUnavailable: () => void,
+    claim: LocalCredentialClaim
+  ) => {
+    const requested = claim.withdrawn ? 'withdrawn' : 'single-user';
+    const connection = await open({
+      onUnavailable,
+      authorizeWorkspace: (canonicalPath, signal) =>
+        isWorkspaceAuthorized(definition, canonicalPath, signal),
+      externalAgentIsolation: requested,
+    });
+    // Asked for attestation, but a second owner arrived while this open was
+    // still running: the connection holds a claim that no longer exists.
+    // Closing it is part of this attempt, so the rejection means it is gone.
+    if (requested === 'single-user' && claim.withdrawn) {
+      await connection.close('released');
+      throw unavailable(
+        'Local single-user-host attestation was withdrawn while it was connecting.'
+      );
+    }
+    // A failed open never reaches this line, so it cannot bind the home.
+    // Every other live claim is this user's, so no other owner can be bound.
+    ownerUserId ??= definition.userId;
+    // Read back rather than assumed: the runtime is the side that decides
+    // whether it can prove anything about its credential home, and a hub that
+    // asked for an attestation it did not get must not act as though it had.
+    const entry = {
+      connection,
+      identityAttested: connection.client.manifest.identityIsolation !== undefined,
+      onUnavailable,
+    };
+    active.add(entry);
+    return {
+      client: connection.client,
+      identityAttested: entry.identityAttested,
+      async close(reason?: RuntimeConnectionCloseReason) {
+        active.delete(entry);
+        await connection.close(reason);
+      },
+    };
+  };
+
   return (definition, onUnavailable) => {
     const attempt = connectSerial.then(async () => {
       if (definition.id !== LOCAL_ENVIRONMENT_ID) {
         throw unavailable('Single-user-host attestation is reserved for the Local environment.');
       }
-      if (!definition.userId) {
+      const userId = definition.userId;
+      if (!userId) {
         throw unavailable('The Local runtime requires a bound MangoStudio user.');
       }
       // CLI/setup probes use this documented stand-in when no authenticated user
       // exists. They may inspect Local, but they neither consume nor establish
       // the one real-user binding and therefore receive no identity attestation.
-      if (definition.userId === 'local') {
+      if (userId === 'local') {
         return await open({
           onUnavailable,
           authorizeWorkspace: (canonicalPath, signal) =>
@@ -1301,55 +1390,19 @@ export function createLocalRuntimeConnector(
           externalAgentIsolation: 'withdrawn',
         });
       }
-      if (ownerUserId !== undefined && ownerUserId !== definition.userId) {
+      if (hasOtherOwner(userId)) {
         multipleOwners = true;
       }
-      if (multipleOwners) {
-        const attested = [...active].filter((entry) => entry.identityAttested);
-        const closed = await Promise.allSettled(
-          attested.map(async (entry) => {
-            try {
-              await entry.connection.close('released');
-            } finally {
-              entry.onUnavailable();
-            }
-          })
-        );
-        if (closed.some((result) => result.status === 'rejected')) {
-          throw unavailable('Could not revoke Local single-user-host attestation.');
-        }
-        for (const entry of attested) {
-          active.delete(entry);
-        }
+      // Reserved before any await, so an attempt that starts while this one is
+      // still revoking or opening sees it as an owner.
+      const claim: LocalCredentialClaim = { userId, withdrawn: multipleOwners };
+      claims.add(claim);
+      try {
+        if (multipleOwners) await withdrawAttestation();
+        return await admit({ ...definition, userId }, onUnavailable, claim);
+      } finally {
+        claims.delete(claim);
       }
-
-      const connection = await open({
-        onUnavailable,
-        authorizeWorkspace: (canonicalPath, signal) =>
-          isWorkspaceAuthorized(definition, canonicalPath, signal),
-        externalAgentIsolation: multipleOwners ? 'withdrawn' : 'single-user',
-      });
-      // Do not let a failed first handshake reserve the OS credential home.
-      // Serialization above makes this the only successful claimant that can
-      // observe the binding as empty.
-      ownerUserId ??= definition.userId;
-      // Read back rather than assumed: the runtime is the side that decides
-      // whether it can prove anything about its credential home, and a hub that
-      // asked for an attestation it did not get must not act as though it had.
-      const entry = {
-        connection,
-        identityAttested: connection.client.manifest.identityIsolation !== undefined,
-        onUnavailable,
-      };
-      active.add(entry);
-      return {
-        client: connection.client,
-        identityAttested: entry.identityAttested,
-        async close(reason) {
-          active.delete(entry);
-          await connection.close(reason);
-        },
-      };
     });
     connectSerial = advanceChainAfter(attempt, chainDeadlineMs);
     return attempt;

@@ -1213,6 +1213,238 @@ describe('RuntimeConnectionManager', () => {
     }
   });
 
+  /**
+   * A Local `open` whose calls the test settles by hand and in any order — the
+   * shape a pending-claim race needs, because which attempt finishes first is
+   * the whole question. Each call records the isolation claim it was given.
+   */
+  function scriptedLocalOpen() {
+    const calls: Array<{
+      readonly isolation: 'single-user' | 'withdrawn';
+      readonly succeed: (close?: () => void | Promise<void>) => void;
+      readonly succeedWith: (connection: ManagedRuntimeConnection) => void;
+      readonly fail: (error: Error) => void;
+    }> = [];
+    const open = (options: {
+      readonly externalAgentIsolation: 'single-user' | 'withdrawn';
+    }): Promise<ManagedRuntimeConnection> => {
+      const opened = Promise.withResolvers<ManagedRuntimeConnection>();
+      const isolation = options.externalAgentIsolation;
+      calls.push({
+        isolation,
+        succeed: (close = () => undefined) => {
+          opened.resolve(fakeConnection(close, { ...TEST_MANIFEST, ...attestationFor(isolation) }));
+        },
+        succeedWith: (connection) => {
+          opened.resolve(connection);
+        },
+        fail: (error) => {
+          opened.reject(error);
+        },
+      });
+      return opened.promise;
+    };
+    const call = (index: number) => {
+      const found = calls[index];
+      if (!found) {
+        throw new Error(`expected Local open call #${index} | received: ${calls.length} call(s)`);
+      }
+      return found;
+    };
+    return { open, call, claims: () => calls.map((entry) => entry.isolation) };
+  }
+
+  /** Lets the chain deadline lapse so the next attempt starts beside a stuck one. */
+  function outlastChainDeadline(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 30));
+  }
+
+  // #925: before claims were reserved ahead of `open`, a second user arriving
+  // while the first user's open was still pending read the owner binding as
+  // empty, and both users ended up attested against one credential home.
+  it('withholds attestation from a second user while the first Local open is pending', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      isWorkspaceAuthorized: () => true,
+      open: opens.open,
+    });
+
+    const stuck = connector(localDefinition('user-1'), () => undefined, connectContext());
+    const stuckOutcome = stuck.catch((error: unknown) => error);
+    await outlastChainDeadline();
+    const second = connector(localDefinition('user-2'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(1).succeed();
+    const secondConnection = await second;
+
+    let lateCloseSettled = false;
+    opens.call(0).succeed(async () => {
+      await flushMicrotasks();
+      lateCloseSettled = true;
+    });
+    const late = await stuckOutcome;
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'withdrawn']);
+      expect(secondConnection.identityAttested).toBe(false);
+      expect(late).toMatchObject({
+        code: RESERVED_ERROR_CODES.UNAVAILABLE,
+        message: expect.stringContaining('withdrawn while it was connecting'),
+      });
+      // Awaited, not fired and forgotten: the rejection is the cleanup's end.
+      expect({ lateCloseSettled }).toEqual({ lateCloseSettled: true });
+    } finally {
+      await secondConnection.close();
+    }
+  });
+
+  it('keeps a pending same-user claim when an older attempt for that user fails late', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      isWorkspaceAuthorized: () => true,
+      open: opens.open,
+    });
+
+    const older = connector(localDefinition('user-1'), () => undefined, connectContext());
+    const olderOutcome = older.catch((error: unknown) => error);
+    await outlastChainDeadline();
+    const newer = connector(localDefinition('user-1'), () => undefined, connectContext());
+    await flushMicrotasks();
+    // The older attempt settling must release only its own generation. Were
+    // claims keyed by user, this would free user-1's newer, still-open claim.
+    opens.call(0).fail(new Error('older handshake failed'));
+    expect(await olderOutcome).toMatchObject({ message: 'older handshake failed' });
+    await outlastChainDeadline();
+    const other = connector(localDefinition('user-2'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(2).succeed();
+    const otherConnection = await other;
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'single-user', 'withdrawn']);
+      expect(otherConnection.identityAttested).toBe(false);
+    } finally {
+      opens.call(1).succeed();
+      await (await newer.catch(() => ({ close: () => undefined }))).close();
+      await otherConnection.close();
+    }
+  });
+
+  it('admits a late same-user success without disturbing the newer attested claim', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      isWorkspaceAuthorized: () => true,
+      open: opens.open,
+    });
+
+    const older = connector(localDefinition('user-1'), () => undefined, connectContext());
+    await outlastChainDeadline();
+    const newer = connector(localDefinition('user-1'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(1).succeed();
+    const newerConnection = await newer;
+    opens.call(0).succeed();
+    const olderConnection = await older;
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'single-user']);
+      expect({
+        older: olderConnection.identityAttested,
+        newer: newerConnection.identityAttested,
+      }).toEqual({ older: true, newer: true });
+    } finally {
+      await olderConnection.close();
+      await newerConnection.close();
+    }
+  });
+
+  it('releases a pending claim once its open fails, not when the chain stops waiting', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      isWorkspaceAuthorized: () => true,
+      open: opens.open,
+    });
+
+    const failed = connector(localDefinition('user-1'), () => undefined, connectContext());
+    const failedOutcome = failed.catch((error: unknown) => error);
+    await outlastChainDeadline();
+    opens.call(0).fail(new Error('handshake failed after the deadline'));
+    expect(await failedOutcome).toMatchObject({ message: 'handshake failed after the deadline' });
+    const next = connector(localDefinition('user-2'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(1).succeed();
+    const nextConnection = await next;
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'single-user']);
+      expect(nextConnection.identityAttested).toBe(true);
+    } finally {
+      await nextConnection.close();
+    }
+  });
+
+  it('keeps withdrawn Local attestation withdrawn through the manager and a manifest refresh', async () => {
+    const opens = scriptedLocalOpen();
+    const local = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      isWorkspaceAuthorized: () => true,
+      open: opens.open,
+    });
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: (userId) => Promise.resolve(localDefinition(userId)),
+      connectors: { 'in-process': local },
+      connectDeadlinesMs: { 'in-process': 25 },
+    });
+
+    const wedged = manager.getClient('user-1', 'local').catch((error: unknown) => error);
+    expect(await wedged).toMatchObject({ message: expect.stringContaining('timed out') });
+    const second = manager.getClient('user-2', 'local');
+    await flushMicrotasks();
+    // A real hub session, so the claim the connector chose is the one the hub
+    // enforces. The peer repeats an attestation in its hello and on health, as
+    // a Local runtime asked to attest would; the withdrawal must outrank both.
+    const runtime = await connectTestRuntime({
+      manifest: { ...TEST_MANIFEST, identityIsolation: ATTESTED },
+      externalAgentIsolation: opens.call(1).isolation,
+      handlers: {
+        'runtime.health': () => ({
+          ...HEALTH_REPORT,
+          externalAgents: {
+            targets: [],
+            identityIsolation: ATTESTED,
+            liveSessionCount: 0,
+            liveSessions: [],
+          },
+        }),
+      },
+    });
+    opens.call(1).succeedWith({ client: runtime.client, close: () => runtime.close() });
+    await second;
+    let lateCloses = 0;
+    opens.call(0).succeed(() => {
+      lateCloses += 1;
+    });
+    await flushMicrotasks();
+    const refreshed = await manager.refreshManifest('user-2', 'local');
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'withdrawn']);
+      expect({
+        user1: manager.isIdentityAttested('user-1', 'local'),
+        user2: manager.isIdentityAttested('user-2', 'local'),
+      }).toEqual({ user1: false, user2: false });
+      expect(refreshed.manifest?.identityIsolation).toBeUndefined();
+      expect(lateCloses).toBe(1);
+    } finally {
+      manager.disconnect('user-2', 'local');
+      await runtime.close();
+    }
+  });
+
   it('re-reads a stale manifest in the background, once, without blocking the read', async () => {
     const probe = healthProbe(TEST_MANIFEST);
     let publishes = 0;
