@@ -1116,6 +1116,9 @@ mod tests {
             &[("pairingToken", Some(json!("stored-token")))],
         )
         .unwrap();
+        let slot = home.join("runtime/remote");
+        let config = fs::read(slot.join("runtime.json")).unwrap();
+        let credentials = fs::read(slot.join("credentials.json")).unwrap();
         let no_bus = operate(
             ServiceAction::Install,
             Some(ServiceMode::Connect),
@@ -1149,9 +1152,6 @@ mod tests {
             ]
         );
 
-        let slot = home.join("runtime/remote");
-        let config = fs::read(slot.join("runtime.json")).unwrap();
-        let credentials = fs::read(slot.join("credentials.json")).unwrap();
         let status = operate(ServiceAction::Status, None, false, &home, &home, &fake).unwrap();
         for field in [
             "installed",
