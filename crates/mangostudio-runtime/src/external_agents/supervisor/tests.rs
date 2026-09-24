@@ -1838,6 +1838,17 @@ async fn a_second_turn_waits_for_the_first_to_end() {
         "received: {}",
         error.message
     );
+    // Busy is transient — a cancelled turn the vendor is still settling —
+    // so the hub must retry it, never read it as a lost session.
+    let details = error.details.clone().unwrap_or_default();
+    assert_eq!(
+        (details.get("kind"), details.get("dispatch")),
+        (
+            Some(&json!("external_agent_busy")),
+            Some(&json!("not-submitted"))
+        ),
+        "expected a retryable busy refusal | received: {details:?}"
+    );
     assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 1);
     rig.close("one").await;
 }

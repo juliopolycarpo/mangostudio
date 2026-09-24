@@ -782,9 +782,7 @@ pub(crate) fn remote_error(error: &sdk::Error) -> RemoteError {
 fn cause_error(cause: &sdk::Error) -> RemoteError {
     let message = cause.to_string();
     match cause {
-        sdk::Error::Busy => {
-            external(codes::INTERNAL, message, "external_agent_busy").with_detail("retryable", true)
-        }
+        sdk::Error::Busy => busy(message),
         sdk::Error::NotSupported { capability } => {
             argument(message).with_detail("capability", capability.to_string())
         }
@@ -826,6 +824,25 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
 /// A caller mistake: `INTERNAL` with `kind: tool_argument`.
 pub(super) fn argument(message: String) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
+}
+
+/// A session still running a turn: transient, so retryable.
+fn busy(message: String) -> RemoteError {
+    external(codes::INTERNAL, message, "external_agent_busy").with_detail("retryable", true)
+}
+
+/// [`busy`] for a refusal this runtime made before anything reached the
+/// vendor, so it can say `not-submitted` and the hub retries it rather than
+/// reading it as a lost session.
+///
+/// # Example
+///
+/// ```ignore
+/// let error = busy_not_submitted("session \"one\" already has an active turn".into());
+/// assert_eq!(error.details.unwrap()["dispatch"], "not-submitted");
+/// ```
+pub(super) fn busy_not_submitted(message: String) -> RemoteError {
+    busy(message).with_detail("dispatch", "not-submitted")
 }
 
 fn external(code: &str, message: String, kind: &str) -> RemoteError {
