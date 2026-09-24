@@ -408,10 +408,7 @@ impl Supervisor {
         if matches!(error, SdkError::Busy)
             || matches!(&error, SdkError::Operation { source, .. } if matches!(**source, SdkError::Busy))
         {
-            return argument(format!(
-                "External-agent session {:?} already has an active turn; expected an idle session.",
-                live.session_id
-            ));
+            return busy(&live.session_id);
         }
         self.sdk_failure(error).await
     }
@@ -754,6 +751,22 @@ fn is_spent_session(error: &SdkError) -> bool {
     }
 }
 
+/// A turn refused because the session is still running one, typically a
+/// cancelled turn the vendor has not finished settling. Nothing reached the
+/// vendor, and the refusal is transient, so the hub retries it rather than
+/// reading it as a lost session.
+fn busy(session_id: &str) -> RemoteError {
+    RemoteError::new(
+        codes::INTERNAL,
+        format!(
+            "External-agent session {session_id:?} already has an active turn; expected an idle session."
+        ),
+    )
+    .with_detail("kind", "external_agent_busy")
+    .with_detail("retryable", true)
+    .with_detail("dispatch", "not-submitted")
+}
+
 enum Admitted {
     Replay(watch::Receiver<Option<Result<Value, RemoteError>>>),
     Fresh(watch::Sender<Option<Result<Value, RemoteError>>>),
@@ -778,10 +791,7 @@ fn admit(
     }
     let mut active = lock(&live.turns.active);
     if active.is_some() {
-        return Err(argument(format!(
-            "External-agent session {:?} already has an active turn; expected an idle session.",
-            live.session_id
-        )));
+        return Err(busy(&live.session_id));
     }
     *active = Some(ActiveTurn {
         client_message_id: client_message_id.to_owned(),
