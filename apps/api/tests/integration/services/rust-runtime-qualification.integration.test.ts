@@ -24,8 +24,9 @@
  * ## Named TS-to-Rust test inventory
  *
  * `crates/mangostudio-runtime/src/health.rs`'s own module doc names what this
- * crate deliberately does not build yet (`externalAgents` and `auditError`,
- * both optional on the wire). The pure-TypeScript
+ * crate deliberately does not build yet (`auditError`, optional on the wire).
+ * External-agent admission is qualified in
+ * `rust-runtime-external-agents-qualification.integration.test.ts`. The pure-TypeScript
  * runtime assertions below are now also proven end-to-end against the real
  * Rust binary, through the real hub call path, by the named test in this
  * file (or its `-connect` sibling):
@@ -47,8 +48,8 @@
  * | `apps/runtime/tests/unit/services/install.test.ts` "kills a child the hub asked it to cancel" (corrected: cancel stops the chain, the running step finishes) | same test (cancel mid-step, effect applied once) |
  * | `apps/runtime/tests/unit/services/install.test.ts` "stops streaming once the hub session refuses a line, without abandoning the install" | "keeps a running install owned after the hub disconnects from a serve runtime" |
  *
- * **Not yet replaced** — no Rust equivalent exists for `externalAgents`, per
- * `health.rs`'s own module doc. PTY qualification now lives in the stdio test.
+ * **Not yet replaced** — external-agent turns, which the Rust runtime does not
+ * serve yet. PTY qualification now lives in the stdio test.
  * GitHub CLI availability and consent revocation are covered here. The paired-connect
  * transport's inventory entries live in the `-connect` sibling file instead.
  */

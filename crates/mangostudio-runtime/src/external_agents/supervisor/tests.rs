@@ -630,6 +630,38 @@ async fn a_repeated_open_answers_without_a_second_launch() {
 }
 
 #[tokio::test]
+async fn a_resumed_open_carries_the_native_session_and_says_it_resumed() {
+    let rig = rig(RigOptions::default());
+    for (session_id, mode) in [
+        ("strict", ResumeMode::Strict),
+        ("fallback", ResumeMode::Fallback),
+    ] {
+        let mut params = rig.open_params(session_id);
+        params.resume_ref = Some(format!("native-{session_id}"));
+        params.resume_mode = mode;
+        let opened = rig
+            .supervisor
+            .open(params, &rig.hub, &CancellationToken::new())
+            .await
+            .unwrap_or_else(|error| {
+                panic!("expected a {mode:?} resume to open | received: {error}")
+            });
+        assert_eq!(
+            (opened.native_session_id.as_str(), opened.resumed),
+            (format!("native-{session_id}").as_str(), true),
+            "expected ({mode:?}) the vendor's own session, reported as resumed"
+        );
+        rig.close(session_id).await;
+    }
+    let fresh = rig.open("fresh").await.unwrap();
+    assert!(
+        !fresh.resumed,
+        "expected an open without a resume ref to start fresh"
+    );
+    rig.close("fresh").await;
+}
+
+#[tokio::test]
 async fn concurrent_opens_of_one_id_share_one_launch() {
     let (release, gate) = watch::channel(false);
     let rig = rig(RigOptions {

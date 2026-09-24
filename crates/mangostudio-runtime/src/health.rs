@@ -8,10 +8,11 @@
 //! Built: `schemaVersion`, `slot`, `version`, `digest`, `sourceSha`,
 //! `profile`, `allow`, `setup`, `audit` (from [`crate::consent::config`]),
 //! `source`, `binaryPath`, `runtimeVersion`, `platform`, `arch`, `homeDir`,
-//! `shells`, `git`, `gh`, `terminal`, `lastError`.
+//! `shells`, `git`, `gh`, `terminal`, `lastError`, and, on a host that serves
+//! external agents, `externalAgents` (added by [`register`] from the
+//! supervisor, with the attestation omitted when the hub withdrew it).
 //!
-//! Deliberately skipped, all optional on the wire:
-//! - `externalAgents` — out of scope; a later plan owns it.
+//! Deliberately skipped, optional on the wire:
 //! - `auditError` — this crate has no "read the audit log's last write
 //!   error" port yet, and building one is out of scope for this change.
 //!

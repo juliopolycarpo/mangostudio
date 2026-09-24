@@ -326,6 +326,7 @@ jobs:
         run: >
           bun test --timeout 15000
           tests/integration/services/rust-runtime-qualification.integration.test.ts
+          tests/integration/services/rust-runtime-external-agents-qualification.integration.test.ts
           tests/integration/services/rust-filesystem-search-compat.integration.test.ts
           tests/integration/services/rust-snapshot-compat.integration.test.ts
           tests/integration/services/rust-command-compat.integration.test.ts
