@@ -535,11 +535,8 @@ pub(crate) async fn resolve_agent_executable(
     let AgentCliDefinition::Cli(cli) = definition else {
         return None;
     };
-    eprintln!("DIAG resolve: building path env");
     let path_env = Arc::new(host::build_runtime_path_env(None));
-    eprintln!("DIAG resolve: PATH={:?}", path_env.env_var("PATH"));
     let status = describe_external_agent(cli, &path_env, cancel, false, &None).await;
-    eprintln!("DIAG resolve: described");
     status
         .runtime
         .effective
@@ -802,9 +799,7 @@ async fn describe_external_agent(
         cancel.clone(),
     ));
     let options = build_binary_scan_options(budget);
-    eprintln!("DIAG describe: scanning");
     let scan = scan_runtime(&cli.runtime, deps, options).await;
-    eprintln!("DIAG describe: scanned");
     let probed_at_ms = now_ms();
     let runtime_status = analyze_runtime_scan(
         &cli.runtime,
@@ -836,7 +831,6 @@ async fn describe_external_agent(
         })
         .await
     };
-    eprintln!("DIAG describe: blocking probes done");
 
     let mut findings = map_runtime_findings(&runtime_status.findings, target_id);
     let cli_installed = !findings

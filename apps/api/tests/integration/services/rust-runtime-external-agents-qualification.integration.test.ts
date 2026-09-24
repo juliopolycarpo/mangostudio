@@ -53,7 +53,6 @@ describe('Real Rust runtime external-agent admission', () => {
       readonly env?: Readonly<Record<string, string>>;
       readonly externalAgentIsolation?: 'single-user' | 'withdrawn';
       readonly workspaceBinding?: HubWorkspaceBinding;
-      readonly workspacePolicy?: () => Promise<boolean>;
     } = {}
   ): Promise<RuntimeClient> {
     const mangoHome = await scratchMangoHome(name);
@@ -63,15 +62,10 @@ describe('Real Rust runtime external-agent admission', () => {
       terminateGraceMs: 2_000,
       killGraceMs: 2_000,
       exitGraceMs: 1_000,
-      onStderr: (chunk) => process.stderr.write(chunk),
     });
-    peer.port.onFrame((frame) =>
-      console.error('DIAG hub inbound', JSON.stringify(frame).slice(0, 120), Date.now())
-    );
     const hub = await openHubSession(peer.port, {
       // The real hub handler, answering from the test database.
       workspaceBinding: options.workspaceBinding ?? null,
-      ...(options.workspacePolicy ? { workspacePolicy: options.workspacePolicy } : {}),
       hubVersion: runtimeVersion,
       ...(options.externalAgentIsolation
         ? { externalAgentIsolation: options.externalAgentIsolation }
@@ -84,76 +78,6 @@ describe('Real Rust runtime external-agent admission', () => {
     });
     return new RuntimeClient(hub, () => undefined, name);
   }
-
-  async function diagVariant(
-    label: string,
-    opts: { db: boolean; binding: boolean; policy: boolean; healthFirst: boolean }
-  ) {
-    console.error('DIAG variant start', label, Date.now());
-    const home = await scratchMangoHome(`diag-${label}`);
-    cleanups.push(() => cleanupMangoHome(home));
-    const emptyPath = join(home, 'empty-path');
-    await mkdir(emptyPath);
-    await mkdir(join(home, 'authorized'));
-    const authorized = await realpath(join(home, 'authorized'));
-    const environmentId = `diag-${label}`;
-    let userId = 'diag-user';
-    if (opts.db) {
-      const owner = await insertTestUser();
-      userId = owner.id;
-      const chat = await insertTestChat(owner.id);
-      await getDb()
-        .updateTable('chats')
-        .set({ environmentId, workdir: authorized })
-        .where('id', '=', chat.id)
-        .execute();
-    }
-    const rust = await spawnRustRuntime(environmentId, {
-      env: {
-        HOME: home,
-        USERPROFILE: home,
-        PATH: emptyPath,
-        XDG_CONFIG_HOME: join(home, '.config'),
-      },
-      ...(opts.binding ? { workspaceBinding: { userId, environmentId } } : {}),
-      ...(opts.policy ? { workspacePolicy: async () => true } : {}),
-    });
-    if (opts.healthFirst) await rust.health();
-    if (label.startsWith('m')) {
-      await expect(
-        rust.externalAgents.open({
-          sessionId: `diag-${label}`,
-          targetId: 'codex',
-          workspacePath: authorized,
-          configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
-          resumeMode: 'fallback',
-          timeoutMs: 10_000,
-        })
-      ).rejects.toThrow(/is not installed/);
-      console.error('DIAG variant result', label, 'rejects matched', Date.now());
-      return;
-    }
-    const result = await rust.externalAgents
-      .open({
-        sessionId: `diag-${label}`,
-        targetId: 'codex',
-        workspacePath: authorized,
-        configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
-        resumeMode: 'fallback',
-        timeoutMs: 10_000,
-      })
-      .then(
-        () => 'resolved',
-        (error: unknown) => String(error)
-      );
-    console.error('DIAG variant result', label, result, Date.now());
-  }
-
-  it.skipIf(!binary.available)(
-    'DIAG E0 exact clone of test 4, first in file',
-    () => diagVariant('e0', { db: true, binding: true, policy: false, healthFirst: false }),
-    60_000
-  );
 
   it.skipIf(!binary.available)(
     'attests the credential home Local attests, so the hub sees two users collide',
@@ -331,138 +255,6 @@ describe('Real Rust runtime external-agent admission', () => {
       const health = await rust.health();
       expect(health.externalAgents?.liveSessionCount).toBe(0);
     },
-    60_000
-  );
-
-  it.skipIf(!binary.available)(
-    'DIAG A db+null binding',
-    () => diagVariant('a', { db: true, binding: false, policy: false, healthFirst: false }),
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG B no db, policy true',
-    () => diagVariant('b', { db: false, binding: true, policy: true, healthFirst: false }),
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG C db+binding, health first',
-    () => diagVariant('c', { db: true, binding: true, policy: false, healthFirst: true }),
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG D no db, null binding, open first',
-    () => diagVariant('d', { db: false, binding: false, policy: false, healthFirst: false }),
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG E exact clone of test 4',
-    () => diagVariant('e', { db: true, binding: true, policy: false, healthFirst: false }),
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG F discover then refuse (test 3 shape)',
-    async () => {
-      const home = await scratchMangoHome('diag-f');
-      cleanups.push(() => cleanupMangoHome(home));
-      const emptyPath = join(home, 'empty-path');
-      await mkdir(emptyPath);
-      const rust = await spawnRustRuntime('diag-f', {
-        env: {
-          HOME: home,
-          USERPROFILE: home,
-          PATH: emptyPath,
-          XDG_CONFIG_HOME: join(home, '.config'),
-        },
-      });
-      await rust.externalAgents.discover({
-        targetIds: ['codex', 'cursor', 'claude'],
-        timeoutMs: 20_000,
-      });
-      console.error('DIAG variant result f discovered', Date.now());
-    },
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG G exact clone of test 4 after F',
-    () => diagVariant('g', { db: true, binding: true, policy: false, healthFirst: false }),
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG H no db, null binding after G',
-    () => diagVariant('h', { db: false, binding: false, policy: false, healthFirst: false }),
-    60_000
-  );
-
-  async function test3Clone(label: string, opts: { refuse: boolean; health: boolean }) {
-    const home = await scratchMangoHome(`diag-${label}`);
-    cleanups.push(() => cleanupMangoHome(home));
-    const emptyPath = join(home, 'empty-path');
-    await mkdir(emptyPath);
-    const rust = await spawnRustRuntime(`diag-${label}`, {
-      env: {
-        HOME: home,
-        USERPROFILE: home,
-        PATH: emptyPath,
-        XDG_CONFIG_HOME: join(home, '.config'),
-      },
-    });
-    await rust.externalAgents.discover({
-      targetIds: ['codex', 'cursor', 'claude'],
-      timeoutMs: 20_000,
-    });
-    if (opts.refuse) {
-      await mkdir(join(home, 'workspace'));
-      const workspace = await realpath(join(home, 'workspace'));
-      const refused = await rust.externalAgents
-        .open({
-          sessionId: 'qualification-session',
-          targetId: 'codex',
-          workspacePath: workspace,
-          configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
-          resumeMode: 'fallback',
-          timeoutMs: 10_000,
-        })
-        .then(
-          () => 'resolved',
-          (error: unknown) => String(error)
-        );
-      console.error('DIAG variant result', label, 'refused', refused.slice(0, 60));
-    }
-    if (opts.health) await rust.health();
-    console.error('DIAG variant result', label, 'done', Date.now());
-  }
-  const pairs: Array<[string, { refuse: boolean; health: boolean }]> = [
-    ['i1', { refuse: true, health: true }],
-    ['i2', { refuse: true, health: false }],
-    ['i3', { refuse: false, health: true }],
-  ];
-  for (const [label, opts] of pairs) {
-    it.skipIf(!binary.available)(
-      `DIAG ${label} test-3 clone`,
-      () => test3Clone(label, opts),
-      60_000
-    );
-    it.skipIf(!binary.available)(
-      `DIAG ${label}-next exact clone of test 4`,
-      () =>
-        diagVariant(`${label}n`, { db: true, binding: true, policy: false, healthFirst: false }),
-      60_000
-    );
-  }
-
-  it.skipIf(!binary.available)(
-    'DIAG m1 clone using expect().rejects',
-    () => diagVariant('m1', { db: true, binding: true, policy: false, healthFirst: false }),
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG m2 clone using expect().rejects after health',
-    () => diagVariant('m2', { db: true, binding: true, policy: false, healthFirst: true }),
-    60_000
-  );
-  it.skipIf(!binary.available)(
-    'DIAG m3 no db, policy true, expect().rejects',
-    () => diagVariant('m3', { db: false, binding: true, policy: true, healthFirst: false }),
     60_000
   );
 });

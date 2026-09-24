@@ -388,9 +388,6 @@ function wire(
     handle.failed(error);
     exit.settle({ code: null, signal: null });
   });
-  child.stdout?.on('data', (chunk: unknown) => {
-    console.error('DIAG raw stdout bytes', toBytes(chunk).length, Date.now());
-  });
   if (child.stderr) {
     child.stderr.on('data', (chunk: unknown) => {
       const bytes = toBytes(chunk);

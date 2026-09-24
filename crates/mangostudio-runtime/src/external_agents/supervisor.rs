@@ -588,19 +588,6 @@ impl Supervisor {
         let host_cancel = CancelToken::new();
         let cancel = opening.cancel.clone();
         let target = params.target_id;
-        eprintln!("DIAG run_open: start {:?}", params.workspace_path);
-        tokio::spawn(async {
-            for i in 0..25 {
-                eprintln!("DIAG tokio tick {i}");
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-        });
-        std::thread::spawn(|| {
-            for i in 0..25 {
-                eprintln!("DIAG thread tick {i}");
-                std::thread::sleep(Duration::from_secs(2));
-            }
-        });
         let work = async {
             refuse_unoffered_configuration(target, &params.configuration)?;
             let workspace = self
@@ -616,7 +603,6 @@ impl Supervisor {
             // told to stop: the grace in `bounded` is for work already
             // launched, and resolving an executable itself runs its version.
             stopped_before_launch(&cancel, &host_cancel)?;
-            eprintln!("DIAG open: authorized, resolving executable");
             let executable = self
                 .ports
                 .executables
@@ -628,7 +614,6 @@ impl Supervisor {
                         target.as_str()
                     ))
                 })?;
-            eprintln!("DIAG open: resolved {executable:?}");
             let scratch = self.session_scratch(&params.session_id)?;
             let host = self.host_context(
                 &workspace,
@@ -991,10 +976,8 @@ impl Supervisor {
         input: &str,
     ) -> Result<PathBuf, RemoteError> {
         let requested = PathBuf::from(input);
-        eprintln!("DIAG authorized_workspace: canonicalizing {input:?}");
         let canonical = crate::blocking::run_blocking(move || canonical_directory(&requested))
         .await
-        .inspect(|c| eprintln!("DIAG authorized_workspace: canonical {c:?}"))
         .ok_or_else(|| {
             argument(format!(
                 "External-agent workspace {input:?} is not a directory; expected an existing directory."
@@ -1006,10 +989,7 @@ impl Supervisor {
                 path_text(&canonical)
             )));
         }
-        eprintln!("DIAG authorized_workspace: asking hub");
-        let allowed = self.ports.workspaces.authorize(hub, &canonical).await;
-        eprintln!("DIAG authorized_workspace: hub answered {allowed}");
-        if !allowed {
+        if !self.ports.workspaces.authorize(hub, &canonical).await {
             return Err(argument(format!(
                 "External-agent workspace {input:?} is not authorized for this session; expected a workspace the runtime owner authorized."
             )));

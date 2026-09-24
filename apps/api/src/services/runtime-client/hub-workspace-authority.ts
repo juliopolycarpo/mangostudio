@@ -106,10 +106,7 @@ export function createHubWorkspaceAuthorizeHandler(
 ) => Promise<HubWorkspaceAuthorizeResult> {
   return async (params, context) => {
     if (!binding || !isRealBinding(binding)) return { authorized: false };
-    console.error('DIAG hub authorize: querying', params.canonicalPath, Date.now());
-    const authorized = await policy(binding, params.canonicalPath, context.signal);
-    console.error('DIAG hub authorize: answered', authorized, Date.now());
-    return { authorized };
+    return { authorized: await policy(binding, params.canonicalPath, context.signal) };
   };
 }
 

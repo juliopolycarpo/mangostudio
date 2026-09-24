@@ -589,13 +589,8 @@ async fn ended(ending: &mut watch::Receiver<bool>) {
 }
 
 async fn write_record<W: AsyncWrite + Unpin>(writer: &mut W, line: &[u8]) -> std::io::Result<()> {
-    let head = String::from_utf8_lossy(&line[..line.len().min(90)]).into_owned();
-    eprintln!("DIAG write start {head}");
     writer.write_all(line).await?;
-    eprintln!("DIAG write wrote");
-    let flushed = writer.flush().await;
-    eprintln!("DIAG write flushed {flushed:?}");
-    flushed
+    writer.flush().await
 }
 
 /// Cuts a close reason down to the [`MAX_REASON_CHARS`] the schema allows, on
