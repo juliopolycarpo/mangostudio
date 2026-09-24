@@ -1,0 +1,45 @@
+{
+  "$schema": "https://mangostudio.dev/protocol/schema/1/catalog.json",
+  "name": "mangostudio.hub",
+  "version": "1.0.0",
+  "description": "What a MangoStudio runtime may ask of the hub that connected it.",
+  "methods": [
+    {
+      "name": "hub.workspace.authorize",
+      "description": "Whether a canonical directory may be an external-agent workspace for the user and environment this connection is bound to.",
+      "params": {
+        "type": "object",
+        "required": [
+          "canonicalPath",
+          "purpose"
+        ],
+        "properties": {
+          "canonicalPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "purpose": {
+            "type": "string",
+            "const": "external-agent"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "authorized"
+        ],
+        "properties": {
+          "authorized": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "capabilities": []
+    }
+  ],
+  "events": []
+}

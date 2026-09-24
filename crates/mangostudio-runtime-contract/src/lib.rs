@@ -3,7 +3,7 @@
 //! `apps/shared/src/runtime-contract/` is the single source of truth: a
 //! TypeBox schema for every method, event, and document the hub and a
 //! runtime exchange. This crate does not restate any of it. It embeds the
-//! seven artifacts `bun run contracts:emit` writes under
+//! eight artifacts `bun run contracts:emit` writes under
 //! `apps/shared/src/runtime-contract/generated/` with [`include_str!`],
 //! parses `catalog.json` into [`mango_protocol::Catalog`], compiles a
 //! `jsonschema` validator for every shape it declares, and mirrors the
@@ -24,6 +24,7 @@
 //!
 //! - [`catalog`] — the parsed catalog and lookups over it.
 //! - [`schemas`] — compiled validators for every method, topic, and document.
+//! - [`hub`] — the contract a hub serves back to its runtimes (`hub-catalog.json`).
 //! - [`errors`] — the error code and `details.kind` vocabulary.
 //! - [`manifest`] — the `hello.capabilities` manifest a runtime announces.
 //! - [`strings`] — the contract's non-schema constants.
@@ -42,6 +43,7 @@
 
 pub mod catalog;
 pub mod errors;
+pub mod hub;
 pub mod manifest;
 pub mod schemas;
 pub mod strings;

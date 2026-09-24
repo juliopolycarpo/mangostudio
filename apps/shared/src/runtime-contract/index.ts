@@ -11,6 +11,7 @@ export * from './cancellation';
 export * from './contract';
 export * from './errors';
 export * from './events';
+export * from './hub-contract';
 export * from './limits';
 export * from './manifest';
 export * from './methods';
