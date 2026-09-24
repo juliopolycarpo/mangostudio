@@ -1,1 +1,1 @@
-{"durationMs":5,"hub":"unidentified hub","method":"runtime.health","outcome":"ok","ts":"2025-01-01T00:00:00.000Z"}
+{"ts":"2025-01-01T00:00:00.000Z","method":"runtime.health","hub":"unidentified hub","outcome":"ok","durationMs":5}

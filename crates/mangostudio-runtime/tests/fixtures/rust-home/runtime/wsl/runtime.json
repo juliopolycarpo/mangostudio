@@ -1,21 +1,21 @@
 {
+  "version": "0.2.0-rust-fixture",
   "allow": {
-    "checkpoints": false,
-    "externalAgents": false,
     "fsRead": true,
     "fsWrite": false,
-    "git": true,
-    "library": true,
-    "mcp": false,
-    "probing": true,
     "shell": false,
-    "update": false
+    "git": true,
+    "probing": true,
+    "mcp": false,
+    "library": true,
+    "checkpoints": false,
+    "update": false,
+    "externalAgents": false
+  },
+  "setup": {
+    "state": "configured",
+    "by": "cli"
   },
   "schemaVersion": 1,
-  "setup": {
-    "by": "cli",
-    "state": "configured"
-  },
-  "slot": "wsl",
-  "version": "0.2.0-rust-fixture"
+  "slot": "wsl"
 }

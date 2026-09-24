@@ -9,7 +9,7 @@
 //! `profile`, `allow`, `setup`, `audit` (from [`crate::consent::config`]),
 //! `source`, `binaryPath`, `runtimeVersion`, `platform`, `arch`, `homeDir`,
 //! `shells`, `git`, `gh`, `terminal`, `lastError`, and, on a host that serves
-//! external agents, `externalAgents` (added by [`register`] from the
+//! external agents, `externalAgents` (added by `register` from the
 //! supervisor, with the attestation omitted when the hub withdrew it).
 //!
 //! Deliberately skipped, optional on the wire:
