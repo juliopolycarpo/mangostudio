@@ -934,8 +934,9 @@ stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`
 ### Cancellation on Windows
 
 Cancelling a turn is a protocol request for Codex (`turn/interrupt`) and Cursor (ACP
-`session/cancel`), so it behaves the same on every platform; the qualification above runs the ACP
-cancel-and-continue path on Windows. Claude has no protocol cancel: the SDK interrupts the
+`session/cancel`), so neither depends on a process signal. The qualification above demonstrates
+the ACP cancel-and-continue path on Windows; Codex's cancel has not been run on Windows. If a
+Codex cancel does not settle, the SDK tears the session down and it is reported lost (below). Claude has no protocol cancel: the SDK interrupts the
 process, and the Windows launcher reports interrupt as unsupported
 (`windows_interrupt_is_unsupported_and_kill_ends_the_job`), so a Claude cancel on Windows is a
 forced termination of the process tree.
