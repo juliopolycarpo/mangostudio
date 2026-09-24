@@ -93,7 +93,7 @@ export async function reconcileExternalTurns(
  *
  * Only the boot pass consults them: an explicit reason (the user's own cancel)
  * already says why the turn ended. At boot, a turn whose latest attempt was
- * still `acceptance-unknown` was sent and never confirmed — calling that
+ * still `acceptance-unknown` (or already `unresolved`) was sent and never confirmed — calling that
  * `hub-restarted` would imply the vendor had it. An accepted turn did run, and
  * one only ever `not-submitted` never reached the vendor; both are what
  * `hub-restarted` means, and neither is resubmitted.
@@ -104,7 +104,11 @@ function reasonFromAttempts(
 ): ExternalTurnTerminalReason {
   if (reason !== 'hub-restarted') return reason;
   const latest = attempts.at(-1);
-  return latest?.state === 'acceptance-unknown' ? 'acceptance-unknown' : reason;
+  // `unresolved` too: the submission already concluded the acceptance was
+  // unknowable, and the hub died before the turn could say so.
+  return latest?.state === 'acceptance-unknown' || latest?.state === 'unresolved'
+    ? 'acceptance-unknown'
+    : reason;
 }
 
 function isExternalTurnPart(part: MessagePart): part is ExternalTurnPart {

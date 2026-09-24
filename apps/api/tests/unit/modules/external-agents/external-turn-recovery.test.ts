@@ -208,6 +208,15 @@ describe('external turn recovery', () => {
       });
     });
 
+    it('ends a turn whose submission was already unresolved as acceptance-unknown', async () => {
+      const messageId = await withAttempt('unresolved');
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+      expect(await outcome(messageId)).toEqual({
+        reason: 'acceptance-unknown',
+        attempts: ['unresolved'],
+      });
+    });
+
     it('keeps hub-restarted for an accepted turn', async () => {
       const messageId = await withAttempt('accepted');
       await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
