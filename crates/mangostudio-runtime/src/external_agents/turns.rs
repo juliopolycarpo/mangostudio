@@ -420,9 +420,24 @@ impl Supervisor {
             let mut subscription = live.session.subscribe();
             relay.commands(&subscription.current().commands);
             let mut facts_open = true;
+            let deadline = tokio::time::sleep(this.hard_turn_timeout());
+            tokio::pin!(deadline);
+            let mut past_deadline = false;
             loop {
                 tokio::select! {
                     biased;
+                    // First, so a stream that never pauses cannot starve it.
+                    () = &mut deadline, if !past_deadline => {
+                        past_deadline = true;
+                        if !relay.failed {
+                            relay.fail(
+                                epoch_ms(SystemTime::now()),
+                                "adapter-stream",
+                                "External-agent turn exceeded its hard timeout.",
+                                CancelReason::Timeout,
+                            );
+                        }
+                    }
                     event = stream.recv() => {
                         let Some(event) = event else { break };
                         relay.event(&event).await;

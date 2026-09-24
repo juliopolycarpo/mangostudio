@@ -19,8 +19,8 @@ use mango_external_agents::Limits;
 use super::hub_authority::{HUB_AUTHORIZE_TIMEOUT, HubWorkspaceAuthority};
 use super::launcher::GuardedProcessLauncher;
 use super::supervisor::{
-    CLEANUP_TIMEOUT, CONSENT_POLL, CloseCause, DEFAULT_SESSION_CAP, ExecutableResolver, PortFuture,
-    Ports, ProductHarnesses, Supervisor,
+    CLEANUP_TIMEOUT, CONSENT_POLL, CloseCause, DEFAULT_SESSION_CAP, ExecutableResolver,
+    HARD_TURN_TIMEOUT, PortFuture, Ports, ProductHarnesses, Supervisor,
 };
 use super::wire::TargetId;
 use crate::consent::source::ConsentSource;
@@ -185,6 +185,7 @@ pub(crate) fn production_supervisor(
         session_cap: DEFAULT_SESSION_CAP,
         consent_poll: CONSENT_POLL,
         cleanup_timeout: CLEANUP_TIMEOUT,
+        hard_turn_timeout: HARD_TURN_TIMEOUT,
     })
 }
 

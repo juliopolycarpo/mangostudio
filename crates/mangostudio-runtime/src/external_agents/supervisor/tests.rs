@@ -578,6 +578,7 @@ struct RigOptions {
     session_cap: usize,
     authority_gate: Option<watch::Receiver<bool>>,
     fake: FakeHarness,
+    hard_turn_timeout: Duration,
 }
 
 impl Default for RigOptions {
@@ -590,6 +591,7 @@ impl Default for RigOptions {
             session_cap: super::DEFAULT_SESSION_CAP,
             authority_gate: None,
             fake: FakeHarness::new(),
+            hard_turn_timeout: super::HARD_TURN_TIMEOUT,
         }
     }
 }
@@ -649,6 +651,7 @@ async fn rig(options: RigOptions) -> Rig {
         session_cap: options.session_cap,
         consent_poll: Duration::from_millis(10),
         cleanup_timeout: Duration::from_secs(2),
+        hard_turn_timeout: options.hard_turn_timeout,
     });
     let (hub, observer) = handshaken_pair().await;
     let events = tokio::sync::Mutex::new(observer.events());
@@ -2067,6 +2070,51 @@ async fn a_duplicate_steer_waiting_on_one_that_fails_in_transit_receives_its_fai
         2,
         "expected a steer sent again after the failure to reach the vendor"
     );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_turn_past_its_hard_deadline_ends_with_its_own_error_and_frees_the_session() {
+    // A turn waiting on a person is not idle, so the SDK's idle bound never
+    // fires for it; the hard deadline still caps the whole turn.
+    let rig = rig(RigOptions {
+        hard_turn_timeout: Duration::from_millis(200),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    rig.events_until("approval_requested").await;
+    // The runtime's own error is the turn's terminal; nothing the vendor
+    // says afterwards is relayed.
+    let rest = rig.events_until("error").await;
+    let error = &rest.last().unwrap()["event"]["error"];
+    assert_eq!(
+        (&error["code"], &error["message"]),
+        (
+            &json!("adapter-stream"),
+            &json!("External-agent turn exceeded its hard timeout.")
+        ),
+        "expected the runtime's own hard-timeout error | received: {error}"
+    );
+    eventually(
+        "the vendor told to stop exactly once",
+        || rig.log.cancels.load(Ordering::SeqCst),
+        |cancels| *cancels == 1,
+    )
+    .await;
+    eventually(
+        "the session idle after its timed-out turn",
+        || rig.supervisor.live_sessions().1[0].state,
+        |state| *state == "idle",
+    )
+    .await;
     rig.close("one").await;
 }
 
