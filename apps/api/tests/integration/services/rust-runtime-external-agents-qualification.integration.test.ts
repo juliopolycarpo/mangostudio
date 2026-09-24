@@ -85,6 +85,62 @@ describe('Real Rust runtime external-agent admission', () => {
     return new RuntimeClient(hub, () => undefined, name);
   }
 
+  async function diagVariant(
+    label: string,
+    opts: { db: boolean; binding: boolean; policy: boolean; healthFirst: boolean }
+  ) {
+    console.error('DIAG variant start', label, Date.now());
+    const home = await scratchMangoHome(`diag-${label}`);
+    cleanups.push(() => cleanupMangoHome(home));
+    const emptyPath = join(home, 'empty-path');
+    await mkdir(emptyPath);
+    await mkdir(join(home, 'authorized'));
+    const authorized = await realpath(join(home, 'authorized'));
+    const environmentId = `diag-${label}`;
+    let userId = 'diag-user';
+    if (opts.db) {
+      const owner = await insertTestUser();
+      userId = owner.id;
+      const chat = await insertTestChat(owner.id);
+      await getDb()
+        .updateTable('chats')
+        .set({ environmentId, workdir: authorized })
+        .where('id', '=', chat.id)
+        .execute();
+    }
+    const rust = await spawnRustRuntime(environmentId, {
+      env: {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: emptyPath,
+        XDG_CONFIG_HOME: join(home, '.config'),
+      },
+      ...(opts.binding ? { workspaceBinding: { userId, environmentId } } : {}),
+      ...(opts.policy ? { workspacePolicy: async () => true } : {}),
+    });
+    if (opts.healthFirst) await rust.health();
+    const result = await rust.externalAgents
+      .open({
+        sessionId: `diag-${label}`,
+        targetId: 'codex',
+        workspacePath: authorized,
+        configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
+        resumeMode: 'fallback',
+        timeoutMs: 10_000,
+      })
+      .then(
+        () => 'resolved',
+        (error: unknown) => String(error)
+      );
+    console.error('DIAG variant result', label, result, Date.now());
+  }
+
+  it.skipIf(!binary.available)(
+    'DIAG E0 exact clone of test 4, first in file',
+    () => diagVariant('e0', { db: true, binding: true, policy: false, healthFirst: false }),
+    60_000
+  );
+
   it.skipIf(!binary.available)(
     'attests the credential home Local attests, so the hub sees two users collide',
     async () => {
@@ -263,56 +319,6 @@ describe('Real Rust runtime external-agent admission', () => {
     },
     60_000
   );
-
-  async function diagVariant(
-    label: string,
-    opts: { db: boolean; binding: boolean; policy: boolean; healthFirst: boolean }
-  ) {
-    console.error('DIAG variant start', label, Date.now());
-    const home = await scratchMangoHome(`diag-${label}`);
-    cleanups.push(() => cleanupMangoHome(home));
-    const emptyPath = join(home, 'empty-path');
-    await mkdir(emptyPath);
-    await mkdir(join(home, 'authorized'));
-    const authorized = await realpath(join(home, 'authorized'));
-    const environmentId = `diag-${label}`;
-    let userId = 'diag-user';
-    if (opts.db) {
-      const owner = await insertTestUser();
-      userId = owner.id;
-      const chat = await insertTestChat(owner.id);
-      await getDb()
-        .updateTable('chats')
-        .set({ environmentId, workdir: authorized })
-        .where('id', '=', chat.id)
-        .execute();
-    }
-    const rust = await spawnRustRuntime(environmentId, {
-      env: {
-        HOME: home,
-        USERPROFILE: home,
-        PATH: emptyPath,
-        XDG_CONFIG_HOME: join(home, '.config'),
-      },
-      ...(opts.binding ? { workspaceBinding: { userId, environmentId } } : {}),
-      ...(opts.policy ? { workspacePolicy: async () => true } : {}),
-    });
-    if (opts.healthFirst) await rust.health();
-    const result = await rust.externalAgents
-      .open({
-        sessionId: `diag-${label}`,
-        targetId: 'codex',
-        workspacePath: authorized,
-        configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
-        resumeMode: 'fallback',
-        timeoutMs: 10_000,
-      })
-      .then(
-        () => 'resolved',
-        (error: unknown) => String(error)
-      );
-    console.error('DIAG variant result', label, result, Date.now());
-  }
 
   it.skipIf(!binary.available)(
     'DIAG A db+null binding',
