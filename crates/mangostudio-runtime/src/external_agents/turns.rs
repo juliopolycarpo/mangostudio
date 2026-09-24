@@ -78,9 +78,32 @@ struct ActiveTurn {
     native_turn_id: Option<String>,
 }
 
+/// Where a session's operator diagnostics go: stderr in production, a named
+/// recording fake in tests.
+pub(crate) trait Diagnostics: Send + Sync {
+    /// Writes one diagnostic in the TypeScript host's line shape.
+    fn write(&self, event: &str, detail: &[(&str, &str)]);
+}
+
+/// Production sink: stderr, never stdout, which carries protocol frames in
+/// `stdio` mode.
+///
+/// # Example
+/// ```ignore
+/// StderrDiagnostics.write("external_agent_events_unobserved", &[("sessionId", "s")]);
+/// ```
+pub(crate) struct StderrDiagnostics;
+
+impl Diagnostics for StderrDiagnostics {
+    fn write(&self, event: &str, detail: &[(&str, &str)]) {
+        eprintln!("{}", crate::mcp::events::diagnostic_line(event, detail));
+    }
+}
+
 /// Everything a live session keeps about its turns.
 pub(crate) struct TurnState {
     hub: HubSession,
+    diagnostics: Arc<dyn Diagnostics>,
     sequence: Mutex<u64>,
     /// Set once the hub session refused an event; final for this session.
     unobserved: AtomicBool,
@@ -93,10 +116,21 @@ pub(crate) struct TurnState {
 }
 
 impl TurnState {
-    /// No turn yet; events go to `hub`.
+    /// No turn yet; events go to `hub`, diagnostics to stderr.
     pub(crate) fn new(hub: HubSession) -> Self {
+        Self::with_diagnostics(hub, Arc::new(StderrDiagnostics))
+    }
+
+    /// No turn yet; events go to `hub`, diagnostics to `diagnostics`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let turns = TurnState::with_diagnostics(hub, Arc::new(StderrDiagnostics));
+    /// ```
+    pub(crate) fn with_diagnostics(hub: HubSession, diagnostics: Arc<dyn Diagnostics>) -> Self {
         Self {
             hub,
+            diagnostics,
             sequence: Mutex::new(0),
             unobserved: AtomicBool::new(false),
             active: Mutex::new(None),
@@ -164,10 +198,43 @@ impl TurnState {
                 Emitted::Delivered(bytes)
             }
             Ok(false) => {
-                self.unobserved.store(true, Ordering::Release);
+                // Written once: every later event of this session is
+                // silenced by the same refusal.
+                if !self.unobserved.swap(true, Ordering::AcqRel) {
+                    let sequence = (*sequence + 1).to_string();
+                    let mut detail = vec![("sessionId", session_id)];
+                    detail.extend(native_turn_id.map(|native| ("nativeTurnId", native)));
+                    detail.push(("sequence", &sequence));
+                    self.diagnostics
+                        .write("external_agent_events_unobserved", &detail);
+                }
                 Emitted::Unobserved
             }
             Err(_) => Emitted::Invalid,
+        }
+    }
+
+    /// Publishes the error that is the whole record of how a turn ended,
+    /// outside any budget. A hub that no longer listens is told nothing, so
+    /// the failure goes to the diagnostics instead of vanishing.
+    fn emit_error(&self, session_id: &str, native_turn_id: &str, at: u64, error: AgentError) {
+        let message = error.message.clone();
+        let emitted = self.emit(
+            session_id,
+            Some(native_turn_id),
+            at,
+            Event::Error { error },
+            usize::MAX,
+        );
+        if matches!(emitted, Emitted::Unobserved) {
+            self.diagnostics.write(
+                "external_agent_turn_failed_unobserved",
+                &[
+                    ("sessionId", session_id),
+                    ("nativeTurnId", native_turn_id),
+                    ("message", &message),
+                ],
+            );
         }
     }
 }
@@ -614,21 +681,18 @@ impl Relay {
     /// The error that is the whole record of how this turn ended. The budget
     /// reserve exists so it always fits.
     fn error(&self, at: u64, code: &str, message: &str) {
-        let _ = self.live.turns.emit(
+        self.live.turns.emit_error(
             &self.live.session_id,
-            Some(&self.native),
+            &self.native,
             at,
-            Event::Error {
-                error: AgentError {
-                    code: code.to_owned(),
-                    message: message.to_owned(),
-                    request_id: None,
-                    retryable: Some(false),
-                    vendor_code: None,
-                    truncated: None,
-                },
+            AgentError {
+                code: code.to_owned(),
+                message: message.to_owned(),
+                request_id: None,
+                retryable: Some(false),
+                vendor_code: None,
+                truncated: None,
             },
-            usize::MAX,
         );
     }
 }
@@ -786,8 +850,34 @@ mod tests {
     use mango_protocol::port::port_pair;
     use mango_protocol::session::{Session as HubSession, SessionOptions};
 
-    use super::{Emitted, TurnState};
-    use crate::external_agents::wire::{ActivityKind, ApprovalRequest, Event};
+    use std::sync::Mutex;
+
+    use super::{Diagnostics, Emitted, TurnState};
+    use crate::external_agents::wire::{ActivityKind, AgentError, ApprovalRequest, Event};
+    use crate::mcp::events::diagnostic_line;
+
+    /// Named fake: records every diagnostic line instead of writing it.
+    #[derive(Default)]
+    struct RecordingDiagnostics(Mutex<Vec<String>>);
+
+    impl Diagnostics for RecordingDiagnostics {
+        fn write(&self, event: &str, detail: &[(&str, &str)]) {
+            self.0.lock().unwrap().push(diagnostic_line(event, detail));
+        }
+    }
+
+    /// A session whose handshake never completes, so the hub never carries
+    /// an event: what a session looks like once its hub stopped listening.
+    fn unheard(diagnostics: &Arc<RecordingDiagnostics>) -> TurnState {
+        let (port, _peer) = port_pair();
+        let info = PeerInfo {
+            name: "turn-state-test".into(),
+            version: "0.1.0".into(),
+            role: "runtime".into(),
+        };
+        let (session, _driver) = HubSession::open(port, SessionOptions::new(info));
+        TurnState::with_diagnostics(session, Arc::clone(diagnostics) as Arc<dyn Diagnostics>)
+    }
 
     async fn pair() -> (HubSession, HubSession) {
         let (port, peer) = port_pair();
@@ -878,6 +968,49 @@ mod tests {
             event.payload["sequence"],
             serde_json::json!(1),
             "expected refused and over-budget frames to spend no sequence number"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hub_that_stops_listening_is_diagnosed_once() {
+        let diagnostics = Arc::new(RecordingDiagnostics::default());
+        let state = unheard(&diagnostics);
+        for n in 0..3 {
+            let emitted = state.emit("s", Some("t"), 0, text(n), usize::MAX);
+            assert!(
+                matches!(emitted, Emitted::Unobserved),
+                "expected an unheard event to be unobserved"
+            );
+        }
+        assert_eq!(
+            *diagnostics.0.lock().unwrap(),
+            [
+                r#"mangostudio-runtime: external_agent_events_unobserved {"sessionId":"s","nativeTurnId":"t","sequence":"1"}"#
+            ],
+            "expected exactly one diagnostic for the first refused event"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_turn_failure_nobody_hears_is_diagnosed_with_its_message() {
+        let diagnostics = Arc::new(RecordingDiagnostics::default());
+        let state = unheard(&diagnostics);
+        let error = AgentError {
+            code: "adapter-stream".into(),
+            message: "External-agent turn exceeded its persisted payload limit.".into(),
+            request_id: None,
+            retryable: Some(false),
+            vendor_code: None,
+            truncated: None,
+        };
+        state.emit_error("s", "t", 0, error);
+        let written = diagnostics.0.lock().unwrap();
+        assert_eq!(
+            written.last().map(String::as_str),
+            Some(
+                r#"mangostudio-runtime: external_agent_turn_failed_unobserved {"sessionId":"s","nativeTurnId":"t","message":"External-agent turn exceeded its persisted payload limit."}"#
+            ),
+            "expected the unheard turn failure diagnosed | received: {written:?}"
         );
     }
 }
