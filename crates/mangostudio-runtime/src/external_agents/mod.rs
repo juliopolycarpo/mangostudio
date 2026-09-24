@@ -11,12 +11,14 @@
 //! - [`launcher`] adapts the runtime's process supervision to the SDK's
 //!   `ProcessLauncher` port.
 //! - [`wire`] is the product wire as typed Rust; [`map`] is the one place SDK
-//!   types become wire types.
+//!   types become wire types, with [`map_events`] for turn events and
+//!   interactions.
 //! - [`supervisor`] owns the sessions; [`service`] registers the methods.
 
 pub(crate) mod isolation;
 pub(crate) mod launcher;
 pub(crate) mod map;
+pub(crate) mod map_events;
 pub(crate) mod service;
 pub(crate) mod supervisor;
 pub(crate) mod wire;
