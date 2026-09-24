@@ -220,7 +220,7 @@ fn stage_files(
             || relative.contains('\\')
             || relative
                 .split('/')
-                .any(|segment| segment.is_empty() || segment == "." || segment == "..");
+                .any(|segment| !is_single_normal_segment(segment));
         if escapes {
             return Err(WriteError::new(
                 WriteFailure::PathEscape,
@@ -272,4 +272,47 @@ fn swap_staged_directory(
     }
     let _ = fs.remove_all(previous);
     Ok(())
+}
+
+/// Whether `segment` is exactly one plain path component on this platform.
+///
+/// Rejects empty, `.` and `..` segments, and on Windows a drive-relative
+/// prefix such as `C:evil`, which `PathBuf::join` would treat as a new base
+/// and so escape the stage.
+///
+/// ```ignore
+/// assert!(is_single_normal_segment("notes.md"));
+/// assert!(!is_single_normal_segment(".."));
+/// ```
+fn is_single_normal_segment(segment: &str) -> bool {
+    let mut components = Path::new(segment).components();
+    matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    )
+}
+
+#[cfg(test)]
+mod segment_tests {
+    use super::is_single_normal_segment;
+
+    #[test]
+    fn single_normal_segment_rejects_empty_dot_and_parent() {
+        for segment in ["", ".", ".."] {
+            assert!(
+                !is_single_normal_segment(segment),
+                "expected segment {segment:?} to be rejected as not one plain component"
+            );
+        }
+        assert!(is_single_normal_segment("notes.md"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn single_normal_segment_rejects_a_drive_relative_prefix() {
+        assert!(
+            !is_single_normal_segment("C:evil"),
+            "expected a drive-relative segment to be rejected; it would replace the stage path"
+        );
+    }
 }
