@@ -1299,6 +1299,32 @@ describe('RuntimeConnectionManager', () => {
     }
   });
 
+  it('surfaces the close failure of a withdrawn late open instead of the withdrawal', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      isWorkspaceAuthorized: () => true,
+      open: opens.open,
+    });
+
+    const stuck = connector(localDefinition('user-1'), () => undefined, connectContext());
+    const stuckOutcome = stuck.catch((error: unknown) => error);
+    await outlastChainDeadline();
+    const second = connector(localDefinition('user-2'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(1).succeed();
+    const secondConnection = await second;
+    opens.call(0).succeed(() => Promise.reject(new Error('late close failed')));
+
+    try {
+      // The caller learns the attested connection may still be alive, rather
+      // than a withdrawal message that implies it is gone.
+      expect(await stuckOutcome).toMatchObject({ message: 'late close failed' });
+    } finally {
+      await secondConnection.close();
+    }
+  });
+
   it('keeps a pending same-user claim when an older attempt for that user fails late', async () => {
     const opens = scriptedLocalOpen();
     const connector = createLocalRuntimeConnector({

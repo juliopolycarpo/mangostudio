@@ -1340,7 +1340,8 @@ export function createLocalRuntimeConnector(
       externalAgentIsolation: requested,
     });
     // Asked for attestation, but a second owner arrived while this open was
-    // still running: the connection holds a claim that no longer exists.
+    // still running and withdrew the claim: the connection carries an
+    // attestation that claim no longer grants.
     // Closing it is part of this attempt: the close is awaited before the
     // rejection, and a close that fails surfaces its own error instead.
     if (requested === 'single-user' && claim.withdrawn) {
