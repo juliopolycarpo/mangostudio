@@ -59,7 +59,8 @@ export class RuntimeRequestNoReplyError extends RemoteError {
 
   constructor(original: RemoteError, reason: NoReplyReason) {
     super(original.code, original.message, original.details);
-    this.name = 'RuntimeRequestNoReplyError';
+    // `name` stays `RemoteError`: callers and logs already match on it, and
+    // this is the same error with one more fact attached.
     this.reason = reason;
   }
 }
