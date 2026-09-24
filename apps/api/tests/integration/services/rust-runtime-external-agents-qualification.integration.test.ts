@@ -378,4 +378,61 @@ describe('Real Rust runtime external-agent admission', () => {
     () => diagVariant('h', { db: false, binding: false, policy: false, healthFirst: false }),
     60_000
   );
+
+  async function test3Clone(label: string, opts: { refuse: boolean; health: boolean }) {
+    const home = await scratchMangoHome(`diag-${label}`);
+    cleanups.push(() => cleanupMangoHome(home));
+    const emptyPath = join(home, 'empty-path');
+    await mkdir(emptyPath);
+    const rust = await spawnRustRuntime(`diag-${label}`, {
+      env: {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: emptyPath,
+        XDG_CONFIG_HOME: join(home, '.config'),
+      },
+    });
+    await rust.externalAgents.discover({
+      targetIds: ['codex', 'cursor', 'claude'],
+      timeoutMs: 20_000,
+    });
+    if (opts.refuse) {
+      await mkdir(join(home, 'workspace'));
+      const workspace = await realpath(join(home, 'workspace'));
+      const refused = await rust.externalAgents
+        .open({
+          sessionId: 'qualification-session',
+          targetId: 'codex',
+          workspacePath: workspace,
+          configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
+          resumeMode: 'fallback',
+          timeoutMs: 10_000,
+        })
+        .then(
+          () => 'resolved',
+          (error: unknown) => String(error)
+        );
+      console.error('DIAG variant result', label, 'refused', refused.slice(0, 60));
+    }
+    if (opts.health) await rust.health();
+    console.error('DIAG variant result', label, 'done', Date.now());
+  }
+  const pairs: Array<[string, { refuse: boolean; health: boolean }]> = [
+    ['i1', { refuse: true, health: true }],
+    ['i2', { refuse: true, health: false }],
+    ['i3', { refuse: false, health: true }],
+  ];
+  for (const [label, opts] of pairs) {
+    it.skipIf(!binary.available)(
+      `DIAG ${label} test-3 clone`,
+      () => test3Clone(label, opts),
+      60_000
+    );
+    it.skipIf(!binary.available)(
+      `DIAG ${label}-next exact clone of test 4`,
+      () =>
+        diagVariant(`${label}n`, { db: true, binding: true, policy: false, healthFirst: false }),
+      60_000
+    );
+  }
 });
