@@ -193,6 +193,33 @@ describe('capabilityManifestFromHealth', () => {
     });
   });
 
+  it('lets a later consent grant through when the handshake refused it by consent', () => {
+    const noneReport: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'none',
+      allow: RUNTIME_CONSENT_PRESETS.none,
+    };
+    const handshake = capabilityManifestFromHealth(noneReport);
+    expect(handshake.features.shell).toBe(false);
+
+    const granted = capabilityManifestFromHealth(
+      {
+        ...baseReport,
+        profile: 'custom',
+        allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true, externalAgents: true },
+      },
+      handshake
+    );
+
+    expect({
+      shell: granted.features.shell,
+      externalAgents: granted.features.externalAgents,
+    }).toEqual({
+      shell: true,
+      externalAgents: true,
+    });
+  });
+
   it('derives tools from capabilities that are both allowed and implemented', () => {
     const report: RuntimeHealthReport = {
       ...baseReport,

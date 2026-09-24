@@ -76,7 +76,7 @@ export function capabilityManifestFromHealth(
     // Same rule as `gh`: absent stays absent, so "too old to say" is never
     // rewritten as "said no".
     ...(report.terminal === undefined ? {} : { terminal: report.terminal }),
-    features: applyImplementationCeiling(allowedFeatures, handshake?.features),
+    features: applyImplementationCeiling(allowedFeatures, implementedAtHandshake(handshake)),
     ...(report.externalAgents?.targets.length
       ? { externalAgents: [...report.externalAgents.targets] }
       : {}),
@@ -98,6 +98,44 @@ export function capabilityManifestFromHealth(
     profile: report.profile,
     allow,
   };
+}
+
+type CeilingKey = Exclude<keyof RuntimeCapabilityManifest['features'], 'tools' | 'toolchain'>;
+
+const CEILING_KEYS: readonly CeilingKey[] = [
+  'git',
+  'probing',
+  'mcp',
+  'library',
+  'checkpoints',
+  'fsRead',
+  'fsWrite',
+  'shell',
+  'update',
+  'externalAgents',
+];
+
+/**
+ * The part of the handshake's `features` that describes the build, not consent.
+ *
+ * `hello` reports each feature as consent AND implementation, so a `false`
+ * whose handshake-time consent was also refused says nothing about the build.
+ * Such keys are lifted to `true` so a later grant is not capped by an old
+ * refusal; current consent still comes from the health report.
+ *
+ * @example implementedAtHandshake(hello)?.shell // true when hello refused shell consent
+ */
+function implementedAtHandshake(
+  handshake?: RuntimeCapabilityManifest
+): RuntimeCapabilityManifest['features'] | undefined {
+  if (!handshake) return undefined;
+  const consent = handshake.allow;
+  if (!consent) return handshake.features;
+  const features = { ...handshake.features };
+  for (const key of CEILING_KEYS) {
+    if (consent[key] === false && features[key] === false) features[key] = true;
+  }
+  return features;
 }
 
 function applyImplementationCeiling(
