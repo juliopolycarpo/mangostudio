@@ -756,15 +756,9 @@ fn is_spent_session(error: &SdkError) -> bool {
 /// vendor, and the refusal is transient, so the hub retries it rather than
 /// reading it as a lost session.
 fn busy(session_id: &str) -> RemoteError {
-    RemoteError::new(
-        codes::INTERNAL,
-        format!(
-            "External-agent session {session_id:?} already has an active turn; expected an idle session."
-        ),
-    )
-    .with_detail("kind", "external_agent_busy")
-    .with_detail("retryable", true)
-    .with_detail("dispatch", "not-submitted")
+    map::busy_not_submitted(format!(
+        "External-agent session {session_id:?} already has an active turn; expected an idle session."
+    ))
 }
 
 enum Admitted {
