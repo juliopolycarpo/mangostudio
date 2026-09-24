@@ -297,10 +297,13 @@ jobs:
         include:
           - os: ubuntu-latest
             runtime-binary: target/debug/mangostudio-runtime
+            fake-cursor-agent: target/debug/examples/fake_cursor_agent
           - os: macos-latest
             runtime-binary: target/debug/mangostudio-runtime
+            fake-cursor-agent: target/debug/examples/fake_cursor_agent
           - os: windows-latest
             runtime-binary: target/debug/mangostudio-runtime.exe
+            fake-cursor-agent: target/debug/examples/fake_cursor_agent.exe
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -314,6 +317,11 @@ jobs:
 
       - run: cargo build -p mangostudio-runtime --locked
 
+      # A separate invocation on purpose: the stand-in vendor needs the SDK's
+      # `testing` feature, and building it with the runtime binary would
+      # unify that feature into the binary under qualification.
+      - run: cargo build -p mangostudio-runtime --example fake_cursor_agent --locked
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
@@ -324,6 +332,7 @@ jobs:
         working-directory: apps/api
         env:
           MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/${{ matrix.runtime-binary }}
+          MANGOSTUDIO_FAKE_CURSOR_AGENT: ${{ github.workspace }}/${{ matrix.fake-cursor-agent }}
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
         run: >
           bun test --timeout 15000

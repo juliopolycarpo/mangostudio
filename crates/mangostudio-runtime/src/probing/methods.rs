@@ -528,6 +528,15 @@ pub(crate) async fn resolve_agent_executable(
     target: AgentTargetId,
     cancel: &CancellationToken,
 ) -> Option<std::path::PathBuf> {
+    resolve_agent_executable_in(target, host::build_runtime_path_env(None), cancel).await
+}
+
+/// [`resolve_agent_executable`] against an explicit environment snapshot.
+async fn resolve_agent_executable_in(
+    target: AgentTargetId,
+    path_env: PathEnv,
+    cancel: &CancellationToken,
+) -> Option<std::path::PathBuf> {
     let definition = AGENT_CLI_DEFINITIONS
         .iter()
         .copied()
@@ -535,12 +544,61 @@ pub(crate) async fn resolve_agent_executable(
     let AgentCliDefinition::Cli(cli) = definition else {
         return None;
     };
-    let path_env = Arc::new(host::build_runtime_path_env(None));
-    let status = describe_external_agent(cli, &path_env, cancel, false, &None).await;
-    status
-        .runtime
-        .effective
+    let status = describe_external_agent(cli, &Arc::new(path_env), cancel, false, &None).await;
+    launchable_installation(status.runtime)
         .map(|installation| std::path::PathBuf::from(installation.path))
+}
+
+/// The installation to launch for a vendor: the effective one, unless its
+/// `--version` does not read as this vendor's and an installation under
+/// another binary name does.
+///
+/// A binary name can belong to more than one vendor — Grok also installs
+/// `agent`, which Cursor's definition probes first — and the report keeps
+/// such an unreadable-version binary as installed, which is right for
+/// display. Launching it as the vendor would speak the wrong protocol to the
+/// wrong program. Only another name is a different program: an older copy
+/// under the same name is the same vendor, and a vendor that changed its
+/// version format keeps launching the install `PATH` picks.
+///
+/// # Example
+///
+/// ```ignore
+/// // `agent` (Grok, unreadable) first on PATH, `cursor-agent` after it.
+/// let chosen = launchable_installation(status.runtime).unwrap();
+/// assert!(chosen.path.ends_with("cursor-agent"));
+/// ```
+fn launchable_installation(runtime: RuntimeStatus) -> Option<RuntimeInstallation> {
+    if runtime
+        .effective
+        .as_ref()
+        .is_some_and(|effective| effective.version.is_some())
+    {
+        return runtime.effective;
+    }
+    let effective_name = runtime
+        .effective
+        .as_ref()
+        .map(|effective| binary_name(&effective.raw_path));
+    runtime
+        .installations
+        .into_iter()
+        .find(|installation| {
+            installation.version.is_some()
+                && effective_name
+                    .as_ref()
+                    .is_none_or(|name| *name != binary_name(&installation.raw_path))
+        })
+        .or(runtime.effective)
+}
+
+/// A candidate's binary name, without a Windows extension and
+/// case-insensitive, e.g. `Cursor-Agent.EXE` -> `cursor-agent`.
+fn binary_name(raw_path: &str) -> String {
+    std::path::Path::new(raw_path)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 fn select_agent_definitions(
@@ -1016,6 +1074,90 @@ mod tests {
         assert_eq!(statuses[0]["id"], "bun");
         assert_eq!(statuses[0]["effective"]["version"], "1.2.3");
         assert_eq!(statuses[0]["health"], "ok");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_shared_binary_name_that_is_another_vendor_is_never_launched_as_cursor() {
+        // Grok installs `agent`, the name Cursor's definition probes first.
+        let dir = scratch_dir("agent-exec-shared-name");
+        fake_binary_on_path(&dir, "agent", "grok 1.0.30 (04b7ffed98c6) [stable]");
+        fake_binary_on_path(&dir, "cursor-agent", "2026.09.10-fd3934a");
+        let env = params_with_path(&dir);
+        let chosen = resolve_agent_executable_in(
+            AgentTargetId::Cursor,
+            host::build_runtime_path_env(Some(&env)),
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(
+            chosen.as_deref().and_then(Path::file_name),
+            Some(std::ffi::OsStr::new("cursor-agent")),
+            "expected Cursor to launch cursor-agent, not Grok's agent | received: {chosen:?}"
+        );
+    }
+
+    fn installation(path: &str, version: Option<&str>, effective: bool) -> RuntimeInstallation {
+        RuntimeInstallation {
+            path: path.to_owned(),
+            raw_path: path.to_owned(),
+            version: version.map(str::to_owned),
+            origin: RuntimeOrigin::Path,
+            path_index: None,
+            effective,
+            alias_of: None,
+            managed_by: None,
+            path_source: None,
+        }
+    }
+
+    fn runtime_status(installations: Vec<RuntimeInstallation>) -> RuntimeStatus {
+        RuntimeStatus {
+            id: RuntimeId::Cursor,
+            health: RuntimeHealth::Ok,
+            effective: installations.iter().find(|entry| entry.effective).cloned(),
+            installations,
+            findings: Vec::new(),
+            installable: false,
+            probed_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn a_readable_effective_installation_is_launched() {
+        let status = runtime_status(vec![
+            installation("/a/agent", Some("2026.9.10"), true),
+            installation("/b/cursor-agent", Some("2026.9.1"), false),
+        ]);
+        assert_eq!(
+            launchable_installation(status).map(|entry| entry.path),
+            Some("/a/agent".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_unreadable_effective_install_is_not_swapped_for_an_older_same_named_one() {
+        // A vendor that changed its version format must keep launching the
+        // install PATH picks, not an older copy under another prefix.
+        let status = runtime_status(vec![
+            installation("/new/bin/claude", None, true),
+            installation("/old/bin/claude", Some("2.0.1"), false),
+        ]);
+        assert_eq!(
+            launchable_installation(status).map(|entry| entry.path),
+            Some("/new/bin/claude".to_owned())
+        );
+    }
+
+    #[test]
+    fn with_no_readable_installation_the_effective_one_still_launches() {
+        let status = runtime_status(vec![installation("/a/claude", None, true)]);
+        assert_eq!(
+            launchable_installation(status).map(|entry| entry.path),
+            Some("/a/claude".to_owned()),
+            "expected a vendor whose version format changed to keep launching"
+        );
+        assert_eq!(launchable_installation(runtime_status(Vec::new())), None);
     }
 
     #[tokio::test]

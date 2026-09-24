@@ -36,7 +36,7 @@ use tokio::sync::watch;
 
 use super::map;
 use super::map_events::{self, Answer, PendingInteraction};
-use super::supervisor::{LiveSession, Supervisor, argument};
+use super::supervisor::{CloseCause, LiveSession, Supervisor, argument};
 use super::wire::{
     AckResult, AgentError, Attachment, AttachmentKind, CancelParams, Event, EventEnvelope,
     RespondParams, StartReviewParams, StartReviewResult, SteerParams, SteerRejection, SteerResult,
@@ -361,6 +361,28 @@ impl Supervisor {
         client_message_id: &str,
         error: SdkError,
     ) -> RemoteError {
+        // The session itself refused: it can never run a turn again. The
+        // Claude harness answers cancelled once a forced stop made it
+        // nonresumable; the Codex harness answers closed once it sealed a
+        // session it tore down itself. Relayed as "not submitted",
+        // the hub would resend to it forever; closing it and reporting it
+        // lost makes the next send open a session that can run the turn.
+        // It starts closing while this turn still holds the slot, so a
+        // concurrent turn is refused rather than sent to the spent session.
+        let spent = error.dispatch().is_safe_to_replay() && is_spent_session(&error);
+        let closed = if spent {
+            Some(
+                self.close_session(
+                    super::wire::CloseParams {
+                        session_id: live.session_id.clone(),
+                    },
+                    CloseCause::Requested,
+                )
+                .await,
+            )
+        } else {
+            None
+        };
         {
             let mut active = lock(&live.turns.active);
             if active
@@ -372,6 +394,16 @@ impl Supervisor {
         }
         if error.dispatch().is_safe_to_replay() {
             lock(&live.turns.receipts).remove(client_message_id);
+        }
+        if let Some(closed) = closed {
+            let cleanup = closed
+                .err()
+                .map(|failure| format!(" Closing it also failed: {}", failure.message))
+                .unwrap_or_default();
+            return argument(format!(
+                "External-agent session {:?} can no longer run turns ({error}); expected a new session.{cleanup}",
+                live.session_id
+            ));
         }
         if matches!(error, SdkError::Busy)
             || matches!(&error, SdkError::Operation { source, .. } if matches!(**source, SdkError::Busy))
@@ -420,9 +452,24 @@ impl Supervisor {
             let mut subscription = live.session.subscribe();
             relay.commands(&subscription.current().commands);
             let mut facts_open = true;
+            let deadline = tokio::time::sleep(this.hard_turn_timeout());
+            tokio::pin!(deadline);
+            let mut past_deadline = false;
             loop {
                 tokio::select! {
                     biased;
+                    // First, so a stream that never pauses cannot starve it.
+                    () = &mut deadline, if !past_deadline => {
+                        past_deadline = true;
+                        if !relay.failed {
+                            relay.fail(
+                                epoch_ms(SystemTime::now()),
+                                "adapter-stream",
+                                "External-agent turn exceeded its hard timeout.",
+                                CancelReason::Timeout,
+                            );
+                        }
+                    }
                     event = stream.recv() => {
                         let Some(event) = event else { break };
                         relay.event(&event).await;
@@ -694,6 +741,16 @@ impl Relay {
                 truncated: None,
             },
         );
+    }
+}
+
+/// Whether the SDK refused because the session can run no more work:
+/// `Cancelled` or `Closed`, directly or inside its `Operation` wrapper.
+fn is_spent_session(error: &SdkError) -> bool {
+    match error {
+        SdkError::Cancelled { .. } | SdkError::Closed { .. } => true,
+        SdkError::Operation { source, .. } => is_spent_session(source),
+        _ => false,
     }
 }
 

@@ -874,3 +874,135 @@ surface, so there is nothing to ask that would prove more than the pin does.
 The same asymmetry applies here. An **unexpected but additive** handshake result — a new capability
 key, an unknown mode — is tolerated and logged. A **missing** expected capability is what makes a
 target unavailable.
+
+## The Rust runtime host
+
+`crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
+External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
+`mango-agent-acp`, pinned exactly). The SDK owns vendor protocols, harness lifecycle and the
+idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
+per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
+
+### Method map
+
+| Method                                 | Rust handler                            | Most discriminating Rust tests                                                                                                                                                                               |
+| -------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `external-agent.discover`              | `supervisor.rs` `discover`              | `discovery_omits_a_failing_target_and_keeps_the_rest`, `a_stalled_probe_costs_only_its_own_target_and_is_told_to_stop`                                                                                       |
+| `external-agent.open`                  | `supervisor.rs` `open`                  | `an_unauthorized_workspace_is_refused_before_any_lookup_or_launch`, `concurrent_opens_of_one_id_share_one_launch`, `an_open_that_finishes_after_a_close_was_requested_is_closed_not_registered`              |
+| `external-agent.turn`                  | `turns.rs` `turn`                       | `a_turn_streams_ordered_events_and_an_approval_round_trips`, `a_repeated_client_message_id_answers_without_a_second_turn`, `a_session_that_can_run_no_more_turns_is_closed_and_reported_lost_not_resendable` |
+| `external-agent.respond`               | `turns.rs` `respond`                    | `a_response_is_refused_for_an_unknown_request_or_another_turn`, `a_single_choice_question_is_a_card_answered_as_a_question_never_as_a_permission`                                                            |
+| `external-agent.steer`                 | `turns.rs` `steer`                      | `steering_is_answered_not_thrown_when_it_cannot_land`, `a_duplicate_steer_waiting_on_one_that_fails_in_transit_receives_its_failure`                                                                         |
+| `external-agent.start-review`          | `turns.rs` `start_review`               | `a_review_on_a_target_without_native_review_is_refused_before_any_reservation`                                                                                                                               |
+| `external-agent.cancel`                | `turns.rs` `cancel`                     | `cancelling_a_turn_ends_it_with_the_marker_before_completion_and_frees_the_session`, `a_cancel_for_a_turn_that_is_no_longer_running_never_stops_the_current_one`                                             |
+| `external-agent.close`                 | `supervisor.rs` `close_session`         | `closing_a_live_session_is_idempotent_awaited_and_removes_its_scratch`, `closing_an_opening_session_cancels_it_and_waits_for_it_to_settle`                                                                   |
+| `external-agent.list-sessions`         | `supervisor.rs` `list_sessions`         | `listing_sessions_never_opens_a_conversation_and_authorizes_its_workspace`                                                                                                                                   |
+| `external-agent.refresh-account-usage` | `supervisor.rs` `refresh_account_usage` | `account_usage_without_a_live_session_is_nothing_to_report`, `account_usage_refuses_a_live_session_of_another_target`                                                                                        |
+| `external-agent.event` topic           | `turns.rs` relay                        | `concurrent_emitters_never_reorder_or_skip_a_sequence`, `a_refused_frame_spends_no_sequence`, `a_turn_past_the_persisted_budget_ends_with_its_own_error_and_is_stopped`                                      |
+
+Rust tests live in `supervisor/tests.rs`, `turns.rs`, `launcher_tests.rs`, `isolation.rs`,
+`hub_authority_tests.rs`, `map_tests.rs` and `map_events_tests.rs` under that directory.
+
+### Compiled-runtime qualification
+
+`apps/api/tests/integration/services/rust-runtime-external-agents-qualification.integration.test.ts`
+drives the compiled binary with the hub's own session manager, approval registry and turn
+controller. The vendor is `crates/mangostudio-runtime/examples/fake_cursor_agent.rs`, a
+`cursor-agent` that pipes its stdio through the SDK's `FakeAcpAgent`, so the runtime discovers,
+authorizes, launches and drives it exactly as it would the real CLI.
+
+- **stdio:** an answered approval completes a turn, a user cancel while the vendor waits on its
+  question ends the next one `cancelled-by-user`, a third turn runs on the same session, and close
+  leaves no live session. Machine-side consent withdrawal ends a waiting turn and closes the
+  session.
+- **direct-URL serve** (same file) and **paired connect**
+  (`apps/api/tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts`):
+  the transport's own `hub.workspace.authorize` binding admits the chat's workdir and an answered
+  turn completes.
+
+`cargo-shim.yml`'s real-binary job runs these on Linux, macOS and Windows. It builds the stand-in
+in its own `cargo build --example` invocation, so the SDK's `testing` feature never reaches the
+binary under qualification.
+
+`rust-runtime-external-agents-live-smoke.integration.test.ts` is the separate, authenticated
+evidence: opt-in through `MANGOSTUDIO_LIVE_AGENT_SMOKE=claude,codex,cursor`, it runs a one-word
+turn against the signed-in CLIs on the machine and never runs in CI.
+
+A runtime-side consent withdrawal reaches the hub as the vendor ending the turn early
+(`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
+stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`.
+
+### Cancellation on Windows
+
+Cancelling a turn is a protocol request for Codex (`turn/interrupt`) and Cursor (ACP
+`session/cancel`), so neither depends on a process signal. The qualification above demonstrates
+the ACP cancel-and-continue path on Windows; Codex's cancel has not been run on Windows. If a
+Codex cancel does not settle, the SDK tears the session down and it is reported lost (below). Claude has no protocol cancel: the SDK interrupts the
+process, and the Windows launcher reports interrupt as unsupported
+(`windows_interrupt_is_unsupported_and_kill_ends_the_job`), so a Claude cancel on Windows is a
+forced termination of the process tree.
+
+A forced Claude stop — on Windows always, elsewhere when the interrupt does not settle — leaves
+that vendor session **nonresumable**: the SDK refuses every later turn on it. The runtime then
+closes the session and answers the turn as a lost session, which the hub reports as
+`session-lost` and follows by opening a new session on the next send. The conversation starts
+over rather than resuming. A session the SDK sealed itself — Codex does after losing its
+app-server or a cancel that never settled — takes the same path. Graceful interruption on Windows stays tracked separately and is not
+required unless a bundled launcher comes to depend on it.
+
+### TypeScript assertion replacement map
+
+TypeScript paths are pinned to `88800868f01c611c58234c6904b5f1288b3a942b`, the last
+`feat/rust-runtime` commit before this map; they go away when the TypeScript runtime is removed.
+Vendor adapter tests (`claude-*`, `codex-*`, `cursor-*`, `vendor-contracts`, `turn-channel` and
+`external-agent-jsonrpc` under `apps/runtime/tests/unit/services/`) moved with the vendor
+protocols to the SDK and are not repeated here.
+
+`external-agent-supervisor.test.ts`:
+
+| TypeScript case                                                                                | Rust counterpart                                                                                                                                                   | Status                                            |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| derives the manifest target list and omits an empty registry                                   | `the_registry_exposes_exactly_the_three_product_targets`; qualification health `targets`                                                                           | covered                                           |
+| names the failing field when a method payload does not match its schema                        | method params are schema-checked by the dispatcher before a handler runs                                                                                           | covered outside the host                          |
+| rejects optional capability drift during discovery                                             | —                                                                                                                                                                  | dropped: SDK capabilities are typed, not declared |
+| accepts an implemented capability the machine cannot serve                                     | `cursor_missing_surface_does_not_blame_the_version`, `claude_refuses_a_mode_the_build_does_not_list`                                                               | covered                                           |
+| authorizes a canonical workspace before resolving or opening an executable                     | `an_unauthorized_workspace_is_refused_before_any_lookup_or_launch`, `a_non_canonical_workspace_is_refused_without_asking_the_authority`                            | covered                                           |
+| default-denies workspace launch when no authorization policy is supplied                       | `the_fallback_authority_denies_every_workspace`                                                                                                                    | covered                                           |
+| refuses a turn workspace root the open call never authorized                                   | `a_turn_may_narrow_its_roots_but_never_widen_them`, `every_extra_workspace_root_is_authorized_at_open`                                                             | covered                                           |
+| bounds discovery when the executable lookup never settles; keeps a healthy sibling target      | `a_stalled_probe_costs_only_its_own_target_and_is_told_to_stop`, `discovery_omits_a_failing_target_and_keeps_the_rest`                                             | covered                                           |
+| aborts a pending workspace authorization through the open shutdown signal                      | `a_stalling_hub_refuses_once_the_bound_passes`, `an_open_stopped_before_it_launched_never_reaches_the_vendor`                                                      | covered                                           |
+| hands every turn the executable that open resolved                                             | turns run on the SDK session opened with that executable                                                                                                           | not applicable                                    |
+| resolves the toolchain open carried and reuses it; leaves `PATH` untouched without one         | `commands/toolchain.rs` tests; open passes its selection into the session's `HostContext`                                                                          | partial: no host-level test pins the wiring       |
+| streams ordered semantic events and coalesces a retried client message id                      | `a_turn_streams_ordered_events_and_an_approval_round_trips`, `a_repeated_client_message_id_answers_without_a_second_turn`                                          | covered                                           |
+| steer: forwards, passes a rejection through, answers not-supported, refuses a closed session   | `steering_is_answered_not_thrown_when_it_cannot_land`, `a_duplicate_steer_waiting_on_one_that_fails_in_transit_receives_its_failure`                               | partial: no closed-session steer test             |
+| bounds concurrent sessions and recovers capacity after close                                   | `the_session_cap_counts_opening_sessions`                                                                                                                          | partial: no reopen-after-close test               |
+| proactively cancels and closes an idle session when consent is revoked                         | `withdrawing_consent_closes_every_live_session_for_that_reason`; qualification consent test                                                                        | covered                                           |
+| makes concurrent close calls share the same teardown barrier                                   | `closing_a_live_session_is_idempotent_awaited_and_removes_its_scratch`                                                                                             | covered                                           |
+| aborts an opening session on close and reaps its late adapter result                           | `closing_an_opening_session_cancels_it_and_waits_for_it_to_settle`, `an_open_that_finishes_after_a_close_was_requested_is_closed_not_registered`                   | covered                                           |
+| surfaces a late-open reaper failure to explicit close and on shutdown                          | `a_failed_late_cleanup_is_reported_by_the_close_that_waited_for_it`                                                                                                | covered                                           |
+| bounds explicit close while a late adapter open never settles; reaps an open past its deadline | `an_open_bounded_by_its_deadline_tells_the_vendor_to_stop`, `a_vendor_that_opens_while_being_stopped_is_closed_not_leaked`                                         | covered                                           |
+| keeps watching consent for a pending reaper; refuses to register an opening during shutdown    | `the_hub_session_ending_shuts_every_session_down`                                                                                                                  | partial: no pending-reaper consent test           |
+| does not emit an event delivered after consent revokes an active turn                          | `revoking_consent_mid_turn_closes_the_session_and_refuses_its_pending_answer`                                                                                      | covered                                           |
+| silences a session whose events the hub refused; publishes until the refusal                   | `a_hub_that_stops_listening_is_diagnosed_once`, `a_refused_frame_spends_no_sequence`                                                                               | covered                                           |
+| reports a silenced turn that its own deadline cancelled                                        | `a_turn_failure_nobody_hears_is_diagnosed_with_its_message`                                                                                                        | covered                                           |
+| preserves adapter-owned environment keys through managed process launch                        | `the_child_sees_exactly_the_given_argv_cwd_and_env` (the SDK builds the allowlist)                                                                                 | covered                                           |
+| surfaces managed process cleanup failure from supervisor shutdown                              | `a_child_the_sdk_could_not_clean_up_is_reaped_before_the_failure_returns`                                                                                          | covered                                           |
+| sanitizes and bounds vendor display strings before emitting them                               | `an_error_message_past_the_cap_is_cut_and_marked`, `an_overlong_option_label_is_cut_and_marks_the_card`, `output_renders_as_its_text_and_is_cut_at_the_detail_cap` | covered                                           |
+| stops a turn before an oversized aggregate payload leaves the runtime                          | `a_turn_past_the_persisted_budget_ends_with_its_own_error_and_is_stopped`                                                                                          | covered                                           |
+| refuses an unbounded native turn id and aborts its adapter context                             | the envelope gate refuses the turn's first event and stops it (`a_turn_past_the_persisted_budget_ends_…` path)                                                     | partial: no dedicated test                        |
+| turns a mid-stream adapter crash into a bounded error and cancellation                         | `error_carries_code_message_vendor_code_request_id_and_retryable`; the SDK owns the crash-to-error mapping                                                         | partial: mapper tested, runtime cancel half not   |
+| refuses unknown additive and host-tool event shapes at the runtime boundary                    | every mapped event validates against the topic schema (`map_events_tests.rs`)                                                                                      | covered                                           |
+| enforces the hard turn deadline even while a stream remains active                             | `a_turn_past_its_hard_deadline_ends_with_its_own_error_and_frees_the_session`                                                                                      | partial: no test with a stream that never pauses  |
+| idle deadline; not idle while awaiting an approval; stops waiting once the approval expired    | SDK `Limits::idle_timeout` and `approval_timeout`                                                                                                                  | moved to the SDK                                  |
+| refuses a listing for an unauthorized workspace; passes the canonical workspace through        | `listing_sessions_never_opens_a_conversation_and_authorizes_its_workspace`                                                                                         | covered                                           |
+| refuses a target whose adapter has no listing; bounds listed text                              | `native_sessions_convert_times_and_cap_at_fifty`                                                                                                                   | partial: no refusal test                          |
+| refuses a session that advertises nativeReview without implementing it                         | —                                                                                                                                                                  | dropped: SDK capabilities are typed               |
+| refuses a review on a session whose open reported no nativeReview                              | `a_review_on_a_target_without_native_review_is_refused_before_any_reservation`                                                                                     | covered                                           |
+| review streams through the turn's session, sequence, topic, receipt and slot rules             | shares `admit`, receipts and the relay with `turn`, whose tests cover them                                                                                         | partial: no review-path test (Codex only)         |
+
+`external-agent-isolation.test.ts` is ported case for case in `isolation.rs`, including
+`fingerprint_matches_the_typescript_derivation_byte_for_byte`, and the qualification proves the
+compiled binary's fingerprint equals Local's on the same home. `external-agent-process.test.ts`
+maps to `launcher_tests.rs` (exact argv, cwd and env; bounded, redacted stderr; tree kill;
+interrupt), except its Windows `taskkill` escalation cases, which the kill-on-close Job replaces.
+`external-agent-runtime.test.ts` (a fake adapter through the real framed host) is superseded by the
+compiled-runtime qualification above.

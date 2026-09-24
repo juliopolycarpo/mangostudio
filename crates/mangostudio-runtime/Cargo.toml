@@ -152,9 +152,12 @@ webpki-roots = "1"
 # `stdio` subcommand keeps stdout protocol-only end to end, not just in an
 # in-process duplex. The runtime binary itself never spawns anything.
 # `FakeLauncher`/`FakeHarness` for the external-agent host's own tests.
+# `FakeAcpAgent` is what `examples/fake_cursor_agent.rs` pipes its stdio
+# through for the compiled-runtime qualification suite.
+mango-agent-acp = { version = "=0.2.0", features = ["testing"] }
 mango-external-agents = { version = "=0.2.0", default-features = false, features = ["stdio", "testing"] }
 mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
-tokio = { version = "1.53", features = ["test-util"] }
+tokio = { version = "1.53", features = ["io-std", "test-util"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"

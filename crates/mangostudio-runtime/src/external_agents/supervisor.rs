@@ -60,6 +60,11 @@ pub(crate) const CONSENT_POLL: Duration = Duration::from_millis(250);
 /// How long one vendor close, or one late open's cleanup, may take before it
 /// is reported as failed. Bounds awaited cleanup; never skips it silently.
 pub(crate) const CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
+/// The longest one turn may run, approvals included, before the runtime ends
+/// it with its own error and asks the vendor to stop — the TypeScript host's
+/// `DEFAULT_HARD_TURN_TIMEOUT_MS`. The SDK's own `idle_timeout` bounds a
+/// silent turn; this bounds one that keeps talking.
+pub(crate) const HARD_TURN_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// A boxed future, for the object-safe ports below.
 pub(crate) type PortFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -149,6 +154,8 @@ pub(crate) struct Ports {
     pub consent_poll: Duration,
     /// The bound on each awaited cleanup.
     pub cleanup_timeout: Duration,
+    /// The bound on one turn, from its start to its end.
+    pub hard_turn_timeout: Duration,
 }
 
 /// Why a session is being closed, in the product's vocabulary.
@@ -315,6 +322,11 @@ impl Supervisor {
         self.slots
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    /// The bound on one turn, from its start to its end.
+    pub(super) fn hard_turn_timeout(&self) -> Duration {
+        self.ports.hard_turn_timeout
     }
 
     /// Health rows for the live sessions, oldest first, and the true count.
