@@ -264,6 +264,15 @@ impl Service {
                 consent_unconfirmed("terminal.open")
             });
         }
+        // The consent read can take seconds; a cancel that landed meanwhile
+        // must not admit a shell whose sessionId nobody will receive.
+        if cancel.is_cancelled() {
+            handle.close().await.map_err(pty_io)?;
+            return Err(RemoteError::new(
+                codes::CANCELLED,
+                "Terminal open was cancelled before admission.",
+            ));
+        }
         let entry = Arc::new(Entry {
             session_id: id.clone(),
             shell: prepared.shell,

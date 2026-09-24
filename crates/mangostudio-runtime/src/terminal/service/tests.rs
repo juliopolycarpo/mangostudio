@@ -383,6 +383,36 @@ async fn slow_consent_at_terminal_open_refuses_the_launch() {
 }
 
 #[tokio::test]
+async fn cancel_during_the_consent_read_refuses_terminal_open() {
+    let cancel = CancellationToken::new();
+    let cancel_in_read = cancel.clone();
+    let (_scratch, service, state) = prepared_service_with(move |service| {
+        service.shell_read = Arc::new(move || {
+            cancel_in_read.cancel();
+            true
+        });
+    });
+
+    let refused = service
+        .open(open_params(), fake_session(), cancel)
+        .await
+        .expect_err("expected a cancel during the consent read to refuse terminal.open");
+
+    let closes = state.lock().unwrap().closes;
+    let listed = service.list().unwrap()["sessions"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(
+        (refused.code.as_str(), closes, listed),
+        (codes::CANCELLED, 1, 0),
+        "expected (error code, spawned handle closes, listed sessions): (CANCELLED, 1, 0) | \
+         received ({}, {closes}, {listed})",
+        refused.code
+    );
+}
+
+#[tokio::test]
 async fn explicit_shell_denial_at_terminal_open_refuses_with_denied() {
     let (_scratch, service, state) = prepared_service_with(|service| {
         service.shell_read = Arc::new(|| false);
