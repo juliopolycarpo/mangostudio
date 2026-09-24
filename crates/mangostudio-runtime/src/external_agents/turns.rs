@@ -55,7 +55,7 @@ const TURN_ERROR_RESERVE_BYTES: usize = 4_096;
 /// One steer's input digest and outcome, for answering its repeats.
 struct SteerReceipt {
     input: [u8; 32],
-    outcome: watch::Receiver<Option<SteerResult>>,
+    outcome: watch::Receiver<Option<Result<SteerResult, RemoteError>>>,
 }
 
 struct Receipt {
@@ -448,13 +448,7 @@ impl Supervisor {
         };
         let publish = match seen {
             Ok(publish) => publish,
-            Err(mut outcome) => {
-                return match outcome.wait_for(Option::is_some).await {
-                    Ok(recorded) => Ok(recorded.expect("wait_for returned a recorded steer")),
-                    // The first attempt failed in transit and was forgotten.
-                    Err(_) => Ok(SteerResult::rejected(SteerRejection::TurnNotSteerable)),
-                };
-            }
+            Err(outcome) => return await_steer(&live, &params.client_message_id, outcome).await,
         };
         let steer = Steer {
             turn_id: mango_external_agents::TurnId::new(turn_id),
@@ -474,12 +468,16 @@ impl Supervisor {
                 SteerResult::rejected(SteerRejection::NotSupported)
             }
             Err(error) => {
-                // A steer that failed in transit may be sent again under its id.
+                // A duplicate that arrives before the failure is known, even
+                // while a child is being reaped, gets the same failure; after
+                // it, the id may be sent again.
+                let failure = self.sdk_failure(error).await;
+                publish.send_replace(Some(Err(failure.clone())));
                 lock(&live.turns.steers).remove(&params.client_message_id);
-                return Err(self.sdk_failure(error).await);
+                return Err(failure);
             }
         };
-        publish.send_replace(Some(result));
+        publish.send_replace(Some(Ok(result)));
         Ok(result)
     }
 
@@ -678,6 +676,34 @@ fn admit(
         },
     );
     Ok(Admitted::Fresh(publish))
+}
+
+/// Answers a duplicate steer with its first attempt's outcome. A first attempt
+/// that ended without recording one (its request was dropped) is forgotten, so
+/// the same id can be sent again, and this duplicate is told to retry.
+async fn await_steer(
+    live: &LiveSession,
+    client_message_id: &str,
+    mut outcome: watch::Receiver<Option<Result<SteerResult, RemoteError>>>,
+) -> Result<SteerResult, RemoteError> {
+    if let Ok(recorded) = outcome.wait_for(Option::is_some).await {
+        return recorded
+            .clone()
+            .expect("wait_for returned a recorded steer");
+    }
+    let mut steers = lock(&live.turns.steers);
+    if steers
+        .get(client_message_id)
+        .is_some_and(|receipt| receipt.outcome.same_channel(&outcome))
+    {
+        steers.remove(client_message_id);
+    }
+    Err(RemoteError::new(
+        codes::UNAVAILABLE,
+        format!(
+            "The first steer under clientMessageId \"{client_message_id}\" ended without an outcome; send it again."
+        ),
+    ))
 }
 
 async fn decode_outcome<T: serde::de::DeserializeOwned>(

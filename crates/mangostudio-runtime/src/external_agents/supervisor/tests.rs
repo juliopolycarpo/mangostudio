@@ -47,6 +47,7 @@ struct HarnessLog {
     permission_answers: AtomicUsize,
     question_answers: AtomicUsize,
     cancels: AtomicUsize,
+    steers: AtomicUsize,
 }
 
 impl HarnessLog {
@@ -77,6 +78,9 @@ enum OpenBehaviour {
     AskingOneChoice,
     /// Opens a session whose turn streams text past the persisted budget.
     Flooding,
+    /// Opens a session whose every steer waits until the gate reads `true`,
+    /// then fails in transit.
+    SteerFailingOnGate(watch::Receiver<bool>),
 }
 
 /// How a [`CountingHarness`] answers a probe.
@@ -147,7 +151,9 @@ impl Harness for CountingHarness {
                 host.cancel().cancelled().await;
                 self.log.saw_host_cancel.store(true, Ordering::SeqCst);
             }
-            OpenBehaviour::AskingOneChoice | OpenBehaviour::Flooding => {}
+            OpenBehaviour::AskingOneChoice
+            | OpenBehaviour::Flooding
+            | OpenBehaviour::SteerFailingOnGate(_) => {}
             OpenBehaviour::FailNeedingCleanup(control) => {
                 return Err(SdkError::CleanupRequired {
                     control: Arc::clone(control) as Arc<dyn ProcessControl>,
@@ -174,9 +180,14 @@ impl Harness for CountingHarness {
                 sink: tokio::sync::Mutex::new(None),
             }));
         }
+        let steer_gate = match &self.open {
+            OpenBehaviour::SteerFailingOnGate(gate) => Some(gate.clone()),
+            _ => None,
+        };
         Ok(Box::new(CountingSession {
             inner,
             log: Arc::clone(&self.log),
+            steer_gate,
         }))
     }
 
@@ -194,10 +205,12 @@ impl Harness for CountingHarness {
     }
 }
 
-/// Delegates to the SDK's fake session and records every close reason.
+/// Delegates to the SDK's fake session and records every close reason. With a
+/// steer gate, every steer waits for it to open and then fails in transit.
 struct CountingSession {
     inner: Box<dyn Session>,
     log: Arc<HarnessLog>,
+    steer_gate: Option<watch::Receiver<bool>>,
 }
 
 #[async_trait::async_trait]
@@ -228,7 +241,16 @@ impl Session for CountingSession {
         &self,
         steer: mango_external_agents::Steer,
     ) -> mango_external_agents::Result<mango_external_agents::SteerOutcome> {
-        self.inner.steer(steer).await
+        self.log.steers.fetch_add(1, Ordering::SeqCst);
+        let Some(gate) = &self.steer_gate else {
+            return self.inner.steer(steer).await;
+        };
+        let mut gate = gate.clone();
+        let _ = gate.wait_for(|open| *open).await;
+        Err(SdkError::Link {
+            peer: String::from("fake-agent"),
+            message: String::from("steer lost in transit"),
+        })
     }
 
     async fn cancel(&self, reason: CancelReason) -> mango_external_agents::Result<()> {
@@ -1974,6 +1996,73 @@ async fn steering_is_answered_not_thrown_when_it_cannot_land() {
     assert_eq!(
         serde_json::to_value(reused).unwrap(),
         json!({ "accepted": false, "reasonCode": "id-reused" })
+    );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_duplicate_steer_waiting_on_one_that_fails_in_transit_receives_its_failure() {
+    let (open_gate, gate) = watch::channel(false);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::SteerFailingOnGate(gate),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let turn = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    rig.events_until("approval_requested").await;
+    let steer = SteerParams {
+        session_id: "one".into(),
+        native_turn_id: turn.native_turn_id.clone(),
+        client_message_id: "s1".into(),
+        input: "more".into(),
+    };
+    let send = |steer: SteerParams| {
+        let supervisor = Arc::clone(&rig.supervisor);
+        tokio::spawn(async move { supervisor.steer(steer).await })
+    };
+    let leader = send(steer.clone());
+    eventually(
+        "the leader steer reached the vendor",
+        || rig.log.steers.load(Ordering::SeqCst),
+        |steers| *steers == 1,
+    )
+    .await;
+    let duplicate = send(steer.clone());
+    // Single-threaded: the duplicate runs until it parks on the leader's outcome.
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    open_gate.send_replace(true);
+    let leader = leader.await.unwrap();
+    let duplicate = duplicate.await.unwrap();
+    let Err(failure) = leader else {
+        panic!("expected the leader steer to fail in transit | received: {leader:?}");
+    };
+    match duplicate {
+        Err(ref echoed) if echoed.code == failure.code && echoed.message == failure.message => {}
+        other => panic!(
+            "expected the duplicate steer to receive the leader's failure {failure:?} | received: {other:?}"
+        ),
+    }
+    assert_eq!(
+        rig.log.steers.load(Ordering::SeqCst),
+        1,
+        "expected one vendor steer for the leader and its waiting duplicate"
+    );
+    let resent = rig.supervisor.steer(steer).await;
+    assert!(resent.is_err(), "received: {resent:?}");
+    assert_eq!(
+        rig.log.steers.load(Ordering::SeqCst),
+        2,
+        "expected a steer sent again after the failure to reach the vendor"
     );
     rig.close("one").await;
 }
