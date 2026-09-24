@@ -354,7 +354,7 @@ impl Default for RigOptions {
 fn rig(options: RigOptions) -> Rig {
     let workspace_dir = ScratchDir::created("agent-workspace");
     let private_dir = ScratchDir::created("agent-private");
-    let workspace = std::fs::canonicalize(workspace_dir.path()).unwrap();
+    let workspace = super::canonical_directory(workspace_dir.path()).unwrap();
     let log = Arc::new(HarnessLog::default());
     let workspaces = Arc::new(AllowListedWorkspaces {
         allowed: if options.authorize_workspace {
@@ -547,7 +547,7 @@ async fn every_extra_workspace_root_is_authorized_at_open() {
     let outside = ScratchDir::created("agent-outside");
     let mut params = rig.open_params("one");
     params.configuration.workspace_roots = vec![
-        std::fs::canonicalize(outside.path())
+        super::canonical_directory(outside.path())
             .unwrap()
             .to_string_lossy()
             .into_owned(),
