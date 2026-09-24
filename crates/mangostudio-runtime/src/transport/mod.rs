@@ -161,11 +161,18 @@ pub(crate) fn build_host_with_restart(
         Arc::new(SystemClock),
         exclusivity.clone(),
     );
+    let external_agents = crate::external_agents::service::production_supervisor(
+        slot,
+        mango_home,
+        runtime_version,
+        ConsentSource::new(slot, mango_home.to_path_buf()),
+    );
     let registry = crate::health::register(
         registry,
         slot,
         mango_home.to_path_buf(),
         runtime_version.to_string(),
+        Some(Arc::clone(&external_agents)),
     );
     let registry = crate::workspace_methods::register(registry);
     let registry = crate::probing::register(registry);
@@ -188,6 +195,7 @@ pub(crate) fn build_host_with_restart(
         ConsentSource::new(slot, mango_home.to_path_buf()),
         mango_home,
     );
+    let registry = crate::external_agents::service::register(registry, external_agents);
     let registry = crate::update::register(registry, &update, exclusivity);
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
@@ -521,6 +529,32 @@ mod tests {
         assert_eq!(peer.version, "9.9.9");
     }
 
+    /// Five of the ten `external-agent.*` methods are implemented, so the
+    /// capability stays unadvertised even where the owner consented: a hub
+    /// that saw it would send turns this build cannot run.
+    #[test]
+    fn external_agents_stay_unadvertised_until_every_method_is_implemented() {
+        let home = scratch_path("transport-external-agents-gate");
+        let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
+        let allow = mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow {
+            fs_read: true,
+            fs_write: true,
+            shell: true,
+            git: true,
+            probing: true,
+            mcp: true,
+            library: true,
+            checkpoints: true,
+            update: true,
+            external_agents: Some(true),
+        };
+        let features = crate::manifest::build_features(&host.registry, &allow, true);
+        assert!(
+            !features.external_agents,
+            "expected features.externalAgents off with five of ten methods | received: on"
+        );
+    }
+
     #[test]
     fn build_host_implements_exactly_the_current_method_families() {
         let home = scratch_path("transport-build-host");
@@ -528,6 +562,11 @@ mod tests {
         assert_eq!(
             host.registry.implemented_methods(),
             vec![
+                "external-agent.close",
+                "external-agent.discover",
+                "external-agent.list-sessions",
+                "external-agent.open",
+                "external-agent.refresh-account-usage",
                 "fs.apply-patch",
                 "fs.create-file",
                 "fs.delete-file",

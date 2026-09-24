@@ -161,7 +161,6 @@ pub(crate) enum UnavailableReason {
     NotInstalled,
     SignedOut,
     VersionUnsupported,
-    InstalledButUnusable,
 }
 
 /// `ExternalAgentRemedyKind`, restricted likewise.
@@ -171,7 +170,6 @@ pub(crate) enum RemedyKind {
     Install,
     Update,
     SignIn,
-    None,
 }
 
 /// `ExternalAgentRemedy`.
@@ -208,10 +206,8 @@ pub(crate) struct DiscoveryReport {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum DiscoverySource {
-    /// Measured by this call.
+    /// Measured by this call. The runtime keeps no discovery cache.
     Live,
-    /// Reused from a receipt this runtime still considers fresh.
-    Cache,
 }
 
 /// `ExternalAgentRuntimeDescriptor` (the hub adds `environmentId`).

@@ -149,13 +149,6 @@ impl PipeChild {
 
     /// The target's pid once [`Self::wait_ready`] has returned; on Unix it is also the target's
     /// process-group id. Before readiness a Unix child reports its guardian's pid instead.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "used by the external-agent launcher, not yet constructed"
-        )
-    )]
     pub(crate) fn id(&self) -> Option<u32> {
         match self {
             #[cfg(unix)]
@@ -167,13 +160,6 @@ impl PipeChild {
 
     /// Asks the target group to stop gracefully (SIGINT), the signal a CLI traps to end its
     /// current turn. Windows has no console port here, so it reports `Unsupported`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "used by the external-agent launcher, not yet constructed"
-        )
-    )]
     pub(crate) fn interrupt_gracefully(&mut self) -> io::Result<()> {
         match self {
             #[cfg(unix)]

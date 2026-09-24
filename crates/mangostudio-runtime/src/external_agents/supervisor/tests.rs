@@ -1139,3 +1139,52 @@ async fn account_usage_refuses_a_live_session_of_another_target() {
     );
     rig.close("one").await;
 }
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn health_reports_live_sessions_and_withholds_a_withdrawn_attestation() {
+    let rig = rig(RigOptions::default());
+    rig.open("one").await.unwrap();
+
+    let reported = rig.supervisor.health(false).await;
+    assert_eq!(reported["targets"], json!(["codex", "cursor", "claude"]));
+    assert_eq!(reported["liveSessionCount"], json!(1));
+    assert_eq!(reported["liveSessions"][0]["sessionId"], json!("one"));
+    assert_eq!(reported["liveSessions"][0]["targetId"], json!("claude"));
+    assert_eq!(reported["liveSessions"][0]["state"], json!("idle"));
+    let attested = crate::external_agents::isolation::detect_external_agent_isolation();
+    assert_eq!(
+        reported.get("identityIsolation").cloned(),
+        attested.map(|isolation| serde_json::to_value(isolation).unwrap()),
+        "expected health to carry exactly this process's attestation"
+    );
+
+    let withdrawn = rig.supervisor.health(true).await;
+    assert!(
+        withdrawn.get("identityIsolation").is_none(),
+        "expected no attestation once the hub withdrew it | received: {withdrawn}"
+    );
+    rig.close("one").await;
+}
+
+#[test]
+fn only_an_explicit_withdrawal_in_the_hub_hello_withholds_attestation() {
+    let hello = |value: serde_json::Value| {
+        let serde_json::Value::Object(map) = json!({ "externalAgentIsolation": value }) else {
+            unreachable!()
+        };
+        map
+    };
+    assert!(crate::external_agents::hub_withdrew_isolation(&hello(
+        json!("withdrawn")
+    )));
+    assert!(!crate::external_agents::hub_withdrew_isolation(&hello(
+        json!("single-user")
+    )));
+    assert!(!crate::external_agents::hub_withdrew_isolation(
+        &serde_json::Map::new()
+    ));
+}

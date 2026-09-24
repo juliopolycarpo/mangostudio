@@ -70,15 +70,30 @@ pub(crate) fn register(
     slot: RuntimeSlot,
     mango_home: PathBuf,
     runtime_version: String,
+    external_agents: Option<std::sync::Arc<crate::external_agents::supervisor::Supervisor>>,
 ) -> Registry {
     registry.implement(
         "runtime.health",
         move |_params: Value, context: CallContext| {
             let mango_home = mango_home.clone();
             let runtime_version = runtime_version.clone();
+            let external_agents = external_agents.clone();
             async move {
-                build_health_report(slot, &mango_home, &runtime_version, context.cancel(), None)
-                    .await
+                let mut report = build_health_report(
+                    slot,
+                    &mango_home,
+                    &runtime_version,
+                    context.cancel(),
+                    None,
+                )
+                .await?;
+                if let Some(supervisor) = external_agents {
+                    let withdrawn = crate::external_agents::hub_withdrew_isolation(
+                        &context.remote().capabilities,
+                    );
+                    report["externalAgents"] = supervisor.health(withdrawn).await;
+                }
+                Ok(report)
             }
         },
     )

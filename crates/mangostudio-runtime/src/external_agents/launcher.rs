@@ -13,14 +13,6 @@
 //! Interruption is `SIGINT` to the target's process group on Unix. Windows has no console port
 //! yet, so [`ProcessControl::interrupt`] reports [`InterruptOutcome::Unsupported`] there, which
 //! makes every cancel a forced termination that the SDK records as nonresumable.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the external-agent supervisor that constructs this launcher lands separately"
-    )
-)]
-
 use std::ffi::OsString;
 use std::future::Future;
 use std::io;

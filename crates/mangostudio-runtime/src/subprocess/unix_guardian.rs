@@ -197,13 +197,6 @@ impl GuardianChild {
     }
 
     /// Delivers SIGINT to the target's process group, the graceful interrupt a CLI traps.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "used by the external-agent launcher, not yet constructed"
-        )
-    )]
     pub(super) fn interrupt_gracefully(&mut self) -> io::Result<()> {
         signal_group(self.id(), libc::SIGINT)
     }

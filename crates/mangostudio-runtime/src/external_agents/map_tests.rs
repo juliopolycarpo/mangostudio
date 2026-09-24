@@ -1405,52 +1405,6 @@ fn the_dispatch_travels_only_when_an_operation_recorded_it() {
     );
 }
 
-#[test]
-fn reason_strings_map_to_the_sdk_enums() {
-    assert_eq!(
-        close_reason("requested").ok(),
-        Some(sdk::CloseReason::Requested)
-    );
-    assert_eq!(
-        close_reason("consent-revoked").ok(),
-        Some(sdk::CloseReason::ConsentRevoked)
-    );
-    assert_eq!(
-        close_reason("shutdown").ok(),
-        Some(sdk::CloseReason::Shutdown)
-    );
-    assert_eq!(
-        cancel_reason("requested").ok(),
-        Some(sdk::CancelReason::Requested)
-    );
-    assert_eq!(
-        cancel_reason("consent-revoked").ok(),
-        Some(sdk::CancelReason::ConsentRevoked)
-    );
-    assert_eq!(
-        cancel_reason("timeout").ok(),
-        Some(sdk::CancelReason::Timeout)
-    );
-    assert_eq!(
-        cancel_reason("shutdown").ok(),
-        Some(sdk::CancelReason::Shutdown)
-    );
-
-    let refused = close_reason("timeout").expect_err("close has no timeout");
-    assert_eq!(details(&refused)["kind"], "tool_argument");
-    assert!(
-        refused.message.contains("\"timeout\"") && refused.message.contains("shutdown"),
-        "expected the value and the accepted set | received {}",
-        refused.message
-    );
-    let refused = cancel_reason("later").expect_err("unknown reason");
-    assert!(
-        refused.message.contains("\"later\""),
-        "received {}",
-        refused.message
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------

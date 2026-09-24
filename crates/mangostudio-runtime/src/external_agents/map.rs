@@ -129,6 +129,7 @@ pub(crate) fn harness_for(target: TargetId, executable: Option<PathBuf>) -> Arc<
 /// let registry = product_harnesses()?;
 /// assert!(registry.get(&harness_id(TargetId::Codex)).is_some());
 /// ```
+#[cfg(test)]
 pub(crate) fn product_harnesses() -> Result<sdk::HarnessRegistry, RemoteError> {
     let harnesses = TargetId::ALL
         .into_iter()
@@ -145,6 +146,7 @@ pub(crate) fn product_harnesses() -> Result<sdk::HarnessRegistry, RemoteError> {
 /// ```ignore
 /// assert_eq!(harness_id(TargetId::Cursor).as_str(), "acp:cursor");
 /// ```
+#[cfg(test)]
 pub(crate) fn harness_id(target: TargetId) -> sdk::HarnessId {
     match target {
         TargetId::Claude => sdk::HarnessId::claude(),
@@ -862,51 +864,6 @@ fn cancel_reason_name(reason: sdk::CancelReason) -> &'static str {
         sdk::CancelReason::ConsentRevoked => "consent-revoked",
         sdk::CancelReason::Timeout => "timeout",
         _ => "shutdown",
-    }
-}
-
-/// The SDK close reason for a wire reason string.
-///
-/// # Errors
-///
-/// A `tool_argument` error naming the received value and the accepted set.
-///
-/// # Example
-///
-/// ```ignore
-/// assert_eq!(close_reason("consent-revoked")?, sdk::CloseReason::ConsentRevoked);
-/// ```
-pub(crate) fn close_reason(reason: &str) -> Result<sdk::CloseReason, RemoteError> {
-    match reason {
-        "requested" => Ok(sdk::CloseReason::Requested),
-        "consent-revoked" => Ok(sdk::CloseReason::ConsentRevoked),
-        "shutdown" => Ok(sdk::CloseReason::Shutdown),
-        other => Err(argument(format!(
-            "Invalid close reason={other:?}; expected requested | consent-revoked | shutdown."
-        ))),
-    }
-}
-
-/// The SDK cancel reason for a wire reason string.
-///
-/// # Errors
-///
-/// A `tool_argument` error naming the received value and the accepted set.
-///
-/// # Example
-///
-/// ```ignore
-/// assert_eq!(cancel_reason("timeout")?, sdk::CancelReason::Timeout);
-/// ```
-pub(crate) fn cancel_reason(reason: &str) -> Result<sdk::CancelReason, RemoteError> {
-    match reason {
-        "requested" => Ok(sdk::CancelReason::Requested),
-        "consent-revoked" => Ok(sdk::CancelReason::ConsentRevoked),
-        "timeout" => Ok(sdk::CancelReason::Timeout),
-        "shutdown" => Ok(sdk::CancelReason::Shutdown),
-        other => Err(argument(format!(
-            "Invalid cancel reason={other:?}; expected requested | consent-revoked | timeout | shutdown."
-        ))),
     }
 }
 

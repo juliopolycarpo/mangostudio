@@ -24,7 +24,7 @@
 //! source must, and a spawned runtime has none yet. Turn configuration may
 //! later narrow the roots an open authorised, never widen them.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -165,7 +165,6 @@ pub(crate) struct LiveSession {
     session_id: String,
     target: TargetId,
     workspace: PathBuf,
-    authorized_roots: BTreeSet<String>,
     executable: Option<PathBuf>,
     opened_at: Instant,
     open_result: OpenResult,
@@ -173,18 +172,6 @@ pub(crate) struct LiveSession {
     scratch: PathBuf,
     closing: AtomicBool,
     closed: watch::Sender<Option<Result<(), String>>>,
-}
-
-impl LiveSession {
-    /// The roots `open` authorised, for a later turn to stay inside.
-    pub(crate) fn authorized_roots(&self) -> &BTreeSet<String> {
-        &self.authorized_roots
-    }
-
-    /// The SDK session.
-    pub(crate) fn session(&self) -> &dyn Session {
-        self.session.as_ref()
-    }
 }
 
 /// An operation stopped by its deadline, its caller or shutdown, with any
@@ -315,14 +302,37 @@ impl Supervisor {
         (count, rows)
     }
 
-    /// The live session for `session_id`, refusing one that is closing.
-    pub(crate) fn require_live(&self, session_id: &str) -> Result<Arc<LiveSession>, RemoteError> {
-        match self.slots().get(session_id) {
-            Some(Slot::Live(live)) if !live.closing.load(Ordering::Acquire) => Ok(Arc::clone(live)),
-            _ => Err(argument(format!(
-                "External-agent session {session_id:?} is not open; expected an open session id."
-            ))),
+    /// The `runtime.health` `externalAgents` subtree: the product targets, the
+    /// live sessions (count kept true, rows bounded by the schema's limit),
+    /// and this process's attestation unless the hub withdrew it.
+    pub(crate) async fn health(&self, isolation_withdrawn: bool) -> serde_json::Value {
+        const LIVE_SESSION_ROW_LIMIT: usize = 128;
+        let (count, rows) = self.live_sessions();
+        let rows: Vec<_> = rows
+            .into_iter()
+            .take(LIVE_SESSION_ROW_LIMIT)
+            .map(|row| {
+                serde_json::json!({
+                    "sessionId": row.session_id,
+                    "targetId": row.target,
+                    "ageMs": row.age_ms,
+                    "state": row.state,
+                })
+            })
+            .collect();
+        let mut health = serde_json::json!({
+            "targets": TargetId::ALL,
+            "liveSessionCount": count,
+            "liveSessions": rows,
+        });
+        if !isolation_withdrawn
+            && let Some(isolation) =
+                crate::blocking::run_blocking(super::isolation::detect_external_agent_isolation)
+                    .await
+        {
+            health["identityIsolation"] = serde_json::json!(isolation);
         }
+        health
     }
 
     /// `external-agent.discover`: one descriptor per target that answered.
@@ -516,9 +526,10 @@ impl Supervisor {
         let work = async {
             refuse_unoffered_configuration(target, &params.configuration)?;
             let workspace = self.authorized_workspace(&params.workspace_path).await?;
-            let mut authorized_roots = BTreeSet::from([path_text(&workspace)]);
+            // Every extra root is authorised at open, and refuses the whole
+            // open if any one is not; a later turn may only narrow the set.
             for root in &params.configuration.workspace_roots {
-                authorized_roots.insert(path_text(&self.authorized_workspace(root).await?));
+                self.authorized_workspace(root).await?;
             }
             let executable = self
                 .ports
@@ -549,7 +560,7 @@ impl Supervisor {
             }
             let opened = harness.open_session(&host, request).await;
             match opened {
-                Ok(session) => Ok((session, workspace, authorized_roots, executable, scratch)),
+                Ok(session) => Ok((session, workspace, executable, scratch)),
                 Err(error) => {
                     remove_scratch(&scratch);
                     Err(self.sdk_failure(error).await)
@@ -564,12 +575,12 @@ impl Supervisor {
                 )
             })
             .await;
-        let (session, workspace, authorized_roots, executable, scratch) = match opened {
+        let (session, workspace, executable, scratch) = match opened {
             Ok(opened) => opened,
             Err(stopped) => {
                 // The vendor finished opening while it was being told to stop:
                 // nobody will register that session, so it is closed here.
-                if let Some((session, _, _, _, scratch)) = stopped.late {
+                if let Some((session, _, _, scratch)) = stopped.late {
                     let cause = opening.cause().unwrap_or(if self.shutdown.is_cancelled() {
                         CloseCause::Shutdown
                     } else {
@@ -592,7 +603,6 @@ impl Supervisor {
             session_id: params.session_id,
             target,
             workspace,
-            authorized_roots,
             executable: Some(executable),
             opened_at: Instant::now(),
             open_result,
@@ -1042,14 +1052,6 @@ impl Supervisor {
         for opening in openings.into_iter().flatten() {
             wait_settled(&opening).await;
         }
-    }
-
-    /// Stops everything and waits for every owned task. Idempotent.
-    pub(crate) async fn shutdown(&self) {
-        self.shutdown.cancel();
-        self.close_all(CloseCause::Shutdown).await;
-        self.tasks.close();
-        self.tasks.wait().await;
     }
 }
 

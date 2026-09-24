@@ -12,10 +12,7 @@
 //!   `ProcessLauncher` port.
 //! - [`wire`] is the product wire as typed Rust; [`map`] is the one place SDK
 //!   types become wire types.
-
-// Scaffolding while the host is assembled commit by commit; removed by the
-// commit that registers the methods, so nothing in the finished module is dead.
-#![allow(dead_code)]
+//! - [`supervisor`] owns the sessions; [`service`] registers the methods.
 
 pub(crate) mod isolation;
 pub(crate) mod launcher;
@@ -23,3 +20,24 @@ pub(crate) mod map;
 pub(crate) mod service;
 pub(crate) mod supervisor;
 pub(crate) mod wire;
+
+/// Whether the hub said, in its hello, that it withdrew this connection's
+/// external-agent isolation claim.
+///
+/// A second MangoStudio user is something only the hub can see, and it says
+/// so after the runtime's own hello has gone out. Every per-call surface that
+/// reports an attestation reads this and stays silent when it is set.
+///
+/// # Example
+///
+/// ```ignore
+/// let withdrawn = hub_withdrew_isolation(&context.remote().capabilities);
+/// ```
+pub(crate) fn hub_withdrew_isolation(
+    capabilities: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    capabilities
+        .get("externalAgentIsolation")
+        .and_then(serde_json::Value::as_str)
+        == Some("withdrawn")
+}

@@ -15,10 +15,20 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use super::supervisor::{CloseCause, ExecutableResolver, PortFuture, Supervisor};
+use mango_external_agents::Limits;
+
+use super::launcher::GuardedProcessLauncher;
+use super::supervisor::{
+    CLEANUP_TIMEOUT, CONSENT_POLL, CloseCause, DEFAULT_SESSION_CAP, DenyEveryWorkspace,
+    ExecutableResolver, PortFuture, Ports, ProductHarnesses, Supervisor,
+};
 use super::wire::TargetId;
+use crate::consent::source::ConsentSource;
+use crate::ports::authorization::consent_denial;
 use crate::probing::detection::agent_cli_definitions::AgentTargetId;
 use crate::registry::Registry;
+use crate::runtime_home::{RuntimeSlot, slot_dir};
+use crate::subprocess::LaunchCheck;
 
 /// Every method [`register`] installs.
 pub(crate) const EXTERNAL_AGENT_METHODS: [&str; 5] = [
@@ -121,6 +131,62 @@ impl ExecutableResolver for ProbedExecutables {
         };
         Box::pin(crate::probing::methods::resolve_agent_executable(
             target, cancel,
+        ))
+    }
+}
+
+/// The supervisor a production host serves: the three product harnesses, the
+/// guarded launcher re-reading `externalAgents` consent before every exec,
+/// the fail-closed workspace authority, and a private directory in the slot.
+///
+/// # Example
+///
+/// ```ignore
+/// let supervisor = production_supervisor(slot, mango_home, "1.2.3", consent);
+/// let registry = register(registry, supervisor);
+/// ```
+pub(crate) fn production_supervisor(
+    slot: RuntimeSlot,
+    mango_home: &std::path::Path,
+    runtime_version: &str,
+    consent: ConsentSource,
+) -> Arc<Supervisor> {
+    let consent = Arc::new(consent);
+    let limits = Limits::default();
+    let launcher = GuardedProcessLauncher::new(
+        Arc::new(FreshExternalAgentLaunch(Arc::clone(&consent))),
+        &limits,
+    );
+    let read = Arc::clone(&consent);
+    Supervisor::new(Ports {
+        launcher: Arc::new(launcher),
+        harnesses: Arc::new(ProductHarnesses),
+        workspaces: Arc::new(DenyEveryWorkspace),
+        executables: Arc::new(ProbedExecutables),
+        environment: Arc::new(|| crate::probing::host::build_runtime_path_env(None)),
+        consent: Arc::new(move || read.refresh().external_agents),
+        private_root: slot_dir(slot, mango_home).join("external-agents"),
+        runtime_version: runtime_version.to_owned(),
+        limits,
+        session_cap: DEFAULT_SESSION_CAP,
+        consent_poll: CONSENT_POLL,
+        cleanup_timeout: CLEANUP_TIMEOUT,
+    })
+}
+
+/// Refuses a vendor launch once `externalAgents` is withdrawn, read fresh
+/// immediately before the child executes.
+struct FreshExternalAgentLaunch(Arc<ConsentSource>);
+
+impl LaunchCheck for FreshExternalAgentLaunch {
+    fn check(&self) -> Result<(), RemoteError> {
+        if self.0.refresh().external_agents {
+            return Ok(());
+        }
+        Err(consent_denial(
+            "external-agent.open",
+            &["externalAgents".to_owned()],
+            self.0.slot().as_str(),
         ))
     }
 }
