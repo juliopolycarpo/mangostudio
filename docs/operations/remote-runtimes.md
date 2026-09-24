@@ -119,11 +119,13 @@ mangostudio-runtime service restart
 | ------- | ------------------------------------------------------------- |
 | Linux   | `~/.config/systemd/user/mangostudio-runtime.service`          |
 | macOS   | `~/Library/LaunchAgents/com.mangostudio.runtime.plist`        |
-| Windows | Scheduled Task `MangoStudio runtime` (Task Scheduler owns it) |
+| Windows | Scheduled Task `MangoStudio Runtime` (Task Scheduler owns it) |
 
-The unit runs `~/.mango/runtime/remote/current/mangostudio-runtime` with only the
-subcommand (`connect` or `serve`) — no hub URL, listen address, or tokens on the
-command line. Configure those first:
+On Unix, the unit runs `~/.mango/runtime/remote/current/mangostudio-runtime`.
+On Windows, the task runs the stable
+`%USERPROFILE%\.mango\runtime\remote\mangostudio-runtime.cmd` shim. Both pass
+only the subcommand (`connect` or `serve`) — no hub URL, listen address, or
+tokens on the command line. Configure those first:
 
 - **connect** — run `connect` once so `hubUrl` and a pairing token are stored.
 - **serve** — run `serve --listen <host:port>` once so `serveListen` and a serve
@@ -134,11 +136,11 @@ configured, and names the missing step.
 
 ### The binary has to live in the slot
 
-`current` is published by an install — `mangostudio-runtime install`, a push over
-ssh, a WSL provision, or an upgrade from the environment card. A binary you
+The stable launcher is published by an install — `mangostudio-runtime install`,
+a push over ssh, a WSL provision, or an upgrade from the environment card. A binary you
 downloaded by hand and ran from your home directory works fine for `setup`,
 `connect` and `serve`, but it never puts anything in the slot on its own, so
-`current` does not exist yet.
+the launcher does not exist yet.
 
 `service install` refuses in that state rather than writing a unit that would
 fail to start at every boot, and `doctor` reports the same gap as a `fail`. Both
@@ -224,20 +226,21 @@ mangostudio-runtime service install --mode connect
 ```
 
 `install` copies the binary into `%USERPROFILE%\.mango\runtime\remote\<version>\`
-and points `current` at it as a **directory junction**, which needs no elevation
-and no Developer Mode. A file symlink would need one of the two, and a `.cmd`
-shim would put `cmd.exe` between the supervisor and the runtime.
+and atomically replaces the stable `mangostudio-runtime.cmd` shim in the slot
+root. The shim points at one immutable version executable; it needs no file
+symlink privilege, elevation, or Developer Mode. `doctor` reports a malformed,
+stale, or misresolved shim with its target so it can be repaired.
 
 From then on the environment card can upgrade it in place like any other peer:
-new bytes land in a new version directory beside the running one, the junction
-moves, and the runtime exits `75` for its supervisor to restart. The version it
+new bytes land in a new version directory beside the running one, the shim
+changes, and the runtime exits `75` for its supervisor to restart. The version it
 came from is kept until the upgrade after that, because Windows will not delete a
 directory holding a running executable.
 
 `service install` registers a per-user **Scheduled Task** named
-`MangoStudio runtime` through PowerShell — no admin, and the same preconditions
+`MangoStudio Runtime` through PowerShell — no admin, and the same preconditions
 as Linux and macOS: setup answered, the chosen mode configured, and a binary
-published at `current`.
+published through the shim.
 
 ```powershell
 mangostudio-runtime service status --json
@@ -251,17 +254,16 @@ What the CLI registers:
 - **Principal** `-LogonType Interactive -RunLevel Limited` — the task borrows the
   interactive session's token, so no password is stored and none has to be
   re-entered after a password change.
-- **Settings** no execution time limit (the default three days would stop the
-  runtime on the fourth), `-MultipleInstances IgnoreNew`, `-StartWhenAvailable`,
-  the battery flags, and `-RestartCount 3 -RestartInterval 1 minute`. That last
-  pair is what brings the runtime back on new bytes after a live update: the
-  wrapper propagates the runtime's exit code, and `75` is a failure as far as
-  Task Scheduler is concerned. One minute is its minimum interval, so expect the
-  card to show the peer disconnected for about that long after a commit.
-- **Action** a hidden `powershell.exe` wrapper that invokes the binary. The
-  wrapper is where a unit's environment, working directory and log redirection
-  would be set; the runtime's unit asks for none of the three, so it is a bare
-  invocation.
+- **Settings** no execution time limit, `-MultipleInstances IgnoreNew`,
+  `-StartWhenAvailable`, the battery flags, and `-RestartCount 3
+  -RestartInterval 1 minute` for unexpected failures.
+- **Action** a hidden `powershell.exe` wrapper that sets `MANGO_HOME`, invokes
+  the shim, and immediately launches it again after update exit code `75`.
+  The task command contains no credentials.
+
+`service stop`, `restart`, and `uninstall` wait for an active update to settle
+before stopping the task. The complete operation has a 30-second cap;
+`service stop --force` skips the installer wait.
 
 Task Scheduler captures no output of its own, and the runtime's task does not
 redirect any, so there is no Windows equivalent of

@@ -227,15 +227,15 @@ pub fn slot_audit_log_path(slot: RuntimeSlot, mango_home: &Path) -> PathBuf {
     slot_dir(slot, mango_home).join(names::AUDIT_LOG_FILE_NAME)
 }
 
-/// `<mango_home>/runtime/<slot>/current`: the link a launcher points at,
-/// which survives every upgrade.
+/// `<mango_home>/runtime/<slot>/current`: the Unix launcher link that survives
+/// every upgrade. Windows uses a root `.cmd` shim instead.
 #[must_use]
 pub fn slot_current_dir(slot: RuntimeSlot, mango_home: &Path) -> PathBuf {
     slot_dir(slot, mango_home).join(names::CURRENT_LINK_NAME)
 }
 
 /// `<mango_home>/runtime/<slot>/<version>`: where an install writes bytes
-/// before publishing them through `current`.
+/// before publishing them through `current` on Unix or the root shim on Windows.
 #[must_use]
 pub fn slot_version_dir(slot: RuntimeSlot, version: &str, mango_home: &Path) -> PathBuf {
     slot_dir(slot, mango_home).join(version)
@@ -261,10 +261,23 @@ pub fn binary_name() -> String {
     }
 }
 
-/// `<slot_current_dir>/<binary_name>`.
+/// Stable launcher path: `<slot>/mangostudio-runtime.cmd` on Windows and
+/// `<slot>/current/mangostudio-runtime` on Unix.
+///
+/// # Example
+/// ```
+/// use std::path::Path;
+/// use mangostudio_runtime::runtime_home::{RuntimeSlot, slot_current_binary_path};
+/// let path = slot_current_binary_path(RuntimeSlot::Host, Path::new("/mango"));
+/// assert!(path.to_string_lossy().contains("mangostudio-runtime"));
+/// ```
 #[must_use]
 pub fn slot_current_binary_path(slot: RuntimeSlot, mango_home: &Path) -> PathBuf {
-    slot_current_dir(slot, mango_home).join(binary_name())
+    if cfg!(windows) {
+        slot_dir(slot, mango_home).join("mangostudio-runtime.cmd")
+    } else {
+        slot_current_dir(slot, mango_home).join(binary_name())
+    }
 }
 
 /// `<slot_version_dir>/<binary_name>`.
@@ -1033,7 +1046,7 @@ mod tests {
         let home = Path::new("/home/ada/.mango");
         let path = slot_current_binary_path(RuntimeSlot::Host, home);
         let expected = if cfg!(windows) {
-            "mangostudio-runtime.exe"
+            "mangostudio-runtime.cmd"
         } else {
             "mangostudio-runtime"
         };

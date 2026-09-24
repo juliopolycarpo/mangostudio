@@ -298,6 +298,15 @@ describe('RuntimeHealthReportSchema', () => {
     ).toBe(true);
   });
 
+  it('accepts native Windows release identities and rejects unknown assets', () => {
+    for (const platformId of ['windows-x64', 'windows-arm64']) {
+      expect(Value.Check(RuntimeHealthReportSchema, { ...baseReport, platformId })).toBe(true);
+    }
+    expect(
+      Value.Check(RuntimeHealthReportSchema, { ...baseReport, platformId: 'windows-x86' })
+    ).toBe(false);
+  });
+
   it('accepts optional external-agent diagnostics while keeping an old report valid', () => {
     expect(
       Value.Check(RuntimeHealthReportSchema, {

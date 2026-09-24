@@ -12,9 +12,6 @@
 //!
 //! Deliberately skipped, all optional on the wire:
 //! - `externalAgents` — out of scope; a later plan owns it.
-//! - `platformId` — needs glibc-version detection on Linux, which this
-//!   crate has no port for yet. A real gap, not a "never"; left for a later
-//!   change.
 //! - `auditError` — this crate has no "read the audit log's last write
 //!   error" port yet, and building one is out of scope for this change.
 //!
@@ -133,7 +130,7 @@ pub(crate) async fn build_health_report(
         .unwrap_or_default();
     let terminal = resolved.allow.shell && !shells.is_empty() && cfg!(any(unix, windows));
 
-    Ok(json!({
+    let mut report = json!({
         "schemaVersion": resolved.schema_version,
         "slot": resolved.slot,
         // The live executable's own source, never `resolved.source` (a
@@ -160,7 +157,30 @@ pub(crate) async fn build_health_report(
         "terminal": terminal,
         "audit": resolved.audit,
         "lastError": state.error.as_ref().map(ToString::to_string),
-    }))
+    });
+    if let Some(platform_id) =
+        release_platform_id(node_platform(), node_arch(), cfg!(target_env = "musl"))
+    {
+        report["platformId"] = json!(platform_id);
+    }
+    Ok(report)
+}
+
+/// Identifies the release binary built for this process's exact target.
+/// Rust's target environment distinguishes Linux musl from glibc without
+/// probing the host, and unknown OS/architecture combinations stay absent.
+fn release_platform_id(platform: &str, arch: &str, musl: bool) -> Option<&'static str> {
+    match (platform, arch, musl) {
+        ("linux", "x64", false) => Some("linux-x64"),
+        ("linux", "arm64", false) => Some("linux-arm64"),
+        ("linux", "x64", true) => Some("linux-x64-musl"),
+        ("linux", "arm64", true) => Some("linux-arm64-musl"),
+        ("darwin", "x64", _) => Some("darwin-x64"),
+        ("darwin", "arm64", _) => Some("darwin-arm64"),
+        ("win32", "x64", _) => Some("windows-x64"),
+        ("win32", "arm64", _) => Some("windows-arm64"),
+        _ => None,
+    }
 }
 
 /// Builds this session's `hello.capabilities`, from the exact platform,
@@ -213,6 +233,9 @@ pub(crate) async fn build_capability_manifest(
         git.clone(),
     );
     manifest.features = crate::manifest::build_features(registry, &allow, git.available);
+    if cfg!(windows) {
+        manifest.publishes_windows_slot = Some(true);
+    }
     // `terminal::register` installs these methods together with the consent watcher. Its
     // close handler remains callable after shell consent is revoked. Attest that invariant
     // independently of current consent or shell discovery, which can change after hello.
@@ -792,6 +815,20 @@ fn parse_gh_version(output: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn release_identity_matches_supported_native_targets() {
+        for (platform, arch, musl, expected) in [
+            ("linux", "x64", false, Some("linux-x64")),
+            ("linux", "arm64", true, Some("linux-arm64-musl")),
+            ("darwin", "arm64", false, Some("darwin-arm64")),
+            ("win32", "x64", false, Some("windows-x64")),
+            ("win32", "arm64", false, Some("windows-arm64")),
+            ("win32", "x86", false, None),
+        ] {
+            assert_eq!(super::release_platform_id(platform, arch, musl), expected);
+        }
+    }
+
+    #[test]
     fn gh_version_omits_release_date_and_url() {
         assert_eq!(
             super::parse_gh_version("gh version 2.88.0 (2026-01-01)\nhttps://release"),
@@ -906,6 +943,14 @@ mod tests {
         assert_eq!(result["schemaVersion"], 1);
         assert_eq!(result["slot"], "host");
         assert_eq!(result["runtimeVersion"], "9.9.9");
+        assert_eq!(
+            result["platformId"].as_str(),
+            super::release_platform_id(
+                super::node_platform(),
+                super::node_arch(),
+                cfg!(target_env = "musl")
+            )
+        );
         assert_eq!(result["profile"], "full");
         assert!(result["allow"]["shell"].as_bool().unwrap());
         assert_eq!(result["setup"]["state"], "configured");
@@ -1072,6 +1117,10 @@ mod tests {
             build_capability_manifest(RuntimeSlot::Host, &home, &registry, &cancel).await;
 
         assert_eq!(manifest.platform, node_platform());
+        assert_eq!(
+            manifest.publishes_windows_slot,
+            cfg!(windows).then_some(true)
+        );
         assert!(!manifest.home_dir.is_empty());
         assert_eq!(
             manifest.profile,

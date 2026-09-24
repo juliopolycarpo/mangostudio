@@ -16,8 +16,8 @@ import {
   deniedCapabilities,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeExternalAgentHealth,
+  type RuntimeHealthPlatformId,
   type RuntimeHealthReport,
-  type RuntimePlatformId,
   type RuntimeSlot,
   resolveRuntimePlatformId,
   runtimeSlotAuditLogPath,
@@ -112,7 +112,12 @@ export function resolveRunningRuntimePlatformId(
   platform: string = process.platform,
   arch: string = process.arch,
   glibcVersionRuntime: string | null | undefined = runningGlibcVersion()
-): RuntimePlatformId | null {
+): RuntimeHealthPlatformId | null {
+  if (platform === 'win32') {
+    if (arch === 'x64') return 'windows-x64';
+    if (arch === 'arm64') return 'windows-arm64';
+    return null;
+  }
   const kernel = platform === 'darwin' ? 'Darwin' : platform === 'linux' ? 'Linux' : platform;
   const machine = arch === 'x64' ? 'x86_64' : arch === 'arm64' ? 'aarch64' : arch;
   return resolveRuntimePlatformId({

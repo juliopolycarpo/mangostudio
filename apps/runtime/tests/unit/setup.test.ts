@@ -306,7 +306,8 @@ describe('runtime health', () => {
     expect(resolveRunningRuntimePlatformId('linux', 'x64', null)).toBe('linux-x64-musl');
     expect(resolveRunningRuntimePlatformId('linux', 'arm64', null)).toBe('linux-arm64-musl');
     expect(resolveRunningRuntimePlatformId('darwin', 'arm64', null)).toBe('darwin-arm64');
-    expect(resolveRunningRuntimePlatformId('win32', 'x64', null)).toBeNull();
+    expect(resolveRunningRuntimePlatformId('win32', 'x64', null)).toBe('windows-x64');
+    expect(resolveRunningRuntimePlatformId('win32', 'arm64', null)).toBe('windows-arm64');
   });
 
   it('reports the slot, its consent, and where the bytes are', async () => {

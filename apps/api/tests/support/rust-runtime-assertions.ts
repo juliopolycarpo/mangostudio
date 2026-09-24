@@ -59,6 +59,14 @@ export function assertRustRuntimeHealthShape(
   // layout, whichever slot it is asked to answer as.
   expect(health.source).toBe('bundled');
   expect(health.platform).toBe(process.platform);
+  if (process.platform === 'win32') {
+    expect(String(health.platformId)).toBe(`windows-${health.arch}`);
+    expect(health.binaryPath?.endsWith('mangostudio-runtime.exe')).toBe(true);
+  } else if (process.platform === 'darwin') {
+    expect(String(health.platformId)).toBe(`darwin-${health.arch}`);
+  } else {
+    expect(health.platformId?.startsWith(`linux-${health.arch}`)).toBe(true);
+  }
   // A freshly auto-granted slot with no stored `runtime.json` reports the
   // `full` preset: a `host` slot's own default, or the "invocation is
   // consent" grant `serve`/`connect` record for a never-seen `remote` slot.
@@ -118,7 +126,7 @@ export function assertRustRuntimeFeatureCeiling(
     fsRead: expected.fsRead,
     fsWrite: expected.fsWrite,
     shell,
-    update: process.platform !== 'win32' && manifest.allow?.update === true,
+    update: manifest.allow?.update === true,
     externalAgents: false,
     toolchain: true,
   });

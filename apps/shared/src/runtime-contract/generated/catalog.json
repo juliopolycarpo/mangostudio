@@ -10027,28 +10027,40 @@
           "platformId": {
             "anyOf": [
               {
-                "type": "string",
-                "const": "linux-x64"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "linux-x64"
+                  },
+                  {
+                    "type": "string",
+                    "const": "linux-arm64"
+                  },
+                  {
+                    "type": "string",
+                    "const": "linux-x64-musl"
+                  },
+                  {
+                    "type": "string",
+                    "const": "linux-arm64-musl"
+                  },
+                  {
+                    "type": "string",
+                    "const": "darwin-x64"
+                  },
+                  {
+                    "type": "string",
+                    "const": "darwin-arm64"
+                  }
+                ]
               },
               {
                 "type": "string",
-                "const": "linux-arm64"
+                "const": "windows-x64"
               },
               {
                 "type": "string",
-                "const": "linux-x64-musl"
-              },
-              {
-                "type": "string",
-                "const": "linux-arm64-musl"
-              },
-              {
-                "type": "string",
-                "const": "darwin-x64"
-              },
-              {
-                "type": "string",
-                "const": "darwin-arm64"
+                "const": "windows-arm64"
               }
             ]
           },

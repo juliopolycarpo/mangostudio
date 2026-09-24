@@ -141,6 +141,12 @@ impl StagedTransfer {
         #[cfg(unix)]
         options.mode(0o700);
         let file = options.open(&stage)?;
+        #[cfg(windows)]
+        let file = secure_stage(
+            &stage,
+            file,
+            crate::runtime_home::owner_only::restrict_to_owner,
+        )?;
         Ok(Self {
             begin,
             stage,
@@ -220,6 +226,26 @@ impl StagedTransfer {
     }
 }
 
+#[cfg(windows)]
+fn secure_stage(
+    stage: &Path,
+    file: File,
+    restrict: impl FnOnce(&Path) -> bool,
+) -> io::Result<File> {
+    if restrict(stage) {
+        return Ok(file);
+    }
+    drop(file);
+    let _ = std::fs::remove_file(stage);
+    Err(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!(
+            "update stage {} could not be restricted to its owner; expected an owner-only scratch file",
+            stage.display()
+        ),
+    ))
+}
+
 impl Drop for StagedTransfer {
     fn drop(&mut self) {
         drop(self.file.take());
@@ -244,6 +270,29 @@ impl VerifiedStage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    fn deny_restriction(_path: &Path) -> bool {
+        false
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_stage_acl_removes_scratch_before_receiving_bytes() {
+        let slot = scratch("stage-acl-refusal");
+        std::fs::create_dir_all(&slot).unwrap();
+        let stage = slot.join(".mangostudio-runtime.incoming-acl");
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&stage)
+            .unwrap();
+        let error = secure_stage(&stage, file, deny_restriction).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains(&stage.display().to_string()));
+        assert!(!stage.exists());
+        std::fs::remove_dir_all(slot).unwrap();
+    }
 
     fn begin(total_bytes: f64, digest: &str) -> ValidatedBegin {
         ValidatedBegin::try_from(BeginParams {

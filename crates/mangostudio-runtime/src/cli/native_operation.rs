@@ -233,13 +233,20 @@ pub(super) fn run_doctor(json_output: bool, env: &impl EnvSource, version: &str)
         findings.push(json!({"severity":"ok","title":"Consent","detail":"configured"}));
     }
     let root = slot_dir(slot.parse().unwrap_or(RuntimeSlot::Remote), &home);
-    if let Some(version) = read_slot_current(&root).ok().flatten() {
-        let binary = root.join(&version).join(crate::runtime_home::binary_name());
-        if !binary.is_file() {
-            findings.push(json!({"severity":"fail","title":"Slot","detail":format!("current points to {version}, but {} is missing",binary.display()),"fix":format!("mangostudio-runtime install --slot {slot}")}));
+    match read_slot_current(&root) {
+        Ok(Some(version)) => {
+            let binary = root.join(&version).join(crate::runtime_home::binary_name());
+            if !binary.is_file() {
+                findings.push(json!({"severity":"fail","title":"Slot","detail":format!("current points to {version}, but {} is missing",binary.display()),"fix":format!("mangostudio-runtime install --slot {slot}")}));
+            }
         }
-    } else if slot == "remote" && report["version"].is_string() {
-        findings.push(json!({"severity":"warn","title":"Slot","detail":"current pointer is missing or invalid","fix":format!("mangostudio-runtime install --slot {slot}")}));
+        Ok(None) if slot == "remote" && report["version"].is_string() => {
+            findings.push(json!({"severity":"warn","title":"Slot","detail":"current pointer is missing","fix":format!("mangostudio-runtime install --slot {slot}")}));
+        }
+        Err(error) => {
+            findings.push(json!({"severity":"fail","title":"Slot","detail":format!("current pointer is invalid: {error}"),"fix":format!("mangostudio-runtime install --slot {slot}")}));
+        }
+        Ok(None) => {}
     }
     if slot == "remote" {
         let config = read_runtime_slot_config(RuntimeSlot::Remote, &home);
@@ -488,13 +495,25 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn self_install_refuses_until_windows_publication_is_available() {
+    fn self_install_copies_source_into_an_immutable_windows_version() {
         let home = scratch_dir("native-install-windows");
         let source = home.join("downloaded-runtime.exe");
         fs::write(&source, b"runtime bytes").unwrap();
-        let error = install_source(&source, RuntimeSlot::Remote, "1.2.3", &home).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
-        assert!(!slot_current_binary_path(RuntimeSlot::Remote, &home).exists());
+        let result = install_source(&source, RuntimeSlot::Remote, "1.2.3", &home).unwrap();
+        assert_eq!(fs::read(&result.binary_path).unwrap(), b"runtime bytes");
+        assert!(
+            result
+                .current_binary_path
+                .ends_with("mangostudio-runtime.cmd")
+        );
+        assert!(slot_current_binary_path(RuntimeSlot::Remote, &home).is_file());
+        assert_eq!(
+            read_slot_current(&slot_dir(RuntimeSlot::Remote, &home))
+                .unwrap()
+                .as_deref(),
+            Some("1.2.3")
+        );
+        assert_eq!(fs::read(&source).unwrap(), b"runtime bytes");
     }
 
     #[test]
