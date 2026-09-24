@@ -3911,6 +3911,8 @@ export const messages = {
         'vendor-error': 'O agente relatou uma falha.',
         'runtime-disconnected': 'A conexão com a máquina caiu no meio do turno.',
         'hub-restarted': 'O MangoStudio reiniciou enquanto este turno rodava.',
+        'acceptance-unknown':
+          'O MangoStudio não conseguiu confirmar se o agente recebeu este turno. Envie novamente para tentar de novo.',
         'sequence-gap': 'Parte do fluxo do agente se perdeu, então este registro está incompleto.',
         'limit-exceeded': 'Este turno passou do limite de tamanho e foi interrompido.',
         'consent-revoked': 'O dono da máquina retirou a permissão para agentes externos.',

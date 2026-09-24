@@ -41,7 +41,7 @@ export interface FakeExternalRuntimeOptions {
   readonly resumeSucceeds?: boolean;
   readonly onOpen?: (params: ExternalAgentOpenParams) => void;
   readonly openFailure?: () => Error;
-  readonly turnFailure?: () => Error;
+  readonly turnFailure?: () => Error | undefined;
   readonly capabilities?: ExternalAgentCapabilities;
   /**
    * Overrides the default `{ accepted: true }` outcome of every `steer` call.

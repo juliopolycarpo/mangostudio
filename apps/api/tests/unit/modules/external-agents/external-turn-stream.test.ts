@@ -14,6 +14,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { Kysely } from 'kysely';
 import { getDb } from '../../../../src/db/database';
 import type { Database } from '../../../../src/db/types';
+import { getChatMessagesUseCase } from '../../../../src/modules/chats/application/get-chat-messages';
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
 import { acknowledgeExternalDisclosure } from '../../../../src/modules/external-agents/application/external-disclosure-gate';
@@ -21,16 +22,20 @@ import { createExternalSessionManager } from '../../../../src/modules/external-a
 import { createExternalTurnConfigurationResolver } from '../../../../src/modules/external-agents/application/external-turn-configuration';
 import { createExternalTurnController } from '../../../../src/modules/external-agents/application/external-turn-controller';
 import { createExternalTurnStream } from '../../../../src/modules/external-agents/application/external-turn-stream';
+import type { CancellableSleep } from '../../../../src/modules/external-agents/application/external-turn-submission';
 import { grantWorkspaceTrust } from '../../../../src/modules/external-agents/application/external-workspace-trust';
 import {
   cancelActiveTurn,
   findActiveTurnByChat,
 } from '../../../../src/modules/generation/application/active-turn-registry';
+import { RuntimeRequestNotSentError } from '../../../../src/services/runtime-client/request-not-sent';
+import { createFakeBackoffClock } from '../../../support/external-agents/fake-backoff-clock';
 import {
   createFakeExternalRuntime,
   type FakeExternalRuntime,
 } from '../../../support/external-agents/fake-external-runtime';
 import { insertTestUser } from '../../../support/factories';
+import { connectTestRuntime } from '../../../support/runtime-fixture';
 
 const EVERY_PAIR: readonly ExternalSupportedConfiguration[] = [
   { level: 'read-only', routing: 'user', supported: true, unattended: false },
@@ -107,17 +112,25 @@ function harness(
     readonly repoRootFailure?: () => Error;
     /** What the opened session reports it can do, as opposed to the descriptor. */
     readonly sessionCapabilities?: ExternalAgentCapabilities;
+    /** Scripted `external-agent.turn` failures, consumed per call. */
+    readonly turnFailure?: () => Error | undefined;
+    readonly sleep?: CancellableSleep;
   } = {}
 ) {
-  const runtime = createFakeExternalRuntime(
-    options.sessionCapabilities ? { capabilities: options.sessionCapabilities } : {}
-  );
+  const runtime = createFakeExternalRuntime({
+    ...(options.sessionCapabilities ? { capabilities: options.sessionCapabilities } : {}),
+    ...(options.turnFailure ? { turnFailure: options.turnFailure } : {}),
+  });
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     newSessionId: () => `session-${crypto.randomUUID()}`,
   });
   const approvals = createExternalApprovalRegistry();
-  const controller = createExternalTurnController({ sessions, approvals });
+  const controller = createExternalTurnController({
+    sessions,
+    approvals,
+    ...(options.sleep ? { sleep: options.sleep } : {}),
+  });
   const resolveConfiguration = createExternalTurnConfigurationResolver({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     discovery: {
@@ -1225,3 +1238,76 @@ class UnreadableAttachmentsDb {
     }) as Kysely<Database>;
   }
 }
+
+describe('browser detach', () => {
+  it('(h) keeps retrying a detached turn to completion and persists what a re-attach reads', async () => {
+    // A genuine never-written failure, from a runtime session that is really closed.
+    const closed = await connectTestRuntime({ handlers: {} });
+    await closed.close();
+    const notSent = await closed.client.externalAgents
+      .turn({
+        sessionId: 'session-closed',
+        clientMessageId: 'probe',
+        input: 'probe',
+        configuration: { level: 'default', routing: 'user', workspaceRoots: ['/work/repo'] },
+      })
+      .catch((error: unknown) => error);
+    if (!(notSent instanceof RuntimeRequestNotSentError)) {
+      throw new Error(`expected a RuntimeRequestNotSentError | received: ${String(notSent)}`);
+    }
+    let failures = 3;
+    const clock = createFakeBackoffClock({ auto: true });
+    const { runtime, stream } = harness({
+      turnFailure: () => {
+        if (failures === 0) return undefined;
+        failures -= 1;
+        return notSent;
+      },
+      sleep: clock.sleep,
+    });
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'summarize the repo',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The browser goes away before the turn has even been accepted.
+    await result.response.body?.cancel();
+
+    await waitFor(() => runtime.calls.turn.length === 4, 'the fourth submission attempt');
+    runtime.emit({
+      type: 'activity_started',
+      callId: 'call-1',
+      activity: { name: 'shell', kind: 'command', title: 'ls' },
+    });
+    runtime.emit({ type: 'text_delta', text: 'a repo' });
+    runtime.emit({ type: 'completed' });
+
+    const reattach = async () => {
+      const { messages } = await getChatMessagesUseCase({ chatId, userId }, getDb());
+      return messages.find((message) => message.role === 'ai');
+    };
+    for (let tick = 0; tick < 500; tick += 1) {
+      const message = await reattach();
+      if (message && !message.isGenerating) break;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const message = await reattach();
+    expect(clock.waits.length).toBe(3);
+    expect(message?.isGenerating).toBeFalsy();
+    expect(message?.text).toBe('a repo');
+    const turn = message?.parts?.find((part) => part.type === 'external_turn');
+    expect(turn).toMatchObject({
+      status: 'terminal',
+      terminalReason: 'completed',
+      lastSequence: 3,
+    });
+  });
+});
