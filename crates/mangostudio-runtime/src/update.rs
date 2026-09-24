@@ -603,6 +603,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn connections_share_slot_exclusivity_without_colliding_request_ids() {
         let home = scratch("shared-gate");

@@ -457,6 +457,7 @@ mod tests {
     use super::*;
     use crate::test_support::scratch_dir;
 
+    #[cfg(unix)]
     #[test]
     fn self_install_publishes_and_reinstall_is_unchanged() {
         let home = scratch_dir("native-install");
@@ -483,6 +484,17 @@ mod tests {
             fs::read(&first.current_binary_path).unwrap(),
             b"tampered bytes"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn self_install_refuses_until_windows_publication_is_available() {
+        let home = scratch_dir("native-install-windows");
+        let source = home.join("downloaded-runtime.exe");
+        fs::write(&source, b"runtime bytes").unwrap();
+        let error = install_source(&source, RuntimeSlot::Remote, "1.2.3", &home).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(!slot_current_binary_path(RuntimeSlot::Remote, &home).exists());
     }
 
     #[test]
