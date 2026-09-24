@@ -2,11 +2,13 @@
 //!
 //! This matches the TypeScript runtime's `runtime-update.lock` protocol, so
 //! both hosts refuse a concurrent writer to the same slot. A token prevents
-//! an expired owner from deleting a newer owner's lock on release.
+//! an old owner from deleting a newer owner's lock on release.
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::runtime_home::lock::{current_hostname, is_process_alive};
 
 const LOCK_NAME: &str = "runtime-update.lock";
-const STALE_FLOOR: Duration = Duration::from_secs(5 * 60);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Serialize, Deserialize)]
 struct Owner {
@@ -27,20 +29,30 @@ struct Owner {
 pub(crate) struct SlotUpdateLock {
     path: PathBuf,
     token: String,
+    stop: Sender<()>,
+    heartbeat: Option<JoinHandle<()>>,
 }
 
 impl SlotUpdateLock {
     /// Claims `<slot>/runtime-update.lock`; refuses a live holder and reclaims
-    /// a dead same-host holder or a sufficiently old foreign-host holder.
-    pub fn acquire(slot_dir: &Path, token: String, hold_timeout: Duration) -> io::Result<Self> {
+    /// a dead same-host holder. Foreign holders require explicit cleanup,
+    /// because an age check cannot fence a paused process on another host.
+    pub fn acquire(slot_dir: &Path, token: String, _hold_timeout: Duration) -> io::Result<Self> {
         fs::create_dir_all(slot_dir)?;
         let path = slot_dir.join(LOCK_NAME);
         let reclaim_path = path.with_extension("lock.reclaim");
-        let stale_after = STALE_FLOOR.max(hold_timeout.saturating_mul(2));
 
         for attempt in 0..2 {
+            // A stranded marker needs explicit operator cleanup. Removing it
+            // automatically races another reclaimer's path-based unlink.
             if reclaim_path.try_exists()? {
-                return Err(busy(&path));
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    format!(
+                        "slot reclaim marker {} is present; verify no slot update is active before removing it",
+                        reclaim_path.display()
+                    ),
+                ));
             }
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
@@ -52,7 +64,7 @@ impl SlotUpdateLock {
             let mut file = match options.open(&path) {
                 Ok(file) => file,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    if attempt == 0 && reclaim_abandoned(&path, &reclaim_path, stale_after) {
+                    if attempt == 0 && reclaim_abandoned(&path, &reclaim_path) {
                         continue;
                     }
                     return Err(busy(&path));
@@ -69,19 +81,57 @@ impl SlotUpdateLock {
                 file.write_all(&encoded)?;
                 file.sync_all()
             })();
-            drop(file);
             if let Err(error) = written {
+                drop(file);
                 let _ = fs::remove_file(&path);
                 return Err(error);
             }
-            return Ok(Self { path, token });
+            let heartbeat_file = match file.try_clone() {
+                Ok(file) => file,
+                Err(error) => {
+                    drop(file);
+                    let _ = fs::remove_file(&path);
+                    return Err(error);
+                }
+            };
+            drop(file);
+            let (stop, stopped) = mpsc::channel();
+            let heartbeat = thread::Builder::new()
+                .name("runtime-update-lock-heartbeat".into())
+                .spawn(move || heartbeat_loop(heartbeat_file, stopped, HEARTBEAT_INTERVAL));
+            let heartbeat = match heartbeat {
+                Ok(heartbeat) => heartbeat,
+                Err(error) => {
+                    let _ = fs::remove_file(&path);
+                    return Err(error);
+                }
+            };
+            return Ok(Self {
+                path,
+                token,
+                stop,
+                heartbeat: Some(heartbeat),
+            });
         }
         Err(busy(&path))
     }
 }
 
+fn heartbeat_loop(file: File, stopped: Receiver<()>, interval: Duration) {
+    while stopped
+        .recv_timeout(interval)
+        .is_err_and(|error| error == mpsc::RecvTimeoutError::Timeout)
+    {
+        let _ = file.set_modified(SystemTime::now());
+    }
+}
+
 impl Drop for SlotUpdateLock {
     fn drop(&mut self) {
+        let _ = self.stop.send(());
+        if let Some(heartbeat) = self.heartbeat.take() {
+            let _ = heartbeat.join();
+        }
         if let Ok(raw) = fs::read(&self.path)
             && serde_json::from_slice::<Owner>(&raw).is_ok_and(|owner| owner.token == self.token)
         {
@@ -93,12 +143,15 @@ impl Drop for SlotUpdateLock {
 fn busy(path: &Path) -> io::Error {
     io::Error::new(
         io::ErrorKind::WouldBlock,
-        format!("another slot update owns {}", path.display()),
+        format!(
+            "another slot update owns {}; if its owner exited, verify no updater is active on any host before removing the lock",
+            path.display()
+        ),
     )
 }
 
-fn reclaim_abandoned(path: &Path, reclaim_path: &Path, stale_after: Duration) -> bool {
-    let Ok(reclaim) = OpenOptions::new()
+fn reclaim_abandoned(path: &Path, reclaim_path: &Path) -> bool {
+    let Ok(mut reclaim) = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(reclaim_path)
@@ -106,20 +159,20 @@ fn reclaim_abandoned(path: &Path, reclaim_path: &Path, stale_after: Duration) ->
         return false;
     };
     let result = (|| -> io::Result<bool> {
+        let marker = Owner {
+            token: format!("reclaim-{}", std::process::id()),
+            pid: std::process::id(),
+            host: current_hostname()?,
+        };
+        reclaim.write_all(&serde_json::to_vec(&marker).map_err(io::Error::other)?)?;
+        reclaim.sync_all()?;
         let raw = fs::read(path)?;
-        let metadata = fs::metadata(path)?;
         let owner = serde_json::from_slice::<Owner>(&raw).ok();
         let same_host = owner.as_ref().is_some_and(|owner| {
             current_hostname().is_ok_and(|host| owner.host.eq_ignore_ascii_case(&host))
         });
-        let abandoned = if same_host {
-            !is_process_alive(owner.as_ref().expect("same_host requires owner").pid)
-        } else {
-            SystemTime::now()
-                .duration_since(metadata.modified()?)
-                .unwrap_or(Duration::ZERO)
-                > stale_after
-        };
+        let abandoned =
+            same_host && !is_process_alive(owner.expect("same_host requires owner").pid);
         if abandoned {
             fs::remove_file(path)?;
         }
@@ -189,6 +242,103 @@ mod tests {
         fs::write(&path, serde_json::to_vec(&dead).unwrap()).unwrap();
         drop(claim);
         assert!(path.exists(), "a replaced token must not be removed");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn abandoned_reclaim_marker_requires_explicit_cleanup() {
+        let dir = slot("abandoned-marker");
+        let marker = dir.join("runtime-update.lock.reclaim");
+        fs::write(&marker, b"").unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&marker)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(31))
+            .unwrap();
+
+        let error = SlotUpdateLock::acquire(&dir, "new".into(), Duration::from_secs(120))
+            .err()
+            .expect("even an old marker must stay exclusive");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert!(marker.exists());
+        fs::remove_file(&marker).unwrap();
+        let claim = SlotUpdateLock::acquire(&dir, "new".into(), Duration::from_secs(120)).unwrap();
+        drop(claim);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_aged_foreign_lock_is_not_reclaimed_without_fencing() {
+        let dir = slot("foreign-owner");
+        let path = dir.join(LOCK_NAME);
+        fs::write(
+            &path,
+            serde_json::to_vec(&Owner {
+                token: "foreign".into(),
+                pid: 4242,
+                host: "some-other-host".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+
+        let error = SlotUpdateLock::acquire(&dir, "local".into(), Duration::from_secs(120))
+            .err()
+            .expect("foreign ownership must remain exclusive regardless of age");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert!(error.to_string().contains("verify no updater is active"));
+        assert_eq!(
+            serde_json::from_slice::<Owner>(&fs::read(&path).unwrap())
+                .unwrap()
+                .token,
+            "foreign"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn heartbeat_renews_only_the_original_lock_inode() {
+        let dir = slot("heartbeat-inode");
+        let path = dir.join(LOCK_NAME);
+        fs::write(&path, b"old owner").unwrap();
+        let file = OpenOptions::new().write(true).open(&path).unwrap();
+        let (stop, stopped) = mpsc::channel();
+        let heartbeat = thread::spawn(move || {
+            heartbeat_loop(file, stopped, Duration::from_millis(10));
+        });
+        let old = SystemTime::now() - Duration::from_secs(600);
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while fs::metadata(&path).unwrap().modified().unwrap() <= old {
+            assert!(std::time::Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        fs::rename(&path, dir.join("retired-lock")).unwrap();
+        fs::write(&path, b"replacement owner").unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        thread::sleep(Duration::from_millis(30));
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), old);
+        stop.send(()).unwrap();
+        heartbeat.join().unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 }

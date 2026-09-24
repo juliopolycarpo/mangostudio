@@ -26,7 +26,10 @@ use crate::registry::Registry;
 use crate::runtime_home::{
     RuntimeSlot, slot_dir, slot_version_binary_path, write_runtime_slot_config,
 };
-use crate::slot_publish::{activate_slot_current, publish_slot_binary, restore_slot_current};
+use crate::slot_publish::{
+    activate_slot_current, prune_slot_versions, publish_slot_binary, restore_slot_current,
+    sweep_abandoned_stages,
+};
 use crate::slot_update_lock::SlotUpdateLock;
 use crate::update_transfer::{
     BeginParams, MAX_CHUNK_BYTES, StagedTransfer, TransferError, ValidatedBegin, refusal,
@@ -297,12 +300,17 @@ impl UpdateService {
                 if error.kind() == io::ErrorKind::WouldBlock {
                     refusal(
                         "slot_update_active",
-                        format!("Another slot update owns {}.", slot_dir.display()),
+                        format!(
+                            "Runtime update slot {} is busy: {error}",
+                            slot_dir.display()
+                        ),
                     )
                 } else {
                     io_error("claim runtime update slot", error)
                 }
             })?;
+        sweep_abandoned_stages(&slot_dir)
+            .map_err(|error| io_error("sweep abandoned update stages", error))?;
         let transfer = StagedTransfer::begin(&slot_dir, &id, begin)
             .map_err(|error| io_error("stage runtime update", error))?;
         *session = Some(Session {
@@ -381,6 +389,7 @@ impl UpdateService {
                 ),
             ));
         }
+        let _ = prune_slot_versions(&slot_dir, &begin.version, previous.as_deref());
         if supervised {
             self.restart_pending.store(true, Ordering::SeqCst);
         }
@@ -526,16 +535,23 @@ mod tests {
     use std::future::Future;
     use std::pin::Pin;
 
+    #[cfg(unix)]
     use mango_protocol::contract::Contract;
     use mango_protocol::frame::PeerInfo;
+    #[cfg(unix)]
     use mango_protocol::port::port_pair;
+    #[cfg(unix)]
     use mango_protocol::session::{Session as ProtocolSession, SessionOptions};
     use sha2::{Digest, Sha256};
 
     use super::*;
+    #[cfg(unix)]
     use crate::ports::audit::NoopAudit;
     use crate::ports::authorization::Authorization;
+    #[cfg(unix)]
     use crate::ports::clock::SystemClock;
+    #[cfg(unix)]
+    use crate::slot_publish::read_slot_current;
 
     struct GrantsUpdate;
 
@@ -813,6 +829,82 @@ mod tests {
         assert_eq!(error.details.unwrap()["reason"], "digest_mismatch");
         assert!(!slot.join("current").exists());
         assert!(!slot.join("runtime-update.lock").exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_publication_failure_restores_the_previous_current_pointer() {
+        let home = scratch("config-rollback");
+        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let slot = slot_dir(RuntimeSlot::Remote, &home);
+        std::fs::create_dir_all(&slot).unwrap();
+        let old_source = slot.join("old-source");
+        std::fs::write(&old_source, b"old binary").unwrap();
+        publish_slot_binary(&slot, "1.0.0", &old_source).unwrap();
+        activate_slot_current(&slot, "1.0.0").unwrap();
+
+        // A directory at the config path makes the post-activation atomic
+        // replacement fail, after the new immutable binary was published.
+        std::fs::create_dir(slot.join("runtime.json")).unwrap();
+        let begun = service.begin("owner", begin_params(b"new binary")).unwrap();
+        let id = begun["sessionId"].as_str().unwrap();
+        service
+            .chunk(
+                "owner",
+                ChunkParams {
+                    session_id: id.into(),
+                    seq: 0.0,
+                    bytes_base64: STANDARD.encode(b"new binary"),
+                },
+            )
+            .unwrap();
+        let error = service
+            .commit(
+                "owner",
+                CommitParams {
+                    session_id: id.into(),
+                },
+                false,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, codes::INTERNAL);
+        assert!(
+            error
+                .message
+                .contains("restored the previous current pointer")
+        );
+        assert_eq!(read_slot_current(&slot).unwrap().as_deref(), Some("1.0.0"));
+        assert_eq!(
+            std::fs::read(slot.join("current").join("mangostudio-runtime")).unwrap(),
+            b"old binary"
+        );
+        assert!(!slot.join("runtime-update.lock").exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn beginning_a_new_transfer_sweeps_abandoned_stages() {
+        let home = scratch("sweep-stages");
+        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let slot = slot_dir(RuntimeSlot::Remote, &home);
+        std::fs::create_dir_all(&slot).unwrap();
+        let abandoned = slot.join(".mangostudio-runtime.incoming-abandoned");
+        std::fs::write(&abandoned, b"orphaned bytes").unwrap();
+        let pointer = slot.join(".current.abandoned");
+        std::os::unix::fs::symlink("1.0.0", &pointer).unwrap();
+        let version = slot.join("1.0.0");
+        std::fs::create_dir(&version).unwrap();
+        let binary_stage = version.join(".mangostudio-runtime.42.7");
+        std::fs::write(&binary_stage, b"orphaned copy").unwrap();
+
+        service.begin("owner", begin_params(b"new binary")).unwrap();
+
+        assert!(!abandoned.exists());
+        assert!(!pointer.exists());
+        assert!(!binary_stage.exists());
+        service.close_owner("owner");
         std::fs::remove_dir_all(home).unwrap();
     }
 

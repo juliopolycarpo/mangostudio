@@ -175,6 +175,14 @@ pub fn read_slot_current(slot_dir: &Path) -> io::Result<Option<String>> {
 /// # Ok(()) }
 /// ```
 pub fn activate_slot_current(slot_dir: &Path, version: &str) -> io::Result<Option<String>> {
+    activate_slot_current_with_sync(slot_dir, version, sync_slot_dir)
+}
+
+fn activate_slot_current_with_sync(
+    slot_dir: &Path,
+    version: &str,
+    sync: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<Option<String>> {
     validate_slot_version(version)?;
     unsupported_on_windows()?;
     let version_dir = slot_dir.join(version);
@@ -190,7 +198,17 @@ pub fn activate_slot_current(slot_dir: &Path, version: &str) -> io::Result<Optio
         ));
     }
     let previous = read_slot_current(slot_dir)?;
-    write_pointer(slot_dir, version)?;
+    if let Err(error) = write_pointer_with_sync(slot_dir, version, sync) {
+        if let Err(restore_error) = restore_slot_current(slot_dir, previous.as_deref()) {
+            return Err(io::Error::other(format!(
+                "could not activate {version:?} ({error}) or restore previous current pointer ({restore_error}); inspect {}",
+                slot_dir.display()
+            )));
+        }
+        return Err(io::Error::other(format!(
+            "could not activate {version:?} ({error}); restored previous current pointer"
+        )));
+    }
     Ok(previous)
 }
 
@@ -244,6 +262,131 @@ pub fn restore_slot_current(slot_dir: &Path, previous: Option<&str>) -> io::Resu
     }
 }
 
+/// Keeps the active and previous immutable versions, removing older versions and abandoned stages.
+///
+/// Call while holding the slot update lock, after the pointer and config both commit. Individual
+/// deletion failures are harmless: the next publication tries again.
+///
+/// ```no_run
+/// use std::path::Path;
+/// use mangostudio_runtime::slot_publish::prune_slot_versions;
+/// # fn example() -> std::io::Result<()> {
+/// prune_slot_versions(Path::new("/tmp/slot"), "1.2.0", Some("1.1.0"))?;
+/// # Ok(()) }
+/// ```
+pub fn prune_slot_versions(
+    slot_dir: &Path,
+    current: &str,
+    previous: Option<&str>,
+) -> io::Result<()> {
+    validate_slot_version(current)?;
+    if let Some(previous) = previous {
+        validate_slot_version(previous)?;
+    }
+    unsupported_on_windows()?;
+    sweep_abandoned_stages(slot_dir)?;
+    for entry in fs::read_dir(slot_dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            if is_abandoned_stage(name, &meta) {
+                let _ = fs::remove_file(path);
+            }
+            continue;
+        }
+        if is_abandoned_stage(name, &meta) {
+            let _ = fs::remove_file(path);
+            continue;
+        }
+        if meta.file_type().is_dir()
+            && name != current
+            && Some(name) != previous
+            && validate_slot_version(name).is_ok()
+        {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+    Ok(())
+}
+
+/// Clears stages left by a killed writer after acquiring the exclusive slot lock.
+///
+/// ```no_run
+/// use std::path::Path;
+/// use mangostudio_runtime::slot_publish::sweep_abandoned_stages;
+/// # fn example() -> std::io::Result<()> {
+/// sweep_abandoned_stages(Path::new("/tmp/slot"))?;
+/// # Ok(()) }
+/// ```
+pub fn sweep_abandoned_stages(slot_dir: &Path) -> io::Result<()> {
+    unsupported_on_windows()?;
+    for entry in fs::read_dir(slot_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if is_abandoned_stage(name, &meta) {
+            let _ = fs::remove_file(path);
+        } else if meta.file_type().is_dir() && validate_slot_version(name).is_ok() {
+            sweep_version_stages(&path);
+        }
+    }
+    Ok(())
+}
+
+fn sweep_version_stages(version_dir: &Path) {
+    let Ok(entries) = fs::read_dir(version_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_file()
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(is_abandoned_binary_stage)
+        {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+fn is_abandoned_binary_stage(name: &str) -> bool {
+    if name == format!("{}.incoming", binary_name()) {
+        return true;
+    }
+    let Some(suffix) = name.strip_prefix(&format!(".{}.", binary_name())) else {
+        return false;
+    };
+    let Some((pid, sequence)) = suffix.split_once('.') else {
+        return false;
+    };
+    !pid.is_empty()
+        && !sequence.is_empty()
+        && pid.bytes().all(|byte| byte.is_ascii_digit())
+        && sequence.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn is_abandoned_stage(name: &str, meta: &fs::Metadata) -> bool {
+    (meta.file_type().is_symlink() && name.starts_with(&format!(".{CURRENT_LINK_NAME}.")))
+        || (meta.file_type().is_file() && name.starts_with(".mangostudio-runtime.incoming-"))
+}
+
 fn compare_existing(source: &Path, destination: &Path) -> io::Result<BinaryPublication> {
     if !fs::symlink_metadata(destination)?.file_type().is_file() {
         return Err(io::Error::new(
@@ -278,6 +421,25 @@ fn compare_existing(source: &Path, destination: &Path) -> io::Result<BinaryPubli
 
 #[cfg(unix)]
 fn write_pointer(slot_dir: &Path, version: &str) -> io::Result<()> {
+    write_pointer_with_sync(slot_dir, version, sync_slot_dir)
+}
+
+#[cfg(unix)]
+fn sync_slot_dir(slot_dir: &Path) -> io::Result<()> {
+    File::open(slot_dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_slot_dir(_slot_dir: &Path) -> io::Result<()> {
+    unsupported_on_windows()
+}
+
+#[cfg(unix)]
+fn write_pointer_with_sync(
+    slot_dir: &Path,
+    version: &str,
+    sync: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
     use std::os::unix::fs::symlink;
 
     let current = slot_dir.join(CURRENT_LINK_NAME);
@@ -302,11 +464,20 @@ fn write_pointer(slot_dir: &Path, version: &str) -> io::Result<()> {
         let _ = fs::remove_file(stage);
     }
     result?;
-    File::open(slot_dir)?.sync_all()
+    sync(slot_dir)
 }
 
 #[cfg(not(unix))]
 fn write_pointer(_slot_dir: &Path, _version: &str) -> io::Result<()> {
+    unsupported_on_windows()
+}
+
+#[cfg(not(unix))]
+fn write_pointer_with_sync(
+    _slot_dir: &Path,
+    _version: &str,
+    _sync: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
     unsupported_on_windows()
 }
 
@@ -398,6 +569,66 @@ mod tests {
         );
         restore_slot_current(&dir, None).unwrap();
         assert_eq!(read_slot_current(&dir).unwrap(), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn activation_restores_previous_pointer_if_sync_fails_after_rename() {
+        let dir = slot();
+        let source = dir.join("source");
+        fs::write(&source, b"runtime").unwrap();
+        publish_slot_binary(&dir, "1.0.0", &source).unwrap();
+        publish_slot_binary(&dir, "2.0.0", &source).unwrap();
+        activate_slot_current(&dir, "1.0.0").unwrap();
+
+        let error = activate_slot_current_with_sync(&dir, "2.0.0", |_| {
+            Err(io::Error::other("injected directory sync failure"))
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("injected directory sync failure")
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("restored previous current pointer")
+        );
+        assert_eq!(read_slot_current(&dir).unwrap().as_deref(), Some("1.0.0"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pruning_keeps_current_and_previous_and_sweeps_abandoned_stages() {
+        let dir = slot();
+        let source = dir.join("source");
+        fs::write(&source, b"runtime").unwrap();
+        for version in ["1.0.0", "2.0.0", "3.0.0"] {
+            publish_slot_binary(&dir, version, &source).unwrap();
+        }
+        activate_slot_current(&dir, "3.0.0").unwrap();
+        std::os::unix::fs::symlink("1.0.0", dir.join(".current.abandoned")).unwrap();
+        fs::write(
+            dir.join(".mangostudio-runtime.incoming-abandoned"),
+            b"partial",
+        )
+        .unwrap();
+        fs::write(dir.join("3.0.0/.mangostudio-runtime.42.7"), b"partial").unwrap();
+        fs::write(dir.join("2.0.0/mangostudio-runtime.incoming"), b"partial").unwrap();
+        fs::write(dir.join("runtime.json"), b"{}").unwrap();
+
+        prune_slot_versions(&dir, "3.0.0", Some("2.0.0")).unwrap();
+
+        assert!(!dir.join("1.0.0").exists());
+        assert!(dir.join("2.0.0").exists());
+        assert!(dir.join("3.0.0").exists());
+        assert!(!dir.join(".current.abandoned").exists());
+        assert!(!dir.join(".mangostudio-runtime.incoming-abandoned").exists());
+        assert!(!dir.join("3.0.0/.mangostudio-runtime.42.7").exists());
+        assert!(!dir.join("2.0.0/mangostudio-runtime.incoming").exists());
+        assert!(dir.join("runtime.json").exists());
+        assert_eq!(read_slot_current(&dir).unwrap().as_deref(), Some("3.0.0"));
         fs::remove_dir_all(dir).unwrap();
     }
 
