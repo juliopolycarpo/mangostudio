@@ -51,6 +51,7 @@ use super::wire::{
     ListSessionsResult, OpenParams, OpenResult, RefreshAccountUsageParams,
     RefreshAccountUsageResult, ResumeMode, TargetId,
 };
+use crate::consent::read::{ConsentRead, ConsentReader};
 use crate::probing::detection::path_env::PathEnv;
 
 /// How many sessions may be live or opening at once, as in the TS host.
@@ -152,6 +153,9 @@ pub(crate) struct Ports {
     pub session_cap: usize,
     /// How often consent is re-read while anything is live or opening.
     pub consent_poll: Duration,
+    /// The bound on one watcher consent read; a read past it is unknown, not
+    /// a withdrawal.
+    pub consent_read_timeout: Duration,
     /// The bound on each awaited cleanup.
     pub cleanup_timeout: Duration,
     /// The bound on one turn, from its start to its end.
@@ -297,6 +301,7 @@ pub(crate) struct Supervisor {
     shutdown: CancellationToken,
     pub(super) tasks: TaskTracker,
     watcher_started: AtomicBool,
+    consent_reader: ConsentReader,
 }
 
 impl Supervisor {
@@ -315,6 +320,7 @@ impl Supervisor {
             shutdown: CancellationToken::new(),
             tasks: TaskTracker::new(),
             watcher_started: AtomicBool::new(false),
+            consent_reader: ConsentReader::new("externalAgents"),
         })
     }
 
@@ -1136,7 +1142,7 @@ impl Supervisor {
                         if this.slots().is_empty() {
                             continue;
                         }
-                        if !this.consent_granted().await {
+                        if this.consent_read().await.revokes() {
                             this.close_all(CloseCause::ConsentRevoked).await;
                         }
                     }
@@ -1147,9 +1153,14 @@ impl Supervisor {
         });
     }
 
-    async fn consent_granted(&self) -> bool {
+    /// One bounded, coalesced watcher read. Only an explicit denial revokes;
+    /// a read that does not finish in time is [`ConsentRead::Unknown`], which
+    /// keeps every session until the next poll (see [`ConsentRead::revokes`]).
+    async fn consent_read(&self) -> ConsentRead {
         let probe = Arc::clone(&self.ports.consent);
-        crate::blocking::run_blocking(move || probe()).await
+        self.consent_reader
+            .read(self.ports.consent_read_timeout, move || probe())
+            .await
     }
 
     /// Cancels every opening and closes every live session for `cause`,

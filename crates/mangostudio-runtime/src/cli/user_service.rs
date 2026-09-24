@@ -456,6 +456,15 @@ fn operate(
     Ok(json!({"ok":true}))
 }
 
+/// Runs one service verb against systemd on Linux or launchd on macOS.
+///
+/// Unlike the Windows Scheduled Task path, `stop`, `restart` and `uninstall` do not first wait
+/// for an active slot update. The asymmetry is intentional: systemd and launchd send SIGTERM
+/// before any kill (systemd waits `TimeoutStopSec=30s`), while `Stop-ScheduledTask` ends the
+/// task without a shutdown signal. An update the stop interrupts before its commit leaves only a
+/// staged binary, which the next update's `begin` sweeps.
+///
+/// Usage: `run(ServiceAction::Stop, None, false, &mango_home)`.
 #[cfg(unix)]
 pub(super) fn run(
     action: ServiceAction,

@@ -23,6 +23,7 @@ use super::supervisor::{
     HARD_TURN_TIMEOUT, PortFuture, Ports, ProductHarnesses, Supervisor,
 };
 use super::wire::TargetId;
+use crate::consent::read::CONSENT_READ_TIMEOUT;
 use crate::consent::source::ConsentSource;
 use crate::ports::authorization::consent_denial;
 use crate::probing::detection::agent_cli_definitions::AgentTargetId;
@@ -184,6 +185,7 @@ pub(crate) fn production_supervisor(
         limits,
         session_cap: DEFAULT_SESSION_CAP,
         consent_poll: CONSENT_POLL,
+        consent_read_timeout: CONSENT_READ_TIMEOUT,
         cleanup_timeout: CLEANUP_TIMEOUT,
         hard_turn_timeout: HARD_TURN_TIMEOUT,
     })

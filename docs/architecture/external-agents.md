@@ -939,6 +939,16 @@ A runtime-side consent withdrawal reaches the hub as the vendor ending the turn 
 (`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
 stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`.
 
+The consent watcher reads `externalAgents` through the shared bounded, coalesced `ConsentReader`,
+like the MCP, terminal and install watchers: only an explicit denial closes sessions, and a read
+that does not finish within `CONSENT_READ_TIMEOUT` keeps them until the next poll. Launch-time
+consent has two reads. The dispatcher's authorization guard makes the bounded read before
+`external-agent.open` runs, and treats an inconclusive read as missing consent. The launcher then
+re-reads consent synchronously immediately before the vendor child executes, failing closed, as
+the terminal and command launch checks do. That second read is not time-bounded. If the store
+hangs between the two reads, each vendor launch waiting on it holds one blocking permit until the
+read returns. This is an accepted asymmetry with the watcher.
+
 ### Cancellation on Windows
 
 Cancelling a turn is a protocol request for Codex (`turn/interrupt`) and Cursor (ACP
@@ -983,6 +993,7 @@ protocols to the SDK and are not repeated here.
 | steer: forwards, passes a rejection through, answers not-supported, refuses a closed session   | `steering_is_answered_not_thrown_when_it_cannot_land`, `a_duplicate_steer_waiting_on_one_that_fails_in_transit_receives_its_failure`                               | partial: no closed-session steer test             |
 | bounds concurrent sessions and recovers capacity after close                                   | `the_session_cap_counts_opening_sessions`                                                                                                                          | partial: no reopen-after-close test               |
 | proactively cancels and closes an idle session when consent is revoked                         | `withdrawing_consent_closes_every_live_session_for_that_reason`; qualification consent test                                                                        | covered                                           |
+| keeps live sessions through an inconclusive consent read; a hung read never delays shutdown    | `slow_consent_store_does_not_close_external_agent_sessions`, `a_hung_consent_read_does_not_hold_up_hub_shutdown`                                                   | covered                                           |
 | makes concurrent close calls share the same teardown barrier                                   | `closing_a_live_session_is_idempotent_awaited_and_removes_its_scratch`                                                                                             | covered                                           |
 | aborts an opening session on close and reaps its late adapter result                           | `closing_an_opening_session_cancels_it_and_waits_for_it_to_settle`, `an_open_that_finishes_after_a_close_was_requested_is_closed_not_registered`                   | covered                                           |
 | surfaces a late-open reaper failure to explicit close and on shutdown                          | `a_failed_late_cleanup_is_reported_by_the_close_that_waited_for_it`                                                                                                | covered                                           |

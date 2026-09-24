@@ -1,5 +1,6 @@
 //! A bounded consent read with three outcomes, shared by every watcher that revokes a live
-//! resource (MCP sessions, terminals, install chains) and by the async launch checks.
+//! resource (MCP sessions, terminals, install chains, external-agent sessions) and by the async
+//! launch checks.
 //!
 //! A read runs on the blocking pool and may not finish in time — a slow disk, a contended
 //! `runtime.json`, a saturated pool. That outcome is [`ConsentRead::Unknown`], never a denial,
