@@ -303,6 +303,20 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     );
     expect(qualificationBlock).toContain('runtime-binary: target/debug/mangostudio-runtime.exe');
     expect(binarySupport).toContain("process.platform === 'win32' ? 'mangostudio-runtime.exe'");
+    // The stand-in vendor, built on its own so the runtime binary never gains
+    // the SDK's `testing` feature, and pointed at so its absence fails loudly.
+    expect(qualificationBlock).toContain(
+      'cargo build -p mangostudio-runtime --example fake_cursor_agent --locked'
+    );
+    expect(qualificationBlock.indexOf('--example fake_cursor_agent')).toBeGreaterThan(
+      qualificationBlock.indexOf('cargo build -p mangostudio-runtime --locked')
+    );
+    expect(qualificationBlock).toContain(
+      `MANGOSTUDIO_FAKE_CURSOR_AGENT: ${EXPR} github.workspace }}/${EXPR} matrix.fake-cursor-agent }}`
+    );
+    expect(qualificationBlock).toContain(
+      'fake-cursor-agent: target/debug/examples/fake_cursor_agent.exe'
+    );
     expect(qualificationBlock).toContain(
       'tests/integration/services/rust-runtime-qualification.integration.test.ts'
     );

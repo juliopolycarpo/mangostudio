@@ -32,7 +32,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { realpath } from 'node:fs/promises';
+import { mkdir, realpath } from 'node:fs/promises';
+import { join } from 'node:path';
+import { sanitizedEnv } from '@mangostudio/protocol/spawn';
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
 import { getDb } from '../../../src/db/database';
@@ -42,6 +44,14 @@ import { createEnvironmentRepository } from '../../../src/modules/environments/i
 import { createRuntimePairingRepository } from '../../../src/modules/environments/infrastructure/runtime-pairing-repository';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
+import {
+  createRustTurnHarness,
+  grantRuntimeConsent,
+  insertCursorChat,
+  installFakeCursorAgent,
+  resolveFakeCursorAgent,
+  runAnsweredTurn,
+} from '../../support/external-agents/rust-agent-turns';
 import { insertTestUser } from '../../support/factories';
 import {
   assertRustRuntimeCommandMethods,
@@ -60,6 +70,7 @@ import {
 } from '../../support/rust-runtime-binary';
 
 const binary = resolveRustRuntimeBinary();
+const fakeCursorAgent = resolveFakeCursorAgent();
 
 const TEST_USER = {
   id: 'rust-connect-qualification-user',
@@ -152,6 +163,7 @@ describe('Real Rust runtime qualification: paired connect', () => {
   let hub: Hub | undefined;
   let mangoHome: string;
   let child: ReturnType<typeof Bun.spawn> | undefined;
+  const scratch: string[] = [];
 
   afterEach(async () => {
     if (child) {
@@ -162,6 +174,16 @@ describe('Real Rust runtime qualification: paired connect', () => {
     hub?.stop();
     hub = undefined;
     if (mangoHome) await cleanupMangoHome(mangoHome);
+    for (const dir of scratch.splice(0)) await cleanupMangoHome(dir);
+    await getDb()
+      .deleteFrom('messages')
+      .where(
+        'chatId',
+        'in',
+        getDb().selectFrom('chats').select('id').where('userId', '=', TEST_USER.id)
+      )
+      .execute();
+    await getDb().deleteFrom('chats').where('userId', '=', TEST_USER.id).execute();
     await getDb().deleteFrom('runtime_pairing_tokens').where('userId', '=', TEST_USER.id).execute();
     await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
     await getDb().deleteFrom('user').where('id', '=', TEST_USER.id).execute();
@@ -221,5 +243,58 @@ describe('Real Rust runtime qualification: paired connect', () => {
       await cleanupMangoHome(dir);
     },
     30_000
+  );
+
+  it.skipIf(!binary.available || !fakeCursorAgent.available)(
+    'authorizes the paired peer and runs an answered external-agent turn through the hub controller',
+    async () => {
+      hub = await startHub('rust-connect-qualification-external-agents');
+      mangoHome = await scratchMangoHome('connect-external-agents');
+      // `connect` answers as the `remote` slot.
+      await grantRuntimeConsent(binary.path, mangoHome, 'remote');
+      const home = await realpath(await scratchMangoHome('connect-external-agents-home'));
+      scratch.push(home);
+      const path = await installFakeCursorAgent(fakeCursorAgent, join(home, 'bin'));
+      await mkdir(join(home, 'workspace'));
+      const workspace = await realpath(join(home, 'workspace'));
+      const chatId = await insertCursorChat(TEST_USER.id, hub.environmentId, workspace);
+
+      child = Bun.spawn({
+        cmd: [binary.path, 'connect', '--hub', hub.url, '--token', 'env'],
+        env: {
+          ...sanitizedEnv(process.env, { MANGO_HOME: mangoHome }),
+          MANGOSTUDIO_RUNTIME_TOKEN: hub.token,
+          HOME: home,
+          USERPROFILE: home,
+          PATH: path,
+          XDG_CONFIG_HOME: join(home, '.config'),
+        },
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+
+      await hub.whenAdopted(1);
+      const client = await hub.manager.getClient(TEST_USER.id, hub.environmentId);
+      const credentialHomeFingerprint =
+        client.manifest.identityIsolation?.credentialHomeFingerprint;
+      if (!credentialHomeFingerprint) {
+        throw new Error(
+          `expected the paired runtime to attest a credential home | received: ${JSON.stringify(client.manifest.identityIsolation)}`
+        );
+      }
+      const turns = createRustTurnHarness({
+        client,
+        userId: TEST_USER.id,
+        chatId,
+        workspace,
+        credentialHomeFingerprint,
+      });
+      const { result, row } = await runAnsweredTurn(turns, 'hello over paired connect');
+      expect(result.reason).toBe('completed');
+      expect(row.text).toContain('hello');
+      await turns.close();
+      expect((await client.health()).externalAgents?.liveSessionCount).toBe(0);
+    },
+    90_000
   );
 });
