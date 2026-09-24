@@ -1,0 +1,500 @@
+//! Native slot installation and local CLI reports. Filesystem work stays outside Tokio.
+
+use std::fs::{self, File};
+use std::io::{self, BufRead, Read};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+
+use super::{AuditArgs, EnvSource, InstallArgs, ServiceAction, ServiceArgs};
+use crate::runtime_home::{
+    RuntimeSlot, read_runtime_slot_config, resolve_runtime_slot_for_current_exe,
+    slot_audit_log_path, slot_current_binary_path, slot_dir, slot_for_path,
+    slot_version_binary_path, write_runtime_slot_config,
+};
+use crate::slot_publish::{
+    BinaryPublication, activate_slot_current, prune_slot_versions, publish_slot_binary,
+    read_slot_current, restore_slot_current, validate_slot_version,
+};
+use crate::slot_update_lock::SlotUpdateLock;
+
+mod user_service;
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallResult {
+    slot: &'static str,
+    version: String,
+    digest: String,
+    binary_path: String,
+    current_binary_path: String,
+    replaced_version: Option<String>,
+    unchanged: bool,
+}
+
+/// Installs one immutable binary under a slot and rolls back `current` if config writing fails.
+///
+/// ```ignore
+/// let result = install_source(Path::new("/tmp/runtime"), RuntimeSlot::Remote, "1.2.0", home)?;
+/// ```
+fn install_source(
+    source: &Path,
+    slot: RuntimeSlot,
+    version: &str,
+    home: &Path,
+) -> io::Result<InstallResult> {
+    validate_slot_version(version)?;
+    let root = slot_dir(slot, home);
+    if slot_for_path(source, home).is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "binary {} already runs from a runtime slot; expected an external source binary",
+                source.display()
+            ),
+        ));
+    }
+    let digest = digest_file(source)?;
+    let _claim = SlotUpdateLock::acquire(
+        &root,
+        format!("install-{}", std::process::id()),
+        Duration::from_secs(120),
+    )?;
+    let previous = read_slot_current(&root)?;
+    let stored = read_runtime_slot_config(slot, home);
+    if let Some(error) = stored.error.as_ref() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("cannot install over invalid slot config: {error}"),
+        ));
+    }
+    let existing_binary = slot_version_binary_path(slot, version, home);
+    let unchanged = previous.as_deref() == Some(version)
+        && stored.stored_string("version").as_deref() == Some(version)
+        && stored.stored_string("digest").as_deref() == Some(digest.as_str())
+        && digest_file(&existing_binary).is_ok_and(|actual| actual == digest);
+    if !unchanged {
+        let publication = publish_slot_binary(&root, version, source)?;
+        if digest_file(&existing_binary)? != digest {
+            if publication == BinaryPublication::Published {
+                let _ = fs::remove_file(&existing_binary);
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "published binary {} does not match source digest {digest}; expected identical bytes",
+                    existing_binary.display()
+                ),
+            ));
+        }
+        let activated = activate_slot_current(&root, version)?;
+        let binary = slot_version_binary_path(slot, version, home);
+        let update = [
+            ("version", Some(Value::String(version.to_owned()))),
+            (
+                "binaryPath",
+                Some(Value::String(binary.to_string_lossy().into_owned())),
+            ),
+            ("digest", Some(Value::String(digest.clone()))),
+        ];
+        if let Err(error) = write_runtime_slot_config(slot, home, &update) {
+            restore_slot_current(&root, activated.as_deref())?;
+            return Err(io::Error::other(error));
+        }
+        let _ = prune_slot_versions(&root, version, previous.as_deref());
+    }
+    let binary = slot_version_binary_path(slot, version, home);
+    Ok(InstallResult {
+        slot: slot.as_str(),
+        version: version.to_owned(),
+        digest,
+        binary_path: binary.to_string_lossy().into_owned(),
+        current_binary_path: slot_current_binary_path(slot, home)
+            .to_string_lossy()
+            .into_owned(),
+        replaced_version: previous.filter(|old| old != version),
+        unchanged,
+    })
+}
+
+fn digest_file(path: &Path) -> io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut sha = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let len = file.read(&mut buffer)?;
+        if len == 0 {
+            break;
+        }
+        sha.update(&buffer[..len]);
+    }
+    Ok(format!(
+        "sha256:{}",
+        sha.finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ))
+}
+
+pub(super) fn run_install(args: InstallArgs, env: &impl EnvSource, version: &str) -> i32 {
+    let result = super::mango_home(env).and_then(|home| {
+        std::env::current_exe()
+            .and_then(|source| install_source(&source, args.slot, version, &home))
+    });
+    match result {
+        Ok(result) => {
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&result).expect("install result serializes")
+                );
+            } else {
+                println!(
+                    "Installed {} into the {} slot at {}.\nLaunch it through {}.\n\nNext:\n  mangostudio-runtime setup --slot {}\n  mangostudio-runtime connect --hub <url>   # or: serve --listen <host:port>\n  mangostudio-runtime service install",
+                    result.version,
+                    result.slot,
+                    result.binary_path,
+                    result.current_binary_path,
+                    result.slot
+                );
+            }
+            0
+        }
+        Err(error) => report_error(args.json, &error.to_string()),
+    }
+}
+
+pub(super) fn health_value_for(slot: RuntimeSlot, home: &Path, version: &str) -> io::Result<Value> {
+    let runtime = super::build_runtime()?;
+    let result = runtime.block_on(crate::health::build_health_report(
+        slot,
+        home,
+        version,
+        &tokio_util::sync::CancellationToken::new(),
+        None,
+    ));
+    runtime.shutdown_timeout(Duration::from_secs(2));
+    result.map_err(|error| io::Error::other(format!("runtime.health failed: {error}")))
+}
+
+fn health_value(home: &Path, version: &str) -> io::Result<Value> {
+    health_value_for(resolve_runtime_slot_for_current_exe(home), home, version)
+}
+
+pub(super) fn run_health(json_output: bool, env: &impl EnvSource, version: &str) -> i32 {
+    let Some(home) = super::mango_home_or_report(env) else {
+        return 1;
+    };
+    let report = match health_value(&home, version) {
+        Ok(report) => report,
+        Err(error) => return report_error(json_output, &error.to_string()),
+    };
+    if json_output {
+        println!("{report}");
+    } else {
+        println!(
+            "slot        {}\nversion     {}\nbinary      {}\ndigest      {}\nprofile     {} ({})\naudit       {}",
+            report["slot"].as_str().unwrap_or("?"),
+            version,
+            report["binaryPath"].as_str().unwrap_or("-"),
+            report["digest"].as_str().unwrap_or("-"),
+            report["profile"].as_str().unwrap_or("?"),
+            report["setup"]["state"].as_str().unwrap_or("?"),
+            if report["audit"]["enabled"] == true {
+                "on"
+            } else {
+                "off"
+            }
+        );
+    }
+    0
+}
+
+pub(super) fn run_doctor(json_output: bool, env: &impl EnvSource, version: &str) -> i32 {
+    let Some(home) = super::mango_home_or_report(env) else {
+        return 1;
+    };
+    let report = match health_value(&home, version) {
+        Ok(report) => report,
+        Err(error) => return report_error(json_output, &error.to_string()),
+    };
+    let mut findings = Vec::new();
+    let slot = report["slot"].as_str().unwrap_or("remote");
+    if let Some(error) = report["lastError"].as_str() {
+        findings.push(json!({"severity":"fail","title":"Config","detail":error,"fix":format!("mangostudio-runtime setup --slot {slot}")}));
+    }
+    if report["setup"]["state"] == "pending" {
+        findings.push(json!({"severity":"fail","title":"Consent","detail":"setup is pending","fix":format!("mangostudio-runtime setup --slot {slot}")}));
+    } else {
+        findings.push(json!({"severity":"ok","title":"Consent","detail":"configured"}));
+    }
+    let root = slot_dir(slot.parse().unwrap_or(RuntimeSlot::Remote), &home);
+    if let Some(version) = read_slot_current(&root).ok().flatten() {
+        let binary = root.join(&version).join(crate::runtime_home::binary_name());
+        if !binary.is_file() {
+            findings.push(json!({"severity":"fail","title":"Slot","detail":format!("current points to {version}, but {} is missing",binary.display()),"fix":format!("mangostudio-runtime install --slot {slot}")}));
+        }
+    } else if slot == "remote" && report["version"].is_string() {
+        findings.push(json!({"severity":"warn","title":"Slot","detail":"current pointer is missing or invalid","fix":format!("mangostudio-runtime install --slot {slot}")}));
+    }
+    if slot == "remote" {
+        let config = read_runtime_slot_config(RuntimeSlot::Remote, &home);
+        let paired = config.stored_string("hubUrl").is_some()
+            || config.stored_string("serveListen").is_some();
+        if paired {
+            match user_service::run(ServiceAction::Status, None, false, &home) {
+                Ok(status) if status["error"].is_string() => {
+                    findings.push(
+                        json!({"severity":"warn","title":"Service","detail":status["error"]}),
+                    );
+                }
+                Ok(status) if status["installed"] != true => {
+                    findings.push(json!({"severity":"warn","title":"Service","detail":"no user-level service keeps this runtime running across logout or reboot","fix":"mangostudio-runtime service install"}));
+                }
+                Ok(status) => {
+                    for (field, severity, detail) in [
+                        ("enabled", "warn", "the user service is not enabled"),
+                        ("running", "fail", "the user service is not running"),
+                        (
+                            "execUsesCurrent",
+                            "warn",
+                            "the user service does not use the current pointer",
+                        ),
+                        (
+                            "currentBinaryPresent",
+                            "fail",
+                            "the current slot binary is missing",
+                        ),
+                    ] {
+                        if status[field] == false {
+                            findings.push(json!({"severity":severity,"title":"Service","detail":detail,"fix":"mangostudio-runtime service install"}));
+                        }
+                    }
+                }
+                Err(error) => {
+                    findings.push(json!({"severity":"warn","title":"Service","detail":format!("could not read the user service: {error}")}));
+                }
+            }
+        }
+    }
+    let failed = findings.iter().any(|finding| finding["severity"] == "fail");
+    if json_output {
+        println!("{}", json!({"health":report,"findings":findings}));
+    } else {
+        for finding in &findings {
+            println!(
+                "{}  {}  {}",
+                finding["severity"].as_str().unwrap_or("?"),
+                finding["title"].as_str().unwrap_or("?"),
+                finding["detail"].as_str().unwrap_or("?")
+            );
+        }
+    }
+    i32::from(failed)
+}
+
+pub(super) fn run_service(args: ServiceArgs, env: &impl EnvSource) -> i32 {
+    let Some(home) = super::mango_home_or_report(env) else {
+        return 1;
+    };
+    match user_service::run(args.action, args.mode, args.force, &home) {
+        Ok(status) => {
+            if args.json {
+                println!("{status}");
+            } else if args.action == super::ServiceAction::Status {
+                println!(
+                    "installed  {}\nenabled    {}\nrunning    {}",
+                    status["installed"], status["enabled"], status["running"]
+                );
+            } else {
+                println!(
+                    "{} mangostudio-runtime service.",
+                    match args.action {
+                        super::ServiceAction::Install => "Installed",
+                        super::ServiceAction::Uninstall => "Removed",
+                        super::ServiceAction::Start => "Started",
+                        super::ServiceAction::Stop => "Stopped",
+                        super::ServiceAction::Restart => "Restart requested",
+                        super::ServiceAction::Status => unreachable!(),
+                    }
+                );
+            }
+            0
+        }
+        Err(error) => report_error(args.json, &error.to_string()),
+    }
+}
+
+fn parse_since(raw: &str) -> Result<DateTime<Utc>, String> {
+    let raw = raw.trim();
+    if let Some(unit) = raw.chars().last().map(|unit| unit.to_ascii_lowercase())
+        && matches!(unit, 's' | 'm' | 'h' | 'd')
+        && !raw[..raw.len() - 1].is_empty()
+        && raw[..raw.len() - 1]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit())
+        && let Ok(amount) = raw[..raw.len() - 1].parse::<i64>()
+    {
+        let seconds = amount
+            .checked_mul(match unit {
+                's' => 1,
+                'm' => 60,
+                'h' => 3600,
+                _ => 86400,
+            })
+            .ok_or_else(|| format!("--since {raw:?} is outside the supported date range"))?;
+        return Utc::now()
+            .checked_sub_signed(chrono::Duration::seconds(seconds))
+            .ok_or_else(|| format!("--since {raw:?} is outside the supported date range"));
+    }
+    DateTime::parse_from_rfc3339(raw)
+        .map(|date| date.with_timezone(&Utc))
+        .map_err(|_| {
+            format!("--since {raw:?} is not an ISO-8601 instant or relative duration like 24h")
+        })
+}
+
+fn audit_records(
+    path: &Path,
+    since: Option<DateTime<Utc>>,
+    denied: bool,
+) -> io::Result<Vec<Value>> {
+    let mut records = Vec::new();
+    for index in (0..=20).rev() {
+        let path = if index == 0 {
+            path.to_path_buf()
+        } else {
+            PathBuf::from(format!("{}.{}", path.display(), index))
+        };
+        let file = match File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        for line in io::BufReader::new(file).lines() {
+            let line = line?;
+            let Ok(record) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if !record["ts"].is_string()
+                || !record["method"].is_string()
+                || !record["hub"].is_string()
+                || !record["durationMs"].is_number()
+            {
+                continue;
+            }
+            if !matches!(record["outcome"].as_str(), Some("ok" | "denied" | "error")) {
+                continue;
+            }
+            if denied && record["outcome"] != "denied" {
+                continue;
+            }
+            if let Some(since) = since
+                && DateTime::parse_from_rfc3339(record["ts"].as_str().unwrap_or(""))
+                    .is_ok_and(|time| time.with_timezone(&Utc) < since)
+            {
+                continue;
+            }
+            records.push(record);
+        }
+    }
+    Ok(records)
+}
+
+pub(super) fn run_audit(args: AuditArgs, env: &impl EnvSource) -> i32 {
+    let Some(home) = super::mango_home_or_report(env) else {
+        return 1;
+    };
+    let slot = args
+        .slot
+        .unwrap_or_else(|| resolve_runtime_slot_for_current_exe(&home));
+    let since = match args.since.as_deref().map(parse_since).transpose() {
+        Ok(since) => since,
+        Err(error) => return report_error(args.json, &error),
+    };
+    match audit_records(&slot_audit_log_path(slot, &home), since, args.denied) {
+        Ok(records) => {
+            if args.json {
+                println!("{}", json!(records));
+            } else if records.is_empty() {
+                println!(
+                    "No audit lines for the {slot} runtime{}.",
+                    if args.denied { " (denied only)" } else { "" }
+                );
+            } else {
+                for record in records {
+                    println!(
+                        "{} {} {} {} {}ms",
+                        record["ts"].as_str().unwrap_or("?"),
+                        record["outcome"].as_str().unwrap_or("?"),
+                        record["method"].as_str().unwrap_or("?"),
+                        record["hub"].as_str().unwrap_or("?"),
+                        record["durationMs"]
+                    );
+                }
+            }
+            0
+        }
+        Err(error) => report_error(args.json, &error.to_string()),
+    }
+}
+
+fn report_error(json_output: bool, message: &str) -> i32 {
+    if json_output {
+        println!("{}", json!({"error":message}));
+    } else {
+        eprintln!("mangostudio-runtime: {message}");
+    }
+    1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::scratch_dir;
+
+    #[test]
+    fn self_install_publishes_and_reinstall_is_unchanged() {
+        let home = scratch_dir("native-install");
+        let source = home.join("downloaded-runtime");
+        fs::write(&source, b"runtime bytes").unwrap();
+        let first = install_source(&source, RuntimeSlot::Remote, "1.2.3", &home).unwrap();
+        assert!(!first.unchanged);
+        assert_eq!(
+            fs::read(&first.current_binary_path).unwrap(),
+            b"runtime bytes"
+        );
+        let second = install_source(&source, RuntimeSlot::Remote, "1.2.3", &home).unwrap();
+        assert!(second.unchanged);
+
+        fs::write(&first.binary_path, b"tampered bytes").unwrap();
+        let error = install_source(&source, RuntimeSlot::Remote, "1.2.3", &home).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert!(
+            error
+                .to_string()
+                .contains("already exists with different bytes")
+        );
+        assert_eq!(
+            fs::read(&first.current_binary_path).unwrap(),
+            b"tampered bytes"
+        );
+    }
+
+    #[test]
+    fn audit_filters_denials_and_ignores_malformed_lines() {
+        let home = scratch_dir("native-audit");
+        let path = home.join("audit.log");
+        fs::write(&path, "bad\n{\"ts\":\"2026-09-20T00:00:00Z\",\"method\":\"shell.run\",\"hub\":\"hub\",\"outcome\":\"denied\",\"durationMs\":1}\n{\"ts\":\"2026-09-20T00:00:00Z\",\"method\":\"git.exec\",\"hub\":\"hub\",\"outcome\":\"ok\",\"durationMs\":1}\n").unwrap();
+        assert_eq!(audit_records(&path, None, true).unwrap().len(), 1);
+        let after = parse_since("2026-09-21T00:00:00Z").unwrap();
+        assert!(audit_records(&path, Some(after), false).unwrap().is_empty());
+        assert!(parse_since("impossible").is_err());
+        assert!(parse_since("-1h").is_err());
+        assert!(parse_since("24H").is_ok());
+    }
+}

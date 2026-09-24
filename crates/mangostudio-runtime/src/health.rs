@@ -92,7 +92,7 @@ pub(crate) fn register(
 ///
 /// `path_override` stands in for `PATH` in tests only; production callers
 /// always pass `None`, which reads the real environment.
-async fn build_health_report(
+pub(crate) async fn build_health_report(
     slot: RuntimeSlot,
     mango_home: &Path,
     runtime_version: &str,

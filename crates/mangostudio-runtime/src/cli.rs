@@ -1,11 +1,8 @@
 //! Argument parsing and dispatch for the `mangostudio-runtime` binary.
 //!
-//! Mirrors the shape of `apps/runtime/src/cli.ts`, scoped to what this
-//! crate actually implements: `--version`/`--help` (already there before
-//! this change), `setup` (wiring [`crate::setup::run_non_interactive_setup`]
-//! behind real flags — no interactive prompting, no audit-only toggle; see
-//! that module's own doc comment for why), and the three transports in
-//! [`crate::transport`].
+//! Mirrors the commands in `apps/runtime/src/cli.ts`: setup, native
+//! installation, health, doctor, audit, user service management, and the
+//! three transports in [`crate::transport`].
 //!
 //! Every synchronous, disk-touching decision (consent, token resolution,
 //! resolving and remembering a listen address or hub URL) happens here,
@@ -30,8 +27,11 @@ use crate::runtime_home::{
     RuntimeSlot, SlotFileError, read_runtime_slot_config, resolve_runtime_slot_for_current_exe,
     write_runtime_slot_config,
 };
-use crate::setup::{self, NonInteractiveSetupRequest, SetupAuthority, parse_allow_overrides};
+use crate::setup::{self, NonInteractiveSetupRequest, parse_allow_overrides};
 use crate::transport::connect::RandomJitter;
+
+#[path = "cli/native_operation.rs"]
+mod native_operation;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -40,7 +40,11 @@ const USAGE: &str = "mangostudio-runtime {VERSION}\n\
 Usage: mangostudio-runtime <command> [options]\n\
 \n\
 Commands:\n\
-\x20\x20setup --profile <full|readonly|none> [--slot <host|wsl|remote>] [--allow k=v,...]\n\
+\x20\x20setup [--profile <full|readonly|none>] [--slot <host|wsl|remote>] [--allow k=v,...] [--audit on|off] [--yes] [--json]\n\
+\x20\x20install [--slot <host|wsl|remote>] [--json]\n\
+\x20\x20health|doctor [--json]\n\
+\x20\x20service <install|uninstall|status|start|stop|restart> [--mode connect|serve] [--force] [--json]\n\
+\x20\x20audit [--slot <host|wsl|remote>] [--since <when>] [--denied] [--json]\n\
 \x20\x20stdio (or --stdio)\n\
 \x20\x20serve --listen <port|host:port> [--token -|env]\n\
 \x20\x20connect --hub <url> [--token -|env]\n\
@@ -54,6 +58,11 @@ enum Invocation {
     Version,
     Help,
     Setup(SetupArgs),
+    Install(InstallArgs),
+    Health { json: bool },
+    Doctor { json: bool },
+    Service(ServiceArgs),
+    Audit(AuditArgs),
     Stdio,
     Serve(ServeArgs),
     Connect(ConnectArgs),
@@ -66,6 +75,53 @@ struct SetupArgs {
     slot: Option<RuntimeSlot>,
     profile: Option<ManifestProfile>,
     allow: Vec<(String, bool)>,
+    audit: Option<bool>,
+    yes: bool,
+    json: bool,
+}
+
+struct InstallArgs {
+    slot: RuntimeSlot,
+    json: bool,
+}
+
+struct ServiceArgs {
+    action: ServiceAction,
+    mode: Option<ServiceMode>,
+    json: bool,
+    force: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ServiceAction {
+    Install,
+    Uninstall,
+    Status,
+    Start,
+    Stop,
+    Restart,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ServiceMode {
+    Connect,
+    Serve,
+}
+
+impl ServiceMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Connect => "connect",
+            Self::Serve => "serve",
+        }
+    }
+}
+
+struct AuditArgs {
+    slot: Option<RuntimeSlot>,
+    since: Option<String>,
+    denied: bool,
+    json: bool,
 }
 
 struct ServeArgs {
@@ -118,6 +174,11 @@ fn parse(args: &[String]) -> Invocation {
         "--version" | "-v" => Invocation::Version,
         "--help" | "-h" => Invocation::Help,
         "setup" => parse_setup(&args[1..]),
+        "install" => parse_install(&args[1..]),
+        "health" => parse_report(&args[1..], false),
+        "doctor" => parse_report(&args[1..], true),
+        "service" => parse_service(&args[1..]),
+        "audit" => parse_audit(&args[1..]),
         // Both spellings are accepted: `spawnRuntimeChild` always appends
         // `--stdio` (`[launch.command, ...launch.args, '--stdio']`), so a
         // hub launching this binary never sends the bare word at all —
@@ -134,10 +195,161 @@ fn parse(args: &[String]) -> Invocation {
     }
 }
 
+fn parse_install(args: &[String]) -> Invocation {
+    let mut slot = RuntimeSlot::Remote;
+    let mut json = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--slot" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Invocation::Invalid("--slot needs host, wsl, or remote.".into());
+                };
+                let Some(parsed) = parse_slot(value) else {
+                    return Invocation::Invalid(format!(
+                        "--slot takes host, wsl, or remote, not {value:?}."
+                    ));
+                };
+                slot = parsed;
+                index += 2;
+            }
+            "--json" => {
+                json = true;
+                index += 1;
+            }
+            other => return Invocation::Unknown(other.into()),
+        }
+    }
+    Invocation::Install(InstallArgs { slot, json })
+}
+
+fn parse_report(args: &[String], doctor: bool) -> Invocation {
+    let mut json = false;
+    for arg in args {
+        if arg != "--json" {
+            return Invocation::Unknown(arg.clone());
+        }
+        json = true;
+    }
+    if doctor {
+        Invocation::Doctor { json }
+    } else {
+        Invocation::Health { json }
+    }
+}
+
+fn parse_service(args: &[String]) -> Invocation {
+    let Some(action) = args.first() else {
+        return Invocation::Invalid(
+            "service needs install, uninstall, status, start, stop, or restart.".into(),
+        );
+    };
+    let action = match action.as_str() {
+        "install" => ServiceAction::Install,
+        "uninstall" => ServiceAction::Uninstall,
+        "status" => ServiceAction::Status,
+        "start" => ServiceAction::Start,
+        "stop" => ServiceAction::Stop,
+        "restart" => ServiceAction::Restart,
+        other => return Invocation::Unknown(other.into()),
+    };
+    let mut mode = None;
+    let mut json = false;
+    let mut force = false;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--mode" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Invocation::Invalid("--mode needs connect or serve.".into());
+                };
+                mode = match value.as_str() {
+                    "connect" => Some(ServiceMode::Connect),
+                    "serve" => Some(ServiceMode::Serve),
+                    _ => {
+                        return Invocation::Invalid(format!(
+                            "--mode takes connect or serve, not {value:?}."
+                        ));
+                    }
+                };
+                index += 2;
+            }
+            "--json" => {
+                json = true;
+                index += 1;
+            }
+            "--force" if action == ServiceAction::Stop => {
+                force = true;
+                index += 1;
+            }
+            other => return Invocation::Unknown(other.into()),
+        }
+    }
+    Invocation::Service(ServiceArgs {
+        action,
+        mode,
+        json,
+        force,
+    })
+}
+
+fn parse_audit(args: &[String]) -> Invocation {
+    let mut slot = None;
+    let mut since = None;
+    let mut denied = false;
+    let mut json = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--slot" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Invocation::Invalid("--slot needs host, wsl, or remote.".into());
+                };
+                slot = match parse_slot(value) {
+                    Some(slot) => Some(slot),
+                    None => {
+                        return Invocation::Invalid(format!(
+                            "--slot takes host, wsl, or remote, not {value:?}."
+                        ));
+                    }
+                };
+                index += 2;
+            }
+            "--since" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Invocation::Invalid(
+                        "--since needs an ISO-8601 instant or relative duration like 24h.".into(),
+                    );
+                };
+                since = Some(value.clone());
+                index += 2;
+            }
+            "--denied" => {
+                denied = true;
+                index += 1;
+            }
+            "--json" => {
+                json = true;
+                index += 1;
+            }
+            other => return Invocation::Unknown(other.into()),
+        }
+    }
+    Invocation::Audit(AuditArgs {
+        slot,
+        since,
+        denied,
+        json,
+    })
+}
+
 fn parse_setup(args: &[String]) -> Invocation {
     let mut slot = None;
     let mut profile = None;
     let mut allow_raw: Option<&str> = None;
+    let mut audit = None;
+    let mut yes = false;
+    let mut json = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -172,6 +384,24 @@ fn parse_setup(args: &[String]) -> Invocation {
                 allow_raw = Some(value);
                 index += 2;
             }
+            "--audit" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Invocation::Invalid("--audit takes on or off.".into());
+                };
+                let Some(parsed) = setup::parse_boolean(value) else {
+                    return Invocation::Invalid(format!("--audit takes on or off, not {value:?}."));
+                };
+                audit = Some(parsed);
+                index += 2;
+            }
+            "--yes" | "-y" => {
+                yes = true;
+                index += 1;
+            }
+            "--json" => {
+                json = true;
+                index += 1;
+            }
             other => return Invocation::Unknown(other.to_string()),
         }
     }
@@ -184,6 +414,9 @@ fn parse_setup(args: &[String]) -> Invocation {
         slot,
         profile,
         allow,
+        audit,
+        yes,
+        json,
     })
 }
 
@@ -291,6 +524,11 @@ pub fn run(args: &[String], env: &impl EnvSource) -> i32 {
             1
         }
         Invocation::Setup(args) => run_setup(args, env),
+        Invocation::Install(args) => native_operation::run_install(args, env, VERSION),
+        Invocation::Health { json } => native_operation::run_health(json, env, VERSION),
+        Invocation::Doctor { json } => native_operation::run_doctor(json, env, VERSION),
+        Invocation::Service(args) => native_operation::run_service(args, env),
+        Invocation::Audit(args) => native_operation::run_audit(args, env),
         Invocation::Stdio => run_stdio(env),
         Invocation::Serve(args) => run_serve(args, env),
         Invocation::Connect(args) => run_connect(args, env),
@@ -306,35 +544,121 @@ fn mango_home(env: &impl EnvSource) -> std::io::Result<PathBuf> {
 }
 
 fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
-    let Some(home) = mango_home_or_report(env) else {
-        return 1;
+    let config = match RuntimeConfig::from_env(env) {
+        Ok(config) => config,
+        Err(error) => {
+            return setup_fail(args.json, &format!("could not resolve MANGO_HOME: {error}"));
+        }
     };
-    let Some(profile) = args.profile else {
-        eprintln!("mangostudio-runtime: setup needs --profile full|readonly|none.");
-        return 1;
-    };
+    let home = config.mango_home;
     let slot = args
         .slot
         .unwrap_or_else(|| resolve_runtime_slot_for_current_exe(&home));
+
+    if let Some(enabled) = args.audit
+        && args.profile.is_none()
+        && args.allow.is_empty()
+    {
+        let state = read_runtime_slot_config(slot, &home);
+        if let Some(error) = state.error.as_ref() {
+            return setup_fail(args.json, &error.to_string());
+        }
+        let pending_without_answer = state
+            .stored
+            .as_ref()
+            .and_then(|value| value.pointer("/setup/state"))
+            .and_then(serde_json::Value::as_str)
+            != Some("configured")
+            && state.stored.is_none();
+        if pending_without_answer {
+            return setup_fail(
+                args.json,
+                "Nothing to answer with: pass --profile full|readonly|none before toggling audit, or set MANGOSTUDIO_RUNTIME_SETUP.",
+            );
+        }
+        if !args.yes && !args.json {
+            return setup_fail(
+                args.json,
+                "Pass --yes with --audit on|off to change the audit log without re-answering consent.",
+            );
+        }
+        let updates = [
+            ("audit", Some(serde_json::json!({"enabled":enabled}))),
+            (
+                "source",
+                Some(serde_json::json!(
+                    crate::runtime_home::resolve_runtime_source_for_current_exe(&home)
+                )),
+            ),
+            ("version", Some(serde_json::json!(VERSION))),
+        ];
+        match write_runtime_slot_config(slot, &home, &updates) {
+            Ok(outcome) => report_replaced_unusable(outcome.replaced_unusable.as_ref()),
+            Err(error) => return setup_fail(args.json, &error.to_string()),
+        }
+        if args.json {
+            return setup_health_json(slot, &home);
+        }
+        println!(
+            "Audit {} for the {slot} runtime.\n  {}",
+            if enabled { "on" } else { "off" },
+            crate::runtime_home::slot_dir(slot, &home).display()
+        );
+        return 0;
+    }
+
+    let profile = match setup::resolve_profile_source_from_raw_env(
+        args.profile,
+        config.setup_profile.as_deref(),
+    ) {
+        Ok(Some(profile)) => profile,
+        Ok(None) => {
+            return setup_fail(
+                args.json,
+                "Nothing to answer with: pass --profile full|readonly|none, or set MANGOSTUDIO_RUNTIME_SETUP.",
+            );
+        }
+        Err(error) => return setup_fail(args.json, &error),
+    };
     let request = NonInteractiveSetupRequest {
         slot,
-        profile: (profile, SetupAuthority::Cli),
+        profile,
         allow_overrides: &args.allow,
     };
-    match setup::run_non_interactive_setup(&request, &home, &SystemWallClock) {
+    match setup::run_non_interactive_setup_with_audit(&request, &home, &SystemWallClock, args.audit)
+    {
         Ok(outcome) => {
             report_replaced_unusable(outcome.replaced_unusable.as_ref());
+            if args.json {
+                return setup_health_json(slot, &home);
+            }
             println!(
                 "Configured the {slot} runtime as {}.",
                 outcome.profile.as_str()
             );
             i32::from(outcome.exit_code())
         }
-        Err(error) => {
-            eprintln!("mangostudio-runtime: {error}");
-            i32::from(error.exit_code())
-        }
+        Err(error) => setup_fail(args.json, &error.to_string()),
     }
+}
+
+fn setup_health_json(slot: RuntimeSlot, home: &std::path::Path) -> i32 {
+    match native_operation::health_value_for(slot, home, VERSION) {
+        Ok(report) => {
+            println!("{report}");
+            0
+        }
+        Err(error) => setup_fail(true, &error.to_string()),
+    }
+}
+
+fn setup_fail(json: bool, message: &str) -> i32 {
+    if json {
+        println!("{}", serde_json::json!({"error":message}));
+    } else {
+        eprintln!("mangostudio-runtime: {message}");
+    }
+    1
 }
 
 /// Reports a replacement using only its path and failure category. A schema
@@ -414,6 +738,26 @@ fn begin_release_on(cancel: &CancellationToken) {
         cancel.cancelled().await;
         crate::release::Release::process().begin();
     });
+}
+
+/// Lets an active installer finish after a user service's signal-driven stop.
+/// The service unit enforces the final 30-second process cap.
+async fn settle_installer_until_service_cap() {
+    settle_installer_until(
+        crate::release::Release::process(),
+        crate::install::settled(),
+    )
+    .await;
+}
+
+async fn settle_installer_until(
+    release: &crate::release::Release,
+    settled: impl std::future::Future<Output = ()>,
+) {
+    tokio::select! {
+        () = settled => {}
+        () = release.cutoff(std::time::Duration::from_secs(27)) => {}
+    }
 }
 
 fn run_stdio(env: &impl EnvSource) -> i32 {
@@ -552,6 +896,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         let cancel = CancellationToken::new();
         let signal_task = signals.watch(cancel.clone());
         begin_release_on(&cancel);
+        let stopping = cancel.clone();
 
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
@@ -583,6 +928,9 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         // side, so this task has already finished (or is about to) by now
         // — never a wait on a signal that may never come.
         let _ = crate::supervisor::join_owned(signal_task).await;
+        if stopping.is_cancelled() {
+            settle_installer_until_service_cap().await;
+        }
         code
     });
     shut_down(runtime);
@@ -684,6 +1032,7 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
                 // `Stopped` means it has already fired (and so finished, or
                 // is about to) — safe, and correct, to await it.
                 let _ = crate::supervisor::join_owned(signal_task).await;
+                settle_installer_until_service_cap().await;
                 0
             }
             crate::transport::connect::ConnectOutcome::Refused { message } => {
@@ -841,6 +1190,58 @@ mod tests {
     }
 
     #[test]
+    fn native_operation_commands_parse_with_their_documented_flags() {
+        assert!(matches!(
+            parse(&[
+                "install".into(),
+                "--slot".into(),
+                "remote".into(),
+                "--json".into()
+            ]),
+            Invocation::Install(_)
+        ));
+        assert!(matches!(
+            parse(&["health".into(), "--json".into()]),
+            Invocation::Health { json: true }
+        ));
+        assert!(matches!(
+            parse(&["doctor".into()]),
+            Invocation::Doctor { json: false }
+        ));
+        assert!(matches!(
+            parse(&["service".into(), "restart".into()]),
+            Invocation::Service(_)
+        ));
+        assert!(matches!(
+            parse(&["service".into(), "stop".into(), "--force".into()]),
+            Invocation::Service(args) if args.force
+        ));
+        assert!(matches!(
+            parse(&["service".into(), "start".into(), "--force".into()]),
+            Invocation::Unknown(flag) if flag == "--force"
+        ));
+        assert!(matches!(
+            parse(&["audit".into(), "--denied".into()]),
+            Invocation::Audit(_)
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn native_service_stop_waits_for_installer_but_never_past_27_seconds() {
+        let release = crate::release::Release::new();
+        release.begin();
+        let start = tokio::time::Instant::now();
+        super::settle_installer_until(&release, std::future::pending()).await;
+        assert_eq!(start.elapsed(), std::time::Duration::from_secs(27));
+
+        let release = crate::release::Release::new();
+        release.begin();
+        let start = tokio::time::Instant::now();
+        super::settle_installer_until(&release, async {}).await;
+        assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+    }
+
+    #[test]
     fn a_trailing_argument_after_either_stdio_spelling_is_unknown() {
         assert!(matches!(
             parse(&["--stdio".to_string(), "extra".to_string()]),
@@ -918,6 +1319,71 @@ mod tests {
     fn setup_without_a_profile_exits_one() {
         let (_home, env) = scratch_env("setup-no-profile");
         assert_eq!(run(&["setup".to_string()], &env), 1);
+    }
+
+    #[test]
+    fn setup_accepts_environment_profile_and_audit_only_without_changing_consent() {
+        let home = scratch_path("setup-env-audit");
+        let env = MapEnv::from([
+            ("MANGO_HOME", home.to_str().unwrap()),
+            ("MANGOSTUDIO_RUNTIME_SETUP", "readonly"),
+        ]);
+        assert_eq!(
+            run(&["setup".into(), "--slot".into(), "remote".into()], &env),
+            0
+        );
+        let before = crate::runtime_home::read_runtime_slot_config(
+            crate::runtime_home::RuntimeSlot::Remote,
+            &home,
+        )
+        .stored
+        .unwrap();
+        assert_eq!(before["setup"]["by"], "env");
+        assert_eq!(
+            run(
+                &[
+                    "setup".into(),
+                    "--slot".into(),
+                    "remote".into(),
+                    "--audit".into(),
+                    "off".into(),
+                    "--yes".into()
+                ],
+                &env
+            ),
+            0
+        );
+        let after = crate::runtime_home::read_runtime_slot_config(
+            crate::runtime_home::RuntimeSlot::Remote,
+            &home,
+        )
+        .stored
+        .unwrap();
+        assert_eq!(after["allow"], before["allow"]);
+        assert_eq!(after["audit"]["enabled"], false);
+        assert_eq!(after["setup"], before["setup"]);
+    }
+
+    #[test]
+    fn audit_only_refuses_to_answer_an_unconfigured_slot() {
+        let (_home, env) = scratch_env("setup-audit-pending");
+        for slot in ["host", "wsl", "remote"] {
+            assert_eq!(
+                run(
+                    &[
+                        "setup".into(),
+                        "--slot".into(),
+                        slot.into(),
+                        "--audit".into(),
+                        "on".into(),
+                        "--yes".into()
+                    ],
+                    &env
+                ),
+                1,
+                "{slot} must not acquire audit config without a recorded answer"
+            );
+        }
     }
 
     #[test]

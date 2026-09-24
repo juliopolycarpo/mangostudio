@@ -383,6 +383,20 @@ pub fn run_non_interactive_setup(
     mango_home: &Path,
     wall_clock: &dyn WallClock,
 ) -> Result<SetupOutcome, SetupError> {
+    run_non_interactive_setup_with_audit(request, mango_home, wall_clock, None)
+}
+
+/// Writes the consent answer and an optional audit switch under the same slot lock.
+///
+/// ```ignore
+/// run_non_interactive_setup_with_audit(&request, home, &clock, Some(true))?;
+/// ```
+pub fn run_non_interactive_setup_with_audit(
+    request: &NonInteractiveSetupRequest<'_>,
+    mango_home: &Path,
+    wall_clock: &dyn WallClock,
+    audit: Option<bool>,
+) -> Result<SetupOutcome, SetupError> {
     let (chosen_profile, by) = request.profile;
     let base = consent_preset(chosen_profile);
     let allow = apply_allow_overrides(base, request.allow_overrides);
@@ -395,16 +409,16 @@ pub fn run_non_interactive_setup(
         "by": by.as_str(),
     });
 
-    let write = write_runtime_slot_config(
-        request.slot,
-        mango_home,
-        &[
-            ("allow", Some(allow_json)),
-            ("setup", Some(setup_json)),
-            ("profile", Some(serde_json::Value::from(profile.as_str()))),
-        ],
-    )
-    .map_err(SetupError::Write)?;
+    let mut updates = vec![
+        ("allow", Some(allow_json)),
+        ("setup", Some(setup_json)),
+        ("profile", Some(serde_json::Value::from(profile.as_str()))),
+    ];
+    if let Some(enabled) = audit {
+        updates.push(("audit", Some(serde_json::json!({"enabled":enabled}))));
+    }
+    let write =
+        write_runtime_slot_config(request.slot, mango_home, &updates).map_err(SetupError::Write)?;
 
     Ok(SetupOutcome {
         profile,
@@ -554,6 +568,27 @@ mod tests {
         assert_eq!(stored["setup"]["state"], "configured");
         assert_eq!(stored["setup"]["by"], "cli");
         assert_eq!(stored["profile"], "readonly");
+    }
+
+    #[test]
+    fn setup_can_write_audit_with_consent_in_one_update() {
+        let home = scratch_home("audit-with-consent");
+        run_non_interactive_setup_with_audit(
+            &NonInteractiveSetupRequest {
+                slot: RuntimeSlot::Host,
+                profile: (ManifestProfile::Readonly, SetupAuthority::Cli),
+                allow_overrides: &[],
+            },
+            &home,
+            &FixedWallClock::new(std::time::UNIX_EPOCH),
+            Some(true),
+        )
+        .unwrap();
+        let stored = read_runtime_slot_config(RuntimeSlot::Host, &home)
+            .stored
+            .unwrap();
+        assert_eq!(stored["setup"]["state"], "configured");
+        assert_eq!(stored["audit"]["enabled"], true);
     }
 
     #[test]
