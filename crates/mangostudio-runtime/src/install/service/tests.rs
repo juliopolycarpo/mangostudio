@@ -19,6 +19,7 @@ use crate::install::log::InstallLog;
 use crate::install::runs::{InstallRuns, StopReason};
 use crate::ports::audit::{Audit, AuditEntry, Outcome};
 use crate::ports::authorization::consent_denial;
+use crate::ports::exclusivity::{EffectClaim, NoExclusivity};
 use crate::ports::wall_clock::FixedWallClock;
 use crate::probing::detection::path_env::PathEnv;
 use crate::subprocess::{
@@ -435,11 +436,15 @@ fn command(run_id: &str) -> Value {
     })
 }
 
+fn effect_claim() -> EffectClaim {
+    EffectClaim::new(Arc::new(NoExclusivity), "test-install")
+}
+
 impl Harness {
     async fn run(&self, params: Value) -> Result<Value, RemoteError> {
         let events = Arc::clone(&self.events) as Arc<dyn InstallEvents>;
         self.service
-            .run(params, events, CancellationToken::new())
+            .run(params, events, CancellationToken::new(), effect_claim())
             .await
     }
 
@@ -451,7 +456,7 @@ impl Harness {
     ) -> tokio::task::JoinHandle<Result<Value, RemoteError>> {
         let service = Arc::clone(&self.service);
         let events = Arc::clone(&self.events) as Arc<dyn InstallEvents>;
-        tokio::spawn(async move { service.run(params, events, cancel).await })
+        tokio::spawn(async move { service.run(params, events, cancel, effect_claim()).await })
     }
 
     fn cancel(&self, run_id: &str) -> Value {
@@ -1515,7 +1520,7 @@ mod real {
 
     use super::{
         EmptyToolchainFs, RecordingAudit, RecordingDiagnostics, RecordingEvents, SwitchableConsent,
-        status, within,
+        effect_claim, status, within,
     };
     use crate::install::log::FileInstallLog;
     use crate::install::runs::InstallRuns;
@@ -1608,6 +1613,7 @@ mod real {
                 params("real-1", &program, &log, 10_000),
                 Arc::clone(&events) as Arc<dyn InstallEvents>,
                 CancellationToken::new(),
+                effect_claim(),
             )
             .await
             .unwrap();
@@ -1656,6 +1662,7 @@ mod real {
                 params("real-timeout", &program, &dir.join("install.log"), 700),
                 Arc::clone(&events) as Arc<dyn InstallEvents>,
                 CancellationToken::new(),
+                effect_claim(),
             )
             .await
             .unwrap();
@@ -1694,7 +1701,11 @@ mod real {
             let service = Arc::clone(&service);
             let params = params("real-cancel", &program, &dir.join("install.log"), 10_000);
             let events = Arc::clone(&events) as Arc<dyn InstallEvents>;
-            async move { service.run(params, events, CancellationToken::new()).await }
+            async move {
+                service
+                    .run(params, events, CancellationToken::new(), effect_claim())
+                    .await
+            }
         });
         within("the installer to start", async {
             while !events.has_line("stdout", "waiting") {

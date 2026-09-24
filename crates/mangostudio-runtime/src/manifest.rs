@@ -97,7 +97,7 @@ pub fn build_features(
     let mcp = allow.mcp && capability_ready(registry, "mcp");
     let library = allow.library && capability_ready(registry, "library");
     let checkpoints = allow.checkpoints && capability_ready(registry, "checkpoints");
-    let update = allow.update && capability_ready(registry, "update");
+    let update = cfg!(unix) && allow.update && capability_ready(registry, "update");
     let external_agents =
         allow.external_agents == Some(true) && capability_ready(registry, "externalAgents");
     // NOT a mirror of `manifest.ts`'s own `tools` line: that formula ORs the
@@ -172,6 +172,23 @@ mod tests {
         // unconditional hardcode, matching `manifest.ts` — see the module
         // docs for why that is safe even with nothing else implemented.
         assert!(features.toolchain);
+    }
+
+    #[test]
+    fn update_feature_requires_publication_support_on_this_platform() {
+        let registry = [
+            "runtime.update.begin",
+            "runtime.update.chunk",
+            "runtime.update.commit",
+        ]
+        .into_iter()
+        .fold(Registry::new(), |registry, method| {
+            registry.implement(method, |_params: Value, _context| async {
+                Ok::<_, mango_protocol::RemoteError>(json!({}))
+            })
+        });
+        let features = build_features(&registry, &full_allow(), true);
+        assert_eq!(features.update, cfg!(unix));
     }
 
     #[test]

@@ -71,6 +71,20 @@ pub struct Registry {
     exclusivity: Arc<dyn CallExclusivity>,
 }
 
+/// Releases a request claim when its future is aborted before the normal
+/// settlement path. A transferred effect ignores this release until its own
+/// owner drops `EffectClaim` after the machine work has ended.
+struct RequestClaim {
+    exclusivity: Arc<dyn CallExclusivity>,
+    call_id: String,
+}
+
+impl Drop for RequestClaim {
+    fn drop(&mut self) {
+        self.exclusivity.end(&self.call_id);
+    }
+}
+
 impl Default for Registry {
     fn default() -> Self {
         Self::new()
@@ -254,7 +268,12 @@ impl Registry {
                 // handler has settled, whatever that settlement turns out
                 // to be.
                 let call_id = context.id().to_string();
+                let claim = RequestClaim {
+                    exclusivity: Arc::clone(&exclusivity),
+                    call_id: call_id.clone(),
+                };
                 async move {
+                    let _claim = claim;
                     let started = clock.now();
                     // Settles the call if this future is dropped before it
                     // finishes — e.g. aborted after the session's handler

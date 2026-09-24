@@ -444,6 +444,7 @@ async fn handle_connection(
         options,
         host.registry,
         host.authorization,
+        host.update,
         context.slot.as_str(),
     );
 

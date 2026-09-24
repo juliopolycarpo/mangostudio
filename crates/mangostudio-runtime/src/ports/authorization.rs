@@ -150,6 +150,20 @@ pub struct AuthorizationGuard {
     slot: String,
 }
 
+struct PendingClaim<'a> {
+    exclusivity: &'a dyn CallExclusivity,
+    call_id: &'a str,
+    handed_off: bool,
+}
+
+impl Drop for PendingClaim<'_> {
+    fn drop(&mut self) {
+        if !self.handed_off {
+            self.exclusivity.end(self.call_id);
+        }
+    }
+}
+
 impl AuthorizationGuard {
     /// Builds a guard that claims `exclusivity` before asking `authorization`,
     /// records a denial (or an exclusivity refusal) through `audit`, and
@@ -191,6 +205,11 @@ impl Guard for AuthorizationGuard {
             let outcome: Result<(), RemoteError> = match self.exclusivity.begin(method, call_id) {
                 Err(refusal) => Err(refusal),
                 Ok(()) => {
+                    let mut claim = PendingClaim {
+                        exclusivity: self.exclusivity.as_ref(),
+                        call_id,
+                        handed_off: false,
+                    };
                     // Only the authorization check itself is inside this
                     // catch: a panic here becomes the wire result
                     // (INTERNAL), distinct from an ordinary denial (DENIED).
@@ -209,12 +228,11 @@ impl Guard for AuthorizationGuard {
                         }
                     })
                     .await;
-                    if result.is_err() {
-                        // The handler this claim was for will never run —
-                        // `Registry::implement`'s wrapper, which releases a
-                        // successful claim, is never reached for a denial
-                        // (or a panic) the guard itself returns.
-                        self.exclusivity.end(call_id);
+                    if result.is_ok() {
+                        // Registry now owns this claim. A denied, panicking,
+                        // or cancelled authorization read drops `claim` and
+                        // releases it before any handler can run.
+                        claim.handed_off = true;
                     }
                     result
                 }

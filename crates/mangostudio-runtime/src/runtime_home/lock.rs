@@ -444,6 +444,17 @@ fn reclaim_if_abandoned(path: &Path, policy: &LockPolicy) -> bool {
     }
 }
 
+/// Host identity used by the live-update lock, which shares this module's
+/// cross-platform process probes with runtime.json's lock protocol.
+pub(crate) fn current_hostname() -> io::Result<String> {
+    platform::hostname()
+}
+
+/// Whether a same-host lock holder still exists.
+pub(crate) fn is_process_alive(pid: u32) -> bool {
+    platform::is_process_alive(pid)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};

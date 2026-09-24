@@ -9,14 +9,9 @@
 //! module's own [`runtime_peer`]/`build_host` for what they share
 //! literally.
 //!
-//! Out of scope for every transport here, matching the crate's own current
-//! scope: every machine method group except `runtime.health` (see
-//! [`crate::health`]), `workspace.*` (see [`crate::workspace_methods`]),
-//! `probing.*` (see [`crate::probing`]), `fs.*`, and `snapshot.*` (both see
-//! [`crate::filesystem`]), `shell.run`/`git.exec`/`gh.exec`/`gh.mutate`
-//! (see [`crate::commands`]), `terminal.*` (see [`crate::terminal`]), `mcp.*`
-//! (see [`crate::mcp`]), and `install.run`/`install.cancel` is unimplemented, so
-//! [`crate::registry::Registry`] answers everything else with
+//! Implemented method families include `runtime.health`, `workspace.*`,
+//! `probing.*`, `fs.*`, `snapshot.*`, command, terminal, MCP, install, and
+//! `runtime.update.*`. [`crate::registry::Registry`] answers other methods with
 //! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
 //! module's own `hello_capabilities`, which shapes `crate::health`'s
 //! `build_capability_manifest` into the `Map` `hello` carries — without it, a
@@ -111,7 +106,8 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
 /// session itself: a [`Registry`] implementing `runtime.health`, the
-/// `workspace.*`, `probing.*`, `fs.*`, `snapshot.*`, `terminal.*`, `mcp.*`, and `install.*` methods (see [`build_host`]
+/// `workspace.*`, `probing.*`, `fs.*`, `snapshot.*`, `terminal.*`, `mcp.*`,
+/// `install.*`, and `runtime.update.*` methods (see [`build_host`]
 /// for the full list; every other machine method group is out of scope, and
 /// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
 /// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
@@ -127,6 +123,7 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 pub(crate) struct SessionHost {
     pub registry: Registry,
     pub authorization: Arc<dyn Authorization>,
+    pub update: crate::update::UpdateBinding,
 }
 
 /// Builds one [`SessionHost`] for `slot` under `mango_home`, announcing
@@ -134,35 +131,36 @@ pub(crate) struct SessionHost {
 /// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
 /// `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`, the
 /// eleven filesystem methods, three snapshot methods, eight terminal methods, the nine MCP
-/// methods, and the two install
-/// methods. Other groups remain unsupported.
-///
-/// Calls [`Registry::with_ports`], not
-/// [`Registry::with_ports_and_exclusivity`], so every connection this
-/// builds enforces [`crate::ports::exclusivity::NoExclusivity`] — not
-/// [`crate::ports::exclusivity::UpdateExclusivityTracker`]. That is correct
-/// *today* only because no `runtime.update.*` method exists yet, so there
-/// is nothing for update-versus-ordinary exclusivity to serialise; it is a
-/// gap left by scope, not a considered choice to leave update calls
-/// unserialised. Whichever change implements `runtime.update.*` must switch
-/// this call to [`Registry::with_ports_and_exclusivity`] with a real
-/// [`crate::ports::exclusivity::UpdateExclusivityTracker`] in the same
-/// change that adds the first update handler — and must keep typed parameter
-/// decoding inside [`Registry::implement`]'s wrapper, so its cleanup runs on
-/// a decode failure or a `Deserialize` panic — not as a follow-up, since a
-/// registry that implements an update method without that tracker installed
-/// is exactly the unguarded state this comment exists to prevent shipping
-/// unnoticed.
+/// methods, the two install methods, and the three runtime update methods.
+/// Other groups remain unsupported. Every connection shares the slot's update
+/// exclusivity tracker; its request claims use a connection-specific namespace.
 pub(crate) fn build_host(
     slot: RuntimeSlot,
     mango_home: &Path,
     runtime_version: &str,
 ) -> SessionHost {
+    build_host_with_restart(slot, mango_home, runtime_version, false)
+}
+
+/// Builds a stdio host that can exit for a supervisor after a verified commit.
+pub(crate) fn build_host_with_restart(
+    slot: RuntimeSlot,
+    mango_home: &Path,
+    runtime_version: &str,
+    supervised: bool,
+) -> SessionHost {
     let audit: Arc<dyn Audit> = Arc::new(crate::audit::FileAudit::new(
         slot_audit_log_path(slot, mango_home),
         Arc::new(SystemWallClock),
     ));
-    let registry = Registry::with_ports(Arc::clone(&audit), Arc::new(SystemClock));
+    let update =
+        crate::update::UpdateBinding::new_with_restart(slot, mango_home.to_path_buf(), supervised);
+    let exclusivity = update.exclusivity();
+    let registry = Registry::with_ports_and_exclusivity(
+        Arc::clone(&audit),
+        Arc::new(SystemClock),
+        exclusivity.clone(),
+    );
     let registry = crate::health::register(
         registry,
         slot,
@@ -190,10 +188,12 @@ pub(crate) fn build_host(
         ConsentSource::new(slot, mango_home.to_path_buf()),
         mango_home,
     );
+    let registry = crate::update::register(registry, &update, exclusivity);
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
         authorization,
+        update,
     }
 }
 
@@ -335,13 +335,18 @@ pub(crate) fn start_session<P: Port>(
     options: SessionOptions,
     registry: Registry,
     authorization: Arc<dyn Authorization>,
+    update: crate::update::UpdateBinding,
     slot: &str,
 ) -> (Session, tokio::task::JoinHandle<SessionClosure>) {
     let (session, driver) = Session::open(port, options);
     let guard = crate::serve::serve(runtime_contract(), &session, registry, authorization, slot)
         .expect("Registry::implement already panics on a catalog mismatch at registration time");
     guard.persist();
-    let driver_handle = tokio::spawn(driver.run());
+    let driver_handle = tokio::spawn(async move {
+        let closure = driver.run().await;
+        update.close().await;
+        closure
+    });
     (session, driver_handle)
 }
 
@@ -562,6 +567,9 @@ mod tests {
                 "probing.runtimes",
                 "probing.version-managers",
                 "runtime.health",
+                "runtime.update.begin",
+                "runtime.update.chunk",
+                "runtime.update.commit",
                 "shell.run",
                 "snapshot.capture",
                 "snapshot.hash",
@@ -578,7 +586,7 @@ mod tests {
                 "workspace.resolve-contained",
                 "workspace.validate",
             ],
-            "nothing else must be implemented yet"
+            "the production registry must match its implemented method families"
         );
     }
 

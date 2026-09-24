@@ -18,6 +18,7 @@
 //! happens to be this release.
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::sync::Semaphore;
 
@@ -36,6 +37,28 @@ use tokio::sync::Semaphore;
 /// per-machine tuning knob for it yet, and a fixed, named constant is
 /// easier to reason about than a value that varies by host.
 pub const MAX_CONCURRENT_BLOCKING_TASKS: usize = 8;
+static ACTIVE_BLOCKING_TASKS: AtomicUsize = AtomicUsize::new(0);
+
+/// Blocking effects still waiting for a pool permit or executing on a worker.
+/// The update gate reads this before claiming authority to replace a binary.
+pub(crate) fn active_count() -> usize {
+    ACTIVE_BLOCKING_TASKS.load(Ordering::SeqCst)
+}
+
+struct ActiveBlocking;
+
+impl ActiveBlocking {
+    fn begin() -> Self {
+        ACTIVE_BLOCKING_TASKS.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for ActiveBlocking {
+    fn drop(&mut self) {
+        ACTIVE_BLOCKING_TASKS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// The process-wide gate every [`run_blocking`] call acquires a permit from
 /// before it ever reaches [`tokio::task::spawn_blocking`].
@@ -87,6 +110,7 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    let active = ActiveBlocking::begin();
     let permit = blocking_pool()
         .acquire()
         .await
@@ -96,6 +120,7 @@ where
         // see this function's own doc comment for why that must not be
         // "until whoever called this stops awaiting it" instead.
         let _permit = permit;
+        let _active = active;
         f()
     })
     .await

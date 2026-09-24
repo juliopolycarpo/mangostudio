@@ -26,12 +26,10 @@
 //! - **Runtime process exit** by signal ends the process, and the supervisor's parent-death lease
 //!   (a Job object on Windows) terminates whatever the step still owns. On end of stdio input with
 //!   no signal after it, the host first waits for [`settled`], bounded by each step's own deadline.
-//!   That is the hub crashing or otherwise vanishing. An orderly Hub stop ends stdin and then
-//!   escalates to SIGTERM after 2 s and SIGKILL 2 s later (`TERMINATE_GRACE_MS` and
-//!   `KILL_GRACE_MS` in `apps/api/src/services/runtime-client/spawn-runtime-child.ts`; on Windows
-//!   both steps are process termination at 2 s), so its signal or termination cuts the wait
-//!   short and a longer step is killed. Whether the Hub should widen that
-//!   window while installs run is an open decision owned there, not here.
+//!   That is the hub crashing or otherwise vanishing. An orderly Hub stop ends stdin, then
+//!   escalates to SIGTERM after 27 s and SIGKILL 2 s later. The launcher allows another 1 s to
+//!   observe exit, capping its stop call at 30 s. On Windows the first escalation terminates the
+//!   process at 27 s. A longer installer step is still cut off by that cap.
 //!
 //! Detaching a browser viewer is not cancellation, and no path promises rollback. A run's owner is
 //! a task of its own, so dropping the request (the session tearing down its handlers) never

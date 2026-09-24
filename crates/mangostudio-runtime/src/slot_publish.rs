@@ -70,11 +70,28 @@ pub fn publish_slot_binary(
 ) -> io::Result<BinaryPublication> {
     validate_slot_version(version)?;
     unsupported_on_windows()?;
+    fs::create_dir_all(slot_dir)?;
     let version_dir = slot_dir.join(version);
-    fs::create_dir_all(&version_dir)?;
+    match fs::create_dir(&version_dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    require_directory(&version_dir)?;
     let destination = version_dir.join(binary_name());
-    if destination.exists() {
-        return compare_existing(source, &destination);
+    match fs::symlink_metadata(&destination) {
+        Ok(meta) if meta.file_type().is_file() => return compare_existing(source, &destination),
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "version binary {} must be a regular file",
+                    destination.display()
+                ),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
 
     let stage = unique_stage_path(&version_dir, &binary_name());
@@ -160,12 +177,14 @@ pub fn read_slot_current(slot_dir: &Path) -> io::Result<Option<String>> {
 pub fn activate_slot_current(slot_dir: &Path, version: &str) -> io::Result<Option<String>> {
     validate_slot_version(version)?;
     unsupported_on_windows()?;
-    let binary = slot_dir.join(version).join(binary_name());
-    if !binary.is_file() {
+    let version_dir = slot_dir.join(version);
+    require_directory(&version_dir)?;
+    let binary = version_dir.join(binary_name());
+    if !fs::symlink_metadata(&binary)?.file_type().is_file() {
         return Err(io::Error::new(
-            io::ErrorKind::NotFound,
+            io::ErrorKind::InvalidData,
             format!(
-                "cannot activate slot version {version:?}: expected binary at {}",
+                "cannot activate slot version {version:?}: expected regular binary at {}",
                 binary.display()
             ),
         ));
@@ -173,6 +192,19 @@ pub fn activate_slot_current(slot_dir: &Path, version: &str) -> io::Result<Optio
     let previous = read_slot_current(slot_dir)?;
     write_pointer(slot_dir, version)?;
     Ok(previous)
+}
+
+fn require_directory(path: &Path) -> io::Result<()> {
+    if fs::symlink_metadata(path)?.file_type().is_dir() {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "version directory {} must be a real directory",
+            path.display()
+        ),
+    ))
 }
 
 /// Restores a previous version or removes `current` when it was absent.
@@ -213,6 +245,15 @@ pub fn restore_slot_current(slot_dir: &Path, previous: Option<&str>) -> io::Resu
 }
 
 fn compare_existing(source: &Path, destination: &Path) -> io::Result<BinaryPublication> {
+    if !fs::symlink_metadata(destination)?.file_type().is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "version binary {} must be a regular file",
+                destination.display()
+            ),
+        ));
+    }
     let mut input = File::open(source)?;
     let mut existing = File::open(destination)?;
     let mut left = [0; 8192];
@@ -389,5 +430,43 @@ mod tests {
             io::ErrorKind::InvalidData
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn publication_refuses_symlinked_version_directory_and_binary() {
+        use std::os::unix::fs::symlink;
+
+        let dir = slot();
+        let outside = slot();
+        let source = dir.join("source");
+        fs::write(&source, b"binary").unwrap();
+        symlink(&outside, dir.join("1.0.0")).unwrap();
+        assert_eq!(
+            publish_slot_binary(&dir, "1.0.0", &source)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            activate_slot_current(&dir, "1.0.0").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert!(!outside.join(binary_name()).exists());
+
+        fs::remove_file(dir.join("1.0.0")).unwrap();
+        fs::create_dir(dir.join("1.0.0")).unwrap();
+        symlink(&source, dir.join("1.0.0").join(binary_name())).unwrap();
+        assert_eq!(
+            publish_slot_binary(&dir, "1.0.0", &source)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            activate_slot_current(&dir, "1.0.0").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }
