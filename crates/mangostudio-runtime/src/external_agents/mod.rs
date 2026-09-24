@@ -10,6 +10,14 @@
 //! - [`isolation`] proves whose vendor credentials this process would use.
 //! - [`launcher`] adapts the runtime's process supervision to the SDK's
 //!   `ProcessLauncher` port.
+//! - [`wire`] is the product wire as typed Rust; [`map`] is the one place SDK
+//!   types become wire types.
+
+// Scaffolding while the host is assembled commit by commit; removed by the
+// commit that registers the methods, so nothing in the finished module is dead.
+#![allow(dead_code)]
 
 pub(crate) mod isolation;
 pub(crate) mod launcher;
+pub(crate) mod map;
+pub(crate) mod wire;
