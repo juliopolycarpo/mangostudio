@@ -119,6 +119,20 @@ describe('Real Rust runtime external-agent admission', () => {
       ...(opts.policy ? { workspacePolicy: async () => true } : {}),
     });
     if (opts.healthFirst) await rust.health();
+    if (label.startsWith('m')) {
+      await expect(
+        rust.externalAgents.open({
+          sessionId: `diag-${label}`,
+          targetId: 'codex',
+          workspacePath: authorized,
+          configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
+          resumeMode: 'fallback',
+          timeoutMs: 10_000,
+        })
+      ).rejects.toThrow(/is not installed/);
+      console.error('DIAG variant result', label, 'rejects matched', Date.now());
+      return;
+    }
     const result = await rust.externalAgents
       .open({
         sessionId: `diag-${label}`,
@@ -435,4 +449,20 @@ describe('Real Rust runtime external-agent admission', () => {
       60_000
     );
   }
+
+  it.skipIf(!binary.available)(
+    'DIAG m1 clone using expect().rejects',
+    () => diagVariant('m1', { db: true, binding: true, policy: false, healthFirst: false }),
+    60_000
+  );
+  it.skipIf(!binary.available)(
+    'DIAG m2 clone using expect().rejects after health',
+    () => diagVariant('m2', { db: true, binding: true, policy: false, healthFirst: true }),
+    60_000
+  );
+  it.skipIf(!binary.available)(
+    'DIAG m3 no db, policy true, expect().rejects',
+    () => diagVariant('m3', { db: false, binding: true, policy: true, healthFirst: false }),
+    60_000
+  );
 });
