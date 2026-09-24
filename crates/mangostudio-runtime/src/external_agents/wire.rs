@@ -13,6 +13,9 @@
 //! present, because absence and an explicit `null` mean different things on
 //! this wire.
 
+// TEMPORARY while turns are assembled; removed once the turn methods use every type.
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 use crate::commands::toolchain::Selection as ToolchainSelection;
@@ -487,4 +490,362 @@ pub(crate) struct ListSessionsResult {
     pub sessions: Vec<NativeSession>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+}
+
+/// `ExternalAgentAttachment`: bytes the hub already bounded, as base64.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct Attachment {
+    pub id: String,
+    pub original_name: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub kind: AttachmentKind,
+    pub bytes_base64: String,
+}
+
+/// `ExternalAgentAttachment.kind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum AttachmentKind {
+    Image,
+    Text,
+    Pdf,
+    Data,
+    Unknown,
+}
+
+/// `external-agent.turn` params.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct TurnParams {
+    pub session_id: String,
+    pub client_message_id: String,
+    pub input: String,
+    pub configuration: Configuration,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<Attachment>>,
+}
+
+/// `external-agent.turn` result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TurnResult {
+    pub native_turn_id: String,
+}
+
+/// `external-agent.respond` params: an answer to one approval.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RespondParams {
+    pub session_id: String,
+    pub native_turn_id: String,
+    pub request_id: String,
+    pub option_id: String,
+}
+
+/// `external-agent.steer` params.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SteerParams {
+    pub session_id: String,
+    pub native_turn_id: String,
+    pub client_message_id: String,
+    pub input: String,
+}
+
+/// `ExternalSteerRejectionReason`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SteerRejection {
+    TurnAlreadyCompleted,
+    NotSupported,
+    SessionLost,
+    TurnNotSteerable,
+    IdReused,
+}
+
+/// `external-agent.steer` result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub(crate) enum SteerResult {
+    /// `{ "accepted": true }`.
+    Accepted {
+        /// Always `true`.
+        accepted: bool,
+    },
+    /// `{ "accepted": false, "reasonCode": … }`.
+    Rejected {
+        /// Always `false`.
+        accepted: bool,
+        /// Why the steer did not land.
+        #[serde(rename = "reasonCode")]
+        reason_code: SteerRejection,
+    },
+}
+
+impl SteerResult {
+    /// The steer reached the running turn.
+    pub(crate) const ACCEPTED: Self = Self::Accepted { accepted: true };
+
+    /// The steer was refused for `reason`.
+    pub(crate) fn rejected(reason: SteerRejection) -> Self {
+        Self::Rejected {
+            accepted: false,
+            reason_code: reason,
+        }
+    }
+}
+
+/// `ExternalReviewTarget`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", deny_unknown_fields)]
+pub(crate) enum ReviewTarget {
+    /// The working tree's uncommitted changes.
+    #[serde(rename = "uncommittedChanges")]
+    UncommittedChanges,
+}
+
+/// `external-agent.start-review` params.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct StartReviewParams {
+    pub session_id: String,
+    pub client_message_id: String,
+    pub target: ReviewTarget,
+}
+
+/// `external-agent.start-review` result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StartReviewResult {
+    pub native_turn_id: String,
+    pub review_thread_id: String,
+}
+
+/// `external-agent.cancel` params.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CancelParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub native_turn_id: Option<String>,
+}
+
+/// `ExternalActivityKind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ActivityKind {
+    Command,
+    FileChange,
+    Mcp,
+    Subagent,
+    WebSearch,
+    Image,
+    Plan,
+    Review,
+    Compaction,
+    Other,
+}
+
+/// `ExternalActivityView`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ActivityView {
+    pub name: String,
+    pub kind: ActivityKind,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+}
+
+/// `ExternalActivityUpdate`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ActivityUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+}
+
+/// `ExternalActivityStatus`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ActivityStatus {
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+/// `ExternalActivityResult`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ActivityResult {
+    pub status: ActivityStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+}
+
+/// `ExternalApprovalOption`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ApprovalOption {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_label: Option<String>,
+    pub is_destructive: bool,
+}
+
+/// `ExternalApprovalRequest`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ApprovalRequest {
+    pub request_id: String,
+    pub kind: ActivityKind,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub options: Vec<ApprovalOption>,
+    pub expires_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+}
+
+/// `ExternalApprovalDecision.source`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum DecisionSource {
+    User,
+    AutoReview,
+    Expired,
+    Cancelled,
+}
+
+/// `ExternalApprovalDecision`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ApprovalDecision {
+    pub option_id: String,
+    pub source: DecisionSource,
+}
+
+/// `ExternalUsage`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Usage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_tokens: Option<u64>,
+}
+
+/// `ExternalThreadUsage`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ThreadUsage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last: Option<Usage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<Usage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u64>,
+}
+
+/// `ExternalAgentError`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentError {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vendor_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+}
+
+/// `ExternalAgentCommand`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Command {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// `ExternalAgentEvent`: one event on the `external-agent.event` topic.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum Event {
+    /// The vendor session is up; carries whether it resumed.
+    SessionStarted {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        resumed: bool,
+    },
+    /// The slash-command catalog, a session fact.
+    CommandsAvailable { commands: Vec<Command> },
+    TextDelta { text: String },
+    ReasoningDelta { text: String },
+    ReasoningStarted,
+    ReasoningEnded,
+    ActivityStarted {
+        #[serde(rename = "callId")]
+        call_id: String,
+        activity: ActivityView,
+    },
+    ActivityUpdated {
+        #[serde(rename = "callId")]
+        call_id: String,
+        update: ActivityUpdate,
+    },
+    ActivityCompleted {
+        #[serde(rename = "callId")]
+        call_id: String,
+        result: ActivityResult,
+    },
+    ApprovalRequested { request: ApprovalRequest },
+    ApprovalResolved {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        decision: ApprovalDecision,
+    },
+    Usage { usage: Usage },
+    ThreadUsage { usage: ThreadUsage },
+    AccountLimits { limits: AccountLimits },
+    Cancelled,
+    Completed,
+    Error { error: AgentError },
+}
+
+/// `ExternalAgentEventEnvelope`: what the topic carries.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EventEnvelope {
+    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_turn_id: Option<String>,
+    pub sequence: u64,
+    pub emitted_at_ms: u64,
+    pub event: Event,
 }
