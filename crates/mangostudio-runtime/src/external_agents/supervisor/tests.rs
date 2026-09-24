@@ -771,7 +771,7 @@ async fn an_unauthorized_workspace_is_refused_before_any_lookup_or_launch() {
 #[tokio::test]
 async fn the_fallback_authority_denies_every_workspace() {
     let authority = super::DenyEveryWorkspace;
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     assert!(
         !authority.authorize(&rig.hub, Path::new("/")).await,
         "expected the fallback workspace authority to deny | received: allow"
@@ -1111,7 +1111,6 @@ async fn an_open_that_finishes_after_a_close_was_requested_is_closed_not_registe
         .supervisor
         .run_open(
             rig.open_params("one"),
-            &rig.hub,
             &super::Opening {
                 target: TargetId::Claude,
                 cancel: CancellationToken::new(),
