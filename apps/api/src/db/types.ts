@@ -525,6 +525,38 @@ interface EnvironmentToolchainsTable {
 }
 
 /** Root Kysely Database interface. */
+/** Where one submission of an external turn stands; see migration 056. */
+export type ExternalTurnAttemptState =
+  | 'acceptance-unknown'
+  | 'not-submitted'
+  | 'accepted'
+  | 'terminal'
+  | 'unresolved';
+
+/**
+ * The hub's receipt for one submission of an external turn, written before
+ * the request is sent. `messageId` is the logical operation; `id` is the
+ * attempt.
+ */
+interface ExternalTurnAttemptsTable {
+  id: string;
+  messageId: string;
+  chatId: string;
+  userId: string;
+  environmentId: string;
+  sessionId: string;
+  clientMessageId: string;
+  /** sha256 of the exact serialized params sent; the params are never stored. */
+  inputFingerprint: string;
+  state: ExternalTurnAttemptState;
+  /** The runtime connection the attempt was sent on. */
+  connectionRevision: number;
+  nativeTurnId: string | null;
+  terminalReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Database {
   chats: ChatsTable;
   environments: EnvironmentsTable;
@@ -554,6 +586,7 @@ export interface Database {
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
   external_session_continuations: ExternalSessionContinuationsTable;
+  external_turn_attempts: ExternalTurnAttemptsTable;
   external_session_adoption_leases: ExternalSessionAdoptionLeasesTable;
   external_agent_disclosures: ExternalAgentDisclosuresTable;
   external_account_limits_cache: ExternalAccountLimitsCacheTable;
@@ -565,6 +598,10 @@ export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
 
 export type ChatAttachmentSelect = Selectable<ChatAttachmentsTable>;
 export type ChatAttachmentInsert = Insertable<ChatAttachmentsTable>;
+
+export type ExternalTurnAttemptSelect = Selectable<ExternalTurnAttemptsTable>;
+export type ExternalTurnAttemptInsert = Insertable<ExternalTurnAttemptsTable>;
+export type ExternalTurnAttemptUpdate = Updateable<ExternalTurnAttemptsTable>;
 
 export type EnvironmentSelect = Selectable<EnvironmentsTable>;
 export type EnvironmentInsert = Insertable<EnvironmentsTable>;
