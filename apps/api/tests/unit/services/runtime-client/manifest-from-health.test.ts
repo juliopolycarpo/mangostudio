@@ -220,6 +220,31 @@ describe('capabilityManifestFromHealth', () => {
     });
   });
 
+  // Known trade-off: hello cannot tell "build lacks it" from "consent refused
+  // it", so a build gap hidden behind a consent refusal is lifted on a later
+  // grant, and the runtime rejects the call itself. This is not build detection.
+  it('lifts a build gap hidden behind a handshake consent refusal on a later grant', () => {
+    const noneReport: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'none',
+      allow: RUNTIME_CONSENT_PRESETS.none,
+    };
+    // A build without shell reports the same `shell: false` as a refusal.
+    const hello = capabilityManifestFromHealth(noneReport);
+    const handshake = { ...hello, features: { ...hello.features, shell: false } };
+
+    const granted = capabilityManifestFromHealth(
+      {
+        ...baseReport,
+        profile: 'custom',
+        allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true },
+      },
+      handshake
+    );
+
+    expect(granted.features.shell).toBe(true);
+  });
+
   it('derives tools from capabilities that are both allowed and implemented', () => {
     const report: RuntimeHealthReport = {
       ...baseReport,
