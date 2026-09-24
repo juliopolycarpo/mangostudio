@@ -413,6 +413,12 @@ mod unix {
         );
         std::fs::write(&gate, "").expect("gate opens");
         wait(&first).await;
+        // `wait` answers as soon as the child exits; the slot is the tree's,
+        // and is released once `kill` has proven the tree gone.
+        tokio::time::timeout(BOUND, first.control.kill(CancelReason::Requested))
+            .await
+            .expect("expected the tree proven gone within the bound")
+            .expect("expected the finished tree to be reaped");
         let third = start(&launcher, spec(&["true"], &directory, false)).await;
         wait(&third).await;
     }

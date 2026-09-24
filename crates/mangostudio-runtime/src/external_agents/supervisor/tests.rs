@@ -272,13 +272,25 @@ impl HarnessFactory for CountingHarnesses {
 struct AllowListedWorkspaces {
     allowed: BTreeSet<PathBuf>,
     asks: AtomicUsize,
+    /// When set, every answer waits until the gate reads `true`.
+    gate: Option<watch::Receiver<bool>>,
 }
 
 impl WorkspaceAuthority for AllowListedWorkspaces {
     fn authorize<'a>(&'a self, canonical: &'a Path) -> PortFuture<'a, bool> {
         self.asks.fetch_add(1, Ordering::SeqCst);
         let allowed = self.allowed.contains(canonical);
-        Box::pin(async move { allowed })
+        let gate = self.gate.clone();
+        Box::pin(async move {
+            if let Some(mut gate) = gate {
+                while !*gate.borrow_and_update() {
+                    if gate.changed().await.is_err() {
+                        break;
+                    }
+                }
+            }
+            allowed
+        })
     }
 }
 
@@ -323,6 +335,7 @@ struct RigOptions {
     authorize_workspace: bool,
     installed: bool,
     session_cap: usize,
+    authority_gate: Option<watch::Receiver<bool>>,
 }
 
 impl Default for RigOptions {
@@ -333,6 +346,7 @@ impl Default for RigOptions {
             authorize_workspace: true,
             installed: true,
             session_cap: super::DEFAULT_SESSION_CAP,
+            authority_gate: None,
         }
     }
 }
@@ -349,6 +363,7 @@ fn rig(options: RigOptions) -> Rig {
             BTreeSet::new()
         },
         asks: AtomicUsize::new(0),
+        gate: options.authority_gate,
     });
     let executables = Arc::new(FixedExecutables {
         installed: options.installed,
@@ -842,6 +857,7 @@ async fn an_open_that_finishes_after_a_close_was_requested_is_closed_not_registe
                 close_cause: Mutex::new(None),
                 outcome: watch::channel(None).0,
                 settled: watch::channel(false).0,
+                cleanup_failure: Mutex::new(None),
             },
         )
         .await
@@ -867,7 +883,8 @@ async fn an_open_bounded_by_its_deadline_tells_the_vendor_to_stop() {
         ..RigOptions::default()
     });
     let mut params = rig.open_params("one");
-    params.timeout_ms = 30;
+    // Long enough that the vendor is reached well before it fires.
+    params.timeout_ms = 500;
     let error = rig
         .supervisor
         .open(params, &rig.hub, &CancellationToken::new())
@@ -892,27 +909,47 @@ async fn a_vendor_that_opens_while_being_stopped_is_closed_not_leaked() {
         open: OpenBehaviour::FinishWhenCancelled,
         ..RigOptions::default()
     });
-    let mut params = rig.open_params("one");
-    params.timeout_ms = 30;
-    let error = rig
-        .supervisor
-        .open(params, &rig.hub, &CancellationToken::new())
+    let supervisor = Arc::clone(&rig.supervisor);
+    let hub = rig.hub.clone();
+    let params = rig.open_params("one");
+    let caller = CancellationToken::new();
+    let caller_cancel = caller.clone();
+    let opening = tokio::spawn(async move { supervisor.open(params, &hub, &caller).await });
+    // Only once the vendor is mid-open does the hub give up on the call.
+    eventually(
+        "the open to reach the vendor",
+        || rig.log.opens(),
+        |opens| *opens == 1,
+    )
+    .await;
+    caller_cancel.cancel();
+    let error = opening
         .await
-        .expect_err("an open past its deadline must fail");
-    assert_eq!(error.code, codes::TIMEOUT, "received: {error:?}");
+        .unwrap()
+        .expect_err("a cancelled open must fail");
+    assert_eq!(error.code, codes::CANCELLED, "received: {error:?}");
+    eventually(
+        "the session the vendor opened late to be closed",
+        || rig.log.closes(),
+        |closes| !closes.is_empty(),
+    )
+    .await;
     assert_eq!(
         rig.log.closes(),
         vec![CloseReason::Requested],
         "expected the session the vendor opened late to be closed once"
     );
-    assert_eq!(rig.live_count(), 0);
-    assert_eq!(
-        std::fs::read_dir(rig.private_root.join("scratch"))
-            .unwrap()
-            .count(),
-        0,
-        "expected the late session's scratch removed"
-    );
+    eventually("no live session", || rig.live_count(), |live| *live == 0).await;
+    eventually(
+        "the late session's scratch removed",
+        || {
+            std::fs::read_dir(rig.private_root.join("scratch"))
+                .unwrap()
+                .count()
+        },
+        |leaves| *leaves == 0,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -922,7 +959,15 @@ async fn a_child_the_sdk_could_not_clean_up_is_reaped_before_the_failure_returns
         open: OpenBehaviour::FailNeedingCleanup(Arc::clone(&control)),
         ..RigOptions::default()
     });
-    rig.open("one").await.expect_err("the open must fail");
+    let error = rig.open("one").await.expect_err("the open must fail");
+    assert!(
+        error
+            .details
+            .as_ref()
+            .is_none_or(|details| !details.contains_key("cleanupRequired")),
+        "expected no cleanupRequired once the child was reaped | received: {:?}",
+        error.details
+    );
     assert_eq!(
         (
             control.kills.load(Ordering::SeqCst),
@@ -1219,4 +1264,95 @@ fn only_an_explicit_withdrawal_in_the_hub_hello_withholds_attestation() {
     assert!(!crate::external_agents::hub_withdrew_isolation(
         &serde_json::Map::new()
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Review regressions
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn an_open_stopped_before_it_launched_never_reaches_the_vendor() {
+    let (release, gate) = watch::channel(false);
+    let rig = rig(RigOptions {
+        authority_gate: Some(gate),
+        ..RigOptions::default()
+    });
+    let supervisor = Arc::clone(&rig.supervisor);
+    let hub = rig.hub.clone();
+    let params = rig.open_params("one");
+    let opening = tokio::spawn(async move {
+        supervisor
+            .open(params, &hub, &CancellationToken::new())
+            .await
+    });
+    eventually(
+        "the open to wait on the workspace authority",
+        || rig.workspaces.asks.load(Ordering::SeqCst),
+        |asks| *asks == 1,
+    )
+    .await;
+    // The close lands while the open is still deciding; the authority then
+    // says yes inside the grace the stop allows.
+    let closing = rig.supervisor.close_session(
+        CloseParams {
+            session_id: "one".into(),
+        },
+        CloseCause::Requested,
+    );
+    let (closed, ()) = tokio::join!(closing, async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        release.send_replace(true);
+    });
+    closed.unwrap();
+    opening.await.unwrap().expect_err("a closed open must fail");
+    assert_eq!(
+        (
+            rig.log.opens(),
+            rig.executables.lookups.load(Ordering::SeqCst)
+        ),
+        (0, 0),
+        "expected (vendor opens, executable lookups) = (0, 0) after a stop before launch"
+    );
+    let scratch = rig.private_root.join("scratch");
+    assert!(
+        !scratch.exists() || std::fs::read_dir(&scratch).unwrap().count() == 0,
+        "expected no scratch created for an open stopped before launch"
+    );
+}
+
+#[tokio::test]
+async fn each_open_gets_its_own_scratch_leaf_even_for_one_session_id() {
+    let rig = rig(RigOptions::default());
+    let first = rig.supervisor.session_scratch("same").unwrap();
+    let second = rig.supervisor.session_scratch("same").unwrap();
+    assert_ne!(
+        first, second,
+        "expected distinct leaves for two opens of one id"
+    );
+    assert!(
+        first.is_dir() && second.is_dir(),
+        "expected creating the second leaf to leave the first in place"
+    );
+}
+
+#[test]
+fn a_failed_late_cleanup_is_reported_by_the_close_that_waited_for_it() {
+    let opening = super::Opening {
+        target: TargetId::Claude,
+        cancel: CancellationToken::new(),
+        close_cause: Mutex::new(None),
+        outcome: watch::channel(None).0,
+        settled: watch::channel(false).0,
+        cleanup_failure: Mutex::new(None),
+    };
+    assert!(opening.cleanup_outcome().is_ok());
+    opening.record_cleanup(Err("the vendor close did not finish in time".into()));
+    let error = opening
+        .cleanup_outcome()
+        .expect_err("a failed late cleanup must be reported");
+    assert!(
+        error.message.contains("did not finish in time"),
+        "received: {}",
+        error.message
+    );
 }

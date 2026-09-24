@@ -208,7 +208,6 @@ struct Start {
 /// What the owner publishes once the tree is gone.
 #[derive(Clone)]
 struct Terminal {
-    status: std::result::Result<ExitStatus, String>,
     cleanup: std::result::Result<(), String>,
 }
 
@@ -271,6 +270,7 @@ async fn own(
     let kill = CancellationToken::new();
     let (interrupt_tx, mut interrupts) = mpsc::channel::<InterruptReply>(4);
     let (terminal_tx, terminal_rx) = watch::channel(None);
+    let (exit_tx, exit_rx) = watch::channel(None);
     let control = GuardedControl {
         pid: child.id(),
         program: program.clone(),
@@ -278,6 +278,7 @@ async fn own(
         kill: kill.clone(),
         interrupts: interrupt_tx,
         terminal: terminal_rx,
+        exit: exit_rx,
         _lease: Arc::clone(&lease),
     };
     let managed = ManagedProcess {
@@ -300,11 +301,24 @@ async fn own(
     let exited = supervise(&mut child, &kill, &handed_out, &mut interrupts, release).await;
     // Pending and later interrupt requests now resolve as `NotDelivered` instead of waiting.
     drop(interrupts);
+    // The target's own exit is published the moment it is known, before the tree cleanup
+    // below: `wait` answers "did the child exit", and a caller timing a graceful interrupt
+    // against its grace must not be charged for the cleanup that follows.
+    if let Some(Ok(status)) = &exited {
+        let _ = exit_tx.send(Some(Ok(exit_status(*status))));
+    }
     let (status, cleanup) = cleanup(child, exited, release).await;
     join_drain(drain).await;
     drop(permit);
     drop(owner);
-    let _ = terminal_tx.send(Some(Terminal { status, cleanup }));
+    exit_tx.send_if_modified(|exit| {
+        if exit.is_some() {
+            return false;
+        }
+        *exit = Some(status.clone());
+        true
+    });
+    let _ = terminal_tx.send(Some(Terminal { cleanup }));
 }
 
 /// Why a child never started.
@@ -559,6 +573,8 @@ struct GuardedControl {
     kill: CancellationToken,
     interrupts: mpsc::Sender<InterruptReply>,
     terminal: watch::Receiver<Option<Terminal>>,
+    /// The target's exit status, published as soon as it exits, ahead of the tree cleanup.
+    exit: watch::Receiver<Option<std::result::Result<ExitStatus, String>>>,
     _lease: Arc<Lease>,
 }
 
@@ -595,10 +611,16 @@ impl ProcessControl for GuardedControl {
     }
 
     async fn wait(&self) -> Result<ExitStatus> {
-        self.terminal()
-            .await?
-            .status
-            .map_err(|message| self.launch_failure(message))
+        let mut exit = self.exit.clone();
+        let status = exit
+            .wait_for(Option::is_some)
+            .await
+            .map_err(|_| Error::Closed {
+                subject: "external-agent process owner",
+            })?
+            .clone()
+            .expect("wait_for returned a recorded exit");
+        status.map_err(|message| self.launch_failure(message))
     }
 
     async fn interrupt(&self, _reason: CancelReason) -> Result<InterruptOutcome> {

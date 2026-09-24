@@ -13,8 +13,10 @@
 //! | A live session | its [`Slot::Live`] entry | [`Supervisor::close_session`] awaits the vendor close and removes the scratch |
 //! | The consent watcher | [`Supervisor::tasks`] | the hub session closes, after every session is closed |
 //!
-//! Nothing here is detached: every spawned task is tracked and awaited by
-//! [`Supervisor::shutdown`], which the watcher runs when the hub session ends.
+//! Every spawned task is tracked. When the hub session ends, the watcher
+//! cancels every opening and closes every live session before it returns.
+//! Vendor process trees are also owned by the launcher, which reaps them at
+//! runtime shutdown whether or not a close ran.
 //!
 //! # Authority
 //!
@@ -206,6 +208,8 @@ struct Opening {
     /// Resolves once the task is finished, including any cleanup of a result
     /// nobody registered. A close of an opening session waits on this.
     settled: watch::Sender<bool>,
+    /// Why closing a session this open produced but never registered failed.
+    cleanup_failure: Mutex<Option<String>>,
 }
 
 impl Opening {
@@ -217,6 +221,31 @@ impl Opening {
         recorded.get_or_insert(cause);
         drop(recorded);
         self.cancel.cancel();
+    }
+
+    fn record_cleanup(&self, outcome: Result<(), String>) {
+        if let Err(detail) = outcome {
+            *self
+                .cleanup_failure
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = Some(detail);
+        }
+    }
+
+    /// Whether everything this open produced was released.
+    fn cleanup_outcome(&self) -> Result<(), RemoteError> {
+        let failure = self
+            .cleanup_failure
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone();
+        match failure {
+            None => Ok(()),
+            Some(detail) => Err(RemoteError::new(
+                codes::INTERNAL,
+                format!("External-agent late-open cleanup failed: {detail}"),
+            )),
+        }
     }
 
     fn cause(&self) -> Option<CloseCause> {
@@ -399,6 +428,7 @@ impl Supervisor {
             let harness = self.ports.harnesses.harness(target, executable);
             let probe_dir = self.probe_dir()?;
             let host = self.host_context(&probe_dir, None, None, &host_cancel)?;
+            stopped_before_launch(cancel, &host_cancel)?;
             let discovery = match harness.discover(&host).await {
                 Ok(discovery) => discovery,
                 Err(error) => return Err(self.sdk_failure(error).await),
@@ -442,6 +472,7 @@ impl Supervisor {
         };
         self.start_watcher(session.clone());
 
+        let params_session_id = params.session_id.clone();
         let this = Arc::clone(self);
         let task_opening = Arc::clone(&opening);
         self.tasks.spawn(async move {
@@ -463,7 +494,7 @@ impl Supervisor {
             () = cancel.cancelled() => {
                 // The hub stopped waiting. The open itself keeps its own
                 // deadline; a result nobody registers is closed by its task.
-                opening.cancel_with(CloseCause::Requested);
+                self.cancel_opening(&params_session_id, &opening, CloseCause::Requested).await;
                 Err(RemoteError::new(codes::CANCELLED, "External-agent open was cancelled."))
             }
         }
@@ -493,6 +524,11 @@ impl Supervisor {
             }
             return Ok(admission);
         }
+        if self.shutdown.is_cancelled() {
+            return Err(argument(
+                "The external-agent supervisor is closed; expected a live runtime session.",
+            ));
+        }
         if slots.len() >= self.ports.session_cap {
             return Err(argument(format!(
                 "External-agent session capacity is {}; close a session before opening another.",
@@ -505,6 +541,7 @@ impl Supervisor {
             close_cause: Mutex::new(None),
             outcome: watch::channel(None).0,
             settled: watch::channel(false).0,
+            cleanup_failure: Mutex::new(None),
         });
         slots.insert(
             params.session_id.clone(),
@@ -531,6 +568,10 @@ impl Supervisor {
             for root in &params.configuration.workspace_roots {
                 self.authorized_workspace(root).await?;
             }
+            // Nothing is probed, created or launched once the open has been
+            // told to stop: the grace in `bounded` is for work already
+            // launched, and resolving an executable itself runs its version.
+            stopped_before_launch(&cancel, &host_cancel)?;
             let executable = self
                 .ports
                 .executables
@@ -557,6 +598,10 @@ impl Supervisor {
                 .with_configuration(map::configuration_patch(&params.configuration));
             if let Some(native) = &params.resume_ref {
                 request = request.resuming(native.clone(), sdk_resume_mode(params.resume_mode));
+            }
+            if let Err(error) = stopped_before_launch(&cancel, &host_cancel) {
+                remove_scratch(&scratch);
+                return Err(error);
             }
             let opened = harness.open_session(&host, request).await;
             match opened {
@@ -586,12 +631,14 @@ impl Supervisor {
                     } else {
                         CloseCause::Requested
                     });
-                    let _ = tokio::time::timeout(
-                        self.ports.cleanup_timeout,
-                        session.close(cause.sdk()),
-                    )
-                    .await;
+                    let closed =
+                        tokio::time::timeout(self.close_bound(), session.close(cause.sdk())).await;
                     remove_scratch(&scratch);
+                    opening.record_cleanup(match closed {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(error)) => Err(error.to_string()),
+                        Err(_) => Err("the vendor close did not finish in time".to_owned()),
+                    });
                 }
                 return Err(stopped.error);
             }
@@ -643,6 +690,7 @@ impl Supervisor {
             return Ok(live.open_result.clone());
         };
         let cleanup = self.finish_close(&live, cause).await;
+        opening.record_cleanup(cleanup.clone());
         let message = "External-agent open was cancelled before registration.";
         Err(match cleanup {
             Ok(()) => RemoteError::new(codes::CANCELLED, message),
@@ -666,18 +714,45 @@ impl Supervisor {
         params: CloseParams,
         cause: CloseCause,
     ) -> Result<AckResult, RemoteError> {
-        let slot = match self.slots().get(&params.session_id) {
-            None => return Ok(AckResult::OK),
-            Some(Slot::Opening(opening)) => Slot::Opening(Arc::clone(opening)),
-            Some(Slot::Live(live)) => Slot::Live(Arc::clone(live)),
+        let slot = {
+            let slots = self.slots();
+            match slots.get(&params.session_id) {
+                None => return Ok(AckResult::OK),
+                Some(Slot::Opening(opening)) => {
+                    // Under the same lock `register` decides under, so the open
+                    // either registered already (and is Live here) or will see
+                    // this cause and close what it opened.
+                    opening.cancel_with(cause);
+                    Slot::Opening(Arc::clone(opening))
+                }
+                Some(Slot::Live(live)) => Slot::Live(Arc::clone(live)),
+            }
         };
         match slot {
             Slot::Opening(opening) => {
-                opening.cancel_with(cause);
                 wait_settled(&opening).await;
-                Ok(AckResult::OK)
+                opening.cleanup_outcome().map(|()| AckResult::OK)
             }
             Slot::Live(live) => self.close_live(&live, cause).await.map(|()| AckResult::OK),
+        }
+    }
+
+    /// Cancels an opening for `cause` under the slot lock, then, if the open
+    /// had already registered, closes the live session it became.
+    async fn cancel_opening(&self, session_id: &str, opening: &Arc<Opening>, cause: CloseCause) {
+        let registered = {
+            let slots = self.slots();
+            match slots.get(session_id) {
+                Some(Slot::Opening(current)) if Arc::ptr_eq(current, opening) => {
+                    opening.cancel_with(cause);
+                    None
+                }
+                Some(Slot::Live(live)) => Some(Arc::clone(live)),
+                _ => None,
+            }
+        };
+        if let Some(live) = registered {
+            let _ = self.close_live(&live, cause).await;
         }
     }
 
@@ -722,16 +797,25 @@ impl Supervisor {
     /// The vendor close, bounded, then the scratch leaf. Both always run.
     async fn finish_close(&self, live: &LiveSession, cause: CloseCause) -> Result<(), String> {
         let vendor =
-            tokio::time::timeout(self.ports.cleanup_timeout, live.session.close(cause.sdk())).await;
+            tokio::time::timeout(self.close_bound(), live.session.close(cause.sdk())).await;
         remove_scratch(&live.scratch);
         match vendor {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => Err(error.to_string()),
             Err(_) => Err(format!(
                 "the vendor close did not finish within {} ms",
-                self.ports.cleanup_timeout.as_millis()
+                self.close_bound().as_millis()
             )),
         }
+    }
+
+    /// How long one vendor close may take: the SDK's own close budget (its
+    /// kill grace plus its shutdown timeout) with the cleanup bound on top,
+    /// so a vendor that uses its whole grace is not reported as failed.
+    fn close_bound(&self) -> Duration {
+        self.ports.limits.kill_grace
+            + self.ports.limits.shutdown_timeout
+            + self.ports.cleanup_timeout
     }
 
     /// `external-agent.list-sessions`: the vendor's own history for one target.
@@ -769,6 +853,7 @@ impl Supervisor {
                 limit: params.limit.map(|limit| limit as usize),
                 workspace_path: workspace.clone(),
             };
+            stopped_before_launch(cancel, &host_cancel)?;
             match harness.list_sessions(&host, query).await {
                 Ok(page) => Ok(map::native_sessions(target, page)),
                 Err(SdkError::NotSupported { .. }) => Err(argument(format!(
@@ -903,7 +988,7 @@ impl Supervisor {
         })
         .await;
         match reaped {
-            Ok(Ok(())) => mapped,
+            Ok(Ok(())) => without_detail(mapped, "cleanupRequired"),
             _ => mapped.with_detail("cleanup", "unconfirmed"),
         }
     }
@@ -945,8 +1030,10 @@ impl Supervisor {
     fn session_scratch(&self, session_id: &str) -> Result<PathBuf, RemoteError> {
         let scratch_root = self.ports.private_root.join("scratch");
         create_private_dir(&scratch_root)?;
-        let leaf = scratch_root.join(scratch_leaf_name(session_id));
-        remove_scratch(&leaf);
+        // Unique per open, not per session id: supervisors of successive hub
+        // connections share this root, and one's close must never remove the
+        // leaf another's live session is using.
+        let leaf = scratch_root.join(scratch_leaf_name(session_id, open_nonce()));
         create_private_dir(&leaf)?;
         Ok(leaf)
     }
@@ -1034,14 +1121,14 @@ impl Supervisor {
             slots
                 .values()
                 .map(|slot| match slot {
-                    Slot::Opening(opening) => (Some(Arc::clone(opening)), None),
+                    Slot::Opening(opening) => {
+                        opening.cancel_with(cause);
+                        (Some(Arc::clone(opening)), None)
+                    }
                     Slot::Live(live) => (None, Some(Arc::clone(live))),
                 })
                 .unzip()
         };
-        for opening in openings.iter().flatten() {
-            opening.cancel_with(cause);
-        }
         let closes = lives
             .iter()
             .flatten()
@@ -1100,6 +1187,20 @@ fn refuse_unoffered_configuration(
     Ok(())
 }
 
+/// Refuses to start anything new once an operation has been told to stop.
+fn stopped_before_launch(
+    cancel: &CancellationToken,
+    host_cancel: &CancelToken,
+) -> Result<(), RemoteError> {
+    if cancel.is_cancelled() || host_cancel.is_cancelled() {
+        return Err(RemoteError::new(
+            codes::CANCELLED,
+            "External-agent operation was stopped before it launched anything.",
+        ));
+    }
+    Ok(())
+}
+
 fn sdk_resume_mode(mode: ResumeMode) -> SdkResumeMode {
     match mode {
         ResumeMode::Strict => SdkResumeMode::Strict,
@@ -1119,15 +1220,24 @@ fn epoch_ms(at: SystemTime) -> u64 {
 
 /// A scratch leaf name that is a pure function of the session id, holds no
 /// path syntax, and stays short enough for a vendor command line.
-fn scratch_leaf_name(session_id: &str) -> String {
+fn scratch_leaf_name(session_id: &str, nonce: u64) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(session_id.as_bytes());
     let hex: String = digest
         .iter()
-        .take(12)
+        .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    format!("s-{hex}")
+    format!("s-{hex}-{nonce:016x}")
+}
+
+/// A value no other open in this process, or a recent one, will reuse.
+fn open_nonce() -> u64 {
+    use std::sync::atomic::AtomicU64;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let mut random = [0_u8; 8];
+    let _ = getrandom::fill(&mut random);
+    u64::from_le_bytes(random) ^ NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Creates `dir` and every missing ancestor as directories only this account
@@ -1159,6 +1269,17 @@ fn create_private_dir(dir: &Path) -> Result<(), RemoteError> {
         }
     }
     Ok(())
+}
+
+/// `error` without the detail `key`, for a fact the supervisor has since resolved.
+fn without_detail(mut error: RemoteError, key: &str) -> RemoteError {
+    if let Some(details) = error.details.as_mut() {
+        details.remove(key);
+        if details.is_empty() {
+            error.details = None;
+        }
+    }
+    error
 }
 
 fn remove_scratch(dir: &Path) {

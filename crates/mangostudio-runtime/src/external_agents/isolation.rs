@@ -21,11 +21,10 @@
 //! The hub may answer the handshake with `externalAgentIsolation:
 //! "withdrawn"`. The hello manifest built here is sent before the peer's
 //! hello arrives, so it cannot react; the hub strips the attestation on its
-//! side (`applyHubIsolationClaim` in `apps/api/.../hub-session.ts`). This
-//! runtime has no per-call surface that reports the attestation yet:
-//! `runtime.health`'s `externalAgents` subtree requires `targets` and
-//! `liveSessions`, which do not exist until `external-agent.*` lands, so the
-//! per-call withdrawal check belongs with that work.
+//! side (`applyHubIsolationClaim` in `apps/api/.../hub-session.ts`). The
+//! per-call surface, `runtime.health`'s `externalAgents` subtree, reads the
+//! peer's hello on every call and omits the attestation once it is withdrawn
+//! (see `external_agents::hub_withdrew_isolation`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
