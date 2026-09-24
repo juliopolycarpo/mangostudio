@@ -19,7 +19,9 @@ use crate::install::log::InstallLog;
 use crate::install::runs::{InstallRuns, StopReason};
 use crate::ports::audit::{Audit, AuditEntry, Outcome};
 use crate::ports::authorization::consent_denial;
-use crate::ports::exclusivity::{EffectClaim, NoExclusivity};
+use crate::ports::exclusivity::{
+    CallExclusivity, EffectClaim, NoExclusivity, NotUpdating, UpdateExclusivityTracker,
+};
 use crate::ports::wall_clock::FixedWallClock;
 use crate::probing::detection::path_env::PathEnv;
 use crate::subprocess::{
@@ -1781,6 +1783,7 @@ mod windows_powershell {
                 }),
                 Arc::clone(&events) as Arc<dyn InstallEvents>,
                 CancellationToken::new(),
+                effect_claim(),
             )
             .await
             .unwrap();
@@ -1848,10 +1851,12 @@ async fn an_install_run_aborted_at_teardown_is_audited_once_by_its_owner() {
     }
 
     let harness = harness(vec![Script::Running]);
+    let exclusivity = Arc::new(UpdateExclusivityTracker::new(Arc::new(NotUpdating)));
     let registry = super::register_service(
-        Registry::with_ports(
+        Registry::with_ports_and_exclusivity(
             Arc::clone(&harness.audit) as Arc<dyn Audit>,
             Arc::new(SystemClock),
+            exclusivity.clone(),
         ),
         &harness.service,
     );
@@ -1882,8 +1887,16 @@ async fn an_install_run_aborted_at_teardown_is_audited_once_by_its_owner() {
         closure.unfinished_handlers
     );
     request.abort();
+    let refused = exclusivity
+        .begin("runtime.update.begin", "after-abort")
+        .expect_err("the active installer still owns its exclusivity claim");
+    assert_eq!(refused.details.unwrap()["reason"], "call_in_flight");
     harness.spawner.settle(exited(0));
     within("every run to settle", harness.runs.settled()).await;
+    exclusivity
+        .begin("runtime.update.begin", "after-settlement")
+        .expect("the installer released its claim after the effect settled");
+    exclusivity.end("after-settlement");
 
     let received: Vec<(String, Outcome, Option<String>)> = harness
         .audit

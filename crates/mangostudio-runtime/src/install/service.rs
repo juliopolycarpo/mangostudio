@@ -354,8 +354,10 @@ impl Service {
             self.record_unobserved(&plan.run_id, outcome, started, finished)
                 .await;
         }
-        drop(lease);
+        // A waiter on `runs.settled()` may begin an update immediately.
+        // Release the completed effect's claim before that waiter wakes.
         drop(claim);
+        drop(lease);
     }
 
     async fn execute(
