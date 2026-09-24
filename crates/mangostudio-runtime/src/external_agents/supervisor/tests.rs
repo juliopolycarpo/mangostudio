@@ -51,6 +51,9 @@ struct HarnessLog {
     /// Makes every later turn start fail the way the Claude harness answers
     /// once a forced stop has made its session nonresumable.
     nonresumable: AtomicBool,
+    /// Makes every later turn start fail the way the Codex harness answers
+    /// once it has sealed a session it closed itself.
+    sealed: AtomicBool,
 }
 
 impl HarnessLog {
@@ -223,6 +226,10 @@ impl Session for CountingSession {
     }
 
     async fn start_turn(&self, request: TurnRequest) -> mango_external_agents::Result<TurnStream> {
+        if self.log.sealed.load(Ordering::SeqCst) {
+            return Err(SdkError::Closed { subject: "session" }
+                .with_dispatch(mango_external_agents::Dispatch::NotSubmitted));
+        }
         if self.log.nonresumable.load(Ordering::SeqCst) {
             return Err(SdkError::Cancelled {
                 reason: mango_external_agents::CancelReason::Timeout,
@@ -1894,6 +1901,36 @@ async fn a_session_that_can_run_no_more_turns_is_closed_and_reported_lost_not_re
         (rig.live_count(), rig.log.closes()),
         (0, vec![CloseReason::Requested]),
         "expected (live sessions, vendor closes) once the session is known dead"
+    );
+}
+
+#[tokio::test]
+async fn a_session_the_sdk_sealed_itself_is_closed_and_reported_lost_not_resendable() {
+    // Codex seals a session it tore down on its own (a lost peer, a poisoned
+    // connection, a cancel that never settled) and answers every later turn
+    // as closed and not submitted.
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    rig.log.sealed.store(true, Ordering::SeqCst);
+    let error = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a turn on a sealed session must fail");
+    let details = error.details.clone().unwrap_or_default();
+    assert_eq!(
+        (details.get("kind"), details.get("dispatch")),
+        (Some(&json!("tool_argument")), None),
+        "expected a session-lost argument refusal with no resendable dispatch | received: {} {details:?}",
+        error.message
+    );
+    assert_eq!(
+        rig.live_count(),
+        0,
+        "expected the sealed session to be closed"
     );
 }
 

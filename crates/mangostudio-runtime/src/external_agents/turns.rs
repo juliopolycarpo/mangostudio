@@ -373,12 +373,13 @@ impl Supervisor {
         if error.dispatch().is_safe_to_replay() {
             lock(&live.turns.receipts).remove(client_message_id);
         }
-        // The session itself refused: it can never run a turn again (the
-        // Claude harness answers this way once a forced stop made it
-        // nonresumable) or it is shutting down. Relayed as "not submitted",
+        // The session itself refused: it can never run a turn again. The
+        // Claude harness answers cancelled once a forced stop made it
+        // nonresumable; the Codex harness answers closed once it sealed a
+        // session it tore down itself. Relayed as "not submitted",
         // the hub would resend to it forever; closing it and reporting it
         // lost makes the next send open a session that can run the turn.
-        if error.dispatch().is_safe_to_replay() && is_cancelled(&error) {
+        if error.dispatch().is_safe_to_replay() && is_spent_session(&error) {
             let closed = self
                 .close_session(
                     super::wire::CloseParams {
@@ -735,12 +736,12 @@ impl Relay {
     }
 }
 
-/// Whether the SDK refused as `Cancelled`, directly or inside its
-/// `Operation` wrapper.
-fn is_cancelled(error: &SdkError) -> bool {
+/// Whether the SDK refused because the session can run no more work:
+/// `Cancelled` or `Closed`, directly or inside its `Operation` wrapper.
+fn is_spent_session(error: &SdkError) -> bool {
     match error {
-        SdkError::Cancelled { .. } => true,
-        SdkError::Operation { source, .. } => is_cancelled(source),
+        SdkError::Cancelled { .. } | SdkError::Closed { .. } => true,
+        SdkError::Operation { source, .. } => is_spent_session(source),
         _ => false,
     }
 }
