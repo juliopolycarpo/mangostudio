@@ -97,7 +97,7 @@ pub fn build_features(
     let mcp = allow.mcp && capability_ready(registry, "mcp");
     let library = allow.library && capability_ready(registry, "library");
     let checkpoints = allow.checkpoints && capability_ready(registry, "checkpoints");
-    let update = cfg!(unix) && allow.update && capability_ready(registry, "update");
+    let update = cfg!(any(unix, windows)) && allow.update && capability_ready(registry, "update");
     let external_agents =
         allow.external_agents == Some(true) && capability_ready(registry, "externalAgents");
     // NOT a mirror of `manifest.ts`'s own `tools` line: that formula ORs the
@@ -188,7 +188,7 @@ mod tests {
             })
         });
         let features = build_features(&registry, &full_allow(), true);
-        assert_eq!(features.update, cfg!(unix));
+        assert_eq!(features.update, cfg!(any(unix, windows)));
     }
 
     #[test]

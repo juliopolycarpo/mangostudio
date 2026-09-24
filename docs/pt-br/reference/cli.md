@@ -139,9 +139,14 @@ de saída, a seção **Doctor** e configuração, consulte a
 O segundo binário, `mangostudio-runtime`, tem os próprios comandos —
 `connect`, `serve`, `setup`, `install`, `service`, `health`, `doctor` e `audit`.
 `install` copia o binário que você baixou para dentro do slot
-(`~/.mango/runtime/<slot>/`) e publica o ponteiro `current`, que é o pré-requisito
-de `service install`: no Windows esse ponteiro é uma junção de diretório, então
-não exige elevação nem o Modo de Desenvolvedor. A credencial guardada é restrita
+(`~/.mango/runtime/<slot>/`) e publica o lançador usado por `service install`.
+No Unix, é o ponteiro `current`; no Windows, é o arquivo estável
+`mangostudio-runtime.cmd`, que aponta para um executável de versão imutável e
+dispensa elevação, Modo de Desenvolvedor e privilégio para links simbólicos.
+A Tarefa Agendada `MangoStudio Runtime` reinicia o lançador após o código de
+saída `75`. `service stop` e `restart` aguardam a instalação ativa terminar,
+com limite total de 30 segundos; `service stop --force` pula essa espera.
+A credencial guardada é restrita
 ao seu usuário — por modo `0600` no POSIX e por ACL (`icacls`) no Windows, onde
 `chmod` só altera o atributo somente-leitura. Detalhes na
 [versão em inglês](../../reference/cli.md#mangostudio-runtime).

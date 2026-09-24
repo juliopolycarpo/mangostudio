@@ -483,8 +483,8 @@ mangostudio-runtime install --slot remote --json
 It refuses a binary that already runs from a slot — the copy would truncate its
 own source, and a runtime already in a slot is upgraded from its environment
 card. A re-run with the same version and the same bytes does nothing and says
-so; different bytes under the same version reinstall, which is how a partial
-download is repaired.
+so; different bytes under the same version are refused, because a published
+version is immutable. Use a distinct version for different bytes.
 
 The version it just replaced is kept, because a service may still be executing
 out of it. Everything older is removed.
@@ -492,8 +492,9 @@ out of it. Everything older is removed.
 ### `service`
 
 Install a user-level unit so `connect` or `serve` survives logout and reboot.
-`ExecStart` points at the slot's `current` pointer, so the runtime has to be in
-the slot first — run [`install`](#install) or push it from the hub; `service
+The Unix unit uses the slot's `current` pointer; the Windows task uses its
+stable `.cmd` shim. The runtime has to be in the slot first — run
+[`install`](#install) or push it from the hub; `service
 install` refuses rather than write a unit that cannot start. See
 [`docs/operations/remote-runtimes.md`](../operations/remote-runtimes.md) for
 that prerequisite, linger, SSH session-bus workarounds, macOS launchd verbs, and
@@ -513,7 +514,7 @@ what the Windows Scheduled Task looks like.
 | ------- | ------------------------------------------------------ |
 | Linux   | `~/.config/systemd/user/mangostudio-runtime.service`   |
 | macOS   | `~/Library/LaunchAgents/com.mangostudio.runtime.plist` |
-| Windows | Scheduled Task `MangoStudio runtime` (no unit file)    |
+| Windows | Scheduled Task `MangoStudio Runtime` (no unit file)    |
 
 ```bash
 mangostudio-runtime service install --mode connect

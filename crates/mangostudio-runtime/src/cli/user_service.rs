@@ -6,24 +6,25 @@ use std::io;
 #[cfg(unix)]
 use std::io::Write;
 use std::path::Path;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::path::PathBuf;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::process::{Command, Stdio};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::thread;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use serde_json::json;
 
 use super::super::{ServiceAction, ServiceMode};
 #[cfg(unix)]
+use crate::runtime_home::home_dir;
+#[cfg(any(unix, windows))]
 use crate::runtime_home::{
-    RuntimeSlot, home_dir, read_runtime_slot_config, read_runtime_slot_credentials,
-    slot_current_binary_path,
+    RuntimeSlot, read_runtime_slot_config, read_runtime_slot_credentials, slot_current_binary_path,
 };
 
 #[cfg(target_os = "linux")]
@@ -118,7 +119,7 @@ fn unit_path(home: &Path) -> PathBuf {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn configured_mode(requested: Option<ServiceMode>, home: &Path) -> io::Result<ServiceMode> {
     let config = read_runtime_slot_config(RuntimeSlot::Remote, home);
     if let Some(error) = config.error {
@@ -147,7 +148,7 @@ fn configured_mode(requested: Option<ServiceMode>, home: &Path) -> io::Result<Se
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn check_install(mode: ServiceMode, home: &Path) -> io::Result<PathBuf> {
     let config = read_runtime_slot_config(RuntimeSlot::Remote, home);
     if let Some(error) = config.error {
@@ -201,6 +202,21 @@ fn check_install(mode: ServiceMode, home: &Path) -> io::Result<PathBuf> {
             io::ErrorKind::NotFound,
             format!(
                 "no runtime binary at {}; expected mangostudio-runtime install --slot remote first",
+                binary.display()
+            ),
+        ));
+    }
+    #[cfg(windows)]
+    if crate::slot_publish::read_slot_current(&crate::runtime_home::slot_dir(
+        RuntimeSlot::Remote,
+        home,
+    ))?
+    .is_none()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} has no valid current version; expected a published runtime shim",
                 binary.display()
             ),
         ));
@@ -451,7 +467,467 @@ pub(super) fn run(
     operate(action, mode, force, home, &account_home, &ProcessExec)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub(super) fn run(
+    action: ServiceAction,
+    mode: Option<ServiceMode>,
+    force: bool,
+    home: &Path,
+) -> io::Result<Value> {
+    windows::operate(action, mode, force, home, &windows::ProcessExec)
+}
+
+#[cfg(windows)]
+mod windows {
+    use super::*;
+    use crate::runtime_home::slot_dir;
+    use crate::slot_update_lock::SlotUpdateLock;
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    const TASK: &str = "MangoStudio Runtime";
+    const MANAGER_TIMEOUT: Duration = Duration::from_secs(30);
+    const UPDATE_SETTLE: Duration = Duration::from_secs(25);
+
+    /// Executes a PowerShell script without interpolating it into a shell command line.
+    /// Usage: `ProcessExec.run("Write-Output 'ready'")`.
+    pub(super) trait Exec {
+        fn run(&self, script: &str, timeout: Duration) -> io::Result<(bool, String)>;
+    }
+
+    pub(super) struct ProcessExec;
+
+    impl Exec for ProcessExec {
+        fn run(&self, script: &str, timeout: Duration) -> io::Result<(bool, String)> {
+            let encoded = encode_script(script);
+            let mut child = Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-EncodedCommand",
+                    &encoded,
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            let deadline = Instant::now() + timeout;
+            loop {
+                if child.try_wait()?.is_some() {
+                    let output = child.wait_with_output()?;
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Ok((
+                        output.status.success(),
+                        if output.status.success() {
+                            stdout.trim()
+                        } else {
+                            stderr.trim()
+                        }
+                        .to_owned(),
+                    ));
+                }
+                if Instant::now() >= deadline {
+                    child.kill()?;
+                    let _ = child.wait();
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "PowerShell Scheduled Task command exceeded 30 seconds",
+                    ));
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+
+    fn encode_script(script: &str) -> String {
+        let utf16 = script
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        STANDARD.encode(utf16)
+    }
+
+    fn ps_quote(text: &str) -> String {
+        format!("'{}'", text.replace('\'', "''"))
+    }
+
+    fn mode_arg(mode: ServiceMode) -> &'static str {
+        match mode {
+            ServiceMode::Connect => "connect",
+            ServiceMode::Serve => "serve",
+        }
+    }
+
+    pub(super) fn task_runner(shim: &Path, home: &Path, mode: ServiceMode) -> String {
+        format!(
+            "$ErrorActionPreference = 'Stop'\n$env:MANGO_HOME = {}\nwhile ($true) {{\n  $global:LASTEXITCODE = $null\n  & {} {}\n  if ($null -eq $LASTEXITCODE) {{ exit 1 }}\n  if ($LASTEXITCODE -ne 75) {{ exit $LASTEXITCODE }}\n  Start-Sleep -Milliseconds 250\n}}",
+            ps_quote(&home.to_string_lossy()),
+            ps_quote(&shim.to_string_lossy()),
+            ps_quote(mode_arg(mode))
+        )
+    }
+
+    fn task_arguments(shim: &Path, home: &Path, mode: ServiceMode) -> String {
+        format!(
+            "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand {}",
+            encode_script(&task_runner(shim, home, mode))
+        )
+    }
+
+    pub(super) fn install_script(
+        shim: &Path,
+        home: &Path,
+        mode: ServiceMode,
+    ) -> io::Result<String> {
+        let args = task_arguments(shim, home, mode);
+        if args.len() > 8192 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Scheduled Task arguments have {} characters; expected at most 8192",
+                    args.len()
+                ),
+            ));
+        }
+        Ok(format!(
+            "$ErrorActionPreference = 'Stop'\n$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()\n$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument {} -WorkingDirectory {}\n$trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.User.Value\n$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)\n$principal = New-ScheduledTaskPrincipal -UserId $identity.User.Value -LogonType Interactive -RunLevel Limited\nRegister-ScheduledTask -TaskPath '\\' -TaskName {} -Description 'MangoStudio remote runtime' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null\nStart-ScheduledTask -TaskPath '\\' -TaskName {}",
+            ps_quote(&args),
+            ps_quote(&shim.parent().unwrap_or(Path::new(".")).to_string_lossy()),
+            ps_quote(TASK),
+            ps_quote(TASK)
+        ))
+    }
+
+    fn status_script() -> String {
+        format!(
+            "$ErrorActionPreference = 'Stop'\n$task = Get-ScheduledTask -TaskPath '\\' -TaskName {} -ErrorAction SilentlyContinue\nif ($null -eq $task) {{ '{{\"installed\":false}}'; exit 0 }}\n$action = @($task.Actions)[0]\n$principal = [string]$task.Principal.UserId\n$principalSid = $null\ntry {{ if ($principal -match '^S-\\d+(?:-\\d+)+$') {{ $principalSid = $principal }} else {{ $principalSid = ([System.Security.Principal.NTAccount]::new($principal)).Translate([System.Security.Principal.SecurityIdentifier]).Value }} }} catch {{}}\n@{{ installed = $true; state = [string]$task.State; enabled = [bool]$task.Settings.Enabled; execute = [string]$action.Execute; arguments = [string]$action.Arguments; principal = $principal; principalSid = $principalSid; currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value }} | ConvertTo-Json -Compress",
+            ps_quote(TASK)
+        )
+    }
+
+    fn verb_script(action: ServiceAction, force: bool) -> String {
+        let name = ps_quote(TASK);
+        let stop = format!(
+            "Stop-ScheduledTask -TaskPath '\\' -TaskName {name} -ErrorAction SilentlyContinue"
+        );
+        let wait = format!(
+            "$deadline = (Get-Date).AddSeconds(27)\nwhile (((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') -and ((Get-Date) -lt $deadline)) {{ Start-Sleep -Milliseconds 200 }}\nif ((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') {{ throw 'Scheduled Task still running after 27 seconds' }}"
+        );
+        let start = format!("Start-ScheduledTask -TaskPath '\\' -TaskName {name}");
+        let body = match action {
+            ServiceAction::Start => start,
+            ServiceAction::Stop if force => stop,
+            ServiceAction::Stop => format!("{stop}\n{wait}"),
+            ServiceAction::Restart => format!("{stop}\n{wait}\n{start}"),
+            ServiceAction::Uninstall => format!(
+                "{stop}\n{wait}\nUnregister-ScheduledTask -TaskPath '\\' -TaskName {name} -Confirm:$false"
+            ),
+            _ => unreachable!(),
+        };
+        format!("$ErrorActionPreference = 'Stop'\n{body}")
+    }
+
+    fn require(exec: &impl Exec, script: &str, timeout: Duration, action: &str) -> io::Result<()> {
+        let (success, output) = exec.run(script, timeout)?;
+        if success {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "{action} failed for {TASK}; expected a working per-user Scheduled Task manager: {output}"
+            )))
+        }
+    }
+
+    fn settle_update(home: &Path) -> io::Result<SlotUpdateLock> {
+        let slot = slot_dir(RuntimeSlot::Remote, home);
+        let deadline = Instant::now() + UPDATE_SETTLE;
+        loop {
+            match SlotUpdateLock::acquire(
+                &slot,
+                format!(
+                    "service-{}-{:?}",
+                    std::process::id(),
+                    std::thread::current().id()
+                ),
+                MANAGER_TIMEOUT,
+            ) {
+                Ok(claim) => return Ok(claim),
+                Err(error)
+                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(100))
+                }
+                Err(error) => {
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!(
+                            "could not settle active runtime update before service stop: {error}"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn inspect_task_owner(home: &Path, exec: &impl Exec) -> io::Result<()> {
+        let status = operate(ServiceAction::Status, None, false, home, exec)?;
+        if status["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("Get-ScheduledTask failed"))
+        {
+            return Err(io::Error::other(format!(
+                "could not inspect Scheduled Task {TASK}: {}",
+                status["error"]
+            )));
+        }
+        if status["installed"] == true && status["ownerMatchesCurrentUser"] != true {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "Scheduled Task {TASK} belongs to another user; expected the current user's task"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Operates the current user's root Scheduled Task. Usage: `operate(ServiceAction::Status, None, false, home, &ProcessExec)`.
+    pub(super) fn operate(
+        action: ServiceAction,
+        mode: Option<ServiceMode>,
+        force: bool,
+        home: &Path,
+        exec: &impl Exec,
+    ) -> io::Result<Value> {
+        let deadline = Instant::now() + MANAGER_TIMEOUT;
+        let shim = slot_current_binary_path(RuntimeSlot::Remote, home);
+        match action {
+            ServiceAction::Install => {
+                let mode = configured_mode(mode, home)?;
+                let shim = check_install(mode, home)?;
+                inspect_task_owner(home, exec)?;
+                require(
+                    exec,
+                    &install_script(&shim, home, mode)?,
+                    MANAGER_TIMEOUT,
+                    "Register-ScheduledTask",
+                )?;
+            }
+            ServiceAction::Status => {
+                let (ok, output) = exec.run(&status_script(), MANAGER_TIMEOUT)?;
+                if !ok {
+                    return Ok(
+                        json!({"schemaVersion":1,"platform":"win32","unitName":TASK,"installed":false,"enabled":false,"running":false,"error":format!("Get-ScheduledTask failed: {output}")}),
+                    );
+                }
+                let task: Value = serde_json::from_str(&output).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("Get-ScheduledTask returned {output:?}; expected JSON task status: {error}")))?;
+                let installed = task["installed"] == true;
+                let owner_matches =
+                    installed && task["principalSid"].as_str() == task["currentSid"].as_str();
+                let args = task["arguments"].as_str().unwrap_or_default();
+                let exec_uses_current = installed
+                    && task["execute"]
+                        .as_str()
+                        .and_then(|value| Path::new(value).file_name())
+                        .is_some_and(|value| {
+                            value
+                                .to_string_lossy()
+                                .eq_ignore_ascii_case("powershell.exe")
+                        })
+                    && [ServiceMode::Connect, ServiceMode::Serve]
+                        .iter()
+                        .any(|mode| args == task_arguments(&shim, home, *mode));
+                let current =
+                    crate::slot_publish::read_slot_current(&slot_dir(RuntimeSlot::Remote, home));
+                let current_binary_present = current.is_ok_and(|version| version.is_some());
+                let error = if installed && !owner_matches {
+                    Some(format!(
+                        "Scheduled Task {TASK} principal {:?} could not be verified as the current user's SID",
+                        task["principal"].as_str().unwrap_or_default()
+                    ))
+                } else if installed && !exec_uses_current {
+                    Some(format!(
+                        "Scheduled Task {TASK} action does not launch the current remote runtime shim"
+                    ))
+                } else {
+                    None
+                };
+                let mut status = json!({"schemaVersion":1,"platform":"win32","unitName":TASK,"installed":installed,"enabled":installed && task["enabled"] == true,"running":installed && task["state"] == "Running","execUsesCurrent":exec_uses_current,"currentBinaryPresent":current_binary_present,"ownerMatchesCurrentUser":owner_matches,"manager":{"label":TASK,"activeState":task["state"],"taskPath":"\\"}});
+                if let Some(error) = error {
+                    status["error"] = json!(error);
+                }
+                return Ok(status);
+            }
+            ServiceAction::Uninstall | ServiceAction::Stop | ServiceAction::Restart => {
+                inspect_task_owner(home, exec)?;
+                let _claim = if force {
+                    None
+                } else {
+                    Some(settle_update(home)?)
+                };
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "runtime update did not settle within the 30-second service stop cap",
+                    ));
+                }
+                require(
+                    exec,
+                    &verb_script(action, force),
+                    remaining,
+                    "Scheduled Task service action",
+                )?;
+            }
+            ServiceAction::Start => {
+                inspect_task_owner(home, exec)?;
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Scheduled Task inspection exceeded the 30-second service start cap",
+                    ));
+                }
+                require(
+                    exec,
+                    &verb_script(action, force),
+                    remaining,
+                    "Start-ScheduledTask",
+                )?;
+            }
+        }
+        Ok(json!({"ok":true}))
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::windows::{Exec, operate};
+    use super::*;
+    use crate::test_support::scratch_dir;
+    use std::sync::Mutex;
+
+    struct FakeTaskExec {
+        calls: Mutex<Vec<String>>,
+        output: String,
+    }
+
+    impl Exec for FakeTaskExec {
+        fn run(&self, script: &str, _timeout: Duration) -> io::Result<(bool, String)> {
+            self.calls.lock().unwrap().push(script.to_owned());
+            Ok((true, self.output.clone()))
+        }
+    }
+
+    #[test]
+    fn status_flags_foreign_task_owner_and_missing_current_shim() {
+        let home = scratch_dir("win-service-status");
+        let exec = FakeTaskExec {
+            calls: Mutex::new(Vec::new()),
+            output: r#"{"installed":true,"state":"Ready","enabled":true,"execute":"other.exe","arguments":"stale","principal":"S-1-5-21-1","currentSid":"S-1-5-21-2"}"#.into(),
+        };
+        let status = operate(ServiceAction::Status, None, false, &home, &exec).unwrap();
+        assert_eq!(status["installed"], true);
+        assert_eq!(status["running"], false);
+        assert_eq!(status["execUsesCurrent"], false);
+        assert_eq!(status["currentBinaryPresent"], false);
+        assert_eq!(status["ownerMatchesCurrentUser"], false);
+        assert!(
+            status["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("could not be verified"))
+        );
+    }
+
+    #[test]
+    fn absent_task_status_omits_optional_error() {
+        let home = scratch_dir("win-service-absent");
+        let exec = FakeTaskExec {
+            calls: Mutex::new(Vec::new()),
+            output: r#"{"installed":false}"#.into(),
+        };
+        let status = operate(ServiceAction::Status, None, false, &home, &exec).unwrap();
+        assert_eq!(status["installed"], false);
+        assert!(status.get("error").is_none());
+    }
+
+    #[test]
+    fn status_accepts_a_task_principal_returned_as_an_account_name() {
+        let home = scratch_dir("win-service-account-name");
+        let exec = FakeTaskExec {
+            calls: Mutex::new(Vec::new()),
+            output: r#"{"installed":true,"state":"Running","enabled":true,"execute":"powershell.exe","arguments":"stale","principal":"julio","principalSid":"S-1-5-21-1","currentSid":"S-1-5-21-1"}"#.into(),
+        };
+        let status = operate(ServiceAction::Status, None, false, &home, &exec).unwrap();
+        assert_eq!(status["ownerMatchesCurrentUser"], true);
+        assert_eq!(status["execUsesCurrent"], false);
+    }
+
+    #[test]
+    fn mutating_commands_refuse_a_foreign_task_before_running_a_verb() {
+        let home = scratch_dir("win-service-foreign-commands");
+        for (action, force) in [
+            (ServiceAction::Start, false),
+            (ServiceAction::Stop, false),
+            (ServiceAction::Stop, true),
+            (ServiceAction::Restart, false),
+            (ServiceAction::Uninstall, false),
+        ] {
+            let exec = FakeTaskExec {
+                calls: Mutex::new(Vec::new()),
+                output: r#"{"installed":true,"state":"Running","enabled":true,"execute":"powershell.exe","arguments":"stale","principal":"other","principalSid":"S-1-5-21-1","currentSid":"S-1-5-21-2"}"#.into(),
+            };
+            let error = operate(action, None, force, &home, &exec).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            let calls = exec.calls.lock().unwrap();
+            assert_eq!(calls.len(), 1);
+            assert!(calls[0].contains("Get-ScheduledTask"));
+            assert!(!calls[0].contains("Stop-ScheduledTask"));
+            assert!(!calls[0].contains("Start-ScheduledTask"));
+            assert!(!calls[0].contains("Unregister-ScheduledTask"));
+        }
+    }
+
+    #[test]
+    fn restart_waits_for_installer_claim_and_then_stops_before_starting() {
+        let home = scratch_dir("win-service-restart");
+        let exec = FakeTaskExec {
+            calls: Mutex::new(Vec::new()),
+            output: r#"{"installed":true,"state":"Running","enabled":true,"execute":"powershell.exe","arguments":"stale","principal":"julio","principalSid":"S-1-5-21-1","currentSid":"S-1-5-21-1"}"#.into(),
+        };
+        operate(ServiceAction::Restart, None, false, &home, &exec).unwrap();
+        let calls = exec.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].contains("Get-ScheduledTask"));
+        assert!(calls[1].contains("Stop-ScheduledTask"));
+        assert!(calls[1].contains("Start-ScheduledTask"));
+        assert!(calls[1].find("Stop-ScheduledTask") < calls[1].find("Start-ScheduledTask"));
+        assert!(calls[1].contains("AddSeconds(27)"));
+        assert!(!home.join("runtime/remote/runtime-update.lock").exists());
+    }
+
+    #[test]
+    fn encoded_runner_relaunches_on_exit_75_without_exposing_credentials() {
+        use super::windows::{install_script, task_runner};
+        let shim =
+            Path::new(r"C:\Users\O'Brien & Sons\Mango\runtime\remote\mangostudio-runtime.cmd");
+        let home = Path::new(r"C:\Users\O'Brien & Sons\Mango");
+        let runner = task_runner(shim, home, ServiceMode::Connect);
+        assert!(runner.contains("O''Brien & Sons"));
+        assert!(runner.contains("$LASTEXITCODE -ne 75"));
+        assert!(runner.contains("exit $LASTEXITCODE"));
+        assert!(runner.contains("$env:MANGO_HOME"));
+        let install = install_script(shim, home, ServiceMode::Connect).unwrap();
+        assert!(install.contains("New-ScheduledTaskPrincipal"));
+        assert!(install.contains("-LogonType Interactive -RunLevel Limited"));
+        assert!(install.contains("-MultipleInstances IgnoreNew"));
+        assert!(!install.contains("pairingToken"));
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub(super) fn run(
     _action: ServiceAction,
     _mode: Option<ServiceMode>,
@@ -464,7 +940,7 @@ pub(super) fn run(
     ))
 }
 
-#[cfg(all(test, not(unix)))]
+#[cfg(all(test, not(any(unix, windows))))]
 mod unsupported_tests {
     use super::*;
 

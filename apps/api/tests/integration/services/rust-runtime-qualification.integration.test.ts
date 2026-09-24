@@ -24,8 +24,8 @@
  * ## Named TS-to-Rust test inventory
  *
  * `crates/mangostudio-runtime/src/health.rs`'s own module doc names what this
- * crate deliberately does not build yet (`externalAgents`,
- * `platformId`, `auditError` — all optional on the wire). The pure-TypeScript
+ * crate deliberately does not build yet (`externalAgents` and `auditError`,
+ * both optional on the wire). The pure-TypeScript
  * runtime assertions below are now also proven end-to-end against the real
  * Rust binary, through the real hub call path, by the named test in this
  * file (or its `-connect` sibling):
@@ -171,7 +171,7 @@ describe('Real Rust runtime qualification', () => {
       30_000
     );
 
-    it.skipIf(!binary.available || process.platform === 'win32')(
+    it.skipIf(!binary.available)(
       'publishes a verified update through the real Rust stdio runtime',
       async () => {
         mangoHome = await scratchMangoHome('stdio-update');
@@ -203,11 +203,21 @@ describe('Real Rust runtime qualification', () => {
           expect(chunked.receivedBytes).toBe(bytes.length);
           const committed = await client.update.commit({ sessionId: begun.sessionId });
           expect(committed).toEqual({ version: '9.8.7', digest, restart: 'manual' });
-          expect(
-            await readFile(
-              runtimeSlotCurrentBinaryPath('host', { mangoHome, platform: process.platform })
-            )
-          ).toEqual(bytes);
+          const published =
+            process.platform === 'win32'
+              ? runtimeSlotVersionBinaryPath('host', '9.8.7', {
+                  mangoHome,
+                  platform: process.platform,
+                })
+              : runtimeSlotCurrentBinaryPath('host', { mangoHome, platform: process.platform });
+          expect(await readFile(published)).toEqual(bytes);
+          if (process.platform === 'win32') {
+            const shim = await readFile(
+              join(mangoHome, 'runtime', 'host', 'mangostudio-runtime.cmd'),
+              'utf8'
+            );
+            expect(shim).toContain('9.8.7');
+          }
         } finally {
           await connection.close();
         }
@@ -215,16 +225,42 @@ describe('Real Rust runtime qualification', () => {
       30_000
     );
 
-    it.skipIf(!binary.available || process.platform === 'win32')(
+    it.skipIf(!binary.available)(
       'exits 75 after a supervised update has returned its commit response',
       async () => {
         mangoHome = await scratchMangoHome('stdio-supervised-update');
-        const oldBinary = runtimeSlotVersionBinaryPath('host', '1.0.0', { mangoHome });
-        await mkdir(dirname(oldBinary), { recursive: true });
-        await copyFile(binary.path, oldBinary);
-        await symlink('1.0.0', runtimeSlotCurrentDir('host', { mangoHome }));
+        const oldBinary = runtimeSlotVersionBinaryPath('host', '1.0.0', {
+          mangoHome,
+          platform: process.platform,
+        });
+        if (process.platform === 'win32') {
+          const installer = Bun.spawn({
+            cmd: [binary.path, 'install', '--slot', 'host', '--json'],
+            env: { ...process.env, MANGO_HOME: mangoHome },
+            stdout: 'ignore',
+            stderr: 'pipe',
+          });
+          const [exitCode, stderr] = await Promise.all([
+            installer.exited,
+            new Response(installer.stderr).text(),
+          ]);
+          if (exitCode !== 0) {
+            throw new Error(`Windows self-install exited ${exitCode}: ${stderr}`);
+          }
+        } else {
+          await mkdir(dirname(oldBinary), { recursive: true });
+          await copyFile(binary.path, oldBinary);
+          await symlink('1.0.0', runtimeSlotCurrentDir('host', { mangoHome }));
+        }
+        const runningBinary =
+          process.platform === 'win32'
+            ? runtimeSlotVersionBinaryPath('host', runtimeVersion, {
+                mangoHome,
+                platform: process.platform,
+              })
+            : oldBinary;
         const peer = spawnPort({
-          argv: [oldBinary, '--stdio'],
+          argv: [runningBinary, '--stdio'],
           env: { MANGO_HOME: mangoHome },
           terminateGraceMs: 2_000,
           killGraceMs: 2_000,
@@ -257,14 +293,26 @@ describe('Real Rust runtime qualification', () => {
             }),
           ]);
           expect(exited.code).toBe(75);
-          expect(await readFile(runtimeSlotCurrentBinaryPath('host', { mangoHome }))).toEqual(
-            bytes
-          );
+          const published =
+            process.platform === 'win32'
+              ? runtimeSlotVersionBinaryPath('host', '9.8.8', {
+                  mangoHome,
+                  platform: process.platform,
+                })
+              : runtimeSlotCurrentBinaryPath('host', { mangoHome });
+          expect(await readFile(published)).toEqual(bytes);
+          if (process.platform === 'win32') {
+            const shim = await readFile(
+              join(mangoHome, 'runtime', 'host', 'mangostudio-runtime.cmd'),
+              'utf8'
+            );
+            expect(shim).toContain('9.8.8');
+          }
         } finally {
           await peer.terminate();
         }
       },
-      30_000
+      45_000
     );
 
     it.skipIf(!binary.available)(

@@ -276,12 +276,6 @@ impl UpdateService {
 
     /// Opens one bounded transfer and returns its opaque session id.
     pub fn begin(&self, owner: &str, params: BeginParams) -> Result<Value, RemoteError> {
-        if !cfg!(unix) {
-            return Err(refusal(
-                "unsupported_platform",
-                "Runtime binary publication requires Unix symlinks on this platform.".into(),
-            ));
-        }
         let begin = ValidatedBegin::try_from(params)?;
         let mut session = self.lock();
         if let Some(active) = session.as_ref() {
@@ -554,7 +548,7 @@ mod tests {
     use crate::ports::authorization::Authorization;
     #[cfg(unix)]
     use crate::ports::clock::SystemClock;
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     use crate::slot_publish::read_slot_current;
 
     #[cfg(unix)]
@@ -955,12 +949,44 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn update_begin_refuses_before_staging_on_windows() {
-        let home = scratch("windows-unsupported");
+    fn windows_update_publishes_immutable_binary_and_preserves_pairing() {
+        let home = scratch("windows-publish");
         let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
-        let error = service.begin("owner", begin_params(b"binary")).unwrap_err();
-        assert_eq!(error.details.unwrap()["reason"], "unsupported_platform");
-        assert!(!slot_dir(RuntimeSlot::Remote, &home).exists());
+        let slot = slot_dir(RuntimeSlot::Remote, &home);
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("credentials.json"), b"pairing bytes").unwrap();
+        let begun = service.begin("owner", begin_params(b"binary")).unwrap();
+        let id = begun["sessionId"].as_str().unwrap();
+        service
+            .chunk(
+                "owner",
+                ChunkParams {
+                    session_id: id.into(),
+                    seq: 0.0,
+                    bytes_base64: STANDARD.encode(b"binary"),
+                },
+            )
+            .unwrap();
+        let committed = service
+            .commit(
+                "owner",
+                CommitParams {
+                    session_id: id.into(),
+                },
+                true,
+            )
+            .unwrap();
+        assert_eq!(committed["restart"], "scheduled");
+        assert_eq!(read_slot_current(&slot).unwrap().as_deref(), Some("1.2.3"));
+        assert_eq!(
+            std::fs::read(slot.join("1.2.3").join("mangostudio-runtime.exe")).unwrap(),
+            b"binary"
+        );
+        assert_eq!(
+            std::fs::read(slot.join("credentials.json")).unwrap(),
+            b"pairing bytes"
+        );
+        assert!(!slot.join("runtime-update.lock").exists());
         std::fs::remove_dir_all(home).unwrap();
     }
 }
