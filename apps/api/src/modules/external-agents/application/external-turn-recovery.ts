@@ -89,6 +89,40 @@ export async function reconcileExternalTurns(
 }
 
 /**
+ * Seals every submission receipt still open whose turn is no longer
+ * generating — a hub that died between finalizing a turn and sealing its
+ * receipts leaves exactly these, and the message sweep above never visits
+ * them because their message is already done. Boot only, for the reason
+ * {@link reconcileExternalTurns} gives. Returns the number of turns touched.
+ *
+ * @example
+ * await sealOrphanedExternalTurnAttempts(getDb());
+ */
+export async function sealOrphanedExternalTurnAttempts(
+  db: Kysely<Database>,
+  now: () => number = Date.now
+): Promise<number> {
+  const rows = await db
+    .selectFrom('external_turn_attempts')
+    .leftJoin('messages', 'messages.id', 'external_turn_attempts.messageId')
+    .select(['external_turn_attempts.messageId as messageId', 'messages.parts as parts'])
+    .where('external_turn_attempts.state', 'in', [
+      'acceptance-unknown',
+      'not-submitted',
+      'accepted',
+    ])
+    .where((eb) => eb.or([eb('messages.id', 'is', null), eb('messages.isGenerating', '=', 0)]))
+    .distinct()
+    .execute();
+  const at = now();
+  for (const row of rows) {
+    const recorded = parseParts(row.parts).find(isExternalTurnPart)?.terminalReason;
+    await sealAttemptsForMessage(row.messageId, recorded ?? 'hub-restarted', at, db);
+  }
+  return rows.length;
+}
+
+/**
  * What a restart may honestly say about a turn, given its submission receipts.
  *
  * Only the boot pass consults them: an explicit reason (the user's own cancel)

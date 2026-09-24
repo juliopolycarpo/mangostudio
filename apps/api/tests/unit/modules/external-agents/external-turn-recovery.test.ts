@@ -6,7 +6,10 @@ import type {
 } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
 import type { ExternalTurnAttemptState } from '../../../../src/db/types';
-import { reconcileExternalTurns } from '../../../../src/modules/external-agents/application/external-turn-recovery';
+import {
+  reconcileExternalTurns,
+  sealOrphanedExternalTurnAttempts,
+} from '../../../../src/modules/external-agents/application/external-turn-recovery';
 import {
   insertAttempt,
   listAttemptsForMessage,
@@ -236,6 +239,45 @@ describe('external turn recovery', () => {
         reason: 'cancelled-by-user',
         attempts: ['unresolved'],
       });
+    });
+
+    it('seals receipts left open under a turn that already finished', async () => {
+      const messageId = await withAttempt('accepted');
+      await getDb()
+        .updateTable('messages')
+        .set({
+          isGenerating: 0,
+          parts: JSON.stringify([
+            { ...ACTIVE_TURN_PART, status: 'terminal', terminalReason: 'completed' },
+          ]),
+        })
+        .where('id', '=', messageId)
+        .execute();
+      const unconfirmed = await withAttempt('acceptance-unknown');
+      await getDb()
+        .updateTable('messages')
+        .set({ isGenerating: 0 })
+        .where('id', '=', unconfirmed)
+        .execute();
+
+      await sealOrphanedExternalTurnAttempts(getDb());
+
+      const rows = [
+        ...(await listAttemptsForMessage(messageId, getDb())),
+        ...(await listAttemptsForMessage(unconfirmed, getDb())),
+      ];
+      expect(rows.map((row) => [row.state, row.terminalReason])).toEqual([
+        ['terminal', 'completed'],
+        ['unresolved', 'hub-restarted'],
+      ]);
+    });
+
+    it('leaves the receipts of a still-generating turn to the message sweep', async () => {
+      const messageId = await withAttempt('acceptance-unknown');
+      await sealOrphanedExternalTurnAttempts(getDb());
+      expect((await listAttemptsForMessage(messageId, getDb())).map((row) => row.state)).toEqual([
+        'acceptance-unknown',
+      ]);
     });
 
     it('is idempotent', async () => {

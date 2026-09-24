@@ -20,7 +20,10 @@ import { getSourceFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
 import { onEnvironmentWithdrawn } from '../modules/environments/application/environment-service';
 import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
-import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
+import {
+  reconcileExternalTurns,
+  sealOrphanedExternalTurnAttempts,
+} from '../modules/external-agents/application/external-turn-recovery';
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
@@ -76,6 +79,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   // External turns first: they carry their own terminal vocabulary, and the
   // generic sweep below would clear the same rows without recording why.
   await reconcileExternalTurns({ reason: 'hub-restarted' }, getDb());
+  await sealOrphanedExternalTurnAttempts(getDb());
   await reconcileStaleTurns({ reasonCode: 'server_restart' }, getDb());
   await loadObservabilitySnapshot();
   // A peer that withdraws external-agent consent closes its vendor sessions
