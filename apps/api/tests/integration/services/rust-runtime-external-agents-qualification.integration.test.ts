@@ -62,6 +62,7 @@ describe('Real Rust runtime external-agent admission', () => {
       terminateGraceMs: 2_000,
       killGraceMs: 2_000,
       exitGraceMs: 1_000,
+      onStderr: (chunk) => process.stderr.write(chunk),
     });
     const hub = await openHubSession(peer.port, {
       // The real hub handler, answering from the test database.

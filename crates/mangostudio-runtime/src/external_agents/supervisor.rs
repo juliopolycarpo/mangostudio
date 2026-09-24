@@ -603,6 +603,19 @@ impl Supervisor {
             // told to stop: the grace in `bounded` is for work already
             // launched, and resolving an executable itself runs its version.
             stopped_before_launch(&cancel, &host_cancel)?;
+            eprintln!("DIAG open: authorized, resolving executable");
+            tokio::spawn(async {
+                for i in 0..30 {
+                    eprintln!("DIAG tokio tick {i}");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            });
+            std::thread::spawn(|| {
+                for i in 0..30 {
+                    eprintln!("DIAG thread tick {i}");
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            });
             let executable = self
                 .ports
                 .executables
@@ -614,6 +627,7 @@ impl Supervisor {
                         target.as_str()
                     ))
                 })?;
+            eprintln!("DIAG open: resolved {executable:?}");
             let scratch = self.session_scratch(&params.session_id)?;
             let host = self.host_context(
                 &workspace,
