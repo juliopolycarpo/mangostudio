@@ -549,16 +549,17 @@ async fn resolve_agent_executable_in(
         .map(|installation| std::path::PathBuf::from(installation.path))
 }
 
-/// The installation to launch for a vendor: the effective one when its
-/// `--version` reads as this vendor's, otherwise the first that does.
+/// The installation to launch for a vendor: the effective one, unless its
+/// `--version` does not read as this vendor's and an installation under
+/// another binary name does.
 ///
 /// A binary name can belong to more than one vendor — Grok also installs
 /// `agent`, which Cursor's definition probes first — and the report keeps
 /// such an unreadable-version binary as installed, which is right for
 /// display. Launching it as the vendor would speak the wrong protocol to the
-/// wrong program. When no installation reads as the vendor's, the effective
-/// one is still returned, so a vendor that changed its version format keeps
-/// launching.
+/// wrong program. Only another name is a different program: an older copy
+/// under the same name is the same vendor, and a vendor that changed its
+/// version format keeps launching the install `PATH` picks.
 ///
 /// # Example
 ///
@@ -575,11 +576,29 @@ fn launchable_installation(runtime: RuntimeStatus) -> Option<RuntimeInstallation
     {
         return runtime.effective;
     }
+    let effective_name = runtime
+        .effective
+        .as_ref()
+        .map(|effective| binary_name(&effective.raw_path));
     runtime
         .installations
         .into_iter()
-        .find(|installation| installation.version.is_some())
+        .find(|installation| {
+            installation.version.is_some()
+                && effective_name
+                    .as_ref()
+                    .is_none_or(|name| *name != binary_name(&installation.raw_path))
+        })
         .or(runtime.effective)
+}
+
+/// A candidate's binary name, without a Windows extension and
+/// case-insensitive, e.g. `Cursor-Agent.EXE` -> `cursor-agent`.
+fn binary_name(raw_path: &str) -> String {
+    std::path::Path::new(raw_path)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 fn select_agent_definitions(
@@ -1113,6 +1132,20 @@ mod tests {
         assert_eq!(
             launchable_installation(status).map(|entry| entry.path),
             Some("/a/agent".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_unreadable_effective_install_is_not_swapped_for_an_older_same_named_one() {
+        // A vendor that changed its version format must keep launching the
+        // install PATH picks, not an older copy under another prefix.
+        let status = runtime_status(vec![
+            installation("/new/bin/claude", None, true),
+            installation("/old/bin/claude", Some("2.0.1"), false),
+        ]);
+        assert_eq!(
+            launchable_installation(status).map(|entry| entry.path),
+            Some("/new/bin/claude".to_owned())
         );
     }
 
