@@ -532,11 +532,14 @@ fn transfer_error(error: TransferError) -> RemoteError {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::future::Future;
+    #[cfg(unix)]
     use std::pin::Pin;
 
     #[cfg(unix)]
     use mango_protocol::contract::Contract;
+    #[cfg(unix)]
     use mango_protocol::frame::PeerInfo;
     #[cfg(unix)]
     use mango_protocol::port::port_pair;
@@ -547,14 +550,17 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use crate::ports::audit::NoopAudit;
+    #[cfg(unix)]
     use crate::ports::authorization::Authorization;
     #[cfg(unix)]
     use crate::ports::clock::SystemClock;
     #[cfg(unix)]
     use crate::slot_publish::read_slot_current;
 
+    #[cfg(unix)]
     struct GrantsUpdate;
 
+    #[cfg(unix)]
     impl Authorization for GrantsUpdate {
         fn missing_capabilities<'a>(
             &'a self,
@@ -565,6 +571,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn peer(role: &str) -> PeerInfo {
         PeerInfo {
             name: format!("update-test-{role}"),

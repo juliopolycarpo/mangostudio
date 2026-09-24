@@ -26,7 +26,7 @@ use crate::runtime_home::{
     slot_current_binary_path,
 };
 
-#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+#[cfg(target_os = "linux")]
 const UNIT: &str = "mangostudio-runtime.service";
 #[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 const LABEL: &str = "com.mangostudio.runtime";
