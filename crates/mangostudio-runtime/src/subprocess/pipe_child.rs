@@ -39,8 +39,23 @@ impl PipeChild {
     /// child.release_start()?;
     /// ```
     pub(crate) fn spawn(request: &ProcessRequest) -> io::Result<Self> {
+        Self::spawn_with_stdin(request, true)
+    }
+
+    /// [`Self::spawn`], but with stdin connected to the null device when `stdin_pipe` is false,
+    /// so the target sees no pipe at all and [`Self::take_stdin`] returns `None`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let child = PipeChild::spawn_with_stdin(&ProcessRequest::new("true", Vec::<String>::new()), false)?;
+    /// ```
+    pub(crate) fn spawn_with_stdin(request: &ProcessRequest, stdin_pipe: bool) -> io::Result<Self> {
         let mut request = request.clone();
-        request.stdin = ProcessStdin::Bytes(Vec::new());
+        request.stdin = if stdin_pipe {
+            ProcessStdin::Bytes(Vec::new())
+        } else {
+            ProcessStdin::Null
+        };
         #[cfg(unix)]
         {
             super::unix_guardian::spawn(&request).map(Self::Unix)
@@ -129,6 +144,45 @@ impl PipeChild {
             Self::Unix(child) => child.interrupt(),
             #[cfg(windows)]
             Self::Windows(child) => child.interrupt(),
+        }
+    }
+
+    /// The target's pid once [`Self::wait_ready`] has returned; on Unix it is also the target's
+    /// process-group id. Before readiness a Unix child reports its guardian's pid instead.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "used by the external-agent launcher, not yet constructed"
+        )
+    )]
+    pub(crate) fn id(&self) -> Option<u32> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.id(),
+            #[cfg(windows)]
+            Self::Windows(child) => child.id(),
+        }
+    }
+
+    /// Asks the target group to stop gracefully (SIGINT), the signal a CLI traps to end its
+    /// current turn. Windows has no console port here, so it reports `Unsupported`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "used by the external-agent launcher, not yet constructed"
+        )
+    )]
+    pub(crate) fn interrupt_gracefully(&mut self) -> io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Self::Unix(child) => child.interrupt_gracefully(),
+            #[cfg(windows)]
+            Self::Windows(_) => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "graceful interruption needs a console port Windows Job children do not have",
+            )),
         }
     }
 
