@@ -361,6 +361,28 @@ impl Supervisor {
         client_message_id: &str,
         error: SdkError,
     ) -> RemoteError {
+        // The session itself refused: it can never run a turn again. The
+        // Claude harness answers cancelled once a forced stop made it
+        // nonresumable; the Codex harness answers closed once it sealed a
+        // session it tore down itself. Relayed as "not submitted",
+        // the hub would resend to it forever; closing it and reporting it
+        // lost makes the next send open a session that can run the turn.
+        // It starts closing while this turn still holds the slot, so a
+        // concurrent turn is refused rather than sent to the spent session.
+        let spent = error.dispatch().is_safe_to_replay() && is_spent_session(&error);
+        let closed = if spent {
+            Some(
+                self.close_session(
+                    super::wire::CloseParams {
+                        session_id: live.session_id.clone(),
+                    },
+                    CloseCause::Requested,
+                )
+                .await,
+            )
+        } else {
+            None
+        };
         {
             let mut active = lock(&live.turns.active);
             if active
@@ -373,21 +395,7 @@ impl Supervisor {
         if error.dispatch().is_safe_to_replay() {
             lock(&live.turns.receipts).remove(client_message_id);
         }
-        // The session itself refused: it can never run a turn again. The
-        // Claude harness answers cancelled once a forced stop made it
-        // nonresumable; the Codex harness answers closed once it sealed a
-        // session it tore down itself. Relayed as "not submitted",
-        // the hub would resend to it forever; closing it and reporting it
-        // lost makes the next send open a session that can run the turn.
-        if error.dispatch().is_safe_to_replay() && is_spent_session(&error) {
-            let closed = self
-                .close_session(
-                    super::wire::CloseParams {
-                        session_id: live.session_id.clone(),
-                    },
-                    CloseCause::Requested,
-                )
-                .await;
+        if let Some(closed) = closed {
             let cleanup = closed
                 .err()
                 .map(|failure| format!(" Closing it also failed: {}", failure.message))
