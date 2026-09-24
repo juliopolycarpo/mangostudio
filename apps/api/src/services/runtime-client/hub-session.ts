@@ -51,6 +51,7 @@ import {
   RuntimeContractViolationError,
 } from './contract-violation';
 import { resolveLocalHubIdentity } from './hub-identity';
+import { RuntimeRequestNotSentError } from './request-not-sent';
 
 /** Name this hub announces itself under; the runtime's audit log records it. */
 const HUB_PEER_NAME = 'mangostudio';
@@ -319,8 +320,15 @@ export async function openHubSession(
     ...(options.externalAgentIsolation
       ? { externalAgentIsolation: options.externalAgentIsolation }
       : {}),
-    request: (method, params, requestOptions) =>
-      requestValidated(client, method, params, requestOptions),
+    request: (method, params, requestOptions) => {
+      // Checked here, synchronously, rather than inferred from the SDK's
+      // rejection: once `client.request` is called the SDK's own
+      // `UNAVAILABLE` no longer says whether the frame was written.
+      if (session.state === 'closed') {
+        return Promise.reject(new RuntimeRequestNotSentError(method, session.closure));
+      }
+      return requestValidated(client, method, params, requestOptions);
+    },
     onEvent,
     onClose,
     close: (code, reason) => session.close(code ?? CLOSE_CODES.RELEASED, reason),
