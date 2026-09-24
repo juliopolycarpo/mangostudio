@@ -135,7 +135,11 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
             .executeTakeFirstOrThrow()
         ).id;
         const row = await turns.assistantRow(messageId);
-        expect(result.reason).toBe('completed');
+        if (result.reason !== 'completed') {
+          throw new Error(
+            `expected the live ${targetId} turn to complete | received: ${result.reason} ${JSON.stringify(result.error ?? null)}`
+          );
+        }
         expect(row.text.toLowerCase()).toContain('pong');
         await turns.close();
       },
