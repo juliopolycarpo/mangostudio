@@ -740,7 +740,16 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(result["ok"], true);
-        assert_eq!(result["resolvedPath"], dir.to_string_lossy().into_owned());
+        // Canonical, not the path as given: macOS temp dirs resolve to
+        // `/private/var`, and Windows expands 8.3 names like `RUNNER~1`.
+        let canonical = crate::workspace_path::canonical_directory(&dir)
+            .expect("the scratch directory canonicalizes");
+        assert_eq!(
+            result["resolvedPath"],
+            canonical.to_string_lossy().into_owned(),
+            "expected the canonical directory | received: {}",
+            result["resolvedPath"]
+        );
     }
 
     #[tokio::test]
