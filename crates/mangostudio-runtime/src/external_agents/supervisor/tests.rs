@@ -569,6 +569,57 @@ impl ExecutableResolver for FixedExecutables {
     }
 }
 
+/// An `externalAgents` consent store whose reads can be held open, standing
+/// in for a slow or contended `runtime.json`.
+struct StallableConsent {
+    granted: AtomicBool,
+    held: AtomicBool,
+}
+
+/// The longest a held read blocks, so a failing test cannot hang the runtime's
+/// blocking pool forever.
+const MAX_HELD_READ: Duration = Duration::from_secs(10);
+
+impl StallableConsent {
+    fn granted() -> Arc<Self> {
+        Arc::new(Self {
+            granted: AtomicBool::new(true),
+            held: AtomicBool::new(false),
+        })
+    }
+
+    fn revoke(&self) {
+        self.granted.store(false, Ordering::SeqCst);
+    }
+
+    /// Makes every read, including one already waiting, block until [`Self::release`].
+    fn hold(self: &Arc<Self>) -> HeldConsent {
+        self.held.store(true, Ordering::SeqCst);
+        HeldConsent(Arc::clone(self))
+    }
+
+    fn release(&self) {
+        self.held.store(false, Ordering::SeqCst);
+    }
+
+    fn read(&self) -> bool {
+        let started = std::time::Instant::now();
+        while self.held.load(Ordering::SeqCst) && started.elapsed() < MAX_HELD_READ {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.granted.load(Ordering::SeqCst)
+    }
+}
+
+/// Releases held consent reads when dropped, including by a failing assertion.
+struct HeldConsent(Arc<StallableConsent>);
+
+impl Drop for HeldConsent {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
 /// A test rig: a supervisor over the fakes above, a canonical authorised
 /// workspace, and the hub session it serves, kept open by its peer port.
 struct Rig {
@@ -576,7 +627,7 @@ struct Rig {
     log: Arc<HarnessLog>,
     workspaces: Arc<AllowListedWorkspaces>,
     executables: Arc<FixedExecutables>,
-    consent: Arc<AtomicBool>,
+    consent: Arc<StallableConsent>,
     hub: HubSession,
     /// The hub's side of the connection, kept open for the rig's lifetime.
     _observer: HubSession,
@@ -646,7 +697,7 @@ async fn rig(options: RigOptions) -> Rig {
         installed: options.installed,
         lookups: AtomicUsize::new(0),
     });
-    let consent = Arc::new(AtomicBool::new(true));
+    let consent = StallableConsent::granted();
     let consent_read = Arc::clone(&consent);
     let private_root = private_dir.path().join("external-agents");
     let supervisor = Supervisor::new(Ports {
@@ -660,12 +711,13 @@ async fn rig(options: RigOptions) -> Rig {
         workspaces: Arc::clone(&workspaces) as Arc<dyn WorkspaceAuthority>,
         executables: Arc::clone(&executables) as Arc<dyn ExecutableResolver>,
         environment: Arc::new(PathEnv::default),
-        consent: Arc::new(move || consent_read.load(Ordering::SeqCst)),
+        consent: Arc::new(move || consent_read.read()),
         private_root: private_root.clone(),
         runtime_version: String::from("0.0.0-test"),
         limits: Limits::default(),
         session_cap: options.session_cap,
         consent_poll: Duration::from_millis(10),
+        consent_read_timeout: Duration::from_millis(20),
         cleanup_timeout: Duration::from_secs(2),
         hard_turn_timeout: options.hard_turn_timeout,
     });
@@ -1276,7 +1328,7 @@ async fn a_child_the_sdk_could_not_clean_up_is_reaped_before_the_failure_returns
 async fn withdrawing_consent_closes_every_live_session_for_that_reason() {
     let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
-    rig.consent.store(false, Ordering::SeqCst);
+    rig.consent.revoke();
     eventually(
         "the live session closed after revocation",
         || rig.live_count(),
@@ -1284,6 +1336,54 @@ async fn withdrawing_consent_closes_every_live_session_for_that_reason() {
     )
     .await;
     assert_eq!(rig.log.closes(), vec![CloseReason::ConsentRevoked]);
+}
+
+/// A consent read that outlives its bound is unknown, not a withdrawal: the
+/// session stays open through the held reads, and an explicit denial after
+/// them still closes it for that reason.
+#[tokio::test]
+async fn slow_consent_store_does_not_close_external_agent_sessions() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let held = rig.consent.hold();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let (live, closes) = (rig.live_count(), rig.log.closes());
+    assert_eq!(
+        (live, closes.len()),
+        (1, 0),
+        "expected (live sessions, vendor closes) through held consent reads: (1, 0) | \
+         received ({live}, {closes:?})"
+    );
+
+    rig.consent.revoke();
+    drop(held);
+    eventually(
+        "the explicitly denied session closed",
+        || rig.live_count(),
+        |live| *live == 0,
+    )
+    .await;
+    assert_eq!(rig.log.closes(), vec![CloseReason::ConsentRevoked]);
+}
+
+/// A consent read that never returns must not pin the watcher: the hub
+/// session ending still shuts every session down while the read is held.
+#[tokio::test]
+async fn a_hung_consent_read_does_not_hold_up_hub_shutdown() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let _held = rig.consent.hold();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    rig.hub.close_now(4000, None);
+    eventually(
+        "the live session closed at hub shutdown while a consent read was held",
+        || rig.live_count(),
+        |live| *live == 0,
+    )
+    .await;
+    assert_eq!(rig.log.closes(), vec![CloseReason::Shutdown]);
 }
 
 #[tokio::test]
@@ -2275,7 +2375,7 @@ async fn revoking_consent_mid_turn_closes_the_session_and_refuses_its_pending_an
         .as_str()
         .unwrap()
         .to_owned();
-    rig.consent.store(false, Ordering::SeqCst);
+    rig.consent.revoke();
     eventually(
         "the session closed after revocation",
         || rig.live_count(),
