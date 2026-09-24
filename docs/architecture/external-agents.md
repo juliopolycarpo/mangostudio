@@ -939,6 +939,16 @@ A runtime-side consent withdrawal reaches the hub as the vendor ending the turn 
 (`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
 stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`.
 
+The consent watcher reads `externalAgents` through the shared bounded, coalesced `ConsentReader`,
+like the MCP, terminal and install watchers: only an explicit denial closes sessions, and a read
+that does not finish within `CONSENT_READ_TIMEOUT` keeps them until the next poll. Launch-time
+consent has two reads. The dispatcher's authorization guard makes the bounded read before
+`external-agent.open` runs, and treats an inconclusive read as missing consent. The launcher then
+re-reads consent synchronously immediately before the vendor child executes, failing closed, as
+the terminal and command launch checks do. That second read is not time-bounded. If the store
+hangs between the two reads, each vendor launch waiting on it holds one blocking permit until the
+read returns. This is an accepted asymmetry with the watcher.
+
 ### Cancellation on Windows
 
 Cancelling a turn is a protocol request for Codex (`turn/interrupt`) and Cursor (ACP
