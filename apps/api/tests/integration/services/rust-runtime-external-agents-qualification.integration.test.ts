@@ -155,8 +155,10 @@ describe('Real Rust runtime external-agent admission', () => {
           XDG_CONFIG_HOME: join(home, '.config'),
         },
       });
-      // Five of the ten methods are implemented: the capability stays off.
-      expect(rust.manifest.features.externalAgents).not.toBe(true);
+      // All ten methods are implemented: the capability follows consent.
+      expect(rust.manifest.features.externalAgents).toBe(
+        rust.manifest.allow?.externalAgents === true
+      );
 
       const discovered = await rust.externalAgents.discover({
         targetIds: ['codex', 'cursor', 'claude'],

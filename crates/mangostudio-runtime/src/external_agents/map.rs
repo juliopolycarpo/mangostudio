@@ -742,7 +742,7 @@ pub(crate) fn native_sessions(
 }
 
 /// Milliseconds since the Unix epoch, or `None` for a time before it.
-fn epoch_ms(time: SystemTime) -> Option<u64> {
+pub(super) fn epoch_ms(time: SystemTime) -> Option<u64> {
     let elapsed = time.duration_since(UNIX_EPOCH).ok()?;
     Some(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
 }
@@ -823,7 +823,8 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
     }
 }
 
-fn argument(message: String) -> RemoteError {
+/// A caller mistake: `INTERNAL` with `kind: tool_argument`.
+pub(super) fn argument(message: String) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 

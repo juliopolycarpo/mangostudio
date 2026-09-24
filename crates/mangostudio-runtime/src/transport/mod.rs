@@ -529,29 +529,36 @@ mod tests {
         assert_eq!(peer.version, "9.9.9");
     }
 
-    /// Five of the ten `external-agent.*` methods are implemented, so the
-    /// capability stays unadvertised even where the owner consented: a hub
-    /// that saw it would send turns this build cannot run.
+    /// All ten `external-agent.*` methods are implemented, so the capability is
+    /// advertised exactly when the owner consented to it.
     #[test]
-    fn external_agents_stay_unadvertised_until_every_method_is_implemented() {
+    fn external_agents_are_advertised_only_with_consent() {
         let home = scratch_path("transport-external-agents-gate");
         let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
-        let allow = mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow {
-            fs_read: true,
-            fs_write: true,
-            shell: true,
-            git: true,
-            probing: true,
-            mcp: true,
-            library: true,
-            checkpoints: true,
-            update: true,
-            external_agents: Some(true),
-        };
-        let features = crate::manifest::build_features(&host.registry, &allow, true);
-        assert!(
-            !features.external_agents,
-            "expected features.externalAgents off with five of ten methods | received: on"
+        let allow =
+            |external_agents| mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow {
+                fs_read: true,
+                fs_write: true,
+                shell: true,
+                git: true,
+                probing: true,
+                mcp: true,
+                library: true,
+                checkpoints: true,
+                update: true,
+                external_agents,
+            };
+        let granted = crate::manifest::build_features(&host.registry, &allow(Some(true)), true);
+        let refused = crate::manifest::build_features(&host.registry, &allow(Some(false)), true);
+        let absent = crate::manifest::build_features(&host.registry, &allow(None), true);
+        assert_eq!(
+            (
+                granted.external_agents,
+                refused.external_agents,
+                absent.external_agents
+            ),
+            (true, false, false),
+            "expected features.externalAgents = (granted, refused, absent) = (true, false, false)"
         );
     }
 
@@ -562,11 +569,16 @@ mod tests {
         assert_eq!(
             host.registry.implemented_methods(),
             vec![
+                "external-agent.cancel",
                 "external-agent.close",
                 "external-agent.discover",
                 "external-agent.list-sessions",
                 "external-agent.open",
                 "external-agent.refresh-account-usage",
+                "external-agent.respond",
+                "external-agent.start-review",
+                "external-agent.steer",
+                "external-agent.turn",
                 "fs.apply-patch",
                 "fs.create-file",
                 "fs.delete-file",
