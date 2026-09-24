@@ -8,7 +8,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { RemoteError } from '@mangostudio/protocol';
 import type { SpawnOptions } from '@mangostudio/protocol/spawn';
+import { HUB_WORKSPACE_AUTHORIZE_METHOD } from '@mangostudio/shared/runtime-contract';
+import { getDb } from '../../../src/db/database';
+import type { HubWorkspaceBinding } from '../../../src/services/runtime-client/hub-workspace-authority';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
+import { insertTestChat, insertTestUser } from '../../support/factories';
 import { DeferredSpawnPort } from '../../support/mocks/deferred-spawn-port';
 
 describe('spawnRuntimeChild — cancellation', () => {
@@ -110,5 +114,55 @@ describe('spawnRuntimeChild — cancellation', () => {
     expect(error.code).toBe('CANCELLED');
     expect(fake.spawnCallCount).toBe(0);
     expect(fake.terminateCallCount).toBe(0);
+  });
+});
+
+describe('spawnRuntimeChild — workspace binding', () => {
+  /** What the spawned runtime hears back when it asks the hub about `workdir`. */
+  async function askThroughSpawn(
+    workspaceBinding: HubWorkspaceBinding | null,
+    workdir: string
+  ): Promise<unknown> {
+    const fake = new DeferredSpawnPort();
+    const connecting = spawnRuntimeChild(
+      {
+        environmentId: 'devbox',
+        launch: { command: 'fake-runtime', args: [] },
+        workspaceBinding,
+        hubVersion: 'hub-test',
+        onClosed: () => undefined,
+      },
+      { spawnPort: fake.spawnPort }
+    );
+    const runtime = fake.release();
+    if (!runtime) throw new Error('expected a runtime-side session | received: none');
+    const connection = await connecting;
+    try {
+      return await runtime.request(HUB_WORKSPACE_AUTHORIZE_METHOD, {
+        canonicalPath: workdir,
+        purpose: 'external-agent',
+      });
+    } finally {
+      await connection.close();
+    }
+  }
+
+  it('answers for the binding the launcher passed, and nothing for none', async () => {
+    const owner = await insertTestUser();
+    const chat = await insertTestChat(owner.id);
+    const workdir = '/home/owner/spawned-project';
+    await getDb()
+      .updateTable('chats')
+      .set({ environmentId: 'devbox', workdir })
+      .where('id', '=', chat.id)
+      .execute();
+
+    expect(await askThroughSpawn({ userId: owner.id, environmentId: 'devbox' }, workdir)).toEqual({
+      authorized: true,
+    });
+    expect(await askThroughSpawn({ userId: owner.id, environmentId: 'other' }, workdir)).toEqual({
+      authorized: false,
+    });
+    expect(await askThroughSpawn(null, workdir)).toEqual({ authorized: false });
   });
 });
