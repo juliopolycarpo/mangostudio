@@ -11,6 +11,7 @@ import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-ag
 import type { ExternalTurnPart, MessagePart } from '@mangostudio/shared/types';
 import { sql } from 'kysely';
 import { getDb } from '../../../../src/db/database';
+import { getChatMessagesUseCase } from '../../../../src/modules/chats/application/get-chat-messages';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
 import { createExternalCommandCatalogCache } from '../../../../src/modules/external-agents/application/external-command-catalog-cache';
 import {
@@ -21,6 +22,7 @@ import {
   createExternalTurnController,
   type ExternalTurnResult,
 } from '../../../../src/modules/external-agents/application/external-turn-controller';
+import { reconcileExternalTurns } from '../../../../src/modules/external-agents/application/external-turn-recovery';
 import { listAttemptsForMessage } from '../../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { cancelActiveTurn } from '../../../../src/modules/generation/application/active-turn-registry';
 import {
@@ -392,6 +394,67 @@ describe('stopping', () => {
     const { part, generating } = await turnPart();
     expect(part.terminalReason).toBe('cancelled-by-user');
     expect(generating).toBe(false);
+    expect(runtime.submissionCount()).toBe(1);
+    await runtime.close();
+  });
+});
+
+/**
+ * The boot sweep run against a turn the hub was still driving, as a restart
+ * finds it: the process is not restarted, the sweep is simply told nothing is
+ * live. What it proves is what the durable rows let a restarted hub say.
+ */
+describe('restart against a real runtime', () => {
+  const bootSweep = () =>
+    reconcileExternalTurns({ reason: 'hub-restarted', chatId, isActive: () => false }, getDb());
+
+  it('ends an unconfirmed submission as acceptance-unknown without resubmitting it', async () => {
+    const { runtime, controller } = harness();
+    runtime.script.push('stall');
+    void start(controller);
+    await waitFor(() => runtime.rpcCount() === 1, 'the stalled turn');
+
+    expect(await bootSweep()).toBe(1);
+    const { part, generating } = await turnPart();
+    expect({ reason: part.terminalReason, generating }).toEqual({
+      reason: 'acceptance-unknown',
+      generating: false,
+    });
+    expect(await attemptStates()).toEqual(['unresolved']);
+
+    runtime.releaseStalled();
+    await settle();
+    expect({ rpcs: runtime.rpcCount(), submissions: runtime.submissionCount() }).toEqual({
+      rpcs: 1,
+      submissions: 1,
+    });
+    await runtime.close();
+  });
+
+  it('ends an accepted turn as hub-restarted with its persisted cursor and parts intact', async () => {
+    const { runtime, controller } = harness();
+    void start(controller);
+    await waitFor(() => runtime.submissionCount() === 1, 'the accepted turn');
+    await settle();
+    runtime.emit({
+      type: 'activity_started',
+      callId: 'call-1',
+      activity: { name: 'shell', kind: 'command', title: 'ls' },
+    });
+    runtime.emit({ type: 'activity_completed', callId: 'call-1', result: { status: 'completed' } });
+    await waitFor(() => runtime.rpcCount() === 1, 'no further request');
+    for (let tick = 0; tick < 500; tick += 1) {
+      if ((await turnPart()).part.lastSequence === 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+
+    expect(await bootSweep()).toBe(1);
+    const { messages } = await getChatMessagesUseCase({ chatId, userId }, getDb());
+    const message = messages.find((entry) => entry.id === assistantMessageId);
+    const turn = message?.parts?.find((part) => part.type === 'external_turn');
+    expect(turn).toMatchObject({ terminalReason: 'hub-restarted', lastSequence: 2, eventCount: 2 });
+    expect(message?.parts?.some((part) => part.type === 'external_activity')).toBe(true);
+    expect(await attemptStates()).toEqual(['terminal']);
     expect(runtime.submissionCount()).toBe(1);
     await runtime.close();
   });
