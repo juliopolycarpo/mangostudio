@@ -88,5 +88,6 @@ async fn serve() -> Result<(), Box<dyn std::error::Error>> {
         stdout.flush().await?;
     }
     input.abort();
+    let _ = input.await;
     Ok(())
 }
