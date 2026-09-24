@@ -17,7 +17,7 @@
 //! never goes through the permission path. Any other question form is
 //! declined back to the vendor by name, and nothing reaches the hub.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -52,6 +52,12 @@ const TURN_ERROR_RESERVE_BYTES: usize = 4_096;
 
 /// What one accepted `clientMessageId` answered, so a retry is answered
 /// rather than run twice. A turn and a review share the id space.
+/// One steer's input digest and outcome, for answering its repeats.
+struct SteerReceipt {
+    input: [u8; 32],
+    outcome: watch::Receiver<Option<SteerResult>>,
+}
+
 struct Receipt {
     kind: ReceiptKind,
     fingerprint: [u8; 32],
@@ -81,7 +87,9 @@ pub(crate) struct TurnState {
     active: Mutex<Option<ActiveTurn>>,
     receipts: Mutex<HashMap<String, Receipt>>,
     interactions: Mutex<HashMap<String, PendingInteraction>>,
-    steers: Mutex<HashSet<String>>,
+    /// Each steer of the running turn by its id: a repeat with the same input
+    /// answers what the first answered; other input under the id is refused.
+    steers: Mutex<HashMap<String, SteerReceipt>>,
 }
 
 impl TurnState {
@@ -94,7 +102,7 @@ impl TurnState {
             active: Mutex::new(None),
             receipts: Mutex::new(HashMap::new()),
             interactions: Mutex::new(HashMap::new()),
-            steers: Mutex::new(HashSet::new()),
+            steers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -210,17 +218,15 @@ impl Supervisor {
         // Not raced against the hub's request cancel: the hub reconciles a
         // lost reply by sending this same id again, and the receipt has to
         // hold what really happened, not that the first caller stopped waiting.
-        let started = Some(live.session.start_turn(request).await);
-        let result = match started {
-            None => Err(self.abandoned_start(&live, &params.client_message_id)),
-            Some(Ok(stream)) => {
+        let result = match live.session.start_turn(request).await {
+            Ok(stream) => {
                 let native = stream.native_turn_id().to_owned();
                 self.relay(&live, &params.client_message_id, stream);
                 Ok(TurnResult {
                     native_turn_id: native,
                 })
             }
-            Some(Err(error)) => Err(self
+            Err(error) => Err(self
                 .refused_start(&live, &params.client_message_id, error)
                 .await),
         };
@@ -233,7 +239,7 @@ impl Supervisor {
     pub(crate) async fn start_review(
         self: &Arc<Self>,
         params: StartReviewParams,
-        cancel: &tokio_util::sync::CancellationToken,
+        _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<StartReviewResult, RemoteError> {
         let live = self.require_live(&params.session_id)?;
         if live
@@ -260,14 +266,10 @@ impl Supervisor {
             turn_id: mango_external_agents::TurnId::new(params.client_message_id.clone()),
             target: SdkReviewTarget::UncommittedChanges,
         };
-        let started = tokio::select! {
-            biased;
-            () = cancel.cancelled() => None,
-            started = live.session.start_review(request) => Some(started),
-        };
-        let result = match started {
-            None => Err(self.abandoned_start(&live, &params.client_message_id)),
-            Some(Ok(review)) => {
+        // Not raced against the caller's cancel either, for the same reason
+        // as a turn: a resend under the same id is answered from the receipt.
+        let result = match live.session.start_review(request).await {
+            Ok(review) => {
                 let native = review.turn.native_turn_id().to_owned();
                 self.relay(&live, &params.client_message_id, review.turn);
                 Ok(StartReviewResult {
@@ -275,26 +277,12 @@ impl Supervisor {
                     review_thread_id: review.review_thread_id,
                 })
             }
-            Some(Err(error)) => Err(self
+            Err(error) => Err(self
                 .refused_start(&live, &params.client_message_id, error)
                 .await),
         };
         publish.send_replace(Some(result.clone().map(|value| to_value(&value))));
         result
-    }
-
-    /// Releases the reservation of a start the hub stopped waiting for. Its
-    /// receipt records the cancellation, so a retry under the same id learns
-    /// what happened instead of starting the work a second time.
-    fn abandoned_start(&self, live: &LiveSession, client_message_id: &str) -> RemoteError {
-        let mut active = lock(&live.turns.active);
-        if active
-            .as_ref()
-            .is_some_and(|turn| turn.client_message_id == client_message_id)
-        {
-            *active = None;
-        }
-        RemoteError::new(codes::CANCELLED, "External-agent turn start was cancelled.")
     }
 
     /// Releases a reservation whose turn never started, and forgets its
@@ -440,32 +428,59 @@ impl Supervisor {
         if native != params.native_turn_id {
             return Ok(SteerResult::rejected(SteerRejection::TurnAlreadyCompleted));
         }
-        if !lock(&live.turns.steers).insert(params.client_message_id.clone()) {
-            return Ok(SteerResult::rejected(SteerRejection::IdReused));
-        }
+        let input = fingerprint(&params.input);
+        let seen = {
+            let mut steers = lock(&live.turns.steers);
+            match steers.get(&params.client_message_id) {
+                Some(receipt) if receipt.input != input => {
+                    return Ok(SteerResult::rejected(SteerRejection::IdReused));
+                }
+                Some(receipt) => Err(receipt.outcome.clone()),
+                None => {
+                    let (publish, outcome) = watch::channel(None);
+                    steers.insert(
+                        params.client_message_id.clone(),
+                        SteerReceipt { input, outcome },
+                    );
+                    Ok(publish)
+                }
+            }
+        };
+        let publish = match seen {
+            Ok(publish) => publish,
+            Err(mut outcome) => {
+                return match outcome.wait_for(Option::is_some).await {
+                    Ok(recorded) => Ok(recorded.expect("wait_for returned a recorded steer")),
+                    // The first attempt failed in transit and was forgotten.
+                    Err(_) => Ok(SteerResult::rejected(SteerRejection::TurnNotSteerable)),
+                };
+            }
+        };
         let steer = Steer {
             turn_id: mango_external_agents::TurnId::new(turn_id),
             native_turn_id: native,
             input: params.input,
         };
-        match live.session.steer(steer).await {
-            Ok(SteerOutcome::Accepted) => Ok(SteerResult::ACCEPTED),
-            Ok(SteerOutcome::Rejected { reason }) => Ok(SteerResult::rejected(match reason {
+        let result = match live.session.steer(steer).await {
+            Ok(SteerOutcome::Accepted) => SteerResult::ACCEPTED,
+            Ok(SteerOutcome::Rejected { reason }) => SteerResult::rejected(match reason {
                 SdkSteerRejection::TurnAlreadyCompleted => SteerRejection::TurnAlreadyCompleted,
                 SdkSteerRejection::TurnNotSteerable => SteerRejection::TurnNotSteerable,
                 // A refusal this build does not know yet is still a refusal.
                 _ => SteerRejection::TurnNotSteerable,
-            })),
-            Ok(_) => Ok(SteerResult::rejected(SteerRejection::TurnNotSteerable)),
+            }),
+            Ok(_) => SteerResult::rejected(SteerRejection::TurnNotSteerable),
             Err(SdkError::NotSupported { .. }) => {
-                Ok(SteerResult::rejected(SteerRejection::NotSupported))
+                SteerResult::rejected(SteerRejection::NotSupported)
             }
             Err(error) => {
                 // A steer that failed in transit may be sent again under its id.
                 lock(&live.turns.steers).remove(&params.client_message_id);
-                Err(self.sdk_failure(error).await)
+                return Err(self.sdk_failure(error).await);
             }
-        }
+        };
+        publish.send_replace(Some(result));
+        Ok(result)
     }
 
     /// `external-agent.cancel`: asks the vendor to stop the running turn. The

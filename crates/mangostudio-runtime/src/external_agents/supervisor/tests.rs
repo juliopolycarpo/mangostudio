@@ -75,6 +75,8 @@ enum OpenBehaviour {
     FailNeedingCleanup(Arc<CountingControl>),
     /// Opens a session whose every turn asks one single-choice question.
     AskingOneChoice,
+    /// Opens a session whose turn streams text past the persisted budget.
+    Flooding,
 }
 
 /// How a [`CountingHarness`] answers a probe.
@@ -145,7 +147,7 @@ impl Harness for CountingHarness {
                 host.cancel().cancelled().await;
                 self.log.saw_host_cancel.store(true, Ordering::SeqCst);
             }
-            OpenBehaviour::AskingOneChoice => {}
+            OpenBehaviour::AskingOneChoice | OpenBehaviour::Flooding => {}
             OpenBehaviour::FailNeedingCleanup(control) => {
                 return Err(SdkError::CleanupRequired {
                     control: Arc::clone(control) as Arc<dyn ProcessControl>,
@@ -157,6 +159,13 @@ impl Harness for CountingHarness {
             }
         }
         let inner = self.inner.open_session(host, request).await?;
+        if matches!(self.open, OpenBehaviour::Flooding) {
+            return Ok(Box::new(FloodingSession {
+                inner,
+                log: Arc::clone(&self.log),
+                host: host.clone(),
+            }));
+        }
         if matches!(self.open, OpenBehaviour::AskingOneChoice) {
             return Ok(Box::new(OneChoiceSession {
                 inner,
@@ -335,6 +344,68 @@ impl Session for OneChoiceSession {
             .await?;
             sink.complete().await?;
         }
+        Ok(())
+    }
+
+    async fn cancel(&self, _reason: CancelReason) -> mango_external_agents::Result<()> {
+        self.log.cancels.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn close(&self, reason: CloseReason) -> mango_external_agents::Result<()> {
+        self.log.closes.lock().unwrap().push(reason);
+        self.inner.close(reason).await
+    }
+}
+
+/// A session whose turn writes about 3 MiB of text and then completes: past
+/// the 2 MiB the hub persists per turn. Counts the cancel the relay sends.
+struct FloodingSession {
+    inner: Box<dyn Session>,
+    log: Arc<HarnessLog>,
+    host: HostContext,
+}
+
+#[async_trait::async_trait]
+impl Session for FloodingSession {
+    fn state(&self) -> &SessionState {
+        self.inner.state()
+    }
+
+    async fn start_turn(&self, request: TurnRequest) -> mango_external_agents::Result<TurnStream> {
+        use mango_external_agents::{EventKind, EventSink};
+        self.log.turns_started.fetch_add(1, Ordering::SeqCst);
+        let (sink, events) = EventSink::with_limits(
+            self.snapshot().ids.session_id.clone(),
+            request.turn_id.clone(),
+            request.attempt,
+            Arc::clone(self.host.clock()),
+            self.host.limits(),
+        );
+        let chunk = "x".repeat(32 * 1024);
+        tokio::spawn(async move {
+            for _ in 0..96 {
+                if sink
+                    .emit(EventKind::TextDelta {
+                        text: chunk.clone(),
+                    })
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            let _ = sink.complete().await;
+        });
+        Ok(TurnStream::accepted(
+            request.turn_id,
+            request.attempt,
+            "flood-turn",
+            events,
+        ))
+    }
+
+    async fn respond(&self, _response: PermissionResponse) -> mango_external_agents::Result<()> {
         Ok(())
     }
 
@@ -1885,11 +1956,21 @@ async fn steering_is_answered_not_thrown_when_it_cannot_land() {
         .await
         .unwrap();
     assert_eq!(first, SteerResult::ACCEPTED);
-    let reused = rig
+    // A repeat with the same id and input answers what the first answered.
+    let repeated = rig
         .supervisor
         .steer(steer(&turn.native_turn_id, "s2"))
         .await
         .unwrap();
+    assert_eq!(
+        repeated,
+        SteerResult::ACCEPTED,
+        "expected a repeated steer to replay its outcome"
+    );
+    // The same id with other input is refused.
+    let mut other = steer(&turn.native_turn_id, "s2");
+    other.input = "something else".into();
+    let reused = rig.supervisor.steer(other).await.unwrap();
     assert_eq!(
         serde_json::to_value(reused).unwrap(),
         json!({ "accepted": false, "reasonCode": "id-reused" })
@@ -2160,5 +2241,78 @@ async fn a_turn_whose_caller_gave_up_still_records_its_real_outcome_for_a_resend
         1,
         "expected one vendor turn across the abandoned call and its resend"
     );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_turn_past_the_persisted_budget_ends_with_its_own_error_and_is_stopped() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Flooding,
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "flood"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let events = rig.events_until("error").await;
+    let error = &events.last().unwrap()["event"]["error"];
+    assert_eq!(error["code"], json!("adapter-stream"), "received: {error}");
+    let bytes: usize = events
+        .iter()
+        .map(|event| serde_json::to_vec(event).unwrap().len())
+        .sum();
+    assert!(
+        bytes <= 2 * 1024 * 1024,
+        "expected everything published to fit the persisted budget | received {bytes} bytes"
+    );
+    eventually(
+        "the flooding vendor stopped",
+        || rig.log.cancels.load(Ordering::SeqCst),
+        |cancels| *cancels >= 1,
+    )
+    .await;
+    eventually(
+        "the session idle once the flood drained",
+        || rig.supervisor.live_sessions().1[0].state,
+        |state| *state == "idle",
+    )
+    .await;
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_review_on_a_target_without_native_review_is_refused_before_any_reservation() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let error = rig
+        .supervisor
+        .start_review(
+            crate::external_agents::wire::StartReviewParams {
+                session_id: "one".into(),
+                client_message_id: "r1".into(),
+                target: crate::external_agents::wire::ReviewTarget::UncommittedChanges,
+            },
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a target without native review must refuse");
+    assert!(
+        error.message.contains("cannot start a native review"),
+        "received: {}",
+        error.message
+    );
+    // Nothing was reserved: a turn under the same id runs.
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "r1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the refused review reserved neither the slot nor the id");
     rig.close("one").await;
 }
