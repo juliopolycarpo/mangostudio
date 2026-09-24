@@ -487,6 +487,8 @@ mod windows {
     const TASK: &str = "MangoStudio Runtime";
     const MANAGER_TIMEOUT: Duration = Duration::from_secs(30);
     const UPDATE_SETTLE: Duration = Duration::from_secs(25);
+    /// PowerShell startup plus the verbs around the wait, reserved from the budget.
+    const VERB_MARGIN: Duration = Duration::from_secs(3);
 
     /// Executes a PowerShell script without interpolating it into a shell command line.
     /// Usage: `ProcessExec.run("Write-Output 'ready'")`.
@@ -533,7 +535,7 @@ mod windows {
                     let _ = child.wait();
                     return Err(io::Error::new(
                         io::ErrorKind::TimedOut,
-                        "PowerShell Scheduled Task command exceeded 30 seconds",
+                        format!("PowerShell Scheduled Task command exceeded {timeout:?}"),
                     ));
                 }
                 thread::sleep(Duration::from_millis(50));
@@ -607,13 +609,16 @@ mod windows {
         )
     }
 
-    fn verb_script(action: ServiceAction, force: bool) -> String {
+    /// Builds one Scheduled Task verb; the stop wait ends `wait` from launch.
+    /// Usage: `verb_script(ServiceAction::Restart, false, Duration::from_secs(27))`.
+    fn verb_script(action: ServiceAction, force: bool, wait: Duration) -> String {
         let name = ps_quote(TASK);
         let stop = format!(
             "Stop-ScheduledTask -TaskPath '\\' -TaskName {name} -ErrorAction SilentlyContinue"
         );
+        let wait_ms = wait.as_millis();
         let wait = format!(
-            "$deadline = (Get-Date).AddSeconds(27)\nwhile (((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') -and ((Get-Date) -lt $deadline)) {{ Start-Sleep -Milliseconds 200 }}\nif ((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') {{ throw 'Scheduled Task still running after 27 seconds' }}"
+            "$deadline = (Get-Date).AddMilliseconds({wait_ms})\nwhile (((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') -and ((Get-Date) -lt $deadline)) {{ Start-Sleep -Milliseconds 200 }}\nif ((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') {{ throw 'Scheduled Task still running after {wait_ms} ms' }}"
         );
         let start = format!("Start-ScheduledTask -TaskPath '\\' -TaskName {name}");
         let body = match action {
@@ -768,15 +773,17 @@ mod windows {
                     Some(settle_update(home)?)
                 };
                 let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
+                if remaining <= VERB_MARGIN {
                     return Err(io::Error::new(
                         io::ErrorKind::TimedOut,
-                        "runtime update did not settle within the 30-second service stop cap",
+                        format!(
+                            "runtime update left {remaining:?} of the 30-second service stop cap; expected more than {VERB_MARGIN:?} to stop the task"
+                        ),
                     ));
                 }
                 require(
                     exec,
-                    &verb_script(action, force),
+                    &verb_script(action, force, remaining - VERB_MARGIN),
                     remaining,
                     "Scheduled Task service action",
                 )?;
@@ -792,7 +799,7 @@ mod windows {
                 }
                 require(
                     exec,
-                    &verb_script(action, force),
+                    &verb_script(action, force, Duration::ZERO),
                     remaining,
                     "Start-ScheduledTask",
                 )?;
@@ -811,12 +818,14 @@ mod windows_tests {
 
     struct FakeTaskExec {
         calls: Mutex<Vec<String>>,
+        timeouts: Mutex<Vec<Duration>>,
         output: String,
     }
 
     impl Exec for FakeTaskExec {
-        fn run(&self, script: &str, _timeout: Duration) -> io::Result<(bool, String)> {
+        fn run(&self, script: &str, timeout: Duration) -> io::Result<(bool, String)> {
             self.calls.lock().unwrap().push(script.to_owned());
+            self.timeouts.lock().unwrap().push(timeout);
             Ok((true, self.output.clone()))
         }
     }
@@ -826,6 +835,7 @@ mod windows_tests {
         let home = scratch_dir("win-service-status");
         let exec = FakeTaskExec {
             calls: Mutex::new(Vec::new()),
+            timeouts: Mutex::new(Vec::new()),
             output: r#"{"installed":true,"state":"Ready","enabled":true,"execute":"other.exe","arguments":"stale","principal":"S-1-5-21-1","currentSid":"S-1-5-21-2"}"#.into(),
         };
         let status = operate(ServiceAction::Status, None, false, &home, &exec).unwrap();
@@ -846,6 +856,7 @@ mod windows_tests {
         let home = scratch_dir("win-service-absent");
         let exec = FakeTaskExec {
             calls: Mutex::new(Vec::new()),
+            timeouts: Mutex::new(Vec::new()),
             output: r#"{"installed":false}"#.into(),
         };
         let status = operate(ServiceAction::Status, None, false, &home, &exec).unwrap();
@@ -858,6 +869,7 @@ mod windows_tests {
         let home = scratch_dir("win-service-account-name");
         let exec = FakeTaskExec {
             calls: Mutex::new(Vec::new()),
+            timeouts: Mutex::new(Vec::new()),
             output: r#"{"installed":true,"state":"Running","enabled":true,"execute":"powershell.exe","arguments":"stale","principal":"julio","principalSid":"S-1-5-21-1","currentSid":"S-1-5-21-1"}"#.into(),
         };
         let status = operate(ServiceAction::Status, None, false, &home, &exec).unwrap();
@@ -877,6 +889,7 @@ mod windows_tests {
         ] {
             let exec = FakeTaskExec {
                 calls: Mutex::new(Vec::new()),
+                timeouts: Mutex::new(Vec::new()),
                 output: r#"{"installed":true,"state":"Running","enabled":true,"execute":"powershell.exe","arguments":"stale","principal":"other","principalSid":"S-1-5-21-1","currentSid":"S-1-5-21-2"}"#.into(),
             };
             let error = operate(action, None, force, &home, &exec).unwrap_err();
@@ -895,6 +908,7 @@ mod windows_tests {
         let home = scratch_dir("win-service-restart");
         let exec = FakeTaskExec {
             calls: Mutex::new(Vec::new()),
+            timeouts: Mutex::new(Vec::new()),
             output: r#"{"installed":true,"state":"Running","enabled":true,"execute":"powershell.exe","arguments":"stale","principal":"julio","principalSid":"S-1-5-21-1","currentSid":"S-1-5-21-1"}"#.into(),
         };
         operate(ServiceAction::Restart, None, false, &home, &exec).unwrap();
@@ -904,8 +918,47 @@ mod windows_tests {
         assert!(calls[1].contains("Stop-ScheduledTask"));
         assert!(calls[1].contains("Start-ScheduledTask"));
         assert!(calls[1].find("Stop-ScheduledTask") < calls[1].find("Start-ScheduledTask"));
-        assert!(calls[1].contains("AddSeconds(27)"));
+        assert!(calls[1].contains("AddMilliseconds("));
         assert!(!home.join("runtime/remote/runtime-update.lock").exists());
+    }
+
+    #[test]
+    fn stop_wait_ends_before_the_budget_left_after_a_slow_update_settles() {
+        use crate::slot_update_lock::SlotUpdateLock;
+        let home = scratch_dir("win-service-slow-settle");
+        let claim = SlotUpdateLock::acquire(
+            &crate::runtime_home::slot_dir(RuntimeSlot::Remote, &home),
+            "slow-installer".into(),
+            Duration::from_secs(30),
+        )
+        .unwrap();
+        let installer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            drop(claim);
+        });
+        let exec = FakeTaskExec {
+            calls: Mutex::new(Vec::new()),
+            timeouts: Mutex::new(Vec::new()),
+            output: r#"{"installed":true,"state":"Running","enabled":true,"execute":"powershell.exe","arguments":"stale","principal":"julio","principalSid":"S-1-5-21-1","currentSid":"S-1-5-21-1"}"#.into(),
+        };
+        operate(ServiceAction::Restart, None, false, &home, &exec).unwrap();
+        installer.join().unwrap();
+        let calls = exec.calls.lock().unwrap();
+        let timeout = exec.timeouts.lock().unwrap()[1];
+        let wait_in = |unit: &str, scale: u64| {
+            calls[1]
+                .split_once(&format!("{unit}("))
+                .and_then(|(_, rest)| rest.split_once(')'))
+                .and_then(|(value, _)| value.parse::<u64>().ok())
+                .map(|value| Duration::from_millis(value * scale))
+        };
+        let wait = wait_in("AddMilliseconds", 1)
+            .or_else(|| wait_in("AddSeconds", 1000))
+            .unwrap_or_else(|| panic!("expected a stop wait in the verb | received: {}", calls[1]));
+        assert!(
+            timeout.saturating_sub(wait) >= Duration::from_secs(2),
+            "expected the stop wait to end at least 2s before the kill timeout {timeout:?} | received wait: {wait:?}"
+        );
     }
 
     #[test]
