@@ -201,6 +201,31 @@ pub(crate) struct LiveSession {
     pub(super) turns: super::turns::TurnState,
 }
 
+/// Publishes a live session's close outcome and drops its slot when the
+/// owning `close_live` call finishes or is dropped, whichever comes first.
+///
+/// ```ignore
+/// let _owner = CloseOwner { supervisor, live, outcome: Some(Ok(())) };
+/// ```
+struct CloseOwner<'a> {
+    supervisor: &'a Supervisor,
+    live: &'a Arc<LiveSession>,
+    outcome: Option<Result<(), String>>,
+}
+
+impl Drop for CloseOwner<'_> {
+    fn drop(&mut self) {
+        {
+            let mut slots = self.supervisor.slots();
+            if matches!(slots.get(&self.live.session_id), Some(Slot::Live(current)) if Arc::ptr_eq(current, self.live))
+            {
+                slots.remove(&self.live.session_id);
+            }
+        }
+        self.live.closed.send_replace(self.outcome.take());
+    }
+}
+
 /// An operation stopped by its deadline, its caller or shutdown, with any
 /// value it still produced while it was being told to stop.
 struct Interrupted<T> {
@@ -815,15 +840,17 @@ impl Supervisor {
         cause: CloseCause,
     ) -> Result<(), RemoteError> {
         if !live.closing.swap(true, Ordering::AcqRel) {
-            let result = self.finish_close(live, cause).await;
-            {
-                let mut slots = self.slots();
-                if matches!(slots.get(&live.session_id), Some(Slot::Live(current)) if Arc::ptr_eq(current, live))
-                {
-                    slots.remove(&live.session_id);
-                }
-            }
-            live.closed.send_replace(Some(result));
+            // This caller's future owns the close. If it is dropped mid-close
+            // (a request aborted at hub teardown), the guard still publishes an
+            // outcome, so every other closer — including `close_all` — returns.
+            let mut guard = CloseOwner {
+                supervisor: self,
+                live,
+                outcome: Some(Err(
+                    "the close was interrupted before the vendor finished closing".to_owned(),
+                )),
+            };
+            guard.outcome = Some(self.finish_close(live, cause).await);
         }
         let mut closed = live.closed.subscribe();
         let outcome = loop {

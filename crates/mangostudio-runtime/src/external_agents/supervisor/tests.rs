@@ -87,6 +87,8 @@ enum OpenBehaviour {
     /// Opens a session whose every steer waits until the gate reads `true`,
     /// then fails in transit.
     SteerFailingOnGate(watch::Receiver<bool>),
+    /// Opens a session whose vendor close records its reason, then never ends.
+    CloseStalls,
 }
 
 /// How a [`CountingHarness`] answers a probe.
@@ -159,7 +161,8 @@ impl Harness for CountingHarness {
             }
             OpenBehaviour::AskingOneChoice
             | OpenBehaviour::Flooding
-            | OpenBehaviour::SteerFailingOnGate(_) => {}
+            | OpenBehaviour::SteerFailingOnGate(_)
+            | OpenBehaviour::CloseStalls => {}
             OpenBehaviour::FailNeedingCleanup(control) => {
                 return Err(SdkError::CleanupRequired {
                     control: Arc::clone(control) as Arc<dyn ProcessControl>,
@@ -194,6 +197,7 @@ impl Harness for CountingHarness {
             inner,
             log: Arc::clone(&self.log),
             steer_gate,
+            close_stalls: matches!(self.open, OpenBehaviour::CloseStalls),
         }))
     }
 
@@ -217,6 +221,7 @@ struct CountingSession {
     inner: Box<dyn Session>,
     log: Arc<HarnessLog>,
     steer_gate: Option<watch::Receiver<bool>>,
+    close_stalls: bool,
 }
 
 #[async_trait::async_trait]
@@ -276,6 +281,9 @@ impl Session for CountingSession {
 
     async fn close(&self, reason: CloseReason) -> mango_external_agents::Result<()> {
         self.log.closes.lock().unwrap().push(reason);
+        if self.close_stalls {
+            std::future::pending::<()>().await;
+        }
         self.inner.close(reason).await
     }
 
@@ -1658,6 +1666,51 @@ fn only_an_explicit_withdrawal_in_the_hub_hello_withholds_attestation() {
 // ---------------------------------------------------------------------------
 // Review regressions
 // ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_close_whose_owner_was_dropped_mid_close_still_releases_later_closers() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::CloseStalls,
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+
+    let supervisor = Arc::clone(&rig.supervisor);
+    let owner = tokio::spawn(async move {
+        supervisor
+            .close_session(
+                CloseParams {
+                    session_id: "one".into(),
+                },
+                CloseCause::Requested,
+            )
+            .await
+    });
+    eventually(
+        "the first close to reach the vendor",
+        || rig.log.closes().len(),
+        |closes| *closes == 1,
+    )
+    .await;
+    owner.abort();
+    let _ = owner.await;
+
+    let later = tokio::time::timeout(
+        Duration::from_secs(2),
+        rig.supervisor.close_all(CloseCause::Shutdown),
+    )
+    .await;
+    assert!(
+        later.is_ok(),
+        "expected close_all to return after the owning close was dropped | received: still waiting after 2s"
+    );
+    assert_eq!(
+        rig.live_count(),
+        0,
+        "expected the session's slot released by the dropped close owner"
+    );
+}
 
 #[tokio::test]
 async fn an_open_stopped_before_it_launched_never_reaches_the_vendor() {
