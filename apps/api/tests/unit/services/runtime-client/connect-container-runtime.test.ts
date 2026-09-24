@@ -39,7 +39,7 @@ function engines(overrides: Partial<ContainerEngineService> = {}): ContainerEngi
 }
 
 function definition(config: ContainerEnvironmentConfig) {
-  return { id: 'sandbox', config };
+  return { id: 'sandbox', userId: 'test-user', config };
 }
 
 const noop = () => undefined;

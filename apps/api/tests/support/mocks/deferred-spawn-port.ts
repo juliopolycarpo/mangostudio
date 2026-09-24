@@ -74,13 +74,16 @@ export class DeferredSpawnPort {
    * which sends its hello over the port pair. A no-op once `terminate()` has
    * already closed the pair — a hello that arrives after has nowhere to
    * land, exactly like a real reply racing a pipe the launcher already tore
-   * down.
+   * down. Returns the runtime-side session, so a test can call the hub.
    */
-  release(manifest: RuntimeCapabilityManifest = TEST_RUNTIME_MANIFEST, version = 'hub-test'): void {
+  release(
+    manifest: RuntimeCapabilityManifest = TEST_RUNTIME_MANIFEST,
+    version = 'hub-test'
+  ): Session | undefined {
     const port = this.#runtimeSidePort;
     if (!port) throw new Error('DeferredSpawnPort: release() called before spawnPort() ran.');
     try {
-      new Session(port, {
+      return new Session(port, {
         peer: { name: 'mangostudio-runtime', version, role: 'runtime' },
         capabilities: {
           ...manifest,
@@ -90,6 +93,7 @@ export class DeferredSpawnPort {
       });
     } catch {
       // See the doc comment above.
+      return undefined;
     }
   }
 }

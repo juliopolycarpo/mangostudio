@@ -81,7 +81,7 @@ function nonLoopbackInterfaces(lsOutput: string): string[] {
 
 function open(config: Partial<ContainerEnvironmentConfig> = {}) {
   return connectContainerRuntime(
-    { id: 'e2e-sandbox', config: { image, engine, ...config } },
+    { userId: 'test-user', id: 'e2e-sandbox', config: { image, engine, ...config } },
     () => undefined,
     undefined,
     { resolveRuntimeBinary: () => Promise.resolve({ path: runtimeBinary, offlineCache: false }) }

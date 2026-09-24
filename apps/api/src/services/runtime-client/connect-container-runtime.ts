@@ -69,6 +69,8 @@ const logger = createDiagnosticLogger('runtime-container');
 /** Minimal definition shape — kept local to avoid a cycle with the manager. */
 export interface ContainerRuntimeDefinition {
   readonly id: string;
+  /** The owner; `hub.workspace.authorize` answers for this user only. */
+  readonly userId: string;
   readonly config: unknown;
 }
 
@@ -162,6 +164,7 @@ export async function connectContainerRuntime(
   try {
     connection = await deps.spawn({
       environmentId: definition.id,
+      workspaceBinding: { userId: definition.userId, environmentId: definition.id },
       launch,
       hubVersion: getVersion(),
       handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,

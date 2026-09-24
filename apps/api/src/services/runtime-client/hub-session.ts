@@ -51,6 +51,11 @@ import {
   RuntimeContractViolationError,
 } from './contract-violation';
 import { resolveLocalHubIdentity } from './hub-identity';
+import {
+  type EnvironmentWorkspacePolicy,
+  type HubWorkspaceBinding,
+  serveHubContract,
+} from './hub-workspace-authority';
 import { RuntimeRequestNoReplyError, RuntimeRequestNotSentError } from './request-not-sent';
 
 /** Name this hub announces itself under; the runtime's audit log records it. */
@@ -248,6 +253,15 @@ export interface OpenHubSessionOptions {
    * alone cannot catch that: it only changes when the frame format does.
    */
   readonly requireMatchingRelease?: boolean;
+  /**
+   * The user and environment this connection speaks for, from the hub's own
+   * record of it. `hub.workspace.authorize` answers for this binding only;
+   * `null` is a connection with no real user, and every answer is `false`.
+   * Required so every transport states its binding rather than forgetting it.
+   */
+  readonly workspaceBinding: HubWorkspaceBinding | null;
+  /** Replaces the database policy behind `hub.workspace.authorize`; for tests. */
+  readonly workspacePolicy?: EnvironmentWorkspacePolicy;
 }
 
 /**
@@ -262,7 +276,7 @@ export interface OpenHubSessionOptions {
  * own, so every runtime's audit log can attribute what it served.
  *
  * @example
- * const hub = await openHubSession(port, { hubVersion: getVersion() });
+ * const hub = await openHubSession(port, { hubVersion: getVersion(), workspaceBinding: null });
  * const health = await hub.request('runtime.health', {});
  */
 export async function openHubSession(
@@ -283,6 +297,9 @@ export async function openHubSession(
       ? { handshakeTimeoutMs: options.handshakeTimeoutMs }
       : {}),
   });
+  // Registered before the handshake settles: the runtime may ask as soon as
+  // its first open arrives, and the handler lives as long as the session.
+  serveHubContract(session, options.workspaceBinding, options.workspacePolicy);
 
   let remote: Awaited<Session['ready']>;
   try {

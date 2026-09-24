@@ -14,6 +14,7 @@ describe('connectSshRuntime', () => {
     // — which sends the user to the server's authorized_keys over a path typo.
     const error = await connectSshRuntime(
       {
+        userId: 'test-user',
         id: 'build-01',
         config: { host: 'build-01.internal', identityFile: '/no/such/key' },
       },
@@ -35,6 +36,7 @@ describe('connectSshRuntime', () => {
     try {
       const error = await connectSshRuntime(
         {
+          userId: 'test-user',
           id: 'build-01',
           config: { host: 'ssh-target.invalid', identityFile },
         },
@@ -52,6 +54,7 @@ describe('connectSshRuntime', () => {
   it('still names a missing home-relative identity file', async () => {
     const error = await connectSshRuntime(
       {
+        userId: 'test-user',
         id: 'build-01',
         config: {
           host: 'build-01.internal',
@@ -68,7 +71,7 @@ describe('connectSshRuntime', () => {
 
   it('refuses a config its schema would not accept', async () => {
     const error = await connectSshRuntime(
-      { id: 'build-01', config: { host: '-oProxyCommand=id' } },
+      { userId: 'test-user', id: 'build-01', config: { host: '-oProxyCommand=id' } },
       () => undefined
     ).catch((caught) => caught);
 
@@ -87,6 +90,7 @@ describe('connectSshRuntime', () => {
     try {
       const error = await connectSshRuntime(
         {
+          userId: 'test-user',
           id: 'build-01',
           config: { host: 'ssh-target.invalid', identityFile },
         },

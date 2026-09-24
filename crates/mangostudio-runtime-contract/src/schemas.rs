@@ -73,7 +73,7 @@ impl std::error::Error for Violation {}
 /// Compiles `schema` into a reusable validator: draft 2020-12, offline (every
 /// schema in this contract is self-contained; a dangling `$ref` fails here
 /// rather than reaching the network), with format assertions enabled.
-fn compile(schema: &Value) -> Validator {
+pub(crate) fn compile(schema: &Value) -> Validator {
     jsonschema::draft202012::options()
         .offline()
         .should_validate_formats(true)
@@ -83,7 +83,7 @@ fn compile(schema: &Value) -> Validator {
 
 /// Runs `validator` against `value` for `subject`, reporting the first
 /// violation without ever touching `value` itself in the result.
-fn check(
+pub(crate) fn check(
     validator: &Validator,
     subject: impl Into<String>,
     value: &Value,
@@ -192,7 +192,7 @@ pub fn validate_event(topic: &str, payload: &Value) -> Result<(), Violation> {
     }
 }
 
-fn unknown_subject(subject: String) -> Violation {
+pub(crate) fn unknown_subject(subject: String) -> Violation {
     Violation {
         subject,
         schema_path: String::new(),

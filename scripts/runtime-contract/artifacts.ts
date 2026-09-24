@@ -14,6 +14,7 @@
 import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   CONSENT_DENIED_KIND,
+  HUB_CONTRACT,
   HubIdentitySchema,
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_EVENTS,
@@ -75,6 +76,14 @@ function schemaDocument(
 
 function catalogDocument(): Record<string, unknown> {
   return { $schema: CATALOG_SCHEMA_URL, ...RUNTIME_CONTRACT.catalog() };
+}
+
+/**
+ * The contract a hub serves back to its runtimes, as a catalog of its own: a
+ * runtime validates what it sends and what it receives against this file.
+ */
+function hubCatalogDocument(): Record<string, unknown> {
+  return { $schema: CATALOG_SCHEMA_URL, ...HUB_CONTRACT.catalog() };
 }
 
 function runtimeHomeDocument(): Record<string, unknown> {
@@ -171,6 +180,7 @@ export interface ContractArtifact {
 
 export const CONTRACT_ARTIFACTS: readonly ContractArtifact[] = [
   { name: 'catalog.json', build: catalogDocument },
+  { name: 'hub-catalog.json', build: hubCatalogDocument },
   { name: 'runtime-home.schema.json', build: runtimeHomeDocument },
   { name: 'manifest.schema.json', build: manifestDocument },
   { name: 'health.schema.json', build: healthDocument },

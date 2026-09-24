@@ -107,6 +107,7 @@ describe('Real Rust runtime MCP qualification', () => {
       const connection = await spawnRuntimeChild({
         environmentId: name,
         launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
+        workspaceBinding: null,
         hubVersion: runtimeVersion,
         onClosed: () => undefined,
       });

@@ -15,6 +15,7 @@
 //!   interactions.
 //! - [`supervisor`] owns the sessions; [`service`] registers the methods.
 
+pub(crate) mod hub_authority;
 pub(crate) mod isolation;
 pub(crate) mod launcher;
 pub(crate) mod map;

@@ -16,6 +16,7 @@ import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
 import { httpRuntimeBaseUrlToWebSocketUrl } from './http-runtime-url';
 import { openHubSession, type ProtocolHubSession } from './hub-session';
+import type { HubWorkspaceBinding } from './hub-workspace-authority';
 import { RuntimeClient } from './runtime-client';
 import { readRuntimeToken } from './runtime-token-secrets';
 
@@ -45,7 +46,10 @@ export async function connectHttpRuntime(
 
   let hub: ProtocolHubSession;
   try {
-    hub = await openRuntimeSession(wsUrl, token);
+    hub = await openRuntimeSession(wsUrl, token, {
+      userId: definition.userId,
+      environmentId: definition.id,
+    });
   } catch (error) {
     throw asConnectError(error, definition.id, baseUrl);
   }
@@ -84,7 +88,11 @@ export async function connectHttpRuntime(
 }
 
 /** Dials the runtime under a deadline and exchanges hellos over what comes back. */
-async function openRuntimeSession(wsUrl: string, token: string): Promise<ProtocolHubSession> {
+async function openRuntimeSession(
+  wsUrl: string,
+  token: string,
+  workspaceBinding: HubWorkspaceBinding
+): Promise<ProtocolHubSession> {
   const deadline = dialDeadline(
     HANDSHAKE_TIMEOUT_MS,
     `The runtime did not accept a WebSocket at ${wsUrl} within ${HANDSHAKE_TIMEOUT_MS}ms.`
@@ -102,6 +110,7 @@ async function openRuntimeSession(wsUrl: string, token: string): Promise<Protoco
     hubVersion: getVersion(),
     handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
     requireMatchingRelease: false,
+    workspaceBinding,
   });
 }
 

@@ -16,10 +16,11 @@ use serde_json::Value;
 
 use mango_external_agents::Limits;
 
+use super::hub_authority::{HUB_AUTHORIZE_TIMEOUT, HubWorkspaceAuthority};
 use super::launcher::GuardedProcessLauncher;
 use super::supervisor::{
-    CLEANUP_TIMEOUT, CONSENT_POLL, CloseCause, DEFAULT_SESSION_CAP, DenyEveryWorkspace,
-    ExecutableResolver, PortFuture, Ports, ProductHarnesses, Supervisor,
+    CLEANUP_TIMEOUT, CONSENT_POLL, CloseCause, DEFAULT_SESSION_CAP, ExecutableResolver, PortFuture,
+    Ports, ProductHarnesses, Supervisor,
 };
 use super::wire::TargetId;
 use crate::consent::source::ConsentSource;
@@ -85,7 +86,7 @@ async fn call(
         ),
         "external-agent.list-sessions" => encode(
             supervisor
-                .list_sessions(decode(method, params)?, cancel)
+                .list_sessions(decode(method, params)?, context.session(), cancel)
                 .await?,
         ),
         "external-agent.refresh-account-usage" => encode(
@@ -150,7 +151,7 @@ impl ExecutableResolver for ProbedExecutables {
 
 /// The supervisor a production host serves: the three product harnesses, the
 /// guarded launcher re-reading `externalAgents` consent before every exec,
-/// the fail-closed workspace authority, and a private directory in the slot.
+/// the hub-asking, fail-closed workspace authority, and a private directory in the slot.
 ///
 /// # Example
 ///
@@ -174,7 +175,7 @@ pub(crate) fn production_supervisor(
     Supervisor::new(Ports {
         launcher: Arc::new(launcher),
         harnesses: Arc::new(ProductHarnesses),
-        workspaces: Arc::new(DenyEveryWorkspace),
+        workspaces: Arc::new(HubWorkspaceAuthority::new(HUB_AUTHORIZE_TIMEOUT)),
         executables: Arc::new(ProbedExecutables),
         environment: Arc::new(|| crate::probing::host::build_runtime_path_env(None)),
         consent: Arc::new(move || read.refresh().external_agents),

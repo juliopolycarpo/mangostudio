@@ -37,6 +37,7 @@ export async function spawnRustAndTypeScriptRuntimes(
   const rustConnection = await spawnRuntimeChild({
     environmentId: `rust-${label}`,
     launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binaryPath }),
+    workspaceBinding: null,
     hubVersion: await rustRuntimeVersion(binaryPath),
     onClosed: ignoreNotification,
   });
