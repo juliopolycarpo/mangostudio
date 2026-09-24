@@ -1,33 +1,49 @@
 //! Per-user systemd or launchd operation for a paired remote runtime.
 
+#[cfg(unix)]
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::io;
+#[cfg(unix)]
+use std::io::Write;
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(unix)]
+use serde_json::json;
 
 use super::super::{ServiceAction, ServiceMode};
+#[cfg(unix)]
 use crate::runtime_home::{
     RuntimeSlot, home_dir, read_runtime_slot_config, read_runtime_slot_credentials,
     slot_current_binary_path,
 };
 
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
 const UNIT: &str = "mangostudio-runtime.service";
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 const LABEL: &str = "com.mangostudio.runtime";
+#[cfg(unix)]
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[cfg(unix)]
 trait Exec {
     fn run(&self, program: &str, args: &[&str]) -> io::Result<bool>;
     #[cfg(target_os = "macos")]
     fn capture(&self, program: &str, args: &[&str]) -> io::Result<(bool, String)>;
 }
 
+#[cfg(unix)]
 struct ProcessExec;
 
+#[cfg(unix)]
 impl Exec for ProcessExec {
     fn run(&self, program: &str, args: &[&str]) -> io::Result<bool> {
         let mut child = Command::new(program)
@@ -89,6 +105,7 @@ impl Exec for ProcessExec {
     }
 }
 
+#[cfg(unix)]
 fn unit_path(home: &Path) -> PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -101,6 +118,7 @@ fn unit_path(home: &Path) -> PathBuf {
     }
 }
 
+#[cfg(unix)]
 fn configured_mode(requested: Option<ServiceMode>, home: &Path) -> io::Result<ServiceMode> {
     let config = read_runtime_slot_config(RuntimeSlot::Remote, home);
     if let Some(error) = config.error {
@@ -129,6 +147,7 @@ fn configured_mode(requested: Option<ServiceMode>, home: &Path) -> io::Result<Se
     }
 }
 
+#[cfg(unix)]
 fn check_install(mode: ServiceMode, home: &Path) -> io::Result<PathBuf> {
     let config = read_runtime_slot_config(RuntimeSlot::Remote, home);
     if let Some(error) = config.error {
@@ -189,6 +208,7 @@ fn check_install(mode: ServiceMode, home: &Path) -> io::Result<PathBuf> {
     Ok(binary)
 }
 
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
 fn quote_systemd_arg(value: &str) -> String {
     let escaped = value.replace('%', "%%").replace('$', "$$$$");
     if escaped
@@ -201,6 +221,7 @@ fn quote_systemd_arg(value: &str) -> String {
     }
 }
 
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
 fn render_systemd(binary: &Path, mode: ServiceMode) -> String {
     format!(
         "[Unit]\nDescription=MangoStudio runtime ({})\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={} {}\nRestart=on-failure\nRestartSec=5\nKillMode=mixed\nTimeoutStopSec=30s\n\n[Install]\nWantedBy=default.target\n",
@@ -210,7 +231,7 @@ fn render_systemd(binary: &Path, mode: ServiceMode) -> String {
     )
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 fn xml_escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -218,7 +239,7 @@ fn xml_escape(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 fn render_launchd(binary: &Path, mode: ServiceMode) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{LABEL}</string><key>ProgramArguments</key><array><string>{}</string><string>{}</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>ExitTimeOut</key><integer>30</integer></dict></plist>\n",
@@ -227,6 +248,7 @@ fn render_launchd(binary: &Path, mode: ServiceMode) -> String {
     )
 }
 
+#[cfg(unix)]
 fn write_unit(path: &Path, body: &str) -> io::Result<()> {
     fs::create_dir_all(path.parent().expect("unit has parent"))?;
     let mut file = OpenOptions::new()
@@ -244,6 +266,7 @@ fn write_unit(path: &Path, body: &str) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn require(exec: &impl Exec, program: &str, args: &[&str]) -> io::Result<()> {
     if exec.run(program, args)? {
         Ok(())
@@ -254,7 +277,7 @@ fn require(exec: &impl Exec, program: &str, args: &[&str]) -> io::Result<()> {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
 fn stop_launchd(exec: &impl Exec, target: &str) -> io::Result<()> {
     if !exec.run("launchctl", &["bootout", target])? && exec.run("launchctl", &["print", target])? {
         return Err(io::Error::other(format!(
@@ -417,21 +440,7 @@ fn operate(
     Ok(json!({"ok":true}))
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn operate(
-    _action: ServiceAction,
-    _mode: Option<ServiceMode>,
-    _force: bool,
-    _home: &Path,
-    _account_home: &Path,
-    _exec: &impl Exec,
-) -> io::Result<Value> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "per-user service management requires Linux systemd or macOS launchd",
-    ))
-}
-
+#[cfg(unix)]
 pub(super) fn run(
     action: ServiceAction,
     mode: Option<ServiceMode>,
@@ -442,14 +451,43 @@ pub(super) fn run(
     operate(action, mode, force, home, &account_home, &ProcessExec)
 }
 
-#[cfg(test)]
+#[cfg(not(unix))]
+pub(super) fn run(
+    _action: ServiceAction,
+    _mode: Option<ServiceMode>,
+    _force: bool,
+    _home: &Path,
+) -> io::Result<Value> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "per-user service management requires Linux systemd or macOS launchd",
+    ))
+}
+
+#[cfg(all(test, not(unix)))]
+mod unsupported_tests {
+    use super::*;
+
+    #[test]
+    fn service_operation_reports_unsupported_until_a_native_backend_exists() {
+        let error = run(ServiceAction::Status, None, false, Path::new(".")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(error.to_string().contains("Linux systemd or macOS launchd"));
+    }
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
     use crate::runtime_home::{write_runtime_slot_config, write_runtime_slot_credentials};
+    #[cfg(target_os = "linux")]
     use crate::test_support::scratch_dir;
     use std::sync::Mutex;
 
+    #[cfg(target_os = "linux")]
     struct FakeExec(Mutex<Vec<String>>);
+    #[cfg(target_os = "linux")]
     impl Exec for FakeExec {
         fn run(&self, program: &str, args: &[&str]) -> io::Result<bool> {
             self.0

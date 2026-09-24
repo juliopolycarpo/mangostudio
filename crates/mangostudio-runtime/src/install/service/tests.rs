@@ -1741,7 +1741,7 @@ mod windows_powershell {
     use serde_json::json;
     use tokio_util::sync::CancellationToken;
 
-    use super::{RecordingAudit, RecordingEvents, SwitchableConsent, status};
+    use super::{RecordingAudit, RecordingEvents, SwitchableConsent, effect_claim, status};
     use crate::commands::toolchain::NativeToolchainFs;
     use crate::install::log::FileInstallLog;
     use crate::install::runs::InstallRuns;
