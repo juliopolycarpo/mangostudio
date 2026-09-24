@@ -56,10 +56,12 @@ impl HubWorkspaceAuthority {
             timeout: Some(self.timeout),
             ..RequestOptions::default()
         };
-        let Ok(result) = hub
+        eprintln!("DIAG ask: sending {params}");
+        let answer = hub
             .request_with(HUB_WORKSPACE_AUTHORIZE, params, options)
-            .await
-        else {
+            .await;
+        eprintln!("DIAG ask: answer {answer:?}");
+        let Ok(result) = answer else {
             return false;
         };
         explicitly_authorized(&result)
