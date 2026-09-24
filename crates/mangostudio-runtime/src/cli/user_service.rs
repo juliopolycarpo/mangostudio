@@ -1148,5 +1148,47 @@ mod tests {
                 "loginctl enable-linger",
             ]
         );
+
+        let slot = home.join("runtime/remote");
+        let config = fs::read(slot.join("runtime.json")).unwrap();
+        let credentials = fs::read(slot.join("credentials.json")).unwrap();
+        let status = operate(ServiceAction::Status, None, false, &home, &home, &fake).unwrap();
+        for field in [
+            "installed",
+            "enabled",
+            "running",
+            "execUsesCurrent",
+            "currentBinaryPresent",
+        ] {
+            assert_eq!(status[field], true, "service status {field}");
+        }
+        for action in [
+            ServiceAction::Start,
+            ServiceAction::Restart,
+            ServiceAction::Stop,
+            ServiceAction::Uninstall,
+        ] {
+            operate(action, None, false, &home, &home, &fake).unwrap();
+        }
+        assert!(!unit_path(&home).exists());
+        assert_eq!(fs::read(slot.join("runtime.json")).unwrap(), config);
+        assert_eq!(
+            fs::read(slot.join("credentials.json")).unwrap(),
+            credentials
+        );
+        assert_eq!(
+            &fake.0.lock().unwrap()[4..],
+            [
+                "systemctl --user show-environment",
+                "systemctl --user is-enabled mangostudio-runtime.service",
+                "systemctl --user is-active mangostudio-runtime.service",
+                "systemctl --user start mangostudio-runtime.service",
+                "systemctl --user --no-block restart mangostudio-runtime.service",
+                "systemctl --user stop mangostudio-runtime.service",
+                "systemctl --user disable mangostudio-runtime.service",
+                "systemctl --user --no-block stop mangostudio-runtime.service",
+                "systemctl --user daemon-reload",
+            ]
+        );
     }
 }
