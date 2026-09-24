@@ -53,6 +53,7 @@ describe('Real Rust runtime external-agent admission', () => {
       readonly env?: Readonly<Record<string, string>>;
       readonly externalAgentIsolation?: 'single-user' | 'withdrawn';
       readonly workspaceBinding?: HubWorkspaceBinding;
+      readonly workspacePolicy?: () => Promise<boolean>;
     } = {}
   ): Promise<RuntimeClient> {
     const mangoHome = await scratchMangoHome(name);
@@ -70,6 +71,7 @@ describe('Real Rust runtime external-agent admission', () => {
     const hub = await openHubSession(peer.port, {
       // The real hub handler, answering from the test database.
       workspaceBinding: options.workspaceBinding ?? null,
+      ...(options.workspacePolicy ? { workspacePolicy: options.workspacePolicy } : {}),
       hubVersion: runtimeVersion,
       ...(options.externalAgentIsolation
         ? { externalAgentIsolation: options.externalAgentIsolation }
@@ -259,6 +261,77 @@ describe('Real Rust runtime external-agent admission', () => {
       const health = await rust.health();
       expect(health.externalAgents?.liveSessionCount).toBe(0);
     },
+    60_000
+  );
+
+  async function diagVariant(
+    label: string,
+    opts: { db: boolean; binding: boolean; policy: boolean; healthFirst: boolean }
+  ) {
+    console.error('DIAG variant start', label, Date.now());
+    const home = await scratchMangoHome(`diag-${label}`);
+    cleanups.push(() => cleanupMangoHome(home));
+    const emptyPath = join(home, 'empty-path');
+    await mkdir(emptyPath);
+    await mkdir(join(home, 'authorized'));
+    const authorized = await realpath(join(home, 'authorized'));
+    const environmentId = `diag-${label}`;
+    let userId = 'diag-user';
+    if (opts.db) {
+      const owner = await insertTestUser();
+      userId = owner.id;
+      const chat = await insertTestChat(owner.id);
+      await getDb()
+        .updateTable('chats')
+        .set({ environmentId, workdir: authorized })
+        .where('id', '=', chat.id)
+        .execute();
+    }
+    const rust = await spawnRustRuntime(environmentId, {
+      env: {
+        HOME: home,
+        USERPROFILE: home,
+        PATH: emptyPath,
+        XDG_CONFIG_HOME: join(home, '.config'),
+      },
+      ...(opts.binding ? { workspaceBinding: { userId, environmentId } } : {}),
+      ...(opts.policy ? { workspacePolicy: async () => true } : {}),
+    });
+    if (opts.healthFirst) await rust.health();
+    const result = await rust.externalAgents
+      .open({
+        sessionId: `diag-${label}`,
+        targetId: 'codex',
+        workspacePath: authorized,
+        configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
+        resumeMode: 'fallback',
+        timeoutMs: 10_000,
+      })
+      .then(
+        () => 'resolved',
+        (error: unknown) => String(error)
+      );
+    console.error('DIAG variant result', label, result, Date.now());
+  }
+
+  it.skipIf(!binary.available)(
+    'DIAG A db+null binding',
+    () => diagVariant('a', { db: true, binding: false, policy: false, healthFirst: false }),
+    60_000
+  );
+  it.skipIf(!binary.available)(
+    'DIAG B no db, policy true',
+    () => diagVariant('b', { db: false, binding: true, policy: true, healthFirst: false }),
+    60_000
+  );
+  it.skipIf(!binary.available)(
+    'DIAG C db+binding, health first',
+    () => diagVariant('c', { db: true, binding: true, policy: false, healthFirst: true }),
+    60_000
+  );
+  it.skipIf(!binary.available)(
+    'DIAG D no db, null binding, open first',
+    () => diagVariant('d', { db: false, binding: false, policy: false, healthFirst: false }),
     60_000
   );
 });
