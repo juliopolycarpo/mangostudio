@@ -20,4 +20,6 @@
 pub(crate) mod isolation;
 pub(crate) mod launcher;
 pub(crate) mod map;
+pub(crate) mod service;
+pub(crate) mod supervisor;
 pub(crate) mod wire;

@@ -30,6 +30,9 @@ name = "mangostudio-runtime"
 path = "src/main.rs"
 
 [dependencies]
+# The SDK's process and launcher ports are `async_trait` traits; already in the graph through
+# `mango-external-agents` at this version.
+async-trait = { version = "0.1.92", default-features = false }
 # `serve`'s token bootstrap (`generate_serve_token`, mirroring `runtime-home.ts`'s
 # `bootstrapServeToken`): base64url-encodes the 32 bytes `getrandom` (below)
 # draws from the operating system's CSPRNG. Already in the dependency graph
@@ -130,7 +133,9 @@ tokio = { version = "1.53", default-features = false, features = ["fs", "io-util
 # `CancellationToken`: the cooperative shutdown signal `serve`'s accept loop
 # and `connect`'s dial loop both watch. Same version `mango-protocol` itself
 # pins, so `cargo deny`'s duplicate-version check has nothing new to catch.
-tokio-util = { version = "0.7", default-features = false }
+# `rt` adds `TaskTracker`, which the external-agent supervisor uses to await every
+# task it spawns before its shutdown returns.
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
 # `library.scan` validates `toml-agent`/`toml-settings` instances and reads a
 # Codex subagent's `name`/`description`, mirroring `smol-toml`'s parse in
 # `apps/shared/src/library/machine/instance-reader.ts`.

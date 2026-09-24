@@ -173,7 +173,7 @@ fn compile_root(path: &Path) -> Result<Root, RemoteError> {
 
 /// Normalizes final and canonical Windows paths to the same Win32 spelling.
 #[cfg(windows)]
-pub(super) fn normalize_windows_final_path(path: &Path) -> PathBuf {
+pub(crate) fn normalize_windows_final_path(path: &Path) -> PathBuf {
     windows::normalize_final_path(path)
 }
 
