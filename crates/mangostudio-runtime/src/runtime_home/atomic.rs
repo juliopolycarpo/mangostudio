@@ -103,7 +103,7 @@ fn is_transient_windows_sharing_violation(error: &io::Error) -> bool {
 /// # Errors
 /// The last rename error, once `policy.attempts` is exhausted or the
 /// failure is not one this recognises as transient.
-fn rename_with_retry(
+pub(crate) fn rename_with_retry(
     rename: &impl Rename,
     from: &Path,
     to: &Path,
