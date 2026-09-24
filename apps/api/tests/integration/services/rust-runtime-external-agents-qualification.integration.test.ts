@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdir, realpath } from 'node:fs/promises';
+import { mkdir, realpath, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sanitizedEnv, spawnPort } from '@mangostudio/protocol/spawn';
 import { rejectionOf } from '@mangostudio/protocol/testing';
@@ -283,6 +283,66 @@ describe('Real Rust runtime external-agent admission', () => {
       });
       const health = await rust.health();
       expect(health.externalAgents?.liveSessionCount).toBe(0);
+    },
+    60_000
+  );
+
+  // Symlink creation needs a privilege on Windows.
+  it.skipIf(!binary.available || process.platform === 'win32')(
+    'authorizes the workdir workspace.validate returned for a symlinked path',
+    async () => {
+      const home = await scratchMangoHome('rust-external-agents-symlink-home');
+      cleanups.push(() => cleanupMangoHome(home));
+      const emptyPath = join(home, 'empty-path');
+      await mkdir(emptyPath);
+      await mkdir(join(home, 'real'));
+      await symlink(join(home, 'real'), join(home, 'link'), 'dir');
+      const canonical = await realpath(join(home, 'real'));
+
+      const owner = await insertTestUser();
+      const environmentId = 'rust-external-agents-symlink';
+      const chat = await insertTestChat(owner.id);
+      cleanups.push(async () => {
+        await getDb().deleteFrom('chats').where('id', '=', chat.id).execute();
+        await getDb().deleteFrom('user').where('id', '=', owner.id).execute();
+      });
+
+      const rust = await spawnRustRuntime(environmentId, {
+        env: {
+          HOME: home,
+          USERPROFILE: home,
+          PATH: emptyPath,
+          XDG_CONFIG_HOME: join(home, '.config'),
+        },
+        workspaceBinding: { userId: owner.id, environmentId },
+      });
+
+      // The hub stores whatever validate resolves as the chat workdir.
+      const validation = await rust.workspace.validate({
+        path: join(home, 'link'),
+        requireAbsolute: true,
+      });
+      if (!validation.ok) throw new Error(`expected ok validation, received ${validation.reason}`);
+      expect(validation.resolvedPath).toBe(canonical);
+      await getDb()
+        .updateTable('chats')
+        .set({ environmentId, workdir: validation.resolvedPath })
+        .where('id', '=', chat.id)
+        .execute();
+
+      // Open exactly the stored string: the supervisor refuses a non-canonical
+      // path, and past the authority only the CLI is missing.
+      const rejection = await rejectionOf(
+        rust.externalAgents.open({
+          sessionId: 'qualification-symlink',
+          targetId: 'codex',
+          workspacePath: validation.resolvedPath,
+          configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
+          resumeMode: 'fallback',
+          timeoutMs: 10_000,
+        })
+      );
+      expect(rejection).toMatchObject({ message: expect.stringMatching(/is not installed/) });
     },
     60_000
   );

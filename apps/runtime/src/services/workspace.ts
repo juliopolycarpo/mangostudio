@@ -16,6 +16,7 @@ import type {
   RuntimeWorkspaceResolveContainedResult,
   RuntimeWorkspaceValidateResult,
 } from '../methods';
+import { canonicalWorkspacePath } from './canonical-workspace';
 
 /** Protocol-layer cap on directory listing size. */
 export const MAX_WORKSPACE_DIRECTORY_ENTRIES = 5000;
@@ -232,7 +233,7 @@ export async function validateWorkdir(
     }
 
     await access(resolvedPath, constants.R_OK | constants.X_OK);
-    return { ok: true, resolvedPath };
+    return { ok: true, resolvedPath: await canonicalWorkspacePath(resolvedPath) };
   } catch (error) {
     const reason = filesystemReason(error);
     if (reason) {

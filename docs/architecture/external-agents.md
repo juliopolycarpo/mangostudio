@@ -63,6 +63,14 @@ authorized only when a chat owned by the connection's user, on the connection's 
 already stores that exact canonical `workdir`. The CLI/setup stand-in user `local` and a connection
 with no bound user are never authorized.
 
+The stored `workdir` is the runtime's own canonical path. `workspace.validate` returns, as
+`resolvedPath`, the directory canonicalized by the same function the runtime's external-agent
+authorization uses (`realpath` in the TypeScript runtime, `canonicalize` in the Rust runtime), and
+the hub stores that value. A workdir chosen through a symlink, or with different casing on a
+case-insensitive filesystem, is therefore stored in the form the authorization later asks about.
+Workdirs stored before this rule keep their lexical form until the user selects them again; the
+hub cannot canonicalize them itself because the path belongs to the runtime's filesystem.
+
 The in-process Local runtime reaches that policy through the callback it is built with. A spawned
 Rust runtime (stdio, WSL, SSH, container, HTTP or dial-in) asks back over its own hub session. A
 spawned TypeScript runtime does not ask yet and still refuses every workspace. It

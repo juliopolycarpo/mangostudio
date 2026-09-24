@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { realpath, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { EventInput } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
@@ -60,6 +60,7 @@ import type { RuntimeConsentSource } from '../../consent-source';
 import { writeRuntimeDiagnostic } from '../../diagnostics';
 import { RuntimeToolArgumentError } from '../../errors';
 import { RUNTIME_EXTERNAL_AGENT_TOPIC } from '../../methods';
+import { canonicalWorkspacePath } from '../canonical-workspace';
 import { probingService } from '../probing/service';
 import { buildSpawnEnv, nodeSpawnEnvHost, type SpawnEnvFs } from '../spawn-env';
 import type {
@@ -1402,7 +1403,7 @@ export class ExternalAgentSessionSupervisor {
       );
       if (!info.isDirectory()) throw new Error('not a directory');
       canonical = await raceAbort(
-        realpath(absolute),
+        canonicalWorkspacePath(absolute),
         signal,
         `External-agent workspace resolution for "${input}" timed out.`
       );

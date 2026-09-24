@@ -988,7 +988,7 @@ impl Supervisor {
         input: &str,
     ) -> Result<PathBuf, RemoteError> {
         let requested = PathBuf::from(input);
-        let canonical = crate::blocking::run_blocking(move || canonical_directory(&requested))
+        let canonical = crate::blocking::run_blocking(move || crate::workspace_path::canonical_directory(&requested))
         .await
         .ok_or_else(|| {
             argument(format!(
@@ -1245,19 +1245,6 @@ fn sdk_resume_mode(mode: ResumeMode) -> SdkResumeMode {
         ResumeMode::Strict => SdkResumeMode::Strict,
         ResumeMode::Fallback => SdkResumeMode::Fallback,
     }
-}
-
-/// The canonical spelling of an existing directory, or `None` when `path`
-/// is not one. On Windows it is the Win32 spelling rather than the verbatim
-/// `\\?\` form `canonicalize` returns, matching every other runtime surface.
-pub(super) fn canonical_directory(path: &Path) -> Option<PathBuf> {
-    if !std::fs::metadata(path).ok()?.is_dir() {
-        return None;
-    }
-    let canonical = std::fs::canonicalize(path).ok()?;
-    #[cfg(windows)]
-    let canonical = crate::filesystem::normalize_windows_final_path(&canonical);
-    Some(canonical)
 }
 
 fn path_text(path: &Path) -> String {

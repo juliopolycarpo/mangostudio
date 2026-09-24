@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
@@ -24,8 +24,29 @@ describe('validateWorkdir', () => {
   it('returns the resolved path for an existing directory', async () => {
     const root = await createTempDir();
 
-    expect(await validateWorkdir(root)).toEqual({ ok: true, resolvedPath: resolve(root) });
+    expect(await validateWorkdir(root)).toEqual({
+      ok: true,
+      resolvedPath: await realpath(resolve(root)),
+    });
   });
+
+  // The hub stores resolvedPath as the chat workdir and the external-agent
+  // authority compares it exactly with the supervisor's realpath.
+  it.skipIf(process.platform === 'win32')(
+    'returns the canonical directory for a symlinked path',
+    async () => {
+      const root = await createTempDir();
+      const real = join(root, 'real');
+      const link = join(root, 'link');
+      await mkdir(real);
+      await symlink(real, link, 'dir');
+
+      expect(await validateWorkdir(link)).toEqual({
+        ok: true,
+        resolvedPath: await realpath(real),
+      });
+    }
+  );
 
   it('distinguishes missing paths from regular files', async () => {
     const root = await createTempDir();

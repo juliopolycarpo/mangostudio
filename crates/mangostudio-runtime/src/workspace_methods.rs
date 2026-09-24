@@ -284,15 +284,14 @@ async fn build_validate_result(params: ValidateParams) -> Result<Value, RemoteEr
     let resolved =
         resolve_workspace_path(&params.path, require_absolute).map_err(workdir_validation_error)?;
 
-    let checked = resolved.clone();
-    let outcome = run_blocking(move || validate_resolved_path(&checked))
+    let outcome = run_blocking(move || validate_resolved_path(&resolved))
         .await
         .map_err(|io_error| RemoteError::new(codes::INTERNAL, io_error.to_string()))?;
 
     Ok(match outcome {
-        ValidationOutcome::Ok => json!({
+        ValidationOutcome::Ok(canonical) => json!({
             "ok": true,
-            "resolvedPath": resolved.to_string_lossy(),
+            "resolvedPath": canonical.to_string_lossy(),
         }),
         ValidationOutcome::NotOk(reason) => json!({ "ok": false, "reason": reason }),
     })
@@ -319,12 +318,16 @@ fn workdir_validation_error(error: WorkspacePathError) -> RemoteError {
 /// classify at all (see [`workdir_filesystem_reason`]) is an `Err`, which
 /// [`build_validate_result`] re-throws bare.
 enum ValidationOutcome {
-    Ok,
+    /// The directory's canonical form — see
+    /// [`crate::workspace_path::canonical_directory`].
+    Ok(PathBuf),
     NotOk(&'static str),
 }
 
 /// The blocking half of `workspace.validate`: `stat`s `path`, then — only
-/// once it is confirmed to be a directory — checks read+execute access.
+/// once it is confirmed to be a directory — checks read+execute access and
+/// returns the directory's canonical form, the same string the external-agent
+/// workspace authorization later asks the hub about.
 ///
 /// # Platform split
 /// On Unix, `access(2)` with `R_OK | X_OK` is the real check Node's own
@@ -355,7 +358,7 @@ fn validate_resolved_path(path: &Path) -> std::io::Result<ValidationOutcome> {
         use nix::unistd::{AccessFlags, access};
 
         match access(path, AccessFlags::R_OK | AccessFlags::X_OK) {
-            Ok(()) => Ok(ValidationOutcome::Ok),
+            Ok(()) => Ok(canonical_outcome(path)),
             Err(Errno::EACCES | Errno::EPERM) => Ok(ValidationOutcome::NotOk("permission-denied")),
             Err(Errno::ENOENT) => Ok(ValidationOutcome::NotOk("not-found")),
             Err(errno) => Err(std::io::Error::from_raw_os_error(errno as i32)),
@@ -363,8 +366,15 @@ fn validate_resolved_path(path: &Path) -> std::io::Result<ValidationOutcome> {
     }
     #[cfg(not(unix))]
     {
-        Ok(ValidationOutcome::Ok)
+        Ok(canonical_outcome(path))
     }
+}
+
+/// A directory that vanished between the access check and canonicalization
+/// answers `not-found`, like one that was never there.
+fn canonical_outcome(path: &Path) -> ValidationOutcome {
+    crate::workspace_path::canonical_directory(path)
+        .map_or(ValidationOutcome::NotOk("not-found"), ValidationOutcome::Ok)
 }
 
 /// `workspace.resolve-contained({ root, path })`: `path` resolved relative
@@ -564,7 +574,7 @@ mod tests {
         let dir = scratch_root("validate-ok");
         assert!(matches!(
             validate_resolved_path(&dir).unwrap(),
-            ValidationOutcome::Ok
+            ValidationOutcome::Ok(_)
         ));
     }
 
@@ -730,7 +740,16 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(result["ok"], true);
-        assert_eq!(result["resolvedPath"], dir.to_string_lossy().into_owned());
+        // Canonical, not the path as given: macOS temp dirs resolve to
+        // `/private/var`, and Windows expands 8.3 names like `RUNNER~1`.
+        let canonical = crate::workspace_path::canonical_directory(&dir)
+            .expect("the scratch directory canonicalizes");
+        assert_eq!(
+            result["resolvedPath"],
+            canonical.to_string_lossy().into_owned(),
+            "expected the canonical directory | received: {}",
+            result["resolvedPath"]
+        );
     }
 
     #[tokio::test]
@@ -793,6 +812,35 @@ mod tests {
         let validator = compile_result_schema(&declared.result);
         check_result("workspace.validate", &validator, &result)
             .expect("the ok:true shape must validate against its own schema");
+    }
+
+    /// The hub stores `resolvedPath` as the chat workdir and the external-agent
+    /// authority compares it byte-for-byte with the canonical directory the
+    /// supervisor asks about, so a symlinked workdir must come back resolved.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn validate_returns_the_canonical_directory_of_a_symlinked_path() {
+        let dir = scratch_root("validate-symlink");
+        let real = dir.join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let expected = crate::workspace_path::canonical_directory(&real)
+            .expect("the real directory canonicalizes");
+
+        let result = build_validate_result(ValidateParams {
+            path: link.to_string_lossy().into_owned(),
+            require_absolute: Some(true),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            result["resolvedPath"],
+            expected.to_string_lossy().as_ref(),
+            "expected resolvedPath: canonical directory {expected:?} | received: {}",
+            result["resolvedPath"]
+        );
     }
 
     #[tokio::test]
