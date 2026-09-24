@@ -13,7 +13,7 @@ use mango_external_agents::{
 };
 use mango_protocol::error::codes;
 use mango_protocol::frame::PeerInfo;
-use mango_protocol::port::{MemoryPort, port_pair};
+use mango_protocol::port::port_pair;
 use mango_protocol::session::{Session as HubSession, SessionOptions};
 use serde_json::json;
 use tokio::sync::watch;
@@ -43,6 +43,10 @@ struct HarnessLog {
     listings: AtomicUsize,
     /// Set when a stalled probe or open observed the host's cancellation.
     saw_host_cancel: AtomicBool,
+    turns_started: AtomicUsize,
+    permission_answers: AtomicUsize,
+    question_answers: AtomicUsize,
+    cancels: AtomicUsize,
 }
 
 impl HarnessLog {
@@ -69,6 +73,8 @@ enum OpenBehaviour {
     FinishWhenCancelled,
     /// Fails, handing back a child whose cleanup the host must finish.
     FailNeedingCleanup(Arc<CountingControl>),
+    /// Opens a session whose every turn asks one single-choice question.
+    AskingOneChoice,
 }
 
 /// How a [`CountingHarness`] answers a probe.
@@ -139,6 +145,7 @@ impl Harness for CountingHarness {
                 host.cancel().cancelled().await;
                 self.log.saw_host_cancel.store(true, Ordering::SeqCst);
             }
+            OpenBehaviour::AskingOneChoice => {}
             OpenBehaviour::FailNeedingCleanup(control) => {
                 return Err(SdkError::CleanupRequired {
                     control: Arc::clone(control) as Arc<dyn ProcessControl>,
@@ -150,6 +157,14 @@ impl Harness for CountingHarness {
             }
         }
         let inner = self.inner.open_session(host, request).await?;
+        if matches!(self.open, OpenBehaviour::AskingOneChoice) {
+            return Ok(Box::new(OneChoiceSession {
+                inner,
+                log: Arc::clone(&self.log),
+                host: host.clone(),
+                sink: tokio::sync::Mutex::new(None),
+            }));
+        }
         Ok(Box::new(CountingSession {
             inner,
             log: Arc::clone(&self.log),
@@ -183,14 +198,32 @@ impl Session for CountingSession {
     }
 
     async fn start_turn(&self, request: TurnRequest) -> mango_external_agents::Result<TurnStream> {
+        self.log.turns_started.fetch_add(1, Ordering::SeqCst);
         self.inner.start_turn(request).await
     }
 
     async fn respond(&self, response: PermissionResponse) -> mango_external_agents::Result<()> {
+        self.log.permission_answers.fetch_add(1, Ordering::SeqCst);
         self.inner.respond(response).await
     }
 
+    async fn answer(
+        &self,
+        response: mango_external_agents::QuestionResponse,
+    ) -> mango_external_agents::Result<()> {
+        self.log.question_answers.fetch_add(1, Ordering::SeqCst);
+        self.inner.answer(response).await
+    }
+
+    async fn steer(
+        &self,
+        steer: mango_external_agents::Steer,
+    ) -> mango_external_agents::Result<mango_external_agents::SteerOutcome> {
+        self.inner.steer(steer).await
+    }
+
     async fn cancel(&self, reason: CancelReason) -> mango_external_agents::Result<()> {
+        self.log.cancels.fetch_add(1, Ordering::SeqCst);
         self.inner.cancel(reason).await
     }
 
@@ -201,6 +234,105 @@ impl Session for CountingSession {
 
     async fn refresh_account_usage(&self) -> mango_external_agents::Result<AccountUsage> {
         Ok(AccountUsage { limits: None })
+    }
+}
+
+/// A session whose turn asks exactly one single-choice question — the one
+/// question shape the product can show — and ends once it is answered. Every
+/// answer is counted by the route it arrived on.
+struct OneChoiceSession {
+    inner: Box<dyn Session>,
+    log: Arc<HarnessLog>,
+    host: HostContext,
+    sink: tokio::sync::Mutex<Option<mango_external_agents::EventSink>>,
+}
+
+#[async_trait::async_trait]
+impl Session for OneChoiceSession {
+    fn state(&self) -> &SessionState {
+        self.inner.state()
+    }
+
+    async fn start_turn(&self, request: TurnRequest) -> mango_external_agents::Result<TurnStream> {
+        use mango_external_agents::{
+            EventKind, EventSink, Interaction, InteractionId, InteractionKind, Question,
+            QuestionForm, QuestionId, QuestionOption, QuestionOptionId, QuestionRequest,
+        };
+        self.log.turns_started.fetch_add(1, Ordering::SeqCst);
+        let session_id = self.snapshot().ids.session_id.clone();
+        let (sink, events) = EventSink::with_limits(
+            session_id.clone(),
+            request.turn_id.clone(),
+            request.attempt,
+            Arc::clone(self.host.clock()),
+            self.host.limits(),
+        );
+        let question = QuestionRequest::new(
+            Interaction::new(
+                InteractionId::new("choice-1"),
+                InteractionKind::Question,
+                session_id,
+                self.host.now() + Duration::from_secs(300),
+            )
+            .during(sink.operation()),
+            vec![Question::new(
+                QuestionId::new("pick"),
+                "Which one?",
+                QuestionForm::Choice {
+                    options: vec![
+                        QuestionOption::new(QuestionOptionId::new("left")).with_label("Left"),
+                        QuestionOption::new(QuestionOptionId::new("right")).with_label("Right"),
+                    ],
+                    multi_select: false,
+                },
+            )],
+        );
+        sink.emit(EventKind::QuestionAsked { request: question })
+            .await?;
+        *self.sink.lock().await = Some(sink);
+        Ok(TurnStream::accepted(
+            request.turn_id,
+            request.attempt,
+            "choice-turn",
+            events,
+        ))
+    }
+
+    async fn respond(&self, _response: PermissionResponse) -> mango_external_agents::Result<()> {
+        self.log.permission_answers.fetch_add(1, Ordering::SeqCst);
+        Err(SdkError::Protocol {
+            expected: String::from("an answer to the question"),
+            received: String::from("a permission response"),
+        })
+    }
+
+    async fn answer(
+        &self,
+        response: mango_external_agents::QuestionResponse,
+    ) -> mango_external_agents::Result<()> {
+        use mango_external_agents::{EventKind, QuestionOutcome};
+        self.log.question_answers.fetch_add(1, Ordering::SeqCst);
+        if let Some(sink) = self.sink.lock().await.take() {
+            sink.emit(EventKind::QuestionResolved {
+                interaction_id: response.interaction_id.clone(),
+                outcome: QuestionOutcome::Answered {
+                    answers: response.answers,
+                },
+            })
+            .await?;
+            sink.complete().await?;
+        }
+        Ok(())
+    }
+
+    async fn cancel(&self, _reason: CancelReason) -> mango_external_agents::Result<()> {
+        self.log.cancels.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn close(&self, reason: CloseReason) -> mango_external_agents::Result<()> {
+        self.log.closes.lock().unwrap().push(reason);
+        self.inner.close(reason).await
     }
 }
 
@@ -246,6 +378,7 @@ impl ProcessControl for CountingControl {
 /// probe behaviour.
 struct CountingHarnesses {
     log: Arc<HarnessLog>,
+    fake: FakeHarness,
     open: OpenBehaviour,
     probes: Mutex<Vec<(TargetId, ProbeBehaviour)>>,
 }
@@ -260,7 +393,7 @@ impl HarnessFactory for CountingHarnesses {
             .find(|(candidate, _)| *candidate == target)
             .map_or(ProbeBehaviour::Answer, |(_, behaviour)| *behaviour);
         Arc::new(CountingHarness {
-            inner: FakeHarness::new(),
+            inner: self.fake.clone(),
             log: Arc::clone(&self.log),
             open: self.open.clone(),
             probe,
@@ -323,7 +456,9 @@ struct Rig {
     executables: Arc<FixedExecutables>,
     consent: Arc<AtomicBool>,
     hub: HubSession,
-    _peer: MemoryPort,
+    /// The hub's side of the connection, kept open for the rig's lifetime.
+    _observer: HubSession,
+    events: tokio::sync::Mutex<mango_protocol::session::EventStream>,
     workspace: String,
     private_root: PathBuf,
     _dirs: (ScratchDir, ScratchDir),
@@ -336,6 +471,7 @@ struct RigOptions {
     installed: bool,
     session_cap: usize,
     authority_gate: Option<watch::Receiver<bool>>,
+    fake: FakeHarness,
 }
 
 impl Default for RigOptions {
@@ -347,11 +483,28 @@ impl Default for RigOptions {
             installed: true,
             session_cap: super::DEFAULT_SESSION_CAP,
             authority_gate: None,
+            fake: FakeHarness::new(),
         }
     }
 }
 
-fn rig(options: RigOptions) -> Rig {
+async fn handshaken_pair() -> (HubSession, HubSession) {
+    let (port, peer) = port_pair();
+    let peer_info = |role: &str| PeerInfo {
+        name: "external-agent-test".into(),
+        version: "0.1.0".into(),
+        role: role.into(),
+    };
+    let (runtime, _runtime_driver) =
+        HubSession::spawn(port, SessionOptions::new(peer_info("runtime")));
+    let (hub, _hub_driver) = HubSession::spawn(peer, SessionOptions::new(peer_info("hub")));
+    let (ran, hubbed) = tokio::join!(runtime.ready(), hub.ready());
+    ran.expect("the runtime side completes its handshake");
+    hubbed.expect("the hub side completes its handshake");
+    (runtime, hub)
+}
+
+async fn rig(options: RigOptions) -> Rig {
     let workspace_dir = ScratchDir::created("agent-workspace");
     let private_dir = ScratchDir::created("agent-private");
     let workspace = super::canonical_directory(workspace_dir.path()).unwrap();
@@ -376,6 +529,7 @@ fn rig(options: RigOptions) -> Rig {
         launcher: Arc::new(FakeLauncher::new()),
         harnesses: Arc::new(CountingHarnesses {
             log: Arc::clone(&log),
+            fake: options.fake,
             open: options.open,
             probes: Mutex::new(options.probes),
         }),
@@ -390,15 +544,8 @@ fn rig(options: RigOptions) -> Rig {
         consent_poll: Duration::from_millis(10),
         cleanup_timeout: Duration::from_secs(2),
     });
-    let (port, peer) = port_pair();
-    let (hub, _driver) = HubSession::spawn(
-        port,
-        SessionOptions::new(PeerInfo {
-            name: "external-agent-test".into(),
-            version: "0.1.0".into(),
-            role: "runtime".into(),
-        }),
-    );
+    let (hub, observer) = handshaken_pair().await;
+    let events = tokio::sync::Mutex::new(observer.events());
     Rig {
         supervisor,
         log,
@@ -406,7 +553,8 @@ fn rig(options: RigOptions) -> Rig {
         executables,
         consent,
         hub,
-        _peer: peer,
+        _observer: observer,
+        events,
         workspace: workspace.to_string_lossy().into_owned(),
         private_root,
         _dirs: (workspace_dir, private_dir),
@@ -491,7 +639,8 @@ async fn an_unauthorized_workspace_is_refused_before_any_lookup_or_launch() {
     let rig = rig(RigOptions {
         authorize_workspace: false,
         ..RigOptions::default()
-    });
+    })
+    .await;
     let error = rig
         .open("one")
         .await
@@ -524,7 +673,7 @@ async fn the_production_authority_denies_every_workspace() {
 
 #[tokio::test]
 async fn a_non_canonical_workspace_is_refused_without_asking_the_authority() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     let mut params = rig.open_params("one");
     params.workspace_path = format!("{}/.", rig.workspace);
     let error = rig
@@ -543,7 +692,7 @@ async fn a_non_canonical_workspace_is_refused_without_asking_the_authority() {
 
 #[tokio::test]
 async fn every_extra_workspace_root_is_authorized_at_open() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     let outside = ScratchDir::created("agent-outside");
     let mut params = rig.open_params("one");
     params.configuration.workspace_roots = vec![
@@ -571,7 +720,7 @@ async fn every_extra_workspace_root_is_authorized_at_open() {
 
 #[tokio::test]
 async fn cursor_auto_review_is_refused_before_any_launch() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     let mut params = rig.open_params("one");
     params.target_id = TargetId::Cursor;
     params.configuration.routing = ApprovalRouting::AutoReview;
@@ -600,7 +749,8 @@ async fn a_target_that_is_not_installed_is_refused_without_a_launch() {
     let rig = rig(RigOptions {
         installed: false,
         ..RigOptions::default()
-    });
+    })
+    .await;
     let error = rig
         .open("one")
         .await
@@ -619,7 +769,7 @@ async fn a_target_that_is_not_installed_is_refused_without_a_launch() {
 
 #[tokio::test]
 async fn a_repeated_open_answers_without_a_second_launch() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     let first = rig.open("one").await.unwrap();
     let second = rig.open("one").await.unwrap();
     assert_eq!(first, second);
@@ -646,7 +796,7 @@ async fn a_repeated_open_answers_without_a_second_launch() {
 
 #[tokio::test]
 async fn a_resumed_open_carries_the_native_session_and_says_it_resumed() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     for (session_id, mode) in [
         ("strict", ResumeMode::Strict),
         ("fallback", ResumeMode::Fallback),
@@ -682,7 +832,8 @@ async fn concurrent_opens_of_one_id_share_one_launch() {
     let rig = rig(RigOptions {
         open: OpenBehaviour::Gated(gate),
         ..RigOptions::default()
-    });
+    })
+    .await;
     let (first, second, ()) = tokio::join!(rig.open("one"), rig.open("one"), async {
         eventually(
             "the first open to reach the vendor",
@@ -708,7 +859,8 @@ async fn the_session_cap_counts_opening_sessions() {
         open: OpenBehaviour::Gated(gate),
         session_cap: 1,
         ..RigOptions::default()
-    });
+    })
+    .await;
     let supervisor = Arc::clone(&rig.supervisor);
     let hub = rig.hub.clone();
     let params = rig.open_params("one");
@@ -739,7 +891,7 @@ async fn the_session_cap_counts_opening_sessions() {
 
 #[tokio::test]
 async fn closing_a_live_session_is_idempotent_awaited_and_removes_its_scratch() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
     let scratch_root = rig.private_root.join("scratch");
     let leaves: Vec<_> = std::fs::read_dir(&scratch_root).unwrap().collect();
@@ -802,7 +954,8 @@ async fn closing_an_opening_session_cancels_it_and_waits_for_it_to_settle() {
     let rig = rig(RigOptions {
         open: OpenBehaviour::Stall,
         ..RigOptions::default()
-    });
+    })
+    .await;
     let supervisor = Arc::clone(&rig.supervisor);
     let hub = rig.hub.clone();
     let params = rig.open_params("one");
@@ -836,7 +989,7 @@ async fn closing_an_opening_session_cancels_it_and_waits_for_it_to_settle() {
 
 #[tokio::test]
 async fn an_open_that_finishes_after_a_close_was_requested_is_closed_not_registered() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     let opening = rig
         .supervisor
         .admit(&rig.open_params("one"))
@@ -859,6 +1012,7 @@ async fn an_open_that_finishes_after_a_close_was_requested_is_closed_not_registe
                 settled: watch::channel(false).0,
                 cleanup_failure: Mutex::new(None),
             },
+            rig.hub.clone(),
         )
         .await
         .unwrap();
@@ -881,7 +1035,8 @@ async fn an_open_bounded_by_its_deadline_tells_the_vendor_to_stop() {
     let rig = rig(RigOptions {
         open: OpenBehaviour::Stall,
         ..RigOptions::default()
-    });
+    })
+    .await;
     let mut params = rig.open_params("one");
     // Long enough that the vendor is reached well before it fires.
     params.timeout_ms = 500;
@@ -908,7 +1063,8 @@ async fn a_vendor_that_opens_while_being_stopped_is_closed_not_leaked() {
     let rig = rig(RigOptions {
         open: OpenBehaviour::FinishWhenCancelled,
         ..RigOptions::default()
-    });
+    })
+    .await;
     let supervisor = Arc::clone(&rig.supervisor);
     let hub = rig.hub.clone();
     let params = rig.open_params("one");
@@ -958,7 +1114,8 @@ async fn a_child_the_sdk_could_not_clean_up_is_reaped_before_the_failure_returns
     let rig = rig(RigOptions {
         open: OpenBehaviour::FailNeedingCleanup(Arc::clone(&control)),
         ..RigOptions::default()
-    });
+    })
+    .await;
     let error = rig.open("one").await.expect_err("the open must fail");
     assert!(
         error
@@ -991,7 +1148,7 @@ async fn a_child_the_sdk_could_not_clean_up_is_reaped_before_the_failure_returns
 
 #[tokio::test]
 async fn withdrawing_consent_closes_every_live_session_for_that_reason() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
     rig.consent.store(false, Ordering::SeqCst);
     eventually(
@@ -1005,7 +1162,7 @@ async fn withdrawing_consent_closes_every_live_session_for_that_reason() {
 
 #[tokio::test]
 async fn the_hub_session_ending_shuts_every_session_down() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
     rig.hub.close_now(4000, None);
     eventually(
@@ -1035,7 +1192,8 @@ async fn discovery_omits_a_failing_target_and_keeps_the_rest() {
     let rig = rig(RigOptions {
         probes: vec![(TargetId::Cursor, ProbeBehaviour::Fail)],
         ..RigOptions::default()
-    });
+    })
+    .await;
     let result = rig
         .supervisor
         .discover(
@@ -1069,7 +1227,8 @@ async fn discovery_where_nothing_answers_is_a_failure() {
     let rig = rig(RigOptions {
         probes: vec![(TargetId::Claude, ProbeBehaviour::Fail)],
         ..RigOptions::default()
-    });
+    })
+    .await;
     let error = rig
         .supervisor
         .discover(
@@ -1093,7 +1252,8 @@ async fn a_stalled_probe_costs_only_its_own_target_and_is_told_to_stop() {
     let rig = rig(RigOptions {
         probes: vec![(TargetId::Cursor, ProbeBehaviour::Stall)],
         ..RigOptions::default()
-    });
+    })
+    .await;
     let result = rig
         .supervisor
         .discover(
@@ -1116,7 +1276,7 @@ async fn a_stalled_probe_costs_only_its_own_target_and_is_told_to_stop() {
 
 #[tokio::test]
 async fn listing_sessions_never_opens_a_conversation_and_authorizes_its_workspace() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     let listed = rig
         .supervisor
         .list_sessions(
@@ -1146,7 +1306,8 @@ async fn listing_sessions_never_opens_a_conversation_and_authorizes_its_workspac
     let refused = self::rig(RigOptions {
         authorize_workspace: false,
         ..RigOptions::default()
-    });
+    })
+    .await;
     let error = refused
         .supervisor
         .list_sessions(
@@ -1172,7 +1333,7 @@ async fn listing_sessions_never_opens_a_conversation_and_authorizes_its_workspac
 
 #[tokio::test]
 async fn account_usage_without_a_live_session_is_nothing_to_report() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     let result = rig
         .supervisor
         .refresh_account_usage(
@@ -1195,7 +1356,7 @@ async fn account_usage_without_a_live_session_is_nothing_to_report() {
 
 #[tokio::test]
 async fn account_usage_refuses_a_live_session_of_another_target() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
     let error = rig
         .supervisor
@@ -1223,7 +1384,7 @@ async fn account_usage_refuses_a_live_session_of_another_target() {
 
 #[tokio::test]
 async fn health_reports_live_sessions_and_withholds_a_withdrawn_attestation() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
 
     let reported = rig.supervisor.health(false).await;
@@ -1276,7 +1437,8 @@ async fn an_open_stopped_before_it_launched_never_reaches_the_vendor() {
     let rig = rig(RigOptions {
         authority_gate: Some(gate),
         ..RigOptions::default()
-    });
+    })
+    .await;
     let supervisor = Arc::clone(&rig.supervisor);
     let hub = rig.hub.clone();
     let params = rig.open_params("one");
@@ -1322,7 +1484,7 @@ async fn an_open_stopped_before_it_launched_never_reaches_the_vendor() {
 
 #[tokio::test]
 async fn each_open_gets_its_own_scratch_leaf_even_for_one_session_id() {
-    let rig = rig(RigOptions::default());
+    let rig = rig(RigOptions::default()).await;
     let first = rig.supervisor.session_scratch("same").unwrap();
     let second = rig.supervisor.session_scratch("same").unwrap();
     assert_ne!(
@@ -1355,4 +1517,503 @@ fn a_failed_late_cleanup_is_reported_by_the_close_that_waited_for_it() {
         "received: {}",
         error.message
     );
+}
+
+// ---------------------------------------------------------------------------
+// Turns
+// ---------------------------------------------------------------------------
+
+impl Rig {
+    fn turn_params(&self, session_id: &str, client_message_id: &str, input: &str) -> TurnParams {
+        TurnParams {
+            session_id: session_id.into(),
+            client_message_id: client_message_id.into(),
+            input: input.into(),
+            configuration: self.open_params(session_id).configuration,
+            attachments: None,
+        }
+    }
+
+    /// The next event the hub received, or a failure naming what was expected.
+    async fn next_event(&self, expecting: &str) -> serde_json::Value {
+        let mut events = self.events.lock().await;
+        let received = tokio::time::timeout(Duration::from_secs(5), events.recv()).await;
+        match received {
+            Ok(Some(event)) => {
+                assert_eq!(
+                    event.topic, "external-agent.event",
+                    "expected only turn events"
+                );
+                event.payload
+            }
+            Ok(None) => panic!("expected {expecting} | received: the hub session closed"),
+            Err(_) => panic!("expected {expecting} | received: nothing within 5s"),
+        }
+    }
+
+    /// Events up to and including the first of `kind`.
+    async fn events_until(&self, kind: &str) -> Vec<serde_json::Value> {
+        let mut seen = Vec::new();
+        loop {
+            let event = self.next_event(&format!("a {kind} event")).await;
+            let done = event["event"]["type"] == kind;
+            seen.push(event);
+            if done {
+                return seen;
+            }
+        }
+    }
+}
+
+use crate::external_agents::wire::{
+    CancelParams, RespondParams, SteerParams, SteerResult, TurnParams,
+};
+
+#[tokio::test]
+async fn a_turn_streams_ordered_events_and_an_approval_round_trips() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let turn = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "fix it"))
+        .await
+        .unwrap();
+
+    let events = rig.events_until("approval_requested").await;
+    let sequences: Vec<u64> = events
+        .iter()
+        .map(|event| event["sequence"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        sequences,
+        (1..=sequences.len() as u64).collect::<Vec<_>>(),
+        "expected gap-free sequences"
+    );
+    for event in &events {
+        assert_eq!(event["sessionId"], json!("one"));
+        if event["event"]["type"] == "commands_available" {
+            // A session fact: it names no turn, and none is invented for it.
+            assert!(event.get("nativeTurnId").is_none(), "received: {event}");
+        } else {
+            assert_eq!(event["nativeTurnId"], json!(turn.native_turn_id));
+        }
+    }
+    assert!(
+        events.iter().any(|event| event["event"]
+            == json!({ "type": "commands_available", "commands": [{ "name": "review", "description": "Reviews the diff" }] })),
+        "expected the session's command catalog on the wire | received: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"]
+                == json!({ "type": "text_delta", "text": "working on fix it" })),
+        "expected the vendor's text on the wire | received: {events:?}"
+    );
+    assert_eq!(rig.supervisor.live_sessions().1[0].state, "running");
+
+    let request = &events.last().unwrap()["event"]["request"];
+    let option = request["options"][0]["id"].as_str().unwrap().to_owned();
+    rig.supervisor
+        .respond(RespondParams {
+            session_id: "one".into(),
+            native_turn_id: turn.native_turn_id.clone(),
+            request_id: request["requestId"].as_str().unwrap().into(),
+            option_id: option,
+        })
+        .await
+        .unwrap();
+    let rest = rig.events_until("completed").await;
+    assert!(
+        rest.iter()
+            .any(|event| event["event"]["type"] == "approval_resolved"),
+        "expected the approval resolved on the wire | received: {rest:?}"
+    );
+    assert_eq!(rig.log.permission_answers.load(Ordering::SeqCst), 1);
+    assert_eq!(rig.log.question_answers.load(Ordering::SeqCst), 0);
+    eventually(
+        "the session idle after its turn",
+        || rig.supervisor.live_sessions().1[0].state,
+        |state| *state == "idle",
+    )
+    .await;
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_repeated_client_message_id_answers_without_a_second_turn() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let first = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "same"))
+        .await
+        .unwrap();
+    let again = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "same"))
+        .await
+        .unwrap();
+    assert_eq!(first, again);
+    assert_eq!(
+        rig.log.turns_started.load(Ordering::SeqCst),
+        1,
+        "expected one vendor turn for a repeated id"
+    );
+    let error = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "different"))
+        .await
+        .expect_err("a reused id with other input must be refused");
+    assert!(
+        error.message.contains("reused with different turn input"),
+        "received: {}",
+        error.message
+    );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_second_turn_waits_for_the_first_to_end() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(rig.turn_params("one", "m1", "first"))
+        .await
+        .unwrap();
+    let error = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m2", "second"))
+        .await
+        .expect_err("a second concurrent turn must be refused");
+    assert!(
+        error.message.contains("already has an active turn"),
+        "received: {}",
+        error.message
+    );
+    assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 1);
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_turn_may_narrow_its_roots_but_never_widen_them() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let mut params = rig.turn_params("one", "m1", "go");
+    params.configuration.workspace_roots = vec!["/somewhere/else".into()];
+    let error = rig
+        .supervisor
+        .turn(params)
+        .await
+        .expect_err("an unopened root must be refused");
+    assert!(
+        error.message.contains("was not authorized when session"),
+        "received: {}",
+        error.message
+    );
+    let mut narrowed = rig.turn_params("one", "m2", "go");
+    narrowed.configuration.workspace_roots = vec![rig.workspace.clone()];
+    rig.supervisor
+        .turn(narrowed)
+        .await
+        .expect("an opened root is allowed");
+    assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 1);
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_response_is_refused_for_an_unknown_request_or_another_turn() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let turn = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "go"))
+        .await
+        .unwrap();
+    let events = rig.events_until("approval_requested").await;
+    let request = events.last().unwrap()["event"]["request"]["requestId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let respond = |native: &str, request: &str, option: &str| RespondParams {
+        session_id: "one".into(),
+        native_turn_id: native.into(),
+        request_id: request.into(),
+        option_id: option.into(),
+    };
+    let unknown = rig
+        .supervisor
+        .respond(respond(&turn.native_turn_id, "nope", "x"))
+        .await;
+    assert!(unknown.unwrap_err().message.contains("is not pending"));
+    let other_turn = rig
+        .supervisor
+        .respond(respond("another-turn", &request, "x"))
+        .await;
+    assert!(other_turn.unwrap_err().message.contains("is not running"));
+    let bad_option = rig
+        .supervisor
+        .respond(respond(&turn.native_turn_id, &request, "not-offered"))
+        .await;
+    assert!(
+        bad_option.is_err(),
+        "expected an option the vendor never offered to be refused"
+    );
+    assert_eq!(
+        rig.log.permission_answers.load(Ordering::SeqCst),
+        0,
+        "expected no answer reached the vendor"
+    );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_question_the_product_cannot_show_or_decline_fails_the_turn_explicitly() {
+    // FakeHarness asks a round with a required free-text question: no card can
+    // carry it, and the SDK refuses a decline of a required question.
+    let rig = rig(RigOptions {
+        fake: FakeHarness::new().without_approvals().asking_a_question(),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(rig.turn_params("one", "m1", "ask me"))
+        .await
+        .unwrap();
+    let events = rig.events_until("error").await;
+    let error = &events.last().unwrap()["event"]["error"];
+    assert_eq!(
+        error["code"],
+        json!("unsupported-question"),
+        "received: {error}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["event"]["type"] == "approval_requested"),
+        "expected no approval card for a question the product cannot show"
+    );
+    assert_eq!(
+        (
+            rig.log.question_answers.load(Ordering::SeqCst),
+            rig.log.permission_answers.load(Ordering::SeqCst)
+        ),
+        (1, 0),
+        "expected (question declines attempted, permission answers) = (1, 0)"
+    );
+    eventually(
+        "the refused turn cancelled",
+        || rig.log.cancels.load(Ordering::SeqCst),
+        |cancels| *cancels == 1,
+    )
+    .await;
+    eventually(
+        "the session idle after the refused turn",
+        || rig.supervisor.live_sessions().1[0].state,
+        |state| *state == "idle",
+    )
+    .await;
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn steering_is_answered_not_thrown_when_it_cannot_land() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let steer = |native: &str, id: &str| SteerParams {
+        session_id: "one".into(),
+        native_turn_id: native.into(),
+        client_message_id: id.into(),
+        input: "more".into(),
+    };
+    let idle = rig.supervisor.steer(steer("none", "s1")).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(idle).unwrap(),
+        json!({ "accepted": false, "reasonCode": "turn-already-completed" })
+    );
+    let turn = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "go"))
+        .await
+        .unwrap();
+    rig.events_until("approval_requested").await;
+    let first = rig
+        .supervisor
+        .steer(steer(&turn.native_turn_id, "s2"))
+        .await
+        .unwrap();
+    assert_eq!(first, SteerResult::ACCEPTED);
+    let reused = rig
+        .supervisor
+        .steer(steer(&turn.native_turn_id, "s2"))
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(reused).unwrap(),
+        json!({ "accepted": false, "reasonCode": "id-reused" })
+    );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn cancelling_a_turn_ends_it_with_the_marker_before_completion_and_frees_the_session() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(rig.turn_params("one", "m1", "go"))
+        .await
+        .unwrap();
+    rig.events_until("approval_requested").await;
+    rig.supervisor
+        .cancel(CancelParams {
+            session_id: "one".into(),
+            native_turn_id: None,
+        })
+        .await
+        .unwrap();
+    let rest = rig.events_until("completed").await;
+    let kinds: Vec<_> = rest
+        .iter()
+        .map(|event| event["event"]["type"].as_str().unwrap().to_owned())
+        .collect();
+    let cancelled = kinds.iter().position(|kind| kind == "cancelled");
+    assert!(
+        cancelled.is_some_and(
+            |at| at + 1 == kinds.len() - 1 || kinds[at + 1..].contains(&"completed".to_owned())
+        ),
+        "expected the cancelled marker before completed | received: {kinds:?}"
+    );
+    eventually(
+        "the session idle after its cancelled turn",
+        || rig.supervisor.live_sessions().1[0].state,
+        |state| *state == "idle",
+    )
+    .await;
+    rig.supervisor
+        .turn(rig.turn_params("one", "m2", "again"))
+        .await
+        .expect("a new turn after the cancelled one");
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn revoking_consent_mid_turn_closes_the_session_and_refuses_its_pending_answer() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let turn = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "go"))
+        .await
+        .unwrap();
+    let events = rig.events_until("approval_requested").await;
+    let request = events.last().unwrap()["event"]["request"]["requestId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    rig.consent.store(false, Ordering::SeqCst);
+    eventually(
+        "the session closed after revocation",
+        || rig.live_count(),
+        |live| *live == 0,
+    )
+    .await;
+    assert_eq!(rig.log.closes(), vec![CloseReason::ConsentRevoked]);
+    let refused = rig
+        .supervisor
+        .respond(RespondParams {
+            session_id: "one".into(),
+            native_turn_id: turn.native_turn_id,
+            request_id: request,
+            option_id: "anything".into(),
+        })
+        .await
+        .expect_err("an answer after revocation must be refused");
+    assert!(
+        refused.message.contains("is not open"),
+        "received: {}",
+        refused.message
+    );
+    assert_eq!(
+        rig.log.permission_answers.load(Ordering::SeqCst),
+        0,
+        "expected no answer to reach a revoked vendor"
+    );
+}
+
+#[tokio::test]
+async fn a_cancel_for_a_turn_that_is_no_longer_running_never_stops_the_current_one() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(rig.turn_params("one", "m1", "go"))
+        .await
+        .unwrap();
+    rig.events_until("approval_requested").await;
+    rig.supervisor
+        .cancel(CancelParams {
+            session_id: "one".into(),
+            native_turn_id: Some("an-earlier-turn".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        rig.log.cancels.load(Ordering::SeqCst),
+        0,
+        "expected a stale cancel to reach no vendor"
+    );
+    assert_eq!(rig.supervisor.live_sessions().1[0].state, "running");
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_single_choice_question_is_a_card_answered_as_a_question_never_as_a_permission() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::AskingOneChoice,
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let turn = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "choose"))
+        .await
+        .unwrap();
+    let events = rig.events_until("approval_requested").await;
+    let request = &events.last().unwrap()["event"]["request"];
+    let option_ids: Vec<_> = request["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|option| option["id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        option_ids,
+        ["left", "right"],
+        "expected the card's options to be the choice ids"
+    );
+    rig.supervisor
+        .respond(RespondParams {
+            session_id: "one".into(),
+            native_turn_id: turn.native_turn_id,
+            request_id: request["requestId"].as_str().unwrap().into(),
+            option_id: "right".into(),
+        })
+        .await
+        .unwrap();
+    let rest = rig.events_until("completed").await;
+    let resolved = rest
+        .iter()
+        .find(|event| event["event"]["type"] == "approval_resolved")
+        .expect("expected the question resolved on the wire");
+    assert_eq!(resolved["event"]["decision"]["optionId"], json!("right"));
+    assert_eq!(
+        (
+            rig.log.question_answers.load(Ordering::SeqCst),
+            rig.log.permission_answers.load(Ordering::SeqCst)
+        ),
+        (1, 0),
+        "expected (question answers, permission answers) = (1, 0)"
+    );
+    rig.close("one").await;
 }

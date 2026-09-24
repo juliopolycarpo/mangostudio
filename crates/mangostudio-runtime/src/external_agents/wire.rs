@@ -13,9 +13,6 @@
 //! present, because absence and an explicit `null` mean different things on
 //! this wire.
 
-// TEMPORARY while turns are assembled; removed once the turn methods use every type.
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 
 use crate::commands::toolchain::Selection as ToolchainSelection;
@@ -528,7 +525,7 @@ pub(crate) struct TurnParams {
 }
 
 /// `external-agent.turn` result.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TurnResult {
     pub native_turn_id: String,
@@ -560,7 +557,6 @@ pub(crate) struct SteerParams {
 pub(crate) enum SteerRejection {
     TurnAlreadyCompleted,
     NotSupported,
-    SessionLost,
     TurnNotSteerable,
     IdReused,
 }
@@ -616,7 +612,7 @@ pub(crate) struct StartReviewParams {
 }
 
 /// `external-agent.start-review` result.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StartReviewResult {
     pub native_turn_id: String,
@@ -797,12 +793,6 @@ pub(crate) struct Command {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum Event {
-    /// The vendor session is up; carries whether it resumed.
-    SessionStarted {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        resumed: bool,
-    },
     /// The slash-command catalog, a session fact.
     CommandsAvailable {
         commands: Vec<Command>,

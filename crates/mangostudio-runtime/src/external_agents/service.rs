@@ -1,11 +1,10 @@
 //! Registers the `external-agent.*` methods this build implements.
 //!
-//! Only the session lifecycle is implemented here: `discover`, `open`,
-//! `close`, `list-sessions` and `refresh-account-usage`. The remaining five —
-//! turns, answers, steering, reviews and cancellation — are not registered, so
-//! the dispatcher answers them `METHOD_UNSUPPORTED` and the manifest keeps
-//! `features.externalAgents` off: it is advertised only once every method the
-//! capability requires is implemented.
+//! All ten methods the `externalAgents` capability requires are registered:
+//! the session lifecycle (`discover`, `open`, `close`, `list-sessions`,
+//! `refresh-account-usage`) and the turn methods (`turn`, `respond`, `steer`,
+//! `start-review`, `cancel`). The manifest advertises the capability only
+//! because every one of them is implemented.
 
 use std::sync::Arc;
 
@@ -31,12 +30,17 @@ use crate::runtime_home::{RuntimeSlot, slot_dir};
 use crate::subprocess::LaunchCheck;
 
 /// Every method [`register`] installs.
-pub(crate) const EXTERNAL_AGENT_METHODS: [&str; 5] = [
+pub(crate) const EXTERNAL_AGENT_METHODS: [&str; 10] = [
     "external-agent.discover",
     "external-agent.open",
     "external-agent.close",
     "external-agent.list-sessions",
     "external-agent.refresh-account-usage",
+    "external-agent.turn",
+    "external-agent.respond",
+    "external-agent.steer",
+    "external-agent.start-review",
+    "external-agent.cancel",
 ];
 
 /// Installs [`EXTERNAL_AGENT_METHODS`] on `registry`, all served by one
@@ -89,7 +93,14 @@ async fn call(
                 .refresh_account_usage(decode(method, params)?, cancel)
                 .await?,
         ),
-        _ => unreachable!("the external-agent registry names exactly five methods"),
+        "external-agent.turn" => encode(supervisor.turn(decode(method, params)?).await?),
+        "external-agent.respond" => encode(supervisor.respond(decode(method, params)?).await?),
+        "external-agent.steer" => encode(supervisor.steer(decode(method, params)?).await?),
+        "external-agent.start-review" => {
+            encode(supervisor.start_review(decode(method, params)?).await?)
+        }
+        "external-agent.cancel" => encode(supervisor.cancel(decode(method, params)?).await?),
+        _ => unreachable!("the external-agent registry names exactly ten methods"),
     }
 }
 

@@ -21,6 +21,7 @@ pub(crate) mod map;
 pub(crate) mod map_events;
 pub(crate) mod service;
 pub(crate) mod supervisor;
+pub(crate) mod turns;
 pub(crate) mod wire;
 
 /// Whether the hub said, in its hello, that it withdrew this connection's

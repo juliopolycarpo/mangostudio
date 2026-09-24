@@ -127,7 +127,8 @@ export function assertRustRuntimeFeatureCeiling(
     fsWrite: expected.fsWrite,
     shell,
     update: manifest.allow?.update === true,
-    externalAgents: false,
+    // All ten external-agent methods are implemented: the feature follows consent.
+    externalAgents: manifest.allow?.externalAgents === true,
     toolchain: true,
   });
   expect(manifest.enforcesPathPolicy).toBe(true);

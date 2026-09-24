@@ -783,6 +783,33 @@ fn agent_error(error: &sdk::VendorError) -> wire::AgentError {
     }
 }
 
+/// The wire's slash-command catalog: at most 256 entries, each name and
+/// description bounded, and nameless entries dropped (the wire requires one).
+///
+/// # Example
+///
+/// ```ignore
+/// let catalog = commands(&session.snapshot().commands);
+/// ```
+pub(crate) fn commands(commands: &[sdk::Command]) -> Vec<wire::Command> {
+    const CATALOG_MAX_ITEMS: usize = 256;
+    commands
+        .iter()
+        .filter_map(|command| {
+            let name = bound(&command.name, TextLimit::CommandName).text;
+            (!name.is_empty()).then(|| wire::Command {
+                name,
+                description: command
+                    .description
+                    .as_deref()
+                    .map(|description| bound(description, TextLimit::CommandDescription).text)
+                    .filter(|description| !description.is_empty()),
+            })
+        })
+        .take(CATALOG_MAX_ITEMS)
+        .collect()
+}
+
 fn bound(raw: &str, limit: TextLimit) -> BoundedText {
     normalize::bound_text(raw, limit)
 }

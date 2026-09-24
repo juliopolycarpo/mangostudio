@@ -164,16 +164,20 @@ impl CloseCause {
 
 /// One live session, as registered after its open succeeded.
 pub(crate) struct LiveSession {
-    session_id: String,
-    target: TargetId,
+    pub(super) session_id: String,
+    pub(super) target: TargetId,
     workspace: PathBuf,
+    /// The canonical roots `open` authorised; a turn may narrow them, never widen.
+    pub(super) authorized_roots: std::collections::BTreeSet<String>,
     executable: Option<PathBuf>,
     opened_at: Instant,
     open_result: OpenResult,
-    session: Box<dyn Session>,
+    pub(super) session: Box<dyn Session>,
     scratch: PathBuf,
-    closing: AtomicBool,
+    pub(super) closing: AtomicBool,
     closed: watch::Sender<Option<Result<(), String>>>,
+    /// Turns, receipts, interactions and the event stream to the hub.
+    pub(super) turns: super::turns::TurnState,
 }
 
 /// An operation stopped by its deadline, its caller or shutdown, with any
@@ -274,7 +278,7 @@ pub(crate) struct Supervisor {
     ports: Ports,
     slots: Mutex<HashMap<String, Slot>>,
     shutdown: CancellationToken,
-    tasks: TaskTracker,
+    pub(super) tasks: TaskTracker,
     watcher_started: AtomicBool,
 }
 
@@ -323,6 +327,8 @@ impl Supervisor {
                 age_ms: u64::try_from(live.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX),
                 state: if live.closing.load(Ordering::Acquire) {
                     "closing"
+                } else if live.turns.is_busy() {
+                    "running"
                 } else {
                     "idle"
                 },
@@ -362,6 +368,16 @@ impl Supervisor {
             health["identityIsolation"] = serde_json::json!(isolation);
         }
         health
+    }
+
+    /// The live session for `session_id`, refusing one that is closing.
+    pub(super) fn require_live(&self, session_id: &str) -> Result<Arc<LiveSession>, RemoteError> {
+        match self.slots().get(session_id) {
+            Some(Slot::Live(live)) if !live.closing.load(Ordering::Acquire) => Ok(Arc::clone(live)),
+            _ => Err(argument(format!(
+                "External-agent session {session_id:?} is not open; expected an open session id."
+            ))),
+        }
     }
 
     /// `external-agent.discover`: one descriptor per target that answered.
@@ -475,9 +491,10 @@ impl Supervisor {
         let params_session_id = params.session_id.clone();
         let this = Arc::clone(self);
         let task_opening = Arc::clone(&opening);
+        let hub = session.clone();
         self.tasks.spawn(async move {
             let session_id = params.session_id.clone();
-            let outcome = this.run_open(params, &task_opening).await;
+            let outcome = this.run_open(params, &task_opening, hub).await;
             let published = match outcome {
                 Ok(live) => this.register(&session_id, &task_opening, live).await,
                 Err(error) => {
@@ -555,6 +572,7 @@ impl Supervisor {
         &self,
         params: OpenParams,
         opening: &Opening,
+        hub: mango_protocol::session::Session,
     ) -> Result<LiveSession, RemoteError> {
         let deadline = Duration::from_millis(params.timeout_ms);
         let host_cancel = CancelToken::new();
@@ -565,8 +583,9 @@ impl Supervisor {
             let workspace = self.authorized_workspace(&params.workspace_path).await?;
             // Every extra root is authorised at open, and refuses the whole
             // open if any one is not; a later turn may only narrow the set.
+            let mut authorized_roots = std::collections::BTreeSet::from([path_text(&workspace)]);
             for root in &params.configuration.workspace_roots {
-                self.authorized_workspace(root).await?;
+                authorized_roots.insert(path_text(&self.authorized_workspace(root).await?));
             }
             // Nothing is probed, created or launched once the open has been
             // told to stop: the grace in `bounded` is for work already
@@ -605,7 +624,7 @@ impl Supervisor {
             }
             let opened = harness.open_session(&host, request).await;
             match opened {
-                Ok(session) => Ok((session, workspace, executable, scratch)),
+                Ok(session) => Ok((session, workspace, authorized_roots, executable, scratch)),
                 Err(error) => {
                     remove_scratch(&scratch);
                     Err(self.sdk_failure(error).await)
@@ -620,12 +639,12 @@ impl Supervisor {
                 )
             })
             .await;
-        let (session, workspace, executable, scratch) = match opened {
+        let (session, workspace, authorized_roots, executable, scratch) = match opened {
             Ok(opened) => opened,
             Err(stopped) => {
                 // The vendor finished opening while it was being told to stop:
                 // nobody will register that session, so it is closed here.
-                if let Some((session, _, _, scratch)) = stopped.late {
+                if let Some((session, _, _, _, scratch)) = stopped.late {
                     let cause = opening.cause().unwrap_or(if self.shutdown.is_cancelled() {
                         CloseCause::Shutdown
                     } else {
@@ -650,6 +669,7 @@ impl Supervisor {
             session_id: params.session_id,
             target,
             workspace,
+            authorized_roots,
             executable: Some(executable),
             opened_at: Instant::now(),
             open_result,
@@ -657,13 +677,14 @@ impl Supervisor {
             scratch,
             closing: AtomicBool::new(false),
             closed,
+            turns: super::turns::TurnState::new(hub),
         })
     }
 
     /// Makes an opened session live, unless a close, revocation or shutdown
     /// claimed it first; then it is closed for that cause and the open fails.
     async fn register(
-        &self,
+        self: &Arc<Self>,
         session_id: &str,
         opening: &Arc<Opening>,
         live: LiveSession,
@@ -687,6 +708,7 @@ impl Supervisor {
             }
         };
         let Some(cause) = refused else {
+            self.relay_session_facts(&live);
             return Ok(live.open_result.clone());
         };
         let cleanup = self.finish_close(&live, cause).await;
@@ -964,7 +986,7 @@ impl Supervisor {
     ///
     /// A failed reap is reported on the error rather than dropped: the child
     /// may still be alive, and the caller has to hear that.
-    async fn sdk_failure(&self, error: SdkError) -> RemoteError {
+    pub(super) async fn sdk_failure(&self, error: SdkError) -> RemoteError {
         let mapped = map::remote_error(&error);
         let Some(control) = error.cleanup_control() else {
             return mapped;
@@ -1288,7 +1310,7 @@ fn remove_scratch(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-fn argument(message: impl Into<String>) -> RemoteError {
+pub(super) fn argument(message: impl Into<String>) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
