@@ -1361,7 +1361,7 @@ describe('RuntimeConnectionManager', () => {
     }
   });
 
-  it('releases a pending claim once its open fails, not when the chain stops waiting', async () => {
+  it('releases a pending claim when its open fails after the chain deadline', async () => {
     const opens = scriptedLocalOpen();
     const connector = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
@@ -1394,9 +1394,18 @@ describe('RuntimeConnectionManager', () => {
       isWorkspaceAuthorized: () => true,
       open: opens.open,
     });
+    // The connector's own outcomes, which the manager hides once it has
+    // timed an attempt out and moved on.
+    const attempts: Array<Promise<unknown>> = [];
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: (userId) => Promise.resolve(localDefinition(userId)),
-      connectors: { 'in-process': local },
+      connectors: {
+        'in-process': (definition, onUnavailable, context) => {
+          const attempt = local(definition, onUnavailable, context);
+          attempts.push(attempt.catch((error: unknown) => error));
+          return attempt;
+        },
+      },
       connectDeadlinesMs: { 'in-process': 25 },
     });
 
@@ -1438,6 +1447,9 @@ describe('RuntimeConnectionManager', () => {
         user2: manager.isIdentityAttested('user-2', 'local'),
       }).toEqual({ user1: false, user2: false });
       expect(refreshed.manifest?.identityIsolation).toBeUndefined();
+      expect(await attempts[0]).toMatchObject({
+        message: expect.stringContaining('withdrawn while it was connecting'),
+      });
       expect(lateCloses).toBe(1);
     } finally {
       manager.disconnect('user-2', 'local');

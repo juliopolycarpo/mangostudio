@@ -1341,7 +1341,8 @@ export function createLocalRuntimeConnector(
     });
     // Asked for attestation, but a second owner arrived while this open was
     // still running: the connection holds a claim that no longer exists.
-    // Closing it is part of this attempt, so the rejection means it is gone.
+    // Closing it is part of this attempt: the close is awaited before the
+    // rejection, and a close that fails surfaces its own error instead.
     if (requested === 'single-user' && claim.withdrawn) {
       await connection.close('released');
       throw unavailable(
