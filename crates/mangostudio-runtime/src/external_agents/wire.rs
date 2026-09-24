@@ -804,9 +804,15 @@ pub(crate) enum Event {
         resumed: bool,
     },
     /// The slash-command catalog, a session fact.
-    CommandsAvailable { commands: Vec<Command> },
-    TextDelta { text: String },
-    ReasoningDelta { text: String },
+    CommandsAvailable {
+        commands: Vec<Command>,
+    },
+    TextDelta {
+        text: String,
+    },
+    ReasoningDelta {
+        text: String,
+    },
     ReasoningStarted,
     ReasoningEnded,
     ActivityStarted {
@@ -824,18 +830,28 @@ pub(crate) enum Event {
         call_id: String,
         result: ActivityResult,
     },
-    ApprovalRequested { request: ApprovalRequest },
+    ApprovalRequested {
+        request: ApprovalRequest,
+    },
     ApprovalResolved {
         #[serde(rename = "requestId")]
         request_id: String,
         decision: ApprovalDecision,
     },
-    Usage { usage: Usage },
-    ThreadUsage { usage: ThreadUsage },
-    AccountLimits { limits: AccountLimits },
+    Usage {
+        usage: Usage,
+    },
+    ThreadUsage {
+        usage: ThreadUsage,
+    },
+    AccountLimits {
+        limits: AccountLimits,
+    },
     Cancelled,
     Completed,
-    Error { error: AgentError },
+    Error {
+        error: AgentError,
+    },
 }
 
 /// `ExternalAgentEventEnvelope`: what the topic carries.
