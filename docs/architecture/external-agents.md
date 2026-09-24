@@ -925,7 +925,7 @@ binary under qualification.
 
 `rust-runtime-external-agents-live-smoke.integration.test.ts` is the separate, authenticated
 evidence: opt-in through `MANGOSTUDIO_LIVE_AGENT_SMOKE=claude,codex,cursor`, it runs a one-word
-turn against the signed-in CLIs on the machine and never runs in CI.
+turn against the signed-in CLIs on the machine, cancels a streaming Codex or Cursor turn and sends the next one at once, and never runs in CI.
 
 A runtime-side consent withdrawal reaches the hub as the vendor ending the turn early
 (`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
@@ -934,8 +934,7 @@ stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`
 ### Cancellation on Windows
 
 Cancelling a turn is a protocol request for Codex (`turn/interrupt`) and Cursor (ACP
-`session/cancel`), so neither depends on a process signal. The qualification above demonstrates
-the ACP cancel-and-continue path on Windows; Codex's cancel has not been run on Windows. If a
+`session/cancel`), so neither depends on a process signal. The qualification above demonstrates the ACP cancel-and-continue path on Windows, and the live smoke cancelled a streaming Codex turn on Windows and completed the next one on the same session. If a
 Codex cancel does not settle, the SDK tears the session down and it is reported lost (below). Claude has no protocol cancel: the SDK interrupts the
 process, and the Windows launcher reports interrupt as unsupported
 (`windows_interrupt_is_unsupported_and_kill_ends_the_job`), so a Claude cancel on Windows is a
