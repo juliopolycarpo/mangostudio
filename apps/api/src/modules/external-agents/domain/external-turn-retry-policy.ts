@@ -16,14 +16,19 @@ export interface RetryPolicy {
   readonly baseDelayMs: number;
   /** No single wait exceeds this, hint or not. */
   readonly maxDelayMs: number;
-  /** Deadline for one submission request. */
-  readonly attemptTimeoutMs: number;
 }
+
+/**
+ * How much of a computed delay jitter may remove. A band rather than full
+ * jitter, as in the SDK's hub-host reference: full jitter makes the delays
+ * non-monotonic, so a turn could wait less after its fifth failure than after
+ * its first.
+ */
+const JITTER_SPREAD = 0.25;
 
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   baseDelayMs: 1_000,
   maxDelayMs: 30_000,
-  attemptTimeoutMs: 30_000,
 };
 
 /**
@@ -69,17 +74,17 @@ export function failureClosedConnection(error: unknown): boolean {
 
 /**
  * Capped exponential backoff with jitter for the `retry`-th wait (0-based).
- * `random` is in [0, 1); the result is in [half, full] of the capped delay, so
- * a wait never collapses to zero.
+ * `random` is in [0, 1]; the result is in [75%, 100%] of the capped delay, so
+ * a wait never collapses to zero and never shrinks as failures grow.
  *
  * @example
- * backoffDelay(0, DEFAULT_RETRY_POLICY, () => 0.5); // 750
+ * backoffDelay(0, DEFAULT_RETRY_POLICY, () => 0.5); // 875
  */
 export function backoffDelay(retry: number, policy: RetryPolicy, random: () => number): number {
   const exponent = Math.min(Math.max(retry, 0), 30);
   const capped = Math.min(policy.baseDelayMs * 2 ** exponent, policy.maxDelayMs);
   const fraction = Math.min(Math.max(random(), 0), 1);
-  return Math.round(capped / 2 + (capped / 2) * fraction);
+  return Math.round(capped * (1 - JITTER_SPREAD + JITTER_SPREAD * fraction));
 }
 
 /**

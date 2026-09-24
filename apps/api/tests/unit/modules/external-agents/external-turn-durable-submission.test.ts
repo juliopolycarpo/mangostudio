@@ -310,8 +310,8 @@ describe('never-written submissions', () => {
 
     expect(result.reason).toBe('completed');
     expect(clock.waits.length).toBe(7);
-    // Doubling from 1s, half-jittered at random() = 0.5, capped at 30s.
-    expect(clock.waits).toEqual([750, 1_500, 3_000, 6_000, 12_000, 22_500, 22_500]);
+    // Doubling from 1s, capped at 30s, with random() = 0.5 inside the 25% jitter band.
+    expect(clock.waits).toEqual([875, 1_750, 3_500, 7_000, 14_000, 26_250, 26_250]);
     expect({
       rpcs: runtime.rpcCount(),
       submissions: runtime.submissionCount(),

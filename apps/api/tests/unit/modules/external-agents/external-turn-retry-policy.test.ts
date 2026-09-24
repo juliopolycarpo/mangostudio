@@ -38,10 +38,10 @@ describe('clampRetryHint (i)', () => {
 });
 
 describe('backoffDelay', () => {
-  it('doubles from the base, jitters within [half, full] and never exceeds the cap', () => {
-    expect(backoffDelay(0, DEFAULT_RETRY_POLICY, () => 0)).toBe(500);
-    expect(backoffDelay(0, DEFAULT_RETRY_POLICY, () => 0.999_999)).toBe(1_000);
-    expect(backoffDelay(3, DEFAULT_RETRY_POLICY, () => 0.5)).toBe(6_000);
+  it('doubles from the base, jitters within [75%, 100%] and never exceeds the cap', () => {
+    expect(backoffDelay(0, DEFAULT_RETRY_POLICY, () => 0)).toBe(750);
+    expect(backoffDelay(0, DEFAULT_RETRY_POLICY, () => 1)).toBe(1_000);
+    expect(backoffDelay(3, DEFAULT_RETRY_POLICY, () => 0.5)).toBe(7_000);
     expect(backoffDelay(10_000, DEFAULT_RETRY_POLICY, () => 1)).toBe(30_000);
   });
 });

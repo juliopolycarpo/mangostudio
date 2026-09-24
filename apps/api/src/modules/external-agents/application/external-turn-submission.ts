@@ -10,6 +10,10 @@
  * 2. **Exact params.** An attempt's params are built once and resent byte for
  *    byte, so a runtime answers a repeat from its `clientMessageId` receipt
  *    instead of starting a second vendor turn. Only the digest is persisted.
+ * Each request is bounded by the session manager's call deadline (30 s), which
+ * is the per-attempt bound; a deadline that fires is a sent request with no
+ * reply, never a vendor error.
+ *
  * 3. **Replay only what was proven not submitted.** A request the hub never
  *    wrote, or one the runtime said it did not dispatch, becomes
  *    `not-submitted` and is retried after a capped, jittered backoff with no
