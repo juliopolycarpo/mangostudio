@@ -3923,6 +3923,8 @@ export const messages: Messages = {
         'vendor-error': 'The agent reported a failure.',
         'runtime-disconnected': 'The connection to that machine dropped mid-turn.',
         'hub-restarted': 'MangoStudio restarted while this turn was running.',
+        'acceptance-unknown':
+          'MangoStudio could not confirm whether the agent received this turn. Send again to retry.',
         'sequence-gap': "Part of the agent's stream was lost, so this record is incomplete.",
         'limit-exceeded': 'This turn passed its size budget and was stopped.',
         'consent-revoked': "The machine's owner withdrew permission for external agents.",
