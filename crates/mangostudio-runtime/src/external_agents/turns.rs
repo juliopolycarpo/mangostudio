@@ -18,7 +18,7 @@
 //! declined back to the vendor by name, and nothing reaches the hub.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -75,7 +75,7 @@ struct ActiveTurn {
 /// Everything a live session keeps about its turns.
 pub(crate) struct TurnState {
     hub: HubSession,
-    sequence: AtomicU64,
+    sequence: Mutex<u64>,
     /// Set once the hub session refused an event; final for this session.
     unobserved: AtomicBool,
     active: Mutex<Option<ActiveTurn>>,
@@ -89,7 +89,7 @@ impl TurnState {
     pub(crate) fn new(hub: HubSession) -> Self {
         Self {
             hub,
-            sequence: AtomicU64::new(0),
+            sequence: Mutex::new(0),
             unobserved: AtomicBool::new(false),
             active: Mutex::new(None),
             receipts: Mutex::new(HashMap::new()),
@@ -112,22 +112,28 @@ impl TurnState {
         })
     }
 
-    /// Publishes one event, until the hub stops taking them. Answers whether
-    /// it reached a hub. A refusal silences this session and nothing else.
+    /// Publishes one event, until the hub stops taking them, when its
+    /// envelope fits in `remaining` bytes. Answers whether it reached a hub.
+    ///
+    /// The sequence number is taken and the frame sent under one lock, and a
+    /// number is spent only on a frame that was sent: the hub's sequencer
+    /// reads a reordered or skipped number as a gap and ends the turn.
     fn emit(
         &self,
         session_id: &str,
         native_turn_id: Option<&str>,
         emitted_at_ms: u64,
         event: Event,
+        remaining: usize,
     ) -> Emitted {
         if self.unobserved.load(Ordering::Acquire) {
             return Emitted::Unobserved;
         }
+        let mut sequence = lock(&self.sequence);
         let envelope = EventEnvelope {
             session_id: session_id.to_owned(),
             native_turn_id: native_turn_id.map(str::to_owned),
-            sequence: self.sequence.fetch_add(1, Ordering::AcqRel) + 1,
+            sequence: *sequence + 1,
             emitted_at_ms,
             event,
         };
@@ -135,6 +141,9 @@ impl TurnState {
             return Emitted::Invalid;
         };
         let bytes = serde_json::to_vec(&payload).map_or(usize::MAX, |bytes| bytes.len());
+        if bytes > remaining {
+            return Emitted::OverBudget;
+        }
         let input = EventInput {
             topic: EVENT_TOPIC.to_owned(),
             payload,
@@ -142,7 +151,10 @@ impl TurnState {
             end: false,
         };
         match crate::event_check::checked_emit(&self.hub, input) {
-            Ok(true) => Emitted::Delivered(bytes),
+            Ok(true) => {
+                *sequence += 1;
+                Emitted::Delivered(bytes)
+            }
             Ok(false) => {
                 self.unobserved.store(true, Ordering::Release);
                 Emitted::Unobserved
@@ -156,6 +168,7 @@ enum Emitted {
     Delivered(usize),
     Unobserved,
     Invalid,
+    OverBudget,
 }
 
 impl Supervisor {
@@ -166,8 +179,13 @@ impl Supervisor {
     pub(crate) async fn turn(
         self: &Arc<Self>,
         params: TurnParams,
+        cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<TurnResult, RemoteError> {
         let live = self.require_live(&params.session_id)?;
+        super::supervisor::refuse_unoffered_configuration(live.target, &params.configuration)?;
+        // Decoded before the session's one turn slot is taken, so a malformed
+        // attachment refuses this call and leaves the session idle.
+        let attachments = sdk_attachments(params.attachments.as_deref().unwrap_or_default())?;
         for root in &params.configuration.workspace_roots {
             if !live.authorized_roots.contains(root) {
                 return Err(argument(format!(
@@ -187,20 +205,25 @@ impl Supervisor {
             Admitted::Fresh(publish) => publish,
         };
         let request = TurnRequest::new(params.client_message_id.clone(), params.input.clone())
-            .with_attachments(sdk_attachments(
-                params.attachments.as_deref().unwrap_or_default(),
-            )?)
+            .with_attachments(attachments)
             .with_configuration(map::configuration_patch(&params.configuration));
-        let started = live.session.start_turn(request).await;
+        // The hub giving up on this call drops the start, which the SDK treats
+        // as abandoning it; nothing is left running that nobody watches.
+        let started = tokio::select! {
+            biased;
+            () = cancel.cancelled() => None,
+            started = live.session.start_turn(request) => Some(started),
+        };
         let result = match started {
-            Ok(stream) => {
+            None => Err(self.abandoned_start(&live, &params.client_message_id)),
+            Some(Ok(stream)) => {
                 let native = stream.native_turn_id().to_owned();
                 self.relay(&live, &params.client_message_id, stream);
                 Ok(TurnResult {
                     native_turn_id: native,
                 })
             }
-            Err(error) => Err(self
+            Some(Err(error)) => Err(self
                 .refused_start(&live, &params.client_message_id, error)
                 .await),
         };
@@ -213,6 +236,7 @@ impl Supervisor {
     pub(crate) async fn start_review(
         self: &Arc<Self>,
         params: StartReviewParams,
+        cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<StartReviewResult, RemoteError> {
         let live = self.require_live(&params.session_id)?;
         if live
@@ -239,8 +263,14 @@ impl Supervisor {
             turn_id: mango_external_agents::TurnId::new(params.client_message_id.clone()),
             target: SdkReviewTarget::UncommittedChanges,
         };
-        let result = match live.session.start_review(request).await {
-            Ok(review) => {
+        let started = tokio::select! {
+            biased;
+            () = cancel.cancelled() => None,
+            started = live.session.start_review(request) => Some(started),
+        };
+        let result = match started {
+            None => Err(self.abandoned_start(&live, &params.client_message_id)),
+            Some(Ok(review)) => {
                 let native = review.turn.native_turn_id().to_owned();
                 self.relay(&live, &params.client_message_id, review.turn);
                 Ok(StartReviewResult {
@@ -248,12 +278,26 @@ impl Supervisor {
                     review_thread_id: review.review_thread_id,
                 })
             }
-            Err(error) => Err(self
+            Some(Err(error)) => Err(self
                 .refused_start(&live, &params.client_message_id, error)
                 .await),
         };
         publish.send_replace(Some(result.clone().map(|value| to_value(&value))));
         result
+    }
+
+    /// Releases the reservation of a start the hub stopped waiting for. Its
+    /// receipt records the cancellation, so a retry under the same id learns
+    /// what happened instead of starting the work a second time.
+    fn abandoned_start(&self, live: &LiveSession, client_message_id: &str) -> RemoteError {
+        let mut active = lock(&live.turns.active);
+        if active
+            .as_ref()
+            .is_some_and(|turn| turn.client_message_id == client_message_id)
+        {
+            *active = None;
+        }
+        RemoteError::new(codes::CANCELLED, "External-agent turn start was cancelled.")
     }
 
     /// Releases a reservation whose turn never started, and forgets its
@@ -289,6 +333,10 @@ impl Supervisor {
     }
 
     /// Drains one turn's stream to the hub, owned by the supervisor's tasks.
+    ///
+    /// The session's slash-command catalog travels here too, under this
+    /// turn's id: the hub listens to a session only while a turn runs, and
+    /// drops an event that names no turn once one has begun.
     fn relay(
         self: &Arc<Self>,
         live: &Arc<LiveSession>,
@@ -309,95 +357,32 @@ impl Supervisor {
         let live = Arc::clone(live);
         let client_message_id = client_message_id.to_owned();
         self.tasks.spawn(async move {
-            let mut spent = 0_usize;
-            let mut failed = false;
-            while let Some(event) = stream.recv().await {
-                let mapped = map_events::map_event(live.target, &event);
-                if let Some(pending) = mapped.opened {
-                    lock(&live.turns.interactions).insert(pending.request_id().to_owned(), pending);
-                }
-                // A round that was declined without a card resolves in the
-                // SDK too; the hub never saw it opened, so it hears nothing.
-                let never_shown = mapped.closed.as_ref().is_some_and(|request_id| {
-                    lock(&live.turns.interactions).remove(request_id).is_none()
-                });
-                let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_ms(SystemTime::now()));
-                let mut refused_form = None;
-                if let Some((response, reason)) = mapped.unrenderable {
-                    // A form the product cannot show is declined by name, so
-                    // the vendor is not left waiting on nobody. A required
-                    // question cannot be declined; that turn fails explicitly
-                    // rather than hanging until the question expires.
-                    if live.session.answer(response).await.is_err() {
-                        refused_form = Some(reason);
+            let mut relay = Relay {
+                live: Arc::clone(&live),
+                tasks: this.tasks.clone(),
+                native: native.clone(),
+                spent: 0,
+                failed: false,
+                shown_commands: None,
+            };
+            let mut subscription = live.session.subscribe();
+            relay.commands(&subscription.current().commands);
+            let mut facts_open = true;
+            loop {
+                tokio::select! {
+                    biased;
+                    event = stream.recv() => {
+                        let Some(event) = event else { break };
+                        relay.event(&event).await;
                     }
-                }
-                let wire = match (refused_form, mapped.wire) {
-                    (Some(_), _) if failed => continue,
-                    (Some(reason), _) => Event::Error {
-                        error: AgentError {
-                            code: "unsupported-question".to_owned(),
-                            message: format!(
-                                "The agent asked a question MangoStudio cannot show ({reason}), and it could not be declined."
-                            ),
-                            request_id: None,
-                            retryable: Some(false),
-                            vendor_code: None,
-                            truncated: None,
-                        },
+                    changed = subscription.changed(), if facts_open => match changed {
+                        Some(snapshot) => relay.commands(&snapshot.commands),
+                        None => facts_open = false,
                     },
-                    (None, Some(Event::ApprovalResolved { .. })) if never_shown => continue,
-                    (None, Some(wire)) => wire,
-                    (None, None) => continue,
-                };
-                if failed {
-                    continue;
-                }
-                let is_refusal = refused_form.is_some();
-                let emitted = live.turns.emit(&live.session_id, Some(&native), at, wire);
-                if is_refusal {
-                    failed = true;
-                    let stopping = Arc::clone(&live);
-                    this.tasks.spawn(async move {
-                        let _ = stopping.session.cancel(CancelReason::Requested).await;
-                    });
-                    continue;
-                }
-                let failure = match emitted {
-                    Emitted::Delivered(bytes) => {
-                        spent = spent.saturating_add(bytes);
-                        (spent > TURN_PAYLOAD_MAX_BYTES - TURN_ERROR_RESERVE_BYTES)
-                            .then_some("External-agent turn exceeded its persisted payload limit.")
-                    }
-                    Emitted::Unobserved => None,
-                    Emitted::Invalid => Some("External-agent adapter produced an invalid event envelope."),
-                };
-                if let Some(message) = failure {
-                    failed = true;
-                    // The error is the whole record that the turn ended badly;
-                    // the vendor is then stopped, and its stream still drained.
-                    let _ = live.turns.emit(
-                        &live.session_id,
-                        Some(&native),
-                        epoch_ms(SystemTime::now()),
-                        Event::Error {
-                            error: AgentError {
-                                code: "adapter-stream".to_owned(),
-                                message: message.to_owned(),
-                                request_id: None,
-                                retryable: None,
-                                vendor_code: None,
-                                truncated: None,
-                            },
-                        },
-                    );
-                    let stopping = Arc::clone(&live);
-                    this.tasks.spawn(async move {
-                        let _ = stopping.session.cancel(CancelReason::Timeout).await;
-                    });
                 }
             }
             lock(&live.turns.interactions).clear();
+            lock(&live.turns.steers).clear();
             let mut active = lock(&live.turns.active);
             if active
                 .as_ref()
@@ -478,7 +463,11 @@ impl Supervisor {
             Err(SdkError::NotSupported { .. }) => {
                 Ok(SteerResult::rejected(SteerRejection::NotSupported))
             }
-            Err(error) => Err(self.sdk_failure(error).await),
+            Err(error) => {
+                // A steer that failed in transit may be sent again under its id.
+                lock(&live.turns.steers).remove(&params.client_message_id);
+                Err(self.sdk_failure(error).await)
+            }
         }
     }
 
@@ -504,29 +493,133 @@ impl Supervisor {
     }
 }
 
-impl Supervisor {
-    /// Relays the session's slash-command catalog to the hub whenever it
-    /// changes. A session fact, not a turn event: it carries no turn id.
-    pub(crate) fn relay_session_facts(self: &Arc<Self>, live: &Arc<LiveSession>) {
-        let live = Arc::clone(live);
-        self.tasks.spawn(async move {
-            let mut subscription = live.session.subscribe();
-            let mut shown = Vec::new();
-            let mut snapshot = Some(subscription.current());
-            while let Some(current) = snapshot {
-                let commands = map_events::commands(&current.commands);
-                if commands != shown {
-                    shown.clone_from(&commands);
-                    let _ = live.turns.emit(
-                        &live.session_id,
-                        None,
-                        epoch_ms(SystemTime::now()),
-                        Event::CommandsAvailable { commands },
-                    );
-                }
-                snapshot = subscription.changed().await;
+/// One turn's relay state: what it has spent of the persisted budget,
+/// whether it already ended the turn with its own error, and the command
+/// catalog it last showed.
+struct Relay {
+    live: Arc<LiveSession>,
+    tasks: tokio_util::task::TaskTracker,
+    native: String,
+    spent: usize,
+    failed: bool,
+    shown_commands: Option<Vec<super::wire::Command>>,
+}
+
+impl Relay {
+    fn remaining(&self) -> usize {
+        (TURN_PAYLOAD_MAX_BYTES - TURN_ERROR_RESERVE_BYTES).saturating_sub(self.spent)
+    }
+
+    /// Shows the catalog when it differs from what this turn last showed.
+    fn commands(&mut self, commands: &[mango_external_agents::Command]) {
+        let commands = map_events::commands(commands);
+        if self.failed || self.shown_commands.as_ref() == Some(&commands) {
+            return;
+        }
+        let at = epoch_ms(SystemTime::now());
+        self.shown_commands = Some(commands.clone());
+        self.publish(at, Event::CommandsAvailable { commands });
+    }
+
+    async fn event(&mut self, event: &mango_external_agents::AgentEvent) {
+        let live = Arc::clone(&self.live);
+        let mapped = map_events::map_event(live.target, event);
+        if let Some(pending) = mapped.opened {
+            lock(&live.turns.interactions).insert(pending.request_id().to_owned(), pending);
+        }
+        // A round that was declined without a card resolves in the SDK too;
+        // the hub never saw it opened, so it hears nothing.
+        let never_shown = mapped
+            .closed
+            .as_ref()
+            .is_some_and(|request_id| lock(&live.turns.interactions).remove(request_id).is_none());
+        let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_ms(SystemTime::now()));
+        if let Some((response, reason)) = mapped.unrenderable {
+            // A form the product cannot show is declined by name, so the
+            // vendor is not left waiting on nobody. A required question cannot
+            // be declined; that turn fails explicitly rather than hanging
+            // until the question expires.
+            if live.session.answer(response).await.is_err() && !self.failed {
+                self.fail(
+                    at,
+                    "unsupported-question",
+                    &format!(
+                        "The agent asked a question MangoStudio cannot show ({reason}), and it could not be declined."
+                    ),
+                    CancelReason::Requested,
+                );
+                return;
             }
+        }
+        let wire = match mapped.wire {
+            Some(Event::ApprovalResolved { .. }) if never_shown => return,
+            Some(wire) => wire,
+            None => return,
+        };
+        if self.failed {
+            return;
+        }
+        self.publish(at, wire);
+    }
+
+    /// Sends one event within the budget; past it, or for an envelope the
+    /// schema refuses, ends the turn with this relay's own error instead.
+    fn publish(&mut self, at: u64, wire: Event) {
+        match self.live.turns.emit(
+            &self.live.session_id,
+            Some(&self.native),
+            at,
+            wire,
+            self.remaining(),
+        ) {
+            Emitted::Delivered(bytes) => self.spent = self.spent.saturating_add(bytes),
+            Emitted::Unobserved => {}
+            Emitted::OverBudget => {
+                self.overflow("External-agent turn exceeded its persisted payload limit.")
+            }
+            Emitted::Invalid => {
+                self.overflow("External-agent adapter produced an invalid event envelope.")
+            }
+        }
+    }
+
+    fn overflow(&mut self, message: &str) {
+        self.failed = true;
+        self.error(epoch_ms(SystemTime::now()), "adapter-stream", message);
+        let stopping = Arc::clone(&self.live);
+        self.tasks.spawn(async move {
+            let _ = stopping.session.cancel(CancelReason::Timeout).await;
         });
+    }
+
+    fn fail(&mut self, at: u64, code: &str, message: &str, reason: CancelReason) {
+        self.failed = true;
+        self.error(at, code, message);
+        let stopping = Arc::clone(&self.live);
+        self.tasks.spawn(async move {
+            let _ = stopping.session.cancel(reason).await;
+        });
+    }
+
+    /// The error that is the whole record of how this turn ended. The budget
+    /// reserve exists so it always fits.
+    fn error(&self, at: u64, code: &str, message: &str) {
+        let _ = self.live.turns.emit(
+            &self.live.session_id,
+            Some(&self.native),
+            at,
+            Event::Error {
+                error: AgentError {
+                    code: code.to_owned(),
+                    message: message.to_owned(),
+                    request_id: None,
+                    retryable: Some(false),
+                    vendor_code: None,
+                    truncated: None,
+                },
+            },
+            usize::MAX,
+        );
     }
 }
 
@@ -645,4 +738,108 @@ fn epoch_ms(at: SystemTime) -> u64 {
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mango_protocol::frame::PeerInfo;
+    use mango_protocol::port::port_pair;
+    use mango_protocol::session::{Session as HubSession, SessionOptions};
+
+    use super::{Emitted, TurnState};
+    use crate::external_agents::wire::{ActivityKind, ApprovalRequest, Event};
+
+    async fn pair() -> (HubSession, HubSession) {
+        let (port, peer) = port_pair();
+        let info = |role: &str| PeerInfo {
+            name: "turn-state-test".into(),
+            version: "0.1.0".into(),
+            role: role.into(),
+        };
+        let (runtime, _) = HubSession::spawn(port, SessionOptions::new(info("runtime")));
+        let (hub, _) = HubSession::spawn(peer, SessionOptions::new(info("hub")));
+        let (a, b) = tokio::join!(runtime.ready(), hub.ready());
+        a.expect("runtime handshake");
+        b.expect("hub handshake");
+        (runtime, hub)
+    }
+
+    fn text(n: usize) -> Event {
+        Event::TextDelta {
+            text: format!("chunk {n}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_emitters_never_reorder_or_skip_a_sequence() {
+        let (runtime, hub) = pair().await;
+        let mut events = hub.events();
+        let state = Arc::new(TurnState::new(runtime));
+        let mut senders = Vec::new();
+        for sender in 0..4 {
+            let state = Arc::clone(&state);
+            senders.push(tokio::spawn(async move {
+                for n in 0..50 {
+                    let emitted = state.emit("s", Some("t"), 0, text(sender * 100 + n), usize::MAX);
+                    assert!(
+                        matches!(emitted, Emitted::Delivered(_)),
+                        "expected every frame delivered"
+                    );
+                    tokio::task::yield_now().await;
+                }
+            }));
+        }
+        for sender in senders {
+            sender.await.unwrap();
+        }
+        let mut received = Vec::new();
+        while received.len() < 200 {
+            let event = events.recv().await.expect("expected 200 frames");
+            received.push(event.payload["sequence"].as_u64().unwrap());
+        }
+        assert_eq!(
+            received,
+            (1..=200).collect::<Vec<_>>(),
+            "expected sequences in arrival order, gap-free"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_frame_spends_no_sequence() {
+        let (runtime, hub) = pair().await;
+        let mut events = hub.events();
+        let state = TurnState::new(runtime);
+        // No options: the schema requires at least one, so the frame is refused.
+        let invalid = Event::ApprovalRequested {
+            request: ApprovalRequest {
+                request_id: "r".into(),
+                kind: ActivityKind::Other,
+                title: "t".into(),
+                detail: None,
+                options: Vec::new(),
+                expires_at_ms: 0,
+                truncated: None,
+            },
+        };
+        assert!(matches!(
+            state.emit("s", Some("t"), 0, invalid, usize::MAX),
+            Emitted::Invalid
+        ));
+        assert!(matches!(
+            state.emit("s", Some("t"), 0, text(1), 8),
+            Emitted::OverBudget
+        ));
+        assert!(matches!(
+            state.emit("s", Some("t"), 0, text(2), usize::MAX),
+            Emitted::Delivered(_)
+        ));
+        let event = events.recv().await.expect("expected the delivered frame");
+        assert_eq!(
+            event.payload["sequence"],
+            serde_json::json!(1),
+            "expected refused and over-budget frames to spend no sequence number"
+        );
+    }
 }

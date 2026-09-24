@@ -708,7 +708,6 @@ impl Supervisor {
             }
         };
         let Some(cause) = refused else {
-            self.relay_session_facts(&live);
             return Ok(live.open_result.clone());
         };
         let cleanup = self.finish_close(&live, cause).await;
@@ -1184,7 +1183,7 @@ async fn wait_settled(opening: &Opening) {
 /// product has no Cursor reviewer: the descriptor refuses those cells with
 /// `cursorNoAutoReview`, and a hub that sends one anyway must not reach the
 /// vendor with it.
-fn refuse_unoffered_configuration(
+pub(super) fn refuse_unoffered_configuration(
     target: TargetId,
     configuration: &super::wire::Configuration,
 ) -> Result<(), RemoteError> {

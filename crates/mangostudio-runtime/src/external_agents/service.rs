@@ -93,12 +93,14 @@ async fn call(
                 .refresh_account_usage(decode(method, params)?, cancel)
                 .await?,
         ),
-        "external-agent.turn" => encode(supervisor.turn(decode(method, params)?).await?),
+        "external-agent.turn" => encode(supervisor.turn(decode(method, params)?, cancel).await?),
         "external-agent.respond" => encode(supervisor.respond(decode(method, params)?).await?),
         "external-agent.steer" => encode(supervisor.steer(decode(method, params)?).await?),
-        "external-agent.start-review" => {
-            encode(supervisor.start_review(decode(method, params)?).await?)
-        }
+        "external-agent.start-review" => encode(
+            supervisor
+                .start_review(decode(method, params)?, cancel)
+                .await?,
+        ),
         "external-agent.cancel" => encode(supervisor.cancel(decode(method, params)?).await?),
         _ => unreachable!("the external-agent registry names exactly ten methods"),
     }

@@ -310,7 +310,20 @@ impl Session for OneChoiceSession {
         &self,
         response: mango_external_agents::QuestionResponse,
     ) -> mango_external_agents::Result<()> {
-        use mango_external_agents::{EventKind, QuestionOutcome};
+        use mango_external_agents::{AnswerValue, EventKind, QuestionOutcome};
+        // As strict as a vendor: an answer for another interaction or
+        // question, or a choice it never offered, is refused.
+        let routed = response.interaction_id.as_str() == "choice-1"
+            && matches!(response.answers.as_slice(), [answer]
+                if answer.question_id.as_str() == "pick"
+                    && matches!(&answer.value, AnswerValue::Chosen { option_ids }
+                        if option_ids.iter().map(|id| id.as_str()).eq(["right"])));
+        if !routed {
+            return Err(SdkError::Protocol {
+                expected: String::from("the answer to choice-1/pick"),
+                received: String::from("an answer routed elsewhere"),
+            });
+        }
         self.log.question_answers.fetch_add(1, Ordering::SeqCst);
         if let Some(sink) = self.sink.lock().await.take() {
             sink.emit(EventKind::QuestionResolved {
@@ -1575,7 +1588,10 @@ async fn a_turn_streams_ordered_events_and_an_approval_round_trips() {
     rig.open("one").await.unwrap();
     let turn = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "fix it"))
+        .turn(
+            rig.turn_params("one", "m1", "fix it"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
 
@@ -1591,12 +1607,13 @@ async fn a_turn_streams_ordered_events_and_an_approval_round_trips() {
     );
     for event in &events {
         assert_eq!(event["sessionId"], json!("one"));
-        if event["event"]["type"] == "commands_available" {
-            // A session fact: it names no turn, and none is invented for it.
-            assert!(event.get("nativeTurnId").is_none(), "received: {event}");
-        } else {
-            assert_eq!(event["nativeTurnId"], json!(turn.native_turn_id));
-        }
+        // Every event, the command catalog included, travels under this
+        // turn's id: the hub drops one that names no turn once one began.
+        assert_eq!(
+            event["nativeTurnId"],
+            json!(turn.native_turn_id),
+            "received: {event}"
+        );
     }
     assert!(
         events.iter().any(|event| event["event"]
@@ -1646,12 +1663,18 @@ async fn a_repeated_client_message_id_answers_without_a_second_turn() {
     rig.open("one").await.unwrap();
     let first = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "same"))
+        .turn(
+            rig.turn_params("one", "m1", "same"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     let again = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "same"))
+        .turn(
+            rig.turn_params("one", "m1", "same"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     assert_eq!(first, again);
@@ -1662,7 +1685,10 @@ async fn a_repeated_client_message_id_answers_without_a_second_turn() {
     );
     let error = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "different"))
+        .turn(
+            rig.turn_params("one", "m1", "different"),
+            &CancellationToken::new(),
+        )
         .await
         .expect_err("a reused id with other input must be refused");
     assert!(
@@ -1678,12 +1704,18 @@ async fn a_second_turn_waits_for_the_first_to_end() {
     let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
     rig.supervisor
-        .turn(rig.turn_params("one", "m1", "first"))
+        .turn(
+            rig.turn_params("one", "m1", "first"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     let error = rig
         .supervisor
-        .turn(rig.turn_params("one", "m2", "second"))
+        .turn(
+            rig.turn_params("one", "m2", "second"),
+            &CancellationToken::new(),
+        )
         .await
         .expect_err("a second concurrent turn must be refused");
     assert!(
@@ -1703,7 +1735,7 @@ async fn a_turn_may_narrow_its_roots_but_never_widen_them() {
     params.configuration.workspace_roots = vec!["/somewhere/else".into()];
     let error = rig
         .supervisor
-        .turn(params)
+        .turn(params, &CancellationToken::new())
         .await
         .expect_err("an unopened root must be refused");
     assert!(
@@ -1714,7 +1746,7 @@ async fn a_turn_may_narrow_its_roots_but_never_widen_them() {
     let mut narrowed = rig.turn_params("one", "m2", "go");
     narrowed.configuration.workspace_roots = vec![rig.workspace.clone()];
     rig.supervisor
-        .turn(narrowed)
+        .turn(narrowed, &CancellationToken::new())
         .await
         .expect("an opened root is allowed");
     assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 1);
@@ -1727,7 +1759,10 @@ async fn a_response_is_refused_for_an_unknown_request_or_another_turn() {
     rig.open("one").await.unwrap();
     let turn = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "go"))
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     let events = rig.events_until("approval_requested").await;
@@ -1778,7 +1813,10 @@ async fn a_question_the_product_cannot_show_or_decline_fails_the_turn_explicitly
     .await;
     rig.open("one").await.unwrap();
     rig.supervisor
-        .turn(rig.turn_params("one", "m1", "ask me"))
+        .turn(
+            rig.turn_params("one", "m1", "ask me"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     let events = rig.events_until("error").await;
@@ -1834,7 +1872,10 @@ async fn steering_is_answered_not_thrown_when_it_cannot_land() {
     );
     let turn = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "go"))
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     rig.events_until("approval_requested").await;
@@ -1861,7 +1902,10 @@ async fn cancelling_a_turn_ends_it_with_the_marker_before_completion_and_frees_t
     let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
     rig.supervisor
-        .turn(rig.turn_params("one", "m1", "go"))
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     rig.events_until("approval_requested").await;
@@ -1891,7 +1935,10 @@ async fn cancelling_a_turn_ends_it_with_the_marker_before_completion_and_frees_t
     )
     .await;
     rig.supervisor
-        .turn(rig.turn_params("one", "m2", "again"))
+        .turn(
+            rig.turn_params("one", "m2", "again"),
+            &CancellationToken::new(),
+        )
         .await
         .expect("a new turn after the cancelled one");
     rig.close("one").await;
@@ -1903,7 +1950,10 @@ async fn revoking_consent_mid_turn_closes_the_session_and_refuses_its_pending_an
     rig.open("one").await.unwrap();
     let turn = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "go"))
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     let events = rig.events_until("approval_requested").await;
@@ -1946,7 +1996,10 @@ async fn a_cancel_for_a_turn_that_is_no_longer_running_never_stops_the_current_o
     let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
     rig.supervisor
-        .turn(rig.turn_params("one", "m1", "go"))
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     rig.events_until("approval_requested").await;
@@ -1976,7 +2029,10 @@ async fn a_single_choice_question_is_a_card_answered_as_a_question_never_as_a_pe
     rig.open("one").await.unwrap();
     let turn = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "choose"))
+        .turn(
+            rig.turn_params("one", "m1", "choose"),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     let events = rig.events_until("approval_requested").await;
@@ -2015,5 +2071,92 @@ async fn a_single_choice_question_is_a_card_answered_as_a_question_never_as_a_pe
         (1, 0),
         "expected (question answers, permission answers) = (1, 0)"
     );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_malformed_attachment_refuses_the_turn_and_leaves_the_session_idle() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let mut params = rig.turn_params("one", "m1", "look");
+    params.attachments = Some(vec![crate::external_agents::wire::Attachment {
+        id: "a1".into(),
+        original_name: "x.png".into(),
+        mime_type: "image/png".into(),
+        size_bytes: 3,
+        kind: crate::external_agents::wire::AttachmentKind::Image,
+        bytes_base64: "not base64!".into(),
+    }]);
+    let error = rig
+        .supervisor
+        .turn(params, &CancellationToken::new())
+        .await
+        .expect_err("a malformed attachment must be refused");
+    assert!(
+        error.message.contains("is not valid base64"),
+        "received: {}",
+        error.message
+    );
+    assert_eq!(rig.supervisor.live_sessions().1[0].state, "idle");
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m2", "again"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the session is still free for the next turn");
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_turn_cannot_switch_cursor_to_auto_review() {
+    let rig = rig(RigOptions::default()).await;
+    let mut open = rig.open_params("one");
+    open.target_id = TargetId::Cursor;
+    rig.supervisor
+        .open(open, &rig.hub, &CancellationToken::new())
+        .await
+        .unwrap();
+    let mut params = rig.turn_params("one", "m1", "go");
+    params.configuration.routing = ApprovalRouting::AutoReview;
+    let error = rig
+        .supervisor
+        .turn(params, &CancellationToken::new())
+        .await
+        .expect_err("auto-review must be refused for Cursor at turn time too");
+    assert!(
+        error.message.contains("does not offer auto-review"),
+        "received: {}",
+        error.message
+    );
+    assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 0);
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_start_the_hub_gave_up_on_releases_the_session() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    let error = rig
+        .supervisor
+        .turn(rig.turn_params("one", "m1", "go"), &cancelled)
+        .await
+        .expect_err("a start the hub abandoned must fail");
+    assert_eq!(error.code, codes::CANCELLED, "received: {error:?}");
+    assert_eq!(
+        rig.log.turns_started.load(Ordering::SeqCst),
+        0,
+        "expected the start never reached the vendor"
+    );
+    assert_eq!(rig.supervisor.live_sessions().1[0].state, "idle");
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m2", "next"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the session is free after the abandoned start");
     rig.close("one").await;
 }

@@ -34,9 +34,6 @@
 //! (`apps/shared/src/external-agents/vendor-text.ts`, the same numbers as
 //! [`TextLimit`]); bounding is idempotent, and a cut sets `truncated`.
 
-// TEMPORARY until the supervisor relays turn events; removed once it calls both entry points.
-#![allow(dead_code)]
-
 use mango_external_agents as sdk;
 use mango_external_agents::normalize::{self, APPROVAL_MAX_OPTIONS, BoundedText, TextLimit};
 use mango_protocol::error::RemoteError;
