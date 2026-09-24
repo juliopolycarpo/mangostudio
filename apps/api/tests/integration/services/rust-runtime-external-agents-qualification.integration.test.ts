@@ -323,18 +323,20 @@ describe('Real Rust runtime external-agent admission', () => {
         requireAbsolute: true,
       });
       if (!validation.ok) throw new Error(`expected ok validation, received ${validation.reason}`);
+      expect(validation.resolvedPath).toBe(canonical);
       await getDb()
         .updateTable('chats')
         .set({ environmentId, workdir: validation.resolvedPath })
         .where('id', '=', chat.id)
         .execute();
 
-      // The supervisor only opens canonical paths; past the authority, only the CLI is missing.
+      // Open exactly the stored string: the supervisor refuses a non-canonical
+      // path, and past the authority only the CLI is missing.
       const rejection = await rejectionOf(
         rust.externalAgents.open({
           sessionId: 'qualification-symlink',
           targetId: 'codex',
-          workspacePath: canonical,
+          workspacePath: validation.resolvedPath,
           configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
           resumeMode: 'fallback',
           timeoutMs: 10_000,
