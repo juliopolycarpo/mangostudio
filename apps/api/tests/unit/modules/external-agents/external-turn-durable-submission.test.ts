@@ -174,7 +174,17 @@ describe('receipt before submission', () => {
       getDb()
     );
     try {
-      const result = await start(controller);
+      const running = start(controller);
+      let result: ExternalTurnResult | undefined;
+      void running.then((settled) => {
+        result = settled;
+      });
+      await waitFor(
+        () => result !== undefined || runtime.rpcCount() > 0,
+        'the turn to end before any request reaches the runtime'
+      );
+      expect(runtime.rpcCount()).toBe(0);
+      if (!result) throw new Error('expected a settled turn | received: still running');
       expect(result.reason).toBe('vendor-error');
       expect(result.error?.code).toBe('turn-receipt');
       expect({ rpcs: runtime.rpcCount(), submissions: runtime.submissionCount() }).toEqual({
@@ -246,7 +256,17 @@ describe('lost acknowledgements', () => {
   it('(c) marks a lost reply across a dropped connection unresolved and never resends it', async () => {
     const { runtime, controller } = harness();
     runtime.script.push('drop-ack');
-    const result = await start(controller);
+    const running = start(controller);
+    let result: ExternalTurnResult | undefined;
+    void running.then((settled) => {
+      result = settled;
+    });
+    await waitFor(
+      () => result !== undefined || runtime.submissionCount() > 1,
+      'the turn to end without a second submission'
+    );
+    expect(runtime.submissionCount()).toBe(1);
+    if (!result) throw new Error('expected a settled turn | received: still running');
     await settle();
 
     expect(result.reason).toBe('acceptance-unknown');
