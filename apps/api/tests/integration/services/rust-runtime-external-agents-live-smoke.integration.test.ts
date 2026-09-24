@@ -4,9 +4,10 @@
  *
  * Opt-in and never part of CI. It reaches real vendor accounts, so it runs
  * only when `MANGOSTUDIO_LIVE_AGENT_SMOKE` names the targets to try, e.g.
- * `MANGOSTUDIO_LIVE_AGENT_SMOKE=claude,codex,cursor`. Each turn asks for one
- * word in an empty scratch workspace and answers no approval, so a tool the
- * vendor wants to run is never granted and nothing on the machine changes. Fixture evidence lives in
+ * `MANGOSTUDIO_LIVE_AGENT_SMOKE=claude,codex,cursor`. Turns ask for one word,
+ * or for a count that is cancelled while it streams, in an empty scratch
+ * workspace. No approval is answered, so a tool the vendor wants to run is
+ * never granted and nothing on the machine changes. Fixture evidence lives in
  * `rust-runtime-external-agents-qualification.integration.test.ts`; this file
  * is the separate, labelled live evidence.
  */
