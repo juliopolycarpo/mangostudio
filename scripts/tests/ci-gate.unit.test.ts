@@ -221,8 +221,9 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       'apps/shared/src/external-agents/',
       'apps/shared/src/schema-helpers.ts',
       'apps/shared/src/environments/toolchain-schemas.ts',
-      'apps/runtime/src/runtime-home.ts',
-      'apps/runtime/src/config.ts',
+      // The whole runtime tree: ts-home reads runtime-home.ts and config.ts,
+      // and the Rust/TypeScript parity lanes drive the in-process runtime.
+      'apps/runtime/src/',
       'apps/runtime/scripts/generate-home-fixtures.ts',
       'apps/runtime/package.json',
     ];
