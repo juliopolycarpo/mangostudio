@@ -249,6 +249,10 @@ pub(crate) async fn build_capability_manifest(
     manifest.profile = Some(resolved.profile);
     manifest.allow = Some(allow);
     manifest.enforces_path_policy = Some(true);
+    // Sent before the peer's hello, so a hub withdrawal cannot shape it; the
+    // hub strips a withdrawn attestation on its side (`applyHubIsolationClaim`).
+    manifest.identity_isolation =
+        run_blocking(crate::external_agents::isolation::detect_external_agent_isolation).await;
     manifest
 }
 
@@ -1107,6 +1111,33 @@ mod tests {
     /// connection with `PROTOCOL_ERROR` before a single method could be
     /// called. Confirmed against a real, compiled binary: see
     /// `apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts`.
+    /// The hello manifest carries this process's own attestation, and a
+    /// runtime process never claims the hub-only `single-user-host`.
+    #[tokio::test]
+    async fn the_manifest_advertises_this_processs_identity_isolation() {
+        use mangostudio_runtime_contract::manifest::IdentityIsolationMethod;
+
+        let home = scratch_home("capabilities-isolation");
+        let manifest = build_capability_manifest(
+            RuntimeSlot::Host,
+            &home,
+            &Registry::new(),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        let expected = crate::external_agents::isolation::detect_external_agent_isolation();
+        assert_eq!(manifest.identity_isolation, expected);
+        let method = manifest
+            .identity_isolation
+            .map(|isolation| isolation.method);
+        assert_ne!(
+            method,
+            Some(IdentityIsolationMethod::SingleUserHost),
+            "a runtime process must never claim single-user-host"
+        );
+    }
+
     #[tokio::test]
     async fn a_never_before_seen_host_slot_builds_a_schema_valid_manifest() {
         let home = scratch_home("capabilities-host");

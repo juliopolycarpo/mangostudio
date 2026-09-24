@@ -12,6 +12,18 @@ pub(crate) struct ObjectIdentity {
     inode: u64,
 }
 
+impl ObjectIdentity {
+    /// The device (Unix `st_dev`) or volume serial (Windows) holding the object.
+    pub(crate) fn device(self) -> u64 {
+        self.device
+    }
+
+    /// The inode (Unix `st_ino`) or 64-bit file index (Windows) of the object.
+    pub(crate) fn inode(self) -> u64 {
+        self.inode
+    }
+}
+
 /// Identifies the opened object independently of its path and timestamps.
 ///
 /// # Example
