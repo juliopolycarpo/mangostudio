@@ -516,7 +516,7 @@ struct AllowListedWorkspaces {
 }
 
 impl WorkspaceAuthority for AllowListedWorkspaces {
-    fn authorize<'a>(&'a self, canonical: &'a Path) -> PortFuture<'a, bool> {
+    fn authorize<'a>(&'a self, _hub: &'a HubSession, canonical: &'a Path) -> PortFuture<'a, bool> {
         self.asks.fetch_add(1, Ordering::SeqCst);
         let allowed = self.allowed.contains(canonical);
         let gate = self.gate.clone();
@@ -769,11 +769,12 @@ async fn an_unauthorized_workspace_is_refused_before_any_lookup_or_launch() {
 }
 
 #[tokio::test]
-async fn the_production_authority_denies_every_workspace() {
+async fn the_fallback_authority_denies_every_workspace() {
     let authority = super::DenyEveryWorkspace;
+    let rig = rig(RigOptions::default());
     assert!(
-        !authority.authorize(Path::new("/")).await,
-        "expected the production workspace authority to deny | received: allow"
+        !authority.authorize(&rig.hub, Path::new("/")).await,
+        "expected the fallback workspace authority to deny | received: allow"
     );
 }
 
@@ -1110,6 +1111,7 @@ async fn an_open_that_finishes_after_a_close_was_requested_is_closed_not_registe
         .supervisor
         .run_open(
             rig.open_params("one"),
+            &rig.hub,
             &super::Opening {
                 target: TargetId::Claude,
                 cancel: CancellationToken::new(),
@@ -1394,6 +1396,7 @@ async fn listing_sessions_never_opens_a_conversation_and_authorizes_its_workspac
                 session_id: None,
                 timeout_ms: 5_000,
             },
+            &rig.hub,
             &CancellationToken::new(),
         )
         .await
@@ -1425,6 +1428,7 @@ async fn listing_sessions_never_opens_a_conversation_and_authorizes_its_workspac
                 session_id: None,
                 timeout_ms: 5_000,
             },
+            &refused.hub,
             &CancellationToken::new(),
         )
         .await

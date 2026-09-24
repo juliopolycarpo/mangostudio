@@ -17,10 +17,13 @@ import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sanitizedEnv, spawnPort } from '@mangostudio/protocol/spawn';
+import { getDb } from '../../../src/db/database';
 import { createExternalIdentityIsolationRegistry } from '../../../src/modules/external-agents/application/external-identity-isolation';
 import { connectLocalRuntime } from '../../../src/services/runtime-client/connect-in-process-runtime';
 import { openHubSession } from '../../../src/services/runtime-client/hub-session';
+import type { HubWorkspaceBinding } from '../../../src/services/runtime-client/hub-workspace-authority';
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
+import { insertTestChat, insertTestUser } from '../../support/factories';
 import {
   cleanupMangoHome,
   resolveRustRuntimeBinary,
@@ -49,6 +52,7 @@ describe('Real Rust runtime external-agent admission', () => {
     options: {
       readonly env?: Readonly<Record<string, string>>;
       readonly externalAgentIsolation?: 'single-user' | 'withdrawn';
+      readonly workspaceBinding?: HubWorkspaceBinding;
     } = {}
   ): Promise<RuntimeClient> {
     const mangoHome = await scratchMangoHome(name);
@@ -60,6 +64,8 @@ describe('Real Rust runtime external-agent admission', () => {
       exitGraceMs: 1_000,
     });
     const hub = await openHubSession(peer.port, {
+      // The real hub handler, answering from the test database.
+      workspaceBinding: options.workspaceBinding ?? null,
       hubVersion: runtimeVersion,
       ...(options.externalAgentIsolation
         ? { externalAgentIsolation: options.externalAgentIsolation }
@@ -189,6 +195,63 @@ describe('Real Rust runtime external-agent admission', () => {
           timeoutMs: 10_000,
         })
       ).rejects.toThrow(/is not authorized/);
+      const health = await rust.health();
+      expect(health.externalAgents?.liveSessionCount).toBe(0);
+    },
+    60_000
+  );
+
+  it.skipIf(!binary.available)(
+    'admits exactly the workspace the hub authorized for this connection',
+    async () => {
+      const home = await scratchMangoHome('rust-external-agents-authorized-home');
+      cleanups.push(() => cleanupMangoHome(home));
+      const emptyPath = join(home, 'empty-path');
+      await mkdir(emptyPath);
+      await mkdir(join(home, 'authorized'));
+      await mkdir(join(home, 'unauthorized'));
+      const authorized = await realpath(join(home, 'authorized'));
+      const unauthorized = await realpath(join(home, 'unauthorized'));
+
+      const owner = await insertTestUser();
+      const environmentId = 'rust-external-agents-authorized';
+      const chat = await insertTestChat(owner.id);
+      await getDb()
+        .updateTable('chats')
+        .set({ environmentId, workdir: authorized })
+        .where('id', '=', chat.id)
+        .execute();
+      cleanups.push(async () => {
+        await getDb().deleteFrom('chats').where('id', '=', chat.id).execute();
+        await getDb().deleteFrom('user').where('id', '=', owner.id).execute();
+      });
+
+      const rust = await spawnRustRuntime(environmentId, {
+        env: {
+          HOME: home,
+          USERPROFILE: home,
+          PATH: emptyPath,
+          XDG_CONFIG_HOME: join(home, '.config'),
+        },
+        workspaceBinding: { userId: owner.id, environmentId },
+      });
+      const open = (sessionId: string, workspacePath: string) =>
+        rust.externalAgents.open({
+          sessionId,
+          targetId: 'codex',
+          workspacePath,
+          configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
+          resumeMode: 'fallback',
+          timeoutMs: 10_000,
+        });
+
+      // Past the authority: the only thing missing is the vendor CLI.
+      await expect(open('qualification-authorized', authorized)).rejects.toThrow(
+        /is not installed/
+      );
+      await expect(open('qualification-unauthorized', unauthorized)).rejects.toThrow(
+        /is not authorized/
+      );
       const health = await rust.health();
       expect(health.externalAgents?.liveSessionCount).toBe(0);
     },

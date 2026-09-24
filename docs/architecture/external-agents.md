@@ -57,9 +57,27 @@ an attestation. Ordinary Local runtime features remain available, but external a
 because the credential home is no longer proven to belong to one MangoStudio user.
 
 Workspace access is independently fail-closed. Before an adapter can launch, the runtime requires
-canonical directory paths and asks its host to authorize each one. The production Local host accepts
-only an exact canonical workdir already stored on a Local chat owned by the same user. Hosts without
-an explicit authorization source deny every workspace.
+canonical directory paths and asks its host to authorize each one. It asks at open, for every extra
+root, and for a workspace-scoped session listing. Every host applies one policy: a workspace is
+authorized only when a chat owned by the connection's user, on the connection's environment,
+already stores that exact canonical `workdir`. The CLI/setup stand-in user `local` and a connection
+with no bound user are never authorized.
+
+The in-process Local runtime reaches that policy through the callback it is built with. A spawned
+runtime (stdio, WSL, SSH, container, HTTP or dial-in) asks back over its own hub session. It
+sends `hub.workspace.authorize` from the hub-served `mangostudio.hub` contract
+(`apps/shared/src/runtime-contract/hub-contract.ts`, emitted as `generated/hub-catalog.json`) with
+`{ canonicalPath, purpose: "external-agent" }`. The hub binds each session to the `(userId,
+environmentId)` it recorded when it opened the connection. For a dial-in, that is the verified
+pairing credential's own user and environment. The runtime never names a user. The hub validates
+the params against the closed schema and refuses a mismatch with `INVALID_PARAMS`.
+
+The Rust runtime validates the question and the answer against the embedded hub catalog. It
+admits a workspace only on an explicit `{ "authorized": true }`, with a 5 s bound. A timeout, an
+error, a closed session, a malformed result or a path the schema refuses is a denial. So is
+`METHOD_UNSUPPORTED` from an older hub. That is also why the hub does not advertise the method in
+its hello: a hub that cannot answer already fails closed. Hosts without an authorization source
+deny every workspace.
 
 **Opening a session is the only place a workspace root is authorized.** Turn configuration reaches
 the vendor verbatim as its sandbox roots, so a turn may name a subset of the roots its session

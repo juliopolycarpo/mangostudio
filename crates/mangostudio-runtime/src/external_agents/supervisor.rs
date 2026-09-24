@@ -22,9 +22,10 @@
 //!
 //! A workspace is authorised only at open, through [`WorkspaceAuthority`],
 //! after canonicalisation and an exact canonical-form check. The production
-//! authority denies every workspace: a host without an explicit authorisation
-//! source must, and a spawned runtime has none yet. Turn configuration may
-//! later narrow the roots an open authorised, never widen them.
+//! authority asks the hub on the calling session (`hub.workspace.authorize`,
+//! see [`super::hub_authority`]) and fails closed on anything but an explicit
+//! yes. Turn configuration may later narrow the roots an open authorised,
+//! never widen them.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -39,6 +40,7 @@ use mango_external_agents::{
     OpenSession, ProcessLauncher, ResumeMode as SdkResumeMode, Session, SessionQuery,
 };
 use mango_protocol::error::{RemoteError, codes};
+use mango_protocol::session::Session as HubSession;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -66,18 +68,26 @@ pub(crate) type PortFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>
 ///
 /// Only ever asked about a path that already exists, is a directory, and was
 /// given in its canonical form. Omission is a denial; there is no allow-all.
+///
+/// `hub` is the session the call arrived on: the authority may ask the peer
+/// that made the request, and never a different one.
 pub(crate) trait WorkspaceAuthority: Send + Sync {
     /// Whether `canonical` may be opened, answered before any vendor launch.
-    fn authorize<'a>(&'a self, canonical: &'a Path) -> PortFuture<'a, bool>;
+    fn authorize<'a>(&'a self, hub: &'a HubSession, canonical: &'a Path) -> PortFuture<'a, bool>;
 }
 
-/// The production authority: no spawned runtime has an authorisation source
-/// yet, so every workspace is refused, exactly as the TypeScript runtime's
-/// spawned hosts refuse it.
+/// The fallback authority, for a host with no authorisation source: every
+/// workspace is refused.
+///
+/// Test-only today: every admission runs on a hub session, so production
+/// always has [`super::hub_authority::HubWorkspaceAuthority`] to ask. A
+/// future caller without a session must use this, never an allow-all.
+#[cfg(test)]
 pub(crate) struct DenyEveryWorkspace;
 
+#[cfg(test)]
 impl WorkspaceAuthority for DenyEveryWorkspace {
-    fn authorize<'a>(&'a self, _canonical: &'a Path) -> PortFuture<'a, bool> {
+    fn authorize<'a>(&'a self, _hub: &'a HubSession, _canonical: &'a Path) -> PortFuture<'a, bool> {
         Box::pin(async { false })
     }
 }
@@ -572,7 +582,7 @@ impl Supervisor {
         &self,
         params: OpenParams,
         opening: &Opening,
-        hub: mango_protocol::session::Session,
+        hub: HubSession,
     ) -> Result<LiveSession, RemoteError> {
         let deadline = Duration::from_millis(params.timeout_ms);
         let host_cancel = CancelToken::new();
@@ -580,12 +590,14 @@ impl Supervisor {
         let target = params.target_id;
         let work = async {
             refuse_unoffered_configuration(target, &params.configuration)?;
-            let workspace = self.authorized_workspace(&params.workspace_path).await?;
+            let workspace = self
+                .authorized_workspace(&hub, &params.workspace_path)
+                .await?;
             // Every extra root is authorised at open, and refuses the whole
             // open if any one is not; a later turn may only narrow the set.
             let mut authorized_roots = std::collections::BTreeSet::from([path_text(&workspace)]);
             for root in &params.configuration.workspace_roots {
-                authorized_roots.insert(path_text(&self.authorized_workspace(root).await?));
+                authorized_roots.insert(path_text(&self.authorized_workspace(&hub, root).await?));
             }
             // Nothing is probed, created or launched once the open has been
             // told to stop: the grace in `bounded` is for work already
@@ -847,6 +859,7 @@ impl Supervisor {
     pub(crate) async fn list_sessions(
         &self,
         params: ListSessionsParams,
+        hub: &HubSession,
         cancel: &CancellationToken,
     ) -> Result<ListSessionsResult, RemoteError> {
         let live = self.live_for_target(params.session_id.as_deref(), params.target_id)?;
@@ -855,7 +868,7 @@ impl Supervisor {
         let target = params.target_id;
         let work = async {
             let workspace = match &params.workspace_path {
-                Some(path) => Some(self.authorized_workspace(path).await?),
+                Some(path) => Some(self.authorized_workspace(hub, path).await?),
                 None => None,
             };
             let executable = match &live {
@@ -957,7 +970,11 @@ impl Supervisor {
 
     /// Canonicalises `input`, requires it to have been given canonically, and
     /// asks the workspace authority. Mirrors `#canonicalAuthorizedWorkspace`.
-    async fn authorized_workspace(&self, input: &str) -> Result<PathBuf, RemoteError> {
+    async fn authorized_workspace(
+        &self,
+        hub: &HubSession,
+        input: &str,
+    ) -> Result<PathBuf, RemoteError> {
         let requested = PathBuf::from(input);
         let canonical = crate::blocking::run_blocking(move || canonical_directory(&requested))
         .await
@@ -972,7 +989,7 @@ impl Supervisor {
                 path_text(&canonical)
             )));
         }
-        if !self.ports.workspaces.authorize(&canonical).await {
+        if !self.ports.workspaces.authorize(hub, &canonical).await {
             return Err(argument(format!(
                 "External-agent workspace {input:?} is not authorized for this session; expected a workspace the runtime owner authorized."
             )));
