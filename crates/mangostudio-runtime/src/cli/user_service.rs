@@ -1151,6 +1151,7 @@ mod tests {
                 "loginctl enable-linger",
             ]
         );
+        let lifecycle_start = fake.0.lock().unwrap().len();
 
         let status = operate(ServiceAction::Status, None, false, &home, &home, &fake).unwrap();
         for field in [
@@ -1177,7 +1178,7 @@ mod tests {
             credentials
         );
         assert_eq!(
-            &fake.0.lock().unwrap()[4..],
+            &fake.0.lock().unwrap()[lifecycle_start..],
             [
                 "systemctl --user show-environment",
                 "systemctl --user is-enabled mangostudio-runtime.service",

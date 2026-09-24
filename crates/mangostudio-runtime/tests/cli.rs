@@ -73,7 +73,7 @@ fn doctor_reports_a_stale_slot_pointer_and_reinstall_recovers_without_reconfigur
 
     let slot = home.join("runtime").join("host");
     let config = slot.join("runtime.json");
-    let configured: serde_json::Value =
+    let mut configured: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
     let current = slot.join("current");
     symlink("9.9.9", &current).unwrap();
@@ -108,11 +108,13 @@ fn doctor_reports_a_stale_slot_pointer_and_reinstall_recovers_without_reconfigur
         std::fs::read_link(&current).unwrap(),
         std::path::Path::new(env!("CARGO_PKG_VERSION"))
     );
-    let after: serde_json::Value =
+    let mut after: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
-    for field in ["setup", "profile", "allow"] {
-        assert_eq!(after[field], configured[field], "reinstall changed {field}");
+    for field in ["version", "binaryPath", "digest"] {
+        configured.as_object_mut().unwrap().remove(field);
+        after.as_object_mut().unwrap().remove(field);
     }
+    assert_eq!(after, configured, "reinstall changed setup or consent");
 
     let recovered = Command::new(binary_path())
         .args(["doctor", "--json"])
