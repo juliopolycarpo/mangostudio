@@ -36,6 +36,7 @@ use serde_json::{Map, Value, json};
 
 use crate::ports::audit::{Audit, AuditEntry, Outcome, lock};
 use crate::ports::wall_clock::{WallClock, format_iso8601_millis};
+use crate::runtime_home::atomic::{Rename, RenameRetryPolicy, StdRename, rename_with_retry};
 
 /// Written before any hub has identified itself — mirrors `audit-log.ts`'s
 /// own local `UNIDENTIFIED_HUB`, not exported from the shared contract
@@ -81,6 +82,7 @@ struct State {
     hub_label: String,
     buffered: VecDeque<String>,
     dropped: usize,
+    error_maybe_present: bool,
 }
 
 /// Records every call's outcome as one JSON line per call in `audit.log`,
@@ -113,13 +115,14 @@ struct State {
 /// assert!(contents.contains("\"method\":\"runtime.health\""));
 /// # }
 /// ```
+#[derive(Clone)]
 pub struct FileAudit {
     path: PathBuf,
     error_path: PathBuf,
     max_bytes: u64,
     max_files: u32,
     wall_clock: Arc<dyn WallClock>,
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
     /// Serialises `append_line_locked`'s read-size, maybe-rotate, then-write
     /// sequence, kept separate from `state`: two `record` calls dispatched
     /// as concurrent tasks (mango_protocol's `JoinSet`, not TypeScript's
@@ -130,7 +133,11 @@ pub struct FileAudit {
     /// for just this sequence means a hub-label update (`set_hub`) never
     /// has to wait on that I/O, which sharing `state`'s own lock would
     /// force.
-    write_lock: Mutex<()>,
+    write_lock: Arc<Mutex<()>>,
+    /// Only one drain from this sink may occupy the process-wide blocking
+    /// pool. The guard moves into the blocking closure, so cancellation of
+    /// a waiter cannot free the gate while that drain is still running.
+    drain_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl FileAudit {
@@ -147,12 +154,16 @@ impl FileAudit {
             max_bytes: DEFAULT_MAX_BYTES,
             max_files: DEFAULT_MAX_FILES,
             wall_clock,
-            state: Mutex::new(State {
+            state: Arc::new(Mutex::new(State {
                 hub_label: UNIDENTIFIED_HUB.to_string(),
                 buffered: VecDeque::new(),
                 dropped: 0,
-            }),
-            write_lock: Mutex::new(()),
+                // A previous process may have left a sidecar. The first
+                // successful drain checks once without doing I/O in `new`.
+                error_maybe_present: true,
+            })),
+            write_lock: Arc::new(Mutex::new(())),
+            drain_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -177,8 +188,32 @@ impl FileAudit {
     /// `audit-log.ts`'s own drain-on-close loop; a line that still cannot
     /// be written is put back (in order) and reported via the sidecar
     /// error file rather than lost.
-    pub fn close(&self) {
-        self.drain_buffer();
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::audit::FileAudit;
+    /// use mangostudio_runtime::ports::wall_clock::SystemWallClock;
+    /// use std::sync::Arc;
+    ///
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// let audit = FileAudit::new(std::env::temp_dir().join("mango-audit-close.log"), Arc::new(SystemWallClock));
+    /// audit.close().await;
+    /// # }
+    /// ```
+    pub async fn close(&self) {
+        self.drain().await;
+    }
+
+    async fn drain(&self) {
+        let gate = Arc::clone(&self.drain_gate).lock_owned().await;
+        let writer = self.clone();
+        crate::blocking::run_blocking(move || {
+            let _gate = gate;
+            writer.drain_buffer();
+        })
+        .await;
     }
 
     fn generation_path(&self, index: u32) -> PathBuf {
@@ -188,16 +223,21 @@ impl FileAudit {
     }
 
     fn rotate(&self) -> std::io::Result<()> {
+        self.rotate_with(&StdRename)
+    }
+
+    fn rotate_with(&self, rename: &impl Rename) -> std::io::Result<()> {
+        let retry = RenameRetryPolicy::default();
         let oldest = self.generation_path(self.max_files);
         let _ = std::fs::remove_file(&oldest);
         for index in (1..self.max_files).rev() {
             let from = self.generation_path(index);
             if from.exists() {
-                std::fs::rename(&from, self.generation_path(index + 1))?;
+                rename_with_retry(rename, &from, &self.generation_path(index + 1), &retry)?;
             }
         }
         if self.path.exists() {
-            std::fs::rename(&self.path, self.generation_path(1))?;
+            rename_with_retry(rename, &self.path, &self.generation_path(1), &retry)?;
         }
         Ok(())
     }
@@ -236,11 +276,22 @@ impl FileAudit {
     }
 
     fn set_error(&self, message: &str) {
+        // Even a failed write may have created a partial sidecar.
+        lock(&self.state).error_maybe_present = true;
         let _ = std::fs::write(&self.error_path, format!("{message}\n"));
     }
 
     fn clear_error(&self) {
-        let _ = std::fs::remove_file(&self.error_path);
+        if !lock(&self.state).error_maybe_present {
+            return;
+        }
+        match std::fs::remove_file(&self.error_path) {
+            Ok(()) => lock(&self.state).error_maybe_present = false,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                lock(&self.state).error_maybe_present = false;
+            }
+            Err(_) => {}
+        }
     }
 
     /// Buffers `line` (dropping the oldest buffered line past
@@ -251,14 +302,18 @@ impl FileAudit {
     /// shape here — let a brand-new line land ahead of an older one still
     /// waiting its turn, reordering the file `drain_buffer`'s own doc
     /// promises never happens.
-    fn write_or_buffer(&self, line: String) {
+    fn enqueue(&self, line: String) {
         let mut state = lock(&self.state);
         state.buffered.push_back(line);
         if state.buffered.len() > MAX_BUFFERED_RECORDS {
             state.buffered.pop_front();
             state.dropped += 1;
         }
-        drop(state);
+    }
+
+    #[cfg(test)]
+    fn write_or_buffer(&self, line: String) {
+        self.enqueue(line);
         self.drain_buffer();
     }
 
@@ -343,13 +398,17 @@ impl Audit for FileAudit {
         Box::pin(async move {
             let hub_label = lock(&self.state).hub_label.clone();
             let line = self.build_line(&entry, &hub_label);
-            self.write_or_buffer(line);
+            self.enqueue(line);
+            self.drain().await;
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -358,7 +417,21 @@ mod tests {
     use super::{FileAudit, HubIdentity};
     use crate::ports::audit::{Audit, AuditEntry, Outcome, lock};
     use crate::ports::wall_clock::FixedWallClock;
+    use crate::runtime_home::atomic::Rename;
     use crate::test_support::scratch_dir;
+
+    struct SharingViolationOnce {
+        attempts: AtomicUsize,
+    }
+
+    impl Rename for SharingViolationOnce {
+        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(io::Error::from_raw_os_error(32));
+            }
+            std::fs::rename(from, to)
+        }
+    }
 
     fn entry(method: &str, outcome: Outcome) -> AuditEntry {
         AuditEntry {
@@ -376,6 +449,78 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_blocked_audit_write_does_not_block_the_executor() {
+        let dir = scratch_dir("off-executor");
+        let audit = Arc::new(FileAudit::new(
+            dir.join("audit.log"),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        ));
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let held = {
+            let audit = Arc::clone(&audit);
+            std::thread::spawn(move || {
+                let _write_guard = lock(&audit.write_lock);
+                ready_tx.send(()).unwrap();
+                std::thread::sleep(Duration::from_millis(250));
+            })
+        };
+        ready_rx.recv().unwrap();
+        let pending = tokio::spawn({
+            let audit = Arc::clone(&audit);
+            async move { audit.record(entry("runtime.health", Outcome::Ok)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !pending.is_finished(),
+            "the executor must advance before the blocked audit write finishes"
+        );
+        pending.await.unwrap();
+        held.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn close_flushes_a_record_whose_waiter_was_cancelled() {
+        let dir = scratch_dir("cancelled-waiter");
+        let path = dir.join("audit.log");
+        let audit = Arc::new(FileAudit::new(
+            path.clone(),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        ));
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let held = {
+            let audit = Arc::clone(&audit);
+            std::thread::spawn(move || {
+                let _write_guard = lock(&audit.write_lock);
+                ready_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+        };
+        ready_rx.recv().unwrap();
+        let pending = tokio::spawn({
+            let audit = Arc::clone(&audit);
+            async move { audit.record(entry("CANCELLED_WAITER", Outcome::Ok)).await }
+        });
+        for _ in 0..100 {
+            if !lock(&audit.state).buffered.is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(lock(&audit.state).buffered.len(), 1);
+        pending.abort();
+        let _ = pending.await;
+        release_tx.send(()).unwrap();
+        held.join().unwrap();
+
+        audit.close().await;
+
+        let lines = read_lines(&path);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["method"], "CANCELLED_WAITER");
     }
 
     #[tokio::test]
@@ -501,6 +646,29 @@ mod tests {
             rotated.len(),
             1,
             "the rotated-out file keeps the older line"
+        );
+    }
+
+    #[test]
+    fn rotation_retries_a_windows_sharing_violation() {
+        let dir = scratch_dir("rotate-sharing-violation");
+        let path = dir.join("audit.log");
+        std::fs::write(&path, "old line\n").unwrap();
+        let audit = FileAudit::new(
+            path.clone(),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+        let rename = SharingViolationOnce {
+            attempts: AtomicUsize::new(0),
+        };
+
+        audit.rotate_with(&rename).unwrap();
+
+        assert_eq!(rename.attempts.load(Ordering::SeqCst), 2);
+        assert!(!path.exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("audit.log.1")).unwrap(),
+            "old line\n"
         );
     }
 
@@ -680,6 +848,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_successful_write_clears_a_sidecar_left_by_an_earlier_process() {
+        let dir = scratch_dir("stale-error");
+        let error_path = dir.join("audit.log.error");
+        std::fs::write(&error_path, "old failure\n").unwrap();
+        let audit = FileAudit::new(
+            dir.join("audit.log"),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+
+        audit.record(entry("runtime.health", Outcome::Ok)).await;
+
+        assert!(!error_path.exists());
+    }
+
+    #[tokio::test]
     async fn close_drains_a_buffered_line_once_the_destination_becomes_writable() {
         let dir = scratch_dir("drain-on-close");
         let path = dir.join("audit.log");
@@ -705,7 +888,7 @@ mod tests {
         );
 
         std::fs::remove_dir(&path).unwrap();
-        audit.close();
+        audit.close().await;
 
         let lines = read_lines(&path);
         assert_eq!(lines.len(), 1, "the buffered line must have been drained");
@@ -738,7 +921,7 @@ mod tests {
         }
 
         std::fs::remove_dir(&path).unwrap();
-        audit.close();
+        audit.close().await;
         let lines = read_lines(&path);
         assert_eq!(lines.len(), 1_024, "the buffer must never exceed its cap");
         assert_eq!(

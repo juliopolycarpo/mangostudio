@@ -19,6 +19,9 @@ use crate::install::log::InstallLog;
 use crate::install::runs::{InstallRuns, StopReason};
 use crate::ports::audit::{Audit, AuditEntry, Outcome};
 use crate::ports::authorization::consent_denial;
+use crate::ports::exclusivity::{
+    CallExclusivity, EffectClaim, NoExclusivity, NotUpdating, UpdateExclusivityTracker,
+};
 use crate::ports::wall_clock::FixedWallClock;
 use crate::probing::detection::path_env::PathEnv;
 use crate::subprocess::{
@@ -435,11 +438,15 @@ fn command(run_id: &str) -> Value {
     })
 }
 
+fn effect_claim() -> EffectClaim {
+    EffectClaim::new(Arc::new(NoExclusivity), "test-install")
+}
+
 impl Harness {
     async fn run(&self, params: Value) -> Result<Value, RemoteError> {
         let events = Arc::clone(&self.events) as Arc<dyn InstallEvents>;
         self.service
-            .run(params, events, CancellationToken::new())
+            .run(params, events, CancellationToken::new(), effect_claim())
             .await
     }
 
@@ -451,7 +458,7 @@ impl Harness {
     ) -> tokio::task::JoinHandle<Result<Value, RemoteError>> {
         let service = Arc::clone(&self.service);
         let events = Arc::clone(&self.events) as Arc<dyn InstallEvents>;
-        tokio::spawn(async move { service.run(params, events, cancel).await })
+        tokio::spawn(async move { service.run(params, events, cancel, effect_claim()).await })
     }
 
     fn cancel(&self, run_id: &str) -> Value {
@@ -1515,7 +1522,7 @@ mod real {
 
     use super::{
         EmptyToolchainFs, RecordingAudit, RecordingDiagnostics, RecordingEvents, SwitchableConsent,
-        status, within,
+        effect_claim, status, within,
     };
     use crate::install::log::FileInstallLog;
     use crate::install::runs::InstallRuns;
@@ -1608,6 +1615,7 @@ mod real {
                 params("real-1", &program, &log, 10_000),
                 Arc::clone(&events) as Arc<dyn InstallEvents>,
                 CancellationToken::new(),
+                effect_claim(),
             )
             .await
             .unwrap();
@@ -1656,6 +1664,7 @@ mod real {
                 params("real-timeout", &program, &dir.join("install.log"), 700),
                 Arc::clone(&events) as Arc<dyn InstallEvents>,
                 CancellationToken::new(),
+                effect_claim(),
             )
             .await
             .unwrap();
@@ -1694,7 +1703,11 @@ mod real {
             let service = Arc::clone(&service);
             let params = params("real-cancel", &program, &dir.join("install.log"), 10_000);
             let events = Arc::clone(&events) as Arc<dyn InstallEvents>;
-            async move { service.run(params, events, CancellationToken::new()).await }
+            async move {
+                service
+                    .run(params, events, CancellationToken::new(), effect_claim())
+                    .await
+            }
         });
         within("the installer to start", async {
             while !events.has_line("stdout", "waiting") {
@@ -1728,7 +1741,7 @@ mod windows_powershell {
     use serde_json::json;
     use tokio_util::sync::CancellationToken;
 
-    use super::{RecordingAudit, RecordingEvents, SwitchableConsent, status};
+    use super::{RecordingAudit, RecordingEvents, SwitchableConsent, effect_claim, status};
     use crate::commands::toolchain::NativeToolchainFs;
     use crate::install::log::FileInstallLog;
     use crate::install::runs::InstallRuns;
@@ -1770,6 +1783,7 @@ mod windows_powershell {
                 }),
                 Arc::clone(&events) as Arc<dyn InstallEvents>,
                 CancellationToken::new(),
+                effect_claim(),
             )
             .await
             .unwrap();
@@ -1837,10 +1851,12 @@ async fn an_install_run_aborted_at_teardown_is_audited_once_by_its_owner() {
     }
 
     let harness = harness(vec![Script::Running]);
+    let exclusivity = Arc::new(UpdateExclusivityTracker::new(Arc::new(NotUpdating)));
     let registry = super::register_service(
-        Registry::with_ports(
+        Registry::with_ports_and_exclusivity(
             Arc::clone(&harness.audit) as Arc<dyn Audit>,
             Arc::new(SystemClock),
+            exclusivity.clone(),
         ),
         &harness.service,
     );
@@ -1871,8 +1887,16 @@ async fn an_install_run_aborted_at_teardown_is_audited_once_by_its_owner() {
         closure.unfinished_handlers
     );
     request.abort();
+    let refused = exclusivity
+        .begin("runtime.update.begin", "after-abort")
+        .expect_err("the active installer still owns its exclusivity claim");
+    assert_eq!(refused.details.unwrap()["reason"], "call_in_flight");
     harness.spawner.settle(exited(0));
     within("every run to settle", harness.runs.settled()).await;
+    exclusivity
+        .begin("runtime.update.begin", "after-settlement")
+        .expect("the installer released its claim after the effect settled");
+    exclusivity.end("after-settlement");
 
     let received: Vec<(String, Outcome, Option<String>)> = harness
         .audit

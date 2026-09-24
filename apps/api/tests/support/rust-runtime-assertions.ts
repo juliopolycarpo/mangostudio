@@ -118,7 +118,7 @@ export function assertRustRuntimeFeatureCeiling(
     fsRead: expected.fsRead,
     fsWrite: expected.fsWrite,
     shell,
-    update: false,
+    update: process.platform !== 'win32' && manifest.allow?.update === true,
     externalAgents: false,
     toolchain: true,
   });

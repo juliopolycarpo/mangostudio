@@ -1,9 +1,9 @@
 //! Proves the real runtime binary gives every stdio MCP server its graceful stop when the runtime
 //! itself is shutting down, and still leaves before the Hub's SIGKILL.
 //!
-//! The Hub stops a stdio runtime by ending its stdin, sending SIGTERM two seconds later, and
-//! SIGKILL two seconds after that (`TERMINATE_GRACE_MS` + `KILL_GRACE_MS` in
-//! `apps/api/src/services/runtime-client/spawn-runtime-child.ts`). A server killed by the
+//! This test uses a shortened launcher budget: it ends stdin, sends SIGTERM two seconds later,
+//! and SIGKILL two seconds after that. Production gives a connected runtime a 27-second
+//! stdin grace so an active installer can finish. A server killed by the
 //! runtime's parent-death lease never records `clean-exit`; one released gracefully does.
 
 #![cfg(unix)]

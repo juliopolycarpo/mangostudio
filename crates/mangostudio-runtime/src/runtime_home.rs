@@ -895,14 +895,14 @@ pub fn write_runtime_slot_credentials(
 pub fn bootstrap_serve_token(
     slot: RuntimeSlot,
     mango_home: &Path,
-) -> Result<(String, bool), WriteError> {
+) -> Result<(String, WriteOutcome, bool), WriteError> {
     let token = generate_serve_token();
-    let (_, restricted) = write_runtime_slot_credentials(
+    let (outcome, restricted) = write_runtime_slot_credentials(
         slot,
         mango_home,
         &[("serveToken", Some(Value::String(token.clone())))],
     )?;
-    Ok((token, restricted))
+    Ok((token, outcome, restricted))
 }
 
 /// 32 CSPRNG bytes, base64url (no padding) encoded.
@@ -1546,7 +1546,7 @@ mod tests {
     #[test]
     fn bootstrap_serve_token_generates_32_random_bytes_of_base64url_with_no_padding() {
         let home = scratch_home("bootstrap-serve-token");
-        let (token, _restricted) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
+        let (token, _, _restricted) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
 
         // 32 bytes of base64url, unpadded: ceil(32 * 4 / 3) = 43 characters.
         assert_eq!(token.len(), 43, "{token}");
@@ -1564,15 +1564,15 @@ mod tests {
     #[test]
     fn bootstrap_serve_token_never_repeats_across_calls() {
         let home = scratch_home("bootstrap-serve-token-unique");
-        let (first, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
-        let (second, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
+        let (first, _, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
+        let (second, _, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
         assert_ne!(first, second);
     }
 
     #[test]
     fn bootstrap_serve_token_persists_through_the_credentials_writer() {
         let home = scratch_home("bootstrap-serve-token-persist");
-        let (token, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
+        let (token, _, _) = bootstrap_serve_token(RuntimeSlot::Remote, &home).unwrap();
 
         let stored = read_runtime_slot_credentials(RuntimeSlot::Remote, &home)
             .stored

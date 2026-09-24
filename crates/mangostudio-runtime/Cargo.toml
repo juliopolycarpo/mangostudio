@@ -43,6 +43,9 @@ bytes = "1"
 # 4.0.3 supports this workspace's Rust 1.97 MSRV on Linux, macOS, and Windows.
 cap-fs-ext = { version = "4.0.3", default-features = false, features = ["std"] }
 cap-std = { version = "4.0.3", default-features = false }
+# CLI audit --since accepts RFC 3339 instants and relative durations. Chrono is
+# already present at this version in the workspace lockfile.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 # The CSPRNG behind `generate_serve_token` (see the `base64` comment above).
 # Already in the workspace graph at this exact version (ring 0.17's RNG shim

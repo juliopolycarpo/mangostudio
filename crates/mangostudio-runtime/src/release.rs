@@ -10,10 +10,10 @@
 //! # The shutdown budget
 //!
 //! The Hub stops a stdio runtime by ending its stdin, sending SIGTERM [`HUB_TERMINATE_GRACE`]
-//! later and SIGKILL [`HUB_KILL_GRACE`] after that (`TERMINATE_GRACE_MS` and `KILL_GRACE_MS` in
-//! `apps/api/src/services/runtime-client/spawn-runtime-child.ts`). Whether the Hub should widen
-//! that window while work is running is an open decision owned by the Hub, so the runtime fits
-//! inside it. Measured from the instant shutdown begins (`T0`, end of input or the first signal):
+//! later and SIGKILL [`HUB_KILL_GRACE`] after that (`ACTIVE_TERMINATE_GRACE_MS` and `KILL_GRACE_MS` in
+//! `apps/api/src/services/runtime-client/spawn-runtime-child.ts`). The longer grace lets an
+//! active installer settle while this runtime still releases child processes promptly. Measured
+//! from the instant shutdown begins (`T0`, end of input or the first signal):
 //!
 //! | phase                                   | ends by      |
 //! |-----------------------------------------|--------------|
@@ -22,11 +22,12 @@
 //! | forced kill and empty-tree proof        | `T0 + 2.75 s` ([`PROOF_CUTOFF`]) |
 //! | every owner reported released           | `T0 + 3.0 s` ([`SHUTDOWN_BUDGET`]) |
 //! | blocking-task grace in `shut_down`      | `T0 + 3.5 s` ([`EXIT_DEADLINE`]) |
-//! | Hub SIGKILL                             | `T0 + 4.0 s` |
+//! | Hub SIGKILL                             | `T0 + 29.0 s` |
+//! | Hub stop call completes                 | `T0 + 30.0 s` |
 //!
 //! Each MCP server's ordinary graces (two seconds each, matching the SDK's close) are compressed
 //! to these cut-offs only once shutdown has begun, so a single `mcp.disconnect` still gets the
-//! full sequence. The half second left before SIGKILL is the margin for process exit itself.
+//! full sequence. The shutdown budget leaves ample margin before the Hub's forced stop.
 //!
 //! The budget is best effort before the Hub's SIGKILL, not a guarantee of an orderly stop: in
 //! the ordinary case, a stubborn tree included, the forced kill's proof completes well inside it,
@@ -34,7 +35,7 @@
 //! guardian's parent-death lease or the Windows kill-on-close Job is the backstop that ends it.
 //!
 //! On Windows the Hub has no signals to send: both escalation steps become process termination
-//! at `T0 + 2 s`. The runtime cannot interrupt a Job-contained server gracefully either, so a
+//! at `T0 + 27 s`. The runtime cannot interrupt a Job-contained server gracefully either, so a
 //! server still running at [`EOF_CUTOFF`] is killed at once and the SIGTERM phase never runs;
 //! the end-of-input grace and the forced kill both finish before the Hub's termination, and the
 //! kill-on-close Job ends anything left if the Hub's termination lands first.
@@ -46,7 +47,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 /// The Hub's grace between end of stdin and SIGTERM.
-pub(crate) const HUB_TERMINATE_GRACE: Duration = Duration::from_secs(2);
+pub(crate) const HUB_TERMINATE_GRACE: Duration = Duration::from_secs(27);
 /// The Hub's further grace between SIGTERM and SIGKILL.
 pub(crate) const HUB_KILL_GRACE: Duration = Duration::from_secs(2);
 /// When, after shutdown begins, a server still running after end of input is sent SIGTERM.

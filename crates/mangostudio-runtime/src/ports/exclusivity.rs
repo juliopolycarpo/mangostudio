@@ -17,20 +17,16 @@
 //!   itself, before it returns — the handler this claim was for is never
 //!   going to run, so nothing downstream will ever release it.
 //! - Authorized: left claimed when the guard returns `Ok`, and released by
-//!   `Registry::implement`'s own wrapper once the handler (successful,
-//!   erroring, or panicking) has settled — matching TypeScript's `finally`,
-//!   which runs after the handler exactly as often as this does.
+//!   `Registry::implement`'s own wrapper once the handler settles. An owned
+//!   blocking effect transfers the claim and releases it only after machine
+//!   work settles, even when the request future is dropped.
 //!
 //! Both sides key a claim on [`mango_protocol::session::CallContext::id`]
 //! rather than a fresh token the way TypeScript's `Symbol()` does, because a
 //! [`crate::registry::Registry`] is consumed whole by one
-//! [`crate::serve::serve`] call and does not outlive it or get shared across
-//! more than the one [`mango_protocol::session::Session`] that call served —
-//! unlike TypeScript's `gateHandlers`, whose returned handlers can be
-//! registered on more than one session at once, which is exactly why it
-//! needs a token no two sessions could ever produce the same value for. A
-//! request id is unique within one session, which is the only scope a claim
-//! here is ever asked to survive.
+//! [`crate::serve::serve`] call. Production's slot-shared tracker prefixes
+//! each request id with its connection owner before forwarding a claim, so
+//! identical request ids on two sessions cannot collide.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -49,14 +45,41 @@ pub const UPDATE_METHOD_PREFIX: &str = "runtime.update.";
 
 /// Whether an update is under way outside the lifetime of any single
 /// `runtime.update.*` call — the gap between `runtime.update.begin` and
-/// `runtime.update.commit` in TypeScript, which this crate does not
-/// implement yet. [`NotUpdating`] is the only implementation until it does.
+/// `runtime.update.commit`. `crate::update::UpdateService` implements this
+/// for production; [`NotUpdating`] remains useful for isolated tests.
 pub trait UpdateActivity: Send + Sync + 'static {
     /// Whether an update is currently in progress.
     fn is_active(&self) -> bool;
 }
 
-/// No update lifecycle exists yet in this crate, so none is ever active.
+/// Effects such as bounded blocking I/O that may outlive the request future
+/// which started them. An update cannot begin until they settle.
+pub trait OrdinaryEffectActivity: Send + Sync + 'static {
+    /// Whether any ordinary effect still owns machine work.
+    fn is_active(&self) -> bool;
+}
+
+/// The default for a tracker used outside production effect tracking.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoOrdinaryEffects;
+
+impl OrdinaryEffectActivity for NoOrdinaryEffects {
+    fn is_active(&self) -> bool {
+        false
+    }
+}
+
+/// Reads the process-wide blocking pool's effect count.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProcessBlockingEffects;
+
+impl OrdinaryEffectActivity for ProcessBlockingEffects {
+    fn is_active(&self) -> bool {
+        crate::blocking::active_count() != 0
+    }
+}
+
+/// Reports no active update for isolated trackers and examples.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NotUpdating;
 
@@ -89,6 +112,42 @@ pub trait CallExclusivity: Send + Sync + 'static {
     /// mirroring `Set::delete`'s own no-op-on-absence in `consent-gate.ts`'s
     /// `finally`.
     fn end(&self, call_id: &str);
+
+    /// Retains a claim after its request future is dropped because an owned
+    /// effect will continue. The owner must later call `end_effect`.
+    fn transfer_to_effect(&self, _call_id: &str) {}
+
+    /// Releases a claim transferred to an effect, after that effect settles.
+    fn end_effect(&self, call_id: &str) {
+        self.end(call_id);
+    }
+}
+
+/// Transfers a request claim to an effect that may outlive its handler.
+///
+/// ```ignore
+/// let claim = EffectClaim::new(exclusivity, context.id());
+/// tokio::spawn(async move { let _claim = claim; finish_effect().await });
+/// ```
+pub(crate) struct EffectClaim {
+    exclusivity: Arc<dyn CallExclusivity>,
+    call_id: String,
+}
+
+impl EffectClaim {
+    pub(crate) fn new(exclusivity: Arc<dyn CallExclusivity>, call_id: &str) -> Self {
+        exclusivity.transfer_to_effect(call_id);
+        Self {
+            exclusivity,
+            call_id: call_id.to_owned(),
+        }
+    }
+}
+
+impl Drop for EffectClaim {
+    fn drop(&mut self) {
+        self.exclusivity.end_effect(&self.call_id);
+    }
 }
 
 /// Enforces nothing: every call is claimed, no call is ever refused. The
@@ -133,6 +192,8 @@ struct Claims {
     total: HashSet<String>,
     /// The subset of `total` that is an update call.
     updates: HashSet<String>,
+    /// Claims whose request has handed cleanup to the actual effect.
+    effects: HashSet<String>,
 }
 
 /// The real [`CallExclusivity`]: an update call refuses while anything else
@@ -159,6 +220,7 @@ struct Claims {
 pub struct UpdateExclusivityTracker {
     claims: Mutex<Claims>,
     update_active: Arc<dyn UpdateActivity>,
+    ordinary_effects: Arc<dyn OrdinaryEffectActivity>,
 }
 
 impl UpdateExclusivityTracker {
@@ -166,9 +228,20 @@ impl UpdateExclusivityTracker {
     /// for whether an update lifecycle outside any single call is under way.
     #[must_use]
     pub fn new(update_active: Arc<dyn UpdateActivity>) -> Self {
+        Self::with_effects(update_active, Arc::new(NoOrdinaryEffects))
+    }
+
+    /// Also refuses an update while an ordinary effect has outlived its
+    /// request, such as an OS write still running on the blocking pool.
+    #[must_use]
+    pub fn with_effects(
+        update_active: Arc<dyn UpdateActivity>,
+        ordinary_effects: Arc<dyn OrdinaryEffectActivity>,
+    ) -> Self {
         Self {
             claims: Mutex::new(Claims::default()),
             update_active,
+            ordinary_effects,
         }
     }
 }
@@ -183,7 +256,7 @@ impl CallExclusivity for UpdateExclusivityTracker {
         // call still leaves no trace in either set for `end` to ever undo,
         // since the early returns happen before either `insert`.
         let mut claims = lock(&self.claims);
-        if is_update && !claims.total.is_empty() {
+        if is_update && (!claims.total.is_empty() || self.ordinary_effects.is_active()) {
             return Err(exclusivity_refusal(
                 "Runtime update refused while another call is in flight.",
                 "call_in_flight",
@@ -204,6 +277,23 @@ impl CallExclusivity for UpdateExclusivityTracker {
 
     fn end(&self, call_id: &str) {
         let mut claims = lock(&self.claims);
+        if claims.effects.contains(call_id) {
+            return;
+        }
+        claims.total.remove(call_id);
+        claims.updates.remove(call_id);
+    }
+
+    fn transfer_to_effect(&self, call_id: &str) {
+        let mut claims = lock(&self.claims);
+        if claims.total.contains(call_id) {
+            claims.effects.insert(call_id.to_owned());
+        }
+    }
+
+    fn end_effect(&self, call_id: &str) {
+        let mut claims = lock(&self.claims);
+        claims.effects.remove(call_id);
         claims.total.remove(call_id);
         claims.updates.remove(call_id);
     }
@@ -215,7 +305,8 @@ mod tests {
     use std::thread;
 
     use super::{
-        CallExclusivity, NoExclusivity, NotUpdating, UpdateActivity, UpdateExclusivityTracker,
+        CallExclusivity, EffectClaim, NoExclusivity, NotUpdating, UpdateActivity,
+        UpdateExclusivityTracker,
     };
 
     /// Runs `race` under a two-thread [`Barrier`] many times over, so a
@@ -397,6 +488,19 @@ mod tests {
         let details = error.details.unwrap();
         assert_eq!(details["kind"], "runtime_update_refused");
         assert_eq!(details["reason"], "call_in_flight");
+    }
+
+    #[test]
+    fn an_effect_keeps_its_claim_after_the_request_is_released() {
+        let tracker = Arc::new(UpdateExclusivityTracker::new(Arc::new(NotUpdating)));
+        tracker.begin("shell.run", "1").unwrap();
+        let effect = EffectClaim::new(tracker.clone(), "1");
+        tracker.end("1");
+        let error = tracker.begin("runtime.update.begin", "2").unwrap_err();
+        assert_eq!(error.details.unwrap()["reason"], "call_in_flight");
+        drop(effect);
+        tracker.begin("runtime.update.begin", "2").unwrap();
+        tracker.end("2");
     }
 
     #[test]

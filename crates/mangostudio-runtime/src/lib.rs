@@ -38,12 +38,9 @@
 //!   adapter that `transport::build_host` (crate-private) wires into every
 //!   real connection: [`consent`]'s [`consent::authorization::ConsentAuthorization`]
 //!   for `Authorization`, [`audit::FileAudit`] for `Audit`, and
-//!   `ports::clock::SystemClock` for `Clock`. `CallExclusivity` is the
-//!   exception: `build_host` calls `Registry::with_ports`, which fixes it
-//!   at `ports::exclusivity::NoExclusivity`, so `ports::exclusivity::UpdateExclusivityTracker`
-//!   exists and is tested but is not installed anywhere production runs —
-//!   see that function's own doc comment for why, and what has to change
-//!   before that stops being true.
+//!   `ports::clock::SystemClock` for `Clock`. `CallExclusivity` uses a
+//!   slot-shared [`ports::exclusivity::UpdateExclusivityTracker`] so update
+//!   calls cannot overlap ordinary machine effects across connections.
 //! - [`consent`] — the real [`ports::authorization::Authorization`]: what
 //!   `runtime.json` grants, re-read on every call.
 //! - [`manifest`] — builds the `hello.capabilities` manifest this runtime
@@ -135,12 +132,16 @@ pub mod result_check;
 pub mod runtime_home;
 pub mod serve;
 pub mod setup;
+pub mod slot_publish;
+mod slot_update_lock;
 pub mod subprocess;
 pub mod supervisor;
 pub mod terminal;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod transport;
+mod update;
+mod update_transfer;
 pub mod workspace;
 pub mod workspace_methods;
 pub mod workspace_path;

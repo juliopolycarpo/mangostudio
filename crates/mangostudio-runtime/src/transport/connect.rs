@@ -271,6 +271,7 @@ async fn run_one_connection(
         options,
         host.registry,
         host.authorization,
+        host.update,
         config.slot.as_str(),
     );
 

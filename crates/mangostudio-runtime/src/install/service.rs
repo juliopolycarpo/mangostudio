@@ -24,6 +24,7 @@ use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentRead, ConsentReader};
 use crate::consent::source::ConsentSource;
 use crate::ports::audit::{Audit, AuditEntry, Outcome};
 use crate::ports::authorization::consent_denial;
+use crate::ports::exclusivity::EffectClaim;
 use crate::ports::wall_clock::{SystemWallClock, WallClock};
 use crate::probing::detection::path_env::PathEnv;
 use crate::registry::Registry;
@@ -140,8 +141,10 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource, mango_home: &
 /// Registers `install.run` and `install.cancel` over an already-built [`Service`], so a test
 /// can drive the real registry wiring against fake ports.
 fn register_service(mut registry: Registry, service: &Arc<Service>) -> Registry {
+    let exclusivity = registry.exclusivity();
     for method in INSTALL_METHODS {
         let service = Arc::clone(service);
+        let exclusivity = Arc::clone(&exclusivity);
         let register = match abandon_policy(method) {
             AbandonAudit::OwnedByHandler => Registry::implement_owning_abandon_audit,
             AbandonAudit::Record => Registry::implement,
@@ -151,13 +154,17 @@ fn register_service(mut registry: Registry, service: &Arc<Service>) -> Registry 
             method,
             move |params: Value, context: CallContext| {
                 let service = Arc::clone(&service);
+                let exclusivity = Arc::clone(&exclusivity);
                 async move {
                     if method == "install.cancel" {
                         return service.cancel(params);
                     }
                     let events: Arc<dyn InstallEvents> =
                         Arc::new(SessionEvents(context.session().clone()));
-                    service.run(params, events, context.cancel().clone()).await
+                    let claim = EffectClaim::new(exclusivity, context.id());
+                    service
+                        .run(params, events, context.cancel().clone(), claim)
+                        .await
                 }
             },
         );
@@ -271,6 +278,7 @@ impl Service {
         params: Value,
         events: Arc<dyn InstallEvents>,
         cancel: CancellationToken,
+        claim: EffectClaim,
     ) -> Result<Value, RemoteError> {
         let params: RunParams = serde_json::from_value(params).map_err(|_| {
             argument(
@@ -293,7 +301,14 @@ impl Service {
         let run_id = plan.run_id.clone();
         let started = epoch_ms(self.ports.clock.now());
         let (delivered, mut received) = oneshot::channel();
-        tokio::spawn(Arc::clone(self).own(plan, lease, Arc::clone(&events), started, delivered));
+        tokio::spawn(Arc::clone(self).own(
+            plan,
+            lease,
+            Arc::clone(&events),
+            started,
+            delivered,
+            claim,
+        ));
         let received = tokio::select! {
             biased;
             result = &mut received => result,
@@ -324,6 +339,7 @@ impl Service {
         events: Arc<dyn InstallEvents>,
         started: u64,
         delivered: oneshot::Sender<Value>,
+        claim: EffectClaim,
     ) {
         let mut stream = OutputStream {
             events,
@@ -338,6 +354,9 @@ impl Service {
             self.record_unobserved(&plan.run_id, outcome, started, finished)
                 .await;
         }
+        // A waiter on `runs.settled()` may begin an update immediately.
+        // Release the completed effect's claim before that waiter wakes.
+        drop(claim);
         drop(lease);
     }
 

@@ -58,6 +58,105 @@ fn scratch_mango_home(name: &str) -> support::scratch::ScratchDir {
     scratch_path(&format!("runtime-binary-test-{name}"))
 }
 
+#[test]
+fn setup_reports_when_it_replaces_an_unusable_runtime_config_without_printing_its_contents() {
+    let home = scratch_mango_home("setup-replaced-config");
+    let remote_dir = home.join("runtime").join("remote");
+    std::fs::create_dir_all(&remote_dir).unwrap();
+    let secret = "private-consent-marker";
+    std::fs::write(remote_dir.join("runtime.json"), format!("{{ {secret}")).unwrap();
+
+    let output = Command::new(binary_path())
+        .args(["setup", "--slot", "remote", "--profile", "readonly"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("replaced unusable") && stderr.contains("runtime.json"),
+        "the replacement must be reported: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains(secret),
+        "the old contents must stay private"
+    );
+}
+
+#[test]
+fn serve_and_connect_report_replaced_credentials_without_printing_stored_values() {
+    use std::io::{BufRead as _, BufReader};
+
+    for (name, args) in [
+        ("serve", vec!["serve", "--listen", "0"]),
+        ("connect", vec!["connect", "--hub", "ws://127.0.0.1:1/"]),
+    ] {
+        let home = scratch_mango_home(&format!("{name}-replaced-credentials"));
+        let setup = Command::new(binary_path())
+            .args(["setup", "--slot", "remote", "--profile", "readonly"])
+            .env("MANGO_HOME", &home)
+            .output()
+            .unwrap();
+        assert!(setup.status.success());
+
+        let secret = "private-credential-marker";
+        let credentials = home.join("runtime").join("remote").join("credentials.json");
+        std::fs::write(
+            &credentials,
+            format!(
+                r#"{{"schemaVersion":1,"slot":"remote","pairingToken":"{secret}","serveToken":42}}"#
+            ),
+        )
+        .unwrap();
+
+        let mut child = Command::new(binary_path())
+            .args(args)
+            .env("MANGO_HOME", &home)
+            .env("MANGOSTUDIO_RUNTIME_TOKEN", "replacement-token")
+            .env_remove("MANGOSTUDIO_RUNTIME_SERVE_TOKEN")
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("the binary runs");
+        let stderr = child.stderr.take().unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let mut lines = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(line) => {
+                    let reported =
+                        line.contains("replaced unusable") && line.contains("credentials.json");
+                    lines.push(line);
+                    if reported {
+                        break;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            lines.iter().any(|line| line.contains("replaced unusable") && line.contains("credentials.json")),
+            "{name} must report the replacement: {lines:?}"
+        );
+        assert!(
+            !lines.join("\n").contains(secret),
+            "old credentials must stay private"
+        );
+    }
+}
+
 /// `connect` on a slot with no answer yet is the "invocation is consent"
 /// case, so this exercises the *other* refusal path: a stored config the
 /// binary itself cannot read at all.

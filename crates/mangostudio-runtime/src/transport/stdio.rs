@@ -15,9 +15,11 @@ use mango_protocol::transports::stdio::stdio_port;
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::invocation::stdio_consent;
-use crate::runtime_home::resolve_runtime_slot_for_current_exe;
+use crate::runtime_home::{
+    resolve_runtime_slot_for_current_exe, resolve_runtime_source_for_current_exe,
+};
 use crate::supervisor::{ShutdownSignals, join_owned};
-use crate::transport::{build_host, hello_capabilities, runtime_peer, start_session};
+use crate::transport::{build_host_with_restart, hello_capabilities, runtime_peer, start_session};
 
 /// Shorter than [`mango_protocol::session::DEFAULT_HANDSHAKE_TIMEOUT`]: a
 /// launcher that reached this process over a pipe it just opened is either
@@ -53,7 +55,9 @@ pub(crate) async fn run_with_signals(
         return Ok(1);
     }
 
-    let host = build_host(slot, mango_home, runtime_version);
+    let supervised = resolve_runtime_source_for_current_exe(mango_home) == "provisioned";
+    let host = build_host_with_restart(slot, mango_home, runtime_version, supervised);
+    let restart = host.update.restart_token();
     // No request is in flight yet to cancel this against — a fresh token
     // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
     // `hello_capabilities`'s own doc comment.
@@ -67,6 +71,7 @@ pub(crate) async fn run_with_signals(
         options,
         host.registry,
         host.authorization,
+        host.update,
         slot.as_str(),
     );
 
@@ -75,14 +80,18 @@ pub(crate) async fn run_with_signals(
     // signal that arrives first releases the session cooperatively (a
     // command sent through the same channel every other close path uses)
     // rather than aborting the driver task outright.
-    let (closure, signalled) = tokio::select! {
+    let (closure, signalled, update_committed) = tokio::select! {
         biased;
         () = signals.wait() => {
             session.close_now(close_codes::RELEASED, Some("the host signalled this runtime"));
-            (join_owned(driver_handle).await, true)
+            (join_owned(driver_handle).await, true, false)
+        }
+        () = restart.cancelled() => {
+            session.close_now(close_codes::RELEASED, Some("runtime update committed"));
+            (join_owned(driver_handle).await, false, true)
         }
         result = &mut driver_handle => {
-            (result.expect("the session driver must run to completion, never be aborted or panic"), false)
+            (result.expect("the session driver must run to completion, never be aborted or panic"), false, false)
         }
     };
     // Either way the session is over: the children it started begin their bounded release now,
@@ -91,20 +100,18 @@ pub(crate) async fn run_with_signals(
     // End of input means the hub went away, not that this process must: a running install step
     // finishes within its own deadline first. A signal still ends the process at once, and the
     // supervisor's parent-death lease then terminates whatever a step still owns.
-    if !signalled {
+    if !signalled && !update_committed {
         tokio::select! {
             biased;
             () = signals.wait() => {}
             () = crate::install::settled() => {}
         }
     }
-    Ok(exit_code(&closure))
+    Ok(exit_code(&closure, update_committed))
 }
 
-/// `stdioExitCode` without `cli.ts`'s update-committed branch — this crate
-/// implements no update mechanism yet (out of scope), so exit `75` is never
-/// produced here.
-fn exit_code(closure: &mango_protocol::session::SessionClosure) -> i32 {
+/// `stdioExitCode`: a clean supervised update asks the parent to relaunch `current`.
+fn exit_code(closure: &mango_protocol::session::SessionClosure, update_committed: bool) -> i32 {
     if closure.error.is_some() || closure.code != close_codes::RELEASED {
         eprintln!(
             "mangostudio-runtime: session closed with {}{}",
@@ -116,6 +123,9 @@ fn exit_code(closure: &mango_protocol::session::SessionClosure) -> i32 {
                 .unwrap_or_default()
         );
         return 1;
+    }
+    if update_committed {
+        return i32::from(mangostudio_runtime_contract::strings::RUNTIME_UPDATE_EXIT_CODE);
     }
     0
 }
@@ -147,7 +157,8 @@ mod tests {
         let (a, _b) = port_pair();
         let (session, _driver) = Session::spawn(a, SessionOptions::new(peer()));
         let closure = session.close(close_codes::RELEASED, Some("done")).await;
-        assert_eq!(exit_code(&closure), 0);
+        assert_eq!(exit_code(&closure, false), 0);
+        assert_eq!(exit_code(&closure, true), 75);
     }
 
     #[tokio::test]
@@ -157,7 +168,8 @@ mod tests {
         let closure = session
             .close(close_codes::PROTOCOL_ERROR, Some("refused"))
             .await;
-        assert_eq!(exit_code(&closure), 1);
+        assert_eq!(exit_code(&closure, false), 1);
+        assert_eq!(exit_code(&closure, true), 1);
     }
 
     /// The other half of `exit_code`'s check: a genuine decoder refusal
@@ -180,7 +192,7 @@ mod tests {
             closure.error.is_some(),
             "a malformed line must be recorded as a decoder error"
         );
-        assert_eq!(exit_code(&closure), 1);
+        assert_eq!(exit_code(&closure, false), 1);
         drop(session);
     }
 }
