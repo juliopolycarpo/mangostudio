@@ -12,6 +12,10 @@ mod service;
 mod snapshot;
 mod text;
 
+/// The Win32 spelling of a canonical Windows path, shared with external-agent
+/// workspace admission so both surfaces compare the same form.
+#[cfg(windows)]
+pub(crate) use policy::normalize_windows_final_path;
 pub(crate) use service::register;
 
 /// Why [`open_contained_file`] refused a path.

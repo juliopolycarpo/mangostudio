@@ -513,6 +513,36 @@ async fn handle_probe_version_managers(
 
 // --- probing.agent-clis -------------------------------------------------
 
+/// The executable `probing.agent-clis` reports as `effective` for one vendor
+/// CLI, for the external-agent host to launch; `None` when it is not installed.
+///
+/// Resolves exactly as `probing.agent-clis` does, against this machine's own
+/// environment snapshot, so a session launches the binary the hub was shown.
+///
+/// # Example
+///
+/// ```ignore
+/// let codex = resolve_agent_executable(AgentTargetId::Codex, &cancel).await;
+/// ```
+pub(crate) async fn resolve_agent_executable(
+    target: AgentTargetId,
+    cancel: &CancellationToken,
+) -> Option<std::path::PathBuf> {
+    let definition = AGENT_CLI_DEFINITIONS
+        .iter()
+        .copied()
+        .find(|definition| definition.target_id() == target)?;
+    let AgentCliDefinition::Cli(cli) = definition else {
+        return None;
+    };
+    let path_env = Arc::new(host::build_runtime_path_env(None));
+    let status = describe_external_agent(cli, &path_env, cancel, false, &None).await;
+    status
+        .runtime
+        .effective
+        .map(|installation| std::path::PathBuf::from(installation.path))
+}
+
 fn select_agent_definitions(
     requested: Option<&[AgentTargetId]>,
 ) -> Result<Vec<AgentCliDefinition>, RemoteError> {

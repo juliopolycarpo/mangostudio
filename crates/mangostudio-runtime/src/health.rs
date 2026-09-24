@@ -8,10 +8,11 @@
 //! Built: `schemaVersion`, `slot`, `version`, `digest`, `sourceSha`,
 //! `profile`, `allow`, `setup`, `audit` (from [`crate::consent::config`]),
 //! `source`, `binaryPath`, `runtimeVersion`, `platform`, `arch`, `homeDir`,
-//! `shells`, `git`, `gh`, `terminal`, `lastError`.
+//! `shells`, `git`, `gh`, `terminal`, `lastError`, and, on a host that serves
+//! external agents, `externalAgents` (added by `register` from the
+//! supervisor, with the attestation omitted when the hub withdrew it).
 //!
-//! Deliberately skipped, all optional on the wire:
-//! - `externalAgents` — out of scope; a later plan owns it.
+//! Deliberately skipped, optional on the wire:
 //! - `auditError` — this crate has no "read the audit log's last write
 //!   error" port yet, and building one is out of scope for this change.
 //!
@@ -70,15 +71,30 @@ pub(crate) fn register(
     slot: RuntimeSlot,
     mango_home: PathBuf,
     runtime_version: String,
+    external_agents: Option<std::sync::Arc<crate::external_agents::supervisor::Supervisor>>,
 ) -> Registry {
     registry.implement(
         "runtime.health",
         move |_params: Value, context: CallContext| {
             let mango_home = mango_home.clone();
             let runtime_version = runtime_version.clone();
+            let external_agents = external_agents.clone();
             async move {
-                build_health_report(slot, &mango_home, &runtime_version, context.cancel(), None)
-                    .await
+                let mut report = build_health_report(
+                    slot,
+                    &mango_home,
+                    &runtime_version,
+                    context.cancel(),
+                    None,
+                )
+                .await?;
+                if let Some(supervisor) = external_agents {
+                    let withdrawn = crate::external_agents::hub_withdrew_isolation(
+                        &context.remote().capabilities,
+                    );
+                    report["externalAgents"] = supervisor.health(withdrawn).await;
+                }
+                Ok(report)
             }
         },
     )
@@ -249,6 +265,10 @@ pub(crate) async fn build_capability_manifest(
     manifest.profile = Some(resolved.profile);
     manifest.allow = Some(allow);
     manifest.enforces_path_policy = Some(true);
+    // Sent before the peer's hello, so a hub withdrawal cannot shape it; the
+    // hub strips a withdrawn attestation on its side (`applyHubIsolationClaim`).
+    manifest.identity_isolation =
+        run_blocking(crate::external_agents::isolation::detect_external_agent_isolation).await;
     manifest
 }
 
@@ -1107,6 +1127,33 @@ mod tests {
     /// connection with `PROTOCOL_ERROR` before a single method could be
     /// called. Confirmed against a real, compiled binary: see
     /// `apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts`.
+    /// The hello manifest carries this process's own attestation, and a
+    /// runtime process never claims the hub-only `single-user-host`.
+    #[tokio::test]
+    async fn the_manifest_advertises_this_processs_identity_isolation() {
+        use mangostudio_runtime_contract::manifest::IdentityIsolationMethod;
+
+        let home = scratch_home("capabilities-isolation");
+        let manifest = build_capability_manifest(
+            RuntimeSlot::Host,
+            &home,
+            &Registry::new(),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        let expected = crate::external_agents::isolation::detect_external_agent_isolation();
+        assert_eq!(manifest.identity_isolation, expected);
+        let method = manifest
+            .identity_isolation
+            .map(|isolation| isolation.method);
+        assert_ne!(
+            method,
+            Some(IdentityIsolationMethod::SingleUserHost),
+            "a runtime process must never claim single-user-host"
+        );
+    }
+
     #[tokio::test]
     async fn a_never_before_seen_host_slot_builds_a_schema_valid_manifest() {
         let home = scratch_home("capabilities-host");

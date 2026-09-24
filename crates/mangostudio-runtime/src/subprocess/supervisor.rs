@@ -78,6 +78,9 @@ pub struct ProcessRequest {
     pub budget: ProcessBudget,
     /// Receives every chunk read from stdout and stderr while the process runs.
     pub output_tap: Option<ProcessOutputTap>,
+    /// Starts the process without a console window on Windows (`CREATE_NO_WINDOW`); ignored
+    /// elsewhere.
+    pub hide_window: bool,
 }
 
 impl ProcessRequest {
@@ -104,6 +107,7 @@ impl ProcessRequest {
             stdin: ProcessStdin::Null,
             budget: ProcessBudget::new(Duration::from_secs(5), 64 * 1024, 64 * 1024),
             output_tap: None,
+            hide_window: false,
         }
     }
 

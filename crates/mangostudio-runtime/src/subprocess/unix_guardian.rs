@@ -196,6 +196,11 @@ impl GuardianChild {
         signal_group(self.id(), libc::SIGTERM)
     }
 
+    /// Delivers SIGINT to the target's process group, the graceful interrupt a CLI traps.
+    pub(super) fn interrupt_gracefully(&mut self) -> io::Result<()> {
+        signal_group(self.id(), libc::SIGINT)
+    }
+
     pub(super) fn force(&mut self) -> io::Result<()> {
         signal_group(self.id(), libc::SIGKILL)
     }

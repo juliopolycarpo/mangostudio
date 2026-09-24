@@ -1,27 +1,27 @@
 {
+  "source": "provisioned",
+  "version": "0.2.0-rust-fixture",
+  "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "allow": {
-    "checkpoints": true,
-    "externalAgents": true,
     "fsRead": true,
     "fsWrite": true,
-    "git": true,
-    "library": true,
-    "mcp": true,
-    "probing": true,
     "shell": true,
-    "update": true
+    "git": true,
+    "probing": true,
+    "mcp": true,
+    "library": true,
+    "checkpoints": true,
+    "update": true,
+    "externalAgents": true
+  },
+  "setup": {
+    "state": "configured",
+    "at": "2026-01-03T00:00:00.000Z",
+    "by": "install"
   },
   "audit": {
     "enabled": false
   },
-  "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "schemaVersion": 1,
-  "setup": {
-    "at": "2026-01-03T00:00:00.000Z",
-    "by": "install",
-    "state": "configured"
-  },
-  "slot": "host",
-  "source": "provisioned",
-  "version": "0.2.0-rust-fixture"
+  "slot": "host"
 }
