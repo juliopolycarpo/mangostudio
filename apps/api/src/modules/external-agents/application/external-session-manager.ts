@@ -39,7 +39,11 @@ import type { Kysely } from 'kysely';
 import { getDb } from '../../../db/database';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
-import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
+import {
+  getExistingRuntimeClient,
+  getRuntimeClient,
+  type RuntimeClient,
+} from '../../../services/runtime-client';
 import { generateId } from '../../../utils/id';
 import {
   resolveToolchainParams,
@@ -102,6 +106,23 @@ interface ExternalSessionBinding {
 
 export interface EnsureExternalSessionInput extends ExternalSessionBinding {
   readonly configuration: ExternalAgentConfiguration;
+  /**
+   * Open only on a connection that already exists or is already being opened.
+   * A turn waiting to resubmit sets it, so its retries never become connect
+   * attempts of their own.
+   */
+  readonly existingConnectionOnly?: boolean;
+}
+
+/** How a reap was asked for. */
+export interface ReapOptions {
+  readonly keepContinuation?: boolean;
+  /**
+   * The user took the environment away — disconnected, disabled, repointed,
+   * rotated its token or removed it. Unlike a dropped socket, that ends a turn
+   * still waiting to resubmit: reconnecting would undo what the user just did.
+   */
+  readonly explicit?: boolean;
 }
 
 /** What a turn submits, before the session adds its own id. */
@@ -202,7 +223,7 @@ export interface ExternalSessionManager {
   reapChat(
     chatId: string,
     reason: ExternalTurnTerminalReason,
-    options?: { readonly keepContinuation?: boolean }
+    options?: ReapOptions
   ): Promise<void>;
   /**
    * Reaps every session matching a scope. Used by consent, environment and user
@@ -220,7 +241,7 @@ export interface ExternalSessionManager {
       readonly targetId?: ExternalAgentTargetId;
     },
     reason: ExternalTurnTerminalReason,
-    options?: { readonly keepContinuation?: boolean }
+    options?: ReapOptions
   ): Promise<void>;
   reapAll(reason: ExternalTurnTerminalReason): Promise<void>;
   /**
@@ -238,6 +259,11 @@ export interface ExternalSessionManager {
 
 export interface ExternalSessionManagerOptions {
   readonly resolveRuntimeClient?: (userId: string, environmentId: string) => Promise<RuntimeClient>;
+  /** The live or connecting client only; never a new connect. */
+  readonly resolveExistingRuntimeClient?: (
+    userId: string,
+    environmentId: string
+  ) => Promise<RuntimeClient>;
   readonly resolveToolchain?: (
     userId: string,
     environmentId: string
@@ -300,6 +326,8 @@ export function createExternalSessionManager(
   options: ExternalSessionManagerOptions = {}
 ): ExternalSessionManager {
   const resolveRuntimeClient = options.resolveRuntimeClient ?? getRuntimeClient;
+  const resolveExistingRuntimeClient =
+    options.resolveExistingRuntimeClient ?? getExistingRuntimeClient;
   const resolveToolchain =
     options.resolveToolchain ??
     ((userId: string, environmentId: string) => toolchainService.resolve(userId, environmentId));
@@ -319,8 +347,14 @@ export function createExternalSessionManager(
   >();
   let shuttingDown: ExternalTurnTerminalReason | undefined;
 
-  function notifyHolds(chatId: string, reason: ExternalTurnTerminalReason): void {
-    if (reason === 'runtime-disconnected') return;
+  function notifyHolds(
+    chatId: string,
+    reason: ExternalTurnTerminalReason,
+    explicit: boolean
+  ): void {
+    // A socket that dropped on its own is the submission's to judge; one the
+    // user took away is not.
+    if (reason === 'runtime-disconnected' && !explicit) return;
     for (const hold of [...(holds.get(chatId) ?? [])]) hold.onReap(reason);
   }
   /**
@@ -460,11 +494,12 @@ export function createExternalSessionManager(
   async function reap(
     chatId: string,
     reason: ExternalTurnTerminalReason,
-    keepContinuation: boolean
+    keepContinuation: boolean,
+    explicit = false
   ): Promise<void> {
     reapGenerations.set(chatId, (reapGenerations.get(chatId) ?? 0) + 1);
     const record = teardown(chatId, reason);
-    notifyHolds(chatId, reason);
+    notifyHolds(chatId, reason, explicit);
     if (!keepContinuation) {
       // The lease goes with the pointer it protects. Keeping it would leave the
       // vendor session unadoptable by anyone until it expired, on behalf of a
@@ -498,7 +533,9 @@ export function createExternalSessionManager(
       await releaseAdoptionLease(input.chatId, db);
     }
 
-    const client = await resolveRuntimeClient(input.userId, input.environmentId);
+    const client = await (input.existingConnectionOnly
+      ? resolveExistingRuntimeClient
+      : resolveRuntimeClient)(input.userId, input.environmentId);
     const toolchain = await resolveToolchainParams(client.manifest, () =>
       resolveToolchain(input.userId, input.environmentId)
     );
@@ -629,7 +666,12 @@ export function createExternalSessionManager(
     },
 
     reapChat(chatId, reason, reapOptions) {
-      return reap(chatId, reason, reapOptions?.keepContinuation === true);
+      return reap(
+        chatId,
+        reason,
+        reapOptions?.keepContinuation === true,
+        reapOptions?.explicit === true
+      );
     },
 
     async reapScope(scope, reason, reapOptions) {
@@ -659,7 +701,14 @@ export function createExternalSessionManager(
       }
 
       await Promise.all(
-        [...chatIds].map((chatId) => reap(chatId, reason, reapOptions?.keepContinuation === true))
+        [...chatIds].map((chatId) =>
+          reap(
+            chatId,
+            reason,
+            reapOptions?.keepContinuation === true,
+            reapOptions?.explicit === true
+          )
+        )
       );
     },
 

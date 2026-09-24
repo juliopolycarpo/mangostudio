@@ -266,6 +266,11 @@ export interface ExternalTurnControllerDependencies {
   readonly sleep?: CancellableSleep;
   /** Jitter source in [0, 1). */
   readonly random?: () => number;
+  /**
+   * Handed each turn's submission as it starts, so a test can wait for the
+   * loop's own outcome instead of for time to pass.
+   */
+  readonly observeSubmission?: (messageId: string, outcome: Promise<SubmissionOutcome>) => void;
   /** A connect failure that waiting cannot fix. Defaults to a recorded protocol mismatch. */
   readonly isTerminalConnectFailure?: (
     error: unknown,
@@ -665,6 +670,8 @@ export function createExternalTurnController(
      * of it: whether the turn was received is the submission loop's call.
      */
     let submitting = !input.review;
+    /** Mirrors the submission's latest attempt: sent, and not yet settled. */
+    let dispatchPending = false;
     const startedAt = now();
     const userMessageId = newId();
     const assistantMessageId = newId();
@@ -700,8 +707,15 @@ export function createExternalTurnController(
     });
 
     /** The first terminal writer wins; every later one is a no-op. */
-    function terminate(reason: ExternalTurnTerminalReason): void {
+    function terminate(requested: ExternalTurnTerminalReason): void {
       if (terminalReason) return;
+      // A shutdown while a request may already be with the runtime cannot say
+      // the vendor had the turn, and must not say it did not: the same mapping
+      // the boot sweep applies to a receipt left `acceptance-unknown`.
+      const reason =
+        requested === 'hub-restarted' && submitting && dispatchPending
+          ? 'acceptance-unknown'
+          : requested;
       terminalReason = reason;
       stop.abort();
       const live = liveTurns.get(input.chatId);
@@ -899,9 +913,12 @@ export function createExternalTurnController(
       : () => undefined;
 
     async function reacquire(): Promise<ExternalSessionHandle> {
-      const next = await sessions.ensureSession(
-        sessionInputFor(input, context.chat.environmentId, targetId)
-      );
+      const next = await sessions.ensureSession({
+        ...sessionInputFor(input, context.chat.environmentId, targetId),
+        existingConnectionOnly: true,
+      });
+      // A stop that landed during the open must not re-point a turn that ended.
+      if (stop.signal.aborted) return next;
       if (next === handle || next.sessionId === handle.sessionId) return next;
       unsubscribe();
       handle = next;
@@ -1000,7 +1017,7 @@ export function createExternalTurnController(
       } else {
         // Not awaited: the turn ends when it is terminated, and a stop must not
         // wait out an in-flight submission's deadline.
-        void submitExternalTurn({
+        const submission = submitExternalTurn({
           db,
           messageId: assistantMessageId,
           chatId: input.chatId,
@@ -1025,6 +1042,9 @@ export function createExternalTurnController(
           newId,
           random,
           sleep,
+          onDispatchPending: (pending) => {
+            dispatchPending = pending;
+          },
           onLateAcceptance: (lateHandle, nativeTurnId) => {
             void lateHandle.cancel(nativeTurnId).catch((error: unknown) => {
               logger.warn('cancel_failed', {
@@ -1033,7 +1053,9 @@ export function createExternalTurnController(
               });
             });
           },
-        }).then(
+        });
+        dependencies.observeSubmission?.(assistantMessageId, submission);
+        submission.then(
           (outcome) => applySubmission(outcome),
           (error: unknown) => {
             // An unexpected fault in the loop itself — a database error on a
@@ -1054,11 +1076,7 @@ export function createExternalTurnController(
             bindAccepted(outcome.nativeTurnId);
             return;
           case 'unresolved':
-            transcript.recordError({
-              code: 'acceptance-unknown',
-              message:
-                'The runtime connection was lost before it confirmed this turn, so whether the agent received it is unknown.',
-            });
+            // No English error part: the localized terminal notice says it.
             terminate('acceptance-unknown');
             return;
           case 'receipt-failed':
@@ -1142,7 +1160,8 @@ export function createExternalTurnController(
       logger.warn('already_finalized', { messageId: context.assistantMessageId });
     }
     // Best effort: the message row above is the turn's own terminal record,
-    // and a receipt left open is sealed again by the next boot sweep.
+    // and a receipt this leaves open is sealed by the boot sweep's receipt
+    // pass, which visits attempts whose message is no longer generating.
     await sealAttemptsForMessage(context.assistantMessageId, reason, at, db).catch(
       (error: unknown) => {
         logger.warn('attempt_seal_failed', {

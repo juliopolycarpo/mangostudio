@@ -558,6 +558,28 @@ export class RuntimeConnectionManager {
   }
 
   /**
+   * The live connection, or the one already being opened — never a new
+   * attempt. Rejects `UNAVAILABLE` when there is neither.
+   *
+   * For a background waiter that must not own reconnecting: every
+   * non-forced `connect` counts toward the backoff latch, so a loop that
+   * called {@link getClient} on its own would latch the environment for
+   * every other caller, and churn a dial-in environment's status forever.
+   * Reconnects stay with the user's Connect and the next ordinary caller.
+   *
+   * @example
+   * const client = await manager.getExistingClient(userId, environmentId);
+   */
+  async getExistingClient(userId: string, environmentId: string): Promise<RuntimeClient> {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (entry?.connection) return entry.connection.client;
+    if (entry?.connecting) return await entry.connecting;
+    throw unavailable(
+      `Environment "${environmentId}" has no live connection; expected one opened by a user or another caller.`
+    );
+  }
+
+  /**
    * Opens a connection, or returns the live one. `force` marks the deliberate
    * connect actions — a user pressing Connect, or a route acting on their
    * behalf — which clear a backoff instead of being held by it.
@@ -1538,6 +1560,19 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
 /** Releases every runtime connection this process opened. Used by shutdown. */
 export async function closeAllRuntimeConnections(): Promise<void> {
   await managerInstance?.closeAll();
+}
+
+/**
+ * The live or connecting client for an environment, without opening one.
+ *
+ * @example
+ * const client = await getExistingRuntimeClient(userId, environmentId);
+ */
+export function getExistingRuntimeClient(
+  userId: string,
+  environmentId: string
+): Promise<RuntimeClient> {
+  return getRuntimeConnectionManager().getExistingClient(userId, environmentId);
 }
 
 export function getRuntimeClient(

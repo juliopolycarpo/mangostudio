@@ -23,6 +23,7 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
+import type { RuntimeEnvironmentConnector } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { connectTestRuntime, type TestRuntime } from '../runtime-fixture';
 
 /**
@@ -32,19 +33,49 @@ import { connectTestRuntime, type TestRuntime } from '../runtime-fixture';
  * - `stall`: submits and never replies (the hub's deadline fires; the
  *   connection stays up).
  * - `drop-ack`: submits, then drops the connection before replying.
- * - `refuse`: replies with an error and submits nothing.
+ * - `refuse`: replies with an application error and submits nothing.
+ * - `refuse-unavailable` / `refuse-timeout`: replies with a reserved
+ *   `UNAVAILABLE` or `TIMEOUT` code — a signed-out vendor, a vendor that timed
+ *   out — and submits nothing. The reply is receipted like any other, so a
+ *   resend gets the same answer, as the Rust runtime does.
+ * - `refuse-acceptance-unknown`: replies `details.dispatch: acceptance-unknown`.
  */
-type TurnBehaviour = 'answer' | 'stall' | 'drop-ack' | 'refuse';
+type TurnBehaviour =
+  | 'answer'
+  | 'stall'
+  | 'drop-ack'
+  | 'refuse'
+  | 'refuse-unavailable'
+  | 'refuse-timeout'
+  | 'refuse-acceptance-unknown';
+
+const REFUSALS: Partial<Record<TurnBehaviour, () => RemoteError>> = {
+  refuse: () => new RemoteError('VENDOR_REFUSED', 'The vendor refused this turn.'),
+  'refuse-unavailable': () =>
+    new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'The vendor CLI is signed out.'),
+  'refuse-timeout': () =>
+    new RemoteError(RESERVED_ERROR_CODES.TIMEOUT, 'The vendor did not start the turn in time.'),
+  'refuse-acceptance-unknown': () =>
+    new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'The vendor link dropped mid-submit.', {
+      dispatch: 'acceptance-unknown',
+    }),
+};
 
 export interface ReceiptKeepingRuntime {
-  /** Handed to the session manager as `resolveRuntimeClient`. */
+  /** Handed to the session manager as `resolveRuntimeClient`; connects when needed. */
   resolveClient(): Promise<RuntimeClient>;
+  /** The live client only, never a connect — `resolveExistingRuntimeClient`. */
+  existingClient(): Promise<RuntimeClient>;
+  /** This runtime as a `RuntimeConnectionManager` connector for the `http` transport. */
+  readonly connector: RuntimeEnvironmentConnector;
   /** Every `external-agent.turn` request that reached the runtime, receipt hits included. */
   rpcCount(): number;
   /** Native vendor submissions: one per turn the vendor was actually asked to run. */
   submissionCount(): number;
   /** How many connections `resolveClient` has opened. */
   connectionCount(): number;
+  /** How many times the connector was asked to connect, failed attempts included. */
+  connectAttemptCount(): number;
   /** Params of every turn request, in arrival order. */
   readonly turns: ExternalAgentTurnParams[];
   /** Every `external-agent.cancel` the hub sent. */
@@ -64,7 +95,14 @@ export interface ReceiptKeepingRuntime {
 
 interface Connection {
   readonly runtime: TestRuntime;
-  readonly receipts: Map<string, { readonly fingerprint: string; readonly nativeTurnId: string }>;
+  readonly receipts: Map<
+    string,
+    {
+      readonly fingerprint: string;
+      readonly nativeTurnId?: string;
+      readonly refusal?: () => RemoteError;
+    }
+  >;
   sessionId: string;
   sequence: number;
   nativeTurnId?: string;
@@ -78,6 +116,7 @@ export function createReceiptKeepingRuntime(): ReceiptKeepingRuntime {
   let rpcs = 0;
   let submissions = 0;
   let connections = 0;
+  let connectAttempts = 0;
   let available = true;
   let live: Connection | undefined;
 
@@ -122,11 +161,14 @@ export function createReceiptKeepingRuntime(): ReceiptKeepingRuntime {
                 { kind: 'tool_argument' }
               );
             }
+            if (receipt.refusal) throw receipt.refusal();
             return { nativeTurnId: receipt.nativeTurnId };
           }
           const behaviour = script.shift() ?? 'answer';
-          if (behaviour === 'refuse') {
-            throw new RemoteError('VENDOR_REFUSED', 'The vendor refused this turn.');
+          const refusal = REFUSALS[behaviour];
+          if (refusal) {
+            receipts.set(typed.clientMessageId, { fingerprint, refusal });
+            throw refusal();
           }
           submissions += 1;
           const nativeTurnId = `native-turn-${submissions}`;
@@ -158,7 +200,27 @@ export function createReceiptKeepingRuntime(): ReceiptKeepingRuntime {
     return connection;
   }
 
+  function unavailable(): RemoteError {
+    return new RemoteError(
+      RESERVED_ERROR_CODES.UNAVAILABLE,
+      'Environment "local" is unavailable; expected a reachable runtime.'
+    );
+  }
+
   return {
+    existingClient() {
+      return live ? Promise.resolve(live.runtime.client) : Promise.reject(unavailable());
+    },
+    connector: async (_definition, onUnavailable) => {
+      connectAttempts += 1;
+      if (!available) throw unavailable();
+      const connection = await connect();
+      connection.runtime.client.onClose(() => onUnavailable());
+      return {
+        client: connection.runtime.client,
+        close: () => connection.runtime.close(),
+      };
+    },
     async resolveClient() {
       if (!available) {
         throw new RemoteError(
@@ -171,6 +233,7 @@ export function createReceiptKeepingRuntime(): ReceiptKeepingRuntime {
     rpcCount: () => rpcs,
     submissionCount: () => submissions,
     connectionCount: () => connections,
+    connectAttemptCount: () => connectAttempts,
     turns,
     cancels,
     script,

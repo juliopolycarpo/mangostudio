@@ -35,6 +35,7 @@ import {
   type FakeExternalRuntime,
 } from '../../../support/external-agents/fake-external-runtime';
 import { insertTestUser } from '../../../support/factories';
+import { connectTestRuntime } from '../../../support/runtime-fixture';
 
 const EVERY_PAIR: readonly ExternalSupportedConfiguration[] = [
   { level: 'read-only', routing: 'user', supported: true, unattended: false },
@@ -1240,13 +1241,27 @@ class UnreadableAttachmentsDb {
 
 describe('browser detach', () => {
   it('(h) keeps retrying a detached turn to completion and persists what a re-attach reads', async () => {
+    // A genuine never-written failure, from a runtime session that is really closed.
+    const closed = await connectTestRuntime({ handlers: {} });
+    await closed.close();
+    const notSent = await closed.client.externalAgents
+      .turn({
+        sessionId: 'session-closed',
+        clientMessageId: 'probe',
+        input: 'probe',
+        configuration: { level: 'default', routing: 'user', workspaceRoots: ['/work/repo'] },
+      })
+      .catch((error: unknown) => error);
+    if (!(notSent instanceof RuntimeRequestNotSentError)) {
+      throw new Error(`expected a RuntimeRequestNotSentError | received: ${String(notSent)}`);
+    }
     let failures = 3;
     const clock = createFakeBackoffClock({ auto: true });
     const { runtime, stream } = harness({
       turnFailure: () => {
         if (failures === 0) return undefined;
         failures -= 1;
-        return new RuntimeRequestNotSentError('external-agent.turn', undefined);
+        return notSent;
       },
       sleep: clock.sleep,
     });

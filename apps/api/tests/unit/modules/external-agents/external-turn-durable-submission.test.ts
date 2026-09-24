@@ -6,12 +6,13 @@
  * vendor turn behind it.
  */
 
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it, setSystemTime } from 'bun:test';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnPart, MessagePart } from '@mangostudio/shared/types';
 import { sql } from 'kysely';
 import { getDb } from '../../../../src/db/database';
 import { getChatMessagesUseCase } from '../../../../src/modules/chats/application/get-chat-messages';
+import { createEnvironmentService } from '../../../../src/modules/environments/application/environment-service';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
 import { createExternalCommandCatalogCache } from '../../../../src/modules/external-agents/application/external-command-catalog-cache';
 import {
@@ -23,8 +24,10 @@ import {
   type ExternalTurnResult,
 } from '../../../../src/modules/external-agents/application/external-turn-controller';
 import { reconcileExternalTurns } from '../../../../src/modules/external-agents/application/external-turn-recovery';
+import type { SubmissionOutcome } from '../../../../src/modules/external-agents/application/external-turn-submission';
 import { listAttemptsForMessage } from '../../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { cancelActiveTurn } from '../../../../src/modules/generation/application/active-turn-registry';
+import { RuntimeConnectionManager } from '../../../../src/services/runtime-client/runtime-connection-manager';
 import {
   createFakeBackoffClock,
   type FakeBackoffClock,
@@ -99,22 +102,56 @@ function harness(
     readonly callTimeoutMs?: number;
     readonly dropAfterOpen?: boolean;
     readonly terminalConnectFailure?: boolean;
+    /** Runs when a resubmitting turn's reopened session is about to be handed back. */
+    readonly beforeReacquireReturns?: () => void;
   } = {}
 ) {
   const runtime = createReceiptKeepingRuntime();
   const clock = options.clock ?? createFakeBackoffClock({ auto: true });
+  // The real connection manager, so its backoff and latch are the ones a
+  // resubmitting turn would drive in production.
+  const manager = new RuntimeConnectionManager({
+    resolveEnvironment: (owner, environmentId) =>
+      Promise.resolve({
+        id: environmentId,
+        userId: owner,
+        name: 'Test box',
+        transportKind: 'http' as const,
+        config: { baseUrl: 'http://127.0.0.1:1' },
+        enabled: true,
+      }),
+    connectors: { http: runtime.connector },
+    recordTransition: () => undefined,
+  });
   let sessionNumber = 0;
   const baseSessions = createExternalSessionManager({
-    resolveRuntimeClient: () => runtime.resolveClient(),
+    resolveRuntimeClient: (owner, environmentId) => manager.getClient(owner, environmentId),
+    resolveExistingRuntimeClient: (owner, environmentId) =>
+      manager.getExistingClient(owner, environmentId),
     newSessionId: () => {
       sessionNumber += 1;
       return `session-${sessionNumber}`;
     },
     callTimeoutMs: options.callTimeoutMs ?? 10_000,
   });
-  const sessions = options.dropAfterOpen ? droppingAfterOpen(baseSessions, runtime) : baseSessions;
+  const dropping = options.dropAfterOpen ? droppingAfterOpen(baseSessions, runtime) : baseSessions;
+  const hook = options.beforeReacquireReturns;
+  const sessions: ExternalSessionManager = hook
+    ? {
+        ...dropping,
+        async ensureSession(input) {
+          const handle = await dropping.ensureSession(input);
+          if (input.existingConnectionOnly) hook();
+          return handle;
+        },
+      }
+    : dropping;
   const ids = [userMessageId, assistantMessageId];
+  const submissions: Promise<SubmissionOutcome>[] = [];
   const controller = createExternalTurnController({
+    observeSubmission: (_messageId, outcome) => {
+      submissions.push(outcome);
+    },
     sessions,
     approvals: createExternalApprovalRegistry(),
     commandCatalog: createExternalCommandCatalogCache(),
@@ -123,7 +160,14 @@ function harness(
     random: () => 0.5,
     isTerminalConnectFailure: () => options.terminalConnectFailure === true,
   });
-  return { runtime, clock, sessions: baseSessions, controller };
+  /** The loop's own outcome, awaited instead of waiting for time to pass. */
+  const submission = async (): Promise<SubmissionOutcome> => {
+    await waitFor(() => submissions.length === 1, 'the submission loop to start');
+    const outcome = submissions[0];
+    if (!outcome) throw new Error('expected a submission | received: none');
+    return await outcome;
+  };
+  return { runtime, clock, manager, sessions: baseSessions, controller, submission };
 }
 
 function start(controller: ReturnType<typeof harness>['controller']): Promise<ExternalTurnResult> {
@@ -149,8 +193,14 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   throw new Error(`expected ${label} | received: still waiting after 2s`);
 }
 
-async function settle(): Promise<void> {
-  for (let tick = 0; tick < 20; tick += 1) await new Promise((resolve) => setTimeout(resolve, 1));
+/** Waits until the vendor's turn is bound, so the events a test emits belong to it. */
+async function accepted(): Promise<void> {
+  for (let tick = 0; tick < 2_000; tick += 1) {
+    const states = await attemptStates();
+    if (states.at(-1) === 'accepted') return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error('expected an accepted attempt | received: none after 2s');
 }
 
 async function attemptStates(): Promise<string[]> {
@@ -209,7 +259,7 @@ describe('receipt before submission', () => {
     expect(rows[0]?.inputFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(rows[0]?.clientMessageId).toBe(userMessageId);
     runtime.releaseStalled();
-    await settle();
+    await accepted();
     runtime.emit({ type: 'completed' });
     expect((await running).reason).toBe('completed');
     await runtime.close();
@@ -222,7 +272,7 @@ describe('lost acknowledgements', () => {
     runtime.script.push('stall');
     const running = start(controller);
     await waitFor(() => runtime.rpcCount() === 2, 'the resend of the unanswered turn');
-    await settle();
+    await accepted();
     runtime.emit({ type: 'text_delta', text: 'done' });
     runtime.emit({ type: 'completed' });
     const result = await running;
@@ -243,7 +293,7 @@ describe('lost acknowledgements', () => {
     runtime.script.push('stall');
     const running = start(controller);
     await waitFor(() => runtime.rpcCount() === 2, 'the resend of the unanswered turn');
-    await settle();
+    await accepted();
     runtime.emit({ type: 'completed' });
     const result = await running;
 
@@ -256,7 +306,7 @@ describe('lost acknowledgements', () => {
   });
 
   it('(c) marks a lost reply across a dropped connection unresolved and never resends it', async () => {
-    const { runtime, controller } = harness();
+    const { runtime, controller, submission } = harness();
     runtime.script.push('drop-ack');
     const running = start(controller);
     let result: ExternalTurnResult | undefined;
@@ -269,10 +319,11 @@ describe('lost acknowledgements', () => {
     );
     expect(runtime.submissionCount()).toBe(1);
     if (!result) throw new Error('expected a settled turn | received: still running');
-    await settle();
+    expect((await submission()).kind).toBe('unresolved');
 
     expect(result.reason).toBe('acceptance-unknown');
-    expect(result.error?.code).toBe('acceptance-unknown');
+    // No English error part: the localized terminal notice explains it.
+    expect(result.error).toBeUndefined();
     expect({
       rpcs: runtime.rpcCount(),
       submissions: runtime.submissionCount(),
@@ -297,20 +348,62 @@ describe('lost acknowledgements', () => {
   });
 });
 
+describe('runtime answers are committed', () => {
+  for (const [behaviour, expected] of [
+    ['refuse-unavailable', 'vendor-error'],
+    ['refuse-timeout', 'vendor-error'],
+    ['refuse-acceptance-unknown', 'acceptance-unknown'],
+  ] as const) {
+    it(`ends the turn after one RPC when the runtime answers ${behaviour}`, async () => {
+      const { runtime, controller, clock, submission } = harness();
+      runtime.script.push(behaviour);
+      const running = start(controller);
+      const outcome = await submission();
+      const result = await running;
+
+      expect({ outcome: outcome.kind, reason: result.reason }).toEqual({
+        outcome: expected === 'acceptance-unknown' ? 'unresolved' : 'refused',
+        reason: expected,
+      });
+      expect({ rpcs: runtime.rpcCount(), submissions: runtime.submissionCount() }).toEqual({
+        rpcs: 1,
+        submissions: 0,
+      });
+      expect(clock.waits).toEqual([]);
+      expect(await attemptStates()).toEqual([
+        expected === 'acceptance-unknown' ? 'unresolved' : 'terminal',
+      ]);
+      await runtime.close();
+    });
+  }
+});
+
 describe('never-written submissions', () => {
   it('(d) keeps retrying past five failed connects with capped backoff and submits once', async () => {
     const clock = createFakeBackoffClock({ auto: true });
-    const { runtime, controller } = harness({ clock, dropAfterOpen: true });
+    const { runtime, controller, manager } = harness({ clock, dropAfterOpen: true });
+    let connectionsWhileWaiting = -1;
     clock.onWait((count) => {
-      if (count === 7) runtime.setAvailable(true);
+      if (count !== 7) return;
+      // Seven waits, and the loop itself opened nothing: it never became a
+      // connect attempt of its own.
+      connectionsWhileWaiting = runtime.connectionCount();
+      runtime.setAvailable(true);
+      // The next ordinary, non-forced caller, once the manager's own backoff
+      // for the dropped connection has passed (the fake clock never moves
+      // `Date.now`). A latched environment would refuse it indefinitely.
+      setSystemTime(new Date(Date.now() + 5_000));
+      void manager.getClient(userId, 'local').finally(() => setSystemTime());
     });
     const running = start(controller);
     await waitFor(() => runtime.rpcCount() === 1, 'the turn once the runtime is back');
-    await settle();
+    await accepted();
     runtime.emit({ type: 'completed' });
     const result = await running;
 
     expect(result.reason).toBe('completed');
+    expect(connectionsWhileWaiting).toBe(1);
+    expect(manager.getStatus(userId, 'local').state).toBe('connected');
     expect(clock.waits.length).toBe(7);
     // Doubling from 1s, capped at 30s, with random() = 0.5 inside the 25% jitter band.
     expect(clock.waits).toEqual([875, 1_750, 3_500, 7_000, 14_000, 26_250, 26_250]);
@@ -319,6 +412,37 @@ describe('never-written submissions', () => {
       submissions: runtime.submissionCount(),
       connections: runtime.connectionCount(),
     }).toEqual({ rpcs: 1, submissions: 1, connections: 2 });
+    await runtime.close();
+  });
+
+  it('never drives the connection backoff itself, so the environment never latches', async () => {
+    const clock = createFakeBackoffClock({ auto: true });
+    const { runtime, controller, manager } = harness({ clock, dropAfterOpen: true });
+    const startedAt = Date.now();
+    let elapsed = 0;
+    let attemptsWhileWaiting = -1;
+    clock.onWait((count) => {
+      // Real time passes with every wait, so any backoff window the manager
+      // set has elapsed by the next reacquire.
+      elapsed += clock.waits.at(-1) ?? 0;
+      setSystemTime(new Date(startedAt + elapsed + 60_000));
+      if (count !== 8) return;
+      attemptsWhileWaiting = runtime.connectAttemptCount();
+      runtime.setAvailable(true);
+      void manager.getClient(userId, 'local');
+    });
+    try {
+      const running = start(controller);
+      await waitFor(() => runtime.rpcCount() === 1, 'the turn once the runtime is back');
+      await accepted();
+      runtime.emit({ type: 'completed' });
+      expect((await running).reason).toBe('completed');
+    } finally {
+      setSystemTime();
+    }
+    // One connect for the first session; none from eight waits of the loop.
+    expect(attemptsWhileWaiting).toBe(1);
+    expect(runtime.submissionCount()).toBe(1);
     await runtime.close();
   });
 
@@ -344,11 +468,13 @@ describe('stopping', () => {
 
   async function expectNoLaterSubmission(
     runtime: ReceiptKeepingRuntime,
-    clock: FakeBackoffClock
+    clock: FakeBackoffClock,
+    submission: () => Promise<SubmissionOutcome>
   ): Promise<void> {
     runtime.setAvailable(true);
     clock.advance();
-    await settle();
+    // The loop itself reports that it stopped; nothing is left to submit.
+    expect((await submission()).kind).toBe('stopped');
     expect({ rpcs: runtime.rpcCount(), connections: runtime.connectionCount() }).toEqual({
       rpcs: 0,
       connections: 1,
@@ -356,28 +482,114 @@ describe('stopping', () => {
   }
 
   it('(e) an abort during backoff ends the turn and every retry', async () => {
-    const { runtime, clock, running } = await waitingInBackoff();
+    const { runtime, clock, running, submission } = await waitingInBackoff();
     expect(cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled')).toBe(true);
     expect((await running).reason).toBe('cancelled-by-user');
-    await expectNoLaterSubmission(runtime, clock);
+    await expectNoLaterSubmission(runtime, clock, submission);
   });
 
   it('(e) a consent revocation during backoff ends every retry', async () => {
-    const { runtime, clock, sessions, running } = await waitingInBackoff();
+    const { runtime, clock, sessions, running, submission } = await waitingInBackoff();
     await sessions.reapScope({ userId }, 'consent-revoked');
     expect((await running).reason).toBe('consent-revoked');
-    await expectNoLaterSubmission(runtime, clock);
+    await expectNoLaterSubmission(runtime, clock, submission);
   });
 
   it('(e) hub shutdown during backoff ends every retry', async () => {
-    const { runtime, clock, sessions, running } = await waitingInBackoff();
+    const { runtime, clock, sessions, running, submission } = await waitingInBackoff();
     await sessions.reapAll('hub-restarted');
     expect((await running).reason).toBe('hub-restarted');
-    await expectNoLaterSubmission(runtime, clock);
+    await expectNoLaterSubmission(runtime, clock, submission);
+  });
+
+  it("(e) the user's own Disconnect during backoff stops the loop without reconnecting", async () => {
+    const { runtime, clock, sessions, manager, running, submission } = await waitingInBackoff();
+    const environments = createEnvironmentService(
+      undefined,
+      manager,
+      () => undefined,
+      undefined,
+      undefined,
+      undefined,
+      (owner, environmentId) => {
+        void sessions.reapScope({ userId: owner, environmentId }, 'runtime-disconnected', {
+          keepContinuation: true,
+          explicit: true,
+        });
+      }
+    );
+    await environments.disconnect(userId, 'local');
+    expect((await running).reason).toBe('runtime-disconnected');
+    await expectNoLaterSubmission(runtime, clock, submission);
+  });
+
+  it('(e) a dropped socket during backoff does not stop the loop', async () => {
+    const { runtime, clock, sessions, submission } = await waitingInBackoff();
+    let settledEarly = false;
+    void submission().then(() => {
+      settledEarly = true;
+    });
+    // The same reap, without the user's say-so: the loop keeps waiting.
+    await sessions.reapScope({ userId, environmentId: 'local' }, 'runtime-disconnected', {
+      keepContinuation: true,
+    });
+    clock.advance();
+    await waitFor(() => clock.pendingCount() === 1, 'the next backoff wait');
+    expect(settledEarly).toBe(false);
+    cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled');
+    await runtime.close();
+  });
+
+  it('never re-points a turn that stopped while its session was reopening', async () => {
+    const clock = createFakeBackoffClock({ auto: true });
+    const context = harness({
+      clock,
+      dropAfterOpen: true,
+      beforeReacquireReturns: () => {
+        cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled');
+      },
+    });
+    clock.onWait(() => {
+      context.runtime.setAvailable(true);
+      void context.manager.connect(userId, 'local', { force: true });
+    });
+    const running = start(context.controller);
+    expect((await running).reason).toBe('cancelled-by-user');
+    expect((await context.submission()).kind).toBe('stopped');
+    const { part } = await turnPart();
+    expect(part.sessionId).toBe('session-1');
+    expect(context.runtime.rpcCount()).toBe(0);
+    await context.runtime.close();
+  });
+
+  it('a graceful shutdown while a submission is unanswered ends it as acceptance-unknown', async () => {
+    const { runtime, controller, sessions, submission } = harness();
+    runtime.script.push('stall');
+    const running = start(controller);
+    await waitFor(() => runtime.rpcCount() === 1, 'the stalled turn');
+    await sessions.reapAll('hub-restarted');
+    expect((await running).reason).toBe('acceptance-unknown');
+    runtime.releaseStalled();
+    expect((await submission()).kind).toBe('stopped');
+    await runtime.close();
+  });
+
+  it('a stop between resends of an unanswered attempt leaves it unresolved', async () => {
+    const clock = createFakeBackoffClock({ auto: false });
+    const { runtime, controller, submission } = harness({ clock, callTimeoutMs: 20 });
+    runtime.script.push('stall');
+    const running = start(controller);
+    await waitFor(() => clock.pendingCount() === 1, 'the backoff after the unanswered send');
+    cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled');
+    expect((await submission()).kind).toBe('stopped');
+    expect((await running).reason).toBe('cancelled-by-user');
+    expect(await attemptStates()).toEqual(['unresolved']);
+    expect(runtime.submissionCount()).toBe(1);
+    await runtime.close();
   });
 
   it('(e) a reply arriving after an abort cannot revive the attempt', async () => {
-    const { runtime, controller } = harness();
+    const { runtime, controller, submission } = harness();
     runtime.script.push('stall');
     const running = start(controller);
     await waitFor(() => runtime.rpcCount() === 1, 'the stalled turn');
@@ -389,8 +601,14 @@ describe('stopping', () => {
       () => runtime.cancels.some((cancel) => cancel.nativeTurnId === 'native-turn-1'),
       'the late-accepted vendor turn to be cancelled'
     );
-    await settle();
-    expect(await attemptStates()).toEqual(['unresolved']);
+    expect((await submission()).kind).toBe('stopped');
+    // The reply proved the vendor accepted it; the turn stays ended.
+    const [row] = await listAttemptsForMessage(assistantMessageId, getDb());
+    expect(row).toMatchObject({
+      state: 'terminal',
+      nativeTurnId: 'native-turn-1',
+      terminalReason: 'accepted-after-stop',
+    });
     const { part, generating } = await turnPart();
     expect(part.terminalReason).toBe('cancelled-by-user');
     expect(generating).toBe(false);
@@ -409,7 +627,7 @@ describe('restart against a real runtime', () => {
     reconcileExternalTurns({ reason: 'hub-restarted', chatId, isActive: () => false }, getDb());
 
   it('ends an unconfirmed submission as acceptance-unknown without resubmitting it', async () => {
-    const { runtime, controller } = harness();
+    const { runtime, controller, submission } = harness();
     runtime.script.push('stall');
     void start(controller);
     await waitFor(() => runtime.rpcCount() === 1, 'the stalled turn');
@@ -423,7 +641,7 @@ describe('restart against a real runtime', () => {
     expect(await attemptStates()).toEqual(['unresolved']);
 
     runtime.releaseStalled();
-    await settle();
+    expect((await submission()).kind).toBe('stopped');
     expect({ rpcs: runtime.rpcCount(), submissions: runtime.submissionCount() }).toEqual({
       rpcs: 1,
       submissions: 1,
@@ -435,7 +653,7 @@ describe('restart against a real runtime', () => {
     const { runtime, controller } = harness();
     void start(controller);
     await waitFor(() => runtime.submissionCount() === 1, 'the accepted turn');
-    await settle();
+    await accepted();
     runtime.emit({
       type: 'activity_started',
       callId: 'call-1',

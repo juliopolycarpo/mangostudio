@@ -18,6 +18,7 @@ import {
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getSourceFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
+import { onEnvironmentWithdrawn } from '../modules/environments/application/environment-service';
 import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
 import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
@@ -84,6 +85,16 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   getRuntimeConnectionManager().onExternalAgentsRevoked((userId, environmentId) => {
     void externalSessionManager
       .reapScope({ userId, environmentId }, 'consent-revoked')
+      .catch(() => undefined);
+  });
+  // A turn waiting to resubmit reconnects on its own after a dropped socket;
+  // after the user's own Disconnect, disable, repoint or removal it must not.
+  onEnvironmentWithdrawn((userId, environmentId) => {
+    void externalSessionManager
+      .reapScope({ userId, environmentId }, 'runtime-disconnected', {
+        keepContinuation: true,
+        explicit: true,
+      })
       .catch(() => undefined);
   });
   getRuntimeConnectionManager().onTerminalsRevoked((userId, environmentId) => {
