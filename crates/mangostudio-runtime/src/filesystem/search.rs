@@ -530,7 +530,8 @@ fn scan_opened_file(
     let mut chunk = [0; 64 * 1024];
     loop {
         check_cancel(cancel)?;
-        let remaining = (params.max_file_size_bytes + 1 - bytes.len()).min(chunk.len());
+        let remaining =
+            (params.max_file_size_bytes.saturating_add(1) - bytes.len()).min(chunk.len());
         if remaining == 0 {
             break;
         }
@@ -1338,6 +1339,23 @@ mod tests {
         assert_eq!(
             grep(grep_parameters, &token()).unwrap()["matches"],
             json!([{ "file": "match.txt", "line": 1, "text": "needle" }])
+        );
+    }
+
+    #[test]
+    fn restricted_grep_still_reads_files_when_the_size_limit_is_usize_max() {
+        let root = scratch_dir("filesystem-search-capability-max-size");
+        fs::write(root.join("match.txt"), "needle\n").unwrap();
+        let mut parameters = grep_params(&root, "needle");
+        parameters.max_file_size_bytes = usize::MAX;
+        parameters.path_policy = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            ..PathPolicy::default()
+        };
+        assert_eq!(
+            grep(parameters, &token()).unwrap()["matches"],
+            json!([{ "file": "match.txt", "line": 1, "text": "needle" }]),
+            "expected the match to survive an unbounded maxFileSizeBytes"
         );
     }
 
