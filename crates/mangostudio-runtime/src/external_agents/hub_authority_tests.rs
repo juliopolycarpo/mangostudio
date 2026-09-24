@@ -116,6 +116,18 @@ async fn anything_but_an_explicit_schema_valid_yes_refuses() {
 #[tokio::test]
 async fn an_older_hub_without_the_method_refuses() {
     let (_hub, runtime) = handshaken_pair().await;
+    let reply = runtime
+        .request(
+            HUB_WORKSPACE_AUTHORIZE,
+            json!({ "canonicalPath": "/work", "purpose": "external-agent" }),
+        )
+        .await
+        .expect_err("a hub without the handler must not answer");
+    assert_eq!(
+        reply.code,
+        codes::METHOD_UNSUPPORTED,
+        "expected the older hub to reply METHOD_UNSUPPORTED | received: {reply:?}"
+    );
     let admitted = authority().authorize(&runtime, Path::new("/work")).await;
     assert!(
         !admitted,

@@ -64,7 +64,8 @@ already stores that exact canonical `workdir`. The CLI/setup stand-in user `loca
 with no bound user are never authorized.
 
 The in-process Local runtime reaches that policy through the callback it is built with. A spawned
-runtime (stdio, WSL, SSH, container, HTTP or dial-in) asks back over its own hub session. It
+Rust runtime (stdio, WSL, SSH, container, HTTP or dial-in) asks back over its own hub session. A
+spawned TypeScript runtime does not ask yet and still refuses every workspace. It
 sends `hub.workspace.authorize` from the hub-served `mangostudio.hub` contract
 (`apps/shared/src/runtime-contract/hub-contract.ts`, emitted as `generated/hub-catalog.json`) with
 `{ canonicalPath, purpose: "external-agent" }`. The hub binds each session to the `(userId,
