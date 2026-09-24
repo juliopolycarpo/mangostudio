@@ -179,7 +179,7 @@ impl Supervisor {
     pub(crate) async fn turn(
         self: &Arc<Self>,
         params: TurnParams,
-        cancel: &tokio_util::sync::CancellationToken,
+        _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<TurnResult, RemoteError> {
         let live = self.require_live(&params.session_id)?;
         super::supervisor::refuse_unoffered_configuration(live.target, &params.configuration)?;
@@ -207,13 +207,10 @@ impl Supervisor {
         let request = TurnRequest::new(params.client_message_id.clone(), params.input.clone())
             .with_attachments(attachments)
             .with_configuration(map::configuration_patch(&params.configuration));
-        // The hub giving up on this call drops the start, which the SDK treats
-        // as abandoning it; nothing is left running that nobody watches.
-        let started = tokio::select! {
-            biased;
-            () = cancel.cancelled() => None,
-            started = live.session.start_turn(request) => Some(started),
-        };
+        // Not raced against the hub's request cancel: the hub reconciles a
+        // lost reply by sending this same id again, and the receipt has to
+        // hold what really happened, not that the first caller stopped waiting.
+        let started = Some(live.session.start_turn(request).await);
         let result = match started {
             None => Err(self.abandoned_start(&live, &params.client_message_id)),
             Some(Ok(stream)) => {

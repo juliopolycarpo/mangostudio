@@ -2134,29 +2134,31 @@ async fn a_turn_cannot_switch_cursor_to_auto_review() {
 }
 
 #[tokio::test]
-async fn a_start_the_hub_gave_up_on_releases_the_session() {
+async fn a_turn_whose_caller_gave_up_still_records_its_real_outcome_for_a_resend() {
+    // The hub reconciles a lost reply by resending the same id on the same
+    // connection; the receipt must answer with the turn that really started.
     let rig = rig(RigOptions::default()).await;
     rig.open("one").await.unwrap();
-    let cancelled = CancellationToken::new();
-    cancelled.cancel();
-    let error = rig
+    let gave_up = CancellationToken::new();
+    gave_up.cancel();
+    let first = rig
         .supervisor
-        .turn(rig.turn_params("one", "m1", "go"), &cancelled)
+        .turn(rig.turn_params("one", "m1", "go"), &gave_up)
         .await
-        .expect_err("a start the hub abandoned must fail");
-    assert_eq!(error.code, codes::CANCELLED, "received: {error:?}");
-    assert_eq!(
-        rig.log.turns_started.load(Ordering::SeqCst),
-        0,
-        "expected the start never reached the vendor"
-    );
-    assert_eq!(rig.supervisor.live_sessions().1[0].state, "idle");
-    rig.supervisor
+        .expect("the start runs to its real outcome");
+    let resent = rig
+        .supervisor
         .turn(
-            rig.turn_params("one", "m2", "next"),
+            rig.turn_params("one", "m1", "go"),
             &CancellationToken::new(),
         )
         .await
-        .expect("the session is free after the abandoned start");
+        .expect("the resend is answered from the receipt");
+    assert_eq!(first, resent);
+    assert_eq!(
+        rig.log.turns_started.load(Ordering::SeqCst),
+        1,
+        "expected one vendor turn across the abandoned call and its resend"
+    );
     rig.close("one").await;
 }
