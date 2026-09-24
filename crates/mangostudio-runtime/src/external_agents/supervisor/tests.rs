@@ -48,6 +48,9 @@ struct HarnessLog {
     question_answers: AtomicUsize,
     cancels: AtomicUsize,
     steers: AtomicUsize,
+    /// Makes every later turn start fail the way the Claude harness answers
+    /// once a forced stop has made its session nonresumable.
+    nonresumable: AtomicBool,
 }
 
 impl HarnessLog {
@@ -220,6 +223,12 @@ impl Session for CountingSession {
     }
 
     async fn start_turn(&self, request: TurnRequest) -> mango_external_agents::Result<TurnStream> {
+        if self.log.nonresumable.load(Ordering::SeqCst) {
+            return Err(SdkError::Cancelled {
+                reason: mango_external_agents::CancelReason::Timeout,
+            }
+            .with_dispatch(mango_external_agents::Dispatch::NotSubmitted));
+        }
         self.log.turns_started.fetch_add(1, Ordering::SeqCst);
         self.inner.start_turn(request).await
     }
@@ -1850,6 +1859,42 @@ async fn a_turn_may_narrow_its_roots_but_never_widen_them() {
         .expect("an opened root is allowed");
     assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 1);
     rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_session_that_can_run_no_more_turns_is_closed_and_reported_lost_not_resendable() {
+    // After a forced stop the Claude harness refuses every later turn on the
+    // session as cancelled-and-not-submitted. Relayed as it is, the hub reads
+    // "not submitted" as "send it again" and would resend to a session that
+    // can never run it.
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    rig.log.nonresumable.store(true, Ordering::SeqCst);
+    let error = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a turn on a nonresumable session must fail");
+    let details = error.details.clone().unwrap_or_default();
+    assert_eq!(
+        (details.get("kind"), details.get("dispatch")),
+        (Some(&json!("tool_argument")), None),
+        "expected a session-lost argument refusal with no resendable dispatch | received: {} {details:?}",
+        error.message
+    );
+    assert!(
+        error.message.contains("can no longer run turns"),
+        "expected the refusal to say the session can run no more turns | received: {}",
+        error.message
+    );
+    assert_eq!(
+        (rig.live_count(), rig.log.closes()),
+        (0, vec![CloseReason::Requested]),
+        "expected (live sessions, vendor closes) once the session is known dead"
+    );
 }
 
 #[tokio::test]

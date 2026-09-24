@@ -36,7 +36,7 @@ use tokio::sync::watch;
 
 use super::map;
 use super::map_events::{self, Answer, PendingInteraction};
-use super::supervisor::{LiveSession, Supervisor, argument};
+use super::supervisor::{CloseCause, LiveSession, Supervisor, argument};
 use super::wire::{
     AckResult, AgentError, Attachment, AttachmentKind, CancelParams, Event, EventEnvelope,
     RespondParams, StartReviewParams, StartReviewResult, SteerParams, SteerRejection, SteerResult,
@@ -372,6 +372,29 @@ impl Supervisor {
         }
         if error.dispatch().is_safe_to_replay() {
             lock(&live.turns.receipts).remove(client_message_id);
+        }
+        // The session itself refused: it can never run a turn again (the
+        // Claude harness answers this way once a forced stop made it
+        // nonresumable) or it is shutting down. Relayed as "not submitted",
+        // the hub would resend to it forever; closing it and reporting it
+        // lost makes the next send open a session that can run the turn.
+        if error.dispatch().is_safe_to_replay() && is_cancelled(&error) {
+            let closed = self
+                .close_session(
+                    super::wire::CloseParams {
+                        session_id: live.session_id.clone(),
+                    },
+                    CloseCause::Requested,
+                )
+                .await;
+            let cleanup = closed
+                .err()
+                .map(|failure| format!(" Closing it also failed: {}", failure.message))
+                .unwrap_or_default();
+            return argument(format!(
+                "External-agent session {:?} can no longer run turns ({error}); expected a new session.{cleanup}",
+                live.session_id
+            ));
         }
         if matches!(error, SdkError::Busy)
             || matches!(&error, SdkError::Operation { source, .. } if matches!(**source, SdkError::Busy))
@@ -709,6 +732,16 @@ impl Relay {
                 truncated: None,
             },
         );
+    }
+}
+
+/// Whether the SDK refused as `Cancelled`, directly or inside its
+/// `Operation` wrapper.
+fn is_cancelled(error: &SdkError) -> bool {
+    match error {
+        SdkError::Cancelled { .. } => true,
+        SdkError::Operation { source, .. } => is_cancelled(source),
+        _ => false,
     }
 }
 
