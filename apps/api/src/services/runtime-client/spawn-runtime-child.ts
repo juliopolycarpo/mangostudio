@@ -17,17 +17,26 @@
 
 import { statSync } from 'node:fs';
 import { RESERVED_ERROR_CODES, RemoteError, type SessionClosure } from '@mangostudio/protocol';
-import { type SpawnedPeer, type SpawnOptions, spawnPort } from '@mangostudio/protocol/spawn';
+import {
+  type LaunchedPeer,
+  type SpawnedPeer,
+  type SpawnOptions,
+  spawnPort,
+} from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/shared/process';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 import { resolveHandshakeTimeoutMs } from './handshake-budget';
 import { type HubSession, openHubSession, type ProtocolHubSession } from './hub-session';
 
-/** Grace between end of stdin and SIGTERM when a runtime does not unwind on its own. */
-const TERMINATE_GRACE_MS = 2_000;
+/** A failed handshake keeps the established short stop budget. */
+const STARTUP_TERMINATE_GRACE_MS = 2_000;
+/** Lets an active installer settle after a successful handshake. */
+const ACTIVE_TERMINATE_GRACE_MS = 27_000;
 /** Further wait after SIGTERM before the launcher escalates to SIGKILL. */
 const KILL_GRACE_MS = 2_000;
+/** Final exit observation after force, completing the 30-second stop cap. */
+const EXIT_GRACE_MS = 1_000;
 const MAX_STDERR_BYTES = 16_384;
 const STDERR_EXCERPT_MAX_CHARS = 2_000;
 /** How long a failed launch waits for the child's exit status before reporting. */
@@ -105,7 +114,7 @@ export interface SpawnRuntimeChildOptions {
  * instead of spawning a process and racing its actual timing.
  */
 export interface SpawnRuntimeChildDeps {
-  readonly spawnPort?: (options: SpawnOptions) => SpawnedPeer;
+  readonly spawnPort?: (options: SpawnOptions) => LaunchedPeer;
 }
 
 /**
@@ -138,8 +147,9 @@ export async function spawnRuntimeChild(
     // two about those — it also catches values that carry one in a URL.
     env: sanitizeShellEnv({}, process.env),
     stderrTailBytes: MAX_STDERR_BYTES,
-    terminateGraceMs: TERMINATE_GRACE_MS,
+    terminateGraceMs: STARTUP_TERMINATE_GRACE_MS,
     killGraceMs: KILL_GRACE_MS,
+    exitGraceMs: EXIT_GRACE_MS,
   });
 
   let hub: ProtocolHubSession;
@@ -172,6 +182,8 @@ export async function spawnRuntimeChild(
       options.describeFailure?.(failure) ?? describeLaunchFailure(failure, options.cwd)
     );
   }
+
+  peer.setTerminateGraceMs(ACTIVE_TERMINATE_GRACE_MS);
 
   let released = false;
   let exited: Promise<void> = Promise.resolve();

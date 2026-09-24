@@ -54,9 +54,16 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { readFile, realpath, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import { createHash } from 'node:crypto';
+import { copyFile, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { spawnPort } from '@mangostudio/protocol/spawn';
+import {
+  RUNTIME_CONSENT_PRESETS,
+  runtimeSlotCurrentBinaryPath,
+  runtimeSlotCurrentDir,
+  runtimeSlotVersionBinaryPath,
+} from '@mangostudio/shared/runtime-home';
 import { getDb } from '../../../src/db/database';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
@@ -64,6 +71,7 @@ import { evaluateRemoteInstallGuard } from '../../../src/modules/environments/do
 import { createEnvironmentRepository } from '../../../src/modules/environments/infrastructure/environment-repository';
 import { createTerminalSessionService } from '../../../src/modules/terminals/application/terminal-session-service';
 import { connectHttpRuntime } from '../../../src/services/runtime-client/connect-http-runtime';
+import { openHubSession } from '../../../src/services/runtime-client/hub-session';
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,
@@ -158,6 +166,102 @@ describe('Real Rust runtime qualification', () => {
           await assertRustRuntimeProbingMethods(client);
         } finally {
           await connection.close();
+        }
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available || process.platform === 'win32')(
+      'publishes a verified update through the real Rust stdio runtime',
+      async () => {
+        mangoHome = await scratchMangoHome('stdio-update');
+        previousMangoHome = process.env.MANGO_HOME;
+        process.env.MANGO_HOME = mangoHome;
+        const connection = await spawnRuntimeChild({
+          environmentId: 'rust-stdio-update',
+          launch: resolveRuntimeLaunchCommand(undefined, {
+            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+          }),
+          hubVersion: runtimeVersion,
+          onClosed: () => undefined,
+        });
+
+        try {
+          const client = new RuntimeClient(connection.hub, () => undefined, 'rust-stdio');
+          const bytes = Buffer.from('verified runtime bytes');
+          const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+          const begun = await client.update.begin({
+            version: '9.8.7',
+            digest,
+            totalBytes: bytes.length,
+          });
+          const chunked = await client.update.chunk({
+            sessionId: begun.sessionId,
+            seq: 0,
+            bytesBase64: bytes.toString('base64'),
+          });
+          expect(chunked.receivedBytes).toBe(bytes.length);
+          const committed = await client.update.commit({ sessionId: begun.sessionId });
+          expect(committed).toEqual({ version: '9.8.7', digest, restart: 'manual' });
+          expect(
+            await readFile(
+              runtimeSlotCurrentBinaryPath('host', { mangoHome, platform: process.platform })
+            )
+          ).toEqual(bytes);
+        } finally {
+          await connection.close();
+        }
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available || process.platform === 'win32')(
+      'exits 75 after a supervised update has returned its commit response',
+      async () => {
+        mangoHome = await scratchMangoHome('stdio-supervised-update');
+        const oldBinary = runtimeSlotVersionBinaryPath('host', '1.0.0', { mangoHome });
+        await mkdir(dirname(oldBinary), { recursive: true });
+        await copyFile(binary.path, oldBinary);
+        await symlink('1.0.0', runtimeSlotCurrentDir('host', { mangoHome }));
+        const peer = spawnPort({
+          argv: [oldBinary, '--stdio'],
+          env: { MANGO_HOME: mangoHome },
+          terminateGraceMs: 2_000,
+          killGraceMs: 2_000,
+          exitGraceMs: 1_000,
+        });
+        try {
+          const hub = await openHubSession(peer.port, { hubVersion: runtimeVersion });
+          const client = new RuntimeClient(hub, () => undefined, 'rust-supervised-update');
+          const bytes = Buffer.from('next runtime bytes');
+          const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+          const begun = await client.update.begin({
+            version: '9.8.8',
+            digest,
+            totalBytes: bytes.length,
+          });
+          await client.update.chunk({
+            sessionId: begun.sessionId,
+            seq: 0,
+            bytesBase64: bytes.toString('base64'),
+          });
+          expect(await client.update.commit({ sessionId: begun.sessionId })).toEqual({
+            version: '9.8.8',
+            digest,
+            restart: 'scheduled',
+          });
+          const exited = await Promise.race([
+            peer.exited,
+            Bun.sleep(5_000).then(() => {
+              throw new Error('the supervised runtime did not exit after commit');
+            }),
+          ]);
+          expect(exited.code).toBe(75);
+          expect(await readFile(runtimeSlotCurrentBinaryPath('host', { mangoHome }))).toEqual(
+            bytes
+          );
+        } finally {
+          await peer.terminate();
         }
       },
       30_000
@@ -437,7 +541,7 @@ describe('Real Rust runtime qualification', () => {
     );
 
     it.skipIf(!binary.available)(
-      'finishes a running install step after the stdio hub goes away',
+      'finishes an install step after the old four-second stop window',
       async () => {
         mangoHome = await scratchMangoHome('stdio-install-hub-loss');
         previousMangoHome = process.env.MANGO_HOME;
@@ -457,14 +561,16 @@ describe('Real Rust runtime qualification', () => {
             () => undefined,
             'rust-stdio-install-hub-loss'
           );
-          const installer = await writeFakeInstaller(scratch, 'sleeps', 'hub-loss');
+          const installer = await writeFakeInstaller(scratch, 'waits', 'hub-loss');
           const run = startRelayedInstall(client, installer, { runId: 'rust-install-hub-loss' });
           await run.waitForLine('stdout', 'waiting');
 
-          // Closing the session is a lost hub, not a cancel: the step still applies its effect.
-          // This short step settles inside the launcher's terminate grace; the runtime's own
-          // wait past the protocol handler grace is proved by the crate's spawned-stdio test.
-          await connection.close();
+          // Closing the session marks the chain stopping. The active step
+          // still has time to finish after the former four-second cap.
+          const closed = connection.close();
+          await Bun.sleep(5_000);
+          await writeFile(installer.release, 'finish');
+          await closed;
           await run.result;
           await expectAppliedOnce(installer, run);
           expect(await readFile(installer.logPath, 'utf8')).toContain('done');

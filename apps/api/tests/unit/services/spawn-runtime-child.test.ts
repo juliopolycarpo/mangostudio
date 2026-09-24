@@ -7,10 +7,57 @@
 
 import { describe, expect, it } from 'bun:test';
 import type { RemoteError } from '@mangostudio/protocol';
+import type { SpawnOptions } from '@mangostudio/protocol/spawn';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { DeferredSpawnPort } from '../../support/mocks/deferred-spawn-port';
 
 describe('spawnRuntimeChild — cancellation', () => {
+  it('keeps a failed handshake on the short stop budget', async () => {
+    const fake = new DeferredSpawnPort();
+    const controller = new AbortController();
+    let launchOptions: SpawnOptions | undefined;
+
+    const attempt = spawnRuntimeChild(
+      {
+        environmentId: 'devbox',
+        launch: { command: 'fake-runtime', args: [] },
+        hubVersion: 'hub-test',
+        onClosed: () => undefined,
+        signal: controller.signal,
+      },
+      {
+        spawnPort: (options) => {
+          launchOptions = options;
+          return fake.spawnPort();
+        },
+      }
+    );
+
+    controller.abort();
+    await attempt.catch(() => undefined);
+    expect(launchOptions?.terminateGraceMs).toBe(2_000);
+    expect(launchOptions?.killGraceMs).toBe(2_000);
+    expect(launchOptions?.exitGraceMs).toBe(1_000);
+    expect(fake.promotedTerminateGraceMs).toBeUndefined();
+  });
+
+  it('promotes a connected runtime to the 30-second total stop cap', async () => {
+    const fake = new DeferredSpawnPort();
+    const connectionPromise = spawnRuntimeChild(
+      {
+        environmentId: 'devbox',
+        launch: { command: 'fake-runtime', args: [] },
+        hubVersion: 'hub-test',
+        onClosed: () => undefined,
+      },
+      { spawnPort: fake.spawnPort }
+    );
+    fake.release();
+    const connection = await connectionPromise;
+    expect(fake.promotedTerminateGraceMs).toBe(27_000);
+    await connection.close();
+  });
+
   it('reaps the child when cancelled mid-handshake, before a late answer arrives', async () => {
     const fake = new DeferredSpawnPort();
     const controller = new AbortController();

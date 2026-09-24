@@ -24,7 +24,7 @@
 
 import { CLOSE_CODES, type Port, Session } from '@mangostudio/protocol';
 import { createInProcessPortPair } from '@mangostudio/protocol/in-process';
-import type { ExitStatus, SpawnedPeer } from '@mangostudio/protocol/spawn';
+import type { ExitStatus, LaunchedPeer } from '@mangostudio/protocol/spawn';
 import {
   RUNTIME_CONTRACT_NAME,
   RUNTIME_CONTRACT_VERSION,
@@ -37,9 +37,10 @@ export class DeferredSpawnPort {
   readonly #exit = Promise.withResolvers<ExitStatus>();
   terminateCallCount = 0;
   spawnCallCount = 0;
+  promotedTerminateGraceMs: number | undefined;
 
   /** Hand this as the injected `spawnPort` dependency. */
-  readonly spawnPort = (): SpawnedPeer => {
+  readonly spawnPort = (): LaunchedPeer => {
     this.spawnCallCount += 1;
     const { a, b } = createInProcessPortPair();
     this.#runtimeSidePort = b;
@@ -48,6 +49,11 @@ export class DeferredSpawnPort {
       pid: 4321,
       exited: this.#exit.promise,
       stderrTail: () => '',
+      startError: async () => ({ exit: undefined, spawnErrorCode: undefined, stderrLine: '' }),
+      setTerminateGraceMs: (ms) => {
+        this.promotedTerminateGraceMs = ms;
+        return true;
+      },
       terminate: () => {
         this.terminateCallCount += 1;
         // Closing `b` — the far end from `a`'s perspective — is what fires

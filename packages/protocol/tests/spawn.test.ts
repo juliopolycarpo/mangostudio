@@ -413,6 +413,22 @@ describe('spawn launcher', () => {
     expect(exitedOutcome).toBe('pending');
   });
 
+  it('lets a launcher extend the graceful window only before termination starts', async () => {
+    const child = new UnkillableChild();
+    const peer = spawnPort(
+      { argv: ['runtime'], terminateGraceMs: 10, killGraceMs: 10, exitGraceMs: 10 },
+      () => child as unknown as ChildProcess
+    );
+
+    expect(peer.setTerminateGraceMs(30)).toBe(true);
+    expect(() => peer.setTerminateGraceMs(-1)).toThrow(
+      'terminateGraceMs is -1; expected an integer of at least 0'
+    );
+    const stopping = peer.terminate();
+    expect(peer.setTerminateGraceMs(1)).toBe(false);
+    expect(await stopping).toBeUndefined();
+  });
+
   it('answers a second terminate with the status of a child that exited late', async () => {
     // `undefined` is what the first call observed, not a verdict on the
     // child. A supervisor that gives up, logs, and asks again once the
