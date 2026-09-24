@@ -334,4 +334,42 @@ describe('Real Rust runtime external-agent admission', () => {
     () => diagVariant('d', { db: false, binding: false, policy: false, healthFirst: false }),
     60_000
   );
+  it.skipIf(!binary.available)(
+    'DIAG E exact clone of test 4',
+    () => diagVariant('e', { db: true, binding: true, policy: false, healthFirst: false }),
+    60_000
+  );
+  it.skipIf(!binary.available)(
+    'DIAG F discover then refuse (test 3 shape)',
+    async () => {
+      const home = await scratchMangoHome('diag-f');
+      cleanups.push(() => cleanupMangoHome(home));
+      const emptyPath = join(home, 'empty-path');
+      await mkdir(emptyPath);
+      const rust = await spawnRustRuntime('diag-f', {
+        env: {
+          HOME: home,
+          USERPROFILE: home,
+          PATH: emptyPath,
+          XDG_CONFIG_HOME: join(home, '.config'),
+        },
+      });
+      await rust.externalAgents.discover({
+        targetIds: ['codex', 'cursor', 'claude'],
+        timeoutMs: 20_000,
+      });
+      console.error('DIAG variant result f discovered', Date.now());
+    },
+    60_000
+  );
+  it.skipIf(!binary.available)(
+    'DIAG G exact clone of test 4 after F',
+    () => diagVariant('g', { db: true, binding: true, policy: false, healthFirst: false }),
+    60_000
+  );
+  it.skipIf(!binary.available)(
+    'DIAG H no db, null binding after G',
+    () => diagVariant('h', { db: false, binding: false, policy: false, healthFirst: false }),
+    60_000
+  );
 });
