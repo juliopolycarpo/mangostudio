@@ -7,9 +7,8 @@
  * them is `external-turn-submission.ts`.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-import { isRequestNotSent } from '../../../services/runtime-client/request-not-sent';
-import { ToolExecutionTimedOutError } from '../../../services/tools/execution-timeout';
+import { RemoteError } from '@mangostudio/protocol';
+import { isRequestNotSent, noReplyOf } from '../../../services/runtime-client/request-not-sent';
 
 export interface RetryPolicy {
   /** First backoff, before jitter. */
@@ -36,40 +35,41 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
  *
  * - `not-submitted`: nothing reached the vendor — the hub never wrote the frame,
  *   or the runtime said so (`details.dispatch === "not-submitted"`).
- * - `no-reply`: the request may have been received; the reply never came.
- * - `refused`: the runtime answered with an error. That is a committed outcome.
+ * - `no-reply`: the hub itself saw no answer — its deadline passed, or its
+ *   connection closed. The request may have been received.
+ * - `acceptance-unknown`: the runtime answered that it cannot say whether the
+ *   vendor took the turn (`details.dispatch === "acceptance-unknown"`).
+ * - `refused`: any other answer the runtime sent, whatever its code. A
+ *   runtime-sent `UNAVAILABLE`, `TIMEOUT` or `CANCELLED` is a committed outcome
+ *   it replays from its receipt, so resending it would only spin.
  */
-export type SubmissionFailure = 'not-submitted' | 'no-reply' | 'refused';
+export type SubmissionFailure = 'not-submitted' | 'no-reply' | 'acceptance-unknown' | 'refused';
 
 /**
- * Classifies a rejected submission. Anything ambiguous is `no-reply`, the
- * direction that can never cause a second submission.
+ * Classifies a rejected submission. Only failures the hub itself observed are
+ * `no-reply`; everything that came over the wire is the runtime's answer.
  *
  * @example
- * classifySubmissionFailure(new ToolExecutionTimedOutError('late')); // 'no-reply'
+ * classifySubmissionFailure(new RemoteError('UNAVAILABLE', 'signed out')); // 'refused'
  */
 export function classifySubmissionFailure(error: unknown): SubmissionFailure {
   if (isRequestNotSent(error)) return 'not-submitted';
-  if (error instanceof RemoteError && error.details?.dispatch === 'not-submitted') {
-    return 'not-submitted';
-  }
-  if (error instanceof ToolExecutionTimedOutError) return 'no-reply';
-  if (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE) {
-    return 'no-reply';
-  }
-  if (error instanceof DOMException && error.name === 'AbortError') return 'no-reply';
+  if (noReplyOf(error)) return 'no-reply';
+  const dispatch = error instanceof RemoteError ? error.details?.dispatch : undefined;
+  if (dispatch === 'not-submitted') return 'not-submitted';
+  if (dispatch === 'acceptance-unknown') return 'acceptance-unknown';
   return 'refused';
 }
 
 /**
  * Whether a `no-reply` failure also proves the connection it was sent on is
- * gone — the SDK names the close code when a close rejected the request.
+ * gone, and with it every receipt that could have answered a resend.
  *
  * @example
- * failureClosedConnection(new RemoteError('UNAVAILABLE', 'closed', { closeCode: 1001 })); // true
+ * failureClosedConnection(error); // true when the hub's own session closed under it
  */
 export function failureClosedConnection(error: unknown): boolean {
-  return error instanceof RemoteError && error.details?.closeCode !== undefined;
+  return noReplyOf(error)?.reason === 'connection-closed';
 }
 
 /**

@@ -51,7 +51,7 @@ import {
   RuntimeContractViolationError,
 } from './contract-violation';
 import { resolveLocalHubIdentity } from './hub-identity';
-import { RuntimeRequestNotSentError } from './request-not-sent';
+import { RuntimeRequestNoReplyError, RuntimeRequestNotSentError } from './request-not-sent';
 
 /** Name this hub announces itself under; the runtime's audit log records it. */
 const HUB_PEER_NAME = 'mangostudio';
@@ -327,7 +327,11 @@ export async function openHubSession(
       if (session.state === 'closed') {
         return Promise.reject(new RuntimeRequestNotSentError(method, session.closure));
       }
-      return requestValidated(client, method, params, requestOptions);
+      return requestTaggingNoReply(
+        session,
+        () => requestValidated(client, method, params, requestOptions),
+        requestOptions?.timeoutMs
+      );
     },
     onEvent,
     onClose,
@@ -344,6 +348,49 @@ export async function openHubSession(
  * The rejected result never appears in the thrown error: only the method name
  * and the JSON pointer to the first mismatch do.
  */
+/**
+ * Runs one request and re-raises a failure *this hub* produced — its own
+ * deadline, or its own connection closing — as {@link RuntimeRequestNoReplyError}.
+ *
+ * Everything else is an answer the runtime sent and passes through unchanged.
+ * The deadline is recognized by a marker timer armed before the SDK's own, for
+ * the same duration: timers of equal delay fire in the order they were set, so
+ * by the time the SDK's `TIMEOUT` rejection is handled the marker has fired,
+ * and a `TIMEOUT` the runtime sent earlier finds it unfired. A close is
+ * recognized by the session being closed when the `UNAVAILABLE` arrives.
+ */
+async function requestTaggingNoReply<T>(
+  session: Session,
+  run: () => Promise<T>,
+  timeoutMs: number | undefined
+): Promise<T> {
+  let deadlinePassed = false;
+  const marker =
+    timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          deadlinePassed = true;
+        }, timeoutMs);
+  try {
+    return await run();
+  } catch (error) {
+    if (!(error instanceof RemoteError)) throw error;
+    if (error.code === RESERVED_ERROR_CODES.TIMEOUT && deadlinePassed) {
+      throw new RuntimeRequestNoReplyError(error, 'deadline');
+    }
+    if (
+      error.code === RESERVED_ERROR_CODES.UNAVAILABLE &&
+      session.state === 'closed' &&
+      error.details?.closeCode !== undefined
+    ) {
+      throw new RuntimeRequestNoReplyError(error, 'connection-closed');
+    }
+    throw error;
+  } finally {
+    if (marker !== undefined) clearTimeout(marker);
+  }
+}
+
 async function requestValidated<K extends RuntimeMethod>(
   client: ReturnType<typeof RUNTIME_CONTRACT.client>,
   method: K,

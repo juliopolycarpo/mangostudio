@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
 import {
   isRequestNotSent,
+  noReplyOf,
   RuntimeRequestNotSentError,
 } from '../../../../src/services/runtime-client/request-not-sent';
 import { connectTestRuntime } from '../../../support/runtime-fixture';
@@ -55,6 +56,43 @@ describe('RuntimeRequestNotSentError', () => {
     expect(received).toBe(1);
     expect(error).toBeInstanceOf(RemoteError);
     expect(isRequestNotSent(error)).toBe(false);
+    expect(noReplyOf(error)?.reason).toBe('connection-closed');
+  });
+
+  it("tags the hub's own deadline as no-reply", async () => {
+    const runtime = await connectTestRuntime({
+      handlers: { 'external-agent.turn': () => new Promise(() => undefined) },
+    });
+    const error = await runtime.client.externalAgents
+      .turn(TURN_PARAMS, { timeoutMs: 20 })
+      .catch((e: unknown) => e);
+    expect(noReplyOf(error)?.reason).toBe('deadline');
+    await runtime.close();
+  });
+
+  it('never tags a TIMEOUT or UNAVAILABLE the runtime itself answered', async () => {
+    let code = 'TIMEOUT';
+    const runtime = await connectTestRuntime({
+      handlers: {
+        'external-agent.turn': () => {
+          // Details a runtime chose, including a close code of its own.
+          throw new RemoteError(code, `the runtime answered ${code}`, { closeCode: 1001 });
+        },
+      },
+    });
+    const timedOut = await runtime.client.externalAgents
+      .turn(TURN_PARAMS, { timeoutMs: 5_000 })
+      .catch((e: unknown) => e);
+    code = 'UNAVAILABLE';
+    const unavailable = await runtime.client.externalAgents
+      .turn(TURN_PARAMS, { timeoutMs: 5_000 })
+      .catch((e: unknown) => e);
+    expect({ timedOut: noReplyOf(timedOut), unavailable: noReplyOf(unavailable) }).toEqual({
+      timedOut: undefined,
+      unavailable: undefined,
+    });
+    expect(unavailable).toBeInstanceOf(RemoteError);
+    await runtime.close();
   });
 
   it('names the method and the expected state in its message', () => {

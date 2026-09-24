@@ -860,7 +860,8 @@ function translateRuntimeError(error: unknown): Error {
     return new DOMException(error.message, 'AbortError');
   }
   if (error.code === RESERVED_ERROR_CODES.TIMEOUT) {
-    return new ToolExecutionTimedOutError(error.message);
+    // `cause` keeps whether the hub or the runtime decided it timed out.
+    return new ToolExecutionTimedOutError(error.message, { cause: error });
   }
   if (error.code === RESERVED_ERROR_CODES.DENIED) {
     const missing = error.details?.missing;

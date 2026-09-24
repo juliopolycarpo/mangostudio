@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
+import { sql } from 'kysely';
 import { getDb } from '../../../../src/db/database';
 import {
   fingerprintTurnParams,
@@ -7,7 +8,10 @@ import {
 } from '../../../../src/modules/external-agents/application/external-turn-submission';
 import { DEFAULT_RETRY_POLICY } from '../../../../src/modules/external-agents/domain/external-turn-retry-policy';
 import { listAttemptsForMessage } from '../../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
-import { RuntimeRequestNotSentError } from '../../../../src/services/runtime-client/request-not-sent';
+import {
+  RuntimeRequestNoReplyError,
+  RuntimeRequestNotSentError,
+} from '../../../../src/services/runtime-client/request-not-sent';
 import { createFakeBackoffClock } from '../../../support/external-agents/fake-backoff-clock';
 import { createScriptedSessionHandle } from '../../../support/external-agents/scripted-session-handle';
 import { insertTestUser } from '../../../support/factories';
@@ -39,7 +43,8 @@ beforeEach(async () => {
 
 function submit(
   handle = createScriptedSessionHandle(),
-  clock = createFakeBackoffClock({ auto: true })
+  clock = createFakeBackoffClock({ auto: true }),
+  lateAcceptances: string[] = []
 ) {
   const signal = new AbortController().signal;
   let clockMs = 1_000;
@@ -69,7 +74,9 @@ function submit(
       newId: () => `attempt-${crypto.randomUUID()}`,
       random: () => 0.5,
       sleep: clock.sleep,
-      onLateAcceptance: () => undefined,
+      onLateAcceptance: (_handle, nativeTurnId) => {
+        lateAcceptances.push(nativeTurnId);
+      },
     }),
   };
 }
@@ -117,11 +124,29 @@ describe('submitExternalTurn', () => {
   it('treats a never-written resend of an already-sent attempt as unresolved', async () => {
     const handle = createScriptedSessionHandle();
     handle.failures.push(
-      () => new RemoteError('UNAVAILABLE', 'no reply'),
+      () => new RuntimeRequestNoReplyError(new RemoteError('TIMEOUT', 'no reply'), 'deadline'),
       () => new RuntimeRequestNotSentError('external-agent.turn', undefined)
     );
     const result = await submit(handle).outcome;
     expect(result.kind).toBe('unresolved');
     expect(handle.submissions()).toBe(0);
+  });
+
+  it('cancels the vendor turn when recording its acceptance fails, then fails loudly', async () => {
+    await sql`CREATE TRIGGER refuse_acceptance BEFORE UPDATE OF state ON external_turn_attempts WHEN NEW.state = 'accepted' BEGIN SELECT RAISE(ABORT, 'acceptance write refused'); END`.execute(
+      getDb()
+    );
+    try {
+      const lateAcceptances: string[] = [];
+      const { outcome } = submit(undefined, undefined, lateAcceptances);
+      const error = await outcome.then(
+        () => undefined,
+        (e: unknown) => e
+      );
+      expect(String(error)).toContain('acceptance write refused');
+      expect(lateAcceptances).toEqual(['native-turn-1']);
+    } finally {
+      await sql`DROP TRIGGER IF EXISTS refuse_acceptance`.execute(getDb());
+    }
   });
 });

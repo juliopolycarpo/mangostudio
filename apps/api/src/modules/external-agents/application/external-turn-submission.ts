@@ -121,6 +121,13 @@ export interface SubmitExternalTurnInput {
   readonly sleep: CancellableSleep;
   /** The accepted turn arrived after `signal` aborted; the vendor must be told to stop. */
   readonly onLateAcceptance: (handle: ExternalSessionHandle, nativeTurnId: string) => void;
+  /**
+   * Whether the latest attempt may have reached the runtime: true from the
+   * moment its request is handed to the transport until it is proven
+   * not-submitted or settled. A turn stopped while this is true cannot say
+   * the vendor never had it.
+   */
+  readonly onDispatchPending?: (pending: boolean) => void;
 }
 
 /** A session open that failed because the connection is not there yet, not because it was refused. */
@@ -221,38 +228,47 @@ async function runAttempt(
       { at: input.now(), ...(reason ? { terminalReason: reason } : {}) },
       input.db
     );
+  const pending = (value: boolean): void => input.onDispatchPending?.(value);
 
-  let sent = false;
+  /** Whether any request of this attempt was handed to the transport. */
+  let dispatched = false;
+  /** Whether a request of this attempt went out and was never answered. */
+  let unanswered = false;
   while (true) {
     if (input.signal.aborted) {
-      await settle('terminal', 'stopped');
+      // A stop after a request went out cannot claim the vendor never had it.
+      await settle(dispatched ? 'unresolved' : 'terminal', 'stopped');
       return { kind: 'done', outcome: { kind: 'stopped' } };
     }
     let nativeTurnId: string;
     try {
+      dispatched = true;
+      pending(true);
       nativeTurnId = await handle.sendTurn(params);
     } catch (error) {
       const failure = classifySubmissionFailure(error);
-      if (failure === 'not-submitted' && !sent) {
+      // The hub's own proof covers only this write; after an unanswered send
+      // the earlier request may still have landed. The runtime's proof comes
+      // from the same receipts every earlier request would have hit.
+      const provenAbsent = failure === 'not-submitted' && (!isRequestNotSent(error) || !unanswered);
+      if (provenAbsent) {
         await settle('not-submitted');
+        pending(false);
         await wait(retryHintOf(error));
         return { kind: 'retry' };
       }
       if (failure === 'refused') {
         await settle('terminal', 'refused');
+        pending(false);
         return { kind: 'done', outcome: { kind: 'refused', error } };
       }
-      // Sent at least once, no answer. Reconcilable only on the connection
-      // whose receipts could answer a resend.
-      sent = true;
-      // A resend the hub could not write proves the session closed, and with it
-      // the receipt that could have answered.
-      const sameConnection =
-        !isRequestNotSent(error) &&
-        !failureClosedConnection(error) &&
-        handle.isLive() &&
-        handle.connectionRevision === revision;
-      if (!sameConnection) {
+      // A resend the hub could not write proves the session closed, and with
+      // it the receipt that could have answered; a runtime that says it cannot
+      // tell has answered for good.
+      const reconcilable =
+        failure === 'no-reply' && !failureClosedConnection(error) && handle.isLive();
+      unanswered = true;
+      if (!reconcilable) {
         if (input.signal.aborted) continue;
         await settle('unresolved', 'acceptance-unknown');
         return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
@@ -262,22 +278,52 @@ async function runAttempt(
     }
 
     if (input.signal.aborted) {
-      await settle('terminal', 'stopped');
+      await recordLateAcceptance(input, attemptId, nativeTurnId);
       input.onLateAcceptance(handle, nativeTurnId);
       return { kind: 'done', outcome: { kind: 'stopped' } };
     }
-    const won = await transitionAttempt(
-      attemptId,
-      ['acceptance-unknown'],
-      'accepted',
-      { at: input.now(), nativeTurnId },
-      input.db
-    );
+    let won: boolean;
+    try {
+      won = await transitionAttempt(
+        attemptId,
+        ['acceptance-unknown'],
+        'accepted',
+        { at: input.now(), nativeTurnId },
+        input.db
+      );
+    } catch (error) {
+      // The vendor is running a turn nothing here will ever observe.
+      input.onLateAcceptance(handle, nativeTurnId);
+      throw error;
+    }
     if (!won) {
       // The turn already ended here; the vendor's copy of it must end too.
+      await recordLateAcceptance(input, attemptId, nativeTurnId);
       input.onLateAcceptance(handle, nativeTurnId);
       return { kind: 'done', outcome: { kind: 'stopped' } };
     }
+    pending(false);
     return { kind: 'done', outcome: { kind: 'accepted', nativeTurnId, attemptId } };
   }
+}
+
+/**
+ * Records what a late reply proved: the vendor did accept this attempt, after
+ * the turn had already stopped. The turn stays ended; the receipt stops
+ * claiming acceptance is unknown.
+ */
+async function recordLateAcceptance(
+  input: SubmitExternalTurnInput,
+  attemptId: string,
+  nativeTurnId: string
+): Promise<void> {
+  await transitionAttempt(
+    attemptId,
+    ['acceptance-unknown', 'unresolved'],
+    'terminal',
+    { at: input.now(), nativeTurnId, terminalReason: 'accepted-after-stop' },
+    input.db
+  ).catch((error: unknown) => {
+    logger.warn('late_acceptance_record_failed', { attemptId, error: String(error) });
+  });
 }
