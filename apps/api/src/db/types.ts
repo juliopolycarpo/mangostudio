@@ -524,7 +524,6 @@ interface EnvironmentToolchainsTable {
   updatedAt: number;
 }
 
-/** Root Kysely Database interface. */
 /** Where one submission of an external turn stands; see migration 056. */
 export type ExternalTurnAttemptState =
   | 'acceptance-unknown'
@@ -557,6 +556,7 @@ interface ExternalTurnAttemptsTable {
   updatedAt: number;
 }
 
+/** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
   environments: EnvironmentsTable;

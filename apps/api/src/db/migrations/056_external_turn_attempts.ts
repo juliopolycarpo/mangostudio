@@ -47,10 +47,11 @@ export const externalTurnAttempts: Migration = {
       .column('messageId')
       .execute();
     await db.schema
-      .createIndex('external_turn_attempts_state')
+      // Chat deletion cascades here; without this SQLite scans the table.
+      .createIndex('external_turn_attempts_chat')
       .ifNotExists()
       .on('external_turn_attempts')
-      .column('state')
+      .column('chatId')
       .execute();
   },
 
