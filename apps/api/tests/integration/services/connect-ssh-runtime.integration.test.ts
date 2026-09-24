@@ -80,7 +80,7 @@ describe('connectSshRuntime over a real sshd', () => {
     'handshakes with a runtime on the far side of the ssh pipe',
     async () => {
       const connection = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig() },
+        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
         () => undefined
       );
 
@@ -98,7 +98,7 @@ describe('connectSshRuntime over a real sshd', () => {
     'runs a shell command on the target rather than on the hub',
     async () => {
       const connection = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig() },
+        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
         () => undefined
       );
 
@@ -122,7 +122,7 @@ describe('connectSshRuntime over a real sshd', () => {
       // says, which is not this process's. Release equality is deliberately not
       // a gate for a machine the hub does not install onto.
       const connection = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig() },
+        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
         () => undefined
       );
 
@@ -148,7 +148,7 @@ describe('connectSshRuntime over a real sshd', () => {
       await chmod(spaced, 0o755);
 
       const connection = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig({ remoteRuntimePath: spaced }) },
+        { userId: 'test-user', id: 'ssh-box', config: sshConfig({ remoteRuntimePath: spaced }) },
         () => undefined
       );
 
@@ -167,6 +167,7 @@ describe('connectSshRuntime over a real sshd', () => {
       const marker = join(workdir, 'injected');
       const error = await connectSshRuntime(
         {
+          userId: 'test-user',
           id: 'ssh-box',
           config: sshConfig({ remoteRuntimePath: `/bin/true; touch ${marker}` }),
         },
@@ -183,7 +184,11 @@ describe('connectSshRuntime over a real sshd', () => {
     'says a runtime is missing rather than that the connection failed',
     async () => {
       const error = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig({ remoteRuntimePath: join(workdir, 'absent') }) },
+        {
+          userId: 'test-user',
+          id: 'ssh-box',
+          config: sshConfig({ remoteRuntimePath: join(workdir, 'absent') }),
+        },
         () => undefined
       ).catch((caught) => caught);
 
@@ -198,7 +203,7 @@ describe('connectSshRuntime over a real sshd', () => {
     'classifies a host that does not resolve without needing one to exist',
     async () => {
       const error = await connectSshRuntime(
-        { id: 'ssh-box', config: { host: 'mangostudio-ssh-target.invalid' } },
+        { userId: 'test-user', id: 'ssh-box', config: { host: 'mangostudio-ssh-target.invalid' } },
         () => undefined
       ).catch((caught) => caught);
 

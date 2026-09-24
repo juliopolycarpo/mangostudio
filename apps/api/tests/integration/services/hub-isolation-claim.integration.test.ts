@@ -54,6 +54,7 @@ async function connect(claim?: HubExternalAgentIsolation): Promise<ProtocolHubSe
     headers: { authorization: `Bearer ${token}` },
   });
   const session = await openHubSession(port, {
+    workspaceBinding: null,
     hubVersion: 'hub-isolation-test',
     ...(claim ? { externalAgentIsolation: claim } : {}),
   });

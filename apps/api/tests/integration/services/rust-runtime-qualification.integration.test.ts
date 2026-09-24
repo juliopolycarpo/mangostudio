@@ -155,6 +155,7 @@ describe('Real Rust runtime qualification', () => {
           launch: resolveRuntimeLaunchCommand(undefined, {
             MANGOSTUDIO_RUNTIME_BINARY: binary.path,
           }),
+          workspaceBinding: null,
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });
@@ -183,6 +184,7 @@ describe('Real Rust runtime qualification', () => {
           launch: resolveRuntimeLaunchCommand(undefined, {
             MANGOSTUDIO_RUNTIME_BINARY: binary.path,
           }),
+          workspaceBinding: null,
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });
@@ -268,7 +270,10 @@ describe('Real Rust runtime qualification', () => {
           exitGraceMs: 1_000,
         });
         try {
-          const hub = await openHubSession(peer.port, { hubVersion: runtimeVersion });
+          const hub = await openHubSession(peer.port, {
+            workspaceBinding: null,
+            hubVersion: runtimeVersion,
+          });
           const client = new RuntimeClient(hub, () => undefined, 'rust-supervised-update');
           const bytes = Buffer.from('next runtime bytes');
           const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
@@ -327,6 +332,7 @@ describe('Real Rust runtime qualification', () => {
           launch: resolveRuntimeLaunchCommand(undefined, {
             MANGOSTUDIO_RUNTIME_BINARY: binary.path,
           }),
+          workspaceBinding: null,
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });
@@ -427,6 +433,7 @@ describe('Real Rust runtime qualification', () => {
           launch: resolveRuntimeLaunchCommand(undefined, {
             MANGOSTUDIO_RUNTIME_BINARY: binary.path,
           }),
+          workspaceBinding: null,
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });
@@ -492,6 +499,7 @@ describe('Real Rust runtime qualification', () => {
           launch: resolveRuntimeLaunchCommand(undefined, {
             MANGOSTUDIO_RUNTIME_BINARY: binary.path,
           }),
+          workspaceBinding: null,
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });
@@ -522,6 +530,7 @@ describe('Real Rust runtime qualification', () => {
           launch: resolveRuntimeLaunchCommand(undefined, {
             MANGOSTUDIO_RUNTIME_BINARY: binary.path,
           }),
+          workspaceBinding: null,
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });
@@ -600,6 +609,7 @@ describe('Real Rust runtime qualification', () => {
           launch: resolveRuntimeLaunchCommand(undefined, {
             MANGOSTUDIO_RUNTIME_BINARY: binary.path,
           }),
+          workspaceBinding: null,
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });
@@ -642,6 +652,7 @@ describe('Real Rust runtime qualification', () => {
           launch: resolveRuntimeLaunchCommand(undefined, {
             MANGOSTUDIO_RUNTIME_BINARY: binary.path,
           }),
+          workspaceBinding: null,
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });

@@ -57,6 +57,7 @@ describe('spawnRuntimeChild', () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
+        workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
         onClosed: () => undefined,
       });
@@ -89,6 +90,7 @@ describe('spawnRuntimeChild', () => {
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
         cwd: workdir,
+        workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
         onClosed: () => undefined,
       });
@@ -112,6 +114,7 @@ describe('spawnRuntimeChild', () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
+        workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
         onClosed: () => undefined,
       });
@@ -136,6 +139,7 @@ describe('spawnRuntimeChild', () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
+        workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
         onClosed: () => {
           closedCount += 1;
@@ -170,6 +174,7 @@ describe('spawnRuntimeChild', () => {
         spawnRuntimeChild({
           environmentId: 'devbox',
           launch: resolveRuntimeLaunchCommand(),
+          workspaceBinding: null,
           hubVersion: `${RUNTIME_VERSION}-other`,
           onClosed: () => undefined,
         })
@@ -196,6 +201,7 @@ describe('spawnRuntimeChild', () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
+        workspaceBinding: null,
         hubVersion: `${RUNTIME_VERSION}-other`,
         requireMatchingRelease: false,
         onClosed: () => undefined,
@@ -220,6 +226,7 @@ describe('spawnRuntimeChild', () => {
       const error = await spawnRuntimeChild({
         environmentId: 'devbox',
         launch: { command: 'sh', args: ['-c', 'echo "no such file" >&2; exit 127'] },
+        workspaceBinding: null,
         hubVersion: 'hub-test',
         handshakeTimeoutMs: 5_000,
         describeFailure: (failure) => {
@@ -244,6 +251,7 @@ describe('spawnRuntimeChild', () => {
     const error = await spawnRuntimeChild({
       environmentId: 'devbox',
       launch: resolveRuntimeLaunchCommand(missing),
+      workspaceBinding: null,
       hubVersion: 'hub-test',
       handshakeTimeoutMs: 5_000,
       describeFailure: () => undefined,
@@ -260,6 +268,7 @@ describe('spawnRuntimeChild', () => {
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
         cwd: join(workdir, 'no-such-directory'),
+        workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
         handshakeTimeoutMs: 5_000,
         onClosed: () => undefined,
@@ -284,6 +293,7 @@ describe('spawnRuntimeChild', () => {
     const error = await spawnRuntimeChild({
       environmentId: 'devbox',
       launch: resolveRuntimeLaunchCommand(missing),
+      workspaceBinding: null,
       hubVersion: 'hub-test',
       onClosed: () => undefined,
     }).catch((caught) => caught);
@@ -312,6 +322,7 @@ describe('spawnRuntimeChild', () => {
         spawnRuntimeChild({
           environmentId: 'devbox',
           launch: { command: process.execPath, args: ['-e', NEVER_GREETING_CHILD] },
+          workspaceBinding: null,
           hubVersion: 'hub-test',
           handshakeTimeoutMs: 1_000,
           onClosed: () => undefined,
@@ -343,6 +354,7 @@ describe('spawnRuntimeChild', () => {
         spawnRuntimeChild({
           environmentId: 'devbox',
           launch: { command: process.execPath, args: ['-e', NEVER_GREETING_CHILD] },
+          workspaceBinding: null,
           hubVersion: 'hub-test',
           onClosed: () => undefined,
         })
@@ -365,6 +377,7 @@ describe('spawnRuntimeChild', () => {
     const error = await spawnRuntimeChild({
       environmentId: 'devbox',
       launch: resolveRuntimeLaunchCommand(process.execPath),
+      workspaceBinding: null,
       hubVersion: 'hub-test',
       handshakeTimeoutMs: 2_000,
       onClosed: () => undefined,

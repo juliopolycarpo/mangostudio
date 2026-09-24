@@ -126,6 +126,9 @@ export async function connectInProcessRuntime(
   try {
     hub = await openHubSession(ports.a, {
       hubVersion: options.hubVersion,
+      // The embedded runtime never asks: it authorizes through the callback
+      // it was built with, which runs the same shared policy.
+      workspaceBinding: null,
       ...(options.handshakeTimeoutMs !== undefined
         ? { handshakeTimeoutMs: options.handshakeTimeoutMs }
         : {}),

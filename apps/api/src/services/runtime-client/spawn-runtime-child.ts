@@ -28,6 +28,7 @@ import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 import { resolveHandshakeTimeoutMs } from './handshake-budget';
 import { type HubSession, openHubSession, type ProtocolHubSession } from './hub-session';
+import type { HubWorkspaceBinding } from './hub-workspace-authority';
 
 /** A failed handshake keeps the established short stop budget. */
 const STARTUP_TERMINATE_GRACE_MS = 2_000;
@@ -71,6 +72,8 @@ export interface SpawnRuntimeChildOptions {
   readonly launch: RuntimeLaunchCommand;
   readonly cwd?: string;
   readonly hubVersion: string;
+  /** Who this connection speaks for; see `OpenHubSessionOptions.workspaceBinding`. */
+  readonly workspaceBinding: HubWorkspaceBinding | null;
   /**
    * How long the child has to say hello. Omit it for a child on the hub's own
    * machine and it follows the host — see {@link resolveHandshakeTimeoutMs},
@@ -157,6 +160,7 @@ export async function spawnRuntimeChild(
     hub = await raceAgainstAbort(
       openHubSession(peer.port, {
         hubVersion: options.hubVersion,
+        workspaceBinding: options.workspaceBinding,
         handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
         // Defaults to on: the runtime ships inside the hub's own distribution, so
         // a binary from another release is a stale install rather than a peer to

@@ -53,6 +53,8 @@ const CONNECT_TIMEOUT_SECONDS = 10;
 /** Minimal definition shape — kept local to avoid a cycle with the manager. */
 export interface SshRuntimeDefinition {
   readonly id: string;
+  /** The owner; `hub.workspace.authorize` answers for this user only. */
+  readonly userId: string;
   readonly config: unknown;
 }
 
@@ -93,6 +95,7 @@ export async function connectSshRuntime(
   try {
     const connection = await spawnRuntimeChild({
       environmentId: definition.id,
+      workspaceBinding: { userId: definition.userId, environmentId: definition.id },
       launch: sshLaunch(launchConfig),
       hubVersion: getVersion(),
       handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,

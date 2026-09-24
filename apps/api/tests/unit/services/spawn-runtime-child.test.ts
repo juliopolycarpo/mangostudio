@@ -21,6 +21,7 @@ describe('spawnRuntimeChild — cancellation', () => {
       {
         environmentId: 'devbox',
         launch: { command: 'fake-runtime', args: [] },
+        workspaceBinding: null,
         hubVersion: 'hub-test',
         onClosed: () => undefined,
         signal: controller.signal,
@@ -47,6 +48,7 @@ describe('spawnRuntimeChild — cancellation', () => {
       {
         environmentId: 'devbox',
         launch: { command: 'fake-runtime', args: [] },
+        workspaceBinding: null,
         hubVersion: 'hub-test',
         onClosed: () => undefined,
       },
@@ -66,6 +68,7 @@ describe('spawnRuntimeChild — cancellation', () => {
       {
         environmentId: 'devbox',
         launch: { command: 'fake-runtime', args: [] },
+        workspaceBinding: null,
         hubVersion: 'hub-test',
         handshakeTimeoutMs: 30_000,
         onClosed: () => undefined,
@@ -96,6 +99,7 @@ describe('spawnRuntimeChild — cancellation', () => {
       {
         environmentId: 'devbox',
         launch: { command: 'fake-runtime', args: [] },
+        workspaceBinding: null,
         hubVersion: 'hub-test',
         onClosed: () => undefined,
         signal: controller.signal,

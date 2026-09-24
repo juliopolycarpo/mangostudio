@@ -18,7 +18,6 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
-import { getDb } from '../../db/database';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
@@ -40,6 +39,7 @@ import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
 import { connectLocalRuntime } from './connect-in-process-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
+import { isAuthorizedEnvironmentWorkspace } from './hub-workspace-authority';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
@@ -1197,36 +1197,21 @@ async function openLocalRuntime(
   };
 }
 
+/**
+ * The Local connector's workspace authority: the shared environment policy,
+ * for the Local environment only.
+ */
 async function isAuthorizedLocalWorkspace(
   definition: RuntimeEnvironmentDefinition,
   canonicalPath: string,
   signal: AbortSignal
 ): Promise<boolean> {
   if (definition.id !== LOCAL_ENVIRONMENT_ID || !definition.userId) return false;
-  signal.throwIfAborted();
-  const query = getDb()
-    .selectFrom('chats')
-    .select('id')
-    .where('userId', '=', definition.userId)
-    .where('environmentId', '=', definition.id)
-    .where('workdir', '=', canonicalPath)
-    .limit(1)
-    .executeTakeFirst();
-  const aborted = Promise.withResolvers<never>();
-  const abort = () =>
-    aborted.reject(
-      signal.reason instanceof Error
-        ? signal.reason
-        : new Error('Local workspace authorization was cancelled.')
-    );
-  signal.addEventListener('abort', abort, { once: true });
-  try {
-    const chat = await Promise.race([query, aborted.promise]);
-    signal.throwIfAborted();
-    return chat !== undefined;
-  } finally {
-    signal.removeEventListener('abort', abort);
-  }
+  return await isAuthorizedEnvironmentWorkspace(
+    { userId: definition.userId, environmentId: definition.id },
+    canonicalPath,
+    signal
+  );
 }
 
 export interface LocalRuntimeConnectorOptions {
@@ -1454,6 +1439,7 @@ async function connectStdioRuntime(
   });
   const connection = await spawnRuntimeChild({
     environmentId: definition.id,
+    workspaceBinding: { userId: definition.userId, environmentId: definition.id },
     launch,
     ...(config.cwd ? { cwd: config.cwd } : {}),
     hubVersion: getVersion(),
@@ -1504,6 +1490,7 @@ export async function connectWslRuntime(
   const wslExecutable = resolveWslExecutable();
   const connection = await spawnRuntimeChild({
     environmentId: definition.id,
+    workspaceBinding: { userId: definition.userId, environmentId: definition.id },
     launch: wslLaunchCommand(distro, wslExecutable.path),
     hubVersion: getVersion(),
     describeFailure: (failure: RuntimeLaunchFailure) =>
