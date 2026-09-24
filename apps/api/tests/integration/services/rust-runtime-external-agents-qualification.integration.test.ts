@@ -33,6 +33,25 @@ import {
 
 const binary = resolveRustRuntimeBinary();
 
+/**
+ * Settles `promise` on the ordinary event loop and returns its rejection
+ * message. `expect(promise).rejects` is not used for a runtime request: on
+ * Windows, bun:test waits for it without servicing the child's stdout, so a
+ * rejection that needs one more frame from the runtime never arrives and the
+ * session dies of a liveness timeout instead.
+ *
+ * @example
+ * expect(await rejectionOf(rust.externalAgents.open(params))).toMatch(/is not authorized/);
+ */
+function rejectionOf(promise: Promise<unknown>): Promise<string> {
+  return promise.then(
+    (value) => {
+      throw new Error(`expected a rejection | received a resolution: ${JSON.stringify(value)}`);
+    },
+    (error: unknown) => (error instanceof Error ? error.message : String(error))
+  );
+}
+
 describe('Real Rust runtime external-agent admission', () => {
   let runtimeVersion: string;
   const cleanups: Array<() => Promise<void>> = [];
@@ -185,16 +204,18 @@ describe('Real Rust runtime external-agent admission', () => {
       await mkdir(join(home, 'workspace'));
       // Canonical, so the refusal can only be the authority's.
       const workspace = await realpath(join(home, 'workspace'));
-      await expect(
-        rust.externalAgents.open({
-          sessionId: 'qualification-session',
-          targetId: 'codex',
-          workspacePath: workspace,
-          configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
-          resumeMode: 'fallback',
-          timeoutMs: 10_000,
-        })
-      ).rejects.toThrow(/is not authorized/);
+      expect(
+        await rejectionOf(
+          rust.externalAgents.open({
+            sessionId: 'qualification-session',
+            targetId: 'codex',
+            workspacePath: workspace,
+            configuration: { level: 'default', routing: 'user', workspaceRoots: [] },
+            resumeMode: 'fallback',
+            timeoutMs: 10_000,
+          })
+        )
+      ).toMatch(/is not authorized/);
       const health = await rust.health();
       expect(health.externalAgents?.liveSessionCount).toBe(0);
     },
@@ -246,10 +267,10 @@ describe('Real Rust runtime external-agent admission', () => {
         });
 
       // Past the authority: the only thing missing is the vendor CLI.
-      await expect(open('qualification-authorized', authorized)).rejects.toThrow(
+      expect(await rejectionOf(open('qualification-authorized', authorized))).toMatch(
         /is not installed/
       );
-      await expect(open('qualification-unauthorized', unauthorized)).rejects.toThrow(
+      expect(await rejectionOf(open('qualification-unauthorized', unauthorized))).toMatch(
         /is not authorized/
       );
       const health = await rust.health();
