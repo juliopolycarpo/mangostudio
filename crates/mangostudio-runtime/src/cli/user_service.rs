@@ -226,7 +226,9 @@ fn check_install(mode: ServiceMode, home: &Path) -> io::Result<PathBuf> {
 
 #[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
 fn quote_systemd_arg(value: &str) -> String {
-    let escaped = value.replace('%', "%%").replace('$', "$$$$");
+    // systemd reads `$$` as one literal `$` (and `%%` as one `%`). Rust's
+    // `replace` has no JS-style `$$` substitution rule, so write `$$` here.
+    let escaped = value.replace('%', "%%").replace('$', "$$");
     if escaped
         .chars()
         .any(|char| char.is_whitespace() || char == '"' || char == '\\')
@@ -1082,6 +1084,18 @@ mod tests {
         assert!(text.contains("ExecStart=/tmp/remote/current/mangostudio-runtime connect"));
         assert!(text.contains("TimeoutStopSec=30s"));
         assert!(text.contains("KillMode=mixed"));
+    }
+
+    #[test]
+    fn systemd_unit_escapes_a_dollar_as_exactly_two_dollars() {
+        let text = render_systemd(
+            Path::new("/tmp/a$b/remote/current/mangostudio-runtime"),
+            ServiceMode::Connect,
+        );
+        assert!(
+            text.contains("ExecStart=/tmp/a$$b/remote/current/mangostudio-runtime connect"),
+            "expected ExecStart with `$` escaped as `$$`; received unit:\n{text}"
+        );
     }
 
     #[test]
