@@ -64,6 +64,9 @@ describe('Real Rust runtime external-agent admission', () => {
       exitGraceMs: 1_000,
       onStderr: (chunk) => process.stderr.write(chunk),
     });
+    peer.port.onFrame((frame) =>
+      console.error('DIAG hub inbound', JSON.stringify(frame).slice(0, 120), Date.now())
+    );
     const hub = await openHubSession(peer.port, {
       // The real hub handler, answering from the test database.
       workspaceBinding: options.workspaceBinding ?? null,
