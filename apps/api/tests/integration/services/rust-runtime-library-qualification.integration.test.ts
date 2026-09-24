@@ -71,6 +71,7 @@ import {
   resolveRustRuntimeBinary,
   scratchMangoHome,
 } from '../../support/rust-runtime-binary';
+import { connectUntilListening, reserveEphemeralPort } from '../../support/rust-serve-dial';
 
 const binary = resolveRustRuntimeBinary();
 const ENVIRONMENT_ID = 'rust-library-box';
@@ -474,38 +475,3 @@ describe('Real Rust runtime library qualification through the Hub', () => {
     60_000
   );
 });
-
-/** An unused TCP port on loopback, released back to the OS before returning. */
-function reserveEphemeralPort(): number {
-  const server = Bun.listen({
-    hostname: '127.0.0.1',
-    port: 0,
-    socket: {
-      open() {
-        /* unused */
-      },
-      data() {
-        /* unused */
-      },
-      close() {
-        /* unused */
-      },
-    },
-  });
-  const { port } = server;
-  server.stop(true);
-  return port;
-}
-
-/** Retries the real Hub dial until `serve` is listening (see the sibling suite). */
-async function connectUntilListening<T>(attempt: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      return await attempt();
-    } catch (error) {
-      if (Date.now() >= deadline) throw error;
-      await Bun.sleep(50);
-    }
-  }
-}

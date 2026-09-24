@@ -35,6 +35,7 @@ import { setRuntimeTokenStoreForTests } from '../../src/services/runtime-client/
 import { insertTestUser } from './factories';
 import { InMemorySecretStore } from './mocks/mock-secret-store';
 import { cleanupMangoHome, type RustRuntimeBinary, scratchMangoHome } from './rust-runtime-binary';
+import { connectUntilListening, reserveEphemeralPort } from './rust-serve-dial';
 
 /** Everything the runtime's location registry reads besides the home. */
 const LOCATION_OVERRIDES = [
@@ -270,28 +271,6 @@ function namedEnvironment(environmentId: string | undefined): string {
   return environmentId;
 }
 
-/** An unused TCP port on loopback, released back to the OS before returning. */
-function reserveEphemeralPort(): number {
-  const server = Bun.listen({
-    hostname: '127.0.0.1',
-    port: 0,
-    socket: {
-      open() {
-        /* unused */
-      },
-      data() {
-        /* unused */
-      },
-      close() {
-        /* unused */
-      },
-    },
-  });
-  const { port } = server;
-  server.stop(true);
-  return port;
-}
-
 /**
  * Drains a child stream and keeps its last `limit` characters, so a startup failure can quote what
  * the runtime printed without the pipe ever filling up.
@@ -309,17 +288,4 @@ function keepTail(stream: ReadableStream<Uint8Array>, limit = 4_000): () => stri
     }
   })().catch(() => undefined);
   return () => tail;
-}
-
-/** Retries the real Hub dial until `serve` is listening. */
-async function connectUntilListening<T>(attempt: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      return await attempt();
-    } catch (error) {
-      if (Date.now() >= deadline) throw error;
-      await Bun.sleep(50);
-    }
-  }
 }

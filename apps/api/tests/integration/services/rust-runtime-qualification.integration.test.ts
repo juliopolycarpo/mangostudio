@@ -105,6 +105,7 @@ import {
   waitUntil,
   writeFakeInstaller,
 } from '../../support/rust-runtime-install-fixture';
+import { connectUntilListening, reserveEphemeralPort } from '../../support/rust-serve-dial';
 
 const binary = resolveRustRuntimeBinary();
 
@@ -991,55 +992,5 @@ async function waitUntilAsync(
       throw new Error(`expected ${what} | received: nothing within ${timeoutMs}ms`);
     }
     await Bun.sleep(20);
-  }
-}
-
-/** An unused TCP port on loopback, released back to the OS before returning. */
-function reserveEphemeralPort(): number {
-  const server = Bun.listen({
-    hostname: '127.0.0.1',
-    port: 0,
-    // Never actually dialed; only the port number this reserves is used.
-    socket: {
-      open() {
-        /* unused */
-      },
-      data() {
-        /* unused */
-      },
-      close() {
-        /* unused */
-      },
-    },
-  });
-  const { port } = server;
-  server.stop(true);
-  return port;
-}
-
-/**
- * Retries `attempt` (a `service.connect(...)` call) until it succeeds, or
- * rethrows once `timeoutMs` has elapsed — `mangostudio-runtime serve` logs
- * nothing on a successful bind, and the hub's own `connect` already clears
- * any backoff on every call, so retrying the real production call is both
- * the readiness check and the assertion, rather than a separate bare-TCP
- * probe.
- *
- * A bare TCP connect-then-immediately-close was tried here first and
- * measured to leave the freshly spawned binary refusing every WebSocket
- * upgrade for several seconds afterwards, even though `ss` shows it bound
- * and listening throughout — a real interaction with the connection this
- * probe leaves half-open, not a fixed delay to paper over. Retrying the
- * real dial avoids ever opening that kind of connection at all.
- */
-async function connectUntilListening<T>(attempt: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      return await attempt();
-    } catch (error) {
-      if (Date.now() >= deadline) throw error;
-      await Bun.sleep(50);
-    }
   }
 }
