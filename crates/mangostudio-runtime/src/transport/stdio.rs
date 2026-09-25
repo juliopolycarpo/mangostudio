@@ -82,10 +82,10 @@ pub(crate) async fn run_with_signals(
     // settles either way, and is aborted below if the session ends first.
     let hub_identity = tokio::spawn({
         let session = session.clone();
-        let audit = std::sync::Arc::clone(&host.audit);
+        let audit = host.audit.clone();
         async move {
             if session.ready().await.is_ok() {
-                identify_hub(&session, &audit);
+                identify_hub(&session, audit.as_ref());
             }
         }
     });

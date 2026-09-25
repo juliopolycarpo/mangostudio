@@ -67,6 +67,14 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
 #[tokio::test]
 async fn a_hub_hello_identity_names_the_stdio_childs_next_audit_line() {
     let home = scratch_home("hub-identity");
+    // The host slot audits nothing by default; turn it on for this test.
+    let host = home.join("runtime").join("host");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(
+        host.join("runtime.json"),
+        br#"{"schemaVersion":1,"slot":"host","audit":{"enabled":true}}"#,
+    )
+    .unwrap();
     let env = sanitized_env([(
         "MANGO_HOME".to_string(),
         home.to_string_lossy().into_owned(),

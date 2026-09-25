@@ -25,7 +25,8 @@ pub mod serve;
 pub mod stdio;
 mod upgrade_head;
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -125,8 +126,9 @@ pub(crate) struct SessionHost {
     pub registry: Registry,
     /// The concrete audit sink `registry` records through, kept so the
     /// transport can name the hub on it once the handshake completes; see
-    /// [`identify_hub`].
-    pub audit: Arc<crate::audit::FileAudit>,
+    /// [`identify_hub`]. `None` when the slot's `audit.enabled` is off and
+    /// `registry` records through [`crate::ports::audit::NoopAudit`].
+    pub audit: Option<Arc<crate::audit::FileAudit>>,
     pub authorization: Arc<dyn Authorization>,
     pub update: crate::update::UpdateBinding,
 }
@@ -147,6 +149,37 @@ pub(crate) fn build_host(
     build_host_with_restart(slot, mango_home, runtime_version, false)
 }
 
+/// Whether `slot` records protocol calls to `audit.log`, from its
+/// `runtime.json` (`audit.enabled`, else the slot default: off for `host`,
+/// on for the others).
+///
+/// Read once per process for each slot and home, then reused by every
+/// connection this process builds a host for. That matches the TypeScript
+/// runtime: `serve` and `connect` build their audit sink once at startup
+/// (`slotAuditSink`) and share it across reconnections, and a stdio process
+/// serves one session. `setup --audit on|off` therefore takes effect when
+/// the runtime restarts, not mid-process.
+///
+/// Usage: `slot_audit_enabled(RuntimeSlot::Host, home)` is `false` on a
+/// fresh home.
+fn slot_audit_enabled(slot: RuntimeSlot, mango_home: &Path) -> bool {
+    static RESOLVED: OnceLock<std::sync::Mutex<HashMap<(RuntimeSlot, PathBuf), bool>>> =
+        OnceLock::new();
+    let resolved = RESOLVED.get_or_init(Default::default);
+    let key = (slot, mango_home.to_path_buf());
+    if let Some(enabled) = crate::ports::audit::lock(resolved).get(&key) {
+        return *enabled;
+    }
+    let stored = crate::runtime_home::read_runtime_slot_config(slot, mango_home).stored;
+    let enabled =
+        crate::consent::config::resolve_runtime_slot_config(slot, stored.as_ref(), "bundled")
+            .audit
+            .enabled;
+    *crate::ports::audit::lock(resolved)
+        .entry(key)
+        .or_insert(enabled)
+}
+
 /// Builds a stdio host that can exit for a supervisor after a verified commit.
 pub(crate) fn build_host_with_restart(
     slot: RuntimeSlot,
@@ -154,11 +187,16 @@ pub(crate) fn build_host_with_restart(
     runtime_version: &str,
     supervised: bool,
 ) -> SessionHost {
-    let file_audit = Arc::new(crate::audit::FileAudit::new(
-        slot_audit_log_path(slot, mango_home),
-        Arc::new(SystemWallClock),
-    ));
-    let audit: Arc<dyn Audit> = Arc::clone(&file_audit) as Arc<dyn Audit>;
+    let file_audit = slot_audit_enabled(slot, mango_home).then(|| {
+        Arc::new(crate::audit::FileAudit::new(
+            slot_audit_log_path(slot, mango_home),
+            Arc::new(SystemWallClock),
+        ))
+    });
+    let audit: Arc<dyn Audit> = match &file_audit {
+        Some(file_audit) => Arc::clone(file_audit) as Arc<dyn Audit>,
+        None => Arc::new(crate::ports::audit::NoopAudit),
+    };
     let update =
         crate::update::UpdateBinding::new_with_restart(slot, mango_home.to_path_buf(), supervised);
     let exclusivity = update.exclusivity();
@@ -221,7 +259,10 @@ pub(crate) fn build_host_with_restart(
 /// `"unidentified hub"`. Called by each transport right after its own
 /// `session.ready()` settles successfully; a session still handshaking
 /// changes nothing.
-pub(crate) fn identify_hub(session: &Session, audit: &crate::audit::FileAudit) {
+pub(crate) fn identify_hub(session: &Session, audit: Option<&Arc<crate::audit::FileAudit>>) {
+    let Some(audit) = audit else {
+        return;
+    };
     if let Ok(remote) = session.remote() {
         audit.set_hub(crate::audit::HubIdentity::from_capabilities(
             &remote.capabilities,
