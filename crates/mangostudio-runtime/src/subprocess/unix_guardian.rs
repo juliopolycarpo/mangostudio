@@ -833,6 +833,13 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
         unsafe { libc::_exit(127) };
     }
     let guardian_pgid = unsafe { libc::getpid() };
+    // Orphans of the target tree, including a descendant that called `setsid`, reparent to this
+    // guardian instead of init, so a forced stop can still find and reap them. Best effort: a
+    // kernel that refuses leaves the containment it had before.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    unsafe {
+        libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
+    };
 
     let watchdog = unsafe { libc::fork() };
     if watchdog < 0 {
@@ -904,9 +911,113 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     {
         wait_group_empty(target_pgid);
     }
+    // Only a target that was stopped by a signal takes its session escapees with it. A natural
+    // exit keeps a deliberately detached helper (`git gc --auto` daemonizes) alive, matching the
+    // TypeScript runtime, which walked the tree only when it terminated a call.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if libc::WIFSIGNALED(status) {
+        unsafe { reap_adopted_orphans(watchdog) };
+    }
     unsafe { libc::kill(watchdog, libc::SIGKILL) };
     let _ = unsafe { wait_raw(watchdog) };
     unsafe { libc::_exit(0) }
+}
+
+/// Most rounds [`reap_adopted_orphans`] runs; each kills every adopted child it can see, and a
+/// killed child's own children are adopted in time for the next round.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const ORPHAN_SWEEP_ROUNDS: usize = 256;
+
+/// Kills and reaps every process this subreaper guardian adopted, other than `watchdog`.
+///
+/// Each listed pid is this guardian's own unreaped child, so it cannot be recycled between the
+/// read and the signal. Reads `/proc/thread-self/children`; a kernel without it is left as is.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn reap_adopted_orphans(watchdog: libc::pid_t) {
+    for _ in 0..ORPHAN_SWEEP_ROUNDS {
+        let mut buffer = [0_u8; 4096];
+        let Some(length) = (unsafe { read_own_children(&mut buffer) }) else {
+            return;
+        };
+        let mut adopted = [0 as libc::pid_t; 512];
+        let count = parse_child_pids(&buffer[..length], watchdog, &mut adopted);
+        if count == 0 {
+            return;
+        }
+        for pid in &adopted[..count] {
+            unsafe { libc::kill(*pid, libc::SIGKILL) };
+        }
+        for pid in &adopted[..count] {
+            let _ = unsafe { wait_raw(*pid) };
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn read_own_children(buffer: &mut [u8]) -> Option<usize> {
+    let file = unsafe {
+        libc::open(
+            c"/proc/thread-self/children".as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC,
+        )
+    };
+    if file < 0 {
+        return None;
+    }
+    let mut filled = 0;
+    while filled < buffer.len() {
+        let read = unsafe {
+            libc::read(
+                file,
+                buffer[filled..].as_mut_ptr().cast(),
+                buffer.len() - filled,
+            )
+        };
+        if read == 0 {
+            break;
+        }
+        if read < 0 {
+            if unsafe { errno_raw() } == libc::EINTR {
+                continue;
+            }
+            unsafe { libc::close(file) };
+            return None;
+        }
+        filled += read as usize;
+    }
+    unsafe { libc::close(file) };
+    Some(filled)
+}
+
+/// Writes the space-terminated pids of a `children` listing into `out`, skipping `excluded`.
+/// A trailing token without its space may be cut by a full buffer, so it is left for the next
+/// round rather than parsed as a shorter, wrong pid.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn parse_child_pids(listing: &[u8], excluded: libc::pid_t, out: &mut [libc::pid_t]) -> usize {
+    let mut count = 0;
+    let mut current: Option<libc::pid_t> = None;
+    for byte in listing {
+        if byte.is_ascii_digit() {
+            let digit = libc::pid_t::from(*byte - b'0');
+            current = current
+                .unwrap_or(0)
+                .checked_mul(10)
+                .and_then(|pid| pid.checked_add(digit));
+            if current.is_none() {
+                return count;
+            }
+            continue;
+        }
+        if let Some(pid) = current.take()
+            && pid > 1
+            && pid != excluded
+            && count < out.len()
+        {
+            out[count] = pid;
+            count += 1;
+        }
+    }
+    count
 }
 
 unsafe fn watchdog_main(fds: GuardianFds, guardian_pgid: libc::pid_t) -> ! {
@@ -1172,9 +1283,17 @@ unsafe fn wait_raw(pid: libc::pid_t) -> libc::c_int {
 /// cannot be recycled while the guardian still owns cleanup. Reaping it here is therefore safe:
 /// the immediately following group probe either observes remaining ordinary descendants or the
 /// kernel reports `ESRCH` once the group is empty. Descendants which deliberately create a new
-/// session are outside this guardian's containment contract.
+/// session are left to [`reap_adopted_orphans`] on Linux and are outside containment elsewhere.
 unsafe fn wait_group_empty(process_group: libc::pid_t) {
     loop {
+        // As a Linux subreaper this guardian adopts group members whose parent died first, and a
+        // killed member stays a zombie, still counted by the probe below, until it is reaped.
+        // `-process_group` limits the reap to that group, never the watchdog.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let mut status = 0;
+            while unsafe { libc::waitpid(-process_group, &mut status, libc::WNOHANG) } > 0 {}
+        }
         // SAFETY: process_group is the target group ID reported by the target itself and remains
         // owned by this guardian until the group has been killed and observed empty.
         if unsafe { libc::kill(-process_group, 0) } == 0 {
@@ -1665,6 +1784,19 @@ mod tests {
         assert_eq!(parse_proc_pid(b"12x\0"), None);
         assert_eq!(parse_proc_pid(b"999999999999\0"), None);
         assert_eq!(parse_proc_pid(b"12"), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn child_listing_parser_skips_the_watchdog_and_a_cut_trailing_pid() {
+        let mut out = [0; 8];
+        let count = super::parse_child_pids(b"41 7 1 42 4", 7, &mut out);
+        assert_eq!(
+            &out[..count],
+            &[41, 42],
+            "expected adopted pids [41, 42] | received {:?}",
+            &out[..count]
+        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]

@@ -542,3 +542,112 @@ fn silent_cli_failures_keep_the_tools_named_error_message() {
         assert_eq!(error.message, message);
     }
 }
+
+/// Rewrites a `gh.exec` launch into a shell whose background child calls `setsid`, leaving the
+/// target's process group and session, then keeps the leader alive until it is stopped.
+#[cfg(target_os = "linux")]
+struct SessionEscapeeSpawner {
+    pid_file: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl ProcessSpawner for SessionEscapeeSpawner {
+    fn start(
+        &self,
+        mut request: ProcessRequest,
+        check: Arc<dyn LaunchCheck>,
+        cancel: CancellationToken,
+    ) -> ProcessFuture<'_, Result<ProcessControl, ProcessStartError>> {
+        request.program = PathBuf::from("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "setsid sleep 60 >/dev/null 2>&1 & echo $! > \"$1.tmp\"; mv \"$1.tmp\" \"$1\"; \
+             sleep 60"
+                .into(),
+            "escapee-fixture".into(),
+            self.pid_file.clone().into_os_string(),
+        ];
+        Box::pin(async move { DefaultProcessSpawner.start(request, check, cancel).await })
+    }
+}
+
+/// `(process group, state)` from `/proc/<pid>/stat`, or `None` once the pid is gone.
+#[cfg(target_os = "linux")]
+fn linux_process_group_and_state(pid: u32) -> Option<(i32, char)> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let mut fields = stat.rsplit_once(')')?.1.split_whitespace();
+    let state = fields.next()?.chars().next()?;
+    let _parent = fields.next()?;
+    let group = fields.next()?.parse().ok()?;
+    Some((group, state))
+}
+
+/// The TypeScript runtime's process-tree kill reaped a descendant that called `setsid` while its
+/// leader was still running. A cancelled ordinary subprocess must not leave that escapee behind.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_cancelled_call_reaps_a_descendant_that_left_its_session() {
+    let home = scratch_dir("commands-setsid-escapee");
+    let pid_file = home.join("escapee.pid");
+    let service = Service {
+        consent: Arc::new(ConsentSource::new(RuntimeSlot::Host, home.to_path_buf())),
+        spawner: Arc::new(SessionEscapeeSpawner {
+            pid_file: pid_file.clone(),
+        }),
+    };
+    let cancel = CancellationToken::new();
+    let call_cancel = cancel.clone();
+    let params = json!({"args":["pr","list"],"cwd":home.path(),"timeoutMs":30_000});
+    let call =
+        tokio::spawn(async move { service.run("gh.exec", params, call_cancel, 100_000).await });
+
+    let escapee: u32 = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(text) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = text.trim().parse()
+            {
+                return pid;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("expected the fixture to record its setsid child's pid | received nothing in 5s");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while linux_process_group_and_state(escapee).map(|(group, _)| group) != Some(escapee as i32)
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("expected the setsid child to lead its own process group | received no change");
+
+    cancel.cancel();
+    let result = tokio::time::timeout(Duration::from_secs(15), call)
+        .await
+        .expect("expected the cancelled call to settle | received: still running after 15s")
+        .unwrap();
+    assert!(
+        result.is_err(),
+        "expected the cancelled read to fail | received {result:?}"
+    );
+
+    let gone = tokio::time::timeout(Duration::from_secs(10), async {
+        while linux_process_group_and_state(escapee).is_some_and(|(_, state)| state != 'Z') {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .is_ok();
+    if !gone {
+        // Cleanup only, so the failing run does not leak a sleeper; the assertion follows.
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &escapee.to_string()])
+            .status();
+    }
+    assert!(
+        gone,
+        "expected the setsid escapee {escapee} to be killed with the cancelled call's tree | \
+         received: still running 10s after the call settled"
+    );
+}
