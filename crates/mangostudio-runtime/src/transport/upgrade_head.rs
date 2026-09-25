@@ -17,13 +17,28 @@ use std::task::{Context, Poll};
 use mangostudio_runtime_contract::strings::binding;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-/// Most bytes of the upgrade request kept for [`binding_header`]. A header
-/// block past this is not a request this runtime's hub sends; the binding
-/// header is then reported malformed rather than silently missed.
-const MAX_RECORDED_HEAD_BYTES: usize = 16 * 1024;
+/// Most bytes of the upgrade request kept for [`binding_header`]: the same
+/// 64 KiB bound tungstenite puts on the request head it will accept, so no
+/// head the upgrade admits is cut short here.
+const MAX_RECORDED_HEAD_BYTES: usize = 64 * 1024;
 
-/// The end of an HTTP request head.
-const HEAD_END: &[u8] = b"\r\n\r\n";
+/// Where the request head in `bytes` ends — just past the empty line that
+/// closes it — or `None` while it has not ended. Accepts the bare-LF line
+/// endings `httparse` (and so tungstenite) accepts, not only CRLF.
+fn head_end(bytes: &[u8]) -> Option<usize> {
+    let mut line_start = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'\n' {
+            continue;
+        }
+        let line = &bytes[line_start..index];
+        if line_start > 0 && line.strip_suffix(b"\r").unwrap_or(line).is_empty() {
+            return Some(index + 1);
+        }
+        line_start = index + 1;
+    }
+    None
+}
 
 /// A stream that keeps a copy of the first bytes read through it — the
 /// upgrade request's head — and is otherwise transparent.
@@ -63,11 +78,7 @@ impl<S> RecordingStream<S> {
         let mut head = self.head.lock().unwrap_or_else(PoisonError::into_inner);
         let room = MAX_RECORDED_HEAD_BYTES.saturating_sub(head.len());
         head.extend_from_slice(&bytes[..bytes.len().min(room)]);
-        if head.len() >= MAX_RECORDED_HEAD_BYTES
-            || head
-                .windows(HEAD_END.len())
-                .any(|window| window == HEAD_END)
-        {
+        if head.len() >= MAX_RECORDED_HEAD_BYTES || head_end(&head).is_some() {
             self.recording = false;
         }
     }
@@ -123,10 +134,12 @@ pub(crate) enum BindingHeader {
 /// Reads [`binding::HEADER`] out of a raw request head.
 ///
 /// A key is exactly [`binding::LENGTH`] lowercase hex characters, the shape
-/// the hub's `HubBindingKeySchema` declares. Anything else present under the
-/// header — a wrong length, another charset, a repeated header, an
-/// unfinished or oversized head — is [`BindingHeader::Malformed`], never
-/// read as absent: a hub that sent a header meant to be bound.
+/// the hub's `HubBindingKeySchema` declares. A header that is present but is
+/// not a key — a wrong length, another charset, repeated, or cut off by a
+/// head that did not end within the recorded bytes — is
+/// [`BindingHeader::Malformed`], never read as absent: a hub that sent one
+/// meant to be bound. A head whose recorded bytes never name the header at
+/// all is [`BindingHeader::Absent`], however long it was.
 ///
 /// # Example
 ///
@@ -135,13 +148,15 @@ pub(crate) enum BindingHeader {
 /// assert!(matches!(binding_header(head), BindingHeader::Key(_)));
 /// ```
 pub(crate) fn binding_header(head: &[u8]) -> BindingHeader {
-    let Some(end) = head
-        .windows(HEAD_END.len())
-        .position(|window| window == HEAD_END)
-    else {
-        return BindingHeader::Malformed(format!(
-            "the upgrade request head did not end within {MAX_RECORDED_HEAD_BYTES} bytes"
-        ));
+    let Some(end) = head_end(head) else {
+        return if contains_ignore_ascii_case(head, binding::HEADER.as_bytes()) {
+            BindingHeader::Malformed(format!(
+                "{} was cut off: the upgrade request head did not end within {MAX_RECORDED_HEAD_BYTES} bytes",
+                binding::HEADER
+            ))
+        } else {
+            BindingHeader::Absent
+        };
     };
     let mut values = head[..end]
         .split(|byte| *byte == b'\n')
@@ -172,6 +187,12 @@ pub(crate) fn binding_header(head: &[u8]) -> BindingHeader {
         ));
     }
     BindingHeader::Key(String::from_utf8_lossy(value).into_owned())
+}
+
+fn contains_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 #[cfg(test)]
@@ -229,12 +250,54 @@ mod tests {
     }
 
     #[test]
-    fn an_unfinished_head_is_malformed() {
+    fn a_head_cut_off_inside_the_binding_header_is_malformed() {
         let header = binding_header(b"GET / HTTP/1.1\r\nx-mangostudio-hub-binding: ab");
         assert!(
-            matches!(header, BindingHeader::Malformed(_)),
-            "expected an unfinished head to be malformed | received {header:?}"
+            matches!(&header, BindingHeader::Malformed(why) if why.contains("cut off")),
+            "expected a cut-off binding header to be malformed | received {header:?}"
         );
+    }
+
+    #[test]
+    fn a_cut_off_head_that_never_names_the_header_is_absent() {
+        let header = binding_header(b"GET / HTTP/1.1\r\nhost: runtime\r\nx-other: ab");
+        assert_eq!(header, BindingHeader::Absent);
+    }
+
+    /// A keyless head past the old 16 KiB cap is an older hub, not a bad key.
+    #[tokio::test]
+    async fn a_keyless_twenty_kib_head_is_absent() {
+        let padding = "p".repeat(20 * 1024);
+        let sent = request(&format!("x-padding: {padding}\r\n"));
+        assert!(sent.len() > 20 * 1024);
+        assert_eq!(recorded(sent.clone()).await, BindingHeader::Absent);
+        assert_eq!(binding_header(&sent), BindingHeader::Absent);
+    }
+
+    #[tokio::test]
+    async fn bare_lf_heads_are_read_like_crlf_heads() {
+        let keyless = b"GET / HTTP/1.1\nhost: runtime\n\nafter".to_vec();
+        assert_eq!(recorded(keyless).await, BindingHeader::Absent);
+        let keyed = format!("GET / HTTP/1.1\nhost: runtime\nx-mangostudio-hub-binding: {KEY}\n\n")
+            .into_bytes();
+        assert_eq!(recorded(keyed).await, BindingHeader::Key(KEY.to_owned()));
+    }
+
+    /// Streams `sent` through a [`RecordingStream`] in small pieces and
+    /// returns what its recorded head says about the binding key.
+    async fn recorded(sent: Vec<u8>) -> BindingHeader {
+        let (mut client, server) = tokio::io::duplex(1024);
+        let (mut recording, head) = RecordingStream::new(server);
+        let writer = tokio::spawn(async move {
+            for piece in sent.chunks(700) {
+                client.write_all(piece).await.unwrap();
+            }
+            client.shutdown().await.unwrap();
+        });
+        let mut received = Vec::new();
+        recording.read_to_end(&mut received).await.unwrap();
+        writer.await.unwrap();
+        head.binding()
     }
 
     /// The recording is transparent — the reader sees every byte — and
