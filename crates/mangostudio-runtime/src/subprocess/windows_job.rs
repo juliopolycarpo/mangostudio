@@ -227,10 +227,7 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
         .map_or(ptr::null(), |block| block.as_ptr().cast::<c_void>());
     let current_directory_pointer = current_directory.as_ref().map_or(ptr::null(), Vec::as_ptr);
     let mut information = PROCESS_INFORMATION::default();
-    let mut flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
-    if request.hide_window {
-        flags |= CREATE_NO_WINDOW;
-    }
+    let flags = creation_flags(request);
 
     // Inheritance is enabled here and revoked immediately below, so the three endpoints are
     // capturable by an unrelated `CreateProcessW` for this call alone rather than for the whole
@@ -290,7 +287,22 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     })
 }
 
+/// `CreateProcessW` flags for a bounded (piped) child: started suspended so the Job owns it before
+/// it runs, and without a console window unless the request opts out of hiding.
+///
+/// Usage: `let flags = creation_flags(&ProcessRequest::new("git", ["--version"]));`
+fn creation_flags(request: &ProcessRequest) -> u32 {
+    let flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
+    if request.hide_window {
+        return flags | CREATE_NO_WINDOW;
+    }
+    flags
+}
+
 /// Starts a ConPTY target atomically inside the same kill-on-close Job used by bounded children.
+///
+/// Deliberately ignores [`ProcessRequest::hide_window`]: a pseudoconsole is already headless, and
+/// `CREATE_NO_WINDOW` stops the child from binding to it, so the terminal would receive no output.
 pub(super) fn spawn_pty(
     request: &ProcessRequest,
     cols: u16,
@@ -902,10 +914,27 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        ChildPipes, HANDLE, HANDLE_FLAG_INHERIT, application_name, command_line, environment_block,
-        spawn_pty,
+        CREATE_NO_WINDOW, ChildPipes, HANDLE, HANDLE_FLAG_INHERIT, application_name, command_line,
+        creation_flags, environment_block, spawn_pty,
     };
     use crate::subprocess::{ProcessRequest, ProcessStdin};
+
+    #[test]
+    fn a_default_request_is_created_without_a_console_window() {
+        let flags = creation_flags(&ProcessRequest::new("git", ["--version"]));
+        assert!(
+            flags & CREATE_NO_WINDOW != 0,
+            "expected CreateProcessW flags to include CREATE_NO_WINDOW | received: {flags:#x}"
+        );
+
+        let mut visible = ProcessRequest::new("git", ["--version"]);
+        visible.hide_window = false;
+        let flags = creation_flags(&visible);
+        assert!(
+            flags & CREATE_NO_WINDOW == 0,
+            "expected an opted-out request to omit CREATE_NO_WINDOW | received: {flags:#x}"
+        );
+    }
 
     #[tokio::test]
     async fn conpty_target_waits_for_explicit_release() {

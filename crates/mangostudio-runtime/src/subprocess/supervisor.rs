@@ -79,12 +79,15 @@ pub struct ProcessRequest {
     /// Receives every chunk read from stdout and stderr while the process runs.
     pub output_tap: Option<ProcessOutputTap>,
     /// Starts the process without a console window on Windows (`CREATE_NO_WINDOW`); ignored
-    /// elsewhere.
+    /// elsewhere and by the ConPTY terminal path. [`ProcessRequest::new`] sets it, so every git,
+    /// gh, shell, MCP, install, and probe child stays hidden; `tests/spawn_boundary.rs` keeps
+    /// spawn sites from bypassing the request.
     pub hide_window: bool,
 }
 
 impl ProcessRequest {
-    /// Builds a request with inherited environment, null stdin, and a five-second 64-KiB budget.
+    /// Builds a request with inherited environment, null stdin, a five-second 64-KiB budget, and
+    /// no console window on Windows.
     ///
     /// # Example
     ///
@@ -107,7 +110,7 @@ impl ProcessRequest {
             stdin: ProcessStdin::Null,
             budget: ProcessBudget::new(Duration::from_secs(5), 64 * 1024, 64 * 1024),
             output_tap: None,
-            hide_window: false,
+            hide_window: true,
         }
     }
 
@@ -1419,6 +1422,23 @@ fn signal_name(number: i32) -> &'static str {
         13 => "SIGPIPE",
         15 => "SIGTERM",
         _ => "UNKNOWN",
+    }
+}
+
+/// Launch defaults every spawn site inherits from [`ProcessRequest::new`]. Platform-neutral, so
+/// the Windows console rule is checked on every CI host, not only on Windows.
+#[cfg(test)]
+mod request_defaults {
+    use super::ProcessRequest;
+
+    #[test]
+    fn a_new_request_hides_its_console_window() {
+        let request = ProcessRequest::new("git", ["--version"]);
+        assert!(
+            request.hide_window,
+            "expected ProcessRequest::new hide_window: true | received: false (a git, gh, shell, \
+             MCP, install, or probe child would open a console window on Windows)"
+        );
     }
 }
 
