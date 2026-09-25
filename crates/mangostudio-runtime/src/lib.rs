@@ -114,6 +114,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod consent;
+pub mod discovery;
 pub mod event_check;
 mod external_agents;
 mod file_identity;

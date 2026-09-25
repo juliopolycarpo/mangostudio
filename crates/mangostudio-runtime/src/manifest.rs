@@ -39,7 +39,7 @@ use crate::registry::{Classification, Registry};
 /// capability nothing backs is never "ready"), and `false` as soon as one
 /// required method is missing — a partially-implemented capability is not
 /// advertised as available.
-fn capability_ready(registry: &Registry, capability: &str) -> bool {
+pub(crate) fn capability_ready(registry: &Registry, capability: &str) -> bool {
     let mut required = catalog()
         .methods
         .iter()
