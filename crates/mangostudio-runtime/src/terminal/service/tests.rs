@@ -660,6 +660,33 @@ fn windows_prefers_powershell_over_a_path_bash_and_falls_back_to_bash() {
 }
 
 #[test]
+fn an_unavailable_explicit_shell_is_refused() {
+    let (_scratch, host) = host_with_shells("terminal-no-zsh", "linux", &["bash"]);
+    for shell in [RuntimeShellKind::Zsh, RuntimeShellKind::Powershell] {
+        let mut params = open_params();
+        params.shell = Some(shell);
+        let Err(error) = prepare(params, host.clone()) else {
+            panic!("expected an unavailable {shell:?} to be refused | received a launch request");
+        };
+        let wire = serde_json::to_value(shell).unwrap();
+        let expected = format!(
+            "The \"{}\" shell is not available on this system.",
+            wire.as_str().unwrap()
+        );
+        assert_eq!(
+            error.message, expected,
+            "expected {expected:?} | received {:?}",
+            error.message
+        );
+        assert_eq!(
+            error.details.unwrap()["kind"],
+            "shell_execution",
+            "expected kind shell_execution for {shell:?}"
+        );
+    }
+}
+
+#[test]
 fn the_session_env_layers_terminal_markers_and_caller_env_and_drops_secrets() {
     let (_scratch, mut host) = host_with_shells("terminal-env", "linux", &["bash"]);
     host.env.insert("ANTHROPIC_API_KEY".into(), "secret".into());
