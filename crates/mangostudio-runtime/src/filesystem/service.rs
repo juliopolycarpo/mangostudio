@@ -30,6 +30,9 @@ use crate::registry::Registry;
 
 pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
 pub(super) const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
+/// Most `fs.edit-file` matches counted for an ambiguity report; past it the
+/// report says "more than" instead of scanning the rest of the file.
+pub(super) const EDIT_OCCURRENCE_COUNT_LIMIT: usize = 1_000;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -478,13 +481,9 @@ impl Service {
                 .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
             let replace_all = params.replace_all.unwrap_or(false);
-            let count = text::count_matches_up_to(
-                &observed.bytes,
-                params.old_string.as_bytes(),
-                if replace_all { usize::MAX } else { 2 },
-            );
+            let count = edit_match_count(&observed.bytes, params.old_string.as_bytes(), replace_all);
             if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
-            if count > 1 && !replace_all { return Err(argument(format!("Found at least {count} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."))); }
+            if count > 1 && !replace_all { return Err(ambiguous_edit_error(count)); }
             let replacement_count = if replace_all { count } else { 1 };
             let projected_bytes = if params.new_string.len() >= params.old_string.len() {
                 params.new_string.len().checked_sub(params.old_string.len())
@@ -826,6 +825,43 @@ fn occupied_path(policy: &CompiledPolicy, params: &WriteParams, create: bool) ->
         ));
     }
     io::create_conflict_error(policy, &params.resolved_path, &params.input_path)
+}
+
+/// Counts `fs.edit-file` matches: every match for `replaceAll`, which
+/// replaces them all anyway, otherwise one past the reporting bound so an
+/// ambiguity report never scans further than it can print.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(edit_match_count(b"x x x", b"x", false), 3);
+/// ```
+fn edit_match_count(source: &[u8], needle: &[u8], replace_all: bool) -> usize {
+    let limit = if replace_all {
+        usize::MAX
+    } else {
+        EDIT_OCCURRENCE_COUNT_LIMIT + 1
+    };
+    text::count_matches_up_to(source, needle, limit)
+}
+
+/// Reports an ambiguous `fs.edit-file` match with the TypeScript runtime's
+/// exact count, or the counting bound once `count` passes it.
+///
+/// # Example
+///
+/// ```ignore
+/// assert!(ambiguous_edit_error(3).message.starts_with("Found 3 occurrences."));
+/// ```
+fn ambiguous_edit_error(count: usize) -> RemoteError {
+    let found = if count > EDIT_OCCURRENCE_COUNT_LIMIT {
+        format!("more than {EDIT_OCCURRENCE_COUNT_LIMIT}")
+    } else {
+        count.to_string()
+    };
+    argument(format!(
+        "Found {found} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."
+    ))
 }
 
 pub(super) fn argument(message: impl Into<String>) -> RemoteError {
@@ -2579,5 +2615,76 @@ mod tests {
         );
         assert_eq!(std::fs::read(&unread_to).unwrap(), b"never read\n");
         assert_eq!(std::fs::read(&partial_to).unwrap(), b"one\ntwo\n");
+    }
+
+    fn edit_params(path: &Path, old: &str, new: &str) -> EditParams {
+        decode(json!({
+            "chatId":"chat", "captureSnapshot":false, "inputPath":"file",
+            "resolvedPath":path, "oldString":old, "newString":new
+        }))
+    }
+
+    /// The TypeScript runtime reported the exact match count, so the model
+    /// knows how much context a unique match needs.
+    #[tokio::test]
+    async fn an_ambiguous_edit_reports_the_exact_occurrence_count() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"x\nx\nx\n").await;
+        let error = Arc::clone(&service)
+            .edit(
+                edit_params(&path, "x", "y"),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Found 3 occurrences. Provide a longer oldString with more surrounding context to \
+             make it unique, or set replaceAll: true."
+        );
+        assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        assert_eq!(std::fs::read(&path).unwrap(), b"x\nx\nx\n");
+    }
+
+    /// Counting stops at the reporting bound, so an enormous match set costs
+    /// a bounded scan and still tells the model its oldString is ambiguous.
+    #[tokio::test]
+    async fn an_ambiguous_edit_past_the_count_bound_reports_the_bound() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        let content = "x".repeat(EDIT_OCCURRENCE_COUNT_LIMIT + 5);
+        seed_and_read(&service, &path, content.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .edit(
+                edit_params(&path, "x", "y"),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            format!(
+                "Found more than {EDIT_OCCURRENCE_COUNT_LIMIT} occurrences. Provide a longer \
+                 oldString with more surrounding context to make it unique, or set replaceAll: true."
+            )
+        );
+    }
+    #[test]
+    fn edit_match_count_stops_one_past_the_bound_unless_replacing_all() {
+        let source = "x".repeat(EDIT_OCCURRENCE_COUNT_LIMIT + 5);
+        assert_eq!(
+            edit_match_count(source.as_bytes(), b"x", false),
+            EDIT_OCCURRENCE_COUNT_LIMIT + 1,
+            "expected an ambiguity count to stop one past the bound"
+        );
+        assert_eq!(
+            edit_match_count(source.as_bytes(), b"x", true),
+            EDIT_OCCURRENCE_COUNT_LIMIT + 5,
+            "expected replaceAll to count every match it replaces"
+        );
+        assert_eq!(edit_match_count(b"x\nx\nx\n", b"x", false), 3);
     }
 }
