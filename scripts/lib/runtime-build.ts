@@ -215,8 +215,8 @@ export function resolveRuntimeSource(options: ResolveRuntimeSourceOptions): Runt
     if (fileExists(path)) return { kind: 'prebuilt', path };
     throw new Error(
       `Missing prebuilt runtime for ${target.arch}: expected ${path}. ` +
-        `A runtime directory holds <dir>/<platform-id>/${name} for every requested target; build it with ` +
-        `\`bun run build:runtime --platform ${target.arch} --out ${runtimeDir}\`.`
+        `A runtime directory holds <dir>/<platform-id>/${name} for every requested target. ` +
+        runtimeBuildHint(target.arch, runtimeDir)
     );
   }
 
@@ -227,8 +227,31 @@ export function resolveRuntimeSource(options: ResolveRuntimeSourceOptions): Runt
   throw new Error(
     `No runtime binary for ${target.arch}: this machine (${hostPlatform ?? 'unsupported host'}) only ` +
       `cargo-builds its own target. Pass --runtime-dir <dir> (or RUNTIME_DIR) where ` +
-      `<dir>/${target.arch}/${name} is a prebuilt runtime, e.g. from ` +
-      `\`bun run build:runtime --platform ${target.arch} --out <dir>\`.`
+      `<dir>/${target.arch}/${name} is a prebuilt runtime. ${runtimeBuildHint(target.arch, '<dir>')}`
+  );
+}
+
+/**
+ * How to produce one target's prebuilt runtime. Linux targets cross-build on a
+ * Linux machine with zig; darwin and windows targets need their own OS (the
+ * Apple SDK and the MSVC toolchain do not cross over) or CI's artifact.
+ *
+ * @example
+ * runtimeBuildHint('linux-arm64', 'out');
+ * // → 'Build it with `bun run build:runtime --platform linux-arm64 --zig --rustup --out out` (zig and cargo-zigbuild on PATH).'
+ */
+export function runtimeBuildHint(platform: ReleasePlatformId, outDir: string): string {
+  if (RUNTIME_TARGETS[platform].os === 'linux') {
+    return (
+      `Build it with \`bun run build:runtime --platform ${platform} --zig --rustup --out ${outDir}\` ` +
+      '(zig and cargo-zigbuild on PATH).'
+    );
+  }
+  const os = RUNTIME_TARGETS[platform].os === 'darwin' ? 'macOS' : 'Windows';
+  return (
+    `A ${platform} runtime only builds on a ${os} host: run ` +
+    `\`bun run build:runtime --platform ${platform} --rustup --out ${outDir}\` there, or download the ` +
+    `\`runtime-<source-sha>-${platform}\` artifact from a Distribution Build run into ${outDir}/.`
   );
 }
 

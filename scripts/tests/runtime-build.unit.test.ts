@@ -13,6 +13,7 @@ import {
   hostPlatformId,
   prebuiltRuntimePath,
   resolveRuntimeSource,
+  runtimeBuildHint,
   runtimeHeaderProblems,
   runtimeVersionProblem,
   rustTargetTriple,
@@ -138,7 +139,7 @@ describe('resolveRuntimeSource', () => {
         fileExists: () => false,
       })
     ).toThrow(
-      `Missing prebuilt runtime for linux-x64: expected ${join('/prebuilt', 'linux-x64', 'mangostudio-runtime')}. A runtime directory holds <dir>/<platform-id>/mangostudio-runtime for every requested target; build it with \`bun run build:runtime --platform linux-x64 --out /prebuilt\`.`
+      `Missing prebuilt runtime for linux-x64: expected ${join('/prebuilt', 'linux-x64', 'mangostudio-runtime')}. A runtime directory holds <dir>/<platform-id>/mangostudio-runtime for every requested target. Build it with \`bun run build:runtime --platform linux-x64 --zig --rustup --out /prebuilt\` (zig and cargo-zigbuild on PATH).`
     );
   });
 
@@ -149,6 +150,15 @@ describe('resolveRuntimeSource', () => {
       kind: 'cargo',
       command: cargoRuntimeBuildCommand('linux-x64', { zig: false }),
     });
+  });
+
+  test('darwin and windows hints name the host OS they need and the CI artifact', () => {
+    expect(runtimeBuildHint('darwin-x64', 'out')).toBe(
+      'A darwin-x64 runtime only builds on a macOS host: run `bun run build:runtime --platform darwin-x64 --rustup --out out` there, or download the `runtime-<source-sha>-darwin-x64` artifact from a Distribution Build run into out/.'
+    );
+    expect(() =>
+      resolveRuntimeSource({ target: target('windows-arm64'), hostPlatform: 'linux-x64' })
+    ).toThrow('A windows-arm64 runtime only builds on a Windows host');
   });
 
   test('a non-host target with no directory fails with the expected path and flag', () => {
