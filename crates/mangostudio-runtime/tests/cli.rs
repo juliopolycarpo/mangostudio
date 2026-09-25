@@ -559,3 +559,50 @@ fn connect_on_a_fresh_slot_reports_a_setup_command_that_actually_works() {
          setup_pending_message was fixed for: {recorded_line:?}"
     );
 }
+
+/// A `credentials.json` this build refuses (here a schemaVersion a newer
+/// build wrote before a rollback) is not "no pairing token": `connect` must
+/// name the refusal and the remedy, and never quote the stored token.
+#[test]
+fn connect_with_a_refused_credentials_file_prints_the_reason_and_remedy_not_the_token() {
+    let home = scratch_mango_home("connect-refused-credentials");
+    let remote = home.join("runtime").join("remote");
+    std::fs::create_dir_all(&remote).unwrap();
+    let secret = "future-pairing-token-marker";
+    std::fs::write(
+        remote.join("credentials.json"),
+        format!(r#"{{"schemaVersion":2,"pairingToken":"{secret}"}}"#),
+    )
+    .unwrap();
+
+    let output = Command::new(binary_path())
+        .args(["connect", "--hub", "wss://hub.example"])
+        .env("MANGO_HOME", &home)
+        .env_remove("MANGOSTUDIO_RUNTIME_TOKEN")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        output.status.code() == Some(1),
+        "expected exit code: 1 | received: {:?} ({stderr:?})",
+        output.status.code()
+    );
+    for expected in ["schemaVersion 2", "Move it aside"] {
+        assert!(
+            stderr.contains(expected),
+            "expected stderr containing: {expected} | received: {stderr:?}"
+        );
+    }
+    for unexpected in ["no pairing token", secret] {
+        assert!(
+            !stderr.contains(unexpected),
+            "expected stderr without: {unexpected} | received: {stderr:?}"
+        );
+    }
+    assert!(
+        !remote.join("runtime.json").exists(),
+        "expected no consent recorded for a refused connect | received: runtime.json written"
+    );
+}

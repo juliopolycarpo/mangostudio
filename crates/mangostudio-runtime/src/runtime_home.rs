@@ -613,6 +613,34 @@ pub fn read_runtime_slot_credentials(slot: RuntimeSlot, mango_home: &Path) -> Sl
     )
 }
 
+/// Why `slot`'s `credentials.json` is refused outright, or `None` when it
+/// is absent, usable, or unusable in a way a rewrite may repair.
+///
+/// A refused file is one this process cannot see into (unreadable) or
+/// one naming a `schemaVersion` this build does not speak, the same
+/// judgement [`write_runtime_slot_credentials`] makes before it would
+/// replace the file. A reader that finds no token must tell this apart
+/// from a genuine absence: only an operator can decide the file is safe
+/// to discard. Mirrors the `refused` kind of `runtime-home.ts`'s
+/// `readRuntimeSlotCredentialsState`. The message names the path and the
+/// reason, never a stored value.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::runtime_home::{RuntimeSlot, credentials_refusal};
+///
+/// let home = std::env::temp_dir().join("mango-credentials-refusal-doctest");
+/// assert!(credentials_refusal(RuntimeSlot::Remote, &home).is_none());
+/// ```
+#[must_use]
+pub fn credentials_refusal(slot: RuntimeSlot, mango_home: &Path) -> Option<String> {
+    match credentials_write_gate(&slot_credentials_path(slot, mango_home)) {
+        CredentialsWriteGate::Refuse(reason) => Some(reason),
+        CredentialsWriteGate::Proceed(_) => None,
+    }
+}
+
 /// Why a merged write to a runtime-home document failed.
 #[derive(Debug)]
 pub enum WriteError {
