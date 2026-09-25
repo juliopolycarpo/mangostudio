@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import {
+  PROTOCOL_MAJOR,
+  PROTOCOL_MINOR,
+  RESERVED_ERROR_CODES,
+  RemoteError,
+} from '@mangostudio/protocol';
 import {
   CONSENT_DENIED_KIND,
   type HubIdentity,
@@ -74,6 +79,23 @@ describe('fake runtime host', () => {
     expect(connection.hub.runtimeVersion).toBe('runtime-announced');
     expect(connection.hub.manifest.platform).toBe(TEST_RUNTIME_MANIFEST.platform);
     expect(connection.hub.manifest.features).toEqual(TEST_RUNTIME_MANIFEST.features);
+  });
+
+  it('negotiates down to a runtime one wire minor behind and is still answered', async () => {
+    const older = { major: PROTOCOL_MAJOR, minor: PROTOCOL_MINOR - 1 };
+    const connection = await connect({
+      protocol: older,
+      handlers: { 'shell.run': () => SHELL_RESULT },
+    });
+
+    expect(connection.hub.effectiveMinor).toBe(older.minor);
+    expect(await connection.hub.request('shell.run', SHELL_CALL)).toEqual(SHELL_RESULT);
+  });
+
+  it("runs at this SDK's minor against a runtime on the same one", async () => {
+    const connection = await connect();
+
+    expect(connection.hub.effectiveMinor).toBe(PROTOCOL_MINOR);
   });
 
   it('answers a named method and names the fixture when an unnamed one is called', async () => {

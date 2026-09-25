@@ -35,6 +35,7 @@ import {
   type EventInput,
   type GuardContext,
   type Port,
+  type ProtocolVersion,
   RESERVED_ERROR_CODES,
   RemoteError,
   Session,
@@ -97,6 +98,8 @@ export interface FakeRuntimeDefinitionOptions {
   readonly handlers: Partial<Record<RuntimeMethod, TestHandler>>;
   /** Absent means nobody records the hub identity. */
   readonly audit?: FakeRuntimeAudit;
+  /** The wire version this runtime announces; absent means the SDK's own. */
+  readonly protocol?: ProtocolVersion;
 }
 
 /**
@@ -119,6 +122,7 @@ export class FakeRuntimeDefinition {
   readonly manifest: RuntimeCapabilityManifest;
   readonly consent: FakeConsentSource;
   readonly audit: FakeRuntimeAudit | undefined;
+  readonly protocol: ProtocolVersion | undefined;
   readonly handlers: Readonly<Record<RuntimeMethod, TestHandler>>;
   #target: ((event: EventInput) => boolean) | undefined;
 
@@ -127,6 +131,7 @@ export class FakeRuntimeDefinition {
     this.manifest = options.manifest;
     this.consent = options.consent;
     this.audit = options.audit;
+    this.protocol = options.protocol;
     const named = Object.keys(options.handlers).join(', ') || '(none)';
     this.handlers = Object.fromEntries(
       Object.keys(RUNTIME_CONTRACT.definition.methods).map((name) => {
@@ -186,6 +191,7 @@ export function serveFakeRuntime(
       ...definition.manifest,
       contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION },
     },
+    ...(definition.protocol ? { protocol: definition.protocol } : {}),
     ...(options.livenessIntervalMs !== undefined
       ? { livenessIntervalMs: options.livenessIntervalMs }
       : {}),
