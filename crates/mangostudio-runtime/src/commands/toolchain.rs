@@ -513,6 +513,74 @@ mod tests {
     }
 
     #[test]
+    fn auto_with_nothing_resolvable_sets_no_manager_variables() {
+        let host = host("linux");
+        let env = build(&host, Some(&auto()), &FakeFs::default());
+        for key in ["NVM_DIR", "FNM_DIR", "BUN_INSTALL"] {
+            assert!(
+                !env.contains_key(key),
+                "expected no {key} when nothing resolves | received {:?}",
+                env.get(key)
+            );
+        }
+        assert_eq!(
+            env["PATH"], "/base",
+            "expected the inherited PATH unchanged | received {:?}",
+            env["PATH"]
+        );
+    }
+
+    #[test]
+    fn an_empty_inherited_path_gets_no_stray_separator() {
+        let mut host = host("linux");
+        host.env.insert("PATH".into(), String::new());
+        let mut fs = FakeFs::default();
+        fs.files
+            .insert("/home/test/.bun/bin/bun".into(), String::new());
+        let env = build(&host, Some(&auto()), &fs);
+        assert_eq!(
+            env["PATH"], "/home/test/.bun/bin",
+            "expected only the resolved bun dir, no trailing ':' | received {:?}",
+            env["PATH"]
+        );
+        host.env.remove("PATH");
+        let env = build(&host, Some(&auto()), &fs);
+        assert_eq!(
+            env.get("PATH").map(String::as_str),
+            Some("/home/test/.bun/bin"),
+            "expected a missing PATH to become just the resolved dir | received {env:?}"
+        );
+    }
+
+    #[test]
+    fn configured_nvm_dir_and_bun_install_are_used_and_preserved() {
+        let mut host = host("linux");
+        host.env.insert("NVM_DIR".into(), "/custom/nvm".into());
+        host.env.insert("BUN_INSTALL".into(), "/custom/bun".into());
+        let mut fs = FakeFs::default();
+        fs.files
+            .insert("/custom/nvm/alias/default".into(), "v22.1.0".into());
+        fs.files.insert(
+            "/custom/nvm/versions/node/v22.1.0/bin/node".into(),
+            String::new(),
+        );
+        fs.files.insert("/custom/bun/bin/bun".into(), String::new());
+        let env = build(&host, Some(&auto()), &fs);
+        assert_eq!(
+            (env["NVM_DIR"].as_str(), env["BUN_INSTALL"].as_str()),
+            ("/custom/nvm", "/custom/bun"),
+            "expected the configured manager roots kept | received NVM_DIR={:?} BUN_INSTALL={:?}",
+            env["NVM_DIR"],
+            env["BUN_INSTALL"]
+        );
+        assert_eq!(
+            env["PATH"], "/custom/nvm/versions/node/v22.1.0/bin:/custom/bun/bin:/base",
+            "expected PATH built from the configured roots | received {:?}",
+            env["PATH"]
+        );
+    }
+
+    #[test]
     fn native_filesystem_bounds_alias_reads_and_reports_missing_paths() {
         let dir = crate::test_support::scratch_dir("toolchain-native");
         let alias = dir.join("alias");
