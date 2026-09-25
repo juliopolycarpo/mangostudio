@@ -2,9 +2,8 @@
 
 The hub/runtime contract — every method, event, capability, and error the two ends of
 [hub-runtime.md](hub-runtime.md) exchange — has exactly one owner:
-`apps/shared/src/runtime-contract/`. Its TypeBox schemas are the source of truth for a
-TypeScript runtime (`apps/runtime`) and for any runtime that is not TypeScript at all, Rust
-included.
+`apps/shared/src/runtime-contract/`. Its TypeBox schemas are the source of truth for the
+TypeScript hub and for the Rust runtime (`crates/mangostudio-runtime`) alike.
 
 ## Who owns what
 

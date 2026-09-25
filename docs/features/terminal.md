@@ -8,16 +8,18 @@ on the hub by special case.
 
 ## Where things run
 
-| Concern                                                      | Owner                    |
-| ------------------------------------------------------------ | ------------------------ |
-| The PTY, the shell process, its environment and its lifetime | Runtime (`apps/runtime`) |
-| Who may open a session, the registry, limits, idle reaping   | Hub (`apps/api`)         |
-| Relaying bytes to the browser and flow control per socket    | Hub (`apps/api`)         |
-| Session shape, socket framing, limits                        | Shared (`apps/shared`)   |
-| Rendering, keystrokes, resize, acknowledgements              | Frontend (xterm.js)      |
+| Concern                                                      | Owner                                  |
+| ------------------------------------------------------------ | -------------------------------------- |
+| The PTY, the shell process, its environment and its lifetime | Runtime (`crates/mangostudio-runtime`) |
+| Who may open a session, the registry, limits, idle reaping   | Hub (`apps/api`)                       |
+| Relaying bytes to the browser and flow control per socket    | Hub (`apps/api`)                       |
+| Session shape, socket framing, limits                        | Shared (`apps/shared`)                 |
+| Rendering, keystrokes, resize, acknowledgements              | Frontend (xterm.js)                    |
 
-The runtime spawns the shell with `Bun.spawn({ terminal })`, inline per spawn so the shell is a
-session leader and owns its job control. There is no native addon to ship. The runtime keeps
+The runtime opens the PTY itself (`crates/mangostudio-runtime/src/terminal/pty.rs`): on Unix the
+shell is a session leader with the PTY as its controlling terminal, so it owns its job control; on
+Windows it runs under ConPTY. Either way it lives in the same guardian or kill-on-close Job as any
+supervised process. There is no native addon to ship. The runtime keeps
 each session's last 256 KiB of output so a viewer that comes back sees where it was.
 
 ## Protocol
@@ -41,8 +43,7 @@ invalidation-only. Frames are binary with a one-byte type prefix: client `data`,
 ## Flow control
 
 The socket options every hub WebSocket route shares close a connection at 64 KiB of
-backpressure rather than throttling it, and `Bun.Terminal` cannot stop reading the PTY. So
-flow control is explicit and lives in three places:
+backpressure rather than throttling it. So flow control is explicit and lives in three places:
 
 - **Browser.** After xterm.js parses a chunk, the client acknowledges the bytes. Acks are
   coalesced, not sent per frame.
@@ -117,9 +118,8 @@ the image; the panel says so.
 
 ## Windows
 
-Sessions on a Windows runtime use ConPTY through Bun with PowerShell (`pwsh` preferred,
-`powershell.exe` fallback). Resize works. Known gaps carried from Bun's ConPTY support: no
-`SIGWINCH` in children, output is re-encoded, and `close()` can block on Windows builds
-older than 11 24H2 while a child is still running — the runtime kills the process tree
-first. This repository has no Windows unit-test lane, so the PowerShell branch ships by code
-reading; the POSIX path is covered by real-PTY tests.
+Sessions on a Windows runtime use ConPTY (`crates/mangostudio-runtime/src/subprocess/windows_job.rs`)
+with PowerShell (`pwsh` preferred, `powershell.exe` fallback), started inside the same
+kill-on-close Job as a bounded child. Resize works. The runtime's real-shell terminal tests are
+Unix-only (`#[cfg(unix)]`), so the ConPTY branch has no test of its own; the POSIX path is
+covered by real-PTY tests.

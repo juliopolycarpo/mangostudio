@@ -3,9 +3,8 @@
 //! `apps/runtime/scripts/generate-library-fixtures.ts` — through this port.
 //!
 //! Nothing here restates an expected value: every one comes from the
-//! TypeScript run. Regenerate the corpus with
-//! `bun run --filter @mangostudio/runtime fixtures:library`; CI's fixture
-//! freshness job fails if the committed file drifts from the generator.
+//! TypeScript run. The corpus is frozen: its generator was deleted with the
+//! TypeScript runtime, and CI's fixture freshness job pins its git tree.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

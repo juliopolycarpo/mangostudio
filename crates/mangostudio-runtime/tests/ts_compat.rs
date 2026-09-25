@@ -1,13 +1,12 @@
 //! Proves this crate reads a runtime home the TypeScript implementation
 //! actually wrote — the direction a Rust-only round-trip test cannot prove.
 //!
-//! `apps/runtime/scripts/generate-home-fixtures.ts` is the TypeScript half:
-//! it calls the real `writeRuntimeSlotConfig`/`writePairingToken`/
-//! `writeServeToken` from `apps/runtime/src/runtime-home.ts` and commits the
-//! result under `tests/fixtures/ts-home/`. Nothing here regenerates that
-//! fixture — regenerate it with `bun run --filter @mangostudio/runtime
-//! fixtures:home` when the shapes in
-//! `apps/runtime/tests/unit/runtime-home.test.ts` change.
+//! `tests/fixtures/ts-home/` is what the TypeScript runtime's own
+//! `writeRuntimeSlotConfig`/`writePairingToken`/`writeServeToken` wrote,
+//! recorded by its `apps/runtime/scripts/generate-home-fixtures.ts` before
+//! that runtime was deleted. The fixture is frozen: operators' machines still
+//! hold homes it wrote, and CI's fixture freshness job pins its git tree so
+//! nothing edits it by accident.
 
 use std::path::{Path, PathBuf};
 

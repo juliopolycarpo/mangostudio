@@ -602,7 +602,7 @@ describe('WslProvisioner', () => {
     const { provisioner, requested } = harness({ version: 'dev', localBuild: null });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
-      /source checkout.*bun build apps\/runtime\/src\/cli\.ts --compile --target=bun-linux-x64 --outfile \/repo\/\.mango\/out\/linux-x64\/mangostudio-runtime/s
+      /source checkout.*bun run build:runtime --platform linux-x64 --dev --zig --rustup --out \/repo\/\.mango\/out`/s
     );
     // A release URL or a cache path would be a dead end here; neither is offered.
     expect(requested).toEqual([]);
@@ -621,7 +621,7 @@ describe('WslProvisioner', () => {
     });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
-      /reports version 0\.1\.1 rather than dev\. .*without a version stamp/s
+      /reports version 0\.1\.1 rather than dev\. .*has to report version dev; build one with `bun run build:runtime --platform linux-x64 --dev/s
     );
   });
 

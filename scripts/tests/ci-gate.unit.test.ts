@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { evaluateGate, parseAllowedSkips, parseNeeds } from '../ci/evaluate-gate';
+import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
 import {
   expectedGateNeeds,
@@ -28,7 +29,6 @@ const INTEGRATION_PR_WORKFLOWS = [
   '.github/workflows/dependency-review.yml',
   '.github/workflows/protocol-ci.yml',
   '.github/workflows/release-dry-run.yml',
-  '.github/workflows/vendor-drift.yml',
 ] as const;
 
 // GitHub expression opener, assembled out of band so the literal `${{` never
@@ -209,30 +209,26 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(onBlock).toContain('- "Cargo.lock"');
   });
 
-  test('the push filter and the changes job both cover every ts-home fixture input', () => {
-    // `runtime-home-fixture-freshness`'s ts-home half depends on these
-    // TypeScript-side paths; a PR touching only one of them must still run
-    // this workflow, or that job's regenerate-and-diff step never executes
-    // and ts-home goes stale silently.
+  test('the push filter and the changes job both cover the shared shapes the Rust lanes read', () => {
+    // The slot and contract shapes the Rust runtime reads and writes have a
+    // TypeScript half in apps/shared; a PR touching only one of them must
+    // still run this workflow.
     const onBlock = extractOnBlock(workflow);
     const changesBlock = extractJobBlock(workflow, 'changes');
-    const tsHomeInputs = [
+    const sharedInputs = [
       'apps/shared/src/runtime-home/',
       'apps/shared/src/external-agents/',
       'apps/shared/src/schema-helpers.ts',
       'apps/shared/src/environments/toolchain-schemas.ts',
-      // The whole runtime tree: ts-home reads runtime-home.ts and config.ts,
-      // and the Rust/TypeScript parity lanes drive the in-process runtime.
-      'apps/runtime/src/',
-      'apps/runtime/scripts/generate-home-fixtures.ts',
-      'apps/runtime/package.json',
     ];
 
-    for (const input of tsHomeInputs) {
+    for (const input of sharedInputs) {
       expect(onBlock).toContain(`"${input}${input.endsWith('/') ? '**' : ''}"`);
       const escaped = input.replaceAll('.', String.raw`\.`);
       expect(changesBlock).toContain(escaped);
     }
+    // The TypeScript runtime is gone; nothing may still filter on its tree.
+    expect(workflow).not.toContain('apps/runtime/');
   });
 
   test('the workspace and launcher MSRV lanes run only when the changes job saw a Rust path', () => {
@@ -265,12 +261,12 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     }
   });
 
-  test('the fixture freshness lane regenerates and diffs both rust-home and ts-home', () => {
+  test('the fixture freshness lane regenerates rust-home and pins the frozen TypeScript fixtures', () => {
     const freshnessBlock = extractJobBlock(workflow, 'runtime-home-fixture-freshness');
 
     // Regenerate, then stage before diffing against `HEAD` — a plain
     // `git diff --exit-code` against the worktree would miss a brand-new
-    // file either regenerator started emitting.
+    // file the regenerator started emitting.
     expect(freshnessBlock).toContain(
       'cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored'
     );
@@ -280,13 +276,26 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(freshnessBlock).toContain(
       'git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home'
     );
-    expect(freshnessBlock).toContain('bun run --filter @mangostudio/runtime fixtures:home');
+    // ts-home and ts-library lost their generators with the TypeScript
+    // runtime; each is pinned to its committed git tree instead.
+    expect(freshnessBlock).toContain('"ts-home:$TS_HOME_TREE" "ts-library:$TS_LIBRARY_TREE"');
     expect(freshnessBlock).toContain(
-      'git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-home'
+      'git rev-parse "HEAD:crates/mangostudio-runtime/tests/fixtures/$name"'
     );
-    expect(freshnessBlock).toContain(
-      'git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-home'
-    );
+    for (const [name, variable] of [
+      ['ts-home', 'TS_HOME_TREE'],
+      ['ts-library', 'TS_LIBRARY_TREE'],
+    ] as const) {
+      const pinned = new RegExp(`${variable}: ([0-9a-f]{40})`).exec(freshnessBlock)?.[1];
+      const committed = Bun.spawnSync(
+        ['git', 'rev-parse', `HEAD:crates/mangostudio-runtime/tests/fixtures/${name}`],
+        { cwd: ROOT_DIR }
+      )
+        .stdout.toString()
+        .trim();
+      expect(pinned, `${variable} pin`).toBe(committed);
+    }
+    expect(freshnessBlock).not.toContain('bun run');
   });
 
   test('gate needs every mandatory job and accepts the Rust skip only when irrelevant', () => {

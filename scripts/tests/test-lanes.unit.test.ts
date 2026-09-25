@@ -312,6 +312,6 @@ describe('shardedCoverageWorkspaces', () => {
   // be reassembled from slices, so a shard flag reaching it silently turns a
   // fraction of the suite into "the" frontend coverage.
   it('excludes the unsharded frontend and keeps every sharded workspace', () => {
-    expect(shardedCoverageWorkspaces().sort()).toEqual(['api', 'runtime', 'shared']);
+    expect(shardedCoverageWorkspaces().sort()).toEqual(['api', 'shared']);
   });
 });

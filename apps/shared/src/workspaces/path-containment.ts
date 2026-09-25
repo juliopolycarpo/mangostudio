@@ -37,13 +37,6 @@ export function isLexicalPathPrefix(root: string, candidate: string): boolean {
   return isPathPrefix(root, candidate);
 }
 
-export class WorkdirContainmentError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'WorkdirContainmentError';
-  }
-}
-
 interface PathParts {
   readonly root: string;
   readonly segments: readonly string[];
@@ -130,12 +123,4 @@ function isInsideResolvedRoot(resolvedRoot: string, candidate: string): boolean 
 
 export function isInside(root: string, candidate: string): boolean {
   return isInsideResolvedRoot(resolveContainmentRoot(root), candidate);
-}
-
-export function assertInsideWorkdir(root: string, candidate: string): void {
-  if (!isInside(root, candidate)) {
-    throw new WorkdirContainmentError(
-      `Path "${candidate}" is outside the chat working directory. Use a path inside "${root}".`
-    );
-  }
 }

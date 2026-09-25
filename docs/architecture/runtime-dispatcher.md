@@ -11,17 +11,6 @@ The crate builds on `mango_protocol::contract::Contract`, `ContractHandlers`, `G
 thin wrapper around that pipeline or a seam this crate defines for a later change to fill in with
 real implementations.
 
-## Two binaries share a name today
-
-The build already produces a binary named `mangostudio-runtime`, Bun-compiled from
-`apps/runtime/src/cli.ts` (see `docs/reference/agent-playbooks.md`'s "Config, Runtime, And
-Standalone Build" section). `crates/mangostudio-runtime`'s own binary target carries the same
-name. Nothing under `scripts/` or `.github/workflows/` copies a build artifact from `target/`
-today, so the two do not collide in the current pipeline — but a future change that wires the Rust
-binary into a release archive alongside (or instead of) the TypeScript one must resolve this
-before both can ship in the same place. This is a known, deliberately deferred fact, not an
-oversight.
-
 ## Known-unimplemented vs. unknown: one wire error, not two
 
 `mango_protocol::session::dispatch`'s own no-handler branch already answers `METHOD_UNSUPPORTED`
@@ -41,8 +30,8 @@ pipeline (`check_params` → `Guard::check` → the handler → the optional res
 check *after* the handler has already settled. Once an audit port records a handler's outcome,
 that ordering means an `outcome: ok` line could already be written before a malformed result is
 ever caught — the hub would see `INTERNAL`, while the runtime's own audit trail says the call
-succeeded. `apps/runtime/src/result-check.ts` exists in the TypeScript runtime for exactly this
-reason: it wraps a handler's result check *inside* the audit-recording wrapper
+succeeded. The retired TypeScript runtime's `result-check.ts` existed for exactly this reason: it
+wrapped a handler's result check *inside* the audit-recording wrapper
 (`gateHandlers(checkResults(handlers), deps)`), not through the SDK's own post-handler option.
 
 `crates/mangostudio-runtime::registry::Registry::implement` does the same thing: the closure it
@@ -51,22 +40,22 @@ own compiled `jsonschema::Validator` (`result_check::compile_result_schema`), be
 records anything through its `Audit` port. `ServeOptions::validate_results` stays `false` for
 every call this crate makes to `Contract::serve`.
 
-**This crate always validates a result, in every build**, unlike the TypeScript runtime, which
-turns the check off in `NODE_ENV === "production"` (`apps/runtime/src/config.ts`) on the reasoning
+**This crate always validates a result, in every build**, unlike the retired TypeScript runtime,
+which turned the check off in `NODE_ENV === "production"` on the reasoning
 that a shape the schema refuses is still better delivered to a user than turned into a 500. This
 is a deliberate, permanent divergence: the check exists to catch a handler drifting from the
 contract before a peer built from the same catalog in another language inherits the mistake, and a
 Rust peer is exactly that other language. Turning it off here would defeat the reason this crate
 embeds the schema at all.
 
-The wire shape mirrors `apps/runtime/src/result-check.ts` exactly: code `INTERNAL`, message
+The wire shape mirrors the TypeScript runtime's `result-check.ts` exactly: code `INTERNAL`, message
 `Result of "{method}" does not match the contract at {path}: {reason}.` (or
 `Result of "{method}" does not match the contract.` when the checked value produced no specific
 violation — structurally unreachable through the `jsonschema` crate's own `Validator::validate`,
 which always returns a violation in its `Err` case, but stated for parity with the TypeScript
 source), details `{ method, path, reason }`, and `path` computed the same way: the instance-path
 JSON pointer, with `/{property}` appended when the failing keyword is `required` or
-`additionalProperties`, defaulting to `/` for a root violation. `result-check.ts` needs no
+`additionalProperties`, defaulting to `/` for a root violation. `result-check.ts` needed no
 `additionalProperties` special case of its own because TypeBox's `instancePath` already points at
 an unexpected property directly; `jsonschema`'s does not (it points at the container), so this
 crate appends the property itself — the same reason
@@ -121,8 +110,8 @@ fabricates a successful outcome on its own.
 - **`authorization::Authorization`** — which of a method's declared capabilities are missing.
   Adapts *into* `mango_protocol::contract::Guard` via `AuthorizationGuard`, rather than building a
   second gate in front of it (`mango_protocol`'s `Guard` already runs after `check_params`, unlike
-  the TypeScript SDK's own guard, which `apps/runtime/src/consent-gate.ts` avoids for exactly that
-  reason — the Rust seam does not have the problem the TypeScript one does). The default,
+  the TypeScript SDK's own guard, which the TypeScript runtime's `consent-gate.ts` avoided for
+  exactly that reason — the Rust seam does not have the problem the TypeScript one does). The default,
   `DenyingAuthorization`, reports every capability a method actually declares as missing, so a
   zero-capability method (`runtime.health` is the only one today) still passes even the denying
   default — mirroring `consent-gate.ts`'s own `missingCapabilities`/`consentDenial` split. The
@@ -130,14 +119,14 @@ fabricates a successful outcome on its own.
   byte: message, and details `{ kind: "consent_denied", method, missing, slot, capability }` where
   `capability` is `missing[0]` and is omitted from the wire when nothing is missing.
 - **`audit::Audit`** — records one call's outcome, after the fact. Wraps *outside* the guard and
-  outside the handler, in the same order `consent-gate.ts`'s `gateHandlers` records them: a denial
+  outside the handler, in the same order `consent-gate.ts`'s `gateHandlers` recorded them: a denial
   is recorded before the handler ever runs (from inside `AuthorizationGuard`); `ok`/`error` is
   recorded only once the handler — and this crate's own result check — have settled (from inside
   `Registry::implement`'s wrapper). The default, `NoopAudit`, records nothing: for an audit sink
   specifically, "does nothing" is the fail-closed choice, since a sink that fabricated entries
   would be worse than one that stays silent.
-  One parity gap against the TypeScript runtime, stated rather than hidden: `gateHandlers` times
-  one duration per call, from before its own consent check to after the handler returns. This
+  One parity gap against the TypeScript runtime, stated rather than hidden: `gateHandlers` timed
+  one duration per call, from before its own consent check to after the handler returned. This
   crate cannot, since `AuthorizationGuard` and `Registry::implement`'s wrapper are two separate
   `mango_protocol` seams with no shared start time — a `denied` entry's duration measures only the
   authorization check, an `ok`/`error` entry's measures only the handler.
@@ -165,10 +154,10 @@ affected service outright, whichever fits that port's own data.
 
 ## Capability filtering (the manifest)
 
-`apps/runtime/src/manifest.ts` computes the `features` map a runtime announces from `allow` (what
-a machine's owner granted) intersected with a couple of environment facts (git's own `--version`
-probe, which shells are on `PATH`). It has no "is this method implemented" gate at all, because
-every method it declares already has a real handler.
+The TypeScript runtime's `manifest.ts` computed the `features` map a runtime announces from
+`allow` (what a machine's owner granted) intersected with a couple of environment facts (git's own
+`--version` probe, which shells are on `PATH`). It had no "is this method implemented" gate at
+all, because every method it declared already had a real handler.
 
 `manifest::build_features` mirrors that allow→features formula field for field — including its
 `tools` formula (an `||` over eight of the ten capability-backed features, deliberately excluding
@@ -190,7 +179,7 @@ The five library reads (`library.locations`, `library.settings-sources`, `librar
 the five write and backup methods sharing the capability land, because the Hub gates every
 library surface on that one flag.
 Only the schema fact `toolchain` remains true. The hello capabilities also announce the
-embedded catalog name and version in `contracts`, matching the TypeScript runtime.
+embedded catalog name and version in `contracts`, as the TypeScript runtime did.
 
 ## Where the TypeScript contract/dispatch tests live in Rust
 
@@ -206,8 +195,9 @@ structured parameters. These tests pin the host behavior; they do not replace th
 | `tools/edit-file-tool.test.ts`: "uses non-overlapping replaceAll semantics"                             | `filesystem::text::tests::literal_edit_retains_bytes_and_uses_nonoverlapping_matches`             |
 | `services/grep-budget.test.ts`: "returns from a catastrophic pattern and reports the file as truncated" | `filesystem::search::tests::unfinished_file_discards_its_partial_matches_but_keeps_earlier_files` |
 
-`rust-filesystem-search-compat.integration.test.ts` compares real Rust and TypeScript runtime
-results through Hub clients, including ordering, glob syntax, regex Unicode semantics, caps,
+`rust-filesystem-search-compat.integration.test.ts` checks the Rust runtime's results through
+Hub clients against the TypeScript answers recorded before that runtime was deleted (see
+[typescript-runtime-retirement.md](typescript-runtime-retirement.md)), including ordering, glob syntax, regex Unicode semantics, caps,
 and error types. `rust-runtime-qualification.integration.test.ts` exercises all eleven filesystem
 methods and snapshot capture/hash/revert against the compiled binary over stdio and direct URL
 serve. Its paired-connect sibling runs the same assertions through the Hub connection manager.
@@ -229,8 +219,8 @@ interrupt its remaining operations. A dropped caller also cannot release a runni
 | `services/cancellation.test.ts`: refuses an already-reverted retry cancelled during its final hash | `a_cancel_during_the_final_hash_refuses_an_already_reverted_retry`   |
 | `services/cancellation.test.ts`: finishes every revert operation after cancellation during replay  | `cancellation_after_the_first_replay_operation_completes_the_replay` |
 
-`rust-snapshot-compat.integration.test.ts` compares the production Rust and TypeScript hosts
-through Hub clients: binary capture, missing files, size errors, reverse replay, freshness,
+`rust-snapshot-compat.integration.test.ts` checks the production Rust host through Hub clients
+against the recorded TypeScript answers: binary capture, missing files, size errors, reverse replay, freshness,
 retry conflicts, permissive base64 decoding, move collisions, and symlink or junction containment.
 It also exercises cross-device moves on Linux when the test filesystem provides two devices,
 including long filenames and retrying after source-removal permissions are restored.
@@ -260,8 +250,8 @@ Before launch, cancellation prevents an effect. After launch, read commands stop
 undo an accepted external mutation. Output is capped before allocation and further constrained by
 the negotiated response frame budget.
 
-`rust-command-compat.integration.test.ts` compares the compiled Rust and TypeScript hosts through
-Hub clients. It covers shell output, exit codes, byte caps, UTF-8 decoding, timeout reporting,
+`rust-command-compat.integration.test.ts` checks the compiled Rust host through Hub clients
+against the recorded TypeScript answers. It covers shell output, exit codes, byte caps, UTF-8 decoding, timeout reporting,
 environment filtering, Git's accepted nonzero exits, GitHub CLI local help, and typed argument
 rejections. Shared qualification assertions exercise the command methods over stdio, direct URL
 serve, and paired connect. Process containment and parent-death fixtures live under
@@ -275,17 +265,18 @@ come from the runtime's own environment through `probing::host::build_runtime_pa
 never inherits the Hub's configured directories. Reads open files through
 `filesystem::open_contained_file`, which refuses a handle whose final path left the root.
 
-`apps/runtime/scripts/generate-library-fixtures.ts` records what the TypeScript readers answer for
-a fixed corpus: hash domains, `localeCompare` ordering, frontmatter scalars, scans, bounded reads,
-read-tree, settings sources and location resolution. `library::ts_compat_tests` replays that
-corpus, and the fixture freshness job regenerates it. `assertRustRuntimeLibraryMethods` runs the
+`crates/mangostudio-runtime/tests/fixtures/ts-library/corpus.json` records what the TypeScript
+readers answered for a fixed corpus: hash domains, `localeCompare` ordering, frontmatter scalars,
+scans, bounded reads, read-tree, settings sources and location resolution. `library::ts_compat_tests`
+replays that corpus. It is frozen: its generator was deleted with the TypeScript runtime, and the
+fixture freshness job pins its git tree instead. `assertRustRuntimeLibraryMethods` runs the
 five reads over stdio, direct URL serve and paired connect, and diffs the scan against
 `scanLibraryInstances` on the same tree. `crates/mangostudio-runtime/tests/library_stdio.rs`
 proves the relocated-home and runtime-local-override behavior against the compiled binary.
 
 ### Dispatcher behavior
 
-| TypeScript test (`packages/protocol/tests/`, `apps/runtime/`)                                        | Rust home                                                                                                                                                                                            |
+| TypeScript test (`packages/protocol/tests/`, retired `apps/runtime/`)                                | Rust home                                                                                                                                                                                            |
 | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `contract.test.ts` — unregistered method answers `METHOD_UNSUPPORTED`                                | `mango-protocol`'s own `session/dispatch.rs` behaviour, relied on by `crates/mangostudio-runtime/tests/dispatch.rs::an_unknown_method_and_a_known_unimplemented_method_answer_byte_identical_errors` |
 | `contract.test.ts` — `rpc.discover` answers the catalog                                              | `crates/mangostudio-runtime/tests/dispatch.rs::rpc_discover_still_answers_the_full_catalog_with_an_empty_registry`                                                                                   |

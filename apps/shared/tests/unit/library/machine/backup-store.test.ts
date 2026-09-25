@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   backupExistingResource,
-  collectBackupGarbage,
   createBackupId,
   createBackupStoreDeps,
   listBackupSets,
@@ -154,7 +153,8 @@ describe('manifest v3', () => {
       listBackupSets(deps).then((sets) => sets.find((set) => set.backupId === 'broken-set'));
 
     expect((await broken())?.evictsNext).toBe(false);
-    expect((await collectBackupGarbage({}, deps)).pruned).not.toContain('broken-set');
+    await pruneBackupSets('set-b', deps);
+    expect((await listBackupSets(deps)).map((set) => set.backupId)).toContain('broken-set');
     expect(await broken()).toMatchObject({ manifestReadable: false, evictsNext: false });
   });
 });
@@ -180,93 +180,5 @@ describe('pruneBackupSets', () => {
     expect(kept, `expected the older set evicted by the count | received ${kept}`).toEqual([
       'current',
     ]);
-  });
-});
-
-describe('collectBackupGarbage', () => {
-  it('never auto-evicts a manifest-less set, which may still be in flight', async () => {
-    const deps = createBackupStoreDeps({
-      backupRoot,
-      retentionCount: 1,
-      retentionBytes: 1024 ** 3,
-    });
-    // No manifest yet: an apply still filling this set (possibly another
-    // runtime sharing the store), or the only copy a failed commit left.
-    mkdirSync(join(backupRoot, 'in-flight', 'claude-skills', 'gh'), { recursive: true });
-    for (const id of ['set-a', 'set-b']) {
-      mkdirSync(join(backupRoot, id, 'claude-skills', 'gh'), { recursive: true });
-      await writeBackupManifest(
-        { version: 3, backupId: id, createdAtMs: 1, entries: [], operation: 'propagation' },
-        deps
-      );
-    }
-
-    const inFlight = (await listBackupSets(deps)).find((set) => set.backupId === 'in-flight');
-    expect(
-      inFlight?.evictsNext,
-      `expected evictsNext false for a manifest-less set | received ${inFlight?.evictsNext}`
-    ).toBe(false);
-    const collected = await collectBackupGarbage({}, deps);
-    expect(collected.pruned).not.toContain('in-flight');
-    expect((await listBackupSets(deps)).map((set) => set.backupId)).toContain('in-flight');
-
-    // An explicit purge still removes it.
-    const purged = await collectBackupGarbage({ purgeBackupIds: ['in-flight'] }, deps);
-    expect(purged.purged).toEqual(['in-flight']);
-    expect((await listBackupSets(deps)).map((set) => set.backupId)).not.toContain('in-flight');
-  });
-
-  it('purges named sets and reports what retention took with them', async () => {
-    const deps = createBackupStoreDeps({
-      backupRoot,
-      retentionCount: 1,
-      retentionBytes: 1024 ** 3,
-    });
-    for (const id of ['set-a', 'set-b', 'set-c']) {
-      mkdirSync(join(backupRoot, id, 'claude-skills', 'gh'), { recursive: true });
-      writeFileSync(join(backupRoot, id, 'claude-skills', 'gh', 'SKILL.md'), id);
-      await writeBackupManifest(
-        { version: 3, backupId: id, createdAtMs: 1, entries: [], operation: 'propagation' },
-        deps
-      );
-    }
-
-    const result = await collectBackupGarbage({ purgeBackupIds: ['set-a'] }, deps);
-
-    expect(result.purged).toEqual(['set-a']);
-    // Retention keeps one ordinary set, so exactly one of the two survivors is
-    // reported pruned — and the hub deletes its index row in the same pass.
-    expect(result.pruned).toHaveLength(1);
-    expect(await listBackupSets(deps)).toHaveLength(1);
-  });
-
-  it('purging a set that is already gone is the state the caller asked for', async () => {
-    const deps = createBackupStoreDeps({ backupRoot });
-    mkdirSync(backupRoot, { recursive: true });
-
-    const result = await collectBackupGarbage({ purgeBackupIds: ['never-existed'] }, deps);
-
-    expect(result.purged).toEqual(['never-existed']);
-    expect(result.pruned).toEqual([]);
-  });
-
-  it('keeps every set when no bounds are exceeded', async () => {
-    const deps = createBackupStoreDeps({
-      backupRoot,
-      retentionCount: 5,
-      retentionBytes: 1024 ** 3,
-    });
-    for (const id of ['keep-a', 'keep-b']) {
-      mkdirSync(join(backupRoot, id, 'claude-skills', 'gh'), { recursive: true });
-      await writeBackupManifest(
-        { version: 3, backupId: id, createdAtMs: 1, entries: [], operation: 'removal' },
-        deps
-      );
-    }
-
-    const result = await collectBackupGarbage({}, deps);
-
-    expect(result.pruned).toEqual([]);
-    expect(await listBackupSets(deps)).toHaveLength(2);
   });
 });

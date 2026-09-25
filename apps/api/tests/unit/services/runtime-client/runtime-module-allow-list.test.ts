@@ -3,21 +3,19 @@
  *
  * Every contract the two share — method shapes, event topics, error kinds,
  * numeric caps, the helpers both machines run — lives in
- * `@mangostudio/shared`. What is left of the TypeScript runtime package in
- * this workspace is the in-process wiring Local used before it became a
- * spawned Rust runtime: constructing a host definition and handing it a port,
- * in one file that nothing the hub ships reaches any more, and which is
- * deleted with the TypeScript runtime. The workspace's tests reach
- * it through none at all: fakes are served by `tests/support/fake-runtime-host.ts`
- * and real runtime behaviour comes from the compiled Rust binary.
+ * `@mangostudio/shared`. The TypeScript runtime package, and the in-process
+ * seam Local used before it became a spawned Rust runtime, are gone, so no
+ * file in this workspace may name either. Fakes are served by
+ * `tests/support/fake-runtime-host.ts` and real runtime behaviour comes from
+ * the compiled Rust binary.
  *
  * The package name is assembled from parts below so this file, which has to
  * name it, is not itself a match for a repository-wide search for importers.
  *
  * Asserted by walking the real source tree rather than trusted to review,
- * because the failure is silent and cheap to reintroduce: an import added here
- * compiles, passes, and is only noticed when the runtime it reaches into is no
- * longer written in TypeScript. Precedent: `tests/unit/lib/hidden-window.test.ts`.
+ * because the failure is cheap to reintroduce: an import added here would
+ * fail only at install time, far from the change that caused it.
+ * Precedent: `tests/unit/lib/hidden-window.test.ts`.
  */
 
 import { describe, expect, it } from 'bun:test';
@@ -31,14 +29,11 @@ const API_TESTS = join(REPO_ROOT, 'apps/api/tests');
 /** The TypeScript runtime package, spelled so this file does not import-match itself. */
 const RUNTIME_PACKAGE = ['@mangostudio', 'runtime'].join('/');
 
-/** The one file allowed to reach the runtime as a module, repo-relative. */
-const ALLOWED = 'apps/api/src/services/runtime-client/connect-in-process-runtime.ts';
-
 const RUNTIME_SPECIFIER = new RegExp(
   `(?:from|import)\\s*\\(?\\s*['"]${RUNTIME_PACKAGE}(?:/[^'"]*)?['"]`
 );
 
-/** The in-process seam's module, as a test would import it. */
+/** The deleted in-process seam's module, as a file would import it. */
 const IN_PROCESS_SEAM_SPECIFIER = /['"][./]*(?:[^'"]*\/)?connect-in-process-runtime['"]/;
 
 /**
@@ -63,7 +58,7 @@ function sourceFilesUnder(directory: string): string[] {
     .filter((path) => statSync(path).isFile());
 }
 
-describe('the hub imports the runtime module in exactly one place', () => {
+describe('the hub source imports no TypeScript runtime', () => {
   const files = sourceFilesUnder(API_SRC);
 
   it('scans a set of files that is neither empty nor accidentally tiny', () => {
@@ -72,18 +67,15 @@ describe('the hub imports the runtime module in exactly one place', () => {
     expect(files.length).toBeGreaterThan(50);
   });
 
-  it('finds the runtime package only in the in-process seam', () => {
+  it('finds no source file importing the runtime package', () => {
     const importers = files
       .filter((file) => RUNTIME_SPECIFIER.test(readFileSync(file, 'utf8')))
-      .map((file) => file.slice(REPO_ROOT.length + 1).replaceAll('\\', '/'))
-      .sort();
+      .map((file) => file.slice(REPO_ROOT.length + 1).replaceAll('\\', '/'));
 
-    expect(importers).toEqual([ALLOWED]);
+    expect(importers).toEqual([]);
   });
 
-  // Local spawns the runtime binary now. The seam stays until it is deleted,
-  // but nothing the hub ships may reach it.
-  it('reaches the in-process seam from no production file', () => {
+  it('finds no source file importing the in-process seam', () => {
     const importers = files
       .filter((file) => IN_PROCESS_SEAM_SPECIFIER.test(readFileSync(file, 'utf8')))
       .map((file) => file.slice(REPO_ROOT.length + 1).replaceAll('\\', '/'));

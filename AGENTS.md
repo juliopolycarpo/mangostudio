@@ -41,8 +41,7 @@ Useful docs:
 - The Mango Protocol (`spec/`, `packages/protocol/`, `crates/mango-protocol/`, `docs/protocol/`, `scripts/protocol/`) is one wire contract on its own `protocol-v*` release line. Any change under those paths follows `packages/protocol/AGENTS.md` and runs `bun run protocol:check && bun run protocol:test` — the repository gate runs only its TypeScript half.
 - One parsing point per host for *configuration* — the environment variables that select a mode,
   a token, or a path the host trusts — never scattered: hub configuration parsing lives only in
-  `apps/api/src/lib/config.ts`; the TypeScript runtime host's, only in
-  `apps/runtime/src/config.ts`; the Rust runtime host's, only in
+  `apps/api/src/lib/config.ts`; the Rust runtime host's, only in
   `crates/mangostudio-runtime/src/config.rs`. Each host owns its own single parser — a second host
   cannot route its configuration through another host's module.
   Machine probing is a separate, legitimate carve-out: a detector describing what is actually on
@@ -64,12 +63,10 @@ Useful docs:
 - Shared code must remain framework-agnostic. Shared code that reaches a Node builtin gets its
   own export subpath (`@mangostudio/shared/library/host`, `/process/host`) so the browser bundle
   never resolves it.
-- `apps/api` must not import `@mangostudio/runtime`. The only exception is
-  `apps/api/src/services/runtime-client/connect-in-process-runtime.ts`, and a test enforces it;
-  everything the two ends share is a contract in `@mangostudio/shared`. No production file may
-  import that seam either: Local is the cargo-built `mangostudio-runtime` the hub spawns, so
-  API tests that reach Local need it built (`cargo build -p mangostudio-runtime`) or named by
-  `MANGOSTUDIO_RUNTIME_BINARY`.
+- `apps/api` never imports a runtime in-process; `runtime-module-allow-list.test.ts` enforces it,
+  and everything the two ends share is a contract in `@mangostudio/shared`. Local is the
+  cargo-built `mangostudio-runtime` the hub spawns, so API tests that reach Local need it built
+  (`cargo build -p mangostudio-runtime`) or named by `MANGOSTUDIO_RUNTIME_BINARY`.
 - Cross-workspace imports must use package names, never relative paths.
 - Do not edit `apps/frontend/src/routeTree.gen.ts`; it is generated.
 

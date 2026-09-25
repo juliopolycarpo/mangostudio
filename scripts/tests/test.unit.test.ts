@@ -93,7 +93,7 @@ describe('test script', () => {
   });
 
   test('keeps Bun coverage output machine-readable without duplicate console tables', () => {
-    for (const workspace of ['api', 'frontend', 'runtime', 'shared']) {
+    for (const workspace of ['api', 'frontend', 'shared']) {
       const bunfig = readText(`apps/${workspace}/bunfig.toml`);
 
       expect(bunfig).toContain('coverageReporter = ["lcov"]');

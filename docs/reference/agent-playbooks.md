@@ -163,10 +163,10 @@ That boundary is now reported rather than left implicit. A tool declares `unchec
 Two invariants the checkpoint path depends on:
 
 - A mutation and its manifest row run under one per-path lock (`withMutationPersistence` in `apps/api/src/services/tools/file-mutation-snapshot.ts`). Every executor passes it the full set of paths its call can touch, so nothing on those paths can start a second mutation before the row exists. The lock does not roll the filesystem back if blob or database I/O then fails: the file stays changed, no row is written, and the tool reports failure. That is accepted. Closing it needs a two-phase capture-then-mutate protocol or a runtime rollback, neither of which this path does.
-- Revert sends both the state the turn left behind (`afterHash`) and the state a completed revert produces (`revertedHash`). A retry after a revert whose bookkeeping write failed therefore recognises its own finished work instead of reporting the file as changed by someone else. A set that is half in each state is still a conflict — see the comment on `alreadyReverted` in `apps/runtime/src/services/snapshot.ts` for why resuming it is unsafe.
-- Cancelling a turn never abandons a mutation that has started. Every runtime method takes the call's `AbortSignal` and refuses only where there is nothing to undo — `apps/runtime/src/services/cancellation.ts` states the rule and [hub-runtime.md](../architecture/hub-runtime.md) explains it. Adding a mutation means choosing its cancellation point, not threading a parameter.
+- Revert sends both the state the turn left behind (`afterHash`) and the state a completed revert produces (`revertedHash`). A retry after a revert whose bookkeeping write failed therefore recognises its own finished work instead of reporting the file as changed by someone else. A set that is half in each state is still a conflict — `already_reverted` in `crates/mangostudio-runtime/src/filesystem/snapshot.rs` refuses it, because resuming it is unsafe.
+- Cancelling a turn never abandons a mutation that has started. Every runtime method takes the call's cancellation token and refuses only where there is nothing to undo — each handler in `crates/mangostudio-runtime/src/filesystem/` places its own last cancellation point and [hub-runtime.md](../architecture/hub-runtime.md) explains the rule. Adding a mutation means choosing its cancellation point, not threading a parameter.
 
-`delete_file` gates on `assertFresh` (`apps/runtime/src/services/file-freshness.ts`): the chat must have read a file's current bytes before it can destroy them. `move_file` does not. A rename does not require the source to have been read. Freshness and containment are separate. Containment is `guardPaths` (`apps/runtime/src/services/fs-path-policy.ts`) refusing any move whose source or destination resolves outside a chat's `pathPolicy.containmentRoot` before `moveRuntimeFile` ever runs. That is not a stronger form of the read-first gate. A contained chat can still relocate unread bytes inside the root. What it prevents is using a rename to park a file outside the root, read or not. The remaining gap: a chat with no containment root (the default, empty `allowedPaths`/`deniedPaths`) can relocate a file anywhere without reading it first, which is functionally an unguarded delete. That gap is accepted, not closed; see #632.
+`delete_file` gates on `read_fresh` (`crates/mangostudio-runtime/src/filesystem/service.rs`, over the ledger in `filesystem/freshness.rs`): the chat must have read a file's current bytes before it can destroy them. `move_file` does not. A rename does not require the source to have been read. Freshness and containment are separate. Containment is the compiled path policy (`crates/mangostudio-runtime/src/filesystem/policy.rs`) refusing any move whose source or destination resolves outside a chat's `pathPolicy.containmentRoot` before `move_file` touches either path. That is not a stronger form of the read-first gate. A contained chat can still relocate unread bytes inside the root. What it prevents is using a rename to park a file outside the root, read or not. The remaining gap: a chat with no containment root (the default, empty `allowedPaths`/`deniedPaths`) can relocate a file anywhere without reading it first, which is functionally an unguarded delete. That gap is accepted, not closed; see #632.
 
 ## Skills
 
@@ -189,8 +189,8 @@ Open these first:
 - `apps/shared/src/library/registry.ts` via `@mangostudio/shared/library/host`
   (locations, targets, per-kind read precedence; path resolution is pure over
   `PathEnv`)
-- `apps/runtime/src/services/library/` (scan + contained read + settings source
-  reads + byte caps + write engines — `library.scan` / `library.read` /
+- `crates/mangostudio-runtime/src/library/` (scan + contained read + settings source
+  reads + byte caps, and write engines under `mutation/` — `library.scan` / `library.read` /
   `library.read-tree` / `library.locations` / `library.settings-sources` /
   `library.apply` / `library.remove` / `library.undo` / `library.backups` /
   `library.gc`; the FS engines that used to live under
@@ -341,20 +341,21 @@ Open these first:
 
 - `apps/shared/src/environments/detection/` (the pure domain: PATH scan, duplicate
   analysis, runtime and agent definitions, auth signals, nvm, the Node release policy)
-- `apps/runtime/src/services/probing/` (the same domain bound to a real host —
-  `service.ts` is the three `probing.*` methods, `host-env.ts` the fs/spawn seams)
+- `crates/mangostudio-runtime/src/probing/` (the same domain bound to a real host —
+  `methods.rs` is the three `probing.*` methods, `host.rs` the environment snapshot,
+  `detection/` the ported domain)
 - `apps/api/src/modules/environments/application/probing-service.ts` (per-environment
   cache, force/dedupe, and the policy the hub sends down)
 - `apps/api/src/modules/environments/application/install-service.ts` (guards, prepare, run)
 - `apps/api/src/modules/environments/domain/install-recipes.ts` (the recipe table: platforms,
   downloads, argv builders, accepted exit codes, copy-only entries)
 - `apps/api/src/modules/environments/application/toolchain-service.ts` and
-  `apps/runtime/src/services/spawn-env.ts` (which Node and Bun a spawned process runs with;
+  `crates/mangostudio-runtime/src/commands/toolchain.rs` (which Node and Bun a spawned process runs with;
   see `docs/features/environments.md`)
 - `apps/api/src/modules/environments/domain/prerequisite-findings.ts` (hub-side
   `prerequisite-missing` findings from the recipe table)
 - `apps/frontend/src/features/environments/setup-checklist.ts` (the Overview's Setup rows)
-- `apps/runtime/src/services/install.ts` (the spawn+capture loop, and only that)
+- `crates/mangostudio-runtime/src/install/` (the spawn+capture loop, and only that)
 - `apps/api/src/modules/environments/http/environment-routes.ts`, `install-routes.ts`
 - `apps/shared/src/environments/schemas.ts` (single source of truth for every shape)
 - `apps/frontend/src/features/environments/` (`format.ts` holds the presentation rules;
@@ -464,25 +465,13 @@ Open these first:
   per-vendor candidate resolution behind them — a *different* responsibility from reading one back)
 - `apps/shared/src/external-agents/remedies.ts` (reason → what would fix it, `satisfies`-guarded so
   a new reason cannot ship without one)
-- `apps/runtime/src/services/external-agents/` (semantic adapters, registry, session lifecycle,
-  vendor-output normalization, process framing and descendant cleanup)
-- `apps/runtime/src/services/external-agents/codex/` (the Codex `app-server` adapter — start at
-  `adapter.ts`, then `reducer.ts` for the notification state machine, `approvals.ts` for the
-  server→client requests including the `item/tool/call` refusal, and `sandbox.ts` for the two
-  differently-shaped sandbox fields)
-- `apps/runtime/src/services/external-agents/codex/protocol/` (**generated** — the vendor's own
-  contract, regenerated by `bun run vendor-contracts:regen`, never edited by hand)
-- `apps/runtime/src/services/external-agents/codex/pinned.ts` (the regeneration pin, the runtime
-  minimum version, and the notification opt-out list)
-- `apps/runtime/src/services/external-agents/*/contract/` (**captured** — the committed vendor
-  contracts and their provenance manifests; `scripts/vendor/` records and diffs them)
-- `apps/runtime/src/services/external-agents/claude/models.ts` (the model catalog read out of
-  `--model`'s own prose, and why nothing in it is marked default)
-- `apps/runtime/src/services/external-agents/claude/cli-surface.ts`,
-  `apps/runtime/src/services/external-agents/cursor/handshake.ts` (the discovery-time probes that
-  decide availability, so a version number never does it alone)
-- `apps/runtime/src/registry.ts`, `apps/runtime/src/methods.ts` (the `external-agent.*` protocol
-  handlers, event topic, consent and close wiring)
+- `crates/mangostudio-runtime/src/external_agents/` (the runtime host over the External Agents
+  SDK — `service.rs` for the `external-agent.*` handlers, `supervisor.rs` for session lifecycle,
+  `launcher.rs` for authorized launch, `isolation.rs` for the attestation, and `map.rs` /
+  `map_events.rs` for the one mapper from SDK types to the wire)
+- The vendor adapters, their pins and the recorded vendor contracts live in the SDK repository,
+  [juliopolycarpo/mango-external-agents](https://github.com/juliopolycarpo/mango-external-agents)
+  (`mango-agent-claude`, `mango-agent-codex`, `mango-agent-acp`)
 - `apps/api/src/services/runtime-client/runtime-client.ts` (typed method facade and session-filtered
   event subscription)
 - `apps/api/src/modules/external-agents/application/external-agent-discovery.ts` (the cheap pass,
@@ -517,7 +506,7 @@ would run the turn, never from a table in the hub.
 Two Codex-specific traps, both of which cost a debugging session if met unprepared:
 
 - `thread/start` takes `sandbox`, a kebab-case **string**; `turn/start` takes `sandboxPolicy`, a
-  camelCase **tagged object**. Encode through `sandbox.ts`'s two helpers, never by hand.
+  camelCase **tagged object**. The SDK's Codex adapter owns both encodings.
 - `item/tool/call` is a server→client request asking MangoStudio to run a tool, and `initialize`
   offers no capability to decline it. It is answered with a JSON-RPC error unconditionally.
 - `thread/list` returns `Thread`s whose `id` is the thread and whose `sessionId` is a *different*
@@ -526,18 +515,15 @@ Two Codex-specific traps, both of which cost a debugging session if met unprepar
   `sourceKinds` must be an explicit allowlist or the listing includes Codex's own subagent, review
   and compaction threads.
 
-All three committed contracts are regenerated with `bun run vendor-contracts:regen` and drift-checked
-in CI by `.github/workflows/vendor-drift.yml`. Codex's pin is a **package invocation**, not a global
-binary, so it reproduces on a runner with no Codex installed — and it is unrelated to how a user
-installed theirs, since the adapter resolves the executable through the runtime scanner and gates on
-`codex --version`. Cursor and Claude have no generator, so their contracts are normalized captures
-from a live binary; `docs/architecture/external-agents.md` has the pinning discipline in full.
+The recorded vendor contracts are regenerated and drift-checked in the SDK repository, whose CI
+runs the vendor contract drift workflow; `docs/architecture/external-agents.md` says where the pins
+live.
 
 ## MCP Servers
 
 Open these first:
 
-- `apps/runtime/src/services/mcp/` (SDK boundary, transports, session registry —
+- `crates/mangostudio-runtime/src/mcp/` (`sdk.rs` is the only `rmcp` boundary; transports and the session registry —
   the server runs on the environment's runtime, not in the hub)
 - `apps/api/src/services/mcp/runtime-session.ts` (hub handle over the protocol,
   secret delivery, elicitation hop)
@@ -583,9 +569,8 @@ Open these first:
 Workspace filesystem browsing and workdir validation run in the runtime via
 `workspace.browse` / `workspace.validate`. Hub modules under
 `application/directory-browser.ts` and `application/workdir-validation.ts` are
-thin RuntimeClient facades that preserve HTTP error types. Path-containment
-helpers re-export from `@mangostudio/runtime`; workdir-policy decisions stay in
-the hub.
+thin RuntimeClient facades that preserve HTTP error types. Link-resolved path
+containment runs in the runtime; workdir-policy decisions stay in the hub.
 
 Every git route lives in `http/git-routes.ts` behind `routeWorkdir()` (chat ownership
 plus workdir resolution) and `gitWriteError()` (typed failures), and declares the same
@@ -641,8 +626,8 @@ change groups, with the GitHub card collapsed at the bottom.
 Open these first:
 
 - `apps/shared/src/terminal/` — session shape, limits, and the binary socket codec
-- `apps/runtime/src/services/terminal/` — `pty.ts` (the `Bun.Terminal` seam), the bounded
-  buffers, the session and the service behind `terminal.*`
+- `crates/mangostudio-runtime/src/terminal/` — `pty.rs` (the PTY port), `flow.rs` (the bounded
+  buffers and credit window) and `service.rs` (the sessions behind `terminal.*`)
 - `apps/api/src/modules/terminals/` — session registry, HTTP routes, and the socket relay
 - `apps/frontend/src/features/terminal/` — xterm.js view, socket hook, rail panel, pop-out
 
@@ -652,12 +637,6 @@ Rules that are easy to get wrong:
   `TERMINAL_INFLIGHT_WINDOW_BYTES` unacknowledged. Change a limit in
   `apps/shared/src/terminal/schemas.ts`, never in one hop; the shared test pins that every
   hop's limit fits the next.
-- The runtime's event relay (`apps/runtime/src/session.ts`) drops an emit when no session
-  is bound, and `Session.emit` answers `false` unless the session is ready. The
-  terminal session wraps its emitter and treats a throw — a frame past the limit — as
-  "viewer gone".
-- Exit status comes from `proc.exited`; the `Bun.Terminal` `exit` callback reports `1, null`
-  for a clean exit and a SIGKILL alike on Bun 1.4.0.
 - The relay never lets the socket throttle: it stops sending under
   `TERMINAL_SOCKET_SEND_HIGH_WATER_BYTES`, resumes on `drain`, and drops with a notice past
   `TERMINAL_HUB_QUEUE_MAX_BYTES`. Bun would otherwise close the socket at 64 KiB.
@@ -667,8 +646,7 @@ Rules that are easy to get wrong:
   `WorkspaceRail.tsx` is the compile-time guard, and the settings normaliser backfills it
   for existing users.
 
-Tests: `apps/runtime/tests/unit/services/terminal/` (fake `PtyPort` plus real-PTY cases that
-skip without `Bun.Terminal`), `apps/api/tests/unit/modules/terminals/` and
+Tests: `crates/mangostudio-runtime/src/terminal/service/tests.rs` (fake PTY plus Unix-only real-PTY cases), `apps/api/tests/unit/modules/terminals/` and
 `apps/api/tests/integration/routes/terminal*.integration.test.ts`,
 `apps/frontend/tests/unit/features/terminal/`, and `tests/browser-smoke/terminal.spec.ts`.
 
@@ -887,15 +865,15 @@ Where a runtime lives and what it is allowed to do — `~/.mango/runtime/<slot>/
 `allow` set, and the CLI that writes it:
 
 - `apps/shared/src/runtime-home/` (schemas, presets, path layout — the contract)
-- `apps/runtime/src/runtime-home.ts` (the half that touches disk), `src/setup.ts`, `src/health.ts`
-- `apps/runtime/src/services/slot-publish.ts` (the `current` pointer per platform — POSIX
-  symlink, Windows junction — plus the version prune and the lock-retry every slot write
-  goes through), `src/services/slot-update-lock.ts` (one writer per slot, across processes)
-- `apps/runtime/src/slot-install.ts` (`mangostudio-runtime install`: the same publication a
-  live update performs, minus the transfer), `src/services/runtime-update.ts` (the transfer)
-- `apps/runtime/src/services/owner-only.ts` (`chmod 0600`, or `icacls` where there is no mode)
-- `apps/runtime/src/consent-gate.ts`, `src/consent-source.ts` (dispatch refusal + per-call re-read)
-- `apps/runtime/src/audit-log.ts` (local NDJSON receipt; never on the wire)
+- `crates/mangostudio-runtime/src/runtime_home.rs` (the half that touches disk), `src/setup.rs`, `src/health.rs`
+- `crates/mangostudio-runtime/src/slot_publish.rs` (the slot pointer per platform — POSIX `current`
+  link, Windows atomic `.cmd` shim — plus the version prune and the rename retry slot writes
+  go through), `src/slot_update_lock.rs` (one writer per slot, across processes)
+- `crates/mangostudio-runtime/src/cli/native_operation.rs` (`mangostudio-runtime install`: the same publication a
+  live update performs, minus the transfer), `src/update.rs` and `src/update_transfer.rs` (the transfer)
+- `crates/mangostudio-runtime/src/runtime_home/owner_only.rs` (`chmod 0600`, or `icacls` where there is no mode)
+- `crates/mangostudio-runtime/src/ports/authorization.rs`, `src/consent/` (dispatch refusal + per-call re-read)
+- `crates/mangostudio-runtime/src/audit/` (local NDJSON receipt; never on the wire)
 - `apps/api/src/modules/generation/application/resolve-capability-candidates.ts` (hub withholds
   tools the connected manifest refuses)
 - `apps/frontend/src/features/environments/components/EnvironmentEntitiesOverview.tsx`
@@ -988,7 +966,7 @@ in the spawn path applies and the manager is entered through `adopt()` rather th
 - `@mangostudio/protocol/ws` — `createWebSocketPort` (frames chunked across 16 KiB
   messages, send queue, backpressure) and the `mango.v1` subprotocol; `CLOSE_CODES` says why
   a socket ended and whether redialing can change it
-- `apps/runtime/src/connect.ts` (dial loop, backoff, heartbeat), `apps/runtime/src/runtime-home.ts`
+- `crates/mangostudio-runtime/src/transport/connect.rs` (dial loop, backoff, heartbeat), `crates/mangostudio-runtime/src/runtime_home.rs`
 - `apps/api/src/modules/environments/http/runtime-socket-routes.ts` (`/api/runtime`)
 - `apps/api/src/modules/environments/domain/pairing-token.ts` (selector + verifier, dial endpoint)
 - `apps/api/src/modules/environments/application/runtime-pairing-service.ts`
@@ -999,7 +977,7 @@ in the spawn path applies and the manager is entered through `adopt()` rather th
 Direct URL inverts it again — the hub dials a listening runtime — so it is a connector
 on `connect()`, not `adopt()`, and is not in the dial-in transport set:
 
-- `apps/runtime/src/serve.ts` (`Bun.serve`, bearer upgrade, supersede, `/health`)
+- `crates/mangostudio-runtime/src/transport/serve.rs` (bearer upgrade, supersede, `/health`)
 - `apps/api/src/services/runtime-client/connect-http-runtime.ts` (hub dial-out)
 - `apps/api/src/services/runtime-client/runtime-token-secrets.ts` (OS secret store, hard-fail)
 - `apps/api/src/services/runtime-client/http-runtime-url.ts` (http→ws, allow private hosts)
@@ -1036,8 +1014,9 @@ mutating actions — lives in one module, shared by the CLI and the API:
 - `apps/api/src/modules/machine/application/` (`hub-service.ts` unit definition and env
   allowlist, `doctor-service.ts` the checks both surfaces render, `machine-service.ts`)
 - `apps/api/src/modules/machine/http/machine-routes.ts`
-- `apps/runtime/src/services/user-service-manager.ts` (the one supervisor abstraction —
-  systemd user units, launchd agents, per-user Scheduled Tasks — used by both binaries)
+- `apps/shared/src/machine/user-service.ts` (`@mangostudio/shared/machine/service`: the hub's
+  supervisor abstraction — systemd user units, launchd agents, per-user Scheduled Tasks) and
+  `crates/mangostudio-runtime/src/cli/user_service.rs` (the same three for the runtime)
 - `apps/shared/src/machine/schemas.ts` (single source of truth for every shape)
 
 Self-update — who installed the binary, whether a newer release exists, and

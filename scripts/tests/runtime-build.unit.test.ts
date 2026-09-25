@@ -14,6 +14,7 @@ import {
   prebuiltRuntimePath,
   resolveRuntimeSource,
   runtimeBuildHint,
+  runtimeBuildVersion,
   runtimeHeaderProblems,
   runtimeVersionProblem,
   rustTargetTriple,
@@ -316,6 +317,14 @@ describe('runtime build wiring', () => {
     const buildScript = readText('scripts/build.ts');
     expect(buildScript).not.toContain('apps/runtime/src/cli.ts');
     expect(buildScript).toContain('resolveRuntimeSource');
+  });
+
+  test('stamps dev with --dev and never resolves the release version for it', () => {
+    const refuse = (): string => {
+      throw new Error('expected no release version lookup for a --dev build');
+    };
+    expect(runtimeBuildVersion({ dev: true }, refuse)).toBe('dev');
+    expect(runtimeBuildVersion({ dev: false }, () => '1.2.3')).toBe('1.2.3');
   });
 
   test('exposes the runtime build as a root script', () => {

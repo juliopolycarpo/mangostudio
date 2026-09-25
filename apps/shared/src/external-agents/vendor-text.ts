@@ -126,28 +126,6 @@ function isStrippable(codePoint: number): boolean {
 }
 
 /**
- * Removes terminal- and wire-unsafe code points without imposing a field cap.
- *
- * Streaming text is bounded by the per-turn byte budget rather than one of
- * the small label limits below, but it still must not carry control sequences,
- * bidi overrides or lone surrogates across the runtime boundary.
- */
-export function sanitizeVendorText(raw: string): BoundedVendorText {
-  const kept: string[] = [];
-  let removed = false;
-
-  for (const character of raw) {
-    if (isStrippable(character.codePointAt(0) ?? 0)) {
-      removed = true;
-      continue;
-    }
-    kept.push(character);
-  }
-
-  return { text: kept.join(''), truncated: removed };
-}
-
-/**
  * Applies one field's bound to vendor-supplied text.
  *
  * Returns the text to persist and whether anything was removed, so a caller can

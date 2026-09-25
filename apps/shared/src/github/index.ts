@@ -1,7 +1,6 @@
 export { summarizeGhSubcommand } from './audit';
 export {
   GITHUB_PR_REVIEW_THREADS_QUERY,
-  isPinnedGithubGraphqlDocument,
   PINNED_GITHUB_GRAPHQL_DOCUMENTS,
 } from './graphql-documents';
 export {

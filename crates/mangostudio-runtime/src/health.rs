@@ -19,7 +19,7 @@
 //! # Two deliberate divergences from the TypeScript report
 //!
 //! - **`source` never reports `"source-checkout"`.** The TypeScript value
-//!   exists because `apps/runtime` can run either as a compiled binary or
+//!   existed because `apps/runtime` could run either as a compiled binary or
 //!   as a workspace entry executed through `bun run` — detected by
 //!   checking whether the running executable's own basename is `bun`. This
 //!   crate is always a compiled binary; there is no "run from source

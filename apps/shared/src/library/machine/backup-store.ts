@@ -226,7 +226,7 @@ async function readManifestAt(setPath: string, fs: BackupStoreFs): Promise<Backu
   try {
     raw = await fs.readFile(join(setPath, MANIFEST_NAME));
   } catch (error) {
-    // Missing set → null so undo can answer with LibraryBackupMissingError.
+    // Missing set → null so the runtime's undo can answer 404 / library_backup_missing.
     // Permission or other I/O failures must propagate: collapsing them into
     // "missing" tells the user retention pruned the set when the file is still
     // there and unreadable.
@@ -529,58 +529,6 @@ export async function listBackupSets(deps: BackupStoreDeps): Promise<LibraryBack
     evictsNext: !retained.has(backup.id),
     manifestReadable: backup.manifestReadable,
   }));
-}
-
-/**
- * Trims this store to its bounds and deletes sets the caller names, reporting
- * exactly which ids went.
- *
- * Retention already runs inside every apply and removal, so this exists for the
- * two things those cannot do: enforce a budget that changed since the last
- * write, and delete a named set on a machine the hub does not share a disk with.
- * The returned ids are what the hub's backup index deletes its rows from — an
- * index row outliving its bytes is the one failure mode a listing cache is
- * allowed to have, and only until the next time the machine can be asked.
- */
-export async function collectBackupGarbage(
-  input: { readonly purgeBackupIds?: readonly string[] },
-  deps: BackupStoreDeps
-): Promise<{ purged: string[]; pruned: string[] }> {
-  const purged: string[] = [];
-  for (const backupId of input.purgeBackupIds ?? []) {
-    // Purge is explicit and idempotent: a set already gone is the state the
-    // caller asked for, and reporting it keeps the hub's index converging.
-    await purgeBackupSet(backupId, deps);
-    purged.push(backupId);
-  }
-
-  const before = await collectBackupSets(deps);
-  await pruneBackupSetsAgainstBounds(deps);
-  const after = new Set((await collectBackupSets(deps)).map((backup) => backup.id));
-  return {
-    purged,
-    pruned: before.map((backup) => backup.id).filter((id) => !after.has(id)),
-  };
-}
-
-/**
- * Retention with no set to protect. `pruneBackupSets` always keeps the apply it
- * was called from; a standalone sweep has no such set, and passing a
- * non-existent id would silently reserve a slot in the count budget.
- */
-async function pruneBackupSetsAgainstBounds(deps: BackupStoreDeps): Promise<void> {
-  const backupSets = await collectBackupSets(deps);
-  if (backupSets.length === 0) return;
-  const retentionCount = deps.retentionCount();
-  if (!Number.isSafeInteger(retentionCount) || retentionCount < 1) {
-    throw new TypeError('Library backup retention count must be a positive integer.');
-  }
-  const retained = selectRetained(backupSets, null, retentionCount, deps);
-  await Promise.all(
-    backupSets
-      .filter((backup) => !retained.has(backup.id))
-      .map((backup) => deps.fs.remove(backup.path))
-  );
 }
 
 /**

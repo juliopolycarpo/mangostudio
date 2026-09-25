@@ -3,12 +3,10 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  assertInsideWorkdir,
   isInside,
   isLexicalPathPrefix,
   isPathPrefix,
   resolvePathForContainment,
-  WorkdirContainmentError,
 } from '../../../src/workspaces/path-containment';
 
 let rootDir: string;
@@ -106,11 +104,5 @@ describe('isInside', () => {
     expect(resolvePathForContainment(planned)).toBe(planned);
     expect(isInside(rootDir, planned)).toBe(true);
     expect(isInside(rootDir, join(outsideDir, 'new.txt'))).toBe(false);
-  });
-});
-
-describe('assertInsideWorkdir', () => {
-  it('throws a descriptive error for outside paths', () => {
-    expect(() => assertInsideWorkdir(rootDir, outsideDir)).toThrow(WorkdirContainmentError);
   });
 });

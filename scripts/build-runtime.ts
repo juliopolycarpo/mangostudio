@@ -5,7 +5,7 @@
 // legs run this once per OS family; it verifies every binary it produces from
 // its header, and asks it its version when this machine can run it.
 // Dependency-free: CI runs it with `bun --no-install`.
-// Usage: bun run build:runtime [--platform <ids>] [--os linux|darwin|windows] [--zig] [--rustup] [--out <dir>]
+// Usage: bun run build:runtime [--platform <ids>] [--os linux|darwin|windows] [--zig] [--rustup] [--dev] [--out <dir>]
 
 import { chmodSync, copyFileSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -22,13 +22,14 @@ import {
   hostPlatformId,
   prebuiltRuntimePath,
   RUNTIME_RELEASE_VERSION_ENV,
+  runtimeBuildVersion,
   rustTargetTriple,
   selectRuntimeTargets,
   verifyRuntimeBinary,
 } from './lib/runtime-build';
 
 function printHelp(): never {
-  console.log(`Usage: bun run build:runtime [--platform <ids>] [--os <os>] [--zig] [--rustup] [--out <dir>]
+  console.log(`Usage: bun run build:runtime [--platform <ids>] [--os <os>] [--zig] [--rustup] [--dev] [--out <dir>]
 
 Builds the cargo mangostudio-runtime into <out>/<platform-id>/mangostudio-runtime[.exe].
 
@@ -37,6 +38,7 @@ Flags:
   --os <os>         Keep only the selected platforms for linux, darwin, or windows
   --zig             Link Linux targets through cargo-zigbuild (glibc floor, musl toolchain)
   --rustup          Install each target's Rust standard library first (rustup target add)
+  --dev             Stamp the runtime \`dev\`, the version a source checkout's hub accepts
   --out <dir>       Output directory (default: .mango/runtime)
   --help            Show this help message`);
   process.exit(0);
@@ -92,7 +94,7 @@ async function buildOne(
 
 if (import.meta.main) {
   const { flags, values, positional } = parseArgs({
-    booleanFlags: ['--zig', '--rustup'],
+    booleanFlags: ['--zig', '--rustup', '--dev'],
     valueFlags: ['--platform', '--os', '--out'],
   });
   if (flags['--help']) printHelp();
@@ -102,7 +104,7 @@ if (import.meta.main) {
   let version: string;
   try {
     targets = selectRuntimeTargets(values['--platform'], values['--os']);
-    version = resolveReleaseVersion();
+    version = runtimeBuildVersion({ dev: flags['--dev'] ?? false }, resolveReleaseVersion);
   } catch (caught) {
     fatal(caught instanceof Error ? caught.message : String(caught));
   }

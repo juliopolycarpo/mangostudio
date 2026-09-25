@@ -8,13 +8,14 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
+import { LEGACY_HELLO_1_0_1_NDJSON_LINE } from '../../fixtures/legacy-hello-1-0-1';
 import { resolveRustRuntimeBinary, rustRuntimeVersion } from '../../support/rust-runtime-binary';
 
 const binary = resolveRustRuntimeBinary();
@@ -339,6 +340,40 @@ describe('spawnRuntimeChild', () => {
       )) as RemoteError;
 
       await expect(whenProcessGone(announcedPid(error))).resolves.toBeUndefined();
+    },
+    30_000
+  );
+
+  it.skipIf(!hasPosixShell)(
+    'refuses a child that greets in the 1.0.1 framing, and reaps it',
+    async () => {
+      // A runtime left over from before the protocol move writes a frame this
+      // wire version has no reading of. The hub must not try: a hello it
+      // cannot decode is 4426, and the child it started has to go with it.
+      // The refusal carries no stderr, so the child records its pid on disk.
+      const pidFile = join(workdir, 'legacy-child.pid');
+      const legacyChild =
+        `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); ` +
+        `process.stdout.write(${JSON.stringify(LEGACY_HELLO_1_0_1_NDJSON_LINE)}); ` +
+        'setInterval(() => {}, 1_000);';
+      const error = (await rejectionOf(
+        spawnRuntimeChild({
+          environmentId: 'devbox',
+          launch: { command: process.execPath, args: ['-e', legacyChild] },
+          workspaceBinding: null,
+          hubVersion: 'hub-test',
+          handshakeTimeoutMs: 10_000,
+          onClosed: () => undefined,
+        })
+      )) as RemoteError;
+
+      expect(
+        error.code,
+        `expected PROTOCOL_MISMATCH | received ${error.code}: ${error.message}`
+      ).toBe('PROTOCOL_MISMATCH');
+      const pid = Number(await readFile(pidFile, 'utf8'));
+      expect(Number.isInteger(pid), `expected a pid in ${pidFile} | received ${pid}`).toBe(true);
+      await expect(whenProcessGone(pid)).resolves.toBeUndefined();
     },
     30_000
   );
