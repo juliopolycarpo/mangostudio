@@ -4,6 +4,11 @@ Use este guia quando quiser o caminho mais curto entre o clone do repositório e
 
 ## 1. Configuração
 
+Você precisa do [Bun](https://bun.sh/) e de um toolchain Rust instalado pelo
+[rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
+O hub inicia o Local como o binário `mangostudio-runtime` compilado pelo cargo, e o
+`rust-toolchain.toml` fixa a versão que o rustup instala no primeiro build.
+
 ```bash
 git clone <repo-url>
 cd mangostudio
@@ -23,6 +28,10 @@ cp .mango/.env.example ~/.mango/.env
 ```bash
 bun run dev
 ```
+
+Ele executa `cargo build -p mangostudio-runtime` antes, para que o Local tenha um binário para
+iniciar; defina `MANGOSTUDIO_RUNTIME_BINARY` para usar um que você já compilou. Os testes da API
+que alcançam o Local precisam do mesmo binário.
 
 URLs locais padrão:
 
