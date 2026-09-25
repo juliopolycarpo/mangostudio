@@ -387,8 +387,20 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       'apps/api/tests/support/rust-serve-runtime.ts',
       'apps/api/tests/support/fixtures/rust-filesystem-search-recorded.ts',
       'apps/api/tests/unit/services/tools/support/target-home.ts',
+      'apps/api/tests/support/fake-runtime-host.ts',
+      'apps/api/tests/support/fake-runtime-websocket-server.ts',
     ]) {
       expect(onBlock).toContain(`"${input}"`);
+      expect(matcher.test(input), `changes regex misses ${input}`).toBe(true);
+    }
+    // The MCP fixtures, including the stdio relay pair, are matched as a tree:
+    // the relay's host half and its spawned half change together.
+    expect(onBlock).toContain('"apps/api/tests/support/fixtures/mcp/**"');
+    for (const input of [
+      'apps/api/tests/support/fixtures/mcp/mcp-relay-host.ts',
+      'apps/api/tests/support/fixtures/mcp/mcp-stdio-relay.ts',
+      'apps/api/tests/support/fixtures/mcp/qualification-mcp-server.ts',
+    ]) {
       expect(matcher.test(input), `changes regex misses ${input}`).toBe(true);
     }
     expect(workflow).not.toContain('rust-typescript-runtimes');
