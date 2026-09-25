@@ -96,3 +96,26 @@ export async function rustRuntimeVersion(binaryPath: string): Promise<string> {
   }
   return match[1];
 }
+
+const announcedSkips = new Set<string>();
+
+/**
+ * True when `binary` is missing, after saying so on stderr once per suite, so
+ * a lane without the Rust build reports which cases it did not run instead of
+ * passing silently.
+ *
+ * @example
+ * it.skipIf(skipWithoutRustBinary(binary, 'terminal-socket'))('relays a PTY', async () => { ... });
+ */
+export function skipWithoutRustBinary(binary: RustRuntimeBinary, suite: string): boolean {
+  if (binary.available) return false;
+  if (!announcedSkips.has(suite)) {
+    announcedSkips.add(suite);
+    console.warn(
+      `[rust-runtime] skipping the Rust-backed cases of ${suite}: no binary at ${binary.path}. ` +
+        'Build it with "cargo build -p mangostudio-runtime --locked" or set MANGOSTUDIO_RUNTIME_BINARY; ' +
+        'CI runs them in cargo-shim.yml real-binary-qualification.'
+    );
+  }
+  return true;
+}

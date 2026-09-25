@@ -16,7 +16,7 @@ import {
 import { createTerminalSocketRoutes } from '../../../src/modules/terminals/http/terminal-socket-routes';
 import { insertTestUser } from '../../support/factories';
 import { FakeTerminalRuntimeClient } from '../../support/mocks/fake-terminal-runtime-client';
-import { resolveRustRuntimeBinary } from '../../support/rust-runtime-binary';
+import { resolveRustRuntimeBinary, skipWithoutRustBinary } from '../../support/rust-runtime-binary';
 import { spawnRustStdioRuntime } from '../../support/rust-stdio-runtime';
 
 const ENVIRONMENT_ID = 'workshop';
@@ -525,7 +525,7 @@ describe('terminal socket relay', () => {
 const binary = resolveRustRuntimeBinary();
 
 describe('terminal socket over a real Rust runtime', () => {
-  it.skipIf(!binary.available)(
+  it.skipIf(skipWithoutRustBinary(binary, 'terminal-socket'))(
     'opens, attaches, and relays real PTY output for printf hi',
     async () => {
       const user = await insertTestUser();

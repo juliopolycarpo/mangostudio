@@ -14,7 +14,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBackupStoreDeps } from '@mangostudio/shared/library/machine';
 import { undoLibraryPropagation } from '../../../../src/modules/library/application/propagation-apply';
-import { resolveRustRuntimeBinary } from '../../../support/rust-runtime-binary';
+import {
+  resolveRustRuntimeBinary,
+  skipWithoutRustBinary,
+} from '../../../support/rust-runtime-binary';
 import { type RustStdioRuntime, spawnRustStdioRuntime } from '../../../support/rust-stdio-runtime';
 
 const binary = resolveRustRuntimeBinary();
@@ -30,7 +33,7 @@ afterEach(async () => {
 });
 
 describe('library.undo against the real runtime', () => {
-  it.skipIf(!binary.available)(
+  it.skipIf(skipWithoutRustBinary(binary, 'library-undo-missing-backup'))(
     'answers 404 when the runtime reports the backup set is gone',
     async () => {
       runtime = await spawnRustStdioRuntime(binary.path, { label: 'library-undo-missing' });
