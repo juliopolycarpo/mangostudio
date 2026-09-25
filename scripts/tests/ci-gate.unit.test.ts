@@ -349,6 +349,45 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(qualificationBlock).toContain(
       'tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts'
     );
+    // The api cases that became Rust-backed when the hub tests stopped using
+    // the TypeScript runtime; the ordinary lane has no binary and skips them.
+    for (const suite of [
+      'tests/integration/routes/terminal-socket.integration.test.ts',
+      'tests/integration/routes/environment-entities.integration.test.ts',
+      'tests/integration/services/hub-isolation-claim.integration.test.ts',
+      'tests/integration/services/connect-http-runtime.integration.test.ts',
+      'tests/integration/modules/library/library-undo-missing-backup.integration.test.ts',
+      'tests/unit/services/tools/read-file-tool.test.ts',
+      'tests/unit/services/tools/write-file-tool.test.ts',
+      'tests/unit/services/tools/list-directory-tool.test.ts',
+      'tests/unit/services/tools/glob-tool.test.ts',
+    ]) {
+      expect(qualificationBlock, `real-binary-qualification does not run ${suite}`).toContain(
+        suite
+      );
+    }
+  });
+
+  test('the push filter and the changes job both cover the Rust-only oracle and its helpers', () => {
+    // Editing a recorded expectation or a Rust spawn helper must rerun the
+    // qualification job that reads it, or the edit is never checked.
+    const onBlock = extractOnBlock(workflow);
+    const changesBlock = extractJobBlock(workflow, 'changes');
+    const relevant = /relevant='([^']+)'/.exec(changesBlock)?.[1];
+    expect(relevant, 'cargo-shim.yml changes job has no `relevant=` regex').toBeDefined();
+    const matcher = new RegExp(relevant ?? '');
+
+    for (const input of [
+      'apps/api/tests/support/rust-runtime-client.ts',
+      'apps/api/tests/support/rust-stdio-runtime.ts',
+      'apps/api/tests/support/rust-serve-runtime.ts',
+      'apps/api/tests/support/fixtures/rust-filesystem-search-recorded.ts',
+      'apps/api/tests/unit/services/tools/support/target-home.ts',
+    ]) {
+      expect(onBlock).toContain(`"${input}"`);
+      expect(matcher.test(input), `changes regex misses ${input}`).toBe(true);
+    }
+    expect(workflow).not.toContain('rust-typescript-runtimes');
   });
 });
 
