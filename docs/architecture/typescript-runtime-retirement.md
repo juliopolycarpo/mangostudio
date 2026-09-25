@@ -120,7 +120,9 @@ Other assertions that changed outside the differential suites:
   affects `environment-entities`, `hub-isolation-claim` and `connect-http-runtime`.
 - A rejected token on Rust `serve` closes with 4401 after the upgrade, where the TypeScript
   listener refused with 401 before it. The 401 wording case moved to the fake listener, and a new
-  Rust case asserts the 4401 close.
+  Rust case asserts the 4401 close. On Windows the hub sees that close as 4000 with no reason, so
+  the Rust case pins only `UNAVAILABLE` there; the fake-listener 4401 case covers the mapping on
+  every OS.
 - The direct `assertFresh` probes became behavioural. A file recreated at a moved-from path is
   refused as not read, and a moved-to path can be written without a re-read.
 - MCP row timeouts for the forced-timeout cases went from 75 and 150 ms to 1 s. The Rust runtime
