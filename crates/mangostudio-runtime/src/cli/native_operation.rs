@@ -297,7 +297,11 @@ fn health_findings(report: &Value, audit_error: Option<&str>) -> Vec<Value> {
     {
         findings.push(json!({"severity":"warn","title":"Version","detail":format!("the config records {recorded} but this binary is {running}; the install was replaced without updating the config")}));
     }
-    if let Some(error) = audit_error {
+    // Only while audit is on, as `health.ts` gates `readRuntimeAuditError`:
+    // a sidecar left from an earlier enabled period is not a current fault.
+    if report["audit"]["enabled"] == true
+        && let Some(error) = audit_error
+    {
         findings.push(json!({"severity":"warn","title":"Audit","detail":format!("the last audit write failed: {error}")}));
     }
     findings
@@ -607,6 +611,7 @@ mod tests {
             "version": version,
             "runtimeVersion": "2.0.0",
             "setup": {"state": "configured"},
+            "audit": {"enabled": true},
             "lastError": null,
         })
     }
@@ -658,6 +663,14 @@ mod tests {
                 && audit[0]["detail"]
                     == "the last audit write failed: No space left on device (os error 28) (3 record(s) dropped)",
             "expected one Audit warning quoting the sidecar | received: {findings:?}"
+        );
+
+        let mut disabled = health_report(json!("2.0.0"));
+        disabled["audit"]["enabled"] = json!(false);
+        let findings = health_findings(&disabled, error.as_deref());
+        assert!(
+            titled(&findings, "Audit").is_empty(),
+            "expected no Audit finding for a stale sidecar while audit is off | received: {findings:?}"
         );
     }
 
