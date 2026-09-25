@@ -185,6 +185,13 @@ session, including requests it refused, cancelled, or could not route:
   local timeout).
 - A `req` whose `id` duplicates an in-flight request is answered with `err` code
   `INVALID_REQUEST` and the original request continues.
+- The responder MUST send every frame it produced while handling a request, before that
+  request's `res` or `err`: an `evt` the handler emitted, or a `req` it sent, before it returned
+  goes on the transport ahead of the answer. A requester MAY therefore treat the answer as the
+  end of what the handler emitted in the course of the call, and stop listening for it. Frames
+  produced after the answer, or by work outside the handler, carry no such order. This rule
+  holds at every minor: it changes no byte on the wire, only the order a responder writes the
+  frames it already sends.
 
 ### 6.3 Reserved error codes
 
@@ -256,6 +263,8 @@ minor and is part of the wire, not of any contract:
   event on the same key starts again at `0`.
 - Events carry no acknowledgement. Flow control is the application's responsibility; this
   specification only makes gaps and reordering detectable.
+- An event a handler emitted before it returned precedes that request's answer
+  ([§6.2](#62-res-and-err)).
 - A receiver that observes a gap on a stream key MAY discard that stream; it MUST NOT close the
   session for it.
 
