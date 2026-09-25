@@ -23,6 +23,7 @@
 pub mod connect;
 pub mod serve;
 pub mod stdio;
+mod upgrade_head;
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};

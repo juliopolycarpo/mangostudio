@@ -6,7 +6,10 @@ import type {
   EnvironmentConnectionState,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+import {
+  RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+  type RuntimeCapabilityManifest,
+} from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
@@ -565,6 +568,88 @@ describe('RuntimeConnectionManager', () => {
 
     expect(attempts).toBe(1);
     expect(manager.getStatus('user-1', 'devbox').errorCode).toBe('PROTOCOL_MISMATCH');
+  });
+
+  describe('a runtime already bound to another environment record', () => {
+    /** Refuses every dial the way `openHubSession` does when `serve` closes 4423. */
+    function boundElsewhereConnector(counter: { attempts: number }): RuntimeEnvironmentConnector {
+      return () => {
+        counter.attempts += 1;
+        return Promise.reject(
+          new RemoteError(
+            RESERVED_ERROR_CODES.UNAVAILABLE,
+            'The session closed before the handshake completed (4423).',
+            { closeCode: RUNTIME_ALREADY_BOUND_CLOSE_CODE }
+          )
+        );
+      };
+    }
+
+    it('reports bound elsewhere and holds lazy retries for the slow window, not the fast backoff', async () => {
+      const counter = { attempts: 0 };
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () =>
+          Promise.resolve(definition('http', { baseUrl: 'http://127.0.0.1:7777' })),
+        connectors: { http: boundElsewhereConnector(counter) },
+      });
+
+      const refusal = await manager.getClient('user-1', 'devbox').catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(RemoteError);
+      expect((refusal as RemoteError).code).toBe(RESERVED_ERROR_CODES.UNAVAILABLE);
+      expect((refusal as RemoteError).message).toContain('already bound to another environment');
+      expect(manager.getStatus('user-1', 'devbox')).toEqual({
+        state: 'error',
+        errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,
+        boundElsewhere: true,
+      });
+
+      // Far past the fast backoff's first step (1s), and still held.
+      advanceSeconds(59);
+      const held = await manager.getClient('user-1', 'devbox').catch((error: unknown) => error);
+      expect((held as Error).message).toContain('next connection attempt is allowed in');
+      expect(counter.attempts).toBe(1);
+    });
+
+    it('never latches: after the slow window it tries again, however often it was refused', async () => {
+      const counter = { attempts: 0 };
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () =>
+          Promise.resolve(definition('http', { baseUrl: 'http://127.0.0.1:7777' })),
+        connectors: { http: boundElsewhereConnector(counter) },
+      });
+
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await manager.getClient('user-1', 'devbox').catch(() => undefined);
+        advanceSeconds(61);
+      }
+      expect(counter.attempts).toBe(8);
+      expect(manager.getStatus('user-1', 'devbox').boundElsewhere).toBe(true);
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('error');
+    });
+
+    it('drops the bound-elsewhere status once the record connects', async () => {
+      let refuse = true;
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () =>
+          Promise.resolve(definition('http', { baseUrl: 'http://127.0.0.1:7777' })),
+        connectors: {
+          http: () =>
+            refuse
+              ? Promise.reject(
+                  new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'closed', {
+                    closeCode: RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+                  })
+                )
+              : Promise.resolve(fakeConnection(() => undefined)),
+        },
+      });
+
+      await manager.getClient('user-1', 'devbox').catch(() => undefined);
+      refuse = false;
+      await manager.connect('user-1', 'devbox', { force: true });
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+      expect(manager.getStatus('user-1', 'devbox').boundElsewhere).toBeUndefined();
+    });
   });
 
   it('reports a runtime that dies as disconnected and reconnects after the backoff', async () => {

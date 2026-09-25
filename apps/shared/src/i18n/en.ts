@@ -2983,6 +2983,8 @@ export const messages: Messages = {
       offlineCache: 'Offline cache',
       offlineCacheHint:
         'The release could not be reached, so this started from a runtime the hub verified earlier.',
+      boundElsewhereHint:
+        'Another environment record, on this hub or another one, is connected to this runtime. It takes one hub connection at a time, so this record tries again at most once a minute, without disturbing that connection. Disconnect or remove the other record to use this one.',
       status: {
         connected: 'Connected',
         connecting: 'Connecting',
@@ -2990,6 +2992,7 @@ export const messages: Messages = {
         error: 'Connection failed',
         updating: 'Updating',
         pulling: 'Pulling image',
+        boundElsewhere: 'Bound elsewhere',
       },
       transport: {
         'in-process': 'In process',

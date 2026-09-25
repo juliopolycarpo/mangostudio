@@ -141,6 +141,12 @@ describe('runtime contract artifacts', () => {
     expect(strings.setupPendingSignature).toBe('runtime setup is pending on this machine');
     expect(strings.updateExitCode).toBe(75);
     expect(strings.pairingTokenPrefix).toBe('mrt_');
+    expect(strings.binding).toEqual({
+      header: 'x-mangostudio-hub-binding',
+      length: 64,
+      alreadyBoundCloseCode: 4423,
+      alreadyBoundReason: 'runtime already bound to another environment',
+    });
     expect(strings.githubGraphqlDocuments).toEqual(PINNED_GITHUB_GRAPHQL_DOCUMENTS);
     expect(strings.runtimeHome.slots).toEqual(['host', 'wsl', 'remote']);
     expect(strings.errors.serviceErrorKinds).toContain('consent_denied');

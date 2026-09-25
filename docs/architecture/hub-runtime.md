@@ -928,11 +928,27 @@ is plaintext HTTP to a public host. On the runtime side, inject a per-run serve 
 `MANGOSTUDIO_RUNTIME_SERVE_TOKEN` (or stdin); that path does not write the credential to
 disk. `MANGOSTUDIO_RUNTIME_TOKEN` stays the pairing credential for `connect`.
 
-**One serve process maps to one user environment.** A second hub (or a second connection
-from the same hub) that upgrades successfully supersedes the previous socket with close
-code `4409`. Multi-user sharing of one listening runtime is therefore a supersede race,
-not a multiplexed session; give each environment its own listen address or its own token
-and process if more than one hub should use that machine.
+**One serve process maps to one user environment.** The hub sends an opaque binding key
+in the upgrade request header `x-mangostudio-hub-binding`, beside the bearer token. The key
+is the SHA-256 digest, in lowercase hex, of the user and environment record the hub connects
+for. The Rust runtime reads it from the upgrade request and decides admission before either
+side's `hello`:
+
+- The same key reconnecting (a network drop the runtime has not noticed yet), or no header
+  at all (an older hub), supersedes the previous socket with close code `4409`.
+- A different key while the previous connection is live is refused with the application
+  close code `4423` (`RUNTIME_ALREADY_BOUND_CLOSE_CODE`). The live connection is not
+  touched. The hub shows the refused record as `boundElsewhere` and lets a lazy caller retry
+  at most once a minute.
+- A header that is present but not 64 lowercase hex characters, or that is repeated, is
+  refused with `4400` and a reason naming what is wrong. It is never treated as no key.
+
+Refusals are sent as a WebSocket close right after the upgrade, before any `hello`, the same
+way a refused credential is.
+
+Multi-user sharing of one listening runtime is not a multiplexed session. Give each
+environment its own listen address, or its own token and process, if more than one hub
+should use that machine.
 
 The runtime does not terminate TLS. Put a reverse proxy in front when the dial crosses an
 untrusted network. The same Bun self-signed client caveat as paired WebSocket applies when
