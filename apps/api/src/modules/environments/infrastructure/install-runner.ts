@@ -26,6 +26,21 @@ import { toolchainParams } from '../application/toolchain-service';
 
 type InstallOutputStream = RuntimeInstallOutputEvent['stream'];
 
+/**
+ * The wire minor from which a responder writes every event a handler asked
+ * for ahead of that request's answer (spec §6.2, wire 1.2). At or above it the
+ * answer is the end of a run's output; below it the answer may overtake the
+ * last lines.
+ */
+export const ORDERED_ANSWER_MINOR = 2;
+
+/**
+ * How long the relay keeps listening past the answer of a peer below
+ * {@link ORDERED_ANSWER_MINOR}. The lines the answer overtook were already
+ * written by then, so they trail it by one transport hop, not by more work.
+ */
+export const UNORDERED_OUTPUT_GRACE_MS = 250;
+
 export interface InstallLogLine {
   readonly stream: InstallOutputStream;
   readonly line: string;
@@ -71,6 +86,8 @@ export interface InstallRunnerDeps {
    */
   readonly logPathFor: (runId: string, environmentId: string) => string;
   readonly now: () => number;
+  /** Listening past the answer on a peer below {@link ORDERED_ANSWER_MINOR}. */
+  readonly unorderedOutputGraceMs: number;
 }
 
 /**
@@ -88,7 +105,21 @@ const defaultDeps: InstallRunnerDeps = {
   resolveClient: (userId, environmentId) => getRuntimeClient(userId, environmentId),
   logPathFor: defaultLogPath,
   now: Date.now,
+  unorderedOutputGraceMs: UNORDERED_OUTPUT_GRACE_MS,
 };
+
+/**
+ * Resolves after `ms` when the peer negotiated a minor below
+ * {@link ORDERED_ANSWER_MINOR}, at once otherwise: the window in which output
+ * the answer overtook can still arrive.
+ *
+ * @example
+ * await awaitUnorderedOutput(client.effectiveMinor, 250);
+ */
+function awaitUnorderedOutput(effectiveMinor: number, ms: number): Promise<void> {
+  if (effectiveMinor >= ORDERED_ANSWER_MINOR || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function terminalFor(result: RuntimeInstallRunResult): Exclude<InstallRunStatus, 'running'> {
   return result.status;
@@ -177,8 +208,9 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
         // claim otherwise. `failed` is the honest reading of "we lost track".
         return failure('failed');
       } finally {
-        unsubscribe();
         options.signal?.removeEventListener('abort', cancel);
+        await awaitUnorderedOutput(client.effectiveMinor, deps.unorderedOutputGraceMs);
+        unsubscribe();
       }
     },
   };
