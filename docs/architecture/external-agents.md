@@ -804,11 +804,11 @@ permission modes changed meaning during the cycle that introduced them.
 
 The vendor protocols moved to the External Agents SDK, and their pins went with them. The
 recorded vendor contracts (Codex's generated API, the normalized Cursor ACP handshake, Claude's
-declared flags and `auth status` shape), the tooling that regenerates and diffs them, and the CI
-drift watch all live in the SDK repository,
-[juliopolycarpo/mango-external-agents](https://github.com/juliopolycarpo/mango-external-agents),
-whose "Vendor contract drift" workflow runs them. This repository consumes the SDK crates at an
-exact version and records no vendor contract of its own.
+declared flags and `auth status` shape) and the tooling that regenerates them live in the SDK
+repository, [juliopolycarpo/mango-external-agents](https://github.com/juliopolycarpo/mango-external-agents).
+Its "Vendor contract drift" workflow watches Claude and Codex (and OpenCode's ACP) in CI. Cursor's
+ACP capture is recorded by hand, so its pin changes only when someone re-records it. This
+repository consumes the SDK crates at an exact version and records no vendor contract of its own.
 
 ### The runtime half
 
