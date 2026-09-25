@@ -31,10 +31,7 @@ pub fn validate(mutate: bool, args: &[String]) -> Result<(), RemoteError> {
         .ok_or_else(|| invalid("unrecognized operation", "a supported gh subcommand"))?;
     let allowed = if mutate { WRITE } else { READ };
     if !(allowed.contains(&operation.as_str()) || !mutate && operation == "--version") {
-        return Err(invalid(
-            "operation outside the method allowlist",
-            "a supported operation for this method",
-        ));
+        return Err(refused_operation(mutate, &operation));
     }
     for argument in args {
         validate_flag(&operation, argument)?;
@@ -43,6 +40,27 @@ pub fn validate(mutate: bool, args: &[String]) -> Result<(), RemoteError> {
         validate_graphql(&args[2..])?;
     }
     Ok(())
+}
+
+/// Names the method that refused, and the method that runs the operation when it is on the other
+/// allowlist. An operation on neither list may be prose, so it is not echoed.
+fn refused_operation(mutate: bool, operation: &str) -> RemoteError {
+    let (method, other, other_list) = if mutate {
+        ("gh.mutate", "gh.exec", READ)
+    } else {
+        ("gh.exec", "gh.mutate", WRITE)
+    };
+    let known = other_list.contains(&operation) || operation == "--version";
+    if !known {
+        return invalid(
+            &format!("{method} refuses an operation outside its subcommand allowlist"),
+            &format!("one of: {}", if mutate { WRITE } else { READ }.join(", ")),
+        );
+    }
+    invalid(
+        &format!("{method} refuses `gh {operation}`"),
+        &format!("{other} for this operation"),
+    )
 }
 
 fn invalid(reason: &str, expected: &str) -> RemoteError {
@@ -225,6 +243,43 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_refusal_names_the_method_that_runs_the_operation() {
+        for (mutate, args, expected) in [
+            (
+                false,
+                argv(&["pr", "create"]),
+                "Invalid gh argv ([redacted]): gh.exec refuses `gh pr create`; expected gh.mutate \
+                 for this operation.",
+            ),
+            (
+                true,
+                argv(&["pr", "view"]),
+                "Invalid gh argv ([redacted]): gh.mutate refuses `gh pr view`; expected gh.exec \
+                 for this operation.",
+            ),
+            (
+                false,
+                argv(&["repo", "delete"]),
+                "Invalid gh argv ([redacted]): gh.exec refuses an operation outside its \
+                 subcommand allowlist; expected one of: auth status, repo view, pr view, pr list, \
+                 pr status, pr checks, issue list, search prs, api graphql.",
+            ),
+        ] {
+            let error = validate(mutate, &args).unwrap_err();
+            assert_eq!(
+                error.message, expected,
+                "expected refusal {expected:?} | received {:?}",
+                error.message
+            );
+            assert_eq!(
+                (error.code.as_str(), &error.details.unwrap()["kind"]),
+                (codes::INTERNAL, &serde_json::json!("tool_argument")),
+                "expected the hub's ToolArgumentError shape (INTERNAL, kind tool_argument)"
+            );
+        }
     }
 
     #[test]
