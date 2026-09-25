@@ -737,6 +737,33 @@ mod tests {
         }
     }
 
+    /// A pre-cancelled capture is refused as CANCELLED instead of reporting
+    /// the file's bytes, and leaves no path lock behind.
+    #[tokio::test]
+    async fn capture_refuses_a_pre_cancelled_call_before_reading() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::write(&path, b"contents").unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let refused = Arc::clone(&service)
+            .capture_snapshot(
+                SnapshotCaptureParams { path },
+                ResponseBudget::unbounded(),
+                cancel,
+            )
+            .await;
+        let code = refused.as_ref().err().map(|error| error.code.clone());
+        let active = service.state.locks.active_paths();
+        assert_eq!(
+            (code.as_deref(), active),
+            (Some(codes::CANCELLED), 0),
+            "expected (code, active locks) = ({}, 0) | received: ({refused:?}, {active})",
+            codes::CANCELLED
+        );
+    }
+
     #[tokio::test]
     async fn capture_enforces_the_eight_mebibyte_limit_and_preflights_its_frame() {
         let (home, service) = fixture();
