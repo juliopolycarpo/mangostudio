@@ -51,6 +51,7 @@ import {
   RuntimeConnectionManager,
   type RuntimeConnectionManagerOptions,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestUser } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { FakeRuntimeDefinition, TEST_RUNTIME_MANIFEST } from '../../support/runtime-fixture';
@@ -79,7 +80,8 @@ function createTestApp(
   connectors: RuntimeConnectionManagerOptions['connectors'] = {},
   lifecycle?: RuntimeLifecycleService,
   runtimeEffects?: Partial<EnvironmentRuntimeEffects>,
-  lifecycleFactory?: (manager: RuntimeConnectionManager) => RuntimeLifecycleService
+  lifecycleFactory?: (manager: RuntimeConnectionManager) => RuntimeLifecycleService,
+  discoveryCache?: RuntimeDiscoveryCache
 ) {
   const repository = createEnvironmentRepository(getDb());
   const manager = new RuntimeConnectionManager({
@@ -88,6 +90,7 @@ function createTestApp(
       return row;
     },
     connectors,
+    ...(discoveryCache ? { discoveryCache } : {}),
   });
   // Byte removal writes to another machine, so the default wiring is never what
   // a test should reach: overriding it is how the removal matrix gets covered
@@ -1407,6 +1410,66 @@ describe('environment entity routes', () => {
     discoverFails = true;
     await manager.connect(TEST_USER.id, 'discovered-box', { force: true });
     expect((await read()).implementation).toBeUndefined();
+    await manager.closeAll();
+  });
+
+  it('answers the runtime view without implementation when runtime.discover never answers', async () => {
+    const definition = new FakeRuntimeDefinition({
+      runtimeVersion: 'discover-hung',
+      manifest: {
+        ...TEST_RUNTIME_MANIFEST,
+        implementation: {
+          schema: 1,
+          fingerprint: '8'.repeat(64),
+          features: {
+            git: false,
+            probing: false,
+            mcp: false,
+            library: false,
+            checkpoints: true,
+            fsRead: false,
+            fsWrite: false,
+            shell: false,
+            update: false,
+            externalAgents: false,
+            terminal: false,
+          },
+        },
+      },
+      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      handlers: { 'runtime.discover': () => new Promise<never>(() => undefined) },
+    });
+    const { app, repository, manager } = createTestApp(
+      {
+        http: async (_definition, onUnavailable) => {
+          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
+          return {
+            client: new RuntimeClient(connection.hub, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      undefined,
+      undefined,
+      new RuntimeDiscoveryCache({ timeoutMs: 50 })
+    );
+    await repository.create({
+      id: 'hung-discover-box',
+      userId: TEST_USER.id,
+      name: 'Hung discover box',
+      transportKind: 'http',
+      config: { baseUrl: 'http://runtime.test' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'hung-discover-box');
+
+    const response = await app.handle(
+      new Request('http://localhost/environments/hung-discover-box/runtime')
+    );
+
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as RuntimeLifecycleView).implementation).toBeUndefined();
     await manager.closeAll();
   });
 

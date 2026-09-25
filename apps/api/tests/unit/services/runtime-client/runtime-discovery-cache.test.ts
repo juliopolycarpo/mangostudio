@@ -4,6 +4,7 @@ import type {
   RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
 import {
+  RUNTIME_DISCOVER_TIMEOUT_MS,
   RuntimeDiscoveryCache,
   type RuntimeDiscoverySource,
   runtimeDiscoveryKey,
@@ -46,6 +47,7 @@ function manifestWith(fingerprint?: string): RuntimeCapabilityManifest {
 /** A runtime whose build answers `runtime.discover` and counts how often it was asked. */
 class FakeDiscoverySource implements RuntimeDiscoverySource {
   calls = 0;
+  readonly timeouts: (number | undefined)[] = [];
   readonly manifest: RuntimeCapabilityManifest;
   readonly #answer: RuntimeDiscoverResult;
 
@@ -59,8 +61,11 @@ class FakeDiscoverySource implements RuntimeDiscoverySource {
     };
   }
 
-  discoverImplementation(): Promise<RuntimeDiscoverResult> {
+  discoverImplementation(options?: {
+    readonly timeoutMs?: number;
+  }): Promise<RuntimeDiscoverResult> {
     this.calls += 1;
+    this.timeouts.push(options?.timeoutMs);
     return Promise.resolve(this.#answer);
   }
 }
@@ -145,15 +150,38 @@ describe('RuntimeDiscoveryCache', () => {
     expect(older.calls).toBe(0);
   });
 
-  it('refuses and does not cache an answer whose fingerprint contradicts hello', async () => {
+  it('refuses an answer whose fingerprint contradicts hello', async () => {
     const cache = new RuntimeDiscoveryCache();
     const inconsistent = new FakeDiscoverySource(BUILD_A, BUILD_B);
 
     await expect(cache.resolve(KEY, inconsistent)).rejects.toThrow(
       `runtime.discover answered implementation fingerprint "${BUILD_B}"; expected the fingerprint announced in hello: "${BUILD_A}".`
     );
-    await expect(cache.resolve(KEY, inconsistent)).rejects.toThrow();
-    expect(inconsistent.calls).toBe(2);
+  });
+
+  it('remembers a failure for its connection until a reconnect or forget', async () => {
+    const cache = new RuntimeDiscoveryCache();
+    const broken = new FakeDiscoverySource(BUILD_A, BUILD_B);
+    await expect(cache.resolve(KEY, broken)).rejects.toThrow();
+
+    await expect(cache.resolve(KEY, broken)).rejects.toThrow();
+    expect(broken.calls).toBe(1);
+
+    cache.forget(KEY);
+    await expect(cache.resolve(KEY, broken)).rejects.toThrow();
+    expect(broken.calls).toBe(2);
+
+    const reconnected = new FakeDiscoverySource(BUILD_A);
+    cache.observe(KEY, reconnected.manifest);
+    expect((await cache.resolve(KEY, reconnected))?.fingerprint).toBe(BUILD_A);
+  });
+
+  it('bounds every runtime.discover with the configured timeout', async () => {
+    const peer = new FakeDiscoverySource(BUILD_A);
+    await new RuntimeDiscoveryCache().resolve(KEY, peer);
+    await new RuntimeDiscoveryCache({ timeoutMs: 25 }).resolve(KEY, peer);
+
+    expect(peer.timeouts).toEqual([RUNTIME_DISCOVER_TIMEOUT_MS, 25]);
   });
 });
 

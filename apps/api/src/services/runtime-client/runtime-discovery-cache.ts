@@ -18,16 +18,29 @@ import {
   type RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
 
+/**
+ * How long one `runtime.discover` may take. The protocol SDK has no default
+ * request timeout, and the reader is an HTTP view: a runtime that never
+ * answers must cost that view one line, not hang it.
+ */
+export const RUNTIME_DISCOVER_TIMEOUT_MS = 5_000;
+
 /** The slice of a runtime client this cache reads. */
 export interface RuntimeDiscoverySource {
   readonly manifest: RuntimeCapabilityManifest;
-  discoverImplementation(): Promise<RuntimeDiscoverResult>;
+  discoverImplementation(options?: { readonly timeoutMs?: number }): Promise<RuntimeDiscoverResult>;
+}
+
+export interface RuntimeDiscoveryCacheOptions {
+  /** Defaults to {@link RUNTIME_DISCOVER_TIMEOUT_MS}; overridable for tests. */
+  readonly timeoutMs?: number;
 }
 
 interface CachedDiscovery {
   readonly fingerprint: string;
   /** The connection the fetch was sent over. */
   readonly source: RuntimeDiscoverySource;
+  /** The fetch; a rejection is kept, so this connection is not asked again. */
   readonly discovery: Promise<RuntimeDiscoverResult>;
   /** Set once the fetch answered; a settled answer describes the build, not the connection. */
   settled?: RuntimeDiscoverResult;
@@ -44,6 +57,11 @@ interface CachedDiscovery {
  */
 export class RuntimeDiscoveryCache {
   readonly #entries = new Map<string, CachedDiscovery>();
+  readonly #timeoutMs: number;
+
+  constructor(options: RuntimeDiscoveryCacheOptions = {}) {
+    this.#timeoutMs = options.timeoutMs ?? RUNTIME_DISCOVER_TIMEOUT_MS;
+  }
 
   /**
    * Records the manifest a connection just announced, dropping a cached
@@ -77,7 +95,8 @@ export class RuntimeDiscoveryCache {
    * `undefined` for a peer that announced no implementation.
    *
    * Rejects when the peer answers a fingerprint other than the one it
-   * announced in hello, and caches nothing in that case. A fetch still in
+   * announced in hello, when it does not answer within the timeout, or when
+   * the call fails; that failure is remembered for this connection. A fetch still in
    * flight is shared only with its own connection: a reconnect with the same
    * fingerprint asks again rather than waiting on a request the old
    * connection may never answer.
@@ -99,16 +118,14 @@ export class RuntimeDiscoveryCache {
       if (cached.source === source) return await cached.discovery;
     }
 
-    const discovery = fetchDiscovery(source, fingerprint);
+    const discovery = fetchDiscovery(source, fingerprint, this.#timeoutMs);
     const entry: CachedDiscovery = { fingerprint, source, discovery };
     this.#entries.set(key, entry);
-    try {
-      entry.settled = await discovery;
-      return entry.settled;
-    } catch (error) {
-      if (this.#entries.get(key) === entry) this.#entries.delete(key);
-      throw error;
-    }
+    // A failure stays cached as this connection's rejected `discovery`: a
+    // runtime that cannot answer is asked once per connection, not on every
+    // read. A reconnect or `forget` asks again.
+    entry.settled = await discovery;
+    return entry.settled;
   }
 }
 
@@ -119,9 +136,10 @@ function fingerprintOf(manifest: RuntimeCapabilityManifest): string | undefined 
 
 async function fetchDiscovery(
   source: RuntimeDiscoverySource,
-  announced: string
+  announced: string,
+  timeoutMs: number
 ): Promise<RuntimeDiscoverResult> {
-  const discovery = await source.discoverImplementation();
+  const discovery = await source.discoverImplementation({ timeoutMs });
   if (discovery.fingerprint !== announced) {
     throw new Error(
       `runtime.discover answered implementation fingerprint "${discovery.fingerprint}"; expected the fingerprint announced in hello: "${announced}".`
