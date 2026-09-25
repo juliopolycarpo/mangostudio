@@ -24,7 +24,6 @@ import {
 } from '@mangostudio/protocol';
 import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
 import {
-  HUB_BINDING_KEY_CAPABILITY,
   type HubExternalAgentIsolation,
   type HubIdentity,
   RUNTIME_CONTRACT,
@@ -51,7 +50,6 @@ import {
   describeContractViolation,
   RuntimeContractViolationError,
 } from './contract-violation';
-import { hubBindingKeyFor } from './hub-binding-key';
 import { resolveLocalHubIdentity } from './hub-identity';
 import {
   type EnvironmentWorkspacePolicy,
@@ -260,9 +258,6 @@ export interface OpenHubSessionOptions {
    * record of it. `hub.workspace.authorize` answers for this binding only;
    * `null` is a connection with no real user, and every answer is `false`.
    * Required so every transport states its binding rather than forgetting it.
-   * A non-null binding is also announced as `hello.capabilities.bindingKey`,
-   * which a `serve` runtime uses to refuse a second record instead of letting
-   * the two supersede each other.
    */
   readonly workspaceBinding: HubWorkspaceBinding | null;
   /** Replaces the database policy behind `hub.workspace.authorize`; for tests. */
@@ -294,9 +289,6 @@ export async function openHubSession(
     capabilities: {
       contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION },
       ...(hub ? { hub } : {}),
-      ...(options.workspaceBinding
-        ? { [HUB_BINDING_KEY_CAPABILITY]: hubBindingKeyFor(options.workspaceBinding) }
-        : {}),
       ...(options.externalAgentIsolation
         ? { externalAgentIsolation: options.externalAgentIsolation }
         : {}),

@@ -4,10 +4,10 @@
  * `serve` holds exactly one hub connection. Before binding keys, the second
  * record's connect superseded the first, whose next caller superseded the
  * second back — each record taking the other offline for as long as both were
- * used. The hub now announces a binding key derived from the environment
- * record, and the runtime refuses a connection for a different record while a
- * live one holds it. This drives that through the real binary and the real
- * connection manager: the first record stays connected, the second reports
+ * used. The hub now sends a binding key derived from the environment record
+ * in its upgrade request, and the runtime refuses a connection for a different
+ * record while a live one holds it, before either side's `hello`. This drives
+ * that through the real binary and the real connection manager: the first record stays connected, the second reports
  * `boundElsewhere`, and nothing redials fast enough to flap.
  */
 

@@ -1,11 +1,12 @@
 /**
  * The binding key this hub announces for one environment record.
  *
- * A `serve` runtime holds one hub connection at a time and compares this key
- * to tell the same record reconnecting (supersede the old socket) from a second
- * record pointing at the same runtime (refused while the first is live). The
- * runtime only compares it, so it is a digest rather than the ids themselves:
- * nothing about the hub's users or records needs to reach another machine.
+ * Sent in the `serve` upgrade request (`HUB_BINDING_KEY_HEADER`). A `serve`
+ * runtime holds one hub connection at a time and compares this key to tell the
+ * same record reconnecting (supersede the old socket) from a second record
+ * pointing at the same runtime (refused while the first is live). The runtime
+ * only compares it, so it is a digest rather than the ids themselves: nothing
+ * about the hub's users or records needs to reach another machine.
  */
 
 import { createHash } from 'node:crypto';

@@ -10,11 +10,13 @@
 
 import { CLOSE_CODES, type Port, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { connectWebSocket } from '@mangostudio/protocol/ws';
+import { HUB_BINDING_KEY_HEADER } from '@mangostudio/shared/runtime-contract';
 import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
 import { httpRuntimeBaseUrlToWebSocketUrl } from './http-runtime-url';
+import { hubBindingKeyFor } from './hub-binding-key';
 import { openHubSession, type ProtocolHubSession } from './hub-session';
 import type { HubWorkspaceBinding } from './hub-workspace-authority';
 import { RuntimeClient } from './runtime-client';
@@ -87,6 +89,29 @@ export async function connectHttpRuntime(
   };
 }
 
+/**
+ * The upgrade request headers for a `serve` runtime: the bearer credential,
+ * and the binding key of the environment record this connection speaks for.
+ *
+ * The key rides beside the credential because that is where the runtime
+ * decides admission — before either side's `hello`. A runtime already holding
+ * a live connection for another record refuses this one with
+ * `RUNTIME_ALREADY_BOUND_CLOSE_CODE` instead of superseding it.
+ *
+ * @example
+ * runtimeUpgradeHeaders('s3cret', { userId: 'u1', environmentId: 'lan-box' });
+ * // { authorization: 'Bearer s3cret', 'x-mangostudio-hub-binding': '<64 hex>' }
+ */
+export function runtimeUpgradeHeaders(
+  token: string,
+  binding: HubWorkspaceBinding
+): Record<string, string> {
+  return {
+    authorization: `Bearer ${token}`,
+    [HUB_BINDING_KEY_HEADER]: hubBindingKeyFor(binding),
+  };
+}
+
 /** Dials the runtime under a deadline and exchanges hellos over what comes back. */
 async function openRuntimeSession(
   wsUrl: string,
@@ -100,7 +125,7 @@ async function openRuntimeSession(
   let port: Port;
   try {
     port = await connectWebSocket(wsUrl, {
-      headers: { authorization: `Bearer ${token}` },
+      headers: runtimeUpgradeHeaders(token, workspaceBinding),
       signal: deadline.signal,
     });
   } finally {
