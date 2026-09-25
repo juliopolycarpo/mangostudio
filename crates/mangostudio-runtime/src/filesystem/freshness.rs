@@ -1228,4 +1228,177 @@ mod tests {
         .await
         .expect("blocking worker releases the path lock");
     }
+
+    fn window(start_line: u64, end_line: u64, total_lines: u64) -> ReadObservation {
+        ReadObservation::Window(ObservedLineRange {
+            start_line,
+            end_line,
+            total_lines,
+        })
+    }
+
+    /// The ledger is keyed by chat: chat A's complete read grants chat A,
+    /// and chat B still has to establish its own snapshot before it writes.
+    #[test]
+    fn one_chats_read_does_not_count_for_another_chat() {
+        let mut ledger = Ledger::new();
+        let file = path("shared.txt");
+        ledger.record_read(
+            "chat-a",
+            &file,
+            b"hello",
+            f64::NAN,
+            ReadObservation::WholeFile,
+        );
+
+        let own = ledger.assert_content("chat-a", &file, b"hello");
+        let other = ledger
+            .assert_content("chat-b", &file, b"hello")
+            .map_err(|error| kind(&error).clone());
+        assert_eq!(
+            (own.is_ok(), other),
+            (true, Err(json!("file_not_read"))),
+            "expected (chat-a fresh, chat-b file_not_read) | received: ({:?}, {:?})",
+            own.map_err(|error| error.message),
+            ledger
+                .assert_content("chat-b", &file, b"hello")
+                .map_err(|error| error.message)
+        );
+    }
+
+    /// A text window that skips the prefix after a byte view leaves the line
+    /// numbers unobserved (nothing numbered line one), though the byte view
+    /// still vouches for the content.
+    #[test]
+    fn a_prefix_skipping_window_after_a_byte_view_keeps_numbers_unobserved() {
+        let mut ledger = Ledger::new();
+        let file = path("bytes-then-window.txt");
+        let content = b"a\nb\nc\n";
+        ledger.record_read("chat", &file, content, f64::NAN, ReadObservation::ByteView);
+        ledger.record_read("chat", &file, content, f64::NAN, window(2, 2, 3));
+
+        let fresh = ledger.assert_content("chat", &file, content);
+        let numbers = ledger
+            .assert_line_numbers("chat", &file, 1)
+            .map_err(|error| kind(&error).clone());
+        assert_eq!(
+            (fresh.is_ok(), numbers),
+            (true, Err(json!("unobserved_line_numbers"))),
+            "expected (content fresh, line 1 unobserved_line_numbers) | received: ({:?}, {:?})",
+            fresh.map_err(|error| error.message),
+            ledger
+                .assert_line_numbers("chat", &file, 1)
+                .map_err(|error| error.message)
+        );
+    }
+
+    /// A byte view's "no numbers yet" state is not a frontier of zero: an
+    /// edit that keeps every line where it was leaves the whole numbering
+    /// valid, instead of being floored by the earlier byte view.
+    #[test]
+    fn a_byte_view_never_floors_a_later_edit_frontier() {
+        let mut ledger = Ledger::new();
+        let file = path("bytes-then-edit.txt");
+        ledger.record_read(
+            "chat",
+            &file,
+            b"a\nb\nc\n",
+            f64::NAN,
+            ReadObservation::ByteView,
+        );
+        ledger.record_edit(
+            "chat",
+            &file,
+            b"A\nb\nc\n",
+            f64::NAN,
+            super::ALL_LINES_VALID,
+        );
+
+        let numbers = ledger.assert_line_numbers("chat", &file, 3);
+        assert!(
+            numbers.is_ok(),
+            "expected line 3 still addressable after a same-height edit | received: {:?}",
+            numbers.map_err(|error| error.message)
+        );
+    }
+
+    /// Reading an empty file yields the window 1..0 of 0 lines; that is a
+    /// numbered view (of nothing), not a byte view, so it is complete and a
+    /// line-addressed edit at line one is not refused as unobserved.
+    #[test]
+    fn an_empty_text_window_counts_as_numbered() {
+        let mut ledger = Ledger::new();
+        let file = path("empty.txt");
+        ledger.record_read("chat", &file, b"", f64::NAN, window(1, 0, 0));
+
+        let fresh = ledger.assert_content("chat", &file, b"");
+        let numbers = ledger.assert_line_numbers("chat", &file, 1);
+        assert!(
+            fresh.is_ok() && numbers.is_ok(),
+            "expected (content fresh, line 1 numbered) for an empty window | received: ({:?}, {:?})",
+            fresh.map_err(|error| error.message),
+            numbers.map_err(|error| error.message)
+        );
+    }
+
+    /// Waiters queued on one path are admitted in the order they arrived.
+    /// Each waiter is known to be queued (its lock clone is visible in the
+    /// table) before the next one starts, so the order is the arrival order
+    /// and not scheduler luck.
+    #[tokio::test]
+    async fn same_path_waiters_are_admitted_in_arrival_order() {
+        let locks = PathLocks::new();
+        let file = path("fifo");
+        let held = locks
+            .acquire(vec![file.clone()], &CancellationToken::new())
+            .await
+            .unwrap();
+        let admitted = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut waiters = Vec::new();
+        for label in ["first", "second", "third"] {
+            let queued_before = strong_count(&locks, &file);
+            let waiter_locks = locks.clone();
+            let waiter_path = file.clone();
+            let waiter_admitted = Arc::clone(&admitted);
+            waiters.push(tokio::spawn(async move {
+                let guard = waiter_locks
+                    .acquire(vec![waiter_path], &CancellationToken::new())
+                    .await
+                    .unwrap();
+                waiter_admitted.lock().unwrap().push(label);
+                drop(guard);
+            }));
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while strong_count(&locks, &file) == queued_before {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| {
+                panic!("expected the {label} waiter to queue | received: no lock clone")
+            });
+        }
+        drop(held);
+        for waiter in waiters {
+            waiter.await.unwrap();
+        }
+        let order = admitted.lock().unwrap().clone();
+        assert_eq!(
+            order,
+            ["first", "second", "third"],
+            "expected same-path waiters admitted FIFO | received: {order:?}"
+        );
+    }
+
+    /// References to `path`'s lock: the table's, the holder's, and one per
+    /// waiter that has reached the lock queue.
+    fn strong_count(locks: &PathLocks, path: &Path) -> usize {
+        locks
+            .owner
+            .locks
+            .lock()
+            .unwrap()
+            .get(path)
+            .map_or(0, Arc::strong_count)
+    }
 }
