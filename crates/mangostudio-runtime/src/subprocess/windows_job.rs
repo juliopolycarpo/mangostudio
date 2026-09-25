@@ -181,6 +181,18 @@ impl WindowsJobChild {
 
 /// Creates a child atomically associated with a non-inheritable kill-on-close Job.
 pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
+    // A PowerShell script cannot be run by CreateProcessW at all; it becomes a request for the
+    // system `powershell.exe -File <script>` (see `super::powershell_script`), which then takes
+    // the ordinary path below with the original environment, window, and Job.
+    let script_request;
+    let request = if super::powershell_script::is_powershell_script(&request.program) {
+        let inherited = inherited_windows_directory(request)?;
+        script_request =
+            super::powershell_script::powershell_script_request(request, inherited.as_deref())?;
+        &script_request
+    } else {
+        request
+    };
     let job = Arc::new(create_killing_job()?);
     let pipes = ChildPipes::from_request(request)?;
     // A batch file is run by cmd.exe, which does not understand the MSVC quoting below; it gets

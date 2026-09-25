@@ -30,6 +30,10 @@ use tokio_util::sync::CancellationToken;
 #[cfg(any(windows, test))]
 mod batch;
 mod pipe_child;
+#[cfg(any(windows, test))]
+mod powershell_script;
+#[cfg(test)]
+pub(crate) use powershell_script::powershell_script_request;
 mod supervisor;
 #[cfg(unix)]
 mod unix_guardian;

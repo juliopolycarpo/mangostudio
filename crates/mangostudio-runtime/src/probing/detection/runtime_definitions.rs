@@ -183,6 +183,7 @@ pub const NODE_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_node_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    windows_powershell_scripts: false,
 };
 
 /// Bun.
@@ -195,6 +196,7 @@ pub const BUN_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_bun_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    windows_powershell_scripts: false,
 };
 
 /// fnm — the second helper-managed Node manager; win32-installable,
@@ -208,6 +210,7 @@ pub const FNM_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_fnm_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    windows_powershell_scripts: false,
 };
 
 /// git — probed as a prerequisite for the Windows recipes; never
@@ -221,6 +224,7 @@ pub const GIT_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_git_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    windows_powershell_scripts: false,
 };
 
 /// winget — probed as a prerequisite for the Windows recipes; never
@@ -234,6 +238,7 @@ pub const WINGET_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_winget_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    windows_powershell_scripts: false,
 };
 
 #[cfg(test)]
