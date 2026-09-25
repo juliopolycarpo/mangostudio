@@ -12,6 +12,7 @@
  * cannot be told, which the connection failure already reports.
  */
 
+import { ORDERED_ANSWER_MINOR } from '@mangostudio/protocol';
 import type { InstallRunStatus, ToolchainSelection } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
@@ -24,15 +25,10 @@ import type { RuntimeClient } from '../../../services/runtime-client/runtime-cli
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { toolchainParams } from '../application/toolchain-service';
 
-type InstallOutputStream = RuntimeInstallOutputEvent['stream'];
+// Re-exported so the relay's tests name the protocol's own feature minor.
+export { ORDERED_ANSWER_MINOR };
 
-/**
- * The wire minor from which a responder writes every event a handler asked
- * for ahead of that request's answer (spec §6.2, wire 1.2). At or above it the
- * answer is the end of a run's output; below it the answer may overtake the
- * last lines.
- */
-export const ORDERED_ANSWER_MINOR = 2;
+type InstallOutputStream = RuntimeInstallOutputEvent['stream'];
 
 /**
  * How long the relay keeps listening past the answer of a peer below
