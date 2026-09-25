@@ -194,6 +194,9 @@ struct Session {
     owner: String,
     transfer: StagedTransfer,
     _lock: SlotUpdateLock,
+    /// Tokio's `Instant`, not std's: it is the std clock outside a paused
+    /// runtime, and it lets `an_abandoned_session_expires_and_removes_its_stage`
+    /// drive the inactivity deadline on a paused test clock.
     touched: Instant,
 }
 
