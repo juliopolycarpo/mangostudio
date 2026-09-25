@@ -569,7 +569,7 @@ describe('RuntimeConnectionManager', () => {
 
     await manager.connect('user-1', 'local').catch(() => undefined);
 
-    expect(missing.message).toContain('cargo build -p mangostudio-runtime');
+    expect(missing.message).toContain('cargo build -p mangostudio-runtime --locked');
     expect(manager.getStatus('user-1', 'local')).toEqual({
       state: 'error',
       errorCode: 'UNAVAILABLE',

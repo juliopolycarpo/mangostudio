@@ -2647,7 +2647,7 @@ export const messages = {
       runtime: {
         title: 'Binário do runtime',
         notBuilt:
-          'Não compilado neste checkout do código-fonte. Execute "cargo build -p mangostudio-runtime" para que o Local possa iniciar.',
+          'Não compilado neste checkout do código-fonte. Execute "cargo build -p mangostudio-runtime --locked" para que o Local possa iniciar.',
         missing: 'não encontrado; o Local não pode iniciar',
         versionMismatch:
           'O binário do runtime informa uma versão diferente da do hub. O Local e os ambientes stdio recusarão a conexão até que as duas coincidam.',
@@ -2986,7 +2986,7 @@ export const messages = {
       local: {
         reason: {
           'binary-missing':
-            'O binário do runtime Local não foi encontrado. Em um checkout do código-fonte, execute "cargo build -p mangostudio-runtime"; em um hub instalado, reinstale o MangoStudio ou defina MANGOSTUDIO_RUNTIME_BINARY.',
+            'O binário do runtime Local não foi encontrado. Em um checkout do código-fonte, execute "cargo build -p mangostudio-runtime --locked"; em um hub instalado, reinstale o MangoStudio ou defina MANGOSTUDIO_RUNTIME_BINARY.',
         },
       },
       boundElsewhereHint:

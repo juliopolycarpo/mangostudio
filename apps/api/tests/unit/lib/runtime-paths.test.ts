@@ -195,7 +195,7 @@ describe('runtime paths', () => {
 
       expect(thrown).toBeInstanceOf(RuntimeBinaryNotFoundError);
       const message = (thrown as Error).message;
-      expect(message).toContain('cargo build -p mangostudio-runtime');
+      expect(message).toContain('cargo build -p mangostudio-runtime --locked');
       expect(message).toContain(join(tempDir, 'target', 'debug', RUNTIME_BINARY_NAME));
       expect(message).toContain(join(tempDir, 'target', 'release', RUNTIME_BINARY_NAME));
       expect(message).toContain('MANGOSTUDIO_RUNTIME_BINARY');

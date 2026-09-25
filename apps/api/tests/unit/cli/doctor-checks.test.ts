@@ -199,7 +199,7 @@ describe('checkRuntimeBinary', () => {
       'dev'
     );
     expect(result.status).toBe('fail');
-    expect(result.detail).toContain('cargo build -p mangostudio-runtime');
+    expect(result.detail).toContain('cargo build -p mangostudio-runtime --locked');
     expect(result.detail).toContain('Local cannot start');
   });
 

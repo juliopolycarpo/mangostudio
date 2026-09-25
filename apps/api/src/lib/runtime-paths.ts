@@ -78,7 +78,7 @@ const SOURCE_CHECKOUT_ROOT = join(import.meta.dir, '..', '..', '..', '..');
 const WORKSPACE_BUILD_PROFILES = ['debug', 'release'] as const;
 
 /** The command that builds the runtime a source checkout launches. */
-export const RUNTIME_BUILD_COMMAND = 'cargo build -p mangostudio-runtime';
+export const RUNTIME_BUILD_COMMAND = 'cargo build -p mangostudio-runtime --locked';
 
 /**
  * Path of the runtime binary that ships beside the hub executable, or null in a

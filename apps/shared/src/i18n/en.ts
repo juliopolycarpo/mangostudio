@@ -2646,7 +2646,7 @@ export const messages: Messages = {
       runtime: {
         title: 'Runtime binary',
         notBuilt:
-          'Not built in this source checkout. Run "cargo build -p mangostudio-runtime" so Local can start.',
+          'Not built in this source checkout. Run "cargo build -p mangostudio-runtime --locked" so Local can start.',
         missing: 'not found; Local cannot start',
         versionMismatch:
           'The runtime binary reports a different version than the hub. Local and stdio environments will refuse to connect until both match.',
@@ -2987,7 +2987,7 @@ export const messages: Messages = {
       local: {
         reason: {
           'binary-missing':
-            'The Local runtime binary was not found. In a source checkout, run "cargo build -p mangostudio-runtime"; for an installed hub, reinstall MangoStudio or set MANGOSTUDIO_RUNTIME_BINARY.',
+            'The Local runtime binary was not found. In a source checkout, run "cargo build -p mangostudio-runtime --locked"; for an installed hub, reinstall MangoStudio or set MANGOSTUDIO_RUNTIME_BINARY.',
         },
       },
       boundElsewhereHint:
