@@ -10,8 +10,17 @@ differential suites that compared the two runtimes before their TypeScript halve
 No file under `apps/api/tests` imports the runtime package or the in-process seam
 (`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`).
 `tests/unit/services/runtime-client/runtime-module-allow-list.test.ts` enforces both. The seam
-is still the one production importer until Local spawns the Rust binary. Tests replace the
-TypeScript host in one of two ways:
+is still the one production importer until Local spawns the Rust binary.
+
+Three files still *spawn* the TypeScript runtime by its source path (`runtime/src/cli.ts`). They
+are migrated in the Local cut-over (#1161), which removes the bun-source fallback. The same
+allow-list test flags any other `runtime/src/` path literal under `apps/api/tests` and lists these
+three explicitly, so the cut-over has to empty that list:
+
+- `integration/services/spawn-runtime-child.integration.test.ts`
+- `integration/services/connect-ssh-runtime.integration.test.ts`
+- `unit/lib/runtime-paths.test.ts` Tests replace the
+  TypeScript host in one of two ways:
 
 - **(a) Fake host.** Use this when a test only needs protocol behaviour or the hub's own
   behaviour. `tests/support/fake-runtime-host.ts` serves a test's handlers through
@@ -24,7 +33,10 @@ TypeScript host in one of two ways:
   `FakeHostileRuntimePeer` is still the peer that puts malformed frames on the wire.
 - **(b) Rust binary.** Use this when a test asserts real runtime behaviour. The test drives
   `target/debug/mangostudio-runtime` (or `MANGOSTUDIO_RUNTIME_BINARY`) over stdio or `serve`, and
-  is guarded with `it.skipIf(!binary.available)`, like the existing `rust-*` suites.
+  is guarded with `it.skipIf(skipWithoutRustBinary(binary, suite))`
+  (`tests/support/rust-runtime-binary.ts`), which prints the skipped suite and how to build the
+  binary when it is missing. The ordinary lane has no binary; `cargo-shim.yml`'s
+  `real-binary-qualification` job runs these cases on Linux, macOS and Windows.
 
 | File                                                                                                          | Strategy                                                                | Why                                                                                                           |
 | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -34,7 +46,7 @@ TypeScript host in one of two ways:
 | `integration/routes/environment-entities.integration.test.ts`                                                 | (a) routes, staging, locks, supervised restart; (b) `serve` live update | Rust cases: bytes published into the slot and the runtime's own digest refusal                                |
 | `integration/routes/terminal-socket.integration.test.ts`                                                      | (b) stdio                                                               | Needs a real PTY and shell                                                                                    |
 | `integration/modules/generation/capability-inspector.integration.test.ts`                                     | (a)                                                                     | Reads only `manifest.features`; no method is called                                                           |
-| `integration/services/hub-isolation-claim.integration.test.ts`                                                | (b) `serve`                                                             | What a dialled runtime attests under the hub's claim                                                          |
+| `integration/services/hub-isolation-claim.integration.test.ts`                                                | (b) `serve`, plus (a) twins for the hub-side withholding                | What a dialled runtime attests under the hub's claim                                                          |
 | `integration/services/connect-http-runtime.integration.test.ts`                                               | (b) `serve`, plus (a) behind a loopback WebSocket                       | The fake covers the external-agent round-trip and the hub's pre-open refusal wording                          |
 | `unit/modules/library/library-apply-transport.test.ts`                                                        | (a)                                                                     | The real-engine 404 case moved to `integration/modules/library/library-undo-missing-backup` (b)               |
 | `unit/modules/environments/ssh-failure.test.ts`                                                               | none                                                                    | Builds the Rust setup-pending sentence from the shared signature                                              |
@@ -42,8 +54,22 @@ TypeScript host in one of two ways:
 | `integration/services/mcp/{http-transport,wrapper-contract}.integration.test.ts`                              | Production Local                                                        | SSE fallback and the wrapper contract are observed on the wire, not imported                                  |
 | File-tool tests, `tool-registry-harness.ts`, file-checkpoint suites                                           | Production Local                                                        | `clearFileFreshness` is gone; each case's mkdtemp directory keeps freshness keys apart                        |
 | `unit/services/runtime-client/unenforced-containment.test.ts`, `unit/services/tools/containment-wire.test.ts` | (a)                                                                     | The hub's reaction to a manifest and what it put on the wire                                                  |
-| `unit/services/tools/support/target-home.ts` (the `~` cases)                                                  | (b) stdio with a scratch `HOME`                                         | The file under the announced home is really read or written                                                   |
+| `unit/services/tools/support/target-home.ts` (the `~` cases)                                                  | (b) stdio with scratch `HOME`/`USERPROFILE`, plus (a) wire twins        | The file under the announced home is really read or written                                                   |
 | `integration/services/rust-*-compat`, `rust-runtime-external-agents-qualification`                            | (b), Rust-only                                                          | See below                                                                                                     |
+
+### Cases that run only against the binary
+
+These run in `real-binary-qualification` and skip, loudly, everywhere else. Where the assertion
+is the hub's own logic, a fake-host twin in the same file keeps the ordinary lane covering it.
+
+| File                                                                          | Binary-only case                                                                                         | Fake-host twin in the ordinary lane                                                    |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `integration/routes/terminal-socket.integration.test.ts`                      | relays a real PTY through the terminal socket                                                            | none (runtime behaviour); the other terminal cases already use a fake                  |
+| `integration/routes/environment-entities.integration.test.ts`                 | updates a connected runtime over its protocol connection; keeps the old binary when an update is refused | the mid-transfer update case pins the platform id the asset loader receives            |
+| `integration/services/hub-isolation-claim.integration.test.ts`                | no claim, single-user claim, withdrawn claim (3)                                                         | the same three manifest outcomes, including withholding after `withdrawn`              |
+| `integration/services/connect-http-runtime.integration.test.ts`               | round-trip, token rotation, 4401 refusal (3)                                                             | 4401 refusal after the upgrade; 401 refusal before it; external-agent round-trip       |
+| `integration/modules/library/library-undo-missing-backup.integration.test.ts` | the runtime reports a missing backup set as a 404                                                        | `unit/modules/library/library-apply-transport.test.ts` keys the 404 on the wire `kind` |
+| `unit/services/tools/{read-file,write-file,list-directory,glob}-tool.test.ts` | `~` reads, writes, lists or matches under the home the binary reports (4)                                | `~` expanded against the announced `homeDir`, asserted on the wire (4)                 |
 
 ## Differential suites
 
@@ -61,10 +87,11 @@ The three skips are Cursor-turn cases that need a vendor CLI; they were not diff
 comparison now checks the Rust answer against the TypeScript answer recorded from that run. Paths
 are normalised to `<ROOT>` and `<HOME>`, and `durationMs` is dropped as before. Test names are
 unchanged.
-The Windows legs of the same CI run (`cargo-shim.yml`, `real-binary-qualification`, all three OSes
-green on that SHA) asserted Rust equal to TypeScript. The two Windows-only values, a BOM written
-as `?text` and a timed-out PowerShell ending with exit code 1 and no signal, are recorded from that
-leg.
+Two values are Windows-only: a BOM written as `?text`, and a timed-out PowerShell ending with exit
+code 1 and no signal. They are the Rust runtime's received output on the Windows leg of this
+change's first qualification run (commit 8928178b), which failed on them. They stand for the
+TypeScript answer because the baseline's Windows leg on e1dc7f73 was green asserting Rust equal
+to TypeScript for the same calls, and `crates/` had not changed between the two.
 
 | Suite                                        | `it` (count)                                                                                                                        | Compared                                   | Last result | Now                                                                                |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ----------- | ---------------------------------------------------------------------------------- |
@@ -99,32 +126,12 @@ Other assertions that changed outside the differential suites:
 - MCP row timeouts for the forced-timeout cases went from 75 and 150 ms to 1 s. The Rust runtime
   counts spawn and initialize against the row timeout.
 
-## Unit-test coverage maps
+## Still to move before `apps/runtime` is deleted
 
-Two coverage maps cover every assertion in `apps/runtime/tests/unit` and record the Rust (or
-shared-code) test that replaces it. A row is MAPPED when a replacement test exists and was
-verified, MOOT when the Rust design removes the concern, and GAP when there is no replacement yet.
-
-| Map | Area                                                                 | Sections | Rows    | MAPPED  | MOOT   | GAP     |
-| --- | -------------------------------------------------------------------- | -------- | ------- | ------- | ------ | ------- |
-| A   | Host core: CLI, consent, connect/serve, session, runtime home, audit | 14       | 165     | 119     | 10     | 36      |
-| A   | Filesystem and read freshness                                        | 4        | 41      | 32      | 2      | 7       |
-| A   | External agents (Claude, Codex, Cursor, supervisor, isolation)       | 18       | 314     | 235     | 8      | 71      |
-| B   | Commands and processes (shell, git, gh, grep, spawn env, snapshot)   | 10       | 83      | 65      | 9      | 9       |
-| B   | Install, live update, slots and setup                                | 8        | 94      | 71      | 5      | 18      |
-| B   | Workspace validation and browsing                                    | 3        | 17      | 14      | 0      | 3       |
-| B   | Library reads, scans and backup recovery                             | 2        | 22      | 20      | 0      | 2       |
-| B   | MCP                                                                  | 3        | 16      | 15      | 0      | 1       |
-| B   | Probing                                                              | 3        | 30      | 21      | 0      | 9       |
-| B   | Terminal                                                             | 5        | 35      | 27      | 1      | 7       |
-| B   | External-agent turn channel and vendor contracts                     | 2        | 12      | 1       | 1      | 10      |
-|     | **Total**                                                            | **72**   | **829** | **620** | **36** | **173** |
-
-Map B's GAP list is the input to the deletion change. These items have to land or be accepted
-before `apps/runtime` goes:
-
-- Windows console hiding on every spawn path.
-- Supervisor termination-cause ordering.
-- User-service and live-update refusals.
-- Relocating the vendor contract captures and the `fixtures:library` generators, and freezing or
-  retiring the `fixtures:home` freshness lane in `cargo-shim.yml`.
+- The three path-spawning tests above, in the Local cut-over.
+- `cargo-shim.yml`'s `runtime-home-fixture-freshness` job regenerates `ts-home` and `ts-library`
+  with `bun run --filter @mangostudio/runtime fixtures:home` / `fixtures:library`. It needs its
+  generators relocated, or the `ts-home` fixture frozen, together with
+  `scripts/tests/ci-gate.unit.test.ts`, which pins those steps.
+- The recorded vendor contract captures under `apps/runtime/src/services/external-agents/*/contract/` and the
+  `scripts/vendor/` sets that write them.
