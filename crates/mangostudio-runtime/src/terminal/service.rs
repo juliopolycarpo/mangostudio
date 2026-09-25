@@ -792,12 +792,8 @@ fn default_shell(host: &PathEnv) -> RuntimeShellKind {
 }
 
 fn shell_program(shell: RuntimeShellKind, host: &PathEnv) -> Result<PathBuf, RemoteError> {
-    let candidates: &[&str] = match shell {
-        RuntimeShellKind::Bash => &["bash"],
-        RuntimeShellKind::Zsh => &["zsh"],
-        RuntimeShellKind::Powershell if host.platform == "win32" => &["pwsh", "powershell"],
-        RuntimeShellKind::Powershell => &[],
-    };
+    // The rule `detect_shells` and `shell.run` also use: PowerShell is Windows-only.
+    let candidates = crate::health::shell_path_candidates(shell, host.is_windows());
     let path = host.env.get("PATH").map(String::as_str).unwrap_or("");
     candidates
         .iter()

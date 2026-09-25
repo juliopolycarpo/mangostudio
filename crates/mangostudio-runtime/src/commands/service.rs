@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
+use mangostudio_runtime_contract::manifest::RuntimeShellKind;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -262,12 +263,16 @@ fn prepare_shell(
         ));
     }
     let path = host.env.get("PATH").map(String::as_str).unwrap_or("");
-    let candidates: &[&str] = match params.kind.as_str() {
-        "bash" => &["bash"],
-        "zsh" => &["zsh"],
-        "powershell" if host.is_windows() => &["pwsh", "powershell"],
-        _ => &[],
+    let kind = match params.kind.as_str() {
+        "bash" => Some(RuntimeShellKind::Bash),
+        "zsh" => Some(RuntimeShellKind::Zsh),
+        "powershell" => Some(RuntimeShellKind::Powershell),
+        _ => None,
     };
+    // The same rule `detect_shells` advertises from, so both always agree.
+    let candidates = kind.map_or(&[][..], |kind| {
+        crate::health::shell_path_candidates(kind, host.is_windows())
+    });
     let program = candidates
         .iter()
         .find_map(|name| crate::health::which_in(name, OsStr::new(path)))

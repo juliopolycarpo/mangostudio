@@ -502,15 +502,30 @@ fn node_arch() -> &'static str {
     }
 }
 
-/// PATH candidates for a shell kind, mirroring
-/// `apps/shared/src/process/host.ts`'s `findShellExecutable`: `bash`/`zsh`
-/// resolve their own name; `powershell` tries `pwsh` first, then
-/// `powershell`, the same fallback the TypeScript side uses.
-fn shell_path_candidates(kind: RuntimeShellKind) -> &'static [&'static str] {
+/// PATH candidates for a shell kind on a host, mirroring
+/// `apps/shared/src/process/host.ts`'s `resolveShellExecutable`: `bash`/`zsh`
+/// resolve their own name; `powershell` is Windows-only and tries `pwsh`
+/// first, then `powershell`. An empty slice means the kind is never offered.
+///
+/// The one rule shared by shell detection ([`detect_shells`], which feeds
+/// `hello.capabilities.shells` and `runtime.health.shells`) and `shell.run`
+/// acceptance, so the advertised list can never include a shell `shell.run`
+/// refuses. `windows_host` is `cfg!(windows)` for detection and the
+/// described host's platform for execution.
+///
+/// ```ignore
+/// assert!(shell_path_candidates(RuntimeShellKind::Powershell, false).is_empty());
+/// assert_eq!(shell_path_candidates(RuntimeShellKind::Powershell, true), ["pwsh", "powershell"]);
+/// ```
+pub(crate) fn shell_path_candidates(
+    kind: RuntimeShellKind,
+    windows_host: bool,
+) -> &'static [&'static str] {
     match kind {
         RuntimeShellKind::Bash => &["bash"],
         RuntimeShellKind::Zsh => &["zsh"],
-        RuntimeShellKind::Powershell => &["pwsh", "powershell"],
+        RuntimeShellKind::Powershell if windows_host => &["pwsh", "powershell"],
+        RuntimeShellKind::Powershell => &[],
     }
 }
 
@@ -599,7 +614,7 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
             ]
             .into_iter()
             .filter(|kind| {
-                shell_path_candidates(*kind)
+                shell_path_candidates(*kind, cfg!(windows))
                     .iter()
                     .any(|name| which_in(name, &path_var).is_some())
             })
@@ -1422,6 +1437,41 @@ mod tests {
         let shells = detect_shells(Some(&path_var)).await;
 
         assert_eq!(shells, vec![RuntimeShellKind::Bash]);
+    }
+
+    /// PowerShell is Windows-only for `shell.run`, so an off-Windows host
+    /// must not advertise it even when `pwsh`/`powershell` sit on `PATH`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn detect_shells_never_advertises_powershell_off_windows() {
+        let (_dir, path_var) =
+            fake_shells_on_path("shells-no-pwsh", &["bash", "pwsh", "powershell"]);
+
+        let shells = detect_shells(Some(&path_var)).await;
+
+        assert_eq!(
+            shells,
+            vec![RuntimeShellKind::Bash],
+            "expected shells: [Bash] (powershell is Windows-only) | received: {shells:?}"
+        );
+    }
+
+    /// The shared rule offers PowerShell only on a Windows host.
+    #[test]
+    fn shell_path_candidates_offers_powershell_only_on_windows() {
+        use super::shell_path_candidates;
+
+        let off = shell_path_candidates(RuntimeShellKind::Powershell, false);
+        assert!(
+            off.is_empty(),
+            "expected powershell candidates off Windows: [] | received: {off:?}"
+        );
+        let on = shell_path_candidates(RuntimeShellKind::Powershell, true);
+        assert_eq!(
+            on,
+            ["pwsh", "powershell"],
+            "expected powershell candidates on Windows: [pwsh, powershell] | received: {on:?}"
+        );
     }
 
     /// A removed shell must disappear even if the PATH string stays identical.

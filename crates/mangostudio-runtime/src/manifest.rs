@@ -57,6 +57,49 @@ fn capability_ready(registry: &Registry, capability: &str) -> bool {
         && required.all(|declared| registry.classify(&declared.name) == Classification::Implemented)
 }
 
+/// Whether at least one tool group is usable: the one derivation of
+/// `features.tools`.
+///
+/// Reads only *effective* features — each already consented, implemented,
+/// and (for `git`) backed by a present binary — never the raw `allow`
+/// flags, so consent alone can never advertise absent handlers or
+/// executables. `apps/runtime/src/manifest.ts` ORs the raw `allow.*` flags
+/// instead; this is the stricter rule both hosts converge on. The eight
+/// groups counted match that source's choice: `update`, `externalAgents`,
+/// and the `toolchain` request shape are not tool groups. `shell` counts on
+/// consent and implementation alone, matching `features.shell`: `install.run`
+/// spawns its argv directly, so the group stays usable with no detected
+/// interactive shell (`shells` reports that separately).
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::manifest::{build_features, effective_tools};
+/// use mangostudio_runtime::registry::Registry;
+/// use mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow;
+///
+/// let allow = RuntimeCapabilityAllow {
+///     fs_read: true, fs_write: true, shell: true, git: true, probing: true,
+///     mcp: true, library: true, checkpoints: true, update: true,
+///     external_agents: Some(true),
+/// };
+/// let mut features = build_features(&Registry::new(), &allow, true);
+/// assert!(!effective_tools(&features));
+/// features.fs_read = true;
+/// assert!(effective_tools(&features));
+/// ```
+#[must_use]
+pub fn effective_tools(features: &RuntimeCapabilityFeatures) -> bool {
+    features.fs_read
+        || features.fs_write
+        || features.shell
+        || features.git
+        || features.mcp
+        || features.probing
+        || features.library
+        || features.checkpoints
+}
+
 /// Builds the `features` map for `registry`, gated on `allow` and, for
 /// `features.git`, on `git_available` (whether this host actually has a
 /// usable `git` binary — probing for it is out of this crate's scope, so the
@@ -100,23 +143,8 @@ pub fn build_features(
     let update = cfg!(any(unix, windows)) && allow.update && capability_ready(registry, "update");
     let external_agents =
         allow.external_agents == Some(true) && capability_ready(registry, "externalAgents");
-    // NOT a mirror of `manifest.ts`'s own `tools` line: that formula ORs the
-    // *raw* `allow.*` flags, with no implementation gate at all (every
-    // method already has a handler in that runtime, so there is nothing to
-    // gate). ORing the *already-gated* `fs_read`/`fs_write`/… above instead
-    // is deliberate: `manifest.ts`'s formula would make an empty registry
-    // advertise `tools: true` purely from a fully-granted `allow`, which is
-    // exactly what this crate's own tests forbid. The eight capabilities
-    // summed here — `update` and `externalAgents` excluded — match the
-    // TypeScript source's choice of which flags count.
-    //
-    // One further divergence worth stating plainly: `git` here also folds in
-    // `git_available`, so a host with `allow.git = true`, all three `git.*`
-    // methods implemented, but no `git` binary present answers TypeScript's
-    // `tools: true` and this crate's `tools: false`.
-    let tools = fs_read || fs_write || shell || git || mcp || probing || library || checkpoints;
-    RuntimeCapabilityFeatures {
-        tools,
+    let mut features = RuntimeCapabilityFeatures {
+        tools: false,
         git,
         probing,
         mcp,
@@ -128,14 +156,16 @@ pub fn build_features(
         update,
         external_agents,
         toolchain: true,
-    }
+    };
+    features.tools = effective_tools(&features);
+    features
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
 
-    use super::build_features;
+    use super::{build_features, effective_tools};
     use crate::registry::Registry;
     use mangostudio_runtime_contract::manifest::RuntimeCapabilityAllow;
 
@@ -276,6 +306,70 @@ mod tests {
         assert!(
             !features.probing,
             "a partially-implemented capability (2 of 3 probing.* methods) must not be advertised"
+        );
+    }
+
+    fn implement_methods(methods: &[&'static str]) -> Registry {
+        methods.iter().fold(Registry::new(), |registry, method| {
+            registry.implement(*method, |_params: Value, _context| async {
+                Ok::<_, mango_protocol::RemoteError>(json!({}))
+            })
+        })
+    }
+
+    fn only_git_allowed() -> RuntimeCapabilityAllow {
+        RuntimeCapabilityAllow {
+            fs_read: false,
+            fs_write: false,
+            shell: false,
+            git: true,
+            probing: false,
+            mcp: false,
+            library: false,
+            checkpoints: false,
+            update: false,
+            external_agents: None,
+        }
+    }
+
+    /// Consent to a group whose executable is absent must not advertise tools.
+    #[test]
+    fn tools_stays_false_when_the_only_consented_group_lacks_its_executable() {
+        let registry = implement_methods(&["git.exec", "gh.exec", "gh.mutate"]);
+
+        let absent = build_features(&registry, &only_git_allowed(), false);
+        assert!(
+            !absent.tools,
+            "expected tools: false (allow.git with no git binary) | received: {absent:?}"
+        );
+
+        let present = build_features(&registry, &only_git_allowed(), true);
+        assert!(
+            present.git && present.tools,
+            "expected git and tools: true (allow.git, implemented, binary present) | received: {present:?}"
+        );
+    }
+
+    /// Consent to a group with no registered handlers must not advertise tools.
+    #[test]
+    fn tools_stays_false_when_the_only_consented_group_has_no_handlers() {
+        let features = build_features(&Registry::new(), &only_git_allowed(), true);
+        assert!(
+            !features.tools,
+            "expected tools: false (allow.git, no git.* handler) | received: {features:?}"
+        );
+    }
+
+    /// `update` and `externalAgents` are not tool groups: effective alone, they
+    /// still leave `tools` false.
+    #[test]
+    fn tools_ignores_groups_that_are_not_tool_groups() {
+        let mut features = build_features(&Registry::new(), &full_allow(), true);
+        features.update = true;
+        features.external_agents = true;
+        assert!(
+            !effective_tools(&features),
+            "expected tools: false (only update/externalAgents/toolchain effective) | received: {features:?}"
         );
     }
 

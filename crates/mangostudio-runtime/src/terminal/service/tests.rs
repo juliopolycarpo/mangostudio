@@ -238,6 +238,34 @@ fn default_shell_prefers_login_shell_only_when_present() {
     assert_eq!(default_shell(&host), RuntimeShellKind::Bash);
 }
 
+/// The terminal offers exactly the shells `detect_shells` may advertise:
+/// PowerShell only on Windows, even with `pwsh` on a non-Windows `PATH`.
+#[cfg(unix)]
+#[test]
+fn terminal_offers_powershell_only_on_windows() {
+    use super::shell_program;
+    use std::os::unix::fs::PermissionsExt;
+    let dir = crate::test_support::scratch_dir("terminal-shell-parity");
+    for name in ["pwsh", "powershell"] {
+        let path = dir.join(name);
+        std::fs::write(&path, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    for platform in ["linux", "darwin", "win32"] {
+        let host = PathEnv {
+            platform: platform.into(),
+            home_dir: dir.to_string_lossy().into_owned(),
+            env: HashMap::from([("PATH".into(), dir.to_string_lossy().into_owned())]),
+        };
+        let program = shell_program(RuntimeShellKind::Powershell, &host).ok();
+        assert_eq!(
+            program.is_some(),
+            platform == "win32",
+            "expected terminal powershell only on win32 | received: {program:?} on {platform}"
+        );
+    }
+}
+
 #[test]
 fn missing_cwd_falls_back_to_home() {
     let home = std::env::temp_dir();

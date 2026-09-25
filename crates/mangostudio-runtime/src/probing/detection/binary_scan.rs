@@ -75,6 +75,12 @@ pub struct RuntimeDefinition {
     pub well_known_dirs: fn(&PathEnv) -> Vec<String>,
     /// Also probes the bare binary name, as a final OS-resolved fallback.
     pub include_bare_binary_names: bool,
+    /// Lowercase names from [`RuntimeDefinition::binary_names`] that another
+    /// vendor also installs (Cursor's `agent` is also Grok's). An unreadable
+    /// `PATH` winner under one of these names may be another vendor's
+    /// binary, so the effective-installation choice also accepts a later
+    /// readable installation under the same name.
+    pub shared_binary_names: &'static [&'static str],
 }
 
 /// A candidate that failed to become an installation.
@@ -783,7 +789,8 @@ pub async fn scan_runtime(
     let mut installations = Vec::new();
     let mut failures = existence_failures;
     let mut first_path_by_realpath: HashMap<String, String> = HashMap::new();
-    let mut has_effective_installation = false;
+    // The installation a plain shell lookup would run: the first found on `PATH`.
+    let mut path_winner = None;
 
     for probe_result in probe_results.into_iter().flatten() {
         match probe_result {
@@ -814,9 +821,9 @@ pub async fn scan_runtime(
                 } else {
                     candidate.origin
                 };
-                let effective =
-                    candidate.origin == RuntimeOrigin::Path && !has_effective_installation;
-                has_effective_installation |= effective;
+                if candidate.origin == RuntimeOrigin::Path && path_winner.is_none() {
+                    path_winner = Some(installations.len());
+                }
                 let path_source = resolve_path_source(&candidate.path, &path, managed_by, path_env);
 
                 installations.push(RuntimeInstallation {
@@ -825,7 +832,7 @@ pub async fn scan_runtime(
                     version,
                     origin,
                     path_index: candidate.path_index,
-                    effective,
+                    effective: false,
                     alias_of,
                     managed_by,
                     path_source: Some(path_source),
@@ -834,10 +841,69 @@ pub async fn scan_runtime(
         }
     }
 
+    if let Some(index) =
+        effective_installation_index(&installations, path_winner, definition.shared_binary_names)
+    {
+        installations[index].effective = true;
+    }
+
     RuntimeScanResult {
         installations,
         failures,
     }
+}
+
+/// Which installation is `effective`: the one reported as running and the
+/// one the external-agent host launches. Both read this one rule.
+///
+/// Normally that is `path_winner`, the first installation found on `PATH`.
+/// A binary name can belong to more than one vendor, though: Grok also
+/// installs `agent`, Cursor's documented name, and a vendor definition keeps
+/// such an unreadable-version binary as installed. So when `path_winner`'s
+/// version does not read as this vendor's, the first installation whose
+/// version does read wins instead, if it is under *another* binary name or
+/// the winner's name is one of `shared_names`. For any other name an older
+/// copy under the same name is the same vendor, so a vendor that changed its
+/// version format keeps the install `PATH` picks. `None` when nothing was
+/// found on `PATH`.
+///
+/// Runtime definitions drop unparsed versions, so for them this is always
+/// `path_winner`.
+///
+/// # Example
+///
+/// ```ignore
+/// // Grok's `agent` (unreadable) first on PATH, Cursor's `agent` after it.
+/// let index = effective_installation_index(&installations, Some(0), &["agent"]);
+/// assert_eq!(index, Some(1));
+/// ```
+pub(crate) fn effective_installation_index(
+    installations: &[RuntimeInstallation],
+    path_winner: Option<usize>,
+    shared_names: &[&str],
+) -> Option<usize> {
+    let winner = installations.get(path_winner?)?;
+    if winner.version.is_some() {
+        return path_winner;
+    }
+    let winner_name = binary_name(&winner.raw_path);
+    let name_is_shared = shared_names.contains(&winner_name.as_str());
+    installations
+        .iter()
+        .position(|installation| {
+            installation.version.is_some()
+                && (name_is_shared || binary_name(&installation.raw_path) != winner_name)
+        })
+        .or(path_winner)
+}
+
+/// A candidate's binary name, without a Windows extension and
+/// case-insensitive, e.g. `Cursor-Agent.EXE` -> `cursor-agent`.
+fn binary_name(raw_path: &str) -> String {
+    std::path::Path::new(raw_path)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -872,6 +938,7 @@ mod tests {
             keep_unparsed_version: false,
             well_known_dirs: |_| Vec::new(),
             include_bare_binary_names: false,
+            shared_binary_names: &[],
         }
     }
 
@@ -981,6 +1048,167 @@ mod tests {
         assert_eq!(result.installations[1].raw_path, "/second/bin/node");
         assert_eq!(result.installations[1].path_index, Some(1));
         assert!(!result.installations[1].effective);
+    }
+
+    fn cursor_definition() -> RuntimeDefinition {
+        crate::probing::detection::agent_cli_definitions::CURSOR_AGENT_CLI_DEFINITION.runtime
+    }
+
+    /// Grok's `agent` sits first on `PATH` under the name Cursor probes
+    /// first; Cursor's own `cursor-agent` must be the effective one.
+    #[tokio::test]
+    async fn another_vendors_shared_binary_name_is_not_the_effective_installation() {
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: linux_env("/home/tester/.grok/bin:/home/tester/.local/bin"),
+            existing: HashSet::from([
+                "/home/tester/.grok/bin/agent".to_string(),
+                "/home/tester/.local/bin/cursor-agent".to_string(),
+            ]),
+            responses: HashMap::from([
+                (
+                    "/home/tester/.grok/bin/agent".to_string(),
+                    "grok 1.0.30 (04b7ffed98c6) [stable]".to_string(),
+                ),
+                (
+                    "/home/tester/.local/bin/cursor-agent".to_string(),
+                    "2026.09.10-fd3934a".to_string(),
+                ),
+            ]),
+            ..Default::default()
+        });
+
+        let result = scan_runtime(&cursor_definition(), deps, BinaryScanOptions::default()).await;
+
+        let effective: Vec<&str> = result
+            .installations
+            .iter()
+            .filter(|installation| installation.effective)
+            .map(|installation| installation.raw_path.as_str())
+            .collect();
+        assert_eq!(
+            effective,
+            ["/home/tester/.local/bin/cursor-agent"],
+            "expected exactly one effective installation: Cursor's cursor-agent | received: {effective:?}"
+        );
+    }
+
+    /// Cursor's documented name is `agent`, the same as Grok's. With Grok's
+    /// `agent` first on `PATH` and Cursor's own `agent` after it (no
+    /// `cursor-agent`), Cursor's `agent` must be the effective one.
+    #[tokio::test]
+    async fn a_later_same_named_install_wins_when_the_name_is_shared_with_another_vendor() {
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: linux_env("/home/tester/.grok/bin:/home/tester/.local/bin"),
+            existing: HashSet::from([
+                "/home/tester/.grok/bin/agent".to_string(),
+                "/home/tester/.local/bin/agent".to_string(),
+            ]),
+            responses: HashMap::from([
+                (
+                    "/home/tester/.grok/bin/agent".to_string(),
+                    "grok 1.0.30 (04b7ffed98c6) [stable]".to_string(),
+                ),
+                (
+                    "/home/tester/.local/bin/agent".to_string(),
+                    "2026.09.10-fd3934a".to_string(),
+                ),
+            ]),
+            ..Default::default()
+        });
+
+        let result = scan_runtime(&cursor_definition(), deps, BinaryScanOptions::default()).await;
+
+        let effective: Vec<&str> = result
+            .installations
+            .iter()
+            .filter(|installation| installation.effective)
+            .map(|installation| installation.raw_path.as_str())
+            .collect();
+        assert_eq!(
+            effective,
+            ["/home/tester/.local/bin/agent"],
+            "expected exactly one effective installation: Cursor's ~/.local/bin/agent | received: {effective:?}"
+        );
+    }
+
+    fn installation(raw_path: &str, version: Option<&str>) -> RuntimeInstallation {
+        RuntimeInstallation {
+            path: raw_path.to_owned(),
+            raw_path: raw_path.to_owned(),
+            version: version.map(str::to_owned),
+            origin: RuntimeOrigin::Path,
+            path_index: None,
+            effective: false,
+            alias_of: None,
+            managed_by: None,
+            path_source: None,
+        }
+    }
+
+    #[test]
+    fn a_readable_path_winner_stays_effective() {
+        let installations = [
+            installation("/a/agent", Some("2026.9.10")),
+            installation("/b/cursor-agent", Some("2026.9.1")),
+        ];
+        let index = effective_installation_index(&installations, Some(0), &[]);
+        assert_eq!(
+            index,
+            Some(0),
+            "expected the readable PATH winner | received: {index:?}"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_path_winner_is_not_swapped_for_an_older_same_named_one() {
+        // A vendor that changed its version format keeps the install PATH picks.
+        let installations = [
+            installation("/new/bin/claude", None),
+            installation("/old/bin/claude", Some("2.0.1")),
+        ];
+        let index = effective_installation_index(&installations, Some(0), &[]);
+        assert_eq!(
+            index,
+            Some(0),
+            "expected the PATH winner kept | received: {index:?}"
+        );
+    }
+
+    #[test]
+    fn only_a_shared_name_accepts_a_later_same_named_install() {
+        let shared = [
+            installation("/grok/bin/agent", None),
+            installation("/cursor/bin/agent", Some("2026.9.10")),
+        ];
+        let index = effective_installation_index(&shared, Some(0), &["agent"]);
+        assert_eq!(
+            index,
+            Some(1),
+            "expected the readable shared-name install | received: {index:?}"
+        );
+        let index = effective_installation_index(&shared, Some(0), &["claude"]);
+        assert_eq!(
+            index,
+            Some(0),
+            "expected the PATH winner for an unshared name | received: {index:?}"
+        );
+    }
+
+    #[test]
+    fn with_no_readable_installation_or_no_path_winner_the_path_rule_holds() {
+        let unreadable = [installation("/a/claude", None)];
+        let index = effective_installation_index(&unreadable, Some(0), &[]);
+        assert_eq!(
+            index,
+            Some(0),
+            "expected the unreadable PATH winner kept | received: {index:?}"
+        );
+        let off_path = [installation("/opt/claude", Some("2.0.1"))];
+        let index = effective_installation_index(&off_path, None, &[]);
+        assert_eq!(
+            index, None,
+            "expected no effective without a PATH winner | received: {index:?}"
+        );
     }
 
     #[tokio::test]

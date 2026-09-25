@@ -142,6 +142,7 @@ pub const CLAUDE_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgen
         keep_unparsed_version: true,
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
+        shared_binary_names: &[],
     },
     auth: AgentAuthDefinition::File {
         file_name: ".credentials.json",
@@ -161,6 +162,7 @@ pub const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgent
         keep_unparsed_version: true,
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
+        shared_binary_names: &[],
     },
     auth: AgentAuthDefinition::File {
         file_name: "auth.json",
@@ -182,6 +184,8 @@ pub const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgen
         keep_unparsed_version: true,
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
+        // Grok Build also installs `agent`.
+        shared_binary_names: &["agent"],
     },
     auth: AgentAuthDefinition::ConfigKey {
         file_name: "cli-config.json",

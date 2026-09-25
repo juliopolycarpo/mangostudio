@@ -444,7 +444,9 @@ pub struct RuntimeInstallation {
     /// `PATH`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path_index: Option<u32>,
-    /// Whether this is the installation a plain shell lookup would run.
+    /// Whether this is the installation that runs: the one a plain shell
+    /// lookup finds, unless that binary is another vendor's under a shared
+    /// name. See `binary_scan::effective_installation_index`.
     pub effective: bool,
     /// The earlier `PATH` entry this installation's resolved path is an
     /// alias of, when one exists.
