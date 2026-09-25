@@ -31,7 +31,8 @@ pub(crate) struct StallGate {
 }
 
 impl StallGate {
-    /// A closed gate; the returned handle releases it when dropped.
+    /// A closed gate owned by the caller: dropping this owner releases every waiter.
+    /// Give reads a [`StallGate::handle`] instead, which never releases on drop.
     pub(crate) fn new() -> Self {
         Self {
             state: Arc::default(),
