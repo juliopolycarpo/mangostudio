@@ -629,12 +629,44 @@ async fn serve_upgraded<P: Port>(
         move |message: &str| (heartbeat_context.log)(message),
     ));
 
-    let _closure: SessionClosure = join_owned(driver_handle).await;
+    let closure: SessionClosure = join_owned(driver_handle).await;
     heartbeat_cancel.cancel();
     let _ = join_owned(heartbeat).await;
 
     state.clear_if_current(generation);
+    if let Some(failure) = teardown_failure(&closure) {
+        (context.log)(&failure);
+    }
     (context.log)("Hub connection ended.");
+}
+
+/// Describes a session teardown that did not finish cleanly, with the close
+/// that started it, or `None` for a clean one.
+///
+/// A handler still running when the close grace expired is the teardown
+/// failure a connection can have here: what it holds (a child process, an
+/// exclusivity claim) outlives the hub that asked for it, and the operator
+/// reading this process's stderr is the only party left to tell.
+///
+/// # Example
+///
+/// ```ignore
+/// // A closure whose grace expired with one handler still running:
+/// assert!(teardown_failure(&closure).unwrap().contains("1 handler(s)"));
+/// ```
+fn teardown_failure(closure: &SessionClosure) -> Option<String> {
+    if closure.unfinished_handlers == 0 {
+        return None;
+    }
+    let reason = closure
+        .reason
+        .as_deref()
+        .map_or_else(String::new, |reason| format!(": {reason}"));
+    Some(format!(
+        "Hub connection teardown failed: {} handler(s) were still running when the close grace \
+         expired (close {}{reason}).",
+        closure.unfinished_handlers, closure.code
+    ))
 }
 
 /// Closes a port nothing ever became a session over — a refused admission,
@@ -882,6 +914,63 @@ mod tests {
             .await
             .expect("expected the newcomer to end once its hub went away")
             .expect("the connection task must not panic");
+    }
+
+    /// A handler still running when the close grace expires is a teardown
+    /// failure, and the line names how many and the close that started it.
+    /// A clean close reports nothing.
+    #[tokio::test(start_paused = true)]
+    async fn a_teardown_that_outlives_the_close_grace_is_described_with_its_close() {
+        let (hub_port, runtime_port) = port_pair();
+        let (entered_tx, entered) = oneshot::channel::<()>();
+        let entered_tx = std::sync::Mutex::new(Some(entered_tx));
+        let (hub, _hub_driver) = Session::spawn(hub_port, SessionOptions::new(peer("hub")));
+        let (runtime, _runtime_driver) = Session::spawn(
+            runtime_port,
+            SessionOptions::new(peer("runtime"))
+                .with_handler_grace(std::time::Duration::from_secs(5))
+                .handle("test.parked", move |_params, _context| {
+                    if let Some(entered) = entered_tx.lock().unwrap().take() {
+                        let _ = entered.send(());
+                    }
+                    async { std::future::pending().await }
+                }),
+        );
+        runtime.ready().await.expect("the pair handshakes");
+        let request = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.request("test.parked", serde_json::json!({})).await }
+        });
+        entered.await.expect("the parked handler starts");
+
+        let closure = runtime
+            .close(
+                mango_protocol::close::close_codes::RELEASED,
+                Some("Runtime stopped"),
+            )
+            .await;
+        request.abort();
+
+        let failure = super::teardown_failure(&closure)
+            .expect("expected a teardown failure for a handler past the grace | received: None");
+        assert!(
+            failure.contains("1 handler(s)")
+                && failure.contains(&format!(
+                    "close {}: Runtime stopped",
+                    mango_protocol::close::close_codes::RELEASED
+                )),
+            "expected the handler count and the close in the line | received: {failure}"
+        );
+
+        let (clean, _peer) = live_session().await;
+        let clean_closure = clean
+            .close(mango_protocol::close::close_codes::RELEASED, None)
+            .await;
+        assert_eq!(
+            super::teardown_failure(&clean_closure),
+            None,
+            "expected a clean close to report no teardown failure"
+        );
     }
 
     /// The property `serve`'s single `Mutex` exists for: however many
