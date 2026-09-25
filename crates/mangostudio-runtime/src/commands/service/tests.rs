@@ -251,6 +251,55 @@ fn shell_preparation_uses_exact_command_and_sanitized_environment() {
     );
 }
 
+/// `shell.run` accepts exactly the shells `detect_shells` may advertise:
+/// both read `crate::health::shell_path_candidates`, so PowerShell is
+/// Windows-only even when `pwsh` is on a non-Windows `PATH`.
+#[cfg(unix)]
+#[test]
+fn shell_acceptance_matches_the_advertised_shell_rule_per_platform() {
+    use mangostudio_runtime_contract::manifest::RuntimeShellKind;
+    use std::os::unix::fs::PermissionsExt;
+    let home = scratch_dir("commands-shell-parity");
+    for name in ["bash", "zsh", "pwsh", "powershell"] {
+        let path = home.join(name);
+        std::fs::write(&path, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    for platform in ["linux", "darwin", "win32"] {
+        let host = PathEnv {
+            platform: platform.into(),
+            home_dir: home.to_string_lossy().into_owned(),
+            env: std::collections::HashMap::from([(
+                "PATH".into(),
+                home.to_string_lossy().into_owned(),
+            )]),
+        };
+        for (kind, wire) in [
+            (RuntimeShellKind::Bash, "bash"),
+            (RuntimeShellKind::Zsh, "zsh"),
+            (RuntimeShellKind::Powershell, "powershell"),
+        ] {
+            let advertised =
+                !crate::health::shell_path_candidates(kind, host.is_windows()).is_empty();
+            let params =
+                json!({"kind":wire,"command":"true","timeoutMs":5000,"maxOutputBytes":1000});
+            let accepted = prepare_shell(params, &host, 100_000).is_ok();
+            assert_eq!(
+                accepted, advertised,
+                "expected shell.run acceptance of {wire} on {platform}: {advertised} | received: {accepted}"
+            );
+        }
+        let powershell =
+            json!({"kind":"powershell","command":"true","timeoutMs":5000,"maxOutputBytes":1000});
+        let accepted = prepare_shell(powershell, &host, 100_000).is_ok();
+        assert_eq!(
+            accepted,
+            platform == "win32",
+            "expected powershell accepted only on win32 | received: accepted={accepted} on {platform}"
+        );
+    }
+}
+
 #[test]
 fn results_preserve_nonzero_acceptance_incomplete_capture_and_error_details() {
     let prepared = prepare(
