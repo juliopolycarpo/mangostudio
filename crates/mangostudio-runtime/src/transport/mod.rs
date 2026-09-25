@@ -21,6 +21,7 @@
 //! for a later plan the way the rest of this module's method-group gap is.
 
 pub mod connect;
+mod opening;
 pub mod serve;
 pub mod stdio;
 

@@ -1,10 +1,12 @@
 //! The `serve` transport: the hub dials in over WebSocket, authenticated by
 //! a bearer token this process holds. Mirrors `serve.ts`.
 //!
-//! One hub connection at a time. A new upgrade supersedes the previous one;
-//! if the previous generation had already published a real session by
-//! then, the replacement waits for it to fully release before building its
-//! own — but a previous generation still in its own placeholder window (one
+//! One hub connection at a time. A new upgrade supersedes the previous one —
+//! unless the previous one is live and bound to a different environment
+//! record (see `ServeState::try_admit`), in which case the new one is
+//! refused and the previous one is left alone. If the previous generation
+//! had already published a real session by then, the replacement waits for
+//! it to fully release before building its own — but a previous generation still in its own placeholder window (one
 //! that has not yet reached `publish`, so it has no session and nothing to
 //! wait on) releases instantly, and the two may briefly overlap while the
 //! newer one constructs. See `ServeState`, the one `Mutex` that makes
@@ -19,15 +21,18 @@ use mango_protocol::close::close_codes;
 use mango_protocol::port::{Port, PortTx};
 use mango_protocol::session::{
     DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_LIVENESS_INTERVAL, Session, SessionClosure, SessionOptions,
+    SessionState,
 };
+use mango_protocol::transports::websocket::WebSocketOptions;
 use mango_protocol::transports::websocket::server::{AcceptOptions, accept_websocket};
-use mango_protocol::transports::websocket::{WebSocketOptions, WebSocketPort};
+use mangostudio_runtime_contract::strings::binding;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Semaphore, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime_home::RuntimeSlot;
 use crate::supervisor::{OwnedTasks, join_owned};
+use crate::transport::opening::{HUB_HELLO_WAIT, ReplayPort, read_opening};
 use crate::transport::{build_host, runtime_peer, tokens_equal};
 
 /// How long `stop()` waits for a straggling connection task (one still in
@@ -187,24 +192,46 @@ struct ConnectionContext {
 /// (`session`, to close it) and to know once it has fully finished
 /// (`released`, which resolves — successfully or not, the value carries no
 /// meaning — the instant the owning task's local sender drops, at any of
-/// its return points).
+/// its return points). `binding` is the key its hub announced, if any.
 struct ActiveGeneration {
     generation: u64,
+    binding: Option<String>,
     session: Option<Session>,
     released: Option<oneshot::Receiver<()>>,
 }
 
 impl ActiveGeneration {
-    fn placeholder(generation: u64) -> Self {
+    fn placeholder(generation: u64, binding: Option<String>) -> Self {
         Self {
             generation,
+            binding,
             session: None,
             released: None,
         }
     }
+
+    /// True when this generation holds the runtime for a binding key other
+    /// than `newcomer`'s, and still counts as holding it.
+    ///
+    /// Either side lacking a key (an older hub) never refuses: that is the
+    /// pre-binding supersede behaviour, kept exactly. A placeholder (no
+    /// session yet) is an authenticated connection whose hub already said
+    /// which record it speaks for, so it holds the runtime too. A session
+    /// that has already closed does not: its task just has not cleared the
+    /// slot yet, and the newcomer should win rather than wait on it.
+    fn bound_elsewhere(&self, newcomer: Option<&str>) -> bool {
+        let (Some(incumbent), Some(newcomer)) = (self.binding.as_deref(), newcomer) else {
+            return false;
+        };
+        incumbent != newcomer
+            && self
+                .session
+                .as_ref()
+                .is_none_or(|session| session.state() != SessionState::Closed)
+    }
 }
 
-/// One of [`ServeState::try_admit`]'s two outcomes.
+/// One of [`ServeState::try_admit`]'s three outcomes.
 enum Admission {
     /// This call is now the active generation. `previous`, if any, must be
     /// released (see [`release_active`]) before this generation may build a
@@ -215,6 +242,9 @@ enum Admission {
     },
     /// Shutdown had already started; nothing was claimed.
     Refused,
+    /// A live generation holds the runtime for a different binding key;
+    /// nothing was claimed and the incumbent was not touched.
+    AlreadyBound,
 }
 
 /// The one synchronisation point admission and shutdown share. See the
@@ -241,21 +271,43 @@ impl ServeState {
         }
     }
 
-    /// Claims the next generation, unless shutdown has already started.
-    /// Mirrors `serve.ts`'s synchronous `active = entry` — the slot is
-    /// claimed by a placeholder immediately, before any session exists, so
-    /// a *third* connection racing in behind this one already sees this
-    /// generation as current rather than the one it is about to supersede.
-    fn try_admit(&self) -> Admission {
+    /// Claims the next generation for a hub announcing `binding`, unless
+    /// shutdown has already started or a live generation is bound to a
+    /// different key. Mirrors `serve.ts`'s synchronous `active = entry` —
+    /// the slot is claimed by a placeholder immediately, before any session
+    /// exists, so a *third* connection racing in behind this one already
+    /// sees this generation as current rather than the one it is about to
+    /// supersede.
+    ///
+    /// The refusal is decided under the same lock every release goes
+    /// through, which is what makes it race-free against the incumbent
+    /// going away: a supersession or shutdown takes the incumbent *out of*
+    /// `active` under this lock before closing it, and the incumbent's own
+    /// task clears `active` under it once its session ends. So under the
+    /// lock the incumbent is exactly one of: still in `active` with a
+    /// session that has not closed (refuse the newcomer), still in `active`
+    /// with a closed session its task has not cleared yet (the newcomer
+    /// supersedes it, as `bound_elsewhere` says), or gone (the newcomer is
+    /// admitted with nothing to supersede). There is no window where a
+    /// newcomer is refused by an incumbent that has already been released.
+    fn try_admit(&self, binding: Option<&str>) -> Admission {
         let mut inner = self.inner.lock().expect("ServeState mutex poisoned");
         if inner.closed {
             return Admission::Refused;
         }
+        if inner
+            .active
+            .as_ref()
+            .is_some_and(|active| active.bound_elsewhere(binding))
+        {
+            return Admission::AlreadyBound;
+        }
         inner.generation += 1;
         let generation = inner.generation;
-        let previous = inner
-            .active
-            .replace(ActiveGeneration::placeholder(generation));
+        let previous = inner.active.replace(ActiveGeneration::placeholder(
+            generation,
+            binding.map(str::to_owned),
+        ));
         Admission::Admitted {
             generation,
             previous,
@@ -389,6 +441,13 @@ async fn handle_connection(
     // multi-hour session) must not keep holding this slot.
     drop(permit);
 
+    // The hub's `hello` is read before anything is decided: its binding key
+    // is what `try_admit` refuses on. Read concurrently with building this
+    // side's capabilities, so it costs no extra time, and replayed into the
+    // session below so the session still sees every frame in order.
+    let max_frame_bytes = port.max_frame_bytes();
+    let (port_tx, mut port_rx) = port.split();
+
     let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
     // No request is in flight yet to cancel this against — a fresh token
     // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
@@ -400,21 +459,39 @@ async fn handle_connection(
     // `PATH` walk, a `git` probe — measured around 200ms) for no reason.
     // The previous connection can keep answering calls right up until
     // this one is actually ready to take its place.
-    let capabilities = crate::transport::hello_capabilities(
-        context.slot,
-        &context.mango_home,
-        &host.registry,
-        &CancellationToken::new(),
-    )
-    .await;
+    let cancel_probe = CancellationToken::new();
+    let (capabilities, opening) = tokio::join!(
+        crate::transport::hello_capabilities(
+            context.slot,
+            &context.mango_home,
+            &host.registry,
+            &cancel_probe,
+        ),
+        read_opening(&mut port_rx, HUB_HELLO_WAIT),
+    );
+    let port = ReplayPort::new(port_tx, port_rx, opening.buffered, max_frame_bytes);
 
-    let (generation, previous) = match state.try_admit() {
+    let (generation, previous) = match state.try_admit(opening.binding.as_deref()) {
         Admission::Admitted {
             generation,
             previous,
         } => (generation, previous),
         Admission::Refused => {
             close_port(port, close_codes::RELEASED, "Runtime stopped").await;
+            return;
+        }
+        Admission::AlreadyBound => {
+            // Refused before this side's `hello` goes out, so the incumbent
+            // is never disturbed and the refused hub learns only the code.
+            close_port(
+                port,
+                binding::ALREADY_BOUND_CLOSE_CODE,
+                binding::ALREADY_BOUND_REASON,
+            )
+            .await;
+            (context.log)(
+                "Refused a hub connection: this runtime is already bound to another environment.",
+            );
             return;
         }
     };
@@ -453,6 +530,7 @@ async fn handle_connection(
         generation,
         ActiveGeneration {
             generation,
+            binding: opening.binding,
             session: Some(session.clone()),
             released: Some(released_rx),
         },
@@ -500,10 +578,7 @@ async fn handle_connection(
 
 /// Closes a port nothing ever became a session over — a refused admission,
 /// or one that lost the race before a session was ever built.
-async fn close_port<S>(port: WebSocketPort<S>, code: u16, reason: &str)
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
-{
+async fn close_port<P: Port>(port: P, code: u16, reason: &str) {
     let (tx, _rx) = port.split();
     tx.close(code, Some(reason.to_string())).await;
 }
@@ -592,6 +667,10 @@ mod tests {
 
     use tokio::sync::{Barrier, oneshot};
 
+    use mango_protocol::frame::PeerInfo;
+    use mango_protocol::port::port_pair;
+    use mango_protocol::session::{Session, SessionOptions, SessionState};
+
     use super::{ActiveGeneration, Admission, ServeState};
 
     /// The property `serve`'s single `Mutex` exists for: however many
@@ -630,7 +709,7 @@ mod tests {
                 let refused = Arc::clone(&refused);
                 admitters.push(tokio::spawn(async move {
                     barrier.wait().await;
-                    match state.try_admit() {
+                    match state.try_admit(None) {
                         Admission::Admitted { .. } => {
                             admitted.fetch_add(1, Ordering::SeqCst);
                             // Deliberately does *not* call
@@ -642,6 +721,9 @@ mod tests {
                         }
                         Admission::Refused => {
                             refused.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Admission::AlreadyBound => {
+                            unreachable!("no generation here announces a binding key")
                         }
                     }
                 }));
@@ -689,7 +771,7 @@ mod tests {
     fn nothing_is_admitted_once_shutdown_has_started() {
         let state = ServeState::new();
         state.begin_shutdown();
-        assert!(matches!(state.try_admit(), Admission::Refused));
+        assert!(matches!(state.try_admit(None), Admission::Refused));
     }
 
     /// `release_active`'s completion signal actually fires: a caller that
@@ -700,6 +782,7 @@ mod tests {
         let (tx, rx) = oneshot::channel::<()>();
         let previous = ActiveGeneration {
             generation: 1,
+            binding: None,
             session: None,
             released: Some(rx),
         };
@@ -719,13 +802,13 @@ mod tests {
     #[test]
     fn a_superseded_generation_cannot_clear_the_generation_that_replaced_it() {
         let state = ServeState::new();
-        let first = match state.try_admit() {
+        let first = match state.try_admit(None) {
             Admission::Admitted { generation, .. } => generation,
-            Admission::Refused => unreachable!(),
+            Admission::Refused | Admission::AlreadyBound => unreachable!(),
         };
-        assert!(state.publish(first, ActiveGeneration::placeholder(first)));
+        assert!(state.publish(first, ActiveGeneration::placeholder(first, None)));
 
-        let second = match state.try_admit() {
+        let second = match state.try_admit(None) {
             Admission::Admitted {
                 generation,
                 previous,
@@ -736,9 +819,9 @@ mod tests {
                 );
                 generation
             }
-            Admission::Refused => unreachable!(),
+            Admission::Refused | Admission::AlreadyBound => unreachable!(),
         };
-        assert!(state.publish(second, ActiveGeneration::placeholder(second)));
+        assert!(state.publish(second, ActiveGeneration::placeholder(second, None)));
 
         // The (already-superseded) first generation's own task finally
         // finishes and tries to clear itself — it must be a no-op now.
@@ -746,6 +829,160 @@ mod tests {
         assert!(
             state.still_current(second),
             "clearing a stale generation must never clear the current one"
+        );
+    }
+
+    /// Admits an incumbent announcing `key` and publishes `session` for it.
+    fn incumbent(state: &ServeState, key: Option<&str>, session: Option<Session>) -> u64 {
+        let Admission::Admitted { generation, .. } = state.try_admit(key) else {
+            panic!("expected an empty runtime to admit the incumbent");
+        };
+        assert!(state.publish(
+            generation,
+            ActiveGeneration {
+                generation,
+                binding: key.map(str::to_owned),
+                session,
+                released: None,
+            },
+        ));
+        generation
+    }
+
+    fn outcome(admission: &Admission) -> &'static str {
+        match admission {
+            Admission::Admitted { .. } => "admitted",
+            Admission::Refused => "refused (shutdown)",
+            Admission::AlreadyBound => "already bound",
+        }
+    }
+
+    /// A handshaken session pair; the runtime half is returned.
+    async fn live_session() -> (Session, Session) {
+        let (hub_port, runtime_port) = port_pair();
+        let (hub, _hub_driver) = Session::spawn(hub_port, SessionOptions::new(peer("hub")));
+        let (runtime, _runtime_driver) =
+            Session::spawn(runtime_port, SessionOptions::new(peer("runtime")));
+        runtime.ready().await.expect("the pair handshakes");
+        (runtime, hub)
+    }
+
+    fn peer(role: &str) -> PeerInfo {
+        PeerInfo {
+            name: "test".into(),
+            version: "0.0.0".into(),
+            role: role.into(),
+        }
+    }
+
+    /// A live incumbent bound to one record refuses a newcomer for another,
+    /// and stays exactly where it was — same generation, still current.
+    #[tokio::test]
+    async fn a_live_incumbent_refuses_a_newcomer_bound_to_another_record() {
+        let state = ServeState::new();
+        let (runtime, _hub) = live_session().await;
+        let first = incumbent(&state, Some("record-a"), Some(runtime));
+
+        let admission = state.try_admit(Some("record-b"));
+        assert!(
+            matches!(admission, Admission::AlreadyBound),
+            "expected admission: already bound | received: {}",
+            outcome(&admission)
+        );
+        assert!(
+            state.still_current(first),
+            "expected the incumbent to stay current after a refusal"
+        );
+    }
+
+    /// A placeholder (admitted, no session yet) holds the runtime for its
+    /// record too: its hub already said which record it speaks for.
+    #[test]
+    fn a_placeholder_incumbent_refuses_a_newcomer_bound_to_another_record() {
+        let state = ServeState::new();
+        let Admission::Admitted { generation, .. } = state.try_admit(Some("record-a")) else {
+            panic!("expected an empty runtime to admit the incumbent");
+        };
+        let admission = state.try_admit(Some("record-b"));
+        assert!(
+            matches!(admission, Admission::AlreadyBound),
+            "expected admission: already bound | received: {}",
+            outcome(&admission)
+        );
+        assert!(state.still_current(generation));
+    }
+
+    /// The same record reconnecting, and every combination with an older hub
+    /// that sends no key, keeps the pre-binding supersede behaviour.
+    #[tokio::test]
+    async fn the_same_record_or_a_keyless_side_still_supersedes() {
+        for (incumbent_key, newcomer_key) in [
+            (Some("record-a"), Some("record-a")),
+            (Some("record-a"), None),
+            (None, Some("record-b")),
+            (None, None),
+        ] {
+            let state = ServeState::new();
+            let (runtime, _hub) = live_session().await;
+            incumbent(&state, incumbent_key, Some(runtime));
+
+            let admission = state.try_admit(newcomer_key);
+            let Admission::Admitted { previous, .. } = &admission else {
+                panic!(
+                    "expected admission: admitted (supersede) for incumbent {incumbent_key:?} \
+                     and newcomer {newcomer_key:?} | received: {}",
+                    outcome(&admission)
+                );
+            };
+            assert!(
+                previous.is_some(),
+                "expected the incumbent handed back to be superseded for incumbent \
+                 {incumbent_key:?} and newcomer {newcomer_key:?}"
+            );
+        }
+    }
+
+    /// An incumbent whose session has already closed — its hub went away,
+    /// and its task has not cleared the slot yet — no longer holds the
+    /// runtime: a newcomer for another record wins.
+    #[tokio::test]
+    async fn a_newcomer_for_another_record_wins_once_the_incumbent_has_closed() {
+        let state = ServeState::new();
+        let (runtime, hub) = live_session().await;
+        incumbent(&state, Some("record-a"), Some(runtime.clone()));
+        hub.close(4000, None).await;
+        runtime.closed().await;
+        assert_eq!(runtime.state(), SessionState::Closed);
+
+        let admission = state.try_admit(Some("record-b"));
+        assert!(
+            matches!(
+                admission,
+                Admission::Admitted {
+                    previous: Some(_),
+                    ..
+                }
+            ),
+            "expected admission: admitted over the closed incumbent | received: {}",
+            outcome(&admission)
+        );
+    }
+
+    /// An incumbent already released — superseded or cleared — is simply
+    /// gone, and a newcomer for another record is admitted with nothing to
+    /// supersede.
+    #[tokio::test]
+    async fn a_newcomer_for_another_record_is_admitted_once_the_incumbent_is_released() {
+        let state = ServeState::new();
+        let (runtime, _hub) = live_session().await;
+        let first = incumbent(&state, Some("record-a"), Some(runtime));
+        state.clear_if_current(first);
+
+        let admission = state.try_admit(Some("record-b"));
+        assert!(
+            matches!(admission, Admission::Admitted { previous: None, .. }),
+            "expected admission: admitted with nothing to supersede | received: {}",
+            outcome(&admission)
         );
     }
 }

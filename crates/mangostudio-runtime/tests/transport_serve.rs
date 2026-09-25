@@ -13,6 +13,7 @@ use mango_protocol::transports::deadline::ConnectDeadline;
 use mango_protocol::transports::websocket::client::{WebSocketConnectOptions, connect_websocket};
 use mangostudio_runtime::runtime_home::RuntimeSlot;
 use mangostudio_runtime::transport::serve::run;
+use mangostudio_runtime_contract::strings::binding;
 use tokio_util::sync::CancellationToken;
 
 mod support;
@@ -33,7 +34,21 @@ fn scratch_home(name: &str) -> ScratchDir {
 }
 
 async fn dial(addr: SocketAddr, bearer: Option<&str>) -> Result<Session, u16> {
+    dial_bound(addr, bearer, None).await
+}
+
+/// Dials as a hub announcing `binding_key` (or none, like an older hub) in
+/// its `hello.capabilities`.
+async fn dial_bound(
+    addr: SocketAddr,
+    bearer: Option<&str>,
+    binding_key: Option<&str>,
+) -> Result<Session, u16> {
     let url = format!("ws://{addr}/");
+    let mut capabilities = serde_json::Map::new();
+    if let Some(key) = binding_key {
+        capabilities.insert(binding::CAPABILITY.to_owned(), key.into());
+    }
     let mut options = WebSocketConnectOptions::default();
     if let Some(token) = bearer {
         options = options.with_bearer(token);
@@ -41,8 +56,10 @@ async fn dial(addr: SocketAddr, bearer: Option<&str>) -> Result<Session, u16> {
     let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
     match connect_websocket(&url, &options, &deadline).await {
         Ok(port) => {
-            let (session, _driver) =
-                Session::spawn(port, SessionOptions::new(support::peer("hub")));
+            let (session, _driver) = Session::spawn(
+                port,
+                SessionOptions::new(support::peer("hub")).with_capabilities(capabilities),
+            );
             match session.ready().await {
                 Ok(_) => Ok(session),
                 Err(_) => {
@@ -124,6 +141,160 @@ async fn a_second_dial_supersedes_the_first() {
         "expected a supersession log line, got {:?}",
         log.messages()
     );
+
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}
+
+fn spawn_serve(
+    listener: tokio::net::TcpListener,
+    name: &str,
+    cancel: &CancellationToken,
+    log: &CollectingLog,
+) -> (ScratchDir, tokio::task::JoinHandle<std::io::Result<()>>) {
+    let home = scratch_home(name);
+    let server = tokio::spawn(run(
+        listener,
+        TOKEN.to_string(),
+        RuntimeSlot::Remote,
+        home.to_path_buf(),
+        "0.0.0".to_string(),
+        cancel.clone(),
+        log.sink(),
+    ));
+    (home, server)
+}
+
+fn count_logged(log: &CollectingLog, needle: &str) -> usize {
+    log.messages()
+        .iter()
+        .filter(|message| message.contains(needle))
+        .count()
+}
+
+/// Waits (bounded) for the runtime to log `needle` — its own signal that a
+/// connection task reached that point.
+async fn logged(log: &CollectingLog, needle: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while count_logged(log, needle) == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "expected a log line containing {needle:?} | received: {:?}",
+            log.messages()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// A live connection bound to one environment record refuses a dial for a
+/// different record with the already-bound close code, and is itself left
+/// alone: it still answers a request afterwards and was never superseded.
+#[tokio::test]
+async fn a_dial_for_another_binding_is_refused_and_the_incumbent_keeps_answering() {
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let log = CollectingLog::new();
+    let (_home, server) = spawn_serve(listener, "binding-refused", &cancel, &log);
+
+    let first = dial_bound(addr, Some(TOKEN), Some("record-a"))
+        .await
+        .expect("the first record's dial succeeds");
+    let refused = dial_bound(addr, Some(TOKEN), Some("record-b")).await;
+    assert_eq!(
+        refused.as_ref().err().copied(),
+        Some(binding::ALREADY_BOUND_CLOSE_CODE),
+        "expected the second record refused with {} | received: {}",
+        binding::ALREADY_BOUND_CLOSE_CODE,
+        match &refused {
+            Ok(_) => "an admitted session".to_owned(),
+            Err(code) => format!("close code {code}"),
+        }
+    );
+
+    let health = first
+        .request("runtime.health", serde_json::json!({}))
+        .await
+        .expect("the incumbent still answers after the refusal");
+    assert!(
+        health.get("runtimeVersion").is_some(),
+        "expected a runtime.health result | received: {health}"
+    );
+    assert_eq!(first.state(), SessionState::Ready);
+    assert_eq!(count_logged(&log, "already bound"), 1);
+    assert_eq!(count_logged(&log, "superseded"), 0);
+
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}
+
+/// The same record reconnecting — its old socket not yet noticed dead —
+/// supersedes the old connection exactly as before binding keys.
+#[tokio::test]
+async fn a_dial_for_the_same_binding_supersedes_the_incumbent() {
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let log = CollectingLog::new();
+    let (_home, server) = spawn_serve(listener, "binding-same", &cancel, &log);
+
+    let first = dial_bound(addr, Some(TOKEN), Some("record-a"))
+        .await
+        .expect("first dial succeeds");
+    let second = dial_bound(addr, Some(TOKEN), Some("record-a"))
+        .await
+        .expect("the same record's reconnect is admitted");
+
+    assert_eq!(first.closed().await.code, close_codes::SUPERSEDED);
+    assert_eq!(second.state(), SessionState::Ready);
+
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}
+
+/// A hub that announces no binding key (built before binding keys) still
+/// supersedes a bound incumbent: either side lacking a key keeps the old
+/// behaviour.
+#[tokio::test]
+async fn a_dial_without_a_binding_supersedes_a_bound_incumbent() {
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let log = CollectingLog::new();
+    let (_home, server) = spawn_serve(listener, "binding-legacy", &cancel, &log);
+
+    let first = dial_bound(addr, Some(TOKEN), Some("record-a"))
+        .await
+        .expect("first dial succeeds");
+    let second = dial_bound(addr, Some(TOKEN), None)
+        .await
+        .expect("a keyless dial is admitted");
+
+    assert_eq!(first.closed().await.code, close_codes::SUPERSEDED);
+    assert_eq!(second.state(), SessionState::Ready);
+
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}
+
+/// Once the incumbent's hub has gone away and the runtime has let go of it,
+/// a dial for another record is admitted — the refusal only protects a live
+/// connection.
+#[tokio::test]
+async fn a_dial_for_another_binding_succeeds_once_the_incumbent_is_gone() {
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let log = CollectingLog::new();
+    let (_home, server) = spawn_serve(listener, "binding-released", &cancel, &log);
+
+    let first = dial_bound(addr, Some(TOKEN), Some("record-a"))
+        .await
+        .expect("first dial succeeds");
+    first.close(close_codes::RELEASED, Some("done")).await;
+    logged(&log, "Hub connection ended.").await;
+
+    let second = dial_bound(addr, Some(TOKEN), Some("record-b"))
+        .await
+        .expect("another record is admitted once the incumbent is gone");
+    assert_eq!(second.state(), SessionState::Ready);
+    assert_eq!(count_logged(&log, "already bound"), 0);
 
     cancel.cancel();
     server.await.unwrap().unwrap();
