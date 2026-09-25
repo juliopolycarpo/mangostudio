@@ -655,3 +655,71 @@ fn setup_json_reports_the_answer_that_health_and_doctor_then_read() {
         doctor.status.code()
     );
 }
+
+/// A slot an installer armed `pending` fails `doctor` on Consent, and the
+/// fix doctor prints, run as printed (with a profile picked for its
+/// placeholder), actually clears it.
+#[test]
+fn doctor_consent_pending_fix_round_trips_to_a_passing_doctor() {
+    let home = scratch_mango_home("doctor-consent-round-trip");
+    let host = home.join("runtime").join("host");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(
+        host.join("runtime.json"),
+        br#"{"schemaVersion":1,"slot":"host","setup":{"state":"pending","at":"2024-01-01T00:00:00.000Z","by":"install"}}"#,
+    )
+    .unwrap();
+
+    let doctor = |home: &std::path::Path| {
+        let output = Command::new(binary_path())
+            .args(["doctor", "--json"])
+            .env("MANGO_HOME", home)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the binary runs");
+        let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let consent = body["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|finding| finding["title"] == "Consent")
+            .cloned()
+            .unwrap_or_else(|| panic!("expected a Consent finding | received: {body}"));
+        (output.status.code(), consent)
+    };
+
+    let (code, consent) = doctor(&home);
+    assert!(
+        code == Some(1) && consent["severity"] == "fail",
+        "expected doctor exit 1 with a failing Consent | received: {code:?} {consent}"
+    );
+    let fix = consent["fix"].as_str().unwrap_or_default().to_owned();
+    assert!(
+        fix.contains("--profile <full|readonly|none>"),
+        "expected a fix that names --profile (setup cannot prompt) | received: {fix:?}"
+    );
+    let fix = fix.replace("<full|readonly|none>", "readonly");
+    let mut words = fix.split_whitespace();
+    assert!(
+        words.next() == Some("mangostudio-runtime"),
+        "expected the fix to start with the binary name | received: {fix:?}"
+    );
+    let applied = Command::new(binary_path())
+        .args(words)
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(
+        applied.status.success(),
+        "expected the printed fix {fix:?} to succeed | received: {:?} {}",
+        applied.status.code(),
+        String::from_utf8_lossy(&applied.stderr)
+    );
+
+    let (code, consent) = doctor(&home);
+    assert!(
+        code == Some(0) && consent["severity"] == "ok",
+        "expected doctor exit 0 with an ok Consent after the fix | received: {code:?} {consent}"
+    );
+}

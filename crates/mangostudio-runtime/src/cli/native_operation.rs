@@ -277,7 +277,9 @@ fn read_audit_error(slot: RuntimeSlot, home: &Path) -> Option<String> {
 fn health_findings(report: &Value, audit_error: Option<&str>) -> Vec<Value> {
     let mut findings = Vec::new();
     let slot = report["slot"].as_str().unwrap_or("remote");
-    let setup = format!("mangostudio-runtime setup --slot {slot}");
+    // Names `--profile`: this crate's `setup` never prompts, so a bare
+    // `setup --slot <slot>` only answers "Nothing to answer with".
+    let setup = crate::consent::invocation::setup_command(slot.parse().ok());
     if let Some(error) = report["lastError"].as_str() {
         findings.push(json!({"severity":"fail","title":"Config","detail":error,"fix":setup}));
     }
