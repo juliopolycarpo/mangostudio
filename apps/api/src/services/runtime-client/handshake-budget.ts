@@ -6,7 +6,12 @@
  * budget — an image pull, a release download and a WSL install each run under
  * their own timeout and finish before this clock starts — and it is not a
  * liveness budget: once the session is up, the protocol's ping/pong decides
- * whether the peer is still there.
+ * whether the peer is still there. The clock starts once the launcher has
+ * returned a process, so what a Windows spawn pays for a never-seen binary
+ * (~1.8s measured, inside the synchronous spawn call) is not in it either.
+ * It stays a wall clock because the runtime shows no sign of life before its
+ * `hello` — no frame, no stderr — to key a shorter one off; the measurements
+ * are under "Runtime startup budgets" in `docs/reference/tooling.md`.
  *
  * The local default was measured on Linux and macOS, where a process spawn and
  * a first request are both cheap. A Windows hub pays for neither: process spawn

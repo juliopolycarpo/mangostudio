@@ -314,3 +314,64 @@ tracks it as [oven-sh/bun#33212](https://github.com/oven-sh/bun/issues/33212),
 with an unmerged PR at
 [#33213](https://github.com/oven-sh/bun/pull/33213) — check whether that landed
 before re-probing the option parser.
+
+## Runtime startup budgets
+
+The hub keeps three clocks on a runtime and they are not interchangeable. **Provisioning** —
+an image pull, a release download, a WSL install — runs under its own timeouts and finishes
+before a child is started. The **handshake** budget bounds one thing: from the launcher
+returning a process (or a socket dial starting) to the runtime's `hello`. **Liveness** after
+that is the protocol's ping/pong. The handshake numbers live in
+`apps/api/src/services/runtime-client/handshake-budget.ts`:
+
+| Transport             | Linux / macOS hub | Windows hub | Why                                                              |
+| --------------------- | ----------------: | ----------: | ---------------------------------------------------------------- |
+| Local, `stdio`, `wsl` |                5s |         30s | A spawn on this machine; Windows cold starts measured up to ~10s |
+| `ssh`, `container`    |               20s |         30s | A wrapper spawn plus a key exchange or a container start         |
+| `http`                |               15s |         30s | A WebSocket dial plus `hello`; one number bounds both            |
+
+A remote budget is its flat number floored at the local one, so no transport that does more
+than a local spawn gets less time than one. A WSL first provision executes the new binary with
+`--version` before it returns, so that first run is paid under provisioning, not here. A
+connect released while its child is still handshaking terminates the child at once.
+
+### What a start costs
+
+`scripts/bench/runtime-handshake.ts` spawns the runtime over stdio the way the hub does and
+times each phase. 30 runs each, fresh `MANGO_HOME` per run, one machine (Intel Xeon
+E5-2699 v3, 2.30 GHz; Windows 11 Pro 26200 with 36 logical CPUs and 64 GiB, and its WSL2
+Linux 6.18 guest with 28 CPUs and 27 GiB), Bun 1.4.2, 2026-09-25. Linux ran this branch's
+cargo builds; Windows ran the CI `windows-x64` release artifact of the same base
+(`0.1.1-pr.1077.g4be9c25`, 38.4 MiB). Milliseconds, as min / median / p95 / max:
+
+| Build, cache                        | spawn                     | spawn → `hello`        | start → first request     |
+| ----------------------------------- | ------------------------- | ---------------------- | ------------------------- |
+| Linux release, same file            | 0.9 / 1.3 / 2.9 / 19      | 264 / 330 / 368 / 372  | 413 / 485 / 555 / 564     |
+| Linux release, fresh copy per run   | 0.9 / 1.2 / 2.4 / 18      | 218 / 265 / 439 / 681  | 323 / 389 / 606 / 803     |
+| Linux debug (481 MiB), same file    | 0.8 / 1.2 / 4.4 / 18      | 439 / 492 / 857 / 1122 | 549 / 602 / 1076 / 1232   |
+| Windows release, same file          | 6.2 / 6.8 / 12 / 31       | 305 / 323 / 473 / 482  | 325 / 346 / 501 / 509     |
+| Windows release, fresh copy per run | 1712 / 1774 / 1956 / 2104 | 311 / 347 / 416 / 425  | 2041 / 2135 / 2397 / 2494 |
+
+"Fresh copy" runs a byte-identical copy at a new path each time, the closest a script gets to
+the first execution of a just-installed binary; neither mode empties the OS page cache. What
+it shows:
+
+- **On Windows the first-execution cost lands in the spawn, not the handshake.** Starting a
+  never-seen file costs ~1.8s inside the launcher's synchronous spawn call (the antivirus and
+  loader's first look). The hub's handshake clock starts after that call returns, so what the
+  budget bounds stayed at ~0.35s. The CI smoke's `elapsedMs` (6288ms on `windows-x64`)
+  includes the spawn; the hub's budget does not.
+- **`hello` is most of a start.** The runtime builds its capability manifest — shells, Git,
+  `gh`, feature flags — before it greets, and that is ~0.3s on both systems here.
+- **The child says nothing before it answers.** No run wrote a stderr byte before its first
+  response, and the wire has no frame ahead of `hello`. That is why the budget stays a wall
+  clock: a liveness-keyed budget (#1055) needs a pre-`hello` progress signal from the runtime,
+  which is a protocol change, not a hub change.
+
+Re-measure on the machine in question before changing a number here, and record the result
+the same way:
+
+```bash
+bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --runs 30
+bun run scripts/bench/runtime-handshake.ts <binary> --runs 30 --fresh-copy --build release-ci
+```
