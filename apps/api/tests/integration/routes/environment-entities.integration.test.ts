@@ -331,14 +331,16 @@ async function serveProvisionedRustRuntime(environmentId: string): Promise<Provi
 
   const token = `${environmentId}-token`;
   const port = reserveEphemeralPort();
-  rustChildren.push(
-    Bun.spawn({
-      cmd: [installed, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
-      env: { ...env, MANGOSTUDIO_RUNTIME_SERVE_TOKEN: token },
-      stdout: 'ignore',
-      stderr: 'pipe',
-    })
-  );
+  const serve = Bun.spawn({
+    cmd: [installed, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
+    env: { ...env, MANGOSTUDIO_RUNTIME_SERVE_TOKEN: token },
+    stdout: 'ignore',
+    stderr: 'pipe',
+  });
+  // Drained for the child's whole life, so a chatty runtime can never fill
+  // the pipe and stall while a test is waiting on it.
+  void new Response(serve.stderr).text();
+  rustChildren.push(serve);
   const store = new InMemorySecretStore();
   setRuntimeTokenStoreForTests(store);
   await persistRuntimeToken(TEST_USER.id, environmentId, token, store);
