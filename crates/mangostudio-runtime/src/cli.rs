@@ -122,7 +122,7 @@ enum ServiceMode {
     Serve,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl ServiceMode {
     fn as_str(self) -> &'static str {
         match self {
