@@ -252,6 +252,19 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(msrvBlock).toContain('cargo test -p mangostudio --all-targets --locked');
   });
 
+  test('the musl clippy lane fails on musl-only warnings for both shipped musl targets', () => {
+    const muslBlock = extractJobBlock(workflow, 'musl-clippy');
+
+    expect(parseNeedsList(muslBlock)).toEqual(['changes']);
+    expect(muslBlock).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(muslBlock).toContain('uses: ./.github/actions/setup-zigbuild');
+    for (const triple of ['x86_64-unknown-linux-musl', 'aarch64-unknown-linux-musl']) {
+      expect(muslBlock).toContain(
+        `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target ${triple} -- -D warnings`
+      );
+    }
+  });
+
   test('the fixture freshness lane regenerates and diffs both rust-home and ts-home', () => {
     const freshnessBlock = extractJobBlock(workflow, 'runtime-home-fixture-freshness');
 
@@ -281,7 +294,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness real-binary-qualification' || '' }}`
+      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness real-binary-qualification' || '' }}`
     );
   });
 
@@ -355,8 +368,13 @@ describe('release-dry-run.yml always-reporting gate', () => {
     const linuxBlock = extractJobBlock(workflow, 'dry-run-linux');
     const windowsBlock = extractJobBlock(workflow, 'dry-run-windows');
     const cargoBlock = extractJobBlock(workflow, 'dry-run-cargo');
+    const runtimeBlock = extractJobBlock(workflow, 'runtime');
 
-    expect(parseNeedsList(linuxBlock)).toEqual(['changes']);
+    // The cargo runtimes both dry-run archives ship come from the runtime lane,
+    // which is relevant exactly when the Linux lane is.
+    expect(parseNeedsList(runtimeBlock)).toEqual(['changes']);
+    expect(runtimeBlock).toContain("if: needs.changes.outputs.release == 'true'");
+    expect(parseNeedsList(linuxBlock)).toEqual(['changes', 'runtime']);
     expect(linuxBlock).toContain("if: needs.changes.outputs.release == 'true'");
     // Also needs `changes` directly (not just transitively through
     // dry-run-linux) so its own `if:` can read `needs.changes.outputs`.
@@ -377,7 +395,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', needs.changes.outputs.release == 'false' && 'runtime' || '') }}`
     );
   });
 });

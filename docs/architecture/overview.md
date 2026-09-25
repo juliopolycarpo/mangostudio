@@ -299,4 +299,4 @@ Columns use `camelCase`, tables use `snake_case`. Kysely type aliases: `<Entity>
 
 ## Standalone Build
 
-`bun run build --binary` compiles the API into platform-specific binaries via `bun build --compile`. Frontend assets are embedded as sidecar files. Supports 8 platforms (linux/windows/darwin × x64/arm64 + glibc/musl). Database defaults to `~/.mango/database.sqlite`.
+`bun run build --binary` compiles the API into platform-specific binaries via `bun build --compile`, with the frontend embedded, and stages the cargo-built `mangostudio-runtime` beside each. Distribution builds all 8 platforms (linux/windows/darwin × x64/arm64 + glibc/musl) from per-target runtimes (`--runtime-dir`); a local build covers the host's own platform (`--platform <host>`) — see [releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built). Database defaults to `~/.mango/database.sqlite`.

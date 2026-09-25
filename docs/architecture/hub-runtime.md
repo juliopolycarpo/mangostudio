@@ -549,8 +549,8 @@ one that is absent.
 
 ## Stdio Transport
 
-`mangostudio-runtime` is a second binary built from `apps/runtime/src/cli.ts` and shipped in
-every distribution channel beside the hub binary. `mangostudio-runtime --stdio` serves the
+`mangostudio-runtime` is a second binary, the cargo build of `crates/mangostudio-runtime`,
+shipped in every distribution channel beside the hub binary. `mangostudio-runtime --stdio` serves the
 protocol over the child's own pipes, one NDJSON frame per line
 ([stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md)).
 
@@ -759,12 +759,12 @@ logged.
 A hub running from a source checkout reports version `dev`, which names no release — there
 is no `vdev` tag and there never will be — so it installs the Linux runtime the checkout
 built for itself, at `.mango/out/<platform>/mangostudio-runtime`, piped in whole with no
-checksum to check it against. Build it with
-`bun build apps/runtime/src/cli.ts --compile --target=bun-linux-x64 --outfile
-.mango/out/linux-x64/mangostudio-runtime`. The absent `--define process.env.VERSION` is the
-point: the runtime then reports `dev` like the hub beside it, which is what the handshake
-insists on. `bun run build:binary` stamps the package version instead, and a runtime built
-that way is refused with a message saying so.
+checksum to check it against. Build it on a Linux x64 host with
+`MANGOSTUDIO_RELEASE_VERSION=dev cargo build --release --locked -p mangostudio-runtime` and copy
+`target/release/mangostudio-runtime` to `.mango/out/linux-x64/mangostudio-runtime`. The `dev`
+stamp is the point: the runtime then reports `dev`
+like the hub beside it, which is what the handshake insists on. `bun run build:binary` stamps
+the package version instead, and a runtime built that way is refused with a message saying so.
 
 A stopped distribution boots when the runtime starts, so the first connection to one is
 slow — the Add Environment copy says so. Distributions on musl (Alpine) get the musl build:

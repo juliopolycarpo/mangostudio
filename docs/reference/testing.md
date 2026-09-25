@@ -748,8 +748,8 @@ bun test tests/integration/services/connect-container-runtime.integration.test.t
 ```
 
 A compiled Linux runtime binary matching the image's libc is the part a checkout does not
-have. Build one with `bun build apps/runtime/src/cli.ts --compile --target=bun-linux-x64`
-(or `bun-linux-x64-musl`), and use an image that satisfies the three requirements in
+have. Build one with `bun run build:runtime --platform linux-x64 --zig` (or `linux-x64-musl`;
+the binary lands in `.mango/runtime/<platform>/`), and use an image that satisfies the three requirements in
 [hub-runtime.md](../architecture/hub-runtime.md#what-an-image-has-to-provide) — for musl that
 means `alpine:3` plus `apk add --no-cache bash libstdc++`. `MANGO_CONTAINER_E2E_ENGINE=podman`
 runs the same suite against podman.

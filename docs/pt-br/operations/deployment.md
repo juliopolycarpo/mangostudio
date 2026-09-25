@@ -43,10 +43,16 @@ estão documentados em
 ## Build De Produção
 
 ```bash
-bun run build --binary
+bun run build --binary --platform linux-x64                  # a plataforma desta máquina
+bun run build --binary --runtime-dir .mango/runtime-prebuilt # as 8, com runtimes pré-construídos
 ```
 
-Isso compila a API em binários sob `.mango/out/<platform>/` com o frontend embarcado no executável.
+Isso compila o hub (com o frontend embarcado) em `.mango/out/<platform>/mangostudio` e coloca o
+`mangostudio-runtime` construído com cargo ao lado. Sem `--runtime-dir`, só a plataforma do
+próprio host pode ser construída, porque só o runtime dela é compilado localmente com
+`cargo build`. Qualquer outra plataforma precisa de um runtime pré-construído em
+`<dir>/<platform>/mangostudio-runtime[.exe]` (`bun run build:runtime` ou o artefato do CI); veja
+[releasing.md](../reference/releasing.md#como-o-binário-do-runtime-é-construído).
 
 ## Alvos De Plataforma
 

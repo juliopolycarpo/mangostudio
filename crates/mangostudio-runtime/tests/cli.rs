@@ -12,6 +12,12 @@ fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_mangostudio-runtime")
 }
 
+/// The release the binary reports: the compile-time stamp when the build set
+/// one, the manifest version otherwise — the same expression as `src/cli.rs`.
+fn expected_version() -> &'static str {
+    option_env!("MANGOSTUDIO_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
 #[test]
 fn version_flag_prints_the_crate_version_and_exits_zero() {
     let output = Command::new(binary_path())
@@ -20,10 +26,7 @@ fn version_flag_prints_the_crate_version_and_exits_zero() {
         .expect("the binary runs");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
-    assert_eq!(
-        stdout.trim(),
-        format!("mangostudio-runtime {}", env!("CARGO_PKG_VERSION"))
-    );
+    assert_eq!(stdout.trim(), expected_version());
 }
 
 #[test]
@@ -106,7 +109,7 @@ fn doctor_reports_a_stale_slot_pointer_and_reinstall_recovers_without_reconfigur
     assert!(reinstall.status.success());
     assert_eq!(
         std::fs::read_link(&current).unwrap(),
-        std::path::Path::new(env!("CARGO_PKG_VERSION"))
+        std::path::Path::new(expected_version())
     );
     let mut after: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();

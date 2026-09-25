@@ -55,6 +55,13 @@ interface WorkflowRunStep {
   readonly env: ReadonlySet<string>;
 }
 
+function parseNeeds(block: string): string[] {
+  return (/\n {4}needs: \[([^\]]*)\]/.exec(block)?.[1] ?? '')
+    .split(',')
+    .map((need) => need.trim())
+    .filter(Boolean);
+}
+
 function expectJobNeeds(workflow: string, job: string, needs: string): void {
   const block = extractJobBlock(workflow, job);
   expect(block, `job "${job}" not found in workflow`).not.toBe('');
@@ -384,6 +391,29 @@ describe('release workflow binary gate', () => {
     );
   });
 
+  test('the packaging job stages cargo runtimes built per target, never Bun-compiled ones', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+    const build = extractJobBlock(workflow, 'build');
+    const runtime = readText('.github/workflows/runtime-build.yml');
+
+    expect(extractJobBlock(workflow, 'runtime')).toContain(
+      'uses: ./.github/workflows/runtime-build.yml'
+    );
+    expect(build).toMatch(/\n {4}needs: \[runtime\]\n/);
+    expect(build).toContain('pattern: runtime-$' + '{{ inputs.source_sha }}-*');
+    expect(build).toContain('bun run build --binary --runtime-dir .mango/runtime-prebuilt');
+
+    // Every release target is in the default matrix, each leg builds exactly
+    // one, and zig is fetched only against a pinned checksum.
+    for (const target of ALL_BINARY_TARGETS) expect(runtime).toContain(`"${target.arch}"`);
+    expect(runtime).toContain('bun --no-install ./scripts/build-runtime.ts --platform "$PLATFORM"');
+    expect(runtime).toContain('uses: ./.github/actions/setup-zigbuild');
+    const zigbuild = readText('.github/actions/setup-zigbuild/action.yml');
+    expect(zigbuild).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
+    expect(zigbuild).toContain('sha256sum --check --strict');
+    expect(zigbuild).toContain('tool: cargo-zigbuild@0.23.4');
+  });
+
   test('archive upload payloads skip artifact re-compression', () => {
     const uploads = workflowFiles().flatMap((path) =>
       uploadArtifactSteps(readText(path)).map((step) => ({
@@ -450,6 +480,29 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('name: Build Docker binary (manual fallback)');
     expect(workflow).toMatch(
       /name: Build Docker binary \(manual fallback\)\n\s+if: \$\{\{ inputs\.rebuild \}\}/
+    );
+  });
+
+  test('the manual rebuild stages release-built cargo runtimes into every leg, never skipping one', () => {
+    const workflow = readText('.github/workflows/smoke-binary.yml');
+    const runtime = extractJobBlock(workflow, 'runtime');
+    const gate =
+      'if: $' +
+      "{{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}";
+
+    expect(runtime).toContain('uses: ./.github/workflows/runtime-build.yml');
+    expect(runtime).toContain('if: $' + '{{ inputs.rebuild }}');
+    for (const job of ['binary', 'docker']) {
+      const block = extractJobBlock(workflow, job);
+      expect(parseNeeds(block), job).toEqual(['runtime']);
+      // A failed runtime build fails the legs' dependency instead of letting
+      // them run without a runtime; a skipped one is only fine off the rebuild path.
+      expect(block, job).toContain(gate);
+      expect(block, job).toContain('name: smoke-rebuild-runtime-$' + '{{ matrix.');
+    }
+    expect(extractJobBlock(workflow, 'binary')).toContain('RUNTIME_DIR: .mango/runtime-prebuilt');
+    expect(extractJobBlock(workflow, 'docker')).toContain(
+      'bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt'
     );
   });
 
@@ -607,6 +660,13 @@ describe('release workflow binary gate', () => {
     expect('Cargo.toml').toMatch(pattern);
     expect('Cargo.lock').toMatch(pattern);
     expect('Dockerfile').toMatch(pattern);
+    // The runtime that ships beside the hub is the cargo crate, built by its own workflow.
+    expect('crates/mangostudio-runtime/src/cli.rs').toMatch(pattern);
+    expect('.github/workflows/runtime-build.yml').toMatch(pattern);
+    expect('scripts/build-runtime.ts').toMatch(pattern);
+    expect('rust-toolchain.toml').toMatch(pattern);
+    expect('.cargo/config.toml').toMatch(pattern);
+    expect('.github/actions/setup-zigbuild/action.yml').toMatch(pattern);
 
     // …while unrelated app code does not.
     expect('apps/api/src/app.ts').not.toMatch(pattern);

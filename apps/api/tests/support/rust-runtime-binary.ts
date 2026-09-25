@@ -89,7 +89,8 @@ export async function rustRuntimeVersion(binaryPath: string): Promise<string> {
   const proc = Bun.spawn([binaryPath, '--version'], { stdout: 'pipe', stderr: 'pipe' });
   const stdout = await new Response(proc.stdout).text();
   await proc.exited;
-  const match = /^mangostudio-runtime (\S+)/.exec(stdout.trim());
+  // Bare `<version>`, the same line the TypeScript runtime prints.
+  const match = /^(\S+)$/.exec(stdout.trim());
   if (!match) {
     throw new Error(`Could not parse a version from "${binaryPath} --version": ${stdout}`);
   }

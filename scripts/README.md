@@ -10,6 +10,7 @@ script (`bun run <name>`).
 scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
+├── build-runtime.ts  Build the cargo mangostudio-runtime per release target (bun run build:runtime)
 ├── check.ts          Biome + dprint + madge + tsc + workflow static analysis, in parallel (bun run check)
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
@@ -36,22 +37,51 @@ scripts/
 `lib/runner.ts` is a barrel re-exporting focused, single-concern modules — prefer
 importing the specific module in new code:
 
-| Module                 | Concern                                                                                                |
-| ---------------------- | ------------------------------------------------------------------------------------------------------ |
-| `log.ts`               | Leveled console output + ANSI colors                                                                   |
-| `args.ts`              | CLI argument + workspace-selection parsing                                                             |
-| `git.ts`               | Change detection (`Bun.spawnSync`), workspace mapping                                                  |
-| `exec.ts`              | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`   |
-| `summary.ts`           | Pass/fail reporting + exit handling                                                                    |
-| `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                         |
-| `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                         |
-| `config.ts`            | Workspace definitions + root lint/format path lists                                                    |
-| `changelog.ts`         | git-cliff arg/format logic (wrapped behind a project API)                                              |
-| `npm-pack.ts`          | npm distribution manifest builders                                                                     |
-| `release-version.ts`   | Canonical release version resolver + lockstep consistency check                                        |
-| `prepare-release.ts`   | Two-phase lockstep version bump for release preparation                                                |
-| `bun-cross-runtime.ts` | Per-target Bun runtime for `--compile` when `.bun-version` names a channel (dormant on a released pin) |
-| `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                            |
+| Module                 | Concern                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `log.ts`               | Leveled console output + ANSI colors                                                                     |
+| `args.ts`              | CLI argument + workspace-selection parsing                                                               |
+| `git.ts`               | Change detection (`Bun.spawnSync`), workspace mapping                                                    |
+| `exec.ts`              | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
+| `summary.ts`           | Pass/fail reporting + exit handling                                                                      |
+| `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                           |
+| `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
+| `config.ts`            | Workspace definitions + root lint/format path lists                                                      |
+| `changelog.ts`         | git-cliff arg/format logic (wrapped behind a project API)                                                |
+| `npm-pack.ts`          | npm distribution manifest builders                                                                       |
+| `release-version.ts`   | Canonical release version resolver + lockstep consistency check                                          |
+| `prepare-release.ts`   | Two-phase lockstep version bump for release preparation                                                  |
+| `bun-cross-runtime.ts` | Per-target Bun runtime for `--compile` when `.bun-version` names a channel (dormant on a released pin)   |
+| `runtime-build.ts`     | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
+| `executable-header.ts` | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
+| `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
+
+## The runtime binary: cargo, not Bun
+
+`bun run build --binary` compiles only the hub with Bun. The
+`mangostudio-runtime[.exe]` beside it is the cargo binary from
+`crates/mangostudio-runtime`, and comes from one of two places:
+
+- `--runtime-dir <dir>` (or `RUNTIME_DIR`): a directory laid out as
+  `<dir>/<platform-id>/mangostudio-runtime[.exe]`, authoritative for every
+  requested target. CI fills it from `.github/workflows/runtime-build.yml`.
+- Otherwise, the host's own target only, via
+  `cargo build --release --locked -p mangostudio-runtime --target <triple>`.
+
+Any other target without a prebuilt file fails before anything compiles,
+naming the file it expected. `bun run build:runtime` produces that layout:
+
+```bash
+bun run build:runtime --platform linux-arm64,linux-x64-musl --zig --out .mango/runtime-prebuilt
+bun run build --binary --platform linux-arm64 --runtime-dir .mango/runtime-prebuilt
+```
+
+`--zig` links Linux targets through cargo-zigbuild (zig and cargo-zigbuild on
+`PATH`): gnu at the `GLIBC_2.17` floor, musl static. `--rustup` installs each
+target's standard library first. Both paths stamp the release version in at
+compile time (`MANGOSTUDIO_RELEASE_VERSION`) and check each binary's header —
+and its `--version`, when this machine can run it — before it is staged.
+`docs/reference/releasing.md` records the per-target toolchains and the floor.
 
 ## actions-lint/ — workflow static analysis
 
