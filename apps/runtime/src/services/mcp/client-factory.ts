@@ -301,8 +301,10 @@ function toConnectionError(config: RuntimeMcpServerConfig, error: unknown): McpC
 }
 
 /**
- * Wraps a connected SDK client in the project-owned handle. Exported so
- * wrapper-contract tests can drive it over the SDK's in-memory transport.
+ * Wraps a connected SDK client in the project-owned handle. `connectMcpClient`
+ * is its caller here; the package barrel still exports it, though no hub test
+ * imports it any more (the api wrapper-contract suite drives the same contract
+ * through a runtime's `mcp.*` methods).
  */
 export function wrapMcpClient(
   client: Client,
