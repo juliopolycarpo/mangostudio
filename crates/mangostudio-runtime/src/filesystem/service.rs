@@ -30,6 +30,9 @@ use crate::registry::Registry;
 
 pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
 pub(super) const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
+/// Most `fs.edit-file` matches counted for an ambiguity report; past it the
+/// report says "more than" instead of scanning the rest of the file.
+pub(super) const EDIT_OCCURRENCE_COUNT_LIMIT: usize = 1_000;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -337,7 +340,12 @@ impl Service {
                 &[&params.resolved_path],
                 &cancel,
             )?;
-            let exists = io::path_is_file(&policy, &params.resolved_path)?;
+            let exists = io::path_is_file(&policy, &params.resolved_path).map_err(|error| {
+                if exclusive {
+                    return blocked_create_parent(&params, error);
+                }
+                error
+            })?;
             let observed = if exists && !exclusive {
                 Some(
                     self.read_fresh(
@@ -389,6 +397,9 @@ impl Service {
                             details.get("alreadyExists").and_then(Value::as_bool) == Some(true)
                         }) {
                             return occupied_path(&policy, &params, exclusive);
+                        }
+                        if exclusive {
+                            return blocked_create_parent(&params, error);
                         }
                         error
                     },
@@ -478,13 +489,9 @@ impl Service {
                 .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
             let replace_all = params.replace_all.unwrap_or(false);
-            let count = text::count_matches_up_to(
-                &observed.bytes,
-                params.old_string.as_bytes(),
-                if replace_all { usize::MAX } else { 2 },
-            );
+            let count = edit_match_count(&observed.bytes, params.old_string.as_bytes(), replace_all);
             if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
-            if count > 1 && !replace_all { return Err(argument(format!("Found at least {count} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."))); }
+            if count > 1 && !replace_all { return Err(ambiguous_edit_error(count)); }
             let replacement_count = if replace_all { count } else { 1 };
             let projected_bytes = if params.new_string.len() >= params.old_string.len() {
                 params.new_string.len().checked_sub(params.old_string.len())
@@ -546,9 +553,7 @@ impl Service {
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
             lock(&self.state.ledger).assert_line_numbers(&params.mutation.chat_id, &params.resolved_path, params.end_line as u64)?;
             let total = text::total_lines(&observed.bytes);
-            let start = positive_integer(params.start_line, "startLine")?;
-            let end = positive_integer(params.end_line, "endLine")?;
-            if start > end || end > total { return Err(argument(format!("Invalid line range {start}-{end} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",params.input_path))); }
+            let (start, end) = validated_range(&params, total)?;
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let written = ContentDigest::of(&updated);
@@ -812,6 +817,9 @@ fn entry_json(name: &std::ffi::OsStr, is_dir: bool) -> Value {
 
 fn occupied_path(policy: &CompiledPolicy, params: &WriteParams, create: bool) -> RemoteError {
     if !create {
+        if let Some(refusal) = io::symlink_write_refusal(policy, &params.resolved_path) {
+            return refusal;
+        }
         if io::assert_regular(policy, &params.resolved_path, "write").is_ok() {
             return io::explain_unread(
                 policy,
@@ -826,6 +834,60 @@ fn occupied_path(policy: &CompiledPolicy, params: &WriteParams, create: bool) ->
         ));
     }
     io::create_conflict_error(policy, &params.resolved_path, &params.input_path)
+}
+
+/// Counts `fs.edit-file` matches: every match for `replaceAll`, which
+/// replaces them all anyway, otherwise one past the reporting bound so an
+/// ambiguity report never scans further than it can print.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(edit_match_count(b"x x x", b"x", false), 3);
+/// ```
+fn edit_match_count(source: &[u8], needle: &[u8], replace_all: bool) -> usize {
+    let limit = if replace_all {
+        usize::MAX
+    } else {
+        EDIT_OCCURRENCE_COUNT_LIMIT + 1
+    };
+    text::count_matches_up_to(source, needle, limit)
+}
+
+/// Reports an ambiguous `fs.edit-file` match with the TypeScript runtime's
+/// exact count, or the counting bound once `count` passes it.
+///
+/// # Example
+///
+/// ```ignore
+/// assert!(ambiguous_edit_error(3).message.starts_with("Found 3 occurrences."));
+/// ```
+fn ambiguous_edit_error(count: usize) -> RemoteError {
+    let found = if count > EDIT_OCCURRENCE_COUNT_LIMIT {
+        format!("more than {EDIT_OCCURRENCE_COUNT_LIMIT}")
+    } else {
+        count.to_string()
+    };
+    argument(format!(
+        "Found {found} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."
+    ))
+}
+
+/// Words a create blocked by a non-directory parent as the TypeScript
+/// runtime's `fs.create-file` did; any other error passes through.
+fn blocked_create_parent(params: &WriteParams, error: RemoteError) -> RemoteError {
+    let Some(blocker) = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("notDirectoryParent"))
+        .and_then(Value::as_str)
+    else {
+        return error;
+    };
+    path_error(format!(
+        "Cannot create \"{}\": \"{blocker}\" is not a directory.",
+        params.input_path
+    ))
 }
 
 pub(super) fn argument(message: impl Into<String>) -> RemoteError {
@@ -893,6 +955,38 @@ fn committed_move_error(from: &Path, to: &Path, cause: RemoteError) -> RemoteErr
         cause.message
     ))
     .with_detail("changedPaths", json!([from, to]))
+}
+
+/// Validates an `fs.replace-range` pair against the file's line count with the
+/// TypeScript runtime's single range message, which also covers a zero or
+/// fractional line.
+///
+/// # Example
+///
+/// ```ignore
+/// let (start, end) = validated_range(&params, text::total_lines(&bytes))?;
+/// ```
+fn validated_range(params: &RangeParams, total: usize) -> Result<(usize, usize), RemoteError> {
+    let (start, end) = (params.start_line, params.end_line);
+    let whole = |value: f64| value.fract() == 0.0;
+    if whole(start) && whole(end) && start >= 1.0 && start <= end && end <= total as f64 {
+        return Ok((start as usize, end as usize));
+    }
+    Err(argument(format!(
+        "Invalid line range {}-{} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",
+        js_number(start),
+        js_number(end),
+        params.input_path
+    )))
+}
+
+/// Formats a wire number the way JavaScript prints it in a template literal,
+/// so an echoed argument reads the same as the TypeScript runtime's message.
+fn js_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    value.to_string()
 }
 
 fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
@@ -2444,5 +2538,441 @@ mod tests {
             b"outside\n",
             "expected the link target outside the root untouched"
         );
+    }
+
+    fn move_params(from: &Path, to: &Path, capture_snapshot: bool) -> MoveParams {
+        decode(json!({
+            "chatId":"chat", "captureSnapshot":capture_snapshot,
+            "inputFrom":"source", "inputTo":"destination",
+            "resolvedFrom":from, "resolvedTo":to
+        }))
+    }
+
+    fn error_kind(result: &Result<Value, RemoteError>) -> Option<Value> {
+        result
+            .as_ref()
+            .err()
+            .and_then(|error| error.details.as_ref())
+            .map(|details| details["kind"].clone())
+    }
+
+    /// A move proves the destination holds exactly the bytes the source read
+    /// observed, so the chat may overwrite the destination without re-reading
+    /// it, as the TypeScript runtime's `rekeyFile` allowed.
+    #[tokio::test]
+    async fn a_move_carries_the_source_read_to_the_destination() {
+        for capture_snapshot in [false, true] {
+            let (home, service) = fixture();
+            let source = home.join("source");
+            let destination = home.join("nested").join("destination");
+            seed_and_read(&service, &source, b"observed\n").await;
+
+            Arc::clone(&service)
+                .move_file(
+                    move_params(&source, &destination, capture_snapshot),
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            let written = Arc::clone(&service)
+                .write(
+                    write_params(&destination, "updated\n"),
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+
+            assert!(
+                written
+                    .as_ref()
+                    .is_ok_and(|value| value["result"]["created"] == json!(false)),
+                "expected an overwrite of the moved destination without a re-read \
+                 (captureSnapshot {capture_snapshot}) | received: {written:?}"
+            );
+            assert_eq!(std::fs::read(&destination).unwrap(), b"updated\n");
+            let source_write = Arc::clone(&service)
+                .write(
+                    write_params(&source, "recreated\n"),
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            assert!(
+                source_write.is_ok(),
+                "expected the vacated source to be a fresh create | received: {source_write:?}"
+            );
+        }
+    }
+
+    /// Carrying freshness never invents it: an unread source leaves the
+    /// destination unread, and a partial source read stays partial.
+    #[tokio::test]
+    async fn a_move_never_marks_unread_content_fresh() {
+        let (home, service) = fixture();
+        let unread = home.join("unread");
+        let unread_to = home.join("unread-moved");
+        std::fs::write(&unread, b"never read\n").unwrap();
+        Arc::clone(&service)
+            .move_file(
+                move_params(&unread, &unread_to, false),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let refused = Arc::clone(&service)
+            .write(
+                write_params(&unread_to, "oops\n"),
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        assert_eq!(
+            error_kind(&refused),
+            Some(json!("file_not_read")),
+            "expected an unread moved file to stay unread | received: {refused:?}"
+        );
+
+        let partial = home.join("partial");
+        let partial_to = home.join("partial-moved");
+        std::fs::write(&partial, b"one\ntwo\n").unwrap();
+        let mut params = read_params(&partial);
+        params.max_lines = Some(1.0);
+        Arc::clone(&service)
+            .read(
+                params,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        Arc::clone(&service)
+            .move_file(
+                move_params(&partial, &partial_to, false),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let refused = Arc::clone(&service)
+            .write(
+                write_params(&partial_to, "oops\n"),
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        assert_eq!(
+            error_kind(&refused),
+            Some(json!("partial_read")),
+            "expected a partially read moved file to stay partial | received: {refused:?}"
+        );
+        assert_eq!(std::fs::read(&unread_to).unwrap(), b"never read\n");
+        assert_eq!(std::fs::read(&partial_to).unwrap(), b"one\ntwo\n");
+    }
+
+    fn edit_params(path: &Path, old: &str, new: &str) -> EditParams {
+        decode(json!({
+            "chatId":"chat", "captureSnapshot":false, "inputPath":"file",
+            "resolvedPath":path, "oldString":old, "newString":new
+        }))
+    }
+
+    /// The TypeScript runtime reported the exact match count, so the model
+    /// knows how much context a unique match needs.
+    #[tokio::test]
+    async fn an_ambiguous_edit_reports_the_exact_occurrence_count() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"x\nx\nx\n").await;
+        let error = Arc::clone(&service)
+            .edit(
+                edit_params(&path, "x", "y"),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Found 3 occurrences. Provide a longer oldString with more surrounding context to \
+             make it unique, or set replaceAll: true."
+        );
+        assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        assert_eq!(std::fs::read(&path).unwrap(), b"x\nx\nx\n");
+    }
+
+    /// Counting stops at the reporting bound, so an enormous match set costs
+    /// a bounded scan and still tells the model its oldString is ambiguous.
+    #[tokio::test]
+    async fn an_ambiguous_edit_past_the_count_bound_reports_the_bound() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        let content = "x".repeat(EDIT_OCCURRENCE_COUNT_LIMIT + 5);
+        seed_and_read(&service, &path, content.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .edit(
+                edit_params(&path, "x", "y"),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            format!(
+                "Found more than {EDIT_OCCURRENCE_COUNT_LIMIT} occurrences. Provide a longer \
+                 oldString with more surrounding context to make it unique, or set replaceAll: true."
+            )
+        );
+    }
+    #[test]
+    fn edit_match_count_stops_one_past_the_bound_unless_replacing_all() {
+        let source = "x".repeat(EDIT_OCCURRENCE_COUNT_LIMIT + 5);
+        assert_eq!(
+            edit_match_count(source.as_bytes(), b"x", false),
+            EDIT_OCCURRENCE_COUNT_LIMIT + 1,
+            "expected an ambiguity count to stop one past the bound"
+        );
+        assert_eq!(
+            edit_match_count(source.as_bytes(), b"x", true),
+            EDIT_OCCURRENCE_COUNT_LIMIT + 5,
+            "expected replaceAll to count every match it replaces"
+        );
+        assert_eq!(edit_match_count(b"x\nx\nx\n", b"x", false), 3);
+    }
+
+    /// The TypeScript runtime rejected every out-of-range pair, including a
+    /// zero or fractional start, with one range message naming the file's size.
+    #[tokio::test]
+    async fn replace_range_reports_every_invalid_range_like_typescript() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"one\ntwo\nthree").await;
+        for (start, end, shown) in [
+            (json!(0), json!(1), "0-1"),
+            (json!(2), json!(1), "2-1"),
+            (json!(1), json!(4), "1-4"),
+            (json!(1.5), json!(2), "1.5-2"),
+        ] {
+            let error = Arc::clone(&service)
+                .replace_range(
+                    decode(json!({
+                        "chatId":"chat", "captureSnapshot":false, "inputPath":"file",
+                        "resolvedPath":path, "startLine":start, "endLine":end, "content":"x"
+                    })),
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.message,
+                format!(
+                    "Invalid line range {shown} for \"file\" (3 lines). Expected 1 <= startLine \
+                     <= endLine <= 3."
+                )
+            );
+            assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"one\ntwo\nthree");
+    }
+
+    fn create_params(path: &Path, policy: Option<&Value>) -> WriteParams {
+        let mut params = json!({
+            "chatId":"chat", "captureSnapshot":false, "inputPath":"child.txt",
+            "resolvedPath":path, "content":"nope"
+        });
+        if let Some(policy) = policy {
+            params["pathPolicy"] = policy.clone();
+        }
+        decode(params)
+    }
+
+    /// A regular file where a parent directory belongs is named as the
+    /// blocker, as TypeScript did for a direct parent, instead of surfacing a
+    /// raw OS error; a deeper path names the same blocking file.
+    #[tokio::test]
+    async fn create_under_a_regular_file_parent_names_the_blocker() {
+        let (home, service) = fixture();
+        let parent = home.join("not-a-directory");
+        std::fs::write(&parent, b"x").unwrap();
+        let unrestricted = json!(null);
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for (policy, path) in [
+            (&unrestricted, parent.join("child.txt")),
+            (&restricted, parent.join("child.txt")),
+            (&unrestricted, parent.join("deeper").join("child.txt")),
+            (&restricted, parent.join("deeper").join("child.txt")),
+        ] {
+            let result = Arc::clone(&service)
+                .write(
+                    create_params(&path, policy.is_object().then_some(policy)),
+                    true,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot create \"child.txt\": \"{}\" is not a directory.",
+                parent.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+        }
+        assert_eq!(std::fs::read(&parent).unwrap(), b"x");
+    }
+
+    /// TypeScript refused to write through any symbolic link, even one whose
+    /// target stays inside the root, naming the link's target.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_refuses_an_in_root_symlink_and_names_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let target = home.join("target.txt");
+        let link = home.join("link.txt");
+        std::fs::write(&target, b"original").unwrap();
+        symlink(&target, &link).unwrap();
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for policy in [None, Some(&restricted)] {
+            let mut read = read_params(&link);
+            read.path_policy = policy.map(|value| decode(value.clone()));
+            Arc::clone(&service)
+                .read(read, ResponseBudget::unbounded(), CancellationToken::new())
+                .await
+                .unwrap();
+            let mut params = write_params(&link, "via link");
+            params.mutation.path_policy = policy.map(|value| decode(value.clone()));
+            let result = Arc::clone(&service)
+                .write(
+                    params,
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot write \"{}\": it is a symbolic link to \"{}\". Write to the link target instead.",
+                link.display(),
+                target.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy:?} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+            assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+            assert_eq!(std::fs::read(&target).unwrap(), b"original");
+        }
+    }
+
+    /// A link out of the containment root is refused by containment before
+    /// the symlink rule is reached, with the TypeScript policy message.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_refuses_an_escaping_symlink_as_outside_the_policy() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let workspace = home.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let secret = home.join("secret.txt");
+        std::fs::write(&secret, b"outside").unwrap();
+        let link = workspace.join("link.txt");
+        symlink(&secret, &link).unwrap();
+        lock(&service.state.ledger).record_read(
+            "chat",
+            &link,
+            b"outside",
+            f64::NAN,
+            ReadObservation::WholeFile,
+        );
+        let mut params = write_params(&link, "pwned");
+        params.mutation.path_policy = Some(decode(
+            json!({"allowedRoots":[],"deniedRoots":[],"containmentRoot":workspace}),
+        ));
+        let result = Arc::clone(&service)
+            .write(
+                params,
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        let expected = format!(
+            "Path \"{}\" resolves outside the paths this chat may access on this environment.",
+            link.display()
+        );
+        assert_eq!(
+            result
+                .as_ref()
+                .map_err(|error| error.message.as_str())
+                .err(),
+            Some(expected.as_str()),
+            "received: {result:?}"
+        );
+        assert_eq!(error_kind(&result), Some(json!("path_access")));
+        assert_eq!(std::fs::read(&secret).unwrap(), b"outside");
+    }
+
+    /// A read-only destination is reported as not writable, the phrase the
+    /// TypeScript runtime used, rather than as a changed path.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_over_a_read_only_file_reports_it_not_writable() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        if nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let (home, service) = fixture();
+        let path = home.join("readonly.txt");
+        seed_and_read(&service, &path, b"protected").await;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for policy in [None, Some(&restricted)] {
+            let mut params = write_params(&path, "replacement");
+            params.mutation.path_policy = policy.map(|value| decode(value.clone()));
+            let result = Arc::clone(&service)
+                .write(
+                    params,
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot write \"{}\": the file is not writable.",
+                path.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy:?} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"protected");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 }

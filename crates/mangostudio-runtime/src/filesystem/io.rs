@@ -45,6 +45,38 @@ pub(super) fn path_error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "path_access")
 }
 
+/// Refuses a target whose existing `ancestor` is not a directory, carrying
+/// the blocker in `notDirectoryParent` so a caller can name it in its own
+/// words.
+///
+/// # Example
+///
+/// ```ignore
+/// return Err(not_directory_parent_error(target, Path::new("/work/notes.txt")));
+/// ```
+pub(super) fn not_directory_parent_error(target: &Path, ancestor: &Path) -> RemoteError {
+    path_error(format!(
+        "Cannot create \"{}\": parent \"{}\" is not a directory.",
+        target.display(),
+        ancestor.display()
+    ))
+    .with_detail("notDirectoryParent", ancestor.to_string_lossy().as_ref())
+}
+
+/// Maps a failed parent creation for `target`, naming the nearest existing
+/// ancestor when it is not a directory instead of surfacing the raw OS error.
+fn parent_creation_error(target: &Path, parent: &Path, error: std::io::Error) -> RemoteError {
+    let blocker = parent
+        .ancestors()
+        .find_map(|ancestor| fs::metadata(ancestor).ok().map(|found| (ancestor, found)));
+    match blocker {
+        Some((ancestor, metadata)) if !metadata.is_dir() => {
+            not_directory_parent_error(target, ancestor)
+        }
+        _ => io_error(error),
+    }
+}
+
 pub(super) fn io_error(error: std::io::Error) -> RemoteError {
     RemoteError::new(codes::INTERNAL, error.to_string())
 }
@@ -483,6 +515,9 @@ pub(super) fn write_atomic_if_unchanged(
 ) -> Result<f64, RemoteError> {
     let parent = capability::verified_parent(policy, path, false)?;
     parent.with_parent(|dir, leaf| {
+        if let Some(refusal) = symlink_leaf_error(dir, leaf, path) {
+            return Err(refusal);
+        }
         let Some(identity) = matching_destination_identity_in(dir, leaf, expected)? else {
             return Err(destination_changed_error(path));
         };
@@ -544,7 +579,8 @@ pub(super) fn create_new(
         let parent = capability::verified_parent(policy, path, true)?;
         return write_exclusive_bound(&parent, path, bytes, create_error);
     }
-    fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(io_error)?;
+    let parent = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| parent_creation_error(path, parent, error))?;
     write_exclusive(path, bytes).map_err(create_error)
 }
 
@@ -583,10 +619,7 @@ fn inspect_destination(path: &Path) -> Result<Option<fs::Permissions>, RemoteErr
     #[cfg(not(unix))]
     let writable = !metadata.permissions().readonly();
     if !writable {
-        return Err(path_error(format!(
-            "Cannot write \"{}\": the file is not writable.",
-            path.display()
-        )));
+        return Err(not_writable_error(path));
     }
     Ok(Some(metadata.permissions()))
 }
@@ -686,10 +719,7 @@ fn inspect_destination_in(
         Ok(metadata) => metadata,
     };
     if metadata.is_symlink() {
-        return Err(path_error(format!(
-            "Cannot write \"{}\": it is a symbolic link. Write to the link target instead.",
-            path.display()
-        )));
+        return Err(symlink_write_error(dir, leaf, path));
     }
     if !metadata.is_file() {
         return Err(path_error(format!(
@@ -714,12 +744,45 @@ fn inspect_destination_in(
     #[cfg(not(unix))]
     let writable = !metadata.permissions().readonly();
     if !writable {
-        return Err(path_error(format!(
-            "Cannot write \"{}\": the file is not writable.",
-            path.display()
-        )));
+        return Err(not_writable_error(path));
     }
     Ok(Some(metadata.permissions()))
+}
+
+/// Refuses a write whose leaf is a symbolic link, wherever it points, as the
+/// TypeScript runtime did; `None` lets any other leaf continue.
+///
+/// # Example
+///
+/// ```ignore
+/// if let Some(refusal) = symlink_leaf_error(dir, leaf, path) { return Err(refusal); }
+/// ```
+fn symlink_leaf_error(dir: &cap_std::fs::Dir, leaf: &Path, path: &Path) -> Option<RemoteError> {
+    let metadata = dir.symlink_metadata(leaf).ok()?;
+    metadata
+        .is_symlink()
+        .then(|| symlink_write_error(dir, leaf, path))
+}
+
+/// Words a symlink refusal with the link's own target text, when readable.
+fn symlink_write_error(dir: &cap_std::fs::Dir, leaf: &Path, path: &Path) -> RemoteError {
+    let target = dir
+        .read_link_contents(leaf)
+        .ok()
+        .map_or_else(String::new, |target| {
+            format!(" to \"{}\"", target.display())
+        });
+    path_error(format!(
+        "Cannot write \"{}\": it is a symbolic link{target}. Write to the link target instead.",
+        path.display()
+    ))
+}
+
+fn not_writable_error(path: &Path) -> RemoteError {
+    path_error(format!(
+        "Cannot write \"{}\": the file is not writable.",
+        path.display()
+    ))
 }
 
 fn open_write_probe(
@@ -744,6 +807,11 @@ fn open_write_probe(
                     "Cannot write \"{}\": it is a symbolic link. Write to the link target instead.",
                     path.display()
                 ));
+            }
+            // A write open refused for permission is the read-only file the
+            // TypeScript runtime's access(W_OK) probe reported.
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                return not_writable_error(path);
             }
             path_error(format!(
                 "Cannot write \"{}\": the path changed while its writable handle was being verified. Cause: {error}",
@@ -2192,6 +2260,24 @@ pub(super) fn create_conflict_error(
     path_error(format!(
         "\"{input_path}\" already exists. Read it with read_file, then use edit_file for an exact text change, replace_range for a line change, or write_file to replace all content."
     ))
+}
+
+/// Refuses writing over `path` when it is a symbolic link, naming its target
+/// like the TypeScript runtime; `None` when it is not a link.
+///
+/// # Example
+///
+/// ```ignore
+/// if let Some(refusal) = symlink_write_refusal(&policy, path) { return refusal; }
+/// ```
+pub(super) fn symlink_write_refusal(policy: &CompiledPolicy, path: &Path) -> Option<RemoteError> {
+    let target = symlink_target(policy, path)?.map_or_else(String::new, |target| {
+        format!(" to \"{}\"", target.display())
+    });
+    Some(path_error(format!(
+        "Cannot write \"{}\": it is a symbolic link{target}. Write to the link target instead.",
+        path.display()
+    )))
 }
 
 fn symlink_target(policy: &CompiledPolicy, path: &Path) -> Option<Option<PathBuf>> {

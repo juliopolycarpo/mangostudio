@@ -14,7 +14,7 @@ use cap_std::ambient_authority;
 use cap_std::fs::Dir;
 use mango_protocol::error::RemoteError;
 
-use super::io::{io_error, open_read, path_error};
+use super::io::{io_error, not_directory_parent_error, open_read, path_error};
 use super::policy::{CompiledPolicy, absolute};
 use crate::workspace::lexically_normalize;
 
@@ -463,14 +463,15 @@ fn existing_parent_and_missing(
                 missing.reverse();
                 return Ok((ancestor, missing, leaf));
             }
-            Ok(_) => {
-                return Err(path_error(format!(
-                    "Cannot create \"{}\": parent \"{}\" is not a directory.",
-                    target.display(),
-                    ancestor.display()
-                )));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(_) => return Err(not_directory_parent_error(target, &ancestor)),
+            // A missing component under a regular file reads as "not a
+            // directory"; keep climbing so the file itself is the one named.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
                 let component = ancestor.file_name().map(OsString::from).ok_or_else(|| {
                     path_error(format!(
                         "Cannot find an existing parent directory for \"{}\".",
