@@ -1069,4 +1069,83 @@ mod tests {
         cancel.cancel();
         cancel
     }
+
+    /// More directories than the cap come back capped at exactly the cap,
+    /// with `truncated: true` on the wire result.
+    #[tokio::test]
+    async fn browse_over_the_cap_returns_the_cap_and_reports_truncated() {
+        let dir = scratch_root("browse-over-cap");
+        for index in 0..MAX_WORKSPACE_DIRECTORY_ENTRIES + 3 {
+            std::fs::create_dir(dir.join(format!("dir-{index:05}"))).unwrap();
+        }
+
+        let result = build_browse_result(browse_params(&dir), CancellationToken::new())
+            .await
+            .unwrap();
+        let listed = result["entries"].as_array().map(Vec::len);
+        assert_eq!(
+            (listed, result["truncated"].clone()),
+            (
+                Some(MAX_WORKSPACE_DIRECTORY_ENTRIES),
+                serde_json::json!(true)
+            ),
+            "expected (entries, truncated) = ({MAX_WORKSPACE_DIRECTORY_ENTRIES}, true) | \
+             received: ({listed:?}, {})",
+            result["truncated"]
+        );
+    }
+
+    /// A directory this account cannot read or enter answers
+    /// `permission-denied` from both methods: validate as an `ok: false`
+    /// result, browse as a thrown `workspace_browser` FILESYSTEM error.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_inaccessible_directory_maps_to_permission_denied_for_validate_and_browse() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        if nix::unistd::Uid::effective().is_root() {
+            eprintln!("skipping: root reads a mode-000 directory anyway");
+            return;
+        }
+        let root = scratch_root("permission-denied");
+        let blocked = root.join("blocked");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let validated = build_validate_result(ValidateParams {
+            path: blocked.to_string_lossy().into_owned(),
+            require_absolute: Some(true),
+        })
+        .await;
+        let browsed = build_browse_result(browse_params(&blocked), CancellationToken::new()).await;
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let validated = validated.map_err(|error| error.message);
+        assert_eq!(
+            validated.as_ref().ok(),
+            Some(&serde_json::json!({ "ok": false, "reason": "permission-denied" })),
+            "expected validate to answer ok:false permission-denied | received: {validated:?}"
+        );
+        let details = browsed
+            .as_ref()
+            .err()
+            .and_then(|error| error.details.clone())
+            .map(|details| {
+                (
+                    details["kind"].clone(),
+                    details["code"].clone(),
+                    details["reason"].clone(),
+                )
+            });
+        assert_eq!(
+            details,
+            Some((
+                serde_json::json!("workspace_browser"),
+                serde_json::json!("FILESYSTEM"),
+                serde_json::json!("permission-denied")
+            )),
+            "expected browse refused as workspace_browser/FILESYSTEM/permission-denied | \
+             received: {browsed:?}"
+        );
+    }
 }
