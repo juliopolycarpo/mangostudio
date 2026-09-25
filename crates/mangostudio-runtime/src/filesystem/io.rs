@@ -45,6 +45,38 @@ pub(super) fn path_error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "path_access")
 }
 
+/// Refuses a target whose existing `ancestor` is not a directory, carrying
+/// the blocker in `notDirectoryParent` so a caller can name it in its own
+/// words.
+///
+/// # Example
+///
+/// ```ignore
+/// return Err(not_directory_parent_error(target, Path::new("/work/notes.txt")));
+/// ```
+pub(super) fn not_directory_parent_error(target: &Path, ancestor: &Path) -> RemoteError {
+    path_error(format!(
+        "Cannot create \"{}\": parent \"{}\" is not a directory.",
+        target.display(),
+        ancestor.display()
+    ))
+    .with_detail("notDirectoryParent", ancestor.to_string_lossy().as_ref())
+}
+
+/// Maps a failed parent creation for `target`, naming the nearest existing
+/// ancestor when it is not a directory instead of surfacing the raw OS error.
+fn parent_creation_error(target: &Path, parent: &Path, error: std::io::Error) -> RemoteError {
+    let blocker = parent
+        .ancestors()
+        .find_map(|ancestor| fs::metadata(ancestor).ok().map(|found| (ancestor, found)));
+    match blocker {
+        Some((ancestor, metadata)) if !metadata.is_dir() => {
+            not_directory_parent_error(target, ancestor)
+        }
+        _ => io_error(error),
+    }
+}
+
 pub(super) fn io_error(error: std::io::Error) -> RemoteError {
     RemoteError::new(codes::INTERNAL, error.to_string())
 }
@@ -544,7 +576,8 @@ pub(super) fn create_new(
         let parent = capability::verified_parent(policy, path, true)?;
         return write_exclusive_bound(&parent, path, bytes, create_error);
     }
-    fs::create_dir_all(path.parent().unwrap_or(Path::new("."))).map_err(io_error)?;
+    let parent = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| parent_creation_error(path, parent, error))?;
     write_exclusive(path, bytes).map_err(create_error)
 }
 

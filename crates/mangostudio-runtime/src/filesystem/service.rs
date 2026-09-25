@@ -340,7 +340,12 @@ impl Service {
                 &[&params.resolved_path],
                 &cancel,
             )?;
-            let exists = io::path_is_file(&policy, &params.resolved_path)?;
+            let exists = io::path_is_file(&policy, &params.resolved_path).map_err(|error| {
+                if exclusive {
+                    return blocked_create_parent(&params, error);
+                }
+                error
+            })?;
             let observed = if exists && !exclusive {
                 Some(
                     self.read_fresh(
@@ -392,6 +397,9 @@ impl Service {
                             details.get("alreadyExists").and_then(Value::as_bool) == Some(true)
                         }) {
                             return occupied_path(&policy, &params, exclusive);
+                        }
+                        if exclusive {
+                            return blocked_create_parent(&params, error);
                         }
                         error
                     },
@@ -859,6 +867,23 @@ fn ambiguous_edit_error(count: usize) -> RemoteError {
     };
     argument(format!(
         "Found {found} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."
+    ))
+}
+
+/// Words a create blocked by a non-directory parent as the TypeScript
+/// runtime's `fs.create-file` did; any other error passes through.
+fn blocked_create_parent(params: &WriteParams, error: RemoteError) -> RemoteError {
+    let Some(blocker) = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("notDirectoryParent"))
+        .and_then(Value::as_str)
+    else {
+        return error;
+    };
+    path_error(format!(
+        "Cannot create \"{}\": \"{blocker}\" is not a directory.",
+        params.input_path
     ))
 }
 
@@ -2752,5 +2777,57 @@ mod tests {
             assert_eq!(error.details.unwrap()["kind"], "tool_argument");
         }
         assert_eq!(std::fs::read(&path).unwrap(), b"one\ntwo\nthree");
+    }
+
+    fn create_params(path: &Path, policy: Option<&Value>) -> WriteParams {
+        let mut params = json!({
+            "chatId":"chat", "captureSnapshot":false, "inputPath":"child.txt",
+            "resolvedPath":path, "content":"nope"
+        });
+        if let Some(policy) = policy {
+            params["pathPolicy"] = policy.clone();
+        }
+        decode(params)
+    }
+
+    /// A regular file where a parent directory belongs is named as the
+    /// blocker, as TypeScript did for a direct parent, instead of surfacing a
+    /// raw OS error; a deeper path names the same blocking file.
+    #[tokio::test]
+    async fn create_under_a_regular_file_parent_names_the_blocker() {
+        let (home, service) = fixture();
+        let parent = home.join("not-a-directory");
+        std::fs::write(&parent, b"x").unwrap();
+        let unrestricted = json!(null);
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for (policy, path) in [
+            (&unrestricted, parent.join("child.txt")),
+            (&restricted, parent.join("child.txt")),
+            (&unrestricted, parent.join("deeper").join("child.txt")),
+            (&restricted, parent.join("deeper").join("child.txt")),
+        ] {
+            let result = Arc::clone(&service)
+                .write(
+                    create_params(&path, policy.is_object().then_some(policy)),
+                    true,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot create \"child.txt\": \"{}\" is not a directory.",
+                parent.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+        }
+        assert_eq!(std::fs::read(&parent).unwrap(), b"x");
     }
 }
