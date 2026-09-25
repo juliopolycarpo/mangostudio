@@ -15,14 +15,13 @@ import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
+import { resolveRemoteHandshakeTimeoutMs } from './handshake-budget';
 import { httpRuntimeBaseUrlToWebSocketUrl } from './http-runtime-url';
 import { hubBindingKeyFor } from './hub-binding-key';
 import { openHubSession, type ProtocolHubSession } from './hub-session';
 import type { HubWorkspaceBinding } from './hub-workspace-authority';
 import { RuntimeClient } from './runtime-client';
 import { readRuntimeToken } from './runtime-token-secrets';
-
-const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 const logger = createDiagnosticLogger('runtime-http');
 
@@ -118,9 +117,11 @@ async function openRuntimeSession(
   token: string,
   workspaceBinding: HubWorkspaceBinding
 ): Promise<ProtocolHubSession> {
+  // One budget for the dial and the hello after it; see `resolveRemoteHandshakeTimeoutMs`.
+  const timeoutMs = resolveRemoteHandshakeTimeoutMs('http');
   const deadline = dialDeadline(
-    HANDSHAKE_TIMEOUT_MS,
-    `The runtime did not accept a WebSocket at ${wsUrl} within ${HANDSHAKE_TIMEOUT_MS}ms.`
+    timeoutMs,
+    `The runtime did not accept a WebSocket at ${wsUrl} within ${timeoutMs}ms.`
   );
   let port: Port;
   try {
@@ -133,7 +134,7 @@ async function openRuntimeSession(
   }
   return await openHubSession(port, {
     hubVersion: getVersion(),
-    handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+    handshakeTimeoutMs: timeoutMs,
     requireMatchingRelease: false,
     workspaceBinding,
   });

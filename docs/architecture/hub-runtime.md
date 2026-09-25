@@ -597,8 +597,11 @@ job, and a wrapper that knows more supplies its own classifier.
 
 Lifecycle:
 
-- **Connect** spawns the child and waits up to five seconds for its `hello`. A missing binary,
-  a non-executable one, and a protocol mismatch each produce their own actionable message.
+- **Connect** spawns the child and waits up to five seconds for its `hello` — thirty on a
+  Windows hub (`resolveHandshakeTimeoutMs` in `handshake-budget.ts`). A missing binary, a
+  non-executable one, and a protocol mismatch each produce their own actionable message. A
+  connect released while its child is still starting — a disconnect, a delete, shutdown —
+  terminates that child rather than letting it handshake for nobody.
 - **Loss** (crash, killed process, broken pipe) fails every in-flight request with
   `UNAVAILABLE` and moves the environment to `disconnected` rather than `error`: the target
   is usually still there, only the process is gone.
@@ -1071,7 +1074,8 @@ runtime that is already there.
 Identical to stdio, because it is stdio: a lost connection is a closed pipe, and the manager's
 lazy deadline backoff re-runs `ssh` on the next call that needs it. The handshake budget is
 larger — twenty seconds rather than five — because a TCP round trip, a key exchange, and a
-remote process start all happen before the first frame. Keepalives make a dead network surface
+remote process start all happen before the first frame. It never drops below the local budget,
+so a Windows hub gives it thirty (`resolveRemoteHandshakeTimeoutMs`). Keepalives make a dead network surface
 as a closed pipe within about forty-five seconds.
 
 `requireMatchingRelease` is off here, as for the other remote transports: the binary on that
@@ -1172,7 +1176,8 @@ generated for that launch — never by image, since two environments may share o
 ### Lifecycle
 
 Identical to stdio, because it is stdio. The handshake budget is twenty seconds rather than
-five, to cover creating the container and starting an init before the first frame.
+five, to cover creating the container and starting an init before the first frame, and never
+less than the local budget — thirty on a Windows hub.
 
 `requireMatchingRelease` stays **on**, unlike the remote transports: the binary in the container
 is this hub's own, mounted from its own cache, so a mismatch means the resolution is wrong

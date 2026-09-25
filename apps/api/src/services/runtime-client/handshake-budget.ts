@@ -1,27 +1,25 @@
 /**
- * How long the hub waits for a runtime child on its own machine to say hello.
+ * How long the hub waits for a runtime to say hello, per transport.
  *
- * The default was measured on Linux and macOS, where a process spawn and a
- * first request are both cheap. A Windows hub pays for neither: process spawn
- * plus first-run JIT and disk warmup costs multiples of what the other
- * platforms pay, and a *healthy* runtime has been observed handshaking in
- * 6288ms — once above 10000ms. At 5s that is an environment reporting itself
- * unavailable while nothing is wrong with it, which is issue #1041.
+ * A handshake budget bounds one thing: the time from the hub starting a child
+ * (or dialing a socket) to the runtime's `hello`. It is not a provisioning
+ * budget — an image pull, a release download and a WSL install each run under
+ * their own timeout and finish before this clock starts — and it is not a
+ * liveness budget: once the session is up, the protocol's ping/pong decides
+ * whether the peer is still there.
  *
- * Only the transports whose child runs on the hub's own machine read this —
- * `stdio` and `wsl`, both of which inherit it by passing no timeout. The
- * transports that reach another machine state their own budget instead — not
- * because the hub's platform is irrelevant to them (the `ssh` and `docker`
- * wrappers are spawned on it) but because those budgets are dominated by network
- * and remote work, so a platform branch would be tuning the wrong term.
+ * The local default was measured on Linux and macOS, where a process spawn and
+ * a first request are both cheap. A Windows hub pays for neither: process spawn
+ * plus first-run disk warmup costs multiples of what the other platforms pay,
+ * and a *healthy* runtime has been observed handshaking in 6288ms — once above
+ * 10000ms. At 5s that is an environment reporting itself unavailable while
+ * nothing is wrong with it, which is issue #1041.
  *
- * Note what that costs on `win32`, because those flat numbers were chosen
- * against the 5s default and no longer clear the Windows one: `ssh` and
- * `container` are 20s and `http` 15s, all three now *below* what a plain local
- * child gets there. Judged acceptable rather than unnoticed — they are already
- * three to four times the default this branch left alone. If a healthy remote
- * runtime is ever measured losing to one of them on a Windows hub, the fix is a
- * platform floor on that budget, not a bigger flat number.
+ * `stdio` and `wsl` read the local budget by passing no timeout. `wsl` needs no
+ * number of its own: provisioning executes the freshly installed binary
+ * (`--version`) before it returns, so the first run of a new binary is paid
+ * outside this window. See {@link resolveRemoteHandshakeTimeoutMs} for the
+ * transports that reach another machine.
  *
  * Deliberately not shared with `scripts/lib/platform-budget.ts`, which has the
  * same shape for the same reason on the smoke side. Sharing is closed from both
@@ -42,7 +40,7 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
 const WIN32_HANDSHAKE_TIMEOUT_MS = 30_000;
 
 /**
- * Picks the handshake budget for the platform the child will start on.
+ * Picks the handshake budget for a child on the hub's own machine.
  *
  * The platform is a parameter rather than a read of `process.platform` inside
  * the body, so both branches are reachable from a test without stubbing a
@@ -59,4 +57,48 @@ const WIN32_HANDSHAKE_TIMEOUT_MS = 30_000;
  */
 export function resolveHandshakeTimeoutMs(platform: NodeJS.Platform = process.platform): number {
   return platform === 'win32' ? WIN32_HANDSHAKE_TIMEOUT_MS : DEFAULT_HANDSHAKE_TIMEOUT_MS;
+}
+
+/** The transports whose handshake crosses to another machine. */
+export type RemoteHandshakeTransport = 'ssh' | 'container' | 'http';
+
+/**
+ * What each remote transport needs beyond a local spawn, flat on every platform
+ * because the link, the engine and the far machine dominate it:
+ *
+ * - `ssh`: a connection setup, a key exchange, and a process start on the far
+ *   machine all happen before the first frame, and a busy host on a slow link
+ *   uses all of it.
+ * - `container`: the engine creates the container, starts an init, and runs a
+ *   binary off a bind mount. The image is already on disk — the pull is its own
+ *   step — so this budgets a start, not a download.
+ * - `http`: a WebSocket dial to a runtime that is already listening, then the
+ *   hello exchange. Nothing is spawned, which is why it is the smallest; the
+ *   same number bounds the dial and the handshake that follows it.
+ */
+const REMOTE_HANDSHAKE_TIMEOUT_MS: Readonly<Record<RemoteHandshakeTransport, number>> = {
+  ssh: 20_000,
+  container: 20_000,
+  http: 15_000,
+};
+
+/**
+ * Picks the handshake budget for a transport that reaches another machine.
+ *
+ * Its flat number, floored at the local budget for the same platform: `ssh`
+ * and `container` spawn `ssh.exe` and `docker.exe` on the hub and then do
+ * strictly more than a local child, and `http` crosses a network, so none may
+ * be given less time than a bare local spawn (#1054). The floor only moves a
+ * number where the hub has already admitted the machine is slow — on a Windows
+ * hub all three become 30s; everywhere else they are unchanged. A platform
+ * multiplier would be tuning the wrong term.
+ *
+ * @example
+ * handshakeTimeoutMs: resolveRemoteHandshakeTimeoutMs('ssh'),
+ */
+export function resolveRemoteHandshakeTimeoutMs(
+  transport: RemoteHandshakeTransport,
+  platform: NodeJS.Platform = process.platform
+): number {
+  return Math.max(REMOTE_HANDSHAKE_TIMEOUT_MS[transport], resolveHandshakeTimeoutMs(platform));
 }

@@ -6,13 +6,12 @@
  * speaks through it unchanged — the same spawn, handshake, and teardown a WSL
  * distribution goes through, with a different argv in front.
  *
- * Two things differ from a local child. The handshake budget is stated here
- * rather than inherited, because a TCP round trip and a key exchange happen
- * before the remote process starts — see the constant for what that costs on a
- * Windows hub. And release equality is not a gate: the binary on that machine
- * is not part of this hub's distribution, so a drift is reported rather than
- * refused, and the protocol version stays the thing that decides whether the
- * two can talk.
+ * Two things differ from a local child. The handshake budget is the remote
+ * one, because a TCP round trip and a key exchange happen before the remote
+ * process starts — see `resolveRemoteHandshakeTimeoutMs`. And release equality
+ * is not a gate: the binary on that machine is not part of this hub's
+ * distribution, so a drift is reported rather than refused, and the protocol
+ * version stays the thing that decides whether the two can talk.
  */
 
 import { existsSync } from 'node:fs';
@@ -29,23 +28,9 @@ import {
   classifySshFailure,
   describeSshFailure,
 } from '../../modules/environments/domain/ssh-failure';
+import { resolveRemoteHandshakeTimeoutMs } from './handshake-budget';
 import { RuntimeClient } from './runtime-client';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
-
-/**
- * Twenty seconds, flat on every platform: a connection setup, an
- * authentication exchange, and a process start on the far machine all happen
- * before the first frame, and a busy host on a slow link uses all of it.
- *
- * Flat includes the platform where this is no longer the larger number. On a
- * Windows hub `resolveHandshakeTimeoutMs` gives a plain local child 30s, so
- * this sits under it — deliberately, because what dominates here is the link
- * and the far machine rather than the `ssh.exe` spawn a platform branch would
- * be tuning. If a healthy remote runtime is ever measured losing to this on a
- * Windows hub, the fix is a platform floor on this budget, not a bigger flat
- * number.
- */
-const HANDSHAKE_TIMEOUT_MS = 20_000;
 
 /** How long `ssh` may spend reaching the host before it gives up. */
 const CONNECT_TIMEOUT_SECONDS = 10;
@@ -118,7 +103,7 @@ export async function connectSshRuntime(
       workspaceBinding: { userId: definition.userId, environmentId: definition.id },
       launch: sshLaunch(launchConfig),
       hubVersion: getVersion(),
-      handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+      handshakeTimeoutMs: resolveRemoteHandshakeTimeoutMs('ssh'),
       requireMatchingRelease: false,
       describeFailure: (failure: RuntimeLaunchFailure) => {
         failureReason = classifySshFailure({

@@ -46,23 +46,9 @@ import {
   type ContainerEngineService,
   containerEngineService,
 } from '../../modules/environments/infrastructure/container-engine';
+import { resolveRemoteHandshakeTimeoutMs } from './handshake-budget';
 import { RuntimeClient } from './runtime-client';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
-
-/**
- * Twenty seconds, flat on every platform: the engine has to create the
- * container, start an init, and run a binary off a bind mount before the first
- * frame. The image is already on disk by this point — the pull is its own
- * step — so this budgets a start, not a download.
- *
- * Flat includes the platform where this is no longer the larger number. On a
- * Windows hub `resolveHandshakeTimeoutMs` gives a plain local child 30s, so
- * this sits under it — deliberately, because what dominates here is the engine
- * rather than the `docker.exe` spawn a platform branch would be tuning. If a
- * healthy container is ever measured losing to this on a Windows hub, the fix
- * is a platform floor on this budget, not a bigger flat number.
- */
-const HANDSHAKE_TIMEOUT_MS = 20_000;
 
 const logger = createDiagnosticLogger('runtime-container');
 
@@ -168,7 +154,7 @@ export async function connectContainerRuntime(
       workspaceBinding: { userId: definition.userId, environmentId: definition.id },
       launch,
       hubVersion: getVersion(),
-      handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+      handshakeTimeoutMs: resolveRemoteHandshakeTimeoutMs('container'),
       describeFailure: (failure: RuntimeLaunchFailure) => {
         failureReason = classifyContainerFailure({
           stderr: failure.stderr,
