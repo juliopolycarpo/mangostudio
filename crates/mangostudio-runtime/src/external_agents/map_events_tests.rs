@@ -530,16 +530,14 @@ fn thread_usage_maps_one_to_one() {
 
 #[test]
 fn account_limits_go_through_the_session_mapper() {
-    let limits = sdk::AccountLimits {
-        windows: vec![sdk::RateLimitWindow {
-            label: Some(String::from("5h")),
-            used_percent: 42.5,
-            window_duration_minutes: Some(300),
-            resets_at: Some(epoch_plus_ms(EXPIRES_AT_MS)),
-        }],
-        plan_type: Some(String::from("pro")),
-        observed_at: epoch_plus_ms(EVENT_AT_MS),
-    };
+    let mut limits = sdk::AccountLimits::unknown(epoch_plus_ms(EVENT_AT_MS));
+    limits.windows = vec![sdk::RateLimitWindow {
+        label: Some(String::from("5h")),
+        used_percent: 42.5,
+        window_duration_minutes: Some(300),
+        resets_at: Some(epoch_plus_ms(EXPIRES_AT_MS)),
+    }];
+    limits.plan_type = Some(String::from("pro"));
     assert_wire(
         sdk::EventKind::AccountLimits { limits },
         &json!({

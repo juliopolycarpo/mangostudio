@@ -1183,24 +1183,23 @@ fn open_result_falls_back_to_the_request_when_nothing_was_accepted() {
 // ---------------------------------------------------------------------------
 
 fn codex_limits() -> sdk::AccountLimits {
-    sdk::AccountLimits {
-        windows: vec![
-            sdk::RateLimitWindow {
-                label: Some(String::from("primary")),
-                used_percent: 42.5,
-                window_duration_minutes: Some(300),
-                resets_at: Some(UNIX_EPOCH + Duration::from_secs(1_790_000_000)),
-            },
-            sdk::RateLimitWindow {
-                label: None,
-                used_percent: 0.0,
-                window_duration_minutes: None,
-                resets_at: None,
-            },
-        ],
-        plan_type: Some(String::from("plus")),
-        observed_at: UNIX_EPOCH,
-    }
+    let mut limits = sdk::AccountLimits::unknown(UNIX_EPOCH);
+    limits.windows = vec![
+        sdk::RateLimitWindow {
+            label: Some(String::from("primary")),
+            used_percent: 42.5,
+            window_duration_minutes: Some(300),
+            resets_at: Some(UNIX_EPOCH + Duration::from_secs(1_790_000_000)),
+        },
+        sdk::RateLimitWindow {
+            label: None,
+            used_percent: 0.0,
+            window_duration_minutes: None,
+            resets_at: None,
+        },
+    ];
+    limits.plan_type = Some(String::from("plus"));
+    limits
 }
 
 #[test]
