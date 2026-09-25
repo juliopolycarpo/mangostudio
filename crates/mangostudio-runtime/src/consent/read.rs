@@ -304,20 +304,32 @@ mod tests {
         let reader = ConsentReader::new("mcp");
         let gate = StallGate::new();
         let started = Arc::new(AtomicUsize::new(0));
+        let first_read = Arc::new(tokio::sync::Notify::new());
         let mut outcomes = Vec::new();
         for _ in 0..3 {
             let started = Arc::clone(&started);
+            let first_read = Arc::clone(&first_read);
             let held = gate.handle();
             outcomes.push(
                 reader
                     .read(SHORT, move || {
                         started.fetch_add(1, Ordering::SeqCst);
+                        first_read.notify_one();
                         held.wait();
                         true
                     })
                     .await,
             );
         }
+        // A poll can give up on its bound before the blocking pool has started the read at
+        // all, so wait for that start before counting. The gate keeps any second read out.
+        let first_started = tokio::time::timeout(FINISH, first_read.notified())
+            .await
+            .is_ok();
+        assert!(
+            first_started,
+            "expected the stuck read to start within {FINISH:?} | received no read started"
+        );
         let reads = started.load(Ordering::SeqCst);
         gate.release();
         assert_eq!(
