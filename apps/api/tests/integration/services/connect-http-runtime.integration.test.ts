@@ -297,16 +297,6 @@ describe('Direct URL http runtime', () => {
       // The binary completes the upgrade and closes it with 4401, so the hub
       // reports the close it saw rather than a dial that never opened.
       expect(error).toBeInstanceOf(RemoteError);
-      if (process.platform === 'win32') {
-        // Known gap: on Windows the hub sees this close as 4000 with no
-        // reason, so only the transport outcome is pinned there. The 4401
-        // mapping itself is pinned on every OS by the fake-listener case below.
-        expect(error).toMatchObject({
-          code: RESERVED_ERROR_CODES.UNAVAILABLE,
-          message: expect.stringMatching(/^The session closed before the handshake completed/),
-        });
-        return;
-      }
       expect(error).toMatchObject({
         code: RESERVED_ERROR_CODES.UNAVAILABLE,
         message: 'The session closed before the handshake completed (4401: credential refused).',

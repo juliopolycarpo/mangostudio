@@ -24,7 +24,9 @@ use mango_protocol::session::{
     SessionState,
 };
 use mango_protocol::transports::websocket::WebSocketOptions;
-use mango_protocol::transports::websocket::server::{AcceptOptions, accept_websocket};
+use mango_protocol::transports::websocket::server::{
+    AcceptOptions, REFUSAL_DRAIN_GRACE, accept_websocket,
+};
 use mangostudio_runtime_contract::strings::binding;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Semaphore, oneshot};
@@ -597,7 +599,6 @@ async fn handle_connection(
         let _ = join_owned(driver_handle).await;
         return;
     }
-    crate::transport::identify_hub(&session, host.audit.as_ref());
     if !state.still_current(generation) {
         // Superseded or stopped in the instant between publishing and the
         // handshake completing; the superseding/stopping call already owns
@@ -623,15 +624,12 @@ async fn handle_connection(
     (context.log)("Hub connection ended.");
 }
 
-/// How long a refused connection is given to answer this side's close
-/// before its socket is dropped anyway. Bounds [`close_port`]'s drain.
-const REFUSAL_DRAIN_GRACE: Duration = Duration::from_secs(2);
-
 /// Closes a port nothing ever became a session over — a refused admission,
 /// or one that lost the race before a session was ever built.
 ///
 /// Then reads the port until the peer's own close arrives (bounded by
-/// [`REFUSAL_DRAIN_GRACE`]) instead of dropping it at once: by now the hub
+/// [`REFUSAL_DRAIN_GRACE`], the protocol crate's own bound for the refusals
+/// [`accept_websocket`] sends) instead of dropping it at once: by now the hub
 /// has usually sent its `hello`, and a socket dropped with those bytes still
 /// unread is reset rather than closed on Windows (and on BSD-derived
 /// stacks — see [`drain_request_headers`]), which throws away the close

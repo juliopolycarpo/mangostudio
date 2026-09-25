@@ -463,6 +463,10 @@ impl Audit for FileAudit {
             self.drain().await;
         })
     }
+
+    fn identify_hub(&self, capabilities: &Map<String, Value>) {
+        self.set_hub(HubIdentity::from_capabilities(capabilities));
+    }
 }
 
 #[cfg(test)]

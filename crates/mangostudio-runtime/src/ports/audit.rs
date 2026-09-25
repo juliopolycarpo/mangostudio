@@ -109,6 +109,25 @@ pub trait Audit: Send + Sync + 'static {
     /// nothing useful to tell the caller that would not also risk turning a
     /// logging failure into a request failure.
     fn record<'a>(&'a self, entry: AuditEntry) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
+    /// Names the hub whose call is about to be recorded, from the
+    /// `capabilities` of the `hello` that call's session received.
+    ///
+    /// [`crate::ports::authorization::AuthorizationGuard`] calls this at the
+    /// start of every call, before anything that call can record, so the
+    /// first call a hub makes the instant its handshake completes is never
+    /// recorded as an unidentified hub. The default does nothing: a sink
+    /// with no hub field has nothing to name.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::ports::audit::{Audit, NoopAudit};
+    ///
+    /// let capabilities = serde_json::json!({ "hub": { "user": "bob", "host": "desk" } });
+    /// NoopAudit.identify_hub(capabilities.as_object().unwrap());
+    /// ```
+    fn identify_hub(&self, _capabilities: &serde_json::Map<String, serde_json::Value>) {}
 }
 
 /// Records nothing. The safe default: see the module docs for why "does

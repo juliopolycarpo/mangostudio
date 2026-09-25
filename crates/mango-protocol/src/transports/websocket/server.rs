@@ -9,8 +9,9 @@
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use futures_util::SinkExt;
+use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
@@ -436,8 +437,32 @@ pub fn bearer_token(authorization: &str) -> Option<&str> {
     (!token.is_empty()).then_some(token)
 }
 
+/// How long a refused socket is given to answer this side's `close` before it
+/// is dropped anyway. Bounds the drain after every refusal
+/// [`accept_websocket`] sends, so a dialler that never answers holds a refusal
+/// up by this much at most.
+///
+/// Public so an acceptor that refuses a socket after the upgrade, outside
+/// [`accept_websocket`], drains it for the same bound.
+///
+/// # Example
+///
+/// ```
+/// use mango_protocol::transports::websocket::server::REFUSAL_DRAIN_GRACE;
+///
+/// assert_eq!(REFUSAL_DRAIN_GRACE.as_secs(), 2);
+/// ```
+pub const REFUSAL_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
 /// Closes a socket the upgrade produced but the session will not use, with a
 /// code the dialler can read.
+///
+/// Then reads the socket until the dialler's own `close` arrives (bounded by
+/// [`REFUSAL_DRAIN_GRACE`]) instead of dropping it at once. A dialler usually
+/// sends its `hello` the moment the upgrade completes, so by now those bytes
+/// are sitting unread; a socket dropped with unread bytes is answered with an
+/// RST rather than a FIN, and Windows discards the `close` frame along with
+/// it — the dialler reads a bare `4000` instead of the refusal's code.
 async fn close_with<S>(mut stream: WebSocketStream<S>, code: u16, reason: &str)
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -446,8 +471,17 @@ where
         code: CloseCode::from(code),
         reason: reason.into(),
     };
-    let _ = stream.send(Message::Close(Some(frame))).await;
-    let _ = stream.close(None).await;
+    if stream.send(Message::Close(Some(frame))).await.is_err() {
+        return;
+    }
+    let _ = tokio::time::timeout(REFUSAL_DRAIN_GRACE, async {
+        while let Some(Ok(message)) = stream.next().await {
+            if matches!(message, Message::Close(_)) {
+                return;
+            }
+        }
+    })
+    .await;
 }
 
 #[cfg(test)]
