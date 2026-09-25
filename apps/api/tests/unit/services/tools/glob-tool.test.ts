@@ -337,7 +337,7 @@ describe('glob registry contract', () => {
     const result = await runGlob({ pattern: '**/*.ts' });
 
     expect(result.cwd).toBe(harness.dir);
-    expect(result.matches.sort()).toEqual(['a.ts', 'nested/b.ts']);
+    expect(result.matches.sort()).toEqual(['a.ts', join('nested', 'b.ts')]);
   });
 
   it('resolves an explicit relative cwd against the chat workdir', async () => {
