@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::runtime_home::RuntimeSlot;
 use crate::supervisor::{OwnedTasks, join_owned};
-use crate::transport::opening::{HUB_HELLO_WAIT, ReplayPort, read_opening};
+use crate::transport::upgrade_head::{BindingHeader, RecordingStream};
 use crate::transport::{build_host, runtime_peer, tokens_equal};
 
 /// How long `stop()` waits for a straggling connection task (one still in
@@ -399,32 +399,33 @@ async fn handle_connection(
             respond_health(stream, &runtime_version).await;
             return None;
         }
-        Some(
-            accept_websocket(
-                stream,
-                // A hub built before `mango.v1` was mandatory still gets
-                // its socket: letting it through unlabelled is what lets
-                // its session answer `hello` with a real close code
-                // instead of a bare HTTP refusal it has no vocabulary for
-                // — mirrors `serve.ts`'s own compatibility policy exactly.
-                AcceptOptions::from(WebSocketOptions::default()).with_subprotocol_optional(),
-                |upgrade| match upgrade.bearer() {
-                    Some(presented) if tokens_equal(presented.as_bytes(), token.as_bytes()) => {
-                        Ok(())
-                    }
-                    _ => Err(close_codes::UNAUTHORIZED),
-                },
-            )
-            .await,
+        // Recorded as the upgrade reads it: the binding key rides in the
+        // upgrade request beside the bearer, and `accept_websocket` hands
+        // its callback only the bearer and the origin.
+        let (stream, head) = RecordingStream::new(stream);
+        let accepted = accept_websocket(
+            stream,
+            // A hub built before `mango.v1` was mandatory still gets
+            // its socket: letting it through unlabelled is what lets
+            // its session answer `hello` with a real close code
+            // instead of a bare HTTP refusal it has no vocabulary for
+            // — mirrors `serve.ts`'s own compatibility policy exactly.
+            AcceptOptions::from(WebSocketOptions::default()).with_subprotocol_optional(),
+            |upgrade| match upgrade.bearer() {
+                Some(presented) if tokens_equal(presented.as_bytes(), token.as_bytes()) => Ok(()),
+                _ => Err(close_codes::UNAUTHORIZED),
+            },
         )
+        .await;
+        Some(accepted.map(|port| (port, head.binding())))
     })
     .await;
-    let port = match classified {
+    let (port, binding_header) = match classified {
         // A health check was answered; nothing to upgrade at all. `permit`
         // drops here — a health check never counted against
         // `MAX_PENDING_HANDSHAKES` in `serve.ts` either.
         Ok(None) => return,
-        Ok(Some(Ok(port))) => port,
+        Ok(Some(Ok(accepted))) => accepted,
         // Refused (bad credential, bad subprotocol, …) or the peer vanished
         // mid-upgrade: `accept_websocket` already told it why. Either way
         // `permit` drops here, at this `return`, releasing the slot.
@@ -441,12 +442,25 @@ async fn handle_connection(
     // multi-hour session) must not keep holding this slot.
     drop(permit);
 
-    // The hub's `hello` is read before anything is decided: its binding key
-    // is what `try_admit` refuses on. Read concurrently with building this
-    // side's capabilities, so it costs no extra time, and replayed into the
-    // session below so the session still sees every frame in order.
-    let max_frame_bytes = port.max_frame_bytes();
-    let (port_tx, mut port_rx) = port.split();
+    // Every refusal from here to admission goes out as a close frame over
+    // the upgraded socket before this side's `hello` — the same shape
+    // `accept_websocket` gives a refused credential. A malformed binding
+    // header is refused outright, never read as "no key": a hub that sent
+    // one meant this connection to be bound.
+    let binding = match binding_header {
+        BindingHeader::Absent => None,
+        BindingHeader::Key(key) => Some(key),
+        BindingHeader::Malformed(why) => {
+            close_port(
+                port,
+                close_codes::PROTOCOL_ERROR,
+                &format!("invalid hub binding header: {why}"),
+            )
+            .await;
+            (context.log)(&format!("Refused a hub connection: {why}."));
+            return;
+        }
+    };
 
     let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
     // No request is in flight yet to cancel this against — a fresh token
@@ -459,19 +473,15 @@ async fn handle_connection(
     // `PATH` walk, a `git` probe — measured around 200ms) for no reason.
     // The previous connection can keep answering calls right up until
     // this one is actually ready to take its place.
-    let cancel_probe = CancellationToken::new();
-    let (capabilities, opening) = tokio::join!(
-        crate::transport::hello_capabilities(
-            context.slot,
-            &context.mango_home,
-            &host.registry,
-            &cancel_probe,
-        ),
-        read_opening(&mut port_rx, HUB_HELLO_WAIT),
-    );
-    let port = ReplayPort::new(port_tx, port_rx, opening.buffered, max_frame_bytes);
+    let capabilities = crate::transport::hello_capabilities(
+        context.slot,
+        &context.mango_home,
+        &host.registry,
+        &CancellationToken::new(),
+    )
+    .await;
 
-    let (generation, previous) = match state.try_admit(opening.binding.as_deref()) {
+    let (generation, previous) = match state.try_admit(binding.as_deref()) {
         Admission::Admitted {
             generation,
             previous,
@@ -482,7 +492,8 @@ async fn handle_connection(
         }
         Admission::AlreadyBound => {
             // Refused before this side's `hello` goes out, so the incumbent
-            // is never disturbed and the refused hub learns only the code.
+            // is never disturbed and the refused hub learns only the code
+            // and reason.
             close_port(
                 port,
                 binding::ALREADY_BOUND_CLOSE_CODE,
@@ -530,7 +541,7 @@ async fn handle_connection(
         generation,
         ActiveGeneration {
             generation,
-            binding: opening.binding,
+            binding,
             session: Some(session.clone()),
             released: Some(released_rx),
         },

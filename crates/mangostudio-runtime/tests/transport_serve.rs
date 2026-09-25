@@ -23,6 +23,10 @@ use support::scratch::{ScratchDir, scratch_dir};
 
 const TOKEN: &str = "test-serve-token";
 
+/// Two well-formed binding keys: 64 lowercase hex characters each.
+const RECORD_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const RECORD_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
 async fn bind_ephemeral() -> (SocketAddr, tokio::net::TcpListener) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -37,29 +41,26 @@ async fn dial(addr: SocketAddr, bearer: Option<&str>) -> Result<Session, u16> {
     dial_bound(addr, bearer, None).await
 }
 
-/// Dials as a hub announcing `binding_key` (or none, like an older hub) in
-/// its `hello.capabilities`.
+/// Dials as a hub sending `binding_key` (or none, like an older hub) in the
+/// binding header of its upgrade request.
 async fn dial_bound(
     addr: SocketAddr,
     bearer: Option<&str>,
     binding_key: Option<&str>,
 ) -> Result<Session, u16> {
     let url = format!("ws://{addr}/");
-    let mut capabilities = serde_json::Map::new();
-    if let Some(key) = binding_key {
-        capabilities.insert(binding::CAPABILITY.to_owned(), key.into());
-    }
     let mut options = WebSocketConnectOptions::default();
     if let Some(token) = bearer {
         options = options.with_bearer(token);
     }
+    if let Some(key) = binding_key {
+        options = options.with_header(binding::HEADER, key);
+    }
     let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
     match connect_websocket(&url, &options, &deadline).await {
         Ok(port) => {
-            let (session, _driver) = Session::spawn(
-                port,
-                SessionOptions::new(support::peer("hub")).with_capabilities(capabilities),
-            );
+            let (session, _driver) =
+                Session::spawn(port, SessionOptions::new(support::peer("hub")));
             match session.ready().await {
                 Ok(_) => Ok(session),
                 Err(_) => {
@@ -196,10 +197,10 @@ async fn a_dial_for_another_binding_is_refused_and_the_incumbent_keeps_answering
     let log = CollectingLog::new();
     let (_home, server) = spawn_serve(listener, "binding-refused", &cancel, &log);
 
-    let first = dial_bound(addr, Some(TOKEN), Some("record-a"))
+    let first = dial_bound(addr, Some(TOKEN), Some(RECORD_A))
         .await
         .expect("the first record's dial succeeds");
-    let refused = dial_bound(addr, Some(TOKEN), Some("record-b")).await;
+    let refused = dial_bound(addr, Some(TOKEN), Some(RECORD_B)).await;
     assert_eq!(
         refused.as_ref().err().copied(),
         Some(binding::ALREADY_BOUND_CLOSE_CODE),
@@ -236,10 +237,10 @@ async fn a_dial_for_the_same_binding_supersedes_the_incumbent() {
     let log = CollectingLog::new();
     let (_home, server) = spawn_serve(listener, "binding-same", &cancel, &log);
 
-    let first = dial_bound(addr, Some(TOKEN), Some("record-a"))
+    let first = dial_bound(addr, Some(TOKEN), Some(RECORD_A))
         .await
         .expect("first dial succeeds");
-    let second = dial_bound(addr, Some(TOKEN), Some("record-a"))
+    let second = dial_bound(addr, Some(TOKEN), Some(RECORD_A))
         .await
         .expect("the same record's reconnect is admitted");
 
@@ -260,7 +261,7 @@ async fn a_dial_without_a_binding_supersedes_a_bound_incumbent() {
     let log = CollectingLog::new();
     let (_home, server) = spawn_serve(listener, "binding-legacy", &cancel, &log);
 
-    let first = dial_bound(addr, Some(TOKEN), Some("record-a"))
+    let first = dial_bound(addr, Some(TOKEN), Some(RECORD_A))
         .await
         .expect("first dial succeeds");
     let second = dial_bound(addr, Some(TOKEN), None)
@@ -284,17 +285,48 @@ async fn a_dial_for_another_binding_succeeds_once_the_incumbent_is_gone() {
     let log = CollectingLog::new();
     let (_home, server) = spawn_serve(listener, "binding-released", &cancel, &log);
 
-    let first = dial_bound(addr, Some(TOKEN), Some("record-a"))
+    let first = dial_bound(addr, Some(TOKEN), Some(RECORD_A))
         .await
         .expect("first dial succeeds");
     first.close(close_codes::RELEASED, Some("done")).await;
     logged(&log, "Hub connection ended.").await;
 
-    let second = dial_bound(addr, Some(TOKEN), Some("record-b"))
+    let second = dial_bound(addr, Some(TOKEN), Some(RECORD_B))
         .await
         .expect("another record is admitted once the incumbent is gone");
     assert_eq!(second.state(), SessionState::Ready);
     assert_eq!(count_logged(&log, "already bound"), 0);
+
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}
+
+/// A binding header that is present but not a key is refused, not read as
+/// "no key" — and the refusal leaves a live incumbent alone.
+#[tokio::test]
+async fn a_malformed_binding_is_refused_without_superseding_the_incumbent() {
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let log = CollectingLog::new();
+    let (_home, server) = spawn_serve(listener, "binding-malformed", &cancel, &log);
+
+    let first = dial_bound(addr, Some(TOKEN), Some(RECORD_A))
+        .await
+        .expect("first dial succeeds");
+    let refused = dial_bound(addr, Some(TOKEN), Some("NOT-A-KEY")).await;
+    assert_eq!(
+        refused.as_ref().err().copied(),
+        Some(close_codes::PROTOCOL_ERROR),
+        "expected a malformed binding refused with {} | received: {}",
+        close_codes::PROTOCOL_ERROR,
+        match &refused {
+            Ok(_) => "an admitted session".to_owned(),
+            Err(code) => format!("close code {code}"),
+        }
+    );
+    assert_eq!(first.state(), SessionState::Ready);
+    assert_eq!(count_logged(&log, "must be 64 lowercase hex characters"), 1);
+    assert_eq!(count_logged(&log, "superseded"), 0);
 
     cancel.cancel();
     server.await.unwrap().unwrap();
