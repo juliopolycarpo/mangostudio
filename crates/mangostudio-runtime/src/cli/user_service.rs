@@ -1268,4 +1268,213 @@ mod tests {
             ]
         );
     }
+    /// A remote slot with setup answered, `config` merged into
+    /// `runtime.json`, `credentials` stored, and (when `publish`) a binary
+    /// published through `current`.
+    #[cfg(target_os = "linux")]
+    fn configured_home(
+        name: &str,
+        config: &[(&str, Option<Value>)],
+        credentials: &[(&str, Option<Value>)],
+        publish: bool,
+    ) -> crate::test_support::ScratchDir {
+        let home = scratch_dir(name);
+        fs::create_dir_all(&*home).unwrap();
+        let mut update = vec![("setup", Some(json!({"state":"configured","by":"cli"})))];
+        update.extend_from_slice(config);
+        write_runtime_slot_config(RuntimeSlot::Remote, &home, &update).unwrap();
+        if !credentials.is_empty() {
+            write_runtime_slot_credentials(RuntimeSlot::Remote, &home, credentials).unwrap();
+        }
+        if publish {
+            let source = home.join("downloaded-runtime");
+            fs::write(&source, b"runtime bytes").unwrap();
+            super::super::install_source(&source, RuntimeSlot::Remote, "1.2.3", &home).unwrap();
+        }
+        home
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reinstalling_rewrites_the_unit_and_re_enables_it() {
+        let home = configured_home(
+            "service-reinstall",
+            &[
+                ("hubUrl", Some(json!("wss://hub.example"))),
+                ("serveListen", Some(json!("0.0.0.0:8787"))),
+            ],
+            &[
+                ("pairingToken", Some(json!("pairing"))),
+                ("serveToken", Some(json!("serving"))),
+            ],
+            true,
+        );
+        let fake = FakeExec(Mutex::new(Vec::new()));
+        operate(
+            ServiceAction::Install,
+            Some(ServiceMode::Connect),
+            false,
+            &home,
+            &home,
+            &fake,
+        )
+        .unwrap();
+        operate(
+            ServiceAction::Install,
+            Some(ServiceMode::Serve),
+            false,
+            &home,
+            &home,
+            &fake,
+        )
+        .unwrap();
+
+        let body = fs::read_to_string(unit_path(&home)).unwrap();
+        assert!(
+            body.contains("/current/mangostudio-runtime serve\n"),
+            "expected the rewritten unit to run serve | received:\n{body}"
+        );
+        let enables = fake
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| {
+                call.as_str() == "systemctl --user enable --now mangostudio-runtime.service"
+            })
+            .count();
+        assert!(
+            enables == 2,
+            "expected enable calls: 2 | received: {enables}"
+        );
+    }
+
+    /// Fails exactly the calls whose arguments include `failing`.
+    #[cfg(target_os = "linux")]
+    struct FailingVerbExec {
+        failing: &'static str,
+        calls: Mutex<Vec<String>>,
+    }
+    #[cfg(target_os = "linux")]
+    impl Exec for FailingVerbExec {
+        fn run(&self, program: &str, args: &[&str]) -> io::Result<bool> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{program} {}", args.join(" ")));
+            Ok(!args.contains(&self.failing))
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn install_reports_a_failed_enable() {
+        let home = configured_home(
+            "service-enable-failure",
+            &[("hubUrl", Some(json!("wss://hub.example")))],
+            &[("pairingToken", Some(json!("pairing")))],
+            true,
+        );
+        let exec = FailingVerbExec {
+            failing: "enable",
+            calls: Mutex::new(Vec::new()),
+        };
+        let error = operate(ServiceAction::Install, None, false, &home, &home, &exec)
+            .expect_err("a failed enable must fail the install");
+        assert!(
+            error.to_string().contains("enable"),
+            "expected an error naming enable | received: {error}"
+        );
+        let calls = exec.calls.lock().unwrap();
+        assert!(
+            calls.last().map(String::as_str)
+                == Some("systemctl --user enable --now mangostudio-runtime.service"),
+            "expected the install to stop at enable | received: {calls:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn install_refuses_a_missing_current_binary_before_any_manager_call() {
+        let home = configured_home(
+            "service-binary-missing",
+            &[("hubUrl", Some(json!("wss://hub.example")))],
+            &[("pairingToken", Some(json!("pairing")))],
+            false,
+        );
+        let fake = FakeExec(Mutex::new(Vec::new()));
+        let error = operate(ServiceAction::Install, None, false, &home, &home, &fake)
+            .expect_err("no binary through current must refuse the install");
+        assert!(
+            error.kind() == io::ErrorKind::NotFound
+                && error.to_string().contains("install --slot remote"),
+            "expected NotFound naming `install --slot remote` | received: {:?} {error}",
+            error.kind()
+        );
+        assert!(
+            !unit_path(&home).exists(),
+            "expected no unit written | received: one"
+        );
+        let calls = fake.0.lock().unwrap();
+        assert!(
+            calls.is_empty(),
+            "expected no manager calls | received: {calls:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn install_with_neither_mode_configured_names_both() {
+        let home = configured_home("service-neither-mode", &[], &[], false);
+        let error = configured_mode(None, &home).expect_err("no mode is configured");
+        assert!(
+            error.kind() == io::ErrorKind::InvalidInput
+                && error
+                    .to_string()
+                    .contains("neither connect nor serve is configured"),
+            "expected InvalidInput naming neither mode | received: {:?} {error}",
+            error.kind()
+        );
+        let both = configured_home(
+            "service-both-modes",
+            &[
+                ("hubUrl", Some(json!("wss://hub.example"))),
+                ("serveListen", Some(json!("0.0.0.0:8787"))),
+            ],
+            &[],
+            false,
+        );
+        let error = configured_mode(None, &both).expect_err("both modes are configured");
+        assert!(
+            error
+                .to_string()
+                .contains("expected --mode connect or --mode serve"),
+            "expected the refusal to ask for --mode | received: {error}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exec_uses_current_is_false_for_a_unit_pointing_at_another_homes_current() {
+        let home = configured_home(
+            "service-foreign-home",
+            &[("hubUrl", Some(json!("wss://hub.example")))],
+            &[],
+            true,
+        );
+        let foreign = scratch_dir("service-foreign-home-other");
+        let foreign_binary = slot_current_binary_path(RuntimeSlot::Remote, &foreign);
+        write_unit(
+            &unit_path(&home),
+            &render_systemd(&foreign_binary, ServiceMode::Connect),
+        )
+        .unwrap();
+        let fake = FakeExec(Mutex::new(Vec::new()));
+        let status = operate(ServiceAction::Status, None, false, &home, &home, &fake).unwrap();
+        assert!(
+            status["execUsesCurrent"] == false,
+            "expected execUsesCurrent: false for another home's current | received: {}",
+            status["execUsesCurrent"]
+        );
+    }
 }
