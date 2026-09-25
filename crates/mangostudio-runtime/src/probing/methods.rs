@@ -549,56 +549,28 @@ async fn resolve_agent_executable_in(
         .map(|installation| std::path::PathBuf::from(installation.path))
 }
 
-/// The installation to launch for a vendor: the effective one, unless its
-/// `--version` does not read as this vendor's and an installation under
-/// another binary name does.
+/// The installation to launch for a vendor: the one `probing.agent-clis`
+/// reports as `effective`, so a session runs the binary the hub was shown.
+/// The shared-binary-name rule lives in that selection
+/// (`binary_scan::effective_installation_index`), not here.
 ///
-/// A binary name can belong to more than one vendor — Grok also installs
-/// `agent`, which Cursor's definition probes first — and the report keeps
-/// such an unreadable-version binary as installed, which is right for
-/// display. Launching it as the vendor would speak the wrong protocol to the
-/// wrong program. Only another name is a different program: an older copy
-/// under the same name is the same vendor, and a vendor that changed its
-/// version format keeps launching the install `PATH` picks.
+/// With nothing on `PATH` there is no effective installation; the first one
+/// found elsewhere whose version reads as the vendor's launches instead, and
+/// the report says `installed-but-not-on-path`.
 ///
 /// # Example
 ///
 /// ```ignore
-/// // `agent` (Grok, unreadable) first on PATH, `cursor-agent` after it.
 /// let chosen = launchable_installation(status.runtime).unwrap();
-/// assert!(chosen.path.ends_with("cursor-agent"));
+/// assert!(chosen.effective);
 /// ```
 fn launchable_installation(runtime: RuntimeStatus) -> Option<RuntimeInstallation> {
-    if runtime
-        .effective
-        .as_ref()
-        .is_some_and(|effective| effective.version.is_some())
-    {
-        return runtime.effective;
-    }
-    let effective_name = runtime
-        .effective
-        .as_ref()
-        .map(|effective| binary_name(&effective.raw_path));
-    runtime
-        .installations
-        .into_iter()
-        .find(|installation| {
-            installation.version.is_some()
-                && effective_name
-                    .as_ref()
-                    .is_none_or(|name| *name != binary_name(&installation.raw_path))
-        })
-        .or(runtime.effective)
-}
-
-/// A candidate's binary name, without a Windows extension and
-/// case-insensitive, e.g. `Cursor-Agent.EXE` -> `cursor-agent`.
-fn binary_name(raw_path: &str) -> String {
-    std::path::Path::new(raw_path)
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
+    runtime.effective.or_else(|| {
+        runtime
+            .installations
+            .into_iter()
+            .find(|installation| installation.version.is_some())
+    })
 }
 
 fn select_agent_definitions(
@@ -1124,40 +1096,74 @@ mod tests {
     }
 
     #[test]
-    fn a_readable_effective_installation_is_launched() {
+    fn the_reported_effective_installation_is_launched() {
         let status = runtime_status(vec![
-            installation("/a/agent", Some("2026.9.10"), true),
-            installation("/b/cursor-agent", Some("2026.9.1"), false),
+            installation("/a/agent", None, false),
+            installation("/b/cursor-agent", Some("2026.9.1"), true),
         ]);
+        let chosen = launchable_installation(status).map(|entry| entry.path);
         assert_eq!(
-            launchable_installation(status).map(|entry| entry.path),
-            Some("/a/agent".to_owned())
+            chosen.as_deref(),
+            Some("/b/cursor-agent"),
+            "expected the launch to be the reported effective installation | received: {chosen:?}"
         );
     }
 
     #[test]
-    fn an_unreadable_effective_install_is_not_swapped_for_an_older_same_named_one() {
-        // A vendor that changed its version format must keep launching the
-        // install PATH picks, not an older copy under another prefix.
+    fn with_nothing_on_path_the_first_readable_installation_launches() {
         let status = runtime_status(vec![
-            installation("/new/bin/claude", None, true),
-            installation("/old/bin/claude", Some("2.0.1"), false),
+            installation("/opt/claude-old", None, false),
+            installation("/opt/claude", Some("2.0.1"), false),
         ]);
+        let chosen = launchable_installation(status).map(|entry| entry.path);
         assert_eq!(
-            launchable_installation(status).map(|entry| entry.path),
-            Some("/new/bin/claude".to_owned())
-        );
-    }
-
-    #[test]
-    fn with_no_readable_installation_the_effective_one_still_launches() {
-        let status = runtime_status(vec![installation("/a/claude", None, true)]);
-        assert_eq!(
-            launchable_installation(status).map(|entry| entry.path),
-            Some("/a/claude".to_owned()),
-            "expected a vendor whose version format changed to keep launching"
+            chosen.as_deref(),
+            Some("/opt/claude"),
+            "expected the first readable off-PATH installation | received: {chosen:?}"
         );
         assert_eq!(launchable_installation(runtime_status(Vec::new())), None);
+    }
+
+    /// The report must name the binary the launcher runs: Cursor's own
+    /// `cursor-agent`, not Grok's `agent` earlier on `PATH`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_agent_clis_reports_the_executable_cursor_launches_as_effective() {
+        let dir = scratch_dir("agent-clis-shared-name");
+        fake_binary_on_path(&dir, "agent", "grok 1.0.30 (04b7ffed98c6) [stable]");
+        fake_binary_on_path(&dir, "cursor-agent", "2026.09.10-fd3934a");
+        let env = params_with_path(&dir);
+        let params = ProbeAgentClisParams {
+            budget: None,
+            path_env: Some(PathEnvOverride {
+                env: Some(env.clone()),
+            }),
+            target_ids: Some(vec![AgentTargetId::Cursor]),
+            installable: None,
+            self_: self_params("9.9.9"),
+        };
+        let result = handle_probe_agent_clis(params, CancellationToken::new())
+            .await
+            .unwrap();
+        let reported = result["statuses"][0]["effective"]["rawPath"]
+            .as_str()
+            .map(std::path::PathBuf::from);
+        let launched = resolve_agent_executable_in(
+            AgentTargetId::Cursor,
+            host::build_runtime_path_env(Some(&env)),
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(
+            reported.as_deref().and_then(Path::file_name),
+            Some(std::ffi::OsStr::new("cursor-agent")),
+            "expected Cursor's effective installation: cursor-agent | received: {reported:?}"
+        );
+        assert_eq!(
+            reported.as_deref().and_then(Path::file_name),
+            launched.as_deref().and_then(Path::file_name),
+            "expected the reported effective binary to be the launched one | reported: {reported:?}, launched: {launched:?}"
+        );
     }
 
     #[tokio::test]
