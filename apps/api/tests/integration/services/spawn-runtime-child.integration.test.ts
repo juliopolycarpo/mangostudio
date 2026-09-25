@@ -345,6 +345,51 @@ describe('spawnRuntimeChild', () => {
   );
 
   it.skipIf(!hasPosixShell)(
+    'terminates a still-handshaking child the moment its connect is aborted',
+    async () => {
+      // #1052: a disconnect while the card reads `connecting` must stop the
+      // child it started, not leave it booting until a 30s Windows budget runs
+      // out. The budget here is deliberately far above the assertion, so only
+      // the abort can settle the launch in time.
+      const pidFile = join(workdir, 'aborted-child.pid');
+      const child =
+        `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); ` +
+        'setInterval(() => {}, 1_000);';
+      const controller = new AbortController();
+      const launching = rejectionOf(
+        spawnRuntimeChild({
+          environmentId: 'devbox',
+          launch: { command: process.execPath, args: ['-e', child] },
+          workspaceBinding: null,
+          hubVersion: 'hub-test',
+          handshakeTimeoutMs: 30_000,
+          onClosed: () => undefined,
+          signal: controller.signal,
+        })
+      );
+      const pid = await readPidFile(pidFile);
+
+      const abortedAt = performance.now();
+      controller.abort();
+      const error = (await launching) as RemoteError;
+      const settledMs = performance.now() - abortedAt;
+
+      expect(
+        error.code,
+        `expected code: CANCELLED | received ${error.code}: ${error.message}`
+      ).toBe('CANCELLED');
+      // The launcher's terminate grace is 2s before it escalates; the handshake
+      // budget is 30s. Anything near the second number means the abort was ignored.
+      expect(
+        settledMs,
+        `expected the aborted launch to settle within 5000ms | received: ${Math.round(settledMs)}ms`
+      ).toBeLessThan(5_000);
+      await expect(whenProcessGone(pid)).resolves.toBeUndefined();
+    },
+    30_000
+  );
+
+  it.skipIf(!hasPosixShell)(
     'refuses a child that greets in the 1.0.1 framing, and reaps it',
     async () => {
       // A runtime left over from before the protocol move writes a frame this
@@ -463,4 +508,20 @@ async function whenProcessGone(pid: number, timeoutMs = 15_000): Promise<void> {
     await Bun.sleep(50);
   }
   throw new Error(`Process ${pid} is still running ${timeoutMs}ms after its launch failed.`);
+}
+
+/**
+ * The pid a child wrote to `path`, once it has written it.
+ *
+ * @example
+ * const pid = await readPidFile(join(workdir, 'child.pid'));
+ */
+async function readPidFile(path: string, timeoutMs = 10_000): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pid = Number(await readFile(path, 'utf8').catch(() => ''));
+    if (Number.isInteger(pid) && pid > 0) return pid;
+    await Bun.sleep(20);
+  }
+  throw new Error(`expected a pid in ${path} within ${timeoutMs}ms | received: no pid`);
 }

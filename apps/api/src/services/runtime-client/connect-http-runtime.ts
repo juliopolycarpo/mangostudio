@@ -15,14 +15,13 @@ import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
+import { resolveRemoteHandshakeTimeoutMs } from './handshake-budget';
 import { httpRuntimeBaseUrlToWebSocketUrl } from './http-runtime-url';
 import { hubBindingKeyFor } from './hub-binding-key';
 import { openHubSession, type ProtocolHubSession } from './hub-session';
 import type { HubWorkspaceBinding } from './hub-workspace-authority';
 import { RuntimeClient } from './runtime-client';
 import { readRuntimeToken } from './runtime-token-secrets';
-
-const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 const logger = createDiagnosticLogger('runtime-http');
 
@@ -38,9 +37,28 @@ export interface HttpRuntimeConnection {
   close(reason?: 'released' | 'superseded'): void | Promise<void>;
 }
 
+/**
+ * What the attempt gives this dial. Structurally the manager's connect
+ * context, kept local for the same reason {@link HttpRuntimeDefinition} is.
+ */
+export interface HttpConnectContext {
+  /**
+   * Aborted when the attempt is released. Ends the WebSocket dial or the
+   * handshake at once, closes the socket, and rejects with `CANCELLED`.
+   */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Dials a runtime listening with `mangostudio-runtime serve` and handshakes.
+ *
+ * @example
+ * const connection = await connectHttpRuntime(definition, markUnavailable, { signal });
+ */
 export async function connectHttpRuntime(
   definition: HttpRuntimeDefinition,
-  onUnavailable: () => void
+  onUnavailable: () => void,
+  context: HttpConnectContext = {}
 ): Promise<HttpRuntimeConnection> {
   const { baseUrl } = environmentConfigFor('http', definition.config);
   const wsUrl = httpRuntimeBaseUrlToWebSocketUrl(baseUrl);
@@ -48,11 +66,14 @@ export async function connectHttpRuntime(
 
   let hub: ProtocolHubSession;
   try {
-    hub = await openRuntimeSession(wsUrl, token, {
-      userId: definition.userId,
-      environmentId: definition.id,
-    });
+    hub = await openRuntimeSession(
+      wsUrl,
+      token,
+      { userId: definition.userId, environmentId: definition.id },
+      context.signal
+    );
   } catch (error) {
+    if (context.signal?.aborted) throw cancelled(definition.id);
     throw asConnectError(error, definition.id, baseUrl);
   }
 
@@ -116,27 +137,40 @@ export function runtimeUpgradeHeaders(
 async function openRuntimeSession(
   wsUrl: string,
   token: string,
-  workspaceBinding: HubWorkspaceBinding
+  workspaceBinding: HubWorkspaceBinding,
+  signal: AbortSignal | undefined
 ): Promise<ProtocolHubSession> {
+  // One budget for the dial and the hello after it; see `resolveRemoteHandshakeTimeoutMs`.
+  const timeoutMs = resolveRemoteHandshakeTimeoutMs('http');
   const deadline = dialDeadline(
-    HANDSHAKE_TIMEOUT_MS,
-    `The runtime did not accept a WebSocket at ${wsUrl} within ${HANDSHAKE_TIMEOUT_MS}ms.`
+    timeoutMs,
+    `The runtime did not accept a WebSocket at ${wsUrl} within ${timeoutMs}ms.`
   );
   let port: Port;
   try {
     port = await connectWebSocket(wsUrl, {
       headers: runtimeUpgradeHeaders(token, workspaceBinding),
-      signal: deadline.signal,
+      // `connectWebSocket` closes the half-open socket on either abort.
+      signal: signal ? AbortSignal.any([deadline.signal, signal]) : deadline.signal,
     });
   } finally {
     deadline.clear();
   }
   return await openHubSession(port, {
     hubVersion: getVersion(),
-    handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+    handshakeTimeoutMs: timeoutMs,
     requireMatchingRelease: false,
     workspaceBinding,
+    ...(signal ? { signal } : {}),
   });
+}
+
+/** What a dial released before it finished handshaking rejects with. */
+function cancelled(environmentId: string): RemoteError {
+  return new RemoteError(
+    RESERVED_ERROR_CODES.CANCELLED,
+    `The connection to environment "${environmentId}" was cancelled before it finished handshaking.`
+  );
 }
 
 /**

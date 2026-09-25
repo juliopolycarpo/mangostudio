@@ -20,7 +20,7 @@ scripts/
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
-├── bench/            Hermetic performance measurement (startup.ts)
+├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts)
 ├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
@@ -191,9 +191,10 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 
 ## bench/ — hermetic performance measurement
 
-| Script       | Purpose                                                            |
-| ------------ | ------------------------------------------------------------------ |
-| `startup.ts` | Median process-start → first healthy `GET /api/health` of a binary |
+| Script                 | Purpose                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `startup.ts`           | Median process-start → first healthy `GET /api/health` of a binary                    |
+| `runtime-handshake.ts` | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max |
 
 ```bash
 bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 10
@@ -208,6 +209,18 @@ module-load time are visible rather than buried under migration work.
 
 Compare two binaries by building both and running the same command against
 each; a startup claim is only worth as much as its median and spread.
+
+`runtime-handshake.ts` spawns `mangostudio-runtime --stdio` through the protocol SDK's
+launcher, exchanges `hello` as the hub does and asks for `runtime.health`, with a fresh
+`MANGO_HOME` per run. It defaults to the newest `target/` build; `--fresh-copy` runs a new
+copy of the binary each time, which on Windows puts the antivirus and loader's first look at a
+file into every sample. The numbers it produced are recorded under "Runtime startup budgets" in
+`docs/reference/tooling.md`.
+
+```bash
+bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --runs 30
+bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --fresh-copy
+```
 
 ## runtime-contract/ — the boundary as files
 

@@ -264,6 +264,12 @@ export interface OpenHubSessionOptions {
    * Required so every transport states its binding rather than forgetting it.
    */
   readonly workspaceBinding: HubWorkspaceBinding | null;
+  /**
+   * Aborted when the caller gives up before the handshake completes. The
+   * session is closed at once and the call rejects with `CANCELLED`, instead
+   * of waiting out `handshakeTimeoutMs` on a peer nobody is waiting for.
+   */
+  readonly signal?: AbortSignal;
   /** Replaces the database policy behind `hub.workspace.authorize`; for tests. */
   readonly workspacePolicy?: EnvironmentWorkspacePolicy;
 }
@@ -305,12 +311,25 @@ export async function openHubSession(
   // its first open arrives, and the handler lives as long as the session.
   serveHubContract(session, options.workspaceBinding, options.workspacePolicy);
 
+  // `closeNow` rejects `ready` and clears the handshake timer, so an abort
+  // settles this call on the next tick and leaves no timer behind.
+  const cancel = () => session.closeNow(CLOSE_CODES.RELEASED, 'connect cancelled');
+  if (options.signal?.aborted) cancel();
+  options.signal?.addEventListener('abort', cancel, { once: true });
   let remote: Awaited<Session['ready']>;
   try {
     remote = await session.ready;
   } catch (error) {
     session.close(CLOSE_CODES.RELEASED, 'handshake failed');
+    if (options.signal?.aborted) {
+      throw new RemoteError(
+        RESERVED_ERROR_CODES.CANCELLED,
+        'The connection was cancelled before it finished handshaking.'
+      );
+    }
     throw error;
+  } finally {
+    options.signal?.removeEventListener('abort', cancel);
   }
 
   const manifest = manifestOf(remote.capabilities, options.externalAgentIsolation);

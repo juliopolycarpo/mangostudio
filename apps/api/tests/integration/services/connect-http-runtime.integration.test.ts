@@ -115,6 +115,70 @@ describe('Direct URL http runtime', () => {
     20_000
   );
 
+  it('cancels a dial whose runtime accepted the socket but never said hello', async () => {
+    // #1052 for Direct URL: a disconnect while the card reads `connecting` must
+    // end the attempt now and close its socket, not wait out the handshake
+    // budget. The listener upgrades with `mango.v1` and then stays silent.
+    const store = new InMemorySecretStore();
+    setRuntimeTokenStoreForTests(store);
+    await persistRuntimeToken(TEST_USER.id, 'silent-lan-box', 'silent-token', store);
+    const opened = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request, self) {
+        const upgraded = self.upgrade(request, {
+          data: undefined,
+          headers: { 'Sec-WebSocket-Protocol': 'mango.v1' },
+        });
+        return upgraded ? undefined : new Response(null, { status: 500 });
+      },
+      websocket: {
+        open: () => opened.resolve(),
+        message: () => undefined,
+        close: () => closed.resolve(),
+      },
+    });
+    handles.push({ close: () => server.stop(true) });
+
+    const controller = new AbortController();
+    const attempt = rejectionOf(
+      connectHttpRuntime(
+        {
+          id: 'silent-lan-box',
+          userId: TEST_USER.id,
+          config: { baseUrl: `http://127.0.0.1:${server.port}` },
+        },
+        () => undefined,
+        { signal: controller.signal }
+      )
+    );
+    await opened.promise;
+
+    const abortedAt = performance.now();
+    controller.abort();
+    const error = (await attempt) as RemoteError;
+    const settledMs = performance.now() - abortedAt;
+
+    expect(
+      error instanceof RemoteError ? error.code : String(error),
+      `expected code: CANCELLED | received: ${error instanceof Error ? error.message : String(error)}`
+    ).toBe(RESERVED_ERROR_CODES.CANCELLED);
+    expect(
+      settledMs,
+      `expected the aborted dial to settle within 2000ms | received: ${Math.round(settledMs)}ms`
+    ).toBeLessThan(2_000);
+    const socketClosed = await Promise.race([
+      closed.promise.then(() => true),
+      Bun.sleep(2_000).then(() => false),
+    ]);
+    expect(
+      socketClosed,
+      'expected the listener to see the socket close | received: still open'
+    ).toBe(true);
+  }, 30_000);
+
   it('drives an external-agent session over the Direct URL transport', async () => {
     await insertTestUser(TEST_USER);
     const store = new InMemorySecretStore();

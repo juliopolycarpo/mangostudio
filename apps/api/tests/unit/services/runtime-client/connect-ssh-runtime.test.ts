@@ -103,6 +103,25 @@ describe('connectSshRuntime', () => {
       await rm(directory, { force: true, recursive: true });
     }
   }, 30_000);
+  it('refuses to spawn ssh once the connect has been cancelled', async () => {
+    // The manager aborts the attempt's signal on a disconnect. A launch that
+    // ignored it would still start `ssh`, wait out the key exchange and the
+    // far process start, and only then be discarded (#1052). An already-aborted
+    // signal has to fail before anything is spawned, so no host is contacted.
+    const controller = new AbortController();
+    controller.abort();
+
+    const error = await connectSshRuntime(
+      { userId: 'test-user', id: 'build-01', config: { host: '127.0.0.1', port: 9 } },
+      () => undefined,
+      { signal: controller.signal }
+    ).catch((caught) => caught);
+
+    expect(
+      error.code,
+      `expected code: CANCELLED | received: ${error.code} (${error.message})`
+    ).toBe('CANCELLED');
+  }, 30_000);
 });
 
 describe('sshLaunch', () => {

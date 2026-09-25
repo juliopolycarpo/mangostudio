@@ -8,6 +8,7 @@
         ".claude/hooks/*.mjs",
         ".codex/hooks/*.mjs",
         "scripts/bench/startup.ts",
+        "scripts/bench/runtime-handshake.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,verify-cross-runtimes}.ts",
         "scripts/examples/external-api-smoke.ts",
         "scripts/protocol/*.test.ts",
