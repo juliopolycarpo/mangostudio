@@ -460,7 +460,10 @@ describe('MCP tool round trip end-to-end', () => {
 
     const events = await collectTurn('Call the slow tool.');
 
-    expect(toolResult(events, 'call-1')?.isError).toBe(true);
+    const result = toolResult(events, 'call-1');
+    expect(result?.isError).toBe(true);
+    // A timeout, not some other failure that also ends the call.
+    expect(JSON.stringify(result?.result)).toMatch(/timed out|timeout/i);
     expect(events.some((event) => event.type === 'done')).toBe(true);
   });
 });

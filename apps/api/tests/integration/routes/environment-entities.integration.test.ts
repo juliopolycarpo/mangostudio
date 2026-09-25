@@ -66,6 +66,7 @@ import {
   resolveRustRuntimeBinary,
   rustRuntimeVersion,
   scratchMangoHome,
+  skipWithoutRustBinary,
 } from '../../support/rust-runtime-binary';
 import { connectUntilListening, reserveEphemeralPort } from '../../support/rust-serve-dial';
 
@@ -1628,7 +1629,7 @@ describe('environment entity routes', () => {
   // Real runtime behaviour: what lands on the peer's disk, and the restart
   // answer an unsupervised peer gives. Served by the Rust binary from inside a
   // slot, dialled over the same Direct URL transport a LAN runtime uses.
-  it.skipIf(!rustBinary.available)(
+  it.skipIf(skipWithoutRustBinary(rustBinary, 'environment-entities'))(
     'updates a connected runtime over its existing protocol connection',
     async () => {
       const peer = await serveProvisionedRustRuntime('http-live-update');
@@ -1716,6 +1717,7 @@ describe('environment entity routes', () => {
     });
     let stalled = false;
     let runtimeClosed = false;
+    let loadedPlatformId: string | undefined;
 
     const update = fakeUpdateHandlers({
       restart: 'manual',
@@ -1729,7 +1731,9 @@ describe('environment entity routes', () => {
     const definition = provisionedFakeRuntime({
       runtimeVersion: '0.0.1-old',
       slot: 'host',
-      platformId: 'linux-x64',
+      // Not this machine's identity, so a hub that derived one instead of
+      // loading the peer's would be caught.
+      platformId: 'linux-x64-musl',
       update: update.handlers,
     });
     const { app, repository, manager } = createTestApp(
@@ -1745,14 +1749,16 @@ describe('environment entity routes', () => {
       (runtimeManager) =>
         createRuntimeLifecycleService({
           manager: runtimeManager,
-          loadRuntimeAsset: () =>
-            Promise.resolve({
+          loadRuntimeAsset: (platformId) => {
+            loadedPlatformId = platformId;
+            return Promise.resolve({
               bytes,
               digest,
               fromArchive: false as const,
               cached: true,
               offlineCache: false,
-            }),
+            });
+          },
         })
     );
     await repository.create({
@@ -1803,6 +1809,8 @@ describe('environment entity routes', () => {
     // staged file — and was never asked to publish anything.
     expect(runtimeClosed).toBe(true);
     expect(update.record).toEqual({ begun: 1, committed: 0 });
+    // The asset loaded is the exact identity the peer reported.
+    expect(loadedPlatformId).toBe('linux-x64-musl');
     await manager.closeAll();
   });
 
@@ -1810,7 +1818,7 @@ describe('environment entity routes', () => {
   // would turn a refused upgrade into an outage, and leaving `updating` behind
   // would let the card claim a handoff that is never coming. Real runtime
   // behaviour: the Rust binary checks the digest and refuses the commit.
-  it.skipIf(!rustBinary.available)(
+  it.skipIf(skipWithoutRustBinary(rustBinary, 'environment-entities'))(
     'keeps the connection and the old binary when a live update is refused',
     async () => {
       const peer = await serveProvisionedRustRuntime('http-refused-update');
