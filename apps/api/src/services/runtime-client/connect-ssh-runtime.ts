@@ -63,9 +63,29 @@ export interface SshRuntimeConnection {
   close(): void | Promise<void>;
 }
 
+/**
+ * What the attempt gives this launch. Structurally the manager's connect
+ * context, kept local for the same reason {@link SshRuntimeDefinition} is.
+ */
+export interface SshConnectContext {
+  /**
+   * Aborted when the attempt is released. Threaded into the spawn, so a
+   * disconnect terminates `ssh` mid-handshake instead of waiting out the key
+   * exchange and the far process start.
+   */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Starts a runtime on an SSH host through `ssh` and handshakes with it.
+ *
+ * @example
+ * const connection = await connectSshRuntime(definition, markUnavailable, { signal });
+ */
 export async function connectSshRuntime(
   definition: SshRuntimeDefinition,
-  onUnavailable: () => void
+  onUnavailable: () => void,
+  context: SshConnectContext = {}
 ): Promise<SshRuntimeConnection> {
   const config = environmentConfigFor('ssh', definition.config);
   // OpenSSH expands `~/…` for `-i`; `existsSync` does not. Resolve the same
@@ -114,6 +134,7 @@ export async function connectSshRuntime(
           : describeSshFailure(failureReason, config, failure.stderr);
       },
       onClosed: onUnavailable,
+      ...(context.signal ? { signal: context.signal } : {}),
     });
 
     return {

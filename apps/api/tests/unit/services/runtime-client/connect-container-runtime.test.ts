@@ -268,4 +268,33 @@ describe('connectContainerRuntime cancellation', () => {
     await expect(attempt).rejects.toMatchObject({ name: 'AbortError' });
     expect(spawned).toBe(false);
   });
+
+  it('hands the attempt signal to the spawn, so a cancel stops a handshaking child', async () => {
+    // Rechecking the signal before the spawn is not enough: the engine can take
+    // most of the handshake budget to start the container, and a disconnect in
+    // that window must terminate the child rather than wait it out (#1052).
+    const controller = new AbortController();
+    let received: AbortSignal | undefined;
+
+    await expect(
+      connectContainerRuntime(
+        definition({ image: 'node:22' }),
+        noop,
+        { signal: controller.signal },
+        {
+          engines: engines(),
+          resolveRuntimeBinary: () => Promise.resolve(RUNTIME_BINARY),
+          spawn: (options) => {
+            received = options.signal;
+            return Promise.reject(new Error('launch is not this test'));
+          },
+        }
+      )
+    ).rejects.toThrow(/launch is not this test/);
+
+    expect(
+      received === controller.signal,
+      `expected spawn signal: the attempt's signal | received: ${received === undefined ? 'no signal' : 'a different signal'}`
+    ).toBe(true);
+  });
 });

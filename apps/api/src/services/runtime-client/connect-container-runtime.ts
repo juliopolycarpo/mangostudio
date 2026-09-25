@@ -95,9 +95,10 @@ export interface ContainerConnectContext {
   readonly report?: ContainerConnectProgress;
   /**
    * Aborted when the attempt is released. The image pull and the matching
-   * runtime download can both outlive the click that started them; spawn is
-   * still bounded by its handshake timeout, so this is rechecked before it
-   * rather than threaded into it.
+   * runtime download can both outlive the click that started them, so it is
+   * rechecked between them; it is also threaded into the spawn, so a cancel
+   * during the handshake terminates the engine client instead of waiting out
+   * the handshake budget.
    */
   readonly signal?: AbortSignal;
 }
@@ -187,6 +188,7 @@ export async function connectContainerRuntime(
             });
       },
       onClosed: onUnavailable,
+      ...(context.signal ? { signal: context.signal } : {}),
     });
   } catch (error) {
     // The engine may have created the container before the handshake failed,

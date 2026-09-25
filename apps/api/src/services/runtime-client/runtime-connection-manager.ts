@@ -132,10 +132,10 @@ export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
  * them: an image pull and a WSL provision both move gigabytes. Only the pull is
  * also the reason {@link RuntimeConnectionManager.connectInteractive} stops
  * waiting — a WSL provision is not the phase that wakes it, so that connect
- * still waits it out; see {@link connectWslRuntime}. A connector that only
- * spawns a process — Local, `stdio` and `wsl` all do — threads `signal` into
- * `spawnRuntimeChild`, which terminates the child the moment it fires instead
- * of waiting out its own handshake timeout. A connector that neither watches
+ * still waits it out; see {@link connectWslRuntime}. Every connector that
+ * spawns a process — Local, `stdio`, `wsl`, `ssh` and `container` — threads
+ * `signal` into `spawnRuntimeChild`, which terminates the child the moment it
+ * fires instead of waiting out its own handshake timeout. A connector that neither watches
  * the signal nor spawns anything is bounded by the manager instead; see
  * {@link CONNECT_DEADLINE_MS}.
  */
