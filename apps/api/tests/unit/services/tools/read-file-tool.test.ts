@@ -20,19 +20,18 @@ import {
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 import { withTargetHome } from './support/target-home';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
 beforeEach(() => {
-  clearFileFreshness();
+  // A fresh directory per case is what isolates read freshness: the runtime
+  // keys it by chat and path and keeps it as long as its process lives.
   tempDir = mkdtempSync(join(tmpdir(), 'read-file-test-'));
 });
 
 afterEach(() => {
-  clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
 });
 

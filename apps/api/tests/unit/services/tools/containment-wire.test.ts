@@ -38,7 +38,6 @@ import { executeReplaceRange } from '../../../../src/services/tools/builtin/repl
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { createLocalRuntimeDefinition } from '../../../support/local-runtime';
-import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 const VERSION = 'test';
 
@@ -108,7 +107,6 @@ function sentPolicy(method: string): RuntimePathFilter | undefined {
 }
 
 beforeEach(() => {
-  clearFileFreshness();
   // Realpath'd because macOS hands back a symlinked temp dir, and the hub sends
   // the workdir it was given: comparing against the un-resolved form would fail
   // there for a reason that has nothing to do with what is being tested.
@@ -117,7 +115,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  clearFileFreshness();
   await release();
   rmSync(workdir, { recursive: true, force: true });
 });
