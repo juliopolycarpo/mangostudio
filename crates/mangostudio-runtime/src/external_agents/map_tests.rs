@@ -1419,6 +1419,27 @@ fn a_codex_account_carries_the_typescript_adapters_fingerprint_and_plan() {
 }
 
 #[test]
+fn a_codex_account_read_without_a_host_key_keeps_its_plan_and_no_fingerprint() {
+    let account = CodexAccount::from_account_read(
+        &json!({ "account": { "type": "chatgpt", "email": "user@example.com", "planType": "plus" } }),
+        plan_only_key(),
+    )
+    .expect("a ChatGPT account");
+    let received = serde_json::to_value(descriptor(
+        TargetId::Codex,
+        &codex_signed_in(),
+        Some(&plan_only(account)),
+        PROBED_AT_MS,
+    ))
+    .expect("serializable");
+    assert_eq!(
+        received["account"],
+        json!({ "label": "ChatGPT", "planType": "plus" }),
+        "expected the plan without a fingerprint the host did not key | received {received}"
+    );
+}
+
+#[test]
 fn codex_account_facts_apply_only_to_a_signed_in_codex_account() {
     let account = codex_account("host-local-key", "user@example.com");
     let claude = serde_json::to_value(descriptor(

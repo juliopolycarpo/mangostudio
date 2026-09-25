@@ -158,10 +158,13 @@ impl HarnessFactory for ProductHarnesses {
         map::harness_for(target, executable)
     }
 
-    /// Codex discovers through [`mango_agent_codex::CodexHarness::discover_with_account`]
-    /// when the host has a key: the email `account/read` returns is only the
-    /// HMAC input inside the SDK and never reaches this crate. Without a key
-    /// there is no fingerprint, never an unkeyed one.
+    /// Codex always discovers through
+    /// [`mango_agent_codex::CodexHarness::discover_with_account`]: the email
+    /// `account/read` returns is only the HMAC input inside the SDK and never
+    /// reaches this crate. Without a host key it runs under
+    /// [`map::plan_only_key`] and the fingerprint is dropped, so the plan
+    /// still arrives, as `codex/adapter.ts` sent it, and no fingerprint is
+    /// ever one the host did not key.
     fn discover<'a>(
         &'a self,
         target: TargetId,
@@ -170,18 +173,21 @@ impl HarnessFactory for ProductHarnesses {
         key: Option<&'a AccountFingerprintKey>,
     ) -> PortFuture<'a, mango_external_agents::Result<TargetDiscovery>> {
         Box::pin(async move {
-            let (TargetId::Codex, Some(key)) = (target, key) else {
+            if target != TargetId::Codex {
                 return Ok(TargetDiscovery {
                     discovery: map::harness_for(target, executable).discover(host).await?,
                     account: None,
                 });
-            };
+            }
             let found = map::codex_harness(executable)
-                .discover_with_account(host, key)
+                .discover_with_account(host, key.unwrap_or_else(|| map::plan_only_key()))
                 .await?;
             Ok(TargetDiscovery {
                 discovery: found.discovery,
-                account: found.account,
+                account: match key {
+                    Some(_) => found.account,
+                    None => found.account.map(map::plan_only),
+                },
             })
         })
     }

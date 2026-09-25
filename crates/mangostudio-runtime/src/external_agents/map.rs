@@ -26,7 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mango_agent_acp::AcpHarness;
 use mango_agent_claude::ClaudeHarness;
 use mango_agent_codex::CodexHarness;
-use mango_agent_codex::account::CodexAccount;
+use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
 use mango_external_agents as sdk;
 use mango_protocol::error::{RemoteError, codes};
 
@@ -124,6 +124,39 @@ pub(crate) fn codex_harness(executable: Option<PathBuf>) -> CodexHarness {
         Some(path) => harness.with_executable(sdk::ExecutablePath::resolved(path)),
         None => harness,
     }
+}
+
+/// The key a Codex discovery runs under when the host has none of its own.
+///
+/// `discover_with_account` needs a key to report the plan at all. A digest
+/// under this fixed key is reproducible anywhere, so it must never leave the
+/// runtime: [`plan_only`] drops it before the account reaches the mapper.
+///
+/// # Example
+///
+/// ```ignore
+/// let found = codex_harness(None).discover_with_account(&host, plan_only_key()).await?;
+/// let account = found.account.map(plan_only);
+/// ```
+pub(crate) fn plan_only_key() -> &'static AccountFingerprintKey {
+    static KEY: std::sync::OnceLock<AccountFingerprintKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        AccountFingerprintKey::new(b"mangostudio/codex-plan-only").expect("a non-empty literal key")
+    })
+}
+
+/// A Codex account read under [`plan_only_key`]: the plan, without the
+/// fingerprint that key cannot make private.
+///
+/// # Example
+///
+/// ```ignore
+/// let account = plan_only(account);
+/// assert!(account.fingerprint.is_none());
+/// ```
+pub(crate) fn plan_only(mut account: CodexAccount) -> CodexAccount {
+    account.fingerprint = None;
+    account
 }
 
 /// The registry of exactly the three product targets, each with its default
