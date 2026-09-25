@@ -316,8 +316,9 @@ duas ações mutantes — vive em um módulo só, compartilhado pela CLI e pela 
 - `apps/api/src/modules/machine/application/` (definição da unidade e allowlist de
   ambiente, checagens do doctor, o serviço)
 - `apps/api/src/modules/machine/http/machine-routes.ts`
-- `apps/runtime/src/services/user-service-manager.ts` (a abstração de supervisor
-  usada pelos dois binários: systemd, launchd e Tarefa Agendada)
+- `apps/shared/src/machine/user-service.ts` (`@mangostudio/shared/machine/service`: a abstração
+  de supervisor do hub — systemd, launchd e Tarefa Agendada) e
+  `crates/mangostudio-runtime/src/cli/user_service.rs` (as mesmas três para o runtime)
 - `apps/shared/src/machine/schemas.ts` (fonte única de verdade dos formatos)
 
 ## Changelog E Release

@@ -65,7 +65,7 @@ with no bound user are never authorized.
 
 The stored `workdir` is the runtime's own canonical path. `workspace.validate` returns, as
 `resolvedPath`, the directory canonicalized by the same function the runtime's external-agent
-authorization uses (`realpath` in the TypeScript runtime, `canonicalize` in the Rust runtime), and
+authorization uses (`canonicalize` in the Rust runtime), and
 the hub stores that value. A workdir chosen through a symlink, or with different casing on a
 case-insensitive filesystem, is therefore stored in the form the authorization later asks about.
 Workdirs stored before this rule keep their lexical form until the user selects them again; the
@@ -73,8 +73,7 @@ hub cannot canonicalize them itself because the path belongs to the runtime's fi
 
 Every Rust runtime — Local, which the hub spawns as the `mangostudio-runtime` binary, and stdio,
 WSL, SSH, container, HTTP or dial-in — asks back over its own hub session; Local's session is bound
-to `{ userId, environmentId: 'local' }`. A
-spawned TypeScript runtime does not ask yet and still refuses every workspace. It
+to `{ userId, environmentId: 'local' }`. It
 sends `hub.workspace.authorize` from the hub-served `mangostudio.hub` contract
 (`apps/shared/src/runtime-contract/hub-contract.ts`, emitted as `generated/hub-catalog.json`) with
 `{ canonicalPath, purpose: "external-agent" }`. The hub binds each session to the `(userId,
@@ -152,9 +151,9 @@ Entry points:
 - `apps/shared/src/external-agents/schemas.ts` — the contracts
 - `apps/api/src/modules/external-agents/application/external-agent-discovery.ts` — the two tiers
 - `apps/api/src/services/runtime-client/runtime-client.ts` — the typed hub facade and event filter
-- `apps/runtime/src/services/external-agents/` — adapter registry, session supervisor, output
-  normalization, process framing and process-tree cleanup
-- `apps/runtime/src/registry.ts` — method wiring, consent boundary and lifecycle close
+- `crates/mangostudio-runtime/src/external_agents/` — the runtime host over the External Agents
+  SDK: session supervisor, authorized launch, isolation and the mapper to the wire (see
+  [The Rust runtime host](#the-rust-runtime-host))
 - `apps/api/src/modules/external-agents/domain/adapter-descriptors.ts` — product declarations
 - `apps/api/src/modules/external-agents/http/external-agent-routes.ts` — `GET /api/external-agents`
 
@@ -371,10 +370,10 @@ too — which is equally model-written — so the boundary belongs there and not
 MangoStudio never reads, stores, logs or transmits a credential value.
 
 It **may** read a bounded, non-secret CLI config to test whether a key is present — Cursor
-publishes sign-in state that way, and `probeConfigKey` in
-`apps/shared/src/environments/detection/auth-signal.ts` does exactly that: a length-capped read, a
+publishes sign-in state that way, and `probe_config_key` in
+`crates/mangostudio-runtime/src/probing/detection/auth_signal.rs` does exactly that: a length-capped read, a
 parse, one boolean out. The parsed value is never retained and no part of it reaches a result, a
-log or a diagnostic. Credential *files*, by contrast, are stat-only: `probeAuthFile` never opens
+log or a diagnostic. Credential *files*, by contrast, are stat-only: `probe_auth_file` never opens
 one.
 
 This is a fallback. All three vendors now answer authoritatively through their own status command,
@@ -399,8 +398,7 @@ absence is default-deny, and there is no configuration flag that fabricates a pr
 The proof has two halves, in two places, because neither side can supply the other's.
 
 The **runtime** attests what it can establish about itself, in
-`crates/mangostudio-runtime/src/external_agents/isolation.rs` (a port of
-`apps/runtime/src/services/external-agents/isolation.ts`):
+`crates/mangostudio-runtime/src/external_agents/isolation.rs`:
 
 | Method             | What it means                                                          | Who makes it                                      |
 | ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------- |
@@ -802,69 +800,15 @@ that can move without notice: `codex app-server` is labelled `[experimental]` in
 `cursor-agent acp` is officially documented but **absent from `cursor-agent --help`**, and Claude's
 permission modes changed meaning during the cycle that introduced them.
 
-### What is pinned, and where
+### Where the pins and the drift watch live
 
-| Vendor | Committed artifacts                                                                                        | Produced by                                          |
-| ------ | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| codex  | `codex/protocol/**` — the generated TypeScript API                                                         | `bunx @openai/codex@<pinned> app-server generate-ts` |
-| cursor | `cursor/contract/` — `initialize`, `session/new`, a `session/list` page                                    | a live `cursor-agent acp` handshake                  |
-| claude | `claude/contract/` — the declared flags with `--permission-mode`'s choices, and the shape of `auth status` | `claude --help`, `claude auth status`                |
-
-All of it lives beside the adapter that reads it, because a vendor's contract is that adapter's
-business. Each set's `contract/manifest.json` records the command, the build it came off, the date
-and a checksum — without the checksum, a regeneration that produced identical output cannot be told
-apart from one that was never run. Minimum versions and the *reason* for each are in the adapter's
-own `pinned.ts`; a minimum version without a reason gets bumped casually.
-
-Cursor and Claude captures are **normalized**: object keys and leaf types survive, values do not.
-Two independent reasons, and either alone would be enough. They are not reproducible — session ids,
-timestamps and model catalogs differ between two runs of the same binary. And they are not ours to
-publish — `session/list` returns the operator's own session titles and working directories, and
-`auth status` returns an email address and an organization name. Values are kept only where the
-value *is* the contract: a negotiated `protocolVersion`, a permission mode's id.
-
-No turn is captured. A `stream-json` transcript needs a billable model call whose output differs
-every time, so it could never diff empty twice; the reducer fixtures pin that vocabulary instead.
-
-### Regenerating
-
-```bash
-bun run vendor-contracts:regen                    # recapture everything installed
-bun run vendor-contracts:regen --only cursor-acp  # one set
-bun run vendor-contracts:check                    # diff instead of writing
-```
-
-Bump a pin in the adapter's `pinned.ts`, rerun without `--check`, and commit the diff — on a version
-bump the diff *is* the changelog. A set whose tool is missing or signed out is skipped loudly and
-counted, never passed over: a green check that verified nothing is the worst outcome available here.
-
-This is deliberately **not** part of `bun run check`. It needs vendor binaries a contributor's
-machine will not have, and making the repository's main gate depend on three third-party CLIs would
-be a poor trade.
-
-### What the CI job does
-
-`.github/workflows/vendor-drift.yml` runs two jobs asking two different questions. **pinned** runs
-on PRs touching the pinned files: does the pin still reproduce? A diff there is a packaging change
-or a mutable release, and it fails. **latest** runs weekly against whatever the vendors published,
-and files a tracking issue instead of failing — a vendor releasing is not a MangoStudio defect, and
-a job that went red over somebody else's release would be muted rather than read.
-
-Both apply the same asymmetry, and it is the load-bearing decision in the whole mechanism:
-
-- A vendor **removing or changing** a recorded field **fails**. That is the case where an adapter is
-  reading something that is gone.
-- A vendor **adding** something is **reported**. The adapters ignore what they do not recognize by
-  construction, so an addition cannot break a turn.
-
-Reversed, this feature would break on every vendor release, and all three ship constantly.
-
-### What a maintainer does when the issue fires
-
-One issue exists at a time, updated in place and closed when the vendors match again, so its
-existence means there is drift *right now*. Read which set moved and in which direction. An additive
-finding needs only `vendor-contracts:regen` and a commit. A removed or changed field needs the
-adapter looked at first — something it reads no longer arrives — and only then a re-record.
+The vendor protocols moved to the External Agents SDK, and their pins went with them. The
+recorded vendor contracts (Codex's generated API, the normalized Cursor ACP handshake, Claude's
+declared flags and `auth status` shape), the tooling that regenerates and diffs them, and the CI
+drift watch all live in the SDK repository,
+[juliopolycarpo/mango-external-agents](https://github.com/juliopolycarpo/mango-external-agents),
+whose "Vendor contract drift" workflow runs them. This repository consumes the SDK crates at an
+exact version and records no vendor contract of its own.
 
 ### The runtime half
 
@@ -913,8 +857,7 @@ These product facts come from SDK surfaces that `dyn Harness` alone does not cov
   events, at most one per 5 s per activity, each with up to the last 2,000 characters. The bound
   is on characters, not bytes. One activity with mostly ASCII output fits the payload budget for
   the whole one-hour hard deadline (about 1.6 MB for 720 updates). Output that is mostly non-ASCII
-  or JSON-escaped, or several activities streaming at once, can reach the limit sooner, the same
-  as in the TypeScript runtime. At the limit the runtime ends the turn with its own
+  or JSON-escaped, or several activities streaming at once, can reach the limit sooner. At the limit the runtime ends the turn with its own
   `adapter-stream` error ("External-agent turn exceeded its persisted payload limit.") and cancels
   the vendor turn.
 - **Turn endings.** A turn the SDK ends for silence, or for a lapsed approval, arrives as
@@ -1002,9 +945,10 @@ required unless a bundled launcher comes to depend on it.
 ### TypeScript assertion replacement map
 
 TypeScript paths are pinned to `88800868f01c611c58234c6904b5f1288b3a942b`, the last
-`feat/rust-runtime` commit before this map; they go away when the TypeScript runtime is removed.
-Vendor adapter tests (`claude-*`, `codex-*`, `cursor-*`, `vendor-contracts`, `turn-channel` and
-`external-agent-jsonrpc` under `apps/runtime/tests/unit/services/`) moved with the vendor
+`feat/rust-runtime` commit before this map; the TypeScript runtime has since been deleted, so
+they resolve only at that commit. Vendor adapter tests (`claude-*`, `codex-*`, `cursor-*`,
+`vendor-contracts`, `turn-channel` and `external-agent-jsonrpc` under
+`apps/runtime/tests/unit/services/`) moved with the vendor
 protocols to the SDK and are not repeated here.
 
 `external-agent-supervisor.test.ts`:

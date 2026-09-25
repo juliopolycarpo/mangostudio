@@ -28,7 +28,6 @@ scripts/
 ├── qa-gate/          PR metrics collector, comment renderers + comment publisher
 ├── release/          Release-time packaging + publication (see below)
 ├── runtime-contract/ Emit + drift-check the cross-language hub/runtime artifacts (bun run contracts:emit)
-├── vendor/           Regenerate + drift-check committed vendor contracts (bun run vendor-contracts:regen)
 └── tests/            Cross-cutting unit tests (co-located tests live beside sources)
 ```
 
@@ -79,7 +78,8 @@ bun run build --binary --platform linux-arm64 --runtime-dir .mango/runtime-prebu
 `--zig` links Linux targets through cargo-zigbuild (zig and cargo-zigbuild on
 `PATH`): gnu at the `GLIBC_2.17` floor, musl static. `--rustup` installs each
 target's standard library first. Both paths stamp the release version in at
-compile time (`MANGOSTUDIO_RELEASE_VERSION`) and check each binary's header —
+compile time (`MANGOSTUDIO_RELEASE_VERSION`) — or `dev` with `--dev`, the version a
+source checkout's hub accepts — and check each binary's header —
 and its `--version`, when this machine can run it — before it is staged.
 `docs/reference/releasing.md` records the per-target toolchains and the floor.
 
@@ -229,7 +229,7 @@ bun run contracts:check   # diff instead of writing (what `bun run check` runs)
 | `install-output.schema.json` | One frame of an install run's output stream                                  |
 | `strings.json`               | What nothing derives: stderr signature, exit code, token prefix, slot layout |
 
-Unlike the vendor captures below, this needs no third-party binary and no network, so it runs
+It needs no third-party binary and no network, so it runs
 inside `bun run check` rather than in a workflow of its own — including on a scoped `--staged` run,
 because a method's schemas reach most of `apps/shared/src` and an edit two modules away can leave
 the catalog stale.
@@ -237,46 +237,7 @@ the catalog stale.
 `catalog.json` is validated against the protocol's published
 [`catalog.json`](https://mangostudio.dev/protocol/schema/1/catalog.json) on every run of either
 mode, with ajv: a wrong catalog is byte-stable too, so a diff check alone would never see it.
-Nothing under `generated/` is formatted by Biome, for the same reason nothing under the vendor
-captures is.
-
-## vendor/ — committed vendor contracts
-
-Every vendor surface the external-agent adapters depend on is pinned and committed, so a version
-bump shows up as a reviewable diff instead of a silent behaviour change.
-
-```bash
-bun run vendor-contracts:regen                    # recapture everything installed
-bun run vendor-contracts:regen --only cursor-acp  # one set
-bun run vendor-contracts:check                    # diff instead of writing (what CI runs)
-bun run vendor-contracts:check --require-all      # also fail when a set was skipped
-```
-
-| Set              | Artifacts                                                        | Produced by                                          |
-| ---------------- | ---------------------------------------------------------------- | ---------------------------------------------------- |
-| `codex-protocol` | `codex/protocol/**` — the generated TypeScript API               | `bunx @openai/codex@<pinned> app-server generate-ts` |
-| `cursor-acp`     | `cursor/contract/` — `initialize`, `session/new`, `session/list` | a live `cursor-agent acp` handshake                  |
-| `claude-cli`     | `claude/contract/` — the CLI surface and `auth status` shape     | `claude --help` and `claude auth status`             |
-
-Artifacts live beside the adapter that reads them; each set's `contract/manifest.json` records the
-command, the build it came off, the date, and a checksum — without which a regeneration that
-produced identical output is indistinguishable from one that was never run.
-
-**Additive drift is reported, not failed.** A vendor removing or changing something a capture
-recorded fails the check; a vendor adding something is noted. All three CLIs ship constantly, and a
-check that failed on every release would train maintainers to rerun it rather than read it.
-
-**Cursor and Claude captures are normalized**, keeping object keys and leaf types while discarding
-values. `session/list` returns the operator's own session titles and working directories and
-`claude auth status` returns an email address and an organization name, none of which is
-reproducible or ours to publish. Values survive only where the value *is* the contract — a
-negotiated `protocolVersion`, a permission mode's id.
-
-Codex's generator is invoked as a **pinned package**, read from
-`apps/runtime/src/services/external-agents/codex/pinned.ts`, so it reproduces on a machine with no
-Codex installed. Bump the version there, rerun without `--check`, and commit the diff. Nothing under
-`protocol/` or `*/contract/` is formatted by Biome — formatting vendor output would make every
-regeneration report a diff that is ours rather than theirs.
+Nothing under `generated/` is formatted by Biome.
 
 ## Conventions
 

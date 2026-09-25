@@ -1,7 +1,7 @@
 # Hub and Runtime Boundary
 
 MangoStudio separates product orchestration from host-machine execution. The API is the
-hub: it owns identity, chats, policy, and durable state. `apps/runtime` is an execution
+hub: it owns identity, chats, policy, and durable state. `crates/mangostudio-runtime` is an execution
 host behind a versioned protocol: it owns filesystem and shell effects plus disposable
 execution caches.
 
@@ -13,45 +13,41 @@ connect with the command that builds it (see [Local runtime](#local-runtime)).
 
 ## Ownership
 
-| Concern                                                                          | Owner                                                  | Notes                                                                                                                                                                                                                                                                   |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Authentication, users, chats, and provider orchestration                         | Hub (`apps/api`)                                       | Runtime requests never carry authority that the hub has not already established.                                                                                                                                                                                        |
-| Tool definitions, settings, argument parsing, and workdir policy                 | Hub (`apps/api`)                                       | The hub decides whether tools are restricted to a chat workdir; path resolution happens before runtime invocation, in the target's path style.                                                                                                                          |
-| Workspace browse and validate (`workspace.browse`, `workspace.validate`)         | Runtime (`apps/runtime`, `crates/mangostudio-runtime`) | Directory listing and workdir existence checks; hub routes are thin RuntimeClient facades.                                                                                                                                                                              |
-| Lexical path resolution and containment                                          | Hub (`apps/api`)                                       | `TargetPaths` resolves `~` and relative input in the target's style, then checks allowed, denied, and containment roots as string prefixes. Decides; never the last word.                                                                                               |
-| Link-resolved path containment                                                   | Runtime (`apps/runtime`, `crates/mangostudio-runtime`) | Shared `isPathPrefix` / ancestor resolution / `assertInsideWorkdir` in TypeScript; `resolve_contained_workspace_path` in Rust. Only the host holding the filesystem can see that a name inside a root is a symlink out of it.                                           |
-| Path policy on filesystem calls                                                  | Hub policy, runtime enforcement                        | The hub serializes allowed, denied, and containment roots as `pathPolicy`; the runtime enforces them link-resolved on every filesystem method, including the candidates glob and grep discover.                                                                         |
-| Filesystem reads, writes, patches, glob, and grep                                | Runtime (`apps/runtime`)                               | The runtime owns host I/O, mutation locking, and result hashing.                                                                                                                                                                                                        |
-| Shell discovery, environment filtering, execution, timeout, and output bounds    | Runtime (`apps/runtime`)                               | The hub selects settings; the runtime applies them where the process is spawned.                                                                                                                                                                                        |
-| Git CLI execution (`git.exec`, argv-array-only)                                  | Runtime (`apps/runtime`)                               | Hardened spawn, env whitelist, timeout, and output bounds; the hub keeps parsers, locks, and routes.                                                                                                                                                                    |
-| Per-chat read freshness state                                                    | Runtime (`apps/runtime`)                               | This cache is disposable and can be rebuilt through normal reads.                                                                                                                                                                                                       |
-| Pre-mutation capture, current-state hashing, and revert effects                  | Runtime (`apps/runtime`)                               | Mutation responses include serializable before snapshots and resulting hashes. Optional `containmentRoot` on revert.                                                                                                                                                    |
-| Checkpoint manifests, blobs, retention, and reverted state                       | Hub (`apps/api`)                                       | Durable checkpoint state remains in SQLite and hub-managed blob storage.                                                                                                                                                                                                |
-| MCP sessions: the SDK, the child process, the outbound HTTP request              | Runtime (`apps/runtime`)                               | A server row names an environment; its session opens there. Only `apps/runtime/src/services/mcp/**` may import `@modelcontextprotocol/sdk`.                                                                                                                             |
-| MCP server rows, secrets, tool naming, and the pending elicitation registry      | Hub (`apps/api`)                                       | The wire names a model sees must not change with placement; secrets live in one store and are delivered at connect. See [mcp.md](../reference/mcp.md).                                                                                                                  |
-| Toolchain, version-manager, and agent-CLI detection (`probing.*`)                | Runtime (`apps/runtime`, `crates/mangostudio-runtime`) | PATH scans, version spawns, auth-signal stats, and library location stats all describe the machine they run on. Per-scan budgets live with the spawns they bound.                                                                                                       |
-| Detection policy: recipes, Node release data, cache freshness                    | Hub (`apps/api`)                                       | Installability, live LTS metadata, and how long an answer may be reused are hub decisions and travel down as parameters. Cache keys include the connection, so a reconnect drops what it said.                                                                          |
-| Spawn environment: the toolchain `PATH` prefix every spawned process starts with | Runtime (`apps/runtime`)                               | `spawn-env.ts` resolves the selection the hub sends (`auto` or one probed installation) once per spawn; `shell.run`, `install.run`, `terminal.open` and `external-agent.open` apply their own secret policy on top. See [environments.md](../features/environments.md). |
-| Toolchain selection storage and validation                                       | Hub (`apps/api`)                                       | `environment_toolchains` keyed by user and environment (`local` is a sentinel); a path is accepted only when the environment's probe reported it.                                                                                                                       |
-| Install execution (`install.run`, `install.cancel`)                              | Runtime (`apps/runtime`)                               | The argv arrives already built from a code-defined recipe; output streams back on `install.output`. See [environment-installs.md](environment-installs.md).                                                                                                             |
-| Install recipes, guards, audit rows, and the SSE stream                          | Hub (`apps/api`)                                       | Whether a recipe may run — including the per-environment `allowInstalls` opt-in — and the system of record for what ran.                                                                                                                                                |
-| Interactive terminal sessions (`terminal.*`)                                     | Runtime (`apps/runtime`)                               | The PTY, the shell, its env and its lifetime; output streams back on `terminal.output` under an ack window. See [terminal.md](../features/terminal.md).                                                                                                                 |
-| Terminal registry, limits, Local isolation gate, and the browser socket relay    | Hub (`apps/api`)                                       | Who may open one, how many, for how long idle; `/api/terminal/:id` relays bytes with its own flow control because `/api/ws` is invalidation-only.                                                                                                                       |
-| Runtime contract: methods, capabilities, events, manifest, error vocabulary      | Shared (`apps/shared`)                                 | `apps/shared/src/runtime-contract/` defines it once; the hub's typed client and the runtime's handler map are both derived from that definition. A non-TypeScript runtime embeds the generated artifacts instead — see [runtime-contract.md](runtime-contract.md).      |
-| Code both machines run on their own disk                                         | Shared (`apps/shared`)                                 | The library engine, the per-user service supervisor, path containment, spawn hardening. Behind a host-only export subpath (`/library/machine`, `/machine/service`, `/workspaces/host`, `/process/host`) so the browser bundle never resolves `node:fs`.                 |
-| Wire framing, negotiation, close codes, and liveness                             | `@mangostudio/protocol`                                | The SDK owns the envelope and the transports. Both workspaces import it and neither restates it.                                                                                                                                                                        |
+| Concern                                                                          | Owner                                  | Notes                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authentication, users, chats, and provider orchestration                         | Hub (`apps/api`)                       | Runtime requests never carry authority that the hub has not already established.                                                                                                                                                                                                 |
+| Tool definitions, settings, argument parsing, and workdir policy                 | Hub (`apps/api`)                       | The hub decides whether tools are restricted to a chat workdir; path resolution happens before runtime invocation, in the target's path style.                                                                                                                                   |
+| Workspace browse and validate (`workspace.browse`, `workspace.validate`)         | Runtime (`crates/mangostudio-runtime`) | Directory listing and workdir existence checks; hub routes are thin RuntimeClient facades.                                                                                                                                                                                       |
+| Lexical path resolution and containment                                          | Hub (`apps/api`)                       | `TargetPaths` resolves `~` and relative input in the target's style, then checks allowed, denied, and containment roots as string prefixes. Decides; never the last word.                                                                                                        |
+| Link-resolved path containment                                                   | Runtime (`crates/mangostudio-runtime`) | `resolve_contained_workspace_path` in `workspace.rs`. Only the host holding the filesystem can see that a name inside a root is a symlink out of it.                                                                                                                             |
+| Path policy on filesystem calls                                                  | Hub policy, runtime enforcement        | The hub serializes allowed, denied, and containment roots as `pathPolicy`; the runtime enforces them link-resolved on every filesystem method, including the candidates glob and grep discover.                                                                                  |
+| Filesystem reads, writes, patches, glob, and grep                                | Runtime (`crates/mangostudio-runtime`) | The runtime owns host I/O, mutation locking, and result hashing.                                                                                                                                                                                                                 |
+| Shell discovery, environment filtering, execution, timeout, and output bounds    | Runtime (`crates/mangostudio-runtime`) | The hub selects settings; the runtime applies them where the process is spawned.                                                                                                                                                                                                 |
+| Git CLI execution (`git.exec`, argv-array-only)                                  | Runtime (`crates/mangostudio-runtime`) | Hardened spawn, env whitelist, timeout, and output bounds; the hub keeps parsers, locks, and routes.                                                                                                                                                                             |
+| Per-chat read freshness state                                                    | Runtime (`crates/mangostudio-runtime`) | This cache is disposable and can be rebuilt through normal reads.                                                                                                                                                                                                                |
+| Pre-mutation capture, current-state hashing, and revert effects                  | Runtime (`crates/mangostudio-runtime`) | Mutation responses include serializable before snapshots and resulting hashes. Optional `containmentRoot` on revert.                                                                                                                                                             |
+| Checkpoint manifests, blobs, retention, and reverted state                       | Hub (`apps/api`)                       | Durable checkpoint state remains in SQLite and hub-managed blob storage.                                                                                                                                                                                                         |
+| MCP sessions: the SDK, the child process, the outbound HTTP request              | Runtime (`crates/mangostudio-runtime`) | A server row names an environment; its session opens there. Only `crates/mangostudio-runtime/src/mcp/sdk.rs` depends on `rmcp`.                                                                                                                                                  |
+| MCP server rows, secrets, tool naming, and the pending elicitation registry      | Hub (`apps/api`)                       | The wire names a model sees must not change with placement; secrets live in one store and are delivered at connect. See [mcp.md](../reference/mcp.md).                                                                                                                           |
+| Toolchain, version-manager, and agent-CLI detection (`probing.*`)                | Runtime (`crates/mangostudio-runtime`) | PATH scans, version spawns, auth-signal stats, and library location stats all describe the machine they run on. Per-scan budgets live with the spawns they bound.                                                                                                                |
+| Detection policy: recipes, Node release data, cache freshness                    | Hub (`apps/api`)                       | Installability, live LTS metadata, and how long an answer may be reused are hub decisions and travel down as parameters. Cache keys include the connection, so a reconnect drops what it said.                                                                                   |
+| Spawn environment: the toolchain `PATH` prefix every spawned process starts with | Runtime (`crates/mangostudio-runtime`) | `commands/toolchain.rs` resolves the selection the hub sends (`auto` or one probed installation) once per spawn; `shell.run`, `install.run`, `terminal.open` and `external-agent.open` apply their own secret policy on top. See [environments.md](../features/environments.md). |
+| Toolchain selection storage and validation                                       | Hub (`apps/api`)                       | `environment_toolchains` keyed by user and environment (`local` is a sentinel); a path is accepted only when the environment's probe reported it.                                                                                                                                |
+| Install execution (`install.run`, `install.cancel`)                              | Runtime (`crates/mangostudio-runtime`) | The argv arrives already built from a code-defined recipe; output streams back on `install.output`. See [environment-installs.md](environment-installs.md).                                                                                                                      |
+| Install recipes, guards, audit rows, and the SSE stream                          | Hub (`apps/api`)                       | Whether a recipe may run — including the per-environment `allowInstalls` opt-in — and the system of record for what ran.                                                                                                                                                         |
+| Interactive terminal sessions (`terminal.*`)                                     | Runtime (`crates/mangostudio-runtime`) | The PTY, the shell, its env and its lifetime; output streams back on `terminal.output` under an ack window. See [terminal.md](../features/terminal.md).                                                                                                                          |
+| Terminal registry, limits, Local isolation gate, and the browser socket relay    | Hub (`apps/api`)                       | Who may open one, how many, for how long idle; `/api/terminal/:id` relays bytes with its own flow control because `/api/ws` is invalidation-only.                                                                                                                                |
+| Runtime contract: methods, capabilities, events, manifest, error vocabulary      | Shared (`apps/shared`)                 | `apps/shared/src/runtime-contract/` defines it once; the hub's typed client is derived from that definition, and the Rust runtime embeds the generated artifacts — see [runtime-contract.md](runtime-contract.md).                                                               |
+| Code both machines run on their own disk                                         | Shared (`apps/shared`)                 | The library engine, the per-user service supervisor, path containment, spawn hardening. Behind a host-only export subpath (`/library/machine`, `/machine/service`, `/workspaces/host`, `/process/host`) so the browser bundle never resolves `node:fs`.                          |
+| Wire framing, negotiation, close codes, and liveness                             | `@mangostudio/protocol`                | The SDK owns the envelope and the transports. Both workspaces import it and neither restates it.                                                                                                                                                                                 |
 
 The runtime must not import API modules or persist product state. The hub must not bypass
 the runtime client for execution that belongs to the runtime.
 
-**The hub does not import `@mangostudio/runtime` either.** One file does —
-`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`, which builds a
-TypeScript runtime host and hands it a port — and a test walks `apps/api/src` to keep it that
-way. Nothing the hub ships reaches that file any more (a second test pins it): Local spawns
-the Rust binary, and only tests still build an in-process TypeScript runtime. The file and
-`apps/runtime` are deleted once those tests are ported. Everything
-else the two ends share is a contract in `@mangostudio/shared`, which is what lets the
-runtime be replaced by a process that is not a TypeScript module at all. Code that is not a
+**The hub does not import a runtime either.** Local spawns the Rust binary, and
+`runtime-module-allow-list.test.ts` walks `apps/api` to keep any in-process runtime out.
+Everything the two ends share is a contract in `@mangostudio/shared`, which is what lets the
+runtime be a process that is not a TypeScript module at all. Code that is not a
 contract but that *both machines genuinely run* — the library engine, the service
 supervisor, path containment — lives in shared too, behind a host-only subpath: the hub runs
 it on the hub's disk, a runtime runs it on the runtime's, and neither borrows the other's
@@ -205,7 +201,7 @@ independent of the protocol version, and neither has to move for an additive met
   version, the sorted methods and the sorted implemented groups, so consent never moves it.
   The hub composes each effective feature as consented ∩ available ∩ implemented. For a peer
   that sends `implementation` a later consent grant shows up on the next health refresh while a
-  build gap stays closed. For one that does not (older runtimes, including the TypeScript host)
+  build gap stays closed. For one that does not (older runtimes)
   the handshake `features` are the ceiling, fail-closed: a grant made after the handshake needs
   a reconnect.
 - **Refreshing the cached manifest.** `runtime.health` exposes the same report mid-session.
@@ -228,7 +224,8 @@ A runtime built on the previous wire (`1.0.1`) is refused rather than half-under
 major, so the port closes with `4426` — over the paired socket and over stdio alike. Dialling
 in, the environment reads `disconnected` rather than failed
 (`apps/api/tests/integration/routes/runtime-socket.integration.test.ts`); spawned, the child
-is terminated with the launch it failed (`apps/runtime/tests/unit/cli.test.ts`). Both run
+is terminated with the launch it failed
+(`apps/api/tests/integration/services/spawn-runtime-child.integration.test.ts`). Both run
 against the frozen bytes in `legacy-hello-1-0-1.ts`. `4426` is in the old binary's own fatal
 set, so it stops rather than redialling and prints the message that names updating it.
 
@@ -241,15 +238,15 @@ the hub is the fix.
 
 ## Transports
 
-| Transport                 | Status  | Direction        | Framing                                                                                                                                                                                                                                                                                                       |
-| ------------------------- | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Embedded in-process ports | Tests   | —                | [In-process](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/in-process.md): a real port pair, round-tripped through the byte codec (`validateInProcessFrames`). No longer a production transport: only tests that reach into a TypeScript runtime's module state still build one. |
-| Local runtime process     | Current | Hub spawns       | [Spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md) over [stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md): NDJSON on the child's own pipes. Used by Local and by `stdio` environments.                                   |
-| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.                                                                                                                                                                                                                        |
-| Paired WebSocket          | Current | Runtime dials in | [WebSocket](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/websocket.md): chunked binary messages under `mango.v1`, to `/api/runtime`, authenticated by a pairing token.                                                                                                          |
-| Direct URL                | Current | Hub dials out    | The same WebSocket transport; the runtime listens and the hub presents a serve token.                                                                                                                                                                                                                         |
-| SSH                       | Current | Hub spawns       | A launcher over stdio: the SDK's hardened `ssh` preset, with the runtime on the far end of its pipe.                                                                                                                                                                                                          |
-| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.                                                                                                                                                                                                                   |
+| Transport                 | Status  | Direction        | Framing                                                                                                                                                                                                                                                                                                                          |
+| ------------------------- | ------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Embedded in-process ports | Tests   | —                | [In-process](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/in-process.md): a real port pair, round-tripped through the byte codec (`validateInProcessFrames`). No longer a production transport: only the hub's fake runtime host (`apps/api/tests/support/fake-runtime-host.ts`) still builds one. |
+| Local runtime process     | Current | Hub spawns       | [Spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md) over [stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md): NDJSON on the child's own pipes. Used by Local and by `stdio` environments.                                                      |
+| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.                                                                                                                                                                                                                                           |
+| Paired WebSocket          | Current | Runtime dials in | [WebSocket](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/websocket.md): chunked binary messages under `mango.v1`, to `/api/runtime`, authenticated by a pairing token.                                                                                                                             |
+| Direct URL                | Current | Hub dials out    | The same WebSocket transport; the runtime listens and the hub presents a serve token.                                                                                                                                                                                                                                            |
+| SSH                       | Current | Hub spawns       | A launcher over stdio: the SDK's hardened `ssh` preset, with the runtime on the far end of its pipe.                                                                                                                                                                                                                             |
+| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.                                                                                                                                                                                                                                      |
 
 Which one to reach for:
 
@@ -393,9 +390,9 @@ Commit renames the verified file over the versioned binary and atomically swaps 
 The old process keeps serving its old inode until restart. A hub-spawned slot runtime exits
 with a distinct update code and the hub reconnects it; a manually launched `connect` or
 `serve` runtime keeps running and the card asks its owner to restart it. That restart no
-longer has to be a person: one user-level service manager
-(`apps/shared/src/machine/user-service.ts`) now supervises both binaries — the
-runtime through `mangostudio-runtime service` and the hub through `mangostudio service` —
+longer has to be a person: a user-level service manager supervises each binary — the
+runtime through `mangostudio-runtime service` (`crates/mangostudio-runtime/src/cli/user_service.rs`)
+and the hub through `mangostudio service` (`apps/shared/src/machine/user-service.ts`) —
 across systemd user units, launchd agents and per-user Scheduled Tasks. A runtime that a
 unit owns exits with the update code on commit and the supervisor's restart-on-failure
 brings it back on the new bytes, without touching the wire contract. On Windows that is
@@ -422,13 +419,11 @@ contract — every row in `apps/shared/src/runtime-contract/contract.ts` carries
 `capabilities` list keyed to the consent file's `allow` set, so a method defined without one
 is a compile error there, and naming a capability nobody can grant is a compile error too.
 
-`gateHandlers` (`apps/runtime/src/consent-gate.ts`) wraps every contract handler and reads
-that list, so a host built from a narrowed `allow` answers the ones it lacks with `DENIED`
-instead of running them. It is a wrapper and not the SDK's `ServeOptions.guard` on purpose:
-the guard is handed the same capability list, but it never sees the parameters the audit
-line summarises, cannot see how many requests are in flight — which is what update
-exclusivity is decided from — and runs before the contract validates parameters, so a
-refusal raised there would bypass everything below. One consequence is worth knowing: a
+`AuthorizationGuard` (`crates/mangostudio-runtime/src/ports/authorization.rs`) is the one
+`mango_protocol::contract::Guard` the runtime registers. It reads that list for every call, so a
+host whose `allow` is narrowed answers the methods it lacks with `DENIED` instead of running them,
+and it records the denial before returning. The Rust SDK's guard runs after the contract
+validates parameters, so a refusal raised there cannot bypass that check. One consequence is worth knowing: a
 payload that is not an object answers `INVALID_PARAMS` and writes no audit line, because no
 method call ever started.
 
@@ -663,8 +658,7 @@ What the in-process host used to get through its constructor now travels on the 
   unchanged: one MangoStudio user owns the OS credential home, a second owner withdraws every
   attestation, and the `local` stand-in is never attested. The hub still announces
   `externalAgentIsolation` in its `hello`; the runtime computes its own attestation from its
-  home (method `os-account`, where the in-process TypeScript host reported
-  `single-user-host`), and a hub `withdrawn` claim strips it from the manifest and from every
+  home (method `os-account`), and a hub `withdrawn` claim strips it from the manifest and from every
   `runtime.health`.
 - **Workspace authorization** — the child asks the hub through `hub.workspace.authorize`,
   answered for the binding `{ userId, environmentId: 'local' }`, instead of calling a callback.
@@ -824,9 +818,9 @@ logged.
 A hub running from a source checkout reports version `dev`, which names no release — there
 is no `vdev` tag and there never will be — so it installs the Linux runtime the checkout
 built for itself, at `.mango/out/<platform>/mangostudio-runtime`, piped in whole with no
-checksum to check it against. Build it on a Linux x64 host with
-`MANGOSTUDIO_RELEASE_VERSION=dev cargo build --release --locked -p mangostudio-runtime` and copy
-`target/release/mangostudio-runtime` to `.mango/out/linux-x64/mangostudio-runtime`. The `dev`
+checksum to check it against. Build it with
+`bun run build:runtime --platform linux-x64 --dev --zig --rustup --out .mango/out`, which writes
+`.mango/out/linux-x64/mangostudio-runtime`; `--dev` stamps the runtime version `dev`. The `dev`
 stamp is the point: the runtime then reports `dev`
 like the hub beside it, which is what the handshake insists on. `bun run build:binary` stamps
 the package version instead, and a runtime built that way is refused with a message saying so.
@@ -973,10 +967,10 @@ upgrade costs one socket and buys a close code the peer can act on.
 ## Direct URL Transport
 
 `transportKind: 'http'` is the transport for a machine the hub can already reach. The
-runtime listens with `mangostudio-runtime serve` (`apps/runtime/src/serve.ts`); the hub
+runtime listens with `mangostudio-runtime serve` (`crates/mangostudio-runtime/src/transport/serve.rs`); the hub
 dials the configured `baseUrl` over WebSocket with a bearer token from the OS secret store.
 Framing, liveness and close codes are the same as the paired socket — the 16 KiB message
-ceiling is mandatory even though `Bun.serve` could raise its payload limit — and the listener
+ceiling is mandatory even though the listener could raise its payload limit — and the listener
 echoes `mango.v1` only when the dialer offered it, for the same reason the paired acceptor
 does.
 
@@ -1239,8 +1233,7 @@ Add a runtime operation as one coherent change:
    `apps/shared/src/runtime-contract/methods/` — `fs.ts`, `mcp.ts`, `library.ts` and so on —
    and derive the public types with `Static<>`. The schema is the declaration; a hand-written
    interface beside one is a second source of truth that only the TypeScript end can see.
-   (`apps/runtime/src/methods.ts` is a re-export, so the runtime's own services keep their
-   import path.) Reuse the schema a shape already has in its owning module rather than
+   Reuse the schema a shape already has in its owning module rather than
    restating it, leave the object open — never `additionalProperties: false` — and add no
    numeric range or string length the handler was not already asserting.
 2. Add the row to the method table in `apps/shared/src/runtime-contract/contract.ts` with the
@@ -1251,9 +1244,11 @@ Add a runtime operation as one coherent change:
    with `captureSnapshot: true` additionally require `fsRead` and `checkpoints`, since their
    response includes the previous file bytes. The Rust host rechecks that consent under the
    mutation lock before committing effects. Other read/write splits need separate methods.
-3. Register the handler in `apps/runtime/src/registry.ts` — the map is typed by the contract,
-   so a missing one is a compile error there rather than a method that answers
-   `METHOD_UNSUPPORTED` at runtime — and keep host effects inside `apps/runtime/src/services/`.
+3. Register the handler through `Registry::implement` (`crates/mangostudio-runtime/src/registry.rs`)
+   from its family's registration function, and add the method to
+   `build_host_implements_exactly_the_current_method_families` in
+   `crates/mangostudio-runtime/src/transport/mod.rs`. A declared method that is never registered
+   answers `METHOD_UNSUPPORTED`, not a compile error, so that test is the check.
 4. Expose the typed call through the `RuntimeClient` facade in
    `apps/api/src/services/runtime-client/`.
 5. Keep authorization, product policy, and durable persistence in the API.
@@ -1268,12 +1263,12 @@ offer on some machines — has two more legs, and forgetting either ships green:
 
 8. Add the field to `RuntimeCapabilityManifestSchema`
    (`apps/shared/src/runtime-contract/manifest.ts`) as `Type.Optional`, and populate it from
-   `createLocalRuntimeManifest` (`apps/runtime/src/manifest.ts`). Required would fail decode
+   the runtime's manifest (`crates/mangostudio-runtime/src/manifest.rs`). Required would fail decode
    for every older peer; document whether absent means granted or unavailable, because the
    two readings already coexist in that schema — the original `features` keys mean granted,
    `externalAgents` and `gh` mean unavailable.
 9. Add the same field to `RuntimeHealthReportSchema` (`apps/shared/src/runtime-home/`), emit it
-   from `apps/runtime/src/health.ts`, and carry it in `capabilityManifestFromHealth`
+   from `crates/mangostudio-runtime/src/health.rs`, and carry it in `capabilityManifestFromHealth`
    (`apps/api/src/services/runtime-client/manifest-from-health.ts`). **This is the leg that
    fails silently.** The hub rebuilds a remote peer's manifest from `runtime.health` after any
    consent change and cannot probe another machine, so a capability that travelled only on

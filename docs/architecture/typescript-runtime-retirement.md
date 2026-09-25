@@ -1,26 +1,24 @@
 # TypeScript Runtime Retirement
 
-The TypeScript runtime package (`apps/runtime`) is being retired in favour of the compiled Rust
-runtime (`crates/mangostudio-runtime`). This page records what the hub's test suite used to prove
-*through* the TypeScript runtime, where each responsibility lives now, and the last result of the
-differential suites that compared the two runtimes before their TypeScript halves were removed.
+The TypeScript runtime package (`apps/runtime`, `@mangostudio/runtime`) has been retired in favour
+of the compiled Rust runtime (`crates/mangostudio-runtime`) and is deleted. This page records what
+the hub's test suite used to prove *through* the TypeScript runtime, where each responsibility
+lives now, the last result of the differential suites that compared the two runtimes before their
+TypeScript halves were removed, and the fixtures that still stand for what the TypeScript runtime
+wrote.
 
-## Hub tests no longer import the TypeScript runtime
+## The hub no longer imports or spawns the TypeScript runtime
 
-No file under `apps/api/tests` imports the runtime package or the in-process seam
-(`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`).
-`tests/unit/services/runtime-client/runtime-module-allow-list.test.ts` enforces both. The seam
-is still the one production importer until Local spawns the Rust binary.
+The runtime package and the in-process seam that built a TypeScript host for Local
+(`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`) are deleted. Local spawns
+the Rust binary. `tests/unit/services/runtime-client/runtime-module-allow-list.test.ts` asserts
+that no file under `apps/api/src` or `apps/api/tests` imports either of them, and that no test
+spawns the TypeScript runtime by a `runtime/src/` path literal. The three tests that used to spawn
+it by its source path (`integration/services/spawn-runtime-child.integration.test.ts`,
+`integration/services/connect-ssh-runtime.integration.test.ts` and
+`unit/lib/runtime-paths.test.ts`) were migrated in the Local cut-over (#1161).
 
-Three files still *spawn* the TypeScript runtime by its source path (`runtime/src/cli.ts`). They
-are migrated in the Local cut-over (#1161), which removes the bun-source fallback. The same
-allow-list test flags any other `runtime/src/` path literal under `apps/api/tests` and lists these
-three explicitly, so the cut-over has to empty that list:
-
-- `integration/services/spawn-runtime-child.integration.test.ts`
-- `integration/services/connect-ssh-runtime.integration.test.ts`
-- `unit/lib/runtime-paths.test.ts` Tests replace the
-  TypeScript host in one of two ways:
+Tests replace the TypeScript host in one of two ways:
 
 - **(a) Fake host.** Use this when a test only needs protocol behaviour or the hub's own
   behaviour. `tests/support/fake-runtime-host.ts` serves a test's handlers through
@@ -127,12 +125,33 @@ Other assertions that changed outside the differential suites:
 - MCP row timeouts for the forced-timeout cases went from 75 and 150 ms to 1 s. The Rust runtime
   counts spawn and initialize against the row timeout.
 
-## Still to move before `apps/runtime` is deleted
+## Frozen compatibility fixtures
 
-- The three path-spawning tests above, in the Local cut-over.
-- `cargo-shim.yml`'s `runtime-home-fixture-freshness` job regenerates `ts-home` and `ts-library`
-  with `bun run --filter @mangostudio/runtime fixtures:home` / `fixtures:library`. It needs its
-  generators relocated, or the `ts-home` fixture frozen, together with
-  `scripts/tests/ci-gate.unit.test.ts`, which pins those steps.
-- The recorded vendor contract captures under `apps/runtime/src/services/external-agents/*/contract/` and the
-  `scripts/vendor/` sets that write them.
+Two fixture sets record what the TypeScript runtime wrote and answered. Rust keeps replaying them
+so it goes on reading the runtime homes and library backup sets that runtime left on operators'
+machines. Their generators were deleted with it, so they are frozen rather than regenerated:
+
+- `crates/mangostudio-runtime/tests/fixtures/ts-home`, a runtime home as the TypeScript runtime
+  wrote it, read by `crates/mangostudio-runtime/tests/ts_compat.rs`.
+- `crates/mangostudio-runtime/tests/fixtures/ts-library/corpus.json`, the TypeScript library
+  readers' answers for a fixed corpus, read by `src/library/ts_compat_tests.rs` and
+  `src/library/mutation/ts_backup_compat_tests.rs`.
+
+`cargo-shim.yml`'s `runtime-home-fixture-freshness` job pins each directory's git tree
+(`ts-home` at `814a421cef442f2dd6c24b13a70fcea00e45576b`, `ts-library` at
+`5ecbf15d46a87ac2c2e8c24dc9d14a47a76b209e`) and fails when either changes, so an edit has to
+update the pin on purpose. The same job still regenerates `rust-home` with
+`cargo test -p mangostudio-runtime --test generate_rust_fixture -- --ignored` and fails on any
+diff. The hub reads that fixture through `probeRuntimeSlots` in
+`apps/api/tests/unit/cli/runtime-slot-probe-rust-home.test.ts`.
+
+Two other things left with the TypeScript runtime:
+
+- The recorded vendor contract captures and the tooling that recorded and drift-checked them now
+  live in the external-agents SDK repository
+  ([juliopolycarpo/mango-external-agents](https://github.com/juliopolycarpo/mango-external-agents)),
+  whose CI runs the vendor contract drift workflow.
+- The `runtime-slot-windows` job in `test.yml` is gone. Its Windows slot coverage is the Rust
+  `#[cfg(windows)]` tests in `crates/mangostudio-runtime/src/slot_publish.rs` and
+  `src/cli/native_operation.rs`, which `cargo-shim.yml`'s `workspace` matrix runs on
+  `windows-latest`.

@@ -542,14 +542,14 @@ reporter first rather than assuming the XML grew an `errors` count.
 > with no JUnit file across the shard set as `parseMiss`, so a missing report
 > cannot become a green suite of zero tests. Bun's `file` attribute is
 > workspace-relative; failed-file counts are namespaced by lane so
-> `apps/shared` and `apps/runtime` files with the same relative path stay
+> `apps/api` and `apps/shared` files with the same relative path stay
 > distinct. Invoking a workspace `test:coverage` script directly on a fresh
 > checkout skips the directory step; create it first if you care about the
 > report.
 
 ### Randomized order
 
-`randomized-order-nightly.yml` runs four lanes under
+`randomized-order-nightly.yml` runs three lanes under
 `--randomize --seed=<run number>` every night. It exists for the one class the
 merge gate cannot see: a test that passes only because of what the file before it
 left behind, which is a live hazard here while `bun test` shares one module graph
@@ -568,7 +568,6 @@ which is why the matrix carries it per entry:
 | `api`             | `--parallel=1` over the whole workspace   | order dependence *within* a file |
 | `api-integration` | no `--parallel`, over `tests/integration` | *cross-file* leakage             |
 | `shared`          | `--parallel=1`                            | order dependence within a file   |
-| `runtime`         | `--parallel=1`                            | order dependence within a file   |
 
 `--parallel=1` means "one worker, *isolated*" (see [Parallelism](#parallelism)),
 so a fresh global per file is exactly what hides cross-file leakage. The

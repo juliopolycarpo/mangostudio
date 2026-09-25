@@ -1,6 +1,6 @@
 # Architecture Overview
 
-MangoStudio follows a modular DDD-inspired architecture across four workspaces. This document explains the design decisions, layer responsibilities, and data flow.
+MangoStudio follows a modular DDD-inspired architecture across three workspaces. This document explains the design decisions, layer responsibilities, and data flow.
 
 ## Workspace Map
 
@@ -8,14 +8,13 @@ MangoStudio follows a modular DDD-inspired architecture across four workspaces. 
 | --------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `apps/api`      | Backend API hub                           | Elysia, Better Auth, Kysely + SQLite                                                               |
 | `apps/frontend` | Browser SPA                               | React 19, TanStack Router/Query, Tailwind CSS v4, `Bun.build()` bundle                             |
-| `apps/runtime`  | TypeScript execution runtime (tests only) | TypeScript, Bun, shared runtime protocol                                                           |
 | `apps/shared`   | Contracts, and the code both machines run | TypeScript types, TypeBox schemas, i18n dictionaries; host-only code behind its own export subpath |
 
 ### Published alongside the application
 
 The repository also hosts the **Mango Protocol** — the wire contract the hub and the runtime
 speak — on its own version line and its own `protocol-v*` release train. It is not one of the
-four application workspaces and does not follow their lifecycle.
+three application workspaces and does not follow their lifecycle.
 
 | Path                           | Ships as                                  | Stack                                          |
 | ------------------------------ | ----------------------------------------- | ---------------------------------------------- |
@@ -143,9 +142,7 @@ Every runtime, Local included, is the cargo-built `mangostudio-runtime` from
 binary beside a standalone hub, or in a source checkout the newest `target/debug` or
 `target/release` build, which `bun run dev` builds first. `MANGOSTUDIO_RUNTIME_BINARY`
 overrides both, and a missing binary fails the connect with `cargo build -p
-mangostudio-runtime` rather than falling back to anything. `apps/runtime` remains only
-because some hub tests still build an in-process TypeScript runtime; it is removed once they
-are ported.
+mangostudio-runtime` rather than falling back to anything.
 
 ### Realtime Invalidation
 
