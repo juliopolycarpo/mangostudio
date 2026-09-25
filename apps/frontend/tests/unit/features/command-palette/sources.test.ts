@@ -150,7 +150,7 @@ describe('environmentCommands', () => {
 
   it('names the transport and the connection state', () => {
     const [local, wsl] = environmentCommands({ environments, t: en, onSelect: jest.fn() });
-    expect(local.hint).toBe('Built in');
+    expect(local.hint).toBe('Hub-launched');
     expect(local.meta).toBe('Connected');
     expect(wsl.hint).toBe('WSL');
     expect(wsl.meta).toBe('Disconnected');

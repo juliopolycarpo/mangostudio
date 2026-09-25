@@ -674,7 +674,7 @@ What the in-process host used to get through its constructor now travels on the 
 The persisted transport literal stays `in-process` for compatibility: stored environments,
 the shared schemas and the frontend all carry it, and renaming it would need a migration for
 no behavioural gain. It names the hub's own Local runtime, not where that runtime runs; the UI
-labels it "Built in".
+labels it "Hub-launched".
 
 ## WSL Transport
 
