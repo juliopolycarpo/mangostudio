@@ -303,6 +303,60 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// An hour-old lock on this host whose body names no pid, or is not an
+    /// owner record at all, cannot prove its holder is gone: neither is
+    /// reclaimed, the body is left byte-for-byte, and the reclaim marker
+    /// taken while weighing it is removed rather than stranded.
+    #[test]
+    fn an_aged_lock_with_a_missing_pid_or_an_unparseable_body_is_not_reclaimed() {
+        let host = current_hostname().unwrap();
+        let bodies: [(&str, Vec<u8>); 2] = [
+            (
+                "missing-pid",
+                serde_json::to_vec(&serde_json::json!({ "token": "pidless", "host": host }))
+                    .unwrap(),
+            ),
+            ("unparseable", b"{ not an owner record".to_vec()),
+        ];
+        for (name, body) in bodies {
+            let dir = slot(name);
+            let path = dir.join(LOCK_NAME);
+            fs::write(&path, &body).unwrap();
+            OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(SystemTime::now() - Duration::from_secs(3600))
+                .unwrap();
+
+            let refused = SlotUpdateLock::acquire(&dir, "local".into(), Duration::from_secs(120));
+            let kind = refused.as_ref().err().map(io::Error::kind);
+            assert_eq!(
+                kind,
+                Some(io::ErrorKind::WouldBlock),
+                "expected the {name} lock to refuse with WouldBlock | received: {:?}",
+                refused
+                    .as_ref()
+                    .map(|_| "acquired")
+                    .map_err(ToString::to_string)
+            );
+            let left = fs::read(&path).unwrap();
+            assert_eq!(
+                left,
+                body,
+                "expected the {name} lock body untouched | received: {:?}",
+                String::from_utf8_lossy(&left)
+            );
+            let marker = dir.join("runtime-update.lock.reclaim");
+            assert!(
+                !marker.exists(),
+                "expected no reclaim marker after weighing the {name} lock | received: {} present",
+                marker.display()
+            );
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn heartbeat_renews_only_the_original_lock_inode() {

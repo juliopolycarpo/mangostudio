@@ -316,3 +316,117 @@ mod segment_tests {
         );
     }
 }
+
+/// What a process killed mid-swap leaves behind, and why the next run is
+/// unaffected by it.
+#[cfg(test)]
+mod crash_leftover_tests {
+    use std::path::Path;
+
+    use tokio_util::sync::CancellationToken;
+
+    use super::DirectorySource;
+    use crate::library::cache::LibraryCache;
+    use crate::library::fs::NativeLibraryFs;
+    use crate::library::mutation::apply::{ApplyContext, ApplyOperation, execute_apply};
+    use crate::library::mutation::fakes::Home;
+    use crate::library::mutation::paths::ResourceKind;
+    use crate::library::reader::{ScanContext, read_location_instances};
+    use crate::probing::locations::location_by_id;
+
+    /// The file names the `claude-skills` location lists as instances, and
+    /// how many entries it reports as unreadable.
+    fn scanned_names(skills: &Path) -> (Vec<String>, usize) {
+        let cache = LibraryCache::default();
+        let cancel = CancellationToken::new();
+        let warn = |_: &str| {};
+        let context = ScanContext {
+            cache: &cache,
+            force: true,
+            fs: &NativeLibraryFs,
+            platform: crate::health::node_platform(),
+            cancel: &cancel,
+            warn: &warn,
+        };
+        let location = location_by_id("claude-skills").unwrap();
+        let scanned =
+            read_location_instances(location, &skills.to_string_lossy(), &context).unwrap();
+        let mut names: Vec<String> = scanned
+            .entries
+            .iter()
+            .map(|entry| {
+                Path::new(&entry.instance.path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        (names, scanned.unreadable_entries.len())
+    }
+
+    /// A process killed between staging and swapping leaves
+    /// `.<slug>.<suffix>.staging` and `.<slug>.<suffix>.previous` siblings,
+    /// each looking like a whole skill. The next scan does not list them as
+    /// resources, and the next apply of the same slug writes the real
+    /// destination without tripping over them.
+    #[test]
+    fn crash_leftover_staging_and_previous_siblings_are_ignored_on_the_next_run() {
+        let home = Home::new("writer-crash-leftovers");
+        let skills = home.path(&[".claude", "skills"]);
+        home.skill(&skills.join(".gh.deadbeefdeadbeef.staging"), "half-staged");
+        home.skill(&skills.join(".gh.deadbeefdeadbeef.previous"), "swapped-out");
+
+        let before = scanned_names(&skills);
+        assert_eq!(
+            before,
+            (Vec::<String>::new(), 0),
+            "expected crash leftovers neither listed nor reported unreadable | \
+             received (instances, unreadable): {before:?}"
+        );
+
+        let source = home.skill(&home.scratch.join("source"), "fresh");
+        let hash = home.hash(&source, ResourceKind::Directory);
+        let never = || None;
+        let result = execute_apply(
+            &[ApplyOperation {
+                resource_key: "skill:gh".into(),
+                location_id: "claude-skills".into(),
+                slug: "gh".into(),
+                operation: "create".into(),
+                kind: ResourceKind::Directory,
+                expected_content_hash: hash,
+                destination_root: skills.to_string_lossy().into_owned(),
+                directory: Some(DirectorySource::Path(source.to_string_lossy().into_owned())),
+                contents: None,
+                adaptation: None,
+            }],
+            &ApplyContext {
+                store: &home.store,
+                hasher: home.hasher.as_ref(),
+                env: &home.env,
+                environment_id: None,
+                backup_id: None,
+                interrupted: &never,
+            },
+        );
+        assert!(
+            result.failed.is_empty(),
+            "expected the next apply to succeed beside the leftovers | received: {:?}",
+            result.failed
+        );
+        let written = std::fs::read_to_string(skills.join("gh").join("SKILL.md")).unwrap();
+        assert!(
+            written.contains("fresh"),
+            "expected the real destination to hold the new skill | received: {written:?}"
+        );
+        let after = scanned_names(&skills);
+        assert_eq!(
+            after,
+            (vec!["gh".to_owned()], 0),
+            "expected only the real skill listed after the next run | \
+             received (instances, unreadable): {after:?}"
+        );
+    }
+}

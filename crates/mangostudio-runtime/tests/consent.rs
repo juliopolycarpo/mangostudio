@@ -6,7 +6,9 @@
 //! `tests/audit_isolation.rs` for `PanickingAuthorization` and
 //! `PanickingAudit` exercised against this guard — that file is the home
 //! for every "a port panics" audit-recording test, on both the
-//! `Registry::implement` and `AuthorizationGuard` sides.
+//! `Registry::implement` and `AuthorizationGuard` sides. The catalog tests at
+//! the end pin the capability split the guard reads from the embedded
+//! contract, where a read-only profile's "no writes" line is drawn.
 
 #[path = "support/mod.rs"]
 mod support;
@@ -14,10 +16,13 @@ mod support;
 use std::sync::Arc;
 
 use mango_protocol::error::codes;
+use mangostudio_runtime::consent::presets::consent_preset;
 use mangostudio_runtime::ports::audit::Outcome;
 use mangostudio_runtime::ports::authorization::DenyingAuthorization;
 use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::registry::Registry;
+use mangostudio_runtime_contract::catalog::capabilities_of;
+use mangostudio_runtime_contract::manifest::ManifestProfile;
 use serde_json::json;
 use support::{
     GrantingAuthorization, PartiallyGrantingAuthorization, RecordingAudit, health_result,
@@ -117,4 +122,65 @@ async fn partially_granting_authorization_names_only_the_ungranted_capability() 
     .expect_err("fsRead was not granted, even though checkpoints was");
     assert_eq!(denied.code, codes::DENIED);
     assert_eq!(denied.details.unwrap()["missing"], json!(["fsRead"]));
+}
+
+/// The declared capabilities of `method` in the embedded contract, as
+/// borrowed strings, failing with a message that names the method when the
+/// catalog does not know it.
+fn declared(method: &str) -> Vec<&'static str> {
+    capabilities_of(method)
+        .unwrap_or_else(|| panic!("expected {method} in the embedded catalog | received: absent"))
+        .iter()
+        .map(String::as_str)
+        .collect()
+}
+
+/// The guard reads the method name and never its params, so the catalog
+/// split between `gh.exec` and `gh.mutate` is the only place a read-only
+/// machine's "no writes" line can be drawn for the GitHub CLI: `readonly`
+/// grants `git` and refuses `shell`, and a mutating `gh` that rode plain
+/// `git` would open pull requests on it.
+#[test]
+fn gh_exec_needs_git_and_gh_mutate_needs_git_and_shell() {
+    assert_eq!(
+        declared("gh.exec"),
+        ["git"],
+        "expected gh.exec capabilities: [git] | received: {:?}",
+        declared("gh.exec")
+    );
+    assert_eq!(
+        declared("gh.mutate"),
+        ["git", "shell"],
+        "expected gh.mutate capabilities: [git, shell] | received: {:?}",
+        declared("gh.mutate")
+    );
+    let readonly = consent_preset(ManifestProfile::Readonly);
+    assert!(
+        readonly.is_granted("git") && !readonly.is_granted("shell"),
+        "expected readonly to grant git and refuse shell | received: {readonly:?}"
+    );
+}
+
+/// `readonly` grants `library` and refuses `fsWrite`, so every catalog
+/// method that writes files must name `fsWrite` too — listing only
+/// `library` or `checkpoints` would let the "no writes" profile write.
+#[test]
+fn every_library_and_snapshot_writer_declares_fs_write() {
+    for method in [
+        "library.apply",
+        "library.remove",
+        "library.undo",
+        "snapshot.revert",
+    ] {
+        let capabilities = declared(method);
+        assert!(
+            capabilities.contains(&"fsWrite"),
+            "expected {method} capabilities to contain fsWrite | received: {capabilities:?}"
+        );
+    }
+    let readonly = consent_preset(ManifestProfile::Readonly);
+    assert!(
+        readonly.is_granted("library") && !readonly.is_granted("fsWrite"),
+        "expected readonly to grant library and refuse fsWrite | received: {readonly:?}"
+    );
 }

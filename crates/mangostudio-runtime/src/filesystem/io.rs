@@ -2681,6 +2681,36 @@ mod tests {
         );
     }
 
+    /// `/proc/self/status` stats as zero bytes, so the pre-read size check
+    /// passes trivially: the ceiling must bind the bytes actually streamed,
+    /// while a ceiling it fits under still reads the entry in full.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_stat_less_procfs_file_is_bounded_by_the_bytes_actually_read() {
+        let policy = unrestricted();
+        let status = Path::new("/proc/self/status");
+        let token = CancellationToken::new();
+
+        let bounded = read(&policy, status, 64, &token).map(|observed| observed.bytes.len());
+        let message = bounded.as_ref().err().map(|error| error.message.clone());
+        assert!(
+            message
+                .as_deref()
+                .is_some_and(|message| message.contains("at least 65 bytes; limit is 64")),
+            "expected a 64-byte ceiling to refuse at least 65 bytes read | received: {bounded:?}"
+        );
+
+        let full = read(&policy, status, 1024 * 1024, &token).map(|observed| observed.bytes);
+        let text = full
+            .as_ref()
+            .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+        assert!(
+            text.as_deref().is_ok_and(|text| text.contains("Name:")),
+            "expected the full procfs entry under a 1 MiB ceiling | received: {:?}",
+            text.map_err(|error| error.message.clone())
+        );
+    }
+
     #[test]
     fn cancellable_hash_checks_after_its_final_read() {
         struct CancellingReader {

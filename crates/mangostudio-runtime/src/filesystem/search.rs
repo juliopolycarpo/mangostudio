@@ -1289,6 +1289,26 @@ mod tests {
         );
     }
 
+    /// A pre-cancelled grep is refused before it compiles its policy, its
+    /// pattern, or touches the path: the invalid pattern and missing root
+    /// here would each fail differently if any of that work ran first.
+    #[test]
+    fn grep_refuses_a_pre_cancelled_call_before_any_work() {
+        let root = scratch_dir("filesystem-search-precancel");
+        let cancelled = token();
+        cancelled.cancel();
+        let params = grep_params(&root.join("missing"), "(unclosed");
+
+        let refused = grep(params, &cancelled);
+        let code = refused.as_ref().err().map(|error| error.code.clone());
+        assert_eq!(
+            code.as_deref(),
+            Some(codes::CANCELLED),
+            "expected a pre-cancelled grep refused as {} | received: {refused:?}",
+            codes::CANCELLED
+        );
+    }
+
     #[test]
     fn search_roots_must_be_authorized_before_the_walk_starts() {
         let dir = scratch_dir("filesystem-search-root-policy");

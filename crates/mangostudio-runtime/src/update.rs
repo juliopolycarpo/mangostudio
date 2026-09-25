@@ -8,7 +8,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
@@ -16,6 +16,7 @@ use mango_protocol::error::{RemoteError, codes};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::runtime::Handle;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::blocking::run_blocking;
@@ -193,6 +194,9 @@ struct Session {
     owner: String,
     transfer: StagedTransfer,
     _lock: SlotUpdateLock,
+    /// Tokio's `Instant`, not std's: it is the std clock outside a paused
+    /// runtime, and it lets `an_abandoned_session_expires_and_removes_its_stage`
+    /// drive the inactivity deadline on a paused test clock.
     touched: Instant,
 }
 
@@ -526,35 +530,24 @@ fn transfer_error(error: TransferError) -> RemoteError {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
     use std::future::Future;
-    #[cfg(unix)]
     use std::pin::Pin;
 
-    #[cfg(unix)]
     use mango_protocol::contract::Contract;
-    #[cfg(unix)]
     use mango_protocol::frame::PeerInfo;
-    #[cfg(unix)]
     use mango_protocol::port::port_pair;
-    #[cfg(unix)]
     use mango_protocol::session::{Session as ProtocolSession, SessionOptions};
+    use mangostudio_runtime_contract::errors::RUNTIME_UPDATE_REFUSED;
     use sha2::{Digest, Sha256};
 
     use super::*;
-    #[cfg(unix)]
     use crate::ports::audit::NoopAudit;
-    #[cfg(unix)]
     use crate::ports::authorization::Authorization;
-    #[cfg(unix)]
     use crate::ports::clock::SystemClock;
-    #[cfg(any(unix, windows))]
     use crate::slot_publish::read_slot_current;
 
-    #[cfg(unix)]
     struct GrantsUpdate;
 
-    #[cfg(unix)]
     impl Authorization for GrantsUpdate {
         fn missing_capabilities<'a>(
             &'a self,
@@ -565,13 +558,44 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     fn peer(role: &str) -> PeerInfo {
         PeerInfo {
             name: format!("update-test-{role}"),
             version: "0.0.0".into(),
             role: role.into(),
         }
+    }
+
+    /// Serves the three registered update methods over a real protocol
+    /// session guarded by `authorization`, returning `(hub, runtime)`.
+    async fn serve_update(
+        binding: &UpdateBinding,
+        authorization: Arc<dyn Authorization>,
+    ) -> (ProtocolSession, ProtocolSession) {
+        let exclusivity: Arc<dyn CallExclusivity> =
+            Arc::new(UpdateExclusivityTracker::new(binding.service.clone()));
+        let registry = register(
+            Registry::with_ports_and_exclusivity(
+                Arc::new(NoopAudit),
+                Arc::new(SystemClock),
+                exclusivity.clone(),
+            ),
+            binding,
+            exclusivity,
+        );
+        let (hub_port, runtime_port) = port_pair();
+        let (hub, _hub_driver) = ProtocolSession::spawn(hub_port, SessionOptions::new(peer("hub")));
+        let (runtime, _runtime_driver) =
+            ProtocolSession::spawn(runtime_port, SessionOptions::new(peer("runtime")));
+        hub.ready().await.unwrap();
+        runtime.ready().await.unwrap();
+        let contract =
+            Contract::from_catalog(mangostudio_runtime_contract::catalog::catalog().clone())
+                .unwrap();
+        crate::serve::serve(&contract, &runtime, registry, authorization, "remote")
+            .unwrap()
+            .persist();
+        (hub, runtime)
     }
 
     fn scratch(name: &str) -> PathBuf {
@@ -672,35 +696,7 @@ mod tests {
     async fn registered_update_round_trips_over_the_runtime_contract() {
         let home = scratch("wire");
         let binding = UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.clone(), false);
-        let exclusivity: Arc<dyn CallExclusivity> =
-            Arc::new(UpdateExclusivityTracker::new(binding.service.clone()));
-        let registry = register(
-            Registry::with_ports_and_exclusivity(
-                Arc::new(NoopAudit),
-                Arc::new(SystemClock),
-                exclusivity.clone(),
-            ),
-            &binding,
-            exclusivity,
-        );
-        let (hub_port, runtime_port) = port_pair();
-        let (hub, _hub_driver) = ProtocolSession::spawn(hub_port, SessionOptions::new(peer("hub")));
-        let (runtime, _runtime_driver) =
-            ProtocolSession::spawn(runtime_port, SessionOptions::new(peer("runtime")));
-        hub.ready().await.unwrap();
-        runtime.ready().await.unwrap();
-        let contract =
-            Contract::from_catalog(mangostudio_runtime_contract::catalog::catalog().clone())
-                .unwrap();
-        crate::serve::serve(
-            &contract,
-            &runtime,
-            registry,
-            Arc::new(GrantsUpdate),
-            "remote",
-        )
-        .unwrap()
-        .persist();
+        let (hub, runtime) = serve_update(&binding, Arc::new(GrantsUpdate)).await;
 
         let bytes = b"binary";
         let params = begin_params(bytes);
@@ -987,6 +983,291 @@ mod tests {
             b"pairing bytes"
         );
         assert!(!slot.join("runtime-update.lock").exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// The slot's `runtime.json` as raw JSON, so a test sees exactly which
+    /// keys a commit wrote or removed.
+    fn slot_config(slot: RuntimeSlot, home: &std::path::Path) -> Value {
+        let path = slot_dir(slot, home).join("runtime.json");
+        let raw = std::fs::read(&path).unwrap_or_else(|error| {
+            panic!("expected {} readable | received: {error}", path.display())
+        });
+        serde_json::from_slice(&raw).expect("runtime.json is JSON")
+    }
+
+    /// Update stage files left in the slot directory.
+    fn stages(slot: RuntimeSlot, home: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(slot_dir(slot, home))
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .filter(|name| name.starts_with(".mangostudio-runtime.incoming-"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Runs one whole begin/chunk/commit over the wire with `source_sha`
+    /// merged into the begin params (`None` omits the key).
+    async fn update_with_source(
+        hub: &ProtocolSession,
+        version: &str,
+        source_sha: Option<Value>,
+    ) -> Value {
+        let bytes = format!("runtime-{version}").into_bytes();
+        let mut params = begin_params(&bytes);
+        params.version = version.into();
+        let mut begin = json!({
+            "version": params.version,
+            "digest": params.digest,
+            "totalBytes": params.total_bytes,
+        });
+        if let Some(source_sha) = source_sha {
+            begin["sourceSha"] = source_sha;
+        }
+        let begun = hub.request("runtime.update.begin", begin).await.unwrap();
+        let id = begun["sessionId"].as_str().unwrap().to_owned();
+        hub.request(
+            "runtime.update.chunk",
+            json!({ "sessionId": id, "seq": 0, "bytesBase64": STANDARD.encode(&bytes) }),
+        )
+        .await
+        .unwrap();
+        hub.request("runtime.update.commit", json!({ "sessionId": id }))
+            .await
+            .unwrap()
+    }
+
+    /// A rolling channel reuses one version string across builds, so the
+    /// commit is the only provenance: it is recorded, cleared (not left
+    /// stale) when a later build omits it or sends null, and a value that is
+    /// not a lowercase commit sha — or not a string at all — is refused before
+    /// anything is staged, leaving the previous config in place.
+    #[tokio::test]
+    async fn source_sha_is_recorded_cleared_and_refused_before_staging() {
+        let home = scratch("source-sha");
+        let binding = UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.clone(), false);
+        let (hub, runtime) = serve_update(&binding, Arc::new(GrantsUpdate)).await;
+
+        let steps: [(&str, Option<Value>, Value); 4] = [
+            ("1.1.0", Some(json!("abc1234")), json!("abc1234")),
+            ("1.2.0", None, Value::Null),
+            ("1.3.0", Some(json!("def5678")), json!("def5678")),
+            ("1.4.0", Some(Value::Null), Value::Null),
+        ];
+        for (version, sent, expected) in steps {
+            update_with_source(&hub, version, sent.clone()).await;
+            let recorded = slot_config(RuntimeSlot::Remote, &home)
+                .get("sourceSha")
+                .cloned()
+                .unwrap_or(Value::Null);
+            assert_eq!(
+                recorded, expected,
+                "expected sourceSha after {version} with {sent:?}: {expected} | received: {recorded}"
+            );
+        }
+
+        let bytes = b"new-runtime";
+        let mut params = begin_params(bytes);
+        params.version = "1.5.0".into();
+        for (sent, expected_reason) in [
+            (
+                json!(format!("{}-and-then-some", "0".repeat(64))),
+                Some("invalid_source_sha"),
+            ),
+            (json!("ABC1234"), Some("invalid_source_sha")),
+            (json!("abc12"), Some("invalid_source_sha")),
+            // The wire schema types sourceSha as string|null, so a number
+            // never reaches the handler at all.
+            (json!(1_234_567), None),
+        ] {
+            let refused = hub
+                .request(
+                    "runtime.update.begin",
+                    json!({
+                        "version": params.version,
+                        "digest": params.digest,
+                        "totalBytes": params.total_bytes,
+                        "sourceSha": sent,
+                    }),
+                )
+                .await
+                .expect_err("an invalid sourceSha must be refused");
+            let reason = refused
+                .details
+                .as_ref()
+                .and_then(|details| details.get("reason"))
+                .and_then(Value::as_str);
+            match expected_reason {
+                Some(expected) => assert_eq!(
+                    (refused.code.as_str(), reason),
+                    (RUNTIME_UPDATE_REFUSED, Some(expected)),
+                    "expected {sent} refused as ({RUNTIME_UPDATE_REFUSED}, {expected}) | received: {refused:?}"
+                ),
+                None => assert_eq!(
+                    refused.code,
+                    codes::INVALID_PARAMS,
+                    "expected numeric {sent} refused as {} | received: {refused:?}",
+                    codes::INVALID_PARAMS
+                ),
+            }
+            let active = binding.service.is_active();
+            let staged = stages(RuntimeSlot::Remote, &home);
+            let version = slot_config(RuntimeSlot::Remote, &home)["version"].clone();
+            assert_eq!(
+                (active, staged.as_slice(), version.clone()),
+                (false, [].as_slice(), json!("1.4.0")),
+                "expected (active, stages, version) = (false, [], 1.4.0) after refusing {sent} | \
+                 received: ({active}, {staged:?}, {version})"
+            );
+        }
+        runtime.close_now(4000, None);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A machine whose owner denied `allow.update` refuses `begin` at the
+    /// consent guard: DENIED naming `update`, and no lock, stage, or version
+    /// directory ever appears in the slot.
+    #[tokio::test]
+    async fn begin_is_denied_before_staging_when_update_consent_is_withheld() {
+        use crate::consent::authorization::ConsentAuthorization;
+        use crate::consent::source::ConsentSource;
+        use crate::runtime_home::write_runtime_slot_config;
+
+        let home = scratch("update-denied");
+        write_runtime_slot_config(
+            RuntimeSlot::Host,
+            &home,
+            &[("allow", Some(json!({ "update": false })))],
+        )
+        .unwrap();
+        let binding = UpdateBinding::new_with_restart(RuntimeSlot::Host, home.clone(), false);
+        let authorization =
+            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home.clone()));
+        let (hub, runtime) = serve_update(&binding, Arc::new(authorization)).await;
+
+        let mut params = begin_params(b"next");
+        params.version = "1.1.0".into();
+        let denied = hub
+            .request(
+                "runtime.update.begin",
+                json!({
+                    "version": params.version,
+                    "digest": params.digest,
+                    "totalBytes": params.total_bytes,
+                }),
+            )
+            .await
+            .expect_err("update consent was withheld");
+        let missing = denied
+            .details
+            .as_ref()
+            .map(|details| details["missing"].clone());
+        assert_eq!(
+            (denied.code.as_str(), missing.clone()),
+            (codes::DENIED, Some(json!(["update"]))),
+            "expected (DENIED, missing [update]) | received: ({}, {missing:?})",
+            denied.code
+        );
+        let slot = slot_dir(RuntimeSlot::Host, &home);
+        let present: Vec<_> = ["1.1.0", "runtime-update.lock", "current"]
+            .into_iter()
+            .filter(|name| slot.join(name).exists())
+            .collect();
+        let staged = stages(RuntimeSlot::Host, &home);
+        assert_eq!(
+            (present.as_slice(), staged.as_slice()),
+            ([].as_slice(), [].as_slice()),
+            "expected no version dir, lock, pointer, or stage after a denied begin | \
+             received: ({present:?}, {staged:?})"
+        );
+        runtime.close_now(4000, None);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// Only exact canonical base64 is accepted: a foreign alphabet, missing
+    /// padding, non-zero trailing bits and embedded whitespace are each
+    /// refused as `invalid_base64` without writing a byte or advancing the
+    /// sequence, so the first valid chunk still lands as seq 0.
+    #[test]
+    fn a_non_canonical_base64_chunk_is_refused_without_writing() {
+        let home = scratch("non-canonical-chunk");
+        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let begun = service.begin("owner", begin_params(b"next")).unwrap();
+        let id = begun["sessionId"].as_str().unwrap().to_owned();
+        for encoded in ["*not-base64*", "bmV4dA", "bmV4dB==", "bmV4 dA=="] {
+            let refused = service
+                .chunk(
+                    "owner",
+                    ChunkParams {
+                        session_id: id.clone(),
+                        seq: 0.0,
+                        bytes_base64: encoded.into(),
+                    },
+                )
+                .expect_err("non-canonical base64 must be refused");
+            let reason = refused
+                .details
+                .as_ref()
+                .and_then(|details| details["reason"].as_str().map(str::to_owned));
+            assert_eq!(
+                reason.as_deref(),
+                Some("invalid_base64"),
+                "expected {encoded:?} refused as invalid_base64 | received: {refused:?}"
+            );
+        }
+        let accepted = service
+            .chunk(
+                "owner",
+                ChunkParams {
+                    session_id: id,
+                    seq: 0.0,
+                    bytes_base64: STANDARD.encode(b"next"),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            accepted["receivedBytes"],
+            json!(4),
+            "expected the first valid chunk at seq 0 to leave 4 received bytes | received: {accepted}"
+        );
+        service.close_owner("owner");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// An abandoned session stays whole until its inactivity deadline, then
+    /// the scheduled expiry discards it: the stage file and the slot lock are
+    /// both gone and the service no longer reports an update in progress.
+    #[tokio::test(start_paused = true)]
+    async fn an_abandoned_session_expires_and_removes_its_stage() {
+        let home = scratch("expiry");
+        let service = Arc::new(UpdateService::new(RuntimeSlot::Remote, home.clone()));
+        let begun = service.begin("owner", begin_params(b"next")).unwrap();
+        let id = begun["sessionId"].as_str().unwrap().to_owned();
+        let slot = slot_dir(RuntimeSlot::Remote, &home);
+        let stage = slot.join(format!(".mangostudio-runtime.incoming-{id}"));
+        let lock = slot.join("runtime-update.lock");
+        schedule_expiration(&Handle::current(), &service, id);
+
+        tokio::time::sleep(SESSION_TIMEOUT - Duration::from_secs(1)).await;
+        let before = (service.is_active(), stage.exists(), lock.exists());
+        assert_eq!(
+            before,
+            (true, true, true),
+            "expected (active, stage, lock) = (true, true, true) just before the deadline | \
+             received: {before:?}"
+        );
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let after = (service.is_active(), stage.exists(), lock.exists());
+        assert_eq!(
+            after,
+            (false, false, false),
+            "expected (active, stage, lock) = (false, false, false) after the deadline | \
+             received: {after:?}"
+        );
         std::fs::remove_dir_all(home).unwrap();
     }
 }

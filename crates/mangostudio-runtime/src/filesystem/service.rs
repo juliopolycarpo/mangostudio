@@ -2074,4 +2074,375 @@ mod tests {
         assert!(!source.exists());
         assert_eq!(std::fs::read(&destination).unwrap(), b"private");
     }
+
+    /// Asserts a pre-cancelled mutation refused as CANCELLED and left every
+    /// fixture byte, the chat's freshness entry and the lock table as they
+    /// were, so no method can start work after its caller gave up.
+    fn assert_refused_before_work(
+        method: &str,
+        service: &Service,
+        result: Result<Value, RemoteError>,
+        untouched: &[(&Path, &[u8])],
+        ledger_entries: usize,
+    ) {
+        let error = result.expect_err("a pre-cancelled call must be refused");
+        assert_eq!(
+            error.code,
+            codes::CANCELLED,
+            "expected {method} refused as {} | received: {error:?}",
+            codes::CANCELLED
+        );
+        for (path, bytes) in untouched {
+            let found = std::fs::read(path).ok();
+            assert_eq!(
+                found.as_deref(),
+                Some(*bytes),
+                "expected {method} to leave {} untouched | received: {found:?}",
+                path.display()
+            );
+        }
+        let entries = lock(&service.state.ledger).len();
+        let active = service.state.locks.active_paths();
+        assert_eq!(
+            (entries, active),
+            (ledger_entries, 0),
+            "expected {method} to leave (ledger entries, active locks) = ({ledger_entries}, 0) | \
+             received: ({entries}, {active})"
+        );
+    }
+
+    fn cancelled() -> CancellationToken {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        cancel
+    }
+
+    #[tokio::test]
+    async fn edit_refuses_a_pre_cancelled_call_before_work() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"before\n").await;
+        let result = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"file", "resolvedPath":path,
+                    "oldString":"before", "newString":"after"
+                })),
+                ResponseBudget::unbounded(),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work("fs.edit-file", &service, result, &[(&path, b"before\n")], 1);
+    }
+
+    #[tokio::test]
+    async fn replace_range_refuses_a_pre_cancelled_call_before_work() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"before\n").await;
+        let result = Arc::clone(&service)
+            .replace_range(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"file", "resolvedPath":path,
+                    "startLine":1, "endLine":1, "content":"after\n"
+                })),
+                ResponseBudget::unbounded(),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work(
+            "fs.replace-range",
+            &service,
+            result,
+            &[(&path, b"before\n")],
+            1,
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_refuses_a_pre_cancelled_call_before_work() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"keep me\n").await;
+        let result = Arc::clone(&service)
+            .delete(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputPath":"file", "resolvedPath":path
+                })),
+                ResponseBudget::unbounded(),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work(
+            "fs.delete-file",
+            &service,
+            result,
+            &[(&path, b"keep me\n")],
+            1,
+        );
+    }
+
+    #[tokio::test]
+    async fn move_refuses_a_pre_cancelled_call_before_work() {
+        let (home, service) = fixture();
+        let source = home.join("source");
+        let destination = home.join("destination");
+        seed_and_read(&service, &source, b"moving\n").await;
+        let result = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                ResponseBudget::unbounded(),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work(
+            "fs.move-file",
+            &service,
+            result,
+            &[(&source, b"moving\n")],
+            1,
+        );
+        assert!(
+            !destination.exists(),
+            "expected no move destination after a pre-cancelled move | received: {} present",
+            destination.display()
+        );
+    }
+
+    #[tokio::test]
+    async fn list_directory_refuses_a_pre_cancelled_call_before_listing() {
+        let (home, service) = fixture();
+        std::fs::write(home.join("entry"), b"").unwrap();
+        let result = Arc::clone(&service)
+            .list(
+                decode(json!({"inputPath":".","resolvedPath":home.to_path_buf()})),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work("fs.list-directory", &service, result, &[], 0);
+    }
+
+    /// Once a write has begun its I/O, a cancel that arrives cannot abandon it
+    /// half-done: the call finishes, reports every byte, and the file holds
+    /// the whole new content. The fake cancels from inside the write itself,
+    /// which is unambiguously after the last cancellation point.
+    #[tokio::test]
+    async fn a_write_already_under_way_when_cancelled_finishes_and_reports_all_bytes() {
+        struct CancellingWriteIo {
+            cancel: CancellationToken,
+        }
+
+        impl WriteIo for CancellingWriteIo {
+            fn write_atomic_if_unchanged(
+                &self,
+                policy: &CompiledPolicy,
+                path: &Path,
+                expected: &[u8],
+                bytes: &[u8],
+            ) -> Result<f64, RemoteError> {
+                self.cancel.cancel();
+                io::write_atomic_if_unchanged(policy, path, expected, bytes)
+            }
+        }
+
+        let cancel = CancellationToken::new();
+        let (home, service) = fixture_with_write_io(Arc::new(CancellingWriteIo {
+            cancel: cancel.clone(),
+        }));
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"before\n").await;
+        let content = "x".repeat(1024 * 1024);
+        let result = Arc::clone(&service)
+            .write(
+                write_params(&path, &content),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await;
+        let written = result
+            .as_ref()
+            .map(|value| value["result"]["bytesWritten"].clone());
+        assert_eq!(
+            written.as_ref().ok(),
+            Some(&json!(content.len())),
+            "expected the started write to report {} bytes | received: {:?}",
+            content.len(),
+            result.as_ref().map_err(|error| error.message.clone())
+        );
+        let on_disk = std::fs::read(&path).unwrap();
+        assert!(
+            cancel.is_cancelled() && on_disk == content.as_bytes(),
+            "expected (cancelled, full content on disk) = (true, {} bytes) | received: ({}, {} bytes)",
+            content.len(),
+            cancel.is_cancelled(),
+            on_disk.len()
+        );
+    }
+
+    /// An unchanged size and mtime is taken as current without re-reading
+    /// the bytes. The file's content is swapped for same-length bytes and its
+    /// mtime put back: a snapshot delete, which must read, refuses it as
+    /// stale, while a snapshot-free delete trusts the metadata and proceeds —
+    /// proof the fast path skipped the read.
+    #[tokio::test]
+    async fn the_size_and_mtime_fast_path_skips_the_content_read() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"original").await;
+        let recorded = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, b"replaced").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(recorded)
+            .unwrap();
+        let delete = |capture: bool| {
+            Arc::clone(&service).delete(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":capture,
+                    "inputPath":"file", "resolvedPath":path
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+        };
+
+        let reading = delete(true).await.map_err(|error| error.details);
+        assert_eq!(
+            reading
+                .as_ref()
+                .err()
+                .and_then(|details| details.as_ref().map(|d| d["kind"].clone())),
+            Some(json!("stale_file")),
+            "expected the reading delete to see the swapped bytes as stale_file | received: {reading:?}"
+        );
+        let fast = delete(false).await;
+        assert!(
+            fast.is_ok() && !path.exists(),
+            "expected the metadata fast path to delete without reading | received: {:?}, exists {}",
+            fast.map_err(|error| error.message),
+            path.exists()
+        );
+    }
+
+    /// Every path-taking method refuses a symlink that leaves the policy's
+    /// containment root, one case per method so a new method that skips the
+    /// check is visible here; the link's target is never touched.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn every_method_refuses_a_symlink_that_escapes_the_containment_root() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let workspace = home.join("workspace");
+        let outside = home.join("outside");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let secret = outside.join("secret.txt");
+        std::fs::write(&secret, b"outside\n").unwrap();
+        let link = workspace.join("link.txt");
+        symlink(&secret, &link).unwrap();
+        let dir_link = workspace.join("linked-dir");
+        symlink(&outside, &dir_link).unwrap();
+        // Freshness is already satisfied, so any refusal is containment's.
+        lock(&service.state.ledger).record_read(
+            "chat",
+            &link,
+            b"outside\n",
+            f64::NAN,
+            ReadObservation::WholeFile,
+        );
+        let policy = json!({"allowedRoots":[],"deniedRoots":[],"containmentRoot":workspace});
+        let mutation = |extra: Value| {
+            let mut params = json!({
+                "chatId":"chat", "captureSnapshot":false, "pathPolicy":policy,
+                "inputPath":"link.txt", "resolvedPath":link
+            });
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            params
+        };
+        let unbounded = ResponseBudget::unbounded;
+        let token = CancellationToken::new;
+        let results: Vec<(&str, Result<Value, RemoteError>)> = vec![
+            (
+                "fs.write-file",
+                Arc::clone(&service)
+                    .write(
+                        decode(mutation(json!({"content":"pwned\n"}))),
+                        false,
+                        unbounded(),
+                        token(),
+                    )
+                    .await,
+            ),
+            (
+                "fs.edit-file",
+                Arc::clone(&service)
+                    .edit(
+                        decode(mutation(json!({"oldString":"outside","newString":"pwned"}))),
+                        unbounded(),
+                        token(),
+                    )
+                    .await,
+            ),
+            (
+                "fs.replace-range",
+                Arc::clone(&service)
+                    .replace_range(
+                        decode(mutation(
+                            json!({"startLine":1,"endLine":1,"content":"pwned\n"}),
+                        )),
+                        unbounded(),
+                        token(),
+                    )
+                    .await,
+            ),
+            (
+                "fs.delete-file",
+                Arc::clone(&service)
+                    .delete(decode(mutation(json!({}))), unbounded(), token())
+                    .await,
+            ),
+            (
+                "fs.list-directory",
+                Arc::clone(&service)
+                    .list(
+                        decode(json!({
+                            "inputPath":"linked-dir", "resolvedPath":dir_link, "pathPolicy":policy
+                        })),
+                        token(),
+                    )
+                    .await,
+            ),
+        ];
+        for (method, result) in results {
+            let kind = result
+                .as_ref()
+                .err()
+                .and_then(|error| error.details.as_ref())
+                .map(|details| details["kind"].clone());
+            assert_eq!(
+                kind,
+                Some(json!("path_access")),
+                "expected {method} through an escaping link refused as path_access | received: {result:?}"
+            );
+        }
+        assert_eq!(
+            std::fs::read(&secret).unwrap(),
+            b"outside\n",
+            "expected the link target outside the root untouched"
+        );
+    }
 }

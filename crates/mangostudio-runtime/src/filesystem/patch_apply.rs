@@ -1374,6 +1374,47 @@ mod tests {
         assert_eq!(service.state.locks.active_paths(), 0);
     }
 
+    /// A pre-cancelled patch is refused as CANCELLED before planning reads
+    /// or writes anything: every target keeps its bytes, the added file is
+    /// never created, and no path lock is left behind.
+    #[tokio::test]
+    async fn a_pre_cancelled_patch_is_refused_before_any_operation() {
+        let (home, service) = fixture();
+        let update = home.join("update.txt");
+        let added = home.join("added.txt");
+        fs::write(&update, "old\n").unwrap();
+        mark_read(&service, &update);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let refused = apply(
+            Arc::clone(&service),
+            params(json!({"chatId":"chat","captureSnapshot":true,"operations":[
+                {"type":"update","inputPath":"update.txt","resolvedPath":update,"hunks":[{"lines":[{"type":"delete","content":"old","ending":"\n"},{"type":"add","content":"new","ending":"\n"}]}]},
+                {"type":"add","inputPath":"added.txt","resolvedPath":added,"content":"added\n"}
+            ]})),
+            cancel,
+        )
+        .await;
+        let code = refused.as_ref().err().map(|error| error.code.clone());
+        assert_eq!(
+            code.as_deref(),
+            Some(codes::CANCELLED),
+            "expected a pre-cancelled apply-patch refused as {} | received: {refused:?}",
+            codes::CANCELLED
+        );
+        let state = (
+            fs::read_to_string(&update).unwrap(),
+            added.exists(),
+            service.state.locks.active_paths(),
+        );
+        assert_eq!(
+            state,
+            ("old\n".to_owned(), false, 0),
+            "expected (update content, added exists, active locks) = (old, false, 0) | received: {state:?}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn revalidation_refuses_a_path_that_a_symlink_switches_outside_policy() {
