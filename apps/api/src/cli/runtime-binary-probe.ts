@@ -1,17 +1,19 @@
 /**
- * Probes the `mangostudio-runtime` binary that ships beside the hub executable.
- * Doctor reports it because stdio environments spawn it, and a version drift
- * between the two is refused at the protocol handshake.
+ * Probes the `mangostudio-runtime` binary the hub launches for Local: the
+ * `MANGOSTUDIO_RUNTIME_BINARY` override, the sibling beside a standalone hub,
+ * or a source checkout's newest cargo build. Doctor reports it because Local
+ * cannot start without it, and a version drift between the two is refused at
+ * the protocol handshake.
  */
 
 import { existsSync } from 'node:fs';
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
-import { getRuntimeBinaryPath } from '../lib/runtime-paths';
+import { locateLocalRuntimeBinary } from '../lib/runtime-paths';
 
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 
 export interface RuntimeBinaryProbe {
-  /** Absolute path that was checked; null when running from a source checkout. */
+  /** Absolute path that was checked; null when a source checkout has no build. */
   readonly path: string | null;
   readonly present: boolean;
   readonly version: string | null;
@@ -19,12 +21,15 @@ export interface RuntimeBinaryProbe {
 }
 
 /**
- * Reads the sibling runtime binary's version, or explains why it could not. The
+ * Reads the Local runtime binary's version, or explains why it could not. The
  * path is a parameter so tests can point it at a file with a known problem; it
- * defaults to the sibling the hub would actually spawn.
+ * defaults to the binary the hub would actually spawn.
+ *
+ * @example
+ * const probe = await probeRuntimeBinary(); // { path: '…/mangostudio-runtime', present: true, version: '0.1.1', error: null }
  */
 export async function probeRuntimeBinary(
-  path: string | null = getRuntimeBinaryPath()
+  path: string | null = locateLocalRuntimeBinary()
 ): Promise<RuntimeBinaryProbe> {
   if (!path) return { path: null, present: false, version: null, error: null };
   if (!existsSync(path)) return { path, present: false, version: null, error: null };

@@ -2646,10 +2646,11 @@ export const messages = {
       },
       runtime: {
         title: 'Binário do runtime',
-        source: 'Executa a partir do checkout do código-fonte via Bun',
-        missing: 'não encontrado ao lado do hub',
+        notBuilt:
+          'Não compilado neste checkout do código-fonte. Execute "cargo build -p mangostudio-runtime" para que o Local possa iniciar.',
+        missing: 'não encontrado; o Local não pode iniciar',
         versionMismatch:
-          'O binário do runtime informa uma versão diferente da do hub. Ambientes stdio recusarão o pareamento até que as duas coincidam.',
+          'O binário do runtime informa uma versão diferente da do hub. O Local e os ambientes stdio recusarão a conexão até que as duas coincidam.',
       },
       hostSlot: {
         title: 'Consentimento do host',

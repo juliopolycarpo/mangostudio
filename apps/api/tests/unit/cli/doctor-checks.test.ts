@@ -191,23 +191,36 @@ describe('checkRuntime', () => {
 describe('checkRuntimeBinary', () => {
   const at = '/opt/mangostudio/mangostudio-runtime';
 
-  it('treats a source checkout as fine: the launcher runs the workspace entry', () => {
+  // There is no other runtime to fall back to, so a checkout with nothing
+  // built is a Local that cannot start, and the row names the build command.
+  it('fails a source checkout with no build, naming the command that builds one', () => {
     const result = checkRuntimeBinary(
       { path: null, present: false, version: null, error: null },
-      '1.2.3'
+      'dev'
     );
-    expect(result.status).toBe('ok');
-    expect(result.detail).toContain('source checkout');
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('cargo build -p mangostudio-runtime');
+    expect(result.detail).toContain('Local cannot start');
   });
 
-  it('warns rather than fails when the binary is missing, since Local still works', () => {
+  it('fails when the sibling binary is missing, since Local cannot start without it', () => {
     const result = checkRuntimeBinary(
       { path: at, present: false, version: null, error: null },
       '1.2.3'
     );
-    expect(result.status).toBe('warn');
+    expect(result.status).toBe('fail');
     expect(result.detail).toContain(at);
-    expect(result.detail).toContain('stdio environments');
+    expect(result.detail).toContain('Reinstall MangoStudio');
+    expect(result.detail).toContain('MANGOSTUDIO_RUNTIME_BINARY');
+  });
+
+  it('passes a cargo build under a development hub, which has no release to match', () => {
+    const result = checkRuntimeBinary(
+      { path: at, present: true, version: '0.1.1', error: null },
+      'dev'
+    );
+    expect(result.status).toBe('ok');
+    expect(result.detail).toContain('v0.1.1');
   });
 
   it('warns when the binary and the hub come from different releases', () => {

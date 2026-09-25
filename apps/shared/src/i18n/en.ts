@@ -2645,10 +2645,11 @@ export const messages: Messages = {
       },
       runtime: {
         title: 'Runtime binary',
-        source: 'Runs from the source checkout through Bun',
-        missing: 'not found beside the hub',
+        notBuilt:
+          'Not built in this source checkout. Run "cargo build -p mangostudio-runtime" so Local can start.',
+        missing: 'not found; Local cannot start',
         versionMismatch:
-          'The runtime binary reports a different version than the hub. Stdio environments will refuse to pair until both match.',
+          'The runtime binary reports a different version than the hub. Local and stdio environments will refuse to connect until both match.',
       },
       hostSlot: {
         title: 'Host consent',

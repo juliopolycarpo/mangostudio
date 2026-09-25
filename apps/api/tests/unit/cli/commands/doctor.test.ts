@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -90,8 +90,14 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
     controller: new FakeProcessController(),
     readState: () => Promise.resolve(null),
     isCursorConfigured: () => false,
+    // A source checkout's cargo build: Local has a binary to launch.
     probeRuntimeBinary: () =>
-      Promise.resolve({ path: null, present: false, version: null, error: null }),
+      Promise.resolve({
+        path: '/repo/target/debug/mangostudio-runtime',
+        present: true,
+        version: '0.1.1',
+        error: null,
+      }),
     listChatGptConnectors: () => [],
     collectChatGptChecks: () =>
       Promise.resolve([
@@ -142,6 +148,13 @@ describe('runDoctor', () => {
 
   it('surfaces a runtime binary that drifted from the hub release', async () => {
     const lines: string[] = [];
+    // A released hub: a development one has no release for the binary to match.
+    const previousVersion = process.env.VERSION;
+    process.env.VERSION = '0.0.2';
+    onTestFinished(() => {
+      if (previousVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = previousVersion;
+    });
 
     await runDoctor(
       { ...DEFAULT_DOCTOR_ARGS },

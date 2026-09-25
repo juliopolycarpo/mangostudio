@@ -192,6 +192,32 @@ describe('machineService.status', () => {
     });
     expect((await service.status(LOCAL)).runtimeBinary.versionMatches).toBe(false);
   });
+
+  it('does not compare a cargo build against a development hub', async () => {
+    const { service } = makeService({
+      environment: () => ({
+        platform: 'linux',
+        standalone: false,
+        container: false,
+        serverHost: '127.0.0.1',
+        serverPort: 3001,
+        homeDir: '/home/j/.mango',
+        logsDir: '/home/j/.mango/logs',
+        configFile: '/home/j/.mango/config.toml',
+        version: 'dev',
+        hostSlotDir: '/home/j/.mango/runtime/host',
+        pid: 42,
+      }),
+      probeRuntimeBinary: () =>
+        Promise.resolve({
+          path: '/repo/target/debug/x',
+          present: true,
+          version: '0.1.1',
+          error: null,
+        }),
+    });
+    expect((await service.status(LOCAL)).runtimeBinary.versionMatches).toBeNull();
+  });
 });
 
 describe('machineService.doctor and logs', () => {
