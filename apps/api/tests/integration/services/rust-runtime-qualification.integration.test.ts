@@ -78,10 +78,7 @@ import {
   RuntimeConnectionManager,
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
-import {
-  RuntimeDiscoveryCache,
-  runtimeDiscoveryKey,
-} from '../../../src/services/runtime-client/runtime-discovery-cache';
+import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { setRuntimeTokenStoreForTests } from '../../../src/services/runtime-client/runtime-token-secrets';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { insertTestUser } from '../../support/factories';
@@ -885,10 +882,7 @@ describe('Real Rust runtime qualification', () => {
         expect(announced?.features).toMatchObject({ fsRead: true, probing: true, mcp: true });
         expect(client.manifest.features.fsRead).toBe(false);
 
-        const surface = await discoveryCache.resolve(
-          runtimeDiscoveryKey(TEST_USER.id, environmentId),
-          client
-        );
+        const surface = await manager.discoverImplementation(TEST_USER.id, environmentId);
         expect(surface?.fingerprint).toBe(announced?.fingerprint);
         expect(surface?.methods).toContain('runtime.discover');
         expect(surface?.methods).toContain('fs.read-file');

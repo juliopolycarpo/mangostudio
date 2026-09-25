@@ -8,7 +8,6 @@ import {
   type RuntimeDiscoverySource,
   runtimeDiscoveryKey,
 } from '../../../../src/services/runtime-client/runtime-discovery-cache';
-import { resolveRuntimeImplementation } from '../../../../src/services/runtime-client/runtime-implementation';
 
 const FEATURES = {
   git: true,
@@ -66,15 +65,22 @@ class FakeDiscoverySource implements RuntimeDiscoverySource {
   }
 }
 
-/** The connection manager's `getExistingClient`, backed by one connected peer. */
-class FakeConnections {
-  readonly asked: string[] = [];
-  constructor(readonly peer: RuntimeDiscoverySource) {}
+/** A connection whose `runtime.discover` never answers until the test fails it. */
+class StalledDiscoverySource implements RuntimeDiscoverySource {
+  readonly manifest: RuntimeCapabilityManifest;
+  readonly #pending = Promise.withResolvers<RuntimeDiscoverResult>();
 
-  readonly getClient = (userId: string, environmentId: string) => {
-    this.asked.push(`${userId}/${environmentId}`);
-    return Promise.resolve(this.peer);
-  };
+  constructor(fingerprint: string) {
+    this.manifest = manifestWith(fingerprint);
+  }
+
+  discoverImplementation(): Promise<RuntimeDiscoverResult> {
+    return this.#pending.promise;
+  }
+
+  fail(error: Error): void {
+    this.#pending.reject(error);
+  }
 }
 
 const KEY = runtimeDiscoveryKey('user-1', 'env-1');
@@ -151,26 +157,41 @@ describe('RuntimeDiscoveryCache', () => {
   });
 });
 
-describe('runtimeDiscoveryKey', () => {
-  it('joins the user and environment ids', () => {
-    expect(runtimeDiscoveryKey('user-1', 'local')).toBe('user-1:local');
+describe('RuntimeDiscoveryCache lifetime', () => {
+  it('forgets a cached surface', async () => {
+    const cache = new RuntimeDiscoveryCache();
+    await cache.resolve(KEY, new FakeDiscoverySource(BUILD_A));
+
+    cache.forget(KEY);
+    const again = new FakeDiscoverySource(BUILD_A);
+    await cache.resolve(KEY, again);
+
+    expect(again.calls).toBe(1);
+  });
+
+  it("does not hand a same-fingerprint reconnect the old connection's pending fetch", async () => {
+    const cache = new RuntimeDiscoveryCache();
+    const stalled = new StalledDiscoverySource(BUILD_A);
+    const abandoned = cache.resolve(KEY, stalled);
+
+    const reconnected = new FakeDiscoverySource(BUILD_A);
+    cache.observe(KEY, reconnected.manifest);
+    const surface = await cache.resolve(KEY, reconnected);
+
+    expect({ calls: reconnected.calls, fingerprint: surface?.fingerprint }).toEqual({
+      calls: 1,
+      fingerprint: BUILD_A,
+    });
+    stalled.fail(new Error('connection closed'));
+    await expect(abandoned).rejects.toThrow('connection closed');
+    // The old connection's failure must not evict the new connection's answer.
+    await cache.resolve(KEY, reconnected);
+    expect(reconnected.calls).toBe(1);
   });
 });
 
-describe('resolveRuntimeImplementation', () => {
-  it("answers the connected environment's surface through the cache", async () => {
-    const cache = new RuntimeDiscoveryCache();
-    const peer = new FakeDiscoverySource(BUILD_A);
-    const connections = new FakeConnections(peer);
-
-    const surface = await resolveRuntimeImplementation('user-1', 'env-1', {
-      cache,
-      getClient: connections.getClient,
-    });
-    await cache.resolve(KEY, peer);
-
-    expect(surface?.methods).toEqual(['runtime.discover', 'runtime.health']);
-    expect(connections.asked).toEqual(['user-1/env-1']);
-    expect(peer.calls).toBe(1);
+describe('runtimeDiscoveryKey', () => {
+  it('joins the user and environment ids', () => {
+    expect(runtimeDiscoveryKey('user-1', 'local')).toBe('user-1:local');
   });
 });

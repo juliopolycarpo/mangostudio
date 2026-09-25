@@ -298,6 +298,18 @@ export function createRuntimeLifecycleService(
   const activeByRun = new Map<string, ActiveRun>();
   const recentStreams = new Map<string, { userId: string; stream: EventBuffer }>();
 
+  /**
+   * The connected build's detailed surface for the panel, or undefined. A
+   * peer that cannot answer costs the view this one line, never the view.
+   */
+  const discoverImplementation = async (userId: string, environmentId: string) => {
+    try {
+      return await manager.discoverImplementation(userId, environmentId);
+    } catch {
+      return undefined;
+    }
+  };
+
   const installKey = (userId: string, environmentId: string): string =>
     `${userId}:${environmentId}`;
 
@@ -520,6 +532,7 @@ export function createRuntimeLifecycleService(
         stagedRuntime: await resolveStagedRuntime(transportKind, cached?.health ?? null),
         ...(status.state === 'connected'
           ? {
+              implementation: await discoverImplementation(userId, environmentId),
               enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true,
               directoryHashDomain: directoryHashDomainOf(status.manifest?.directoryHashDomain),
               publishesWindowsSlot: status.manifest?.publishesWindowsSlot === true,

@@ -146,6 +146,39 @@ describe('buildRuntimeLifecycleView', () => {
     expect(disconnected.directoryHashDomain).toBeUndefined();
   });
 
+  it('passes the connected build implementation through, and omits it when absent', () => {
+    const implementation = {
+      schema: 1,
+      fingerprint: 'f'.repeat(64),
+      features: {
+        git: false,
+        probing: false,
+        mcp: false,
+        library: false,
+        checkpoints: false,
+        fsRead: true,
+        fsWrite: false,
+        shell: false,
+        update: false,
+        externalAgents: false,
+        terminal: false,
+      },
+      methods: ['fs.read-file', 'runtime.discover'],
+    };
+    const base = {
+      transportKind: 'ssh' as const,
+      health: health({ slot: 'remote' }),
+      readAtMs: 10_000,
+      connected: true,
+      nowMs: 11_000,
+    };
+
+    expect(buildRuntimeLifecycleView({ ...base, implementation }).implementation).toEqual(
+      implementation
+    );
+    expect(buildRuntimeLifecycleView(base).implementation).toBeUndefined();
+  });
+
   it('attaches manualCommands for websocket and http only', () => {
     const ws = buildRuntimeLifecycleView({
       transportKind: 'websocket',

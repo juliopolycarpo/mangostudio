@@ -682,8 +682,8 @@ export class RuntimeClient {
   /**
    * The methods and feature groups this peer's build implements
    * (`runtime.discover`). Only a peer that announced `implementation` in hello
-   * serves it; read it through `resolveRuntimeImplementation`, which caches
-   * it by fingerprint, rather than calling this per request.
+   * serves it; read it through `RuntimeConnectionManager.discoverImplementation`,
+   * which caches it by fingerprint, rather than calling this per request.
    *
    * @example
    * const { methods } = await client.discoverImplementation();

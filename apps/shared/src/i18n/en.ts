@@ -3067,6 +3067,7 @@ export const messages: Messages = {
         version: 'v{version}',
         slot: 'slot {slot}',
         digest: '{digest}…',
+        implementation: '{count} methods · build {fingerprint}',
         actions: {
           install: 'Install runtime',
           reinstall: 'Reinstall',

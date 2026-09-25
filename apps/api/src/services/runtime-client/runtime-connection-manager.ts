@@ -15,6 +15,7 @@ import {
   narrowRuntimeErrorCode,
   RUNTIME_ALREADY_BOUND_CLOSE_CODE,
   type RuntimeCapabilityManifest,
+  type RuntimeDiscoverResult,
   type RuntimeErrorCode,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
@@ -869,7 +870,25 @@ export class RuntimeConnectionManager {
     return connection.client;
   }
 
+  /**
+   * The detailed implementation surface of the environment's live runtime
+   * (`runtime.discover`), read through the fingerprint-keyed cache this
+   * manager invalidates. `undefined` for a peer that announced none; rejects
+   * like {@link getExistingClient} when nothing is connected.
+   *
+   * @example
+   * const surface = await manager.discoverImplementation(userId, environmentId);
+   */
+  async discoverImplementation(
+    userId: string,
+    environmentId: string
+  ): Promise<RuntimeDiscoverResult | undefined> {
+    const client = await this.getExistingClient(userId, environmentId);
+    return await this.#discoveryCache.resolve(runtimeDiscoveryKey(userId, environmentId), client);
+  }
+
   disconnect(userId: string, environmentId: string): void {
+    this.#discoveryCache.forget(runtimeDiscoveryKey(userId, environmentId));
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry) return;
 
@@ -970,6 +989,7 @@ export class RuntimeConnectionManager {
    * show the previous host.
    */
   clearHealth(userId: string, environmentId: string): void {
+    this.#discoveryCache.forget(runtimeDiscoveryKey(userId, environmentId));
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry) return;
     const hadPeer =

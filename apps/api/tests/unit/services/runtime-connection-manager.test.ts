@@ -31,10 +31,7 @@ import {
   type RuntimeEnvironmentConnector,
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
-import {
-  RuntimeDiscoveryCache,
-  runtimeDiscoveryKey,
-} from '../../../src/services/runtime-client/runtime-discovery-cache';
+import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { connectTestRuntime } from '../../support/runtime-fixture';
 
@@ -303,32 +300,63 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getStatus('user-1', 'devbox').offlineRuntimeCache).toBeUndefined();
   });
 
-  it('drops the cached runtime.discover surface when a reconnect announces another build', async () => {
-    const cache = new RuntimeDiscoveryCache();
-    const builds = [
-      new DiscoveringConnection('a'.repeat(64)),
-      new DiscoveringConnection('a'.repeat(64)),
-      new DiscoveringConnection('b'.repeat(64)),
-    ];
-    let next = 0;
-    const manager = new RuntimeConnectionManager({
-      resolveEnvironment: () => Promise.resolve(definition()),
-      connectors: { stdio: () => Promise.resolve(builds[next++] as DiscoveringConnection) },
-      discoveryCache: cache,
+  describe('runtime.discover cache', () => {
+    /** A manager whose every connect hands out the next of `builds`. */
+    function managerOver(builds: readonly DiscoveringConnection[]) {
+      let next = 0;
+      let drop: (() => void) | undefined;
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: {
+          stdio: (_definition, onUnavailable) => {
+            drop = onUnavailable;
+            return Promise.resolve(builds[next++] as DiscoveringConnection);
+          },
+        },
+        discoveryCache: new RuntimeDiscoveryCache(),
+      });
+      const reconnectAfterDrop = async () => {
+        drop?.();
+        await manager.connect('user-1', 'devbox', { force: true });
+      };
+      return { manager, reconnectAfterDrop };
+    }
+
+    it('drops the cached surface when a reconnect announces another build', async () => {
+      const builds = [
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('b'.repeat(64)),
+      ];
+      const { manager, reconnectAfterDrop } = managerOver(builds);
+
+      await manager.connect('user-1', 'devbox');
+      await manager.discoverImplementation('user-1', 'devbox');
+      await reconnectAfterDrop();
+      const sameBuild = await manager.discoverImplementation('user-1', 'devbox');
+      await reconnectAfterDrop();
+      const otherBuild = await manager.discoverImplementation('user-1', 'devbox');
+
+      expect(builds.map((build) => build.discoverCalls)).toEqual([1, 0, 1]);
+      expect(sameBuild?.fingerprint).toBe('a'.repeat(64));
+      expect(otherBuild?.fingerprint).toBe('b'.repeat(64));
     });
-    const key = runtimeDiscoveryKey('user-1', 'devbox');
-    const reconnect = async () => {
+
+    it('forgets the cached surface when the environment is disconnected deliberately', async () => {
+      const builds = [
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('a'.repeat(64)),
+      ];
+      const { manager } = managerOver(builds);
+
+      await manager.connect('user-1', 'devbox');
+      await manager.discoverImplementation('user-1', 'devbox');
       manager.disconnect('user-1', 'devbox');
-      return await manager.connect('user-1', 'devbox', { force: true });
-    };
+      await manager.connect('user-1', 'devbox', { force: true });
+      await manager.discoverImplementation('user-1', 'devbox');
 
-    await cache.resolve(key, await manager.connect('user-1', 'devbox'));
-    const sameBuild = await cache.resolve(key, await reconnect());
-    const otherBuild = await cache.resolve(key, await reconnect());
-
-    expect(builds.map((build) => build.discoverCalls)).toEqual([1, 0, 1]);
-    expect(sameBuild?.fingerprint).toBe('a'.repeat(64));
-    expect(otherBuild?.fingerprint).toBe('b'.repeat(64));
+      expect(builds.map((build) => build.discoverCalls)).toEqual([1, 1]);
+    });
   });
 
   // #792: the pull is bounded at half an hour, which no proxy or browser holds

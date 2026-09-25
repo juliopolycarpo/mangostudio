@@ -12,9 +12,10 @@
  * detailed surface to offer, and the answer is `undefined`.
  */
 
-import type {
-  RuntimeCapabilityManifest,
-  RuntimeDiscoverResult,
+import {
+  acceptedRuntimeImplementation,
+  type RuntimeCapabilityManifest,
+  type RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
 
 /** The slice of a runtime client this cache reads. */
@@ -25,7 +26,11 @@ export interface RuntimeDiscoverySource {
 
 interface CachedDiscovery {
   readonly fingerprint: string;
+  /** The connection the fetch was sent over. */
+  readonly source: RuntimeDiscoverySource;
   readonly discovery: Promise<RuntimeDiscoverResult>;
+  /** Set once the fetch answered; a settled answer describes the build, not the connection. */
+  settled?: RuntimeDiscoverResult;
 }
 
 /**
@@ -50,7 +55,19 @@ export class RuntimeDiscoveryCache {
   observe(key: string, manifest: RuntimeCapabilityManifest): void {
     const cached = this.#entries.get(key);
     if (!cached) return;
-    if (cached.fingerprint === manifest.implementation?.fingerprint) return;
+    if (cached.fingerprint === fingerprintOf(manifest)) return;
+    this.#entries.delete(key);
+  }
+
+  /**
+   * Drops whatever is cached for `key`. Called when the environment is
+   * disconnected deliberately or its transport changes, so a cache entry
+   * never outlives the environment it describes.
+   *
+   * @example
+   * cache.forget(runtimeDiscoveryKey(userId, environmentId));
+   */
+  forget(key: string): void {
     this.#entries.delete(key);
   }
 
@@ -60,7 +77,10 @@ export class RuntimeDiscoveryCache {
    * `undefined` for a peer that announced no implementation.
    *
    * Rejects when the peer answers a fingerprint other than the one it
-   * announced in hello, and caches nothing in that case.
+   * announced in hello, and caches nothing in that case. A fetch still in
+   * flight is shared only with its own connection: a reconnect with the same
+   * fingerprint asks again rather than waiting on a request the old
+   * connection may never answer.
    *
    * @example
    * const surface = await cache.resolve(key, client);
@@ -70,22 +90,31 @@ export class RuntimeDiscoveryCache {
     key: string,
     source: RuntimeDiscoverySource
   ): Promise<RuntimeDiscoverResult | undefined> {
-    const fingerprint = source.manifest.implementation?.fingerprint;
+    const fingerprint = fingerprintOf(source.manifest);
     if (fingerprint === undefined) return undefined;
 
     const cached = this.#entries.get(key);
-    if (cached?.fingerprint === fingerprint) return await cached.discovery;
+    if (cached?.fingerprint === fingerprint) {
+      if (cached.settled) return cached.settled;
+      if (cached.source === source) return await cached.discovery;
+    }
 
     const discovery = fetchDiscovery(source, fingerprint);
-    const entry = { fingerprint, discovery };
+    const entry: CachedDiscovery = { fingerprint, source, discovery };
     this.#entries.set(key, entry);
     try {
-      return await discovery;
+      entry.settled = await discovery;
+      return entry.settled;
     } catch (error) {
       if (this.#entries.get(key) === entry) this.#entries.delete(key);
       throw error;
     }
   }
+}
+
+/** The fingerprint of a descriptor this hub can interpret, or undefined. */
+function fingerprintOf(manifest: RuntimeCapabilityManifest): string | undefined {
+  return acceptedRuntimeImplementation(manifest.implementation)?.fingerprint;
 }
 
 async function fetchDiscovery(

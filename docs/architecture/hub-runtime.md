@@ -192,7 +192,11 @@ independent of the protocol version, and neither has to move for an additive met
   costs no round-trip. `runtime.discover` (no consent capability) answers the detailed surface
   — the sorted implemented methods beside the same ceiling and fingerprint — and the hub caches
   it per environment by fingerprint (`runtime-discovery-cache.ts`); a reconnect announcing
-  another fingerprint drops the cached surface. The fingerprint is a SHA-256 over the schema
+  another fingerprint, a deliberate disconnect, or a transport change drops the cached surface.
+  The environment card's runtime panel (`GET /environments/:id/runtime`, `implementation`) is
+  its reader. A descriptor the hub cannot interpret — another schema version, a missing key, a
+  fingerprint in another format — is dropped on its own at the handshake rather than refusing
+  the connection, and the hub then treats the peer as one that sent none. The fingerprint is a SHA-256 over the schema
   version, the sorted methods and the sorted implemented groups, so consent never moves it.
   The hub composes each effective feature as consented ∩ available ∩ implemented. For a peer
   that sends `implementation` a later consent grant shows up on the next health refresh while a
