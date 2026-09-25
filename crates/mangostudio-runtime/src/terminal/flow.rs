@@ -305,9 +305,11 @@ impl TerminalFlow {
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+
     use super::{
         ByteRing, ExitInfo, INFLIGHT_WINDOW_BYTES, OutputFrame, PENDING_MAX_BYTES,
-        SCROLLBACK_MAX_BYTES, TerminalFlow,
+        SCROLLBACK_MAX_BYTES, STANDARD, TerminalFlow,
     };
 
     #[test]
@@ -400,6 +402,80 @@ mod tests {
         assert!(frames.last().unwrap().end);
         assert_eq!(frames.iter().filter(|frame| frame.end).count(), 1);
         assert!(!flow.attached());
+    }
+
+    #[test]
+    fn an_exit_with_nothing_pending_emits_no_dropped_marker() {
+        let mut flow = TerminalFlow::new(64).unwrap();
+        flow.attach();
+        let mut frames = Vec::new();
+        let mut emit = |frame| {
+            frames.push(frame);
+            true
+        };
+        flow.on_data(b"done", &mut emit);
+        flow.on_exit(
+            ExitInfo {
+                exit_code: Some(0),
+                signal: None,
+            },
+            false,
+            &mut emit,
+        );
+        let kinds: Vec<_> = frames
+            .iter()
+            .map(|frame| frame.payload["kind"].clone())
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![serde_json::json!("data"), serde_json::json!("exit")],
+            "expected data then exit with no dropped marker | received {kinds:?}"
+        );
+    }
+
+    /// Live data bytes carried by `frames`.
+    fn data_bytes(frames: &[OutputFrame]) -> usize {
+        frames
+            .iter()
+            .filter(|frame| frame.payload["kind"] == "data")
+            .map(|frame| {
+                STANDARD
+                    .decode(frame.payload["data"].as_str().unwrap())
+                    .unwrap()
+                    .len()
+            })
+            .sum()
+    }
+
+    #[test]
+    fn replayed_scrollback_is_charged_to_the_inflight_window() {
+        let replay = 1024;
+        let mut flow = TerminalFlow::new(replay).unwrap();
+        flow.on_data(&vec![b'a'; replay], &mut |_| true);
+        assert_eq!(flow.attach().scrollback.len(), replay);
+        let room = INFLIGHT_WINDOW_BYTES - replay;
+        let mut live = Vec::new();
+        flow.on_data(&vec![b'b'; room + 5], &mut |frame| {
+            live.push(frame);
+            true
+        });
+        assert_eq!(
+            data_bytes(&live),
+            room,
+            "expected only the window left after a {replay}-byte replay | received {} live bytes",
+            data_bytes(&live)
+        );
+        let mut resumed = Vec::new();
+        flow.ack(5, &mut |frame| {
+            resumed.push(frame);
+            true
+        });
+        assert_eq!(
+            data_bytes(&resumed),
+            5,
+            "expected an ack of 5 to release exactly 5 held bytes | received {}",
+            data_bytes(&resumed)
+        );
     }
 
     #[test]
