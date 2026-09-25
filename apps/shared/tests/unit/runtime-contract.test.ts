@@ -2,10 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { defineContract } from '@mangostudio/protocol';
 import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '@mangostudio/shared/library';
 import {
+  effectiveTools,
   narrowRuntimeErrorCode,
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_NAME,
   RUNTIME_CONTRACT_VERSION,
+  RUNTIME_TOOL_GROUPS,
   RuntimeCapabilityManifestSchema,
 } from '@mangostudio/shared/runtime-contract';
 import Type from 'typebox';
@@ -263,5 +265,23 @@ describe('narrowRuntimeErrorCode', () => {
     expect(narrowRuntimeErrorCode('TIMEOUT')).toBe('TIMEOUT');
     expect(narrowRuntimeErrorCode('RUNTIME_UPDATE_REFUSED')).toBe('RUNTIME_UPDATE_REFUSED');
     expect(narrowRuntimeErrorCode('SOMETHING_FROM_THE_FUTURE')).toBe('INTERNAL');
+  });
+});
+
+describe('effectiveTools', () => {
+  it('is true when any tool group is effective', () => {
+    expect(effectiveTools({ git: false, fsRead: true })).toBe(true);
+  });
+
+  it('is false when no tool group is effective, whatever else is granted', () => {
+    const noGroups = Object.fromEntries(RUNTIME_TOOL_GROUPS.map((group) => [group, false]));
+    expect(effectiveTools(noGroups)).toBe(false);
+    expect(effectiveTools({})).toBe(false);
+  });
+
+  it('counts exactly the eight tool groups, not update or externalAgents', () => {
+    expect([...RUNTIME_TOOL_GROUPS].sort() as string[]).toEqual(
+      ['checkpoints', 'fsRead', 'fsWrite', 'git', 'library', 'mcp', 'probing', 'shell'].sort()
+    );
   });
 });

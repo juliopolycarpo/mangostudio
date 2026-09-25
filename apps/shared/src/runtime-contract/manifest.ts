@@ -188,6 +188,38 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
 export type RuntimeCapabilityManifest = Static<typeof RuntimeCapabilityManifestSchema>;
 
 /**
+ * The feature groups that count towards `features.tools`. `update` and
+ * `externalAgents` are capabilities, not tool groups.
+ */
+export const RUNTIME_TOOL_GROUPS = [
+  'git',
+  'probing',
+  'mcp',
+  'library',
+  'checkpoints',
+  'fsRead',
+  'fsWrite',
+  'shell',
+] as const satisfies readonly (keyof RuntimeCapabilityManifest['features'])[];
+
+/**
+ * `features.tools` for a set of *effective* feature flags: true when at least
+ * one tool group is usable. Pass flags that are already consented ∩ available
+ * ∩ implemented — ORing raw consent would claim tools for a group the machine
+ * or build cannot serve. An absent flag counts as unusable here.
+ *
+ * @example
+ * effectiveTools({ git: false, fsRead: true }); // true
+ */
+export function effectiveTools(
+  features: Partial<
+    Pick<RuntimeCapabilityManifest['features'], (typeof RUNTIME_TOOL_GROUPS)[number]>
+  >
+): boolean {
+  return RUNTIME_TOOL_GROUPS.some((group) => features[group] === true);
+}
+
+/**
  * What a hub claims about who reaches the machine its runtime serves.
  *
  * The one isolation fact a runtime cannot establish about itself. Looking from

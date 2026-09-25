@@ -21,9 +21,10 @@
  * handshake needs a reconnect before the hub offers it.
  */
 
-import type {
-  RuntimeCapabilityManifest,
-  RuntimeShellKind,
+import {
+  effectiveTools,
+  type RuntimeCapabilityManifest,
+  type RuntimeShellKind,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 
@@ -37,18 +38,7 @@ export function capabilityManifestFromHealth(
   const shells = allow.shell
     ? report.shells.filter((shell): shell is RuntimeShellKind => SHELL_KINDS.has(shell))
     : [];
-  const tools =
-    allow.fsRead ||
-    allow.fsWrite ||
-    allow.shell ||
-    allow.git ||
-    allow.mcp ||
-    allow.probing ||
-    allow.library ||
-    allow.checkpoints;
-
-  const allowedFeatures: RuntimeCapabilityManifest['features'] = {
-    tools,
+  const allowedFeatures: Omit<RuntimeCapabilityManifest['features'], 'tools'> = {
     git: allow.git && report.git.available,
     probing: allow.probing,
     mcp: allow.mcp,
@@ -161,10 +151,12 @@ function implementationCeiling(
 }
 
 function applyImplementationCeiling(
-  allowed: RuntimeCapabilityManifest['features'],
+  allowed: Omit<RuntimeCapabilityManifest['features'], 'tools'>,
   implemented?: RuntimeCapabilityManifest['features']
 ): RuntimeCapabilityManifest['features'] {
-  if (!implemented) return allowed;
+  // Every branch derives `tools` from effective groups only (#1100): ORing raw
+  // consent would claim tools for a group the machine or build cannot serve.
+  if (!implemented) return { tools: effectiveTools(allowed), ...allowed };
 
   const effective = {
     git: allowed.git && implemented.git,
@@ -186,20 +178,8 @@ function applyImplementationCeiling(
     ...(implemented.toolchain === undefined ? {} : { toolchain: implemented.toolchain }),
   } satisfies Omit<RuntimeCapabilityManifest['features'], 'tools'>;
 
-  return {
-    // This aggregate must describe at least one effective tool group. The
-    // permission and implementation operands can each be true for a different
-    // group, so intersecting their precomputed aggregates would be unsound.
-    tools: Boolean(
-      effective.git ||
-        effective.probing ||
-        effective.mcp ||
-        effective.library ||
-        effective.checkpoints ||
-        effective.fsRead ||
-        effective.fsWrite ||
-        effective.shell
-    ),
-    ...effective,
-  };
+  // The permission and implementation operands can each be true for a
+  // different group, so intersecting their precomputed aggregates would be
+  // unsound; only the effective groups decide.
+  return { tools: effectiveTools(effective), ...effective };
 }

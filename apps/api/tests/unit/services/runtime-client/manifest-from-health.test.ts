@@ -283,6 +283,24 @@ describe('capabilityManifestFromHealth', () => {
     });
   });
 
+  it('derives tools from effective groups, not raw consent, without a handshake (#1100)', () => {
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      git: { available: false },
+      profile: 'custom',
+      allow: { ...RUNTIME_CONSENT_PRESETS.none, git: true, update: true, externalAgents: true },
+    };
+
+    const refreshed = capabilityManifestFromHealth(report);
+
+    // git is consented but the binary is missing; update and externalAgents
+    // are not tool groups. No effective tool group remains.
+    expect({ tools: refreshed.features.tools, git: refreshed.features.git }).toEqual({
+      tools: false,
+      git: false,
+    });
+  });
+
   it('derives tools from capabilities that are both allowed and implemented', () => {
     const report: RuntimeHealthReport = {
       ...baseReport,
