@@ -736,14 +736,8 @@ bun run --filter @mangostudio/api test:integration
 > fallback. `tests/integration/services/local-rust-runtime.integration.test.ts`
 > qualifies Local itself through the real connector: the `host` slot, the
 > single-owner attestation, terminal revocation, reaping on disconnect, and a home
-> the TypeScript runtime wrote.
->
-> A test that reaches into a runtime's module state — the file-freshness registry
-> (`tests/support/runtime-file-freshness.ts`) or the MCP transport factory an
-> in-memory fixture replaces — cannot do that to a child process. Those files call
-> `installInProcessLocalRuntime()` from `tests/support/in-process-local-runtime.ts`
-> in `beforeAll`, which serves Local from the TypeScript runtime inside the test
-> process while keeping the real claim logic. Everything else talks to the binary.
+> the TypeScript runtime wrote. No API test imports the TypeScript runtime or
+> spawns it by path; `runtime-module-allow-list.test.ts` fails the lane if one does.
 
 > **Run API tests from the workspace.** `apps/api/bunfig.toml` declares the test
 > preload, and Bun resolves `bunfig.toml` relative to the current directory. Running
