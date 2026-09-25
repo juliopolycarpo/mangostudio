@@ -1670,6 +1670,154 @@ mod tests {
         );
     }
 
+    /// A probe that fails is re-probed next time rather than memoised as
+    /// absent. The binary is untouched between the two probes, so only a
+    /// cache that stored the failure could answer the second one.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_probe_is_not_memoised() {
+        let _exclusive = git_probe_test_lock().lock().await;
+        let state = scratch_home("probe-not-memoised-state");
+        let ready = state.join("ready");
+        let (_dir, path_var) = fake_git(
+            "probe-not-memoised",
+            &format!(
+                "[ -f {} ] || exit 1\necho 'git version 9.9.9'",
+                ready.display()
+            ),
+        );
+        let failures = super::ProbeFailureLog::new();
+        let sink = RecordingDiagnostics::default();
+
+        let first = probe_recorded("git", &path_var, &failures, &sink).await;
+        assert!(!first.available, "the first probe exits 1 and is absent");
+
+        std::fs::write(&ready, "").unwrap();
+        let second = probe_recorded("git", &path_var, &failures, &sink).await;
+        assert!(
+            second.available,
+            "expected the failed probe to be re-run and find git | received: {second:?}"
+        );
+        assert_eq!(second.version.as_deref(), Some("9.9.9"));
+    }
+
+    /// A `gh` whose interpreter does not exist cannot start at all. It is
+    /// absent, not an error, and the diagnostic names the spawn failure.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_gh_that_cannot_start_is_absent() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _exclusive = git_probe_test_lock().lock().await;
+        let dir = scratch_home("probe-gh-broken-shebang");
+        let gh = dir.join("gh");
+        std::fs::write(&gh, "#!/nonexistent/mango-interpreter\n").unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path_var = dir.as_os_str().to_os_string();
+
+        let allowed = super::probe_gh(true, Some(&path_var), &CancellationToken::new())
+            .await
+            .expect("a gh that cannot start must not fail the probe");
+        assert!(
+            !allowed.available,
+            "expected gh absent | received: {allowed:?}"
+        );
+
+        let failures = super::ProbeFailureLog::new();
+        let sink = RecordingDiagnostics::default();
+        probe_recorded("gh", &path_var, &failures, &sink).await;
+        let lines = sink.lines();
+        assert_eq!(
+            lines.len(),
+            1,
+            "expected one diagnostic | received: {lines:?}"
+        );
+        assert!(
+            lines[0].contains(r#""spawnError":"ENOENT""#) && lines[0].contains(r#""killed":false"#),
+            "expected a spawnError ENOENT diagnostic | received: {}",
+            lines[0]
+        );
+    }
+
+    /// A `git --version` that never answers is killed at the two-second
+    /// bound (`VERSION_PROBE_TIMEOUT_MS` in the TypeScript runtime) and
+    /// reported absent.
+    ///
+    /// The clock is paused and advanced by hand: the child reaper runs on the
+    /// blocking pool, which inhibits Tokio's auto-advance, so nothing here
+    /// waits two real seconds. The supervisor anchors its deadline to a
+    /// `std` instant taken as the probe starts, and a paused clock maps that
+    /// instant onto virtual time by the real time elapsed since it paused.
+    /// The test brackets that offset (before spawning the probe, and once
+    /// the child is running), then requires the probe to be running 1.9 s
+    /// after the earliest possible start and settled 2.1 s after the latest.
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn a_hung_git_is_absent_at_the_two_second_bound() {
+        use std::time::Duration;
+
+        let _exclusive = git_probe_test_lock().lock().await;
+        let state = scratch_home("probe-hung-state");
+        let started_marker = state.join("started");
+        let (_dir, path_var) = fake_git(
+            "probe-hung",
+            &format!("echo > {}\nexec sleep 30", started_marker.display()),
+        );
+        let failures = Arc::new(super::ProbeFailureLog::new());
+        let sink = Arc::new(RecordingDiagnostics::default());
+
+        let virtual_zero = tokio::time::Instant::now().into_std();
+        let earliest_start = std::time::Instant::now().saturating_duration_since(virtual_zero);
+        let probe = tokio::spawn({
+            let failures = Arc::clone(&failures);
+            let sink = Arc::clone(&sink);
+            async move { probe_recorded("git", &path_var, &failures, &sink).await }
+        });
+        let real_deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while !started_marker.exists() {
+            assert!(
+                std::time::Instant::now() < real_deadline,
+                "expected the fake git to start within 20 real seconds"
+            );
+            tokio::task::yield_now().await;
+        }
+        let latest_start = std::time::Instant::now().saturating_duration_since(virtual_zero);
+
+        let before_bound = earliest_start + Duration::from_millis(1_900);
+        tokio::time::advance(before_bound).await;
+        // A bound that had already fired would finish the kill and reap
+        // well inside this real-time window; one that has not cannot finish
+        // at all, so the window only adds sensitivity, never flakiness.
+        let window = std::time::Instant::now() + Duration::from_millis(250);
+        while std::time::Instant::now() < window && !probe.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !probe.is_finished(),
+            "expected the probe still running 1.9s after it started | received: finished"
+        );
+
+        // Past the bound, then no further: from here the kill and the reap
+        // run in real time.
+        let past_bound = latest_start + Duration::from_millis(2_100);
+        tokio::time::advance(past_bound.saturating_sub(before_bound)).await;
+        while !probe.is_finished() {
+            assert!(
+                std::time::Instant::now() < real_deadline,
+                "expected the probe to settle 2.1s after it started | received: still running"
+            );
+            tokio::task::yield_now().await;
+        }
+
+        let git = probe.await.expect("the probe task must not panic");
+        assert!(!git.available, "a hung git is absent | received: {git:?}");
+        let lines = sink.lines();
+        assert!(
+            lines.len() == 1 && lines[0].contains(r#""killed":true"#),
+            "expected one killed diagnostic | received: {lines:?}"
+        );
+    }
+
     /// Regression test for the `PATH_WALK_TIMEOUT` gap `probe_git` used to
     /// have: `which_in("git", ..)` ran through `run_blocking` with no
     /// timeout around it at all — `bounded_path_walk` is the fix, and this
