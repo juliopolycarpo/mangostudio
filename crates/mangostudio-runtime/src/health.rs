@@ -267,6 +267,10 @@ pub(crate) async fn build_capability_manifest(
     // What this build implements, independent of the consent read above.
     manifest.implementation = Some(crate::discovery::discovery_of(registry).implementation());
     manifest.enforces_path_policy = Some(true);
+    // Said outright, never left to the hub's "absent means v2" default: that
+    // default is pinned to the domain that shipped before this field, not to
+    // whatever this binary hashes with.
+    manifest.directory_hash_domain = Some(crate::library::hash::DIRECTORY_HASH_DOMAIN_VERSION);
     // Sent before the peer's hello, so a hub withdrawal cannot shape it; the
     // hub strips a withdrawn attestation on its side (`applyHubIsolationClaim`).
     manifest.identity_isolation =
@@ -1205,6 +1209,14 @@ mod tests {
 
         let wire = serde_json::to_value(&manifest).expect("serialises");
         assert!(wire.get("terminalCloseAfterRevocation").is_none());
+        // Absent means v2 only by the hub's current default; a runtime that
+        // stays silent breaks the day that default moves.
+        assert_eq!(
+            wire.get("directoryHashDomain"),
+            Some(&serde_json::json!(2)),
+            "expected directoryHashDomain: 2 (the domain library::hash computes) | received: {:?}",
+            wire.get("directoryHashDomain")
+        );
         assert!(
             mangostudio_runtime_contract::schemas::validate_manifest(&wire).is_ok(),
             "a manifest this crate builds for `hello` must validate against the same schema the \

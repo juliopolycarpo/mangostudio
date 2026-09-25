@@ -60,7 +60,7 @@ mod describe;
 mod discovery;
 mod frontmatter;
 mod fs;
-mod hash;
+pub(crate) mod hash;
 mod js;
 mod mutation;
 mod names;
