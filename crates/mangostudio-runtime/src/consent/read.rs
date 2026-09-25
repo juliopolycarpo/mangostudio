@@ -233,13 +233,17 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use crate::consent::stall_gate::StallGate;
 
+    /// The bound a read under test is expected to miss: it is held by a [`StallGate`].
     const SHORT: Duration = Duration::from_millis(50);
+    /// The bound a read under test is expected to meet, generous for a loaded machine.
+    const FINISH: Duration = Duration::from_secs(5);
 
     #[tokio::test]
     async fn a_finished_read_reports_its_answer() {
-        let granted = read_consent("shell", SHORT, || true).await;
-        let denied = read_consent("shell", SHORT, || false).await;
+        let granted = read_consent("shell", FINISH, || true).await;
+        let denied = read_consent("shell", FINISH, || false).await;
         assert_eq!(
             (granted, denied),
             (ConsentRead::Granted, ConsentRead::Denied),
@@ -249,11 +253,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_read_that_outlives_its_bound_is_unknown_not_denied() {
-        let read = read_consent("shell", SHORT, || {
-            std::thread::sleep(Duration::from_millis(400));
+        let gate = StallGate::new();
+        let held = gate.handle();
+        let read = read_consent("shell", SHORT, move || {
+            held.wait();
             false
         })
         .await;
+        gate.release();
         assert_eq!(
             read,
             ConsentRead::Unknown,
@@ -283,8 +290,8 @@ mod tests {
     #[tokio::test]
     async fn a_reader_reports_finished_answers_and_reads_afresh_each_time() {
         let reader = ConsentReader::new("mcp");
-        let granted = reader.read(SHORT * 10, || true).await;
-        let denied = reader.read(SHORT * 10, || false).await;
+        let granted = reader.read(FINISH, || true).await;
+        let denied = reader.read(FINISH, || false).await;
         assert_eq!(
             (granted, denied),
             (ConsentRead::Granted, ConsentRead::Denied),
@@ -295,21 +302,24 @@ mod tests {
     #[tokio::test]
     async fn a_stuck_read_is_not_restarted_by_later_polls() {
         let reader = ConsentReader::new("mcp");
+        let gate = StallGate::new();
         let started = Arc::new(AtomicUsize::new(0));
         let mut outcomes = Vec::new();
         for _ in 0..3 {
             let started = Arc::clone(&started);
+            let held = gate.handle();
             outcomes.push(
                 reader
                     .read(SHORT, move || {
                         started.fetch_add(1, Ordering::SeqCst);
-                        std::thread::sleep(Duration::from_millis(400));
+                        held.wait();
                         true
                     })
                     .await,
             );
         }
         let reads = started.load(Ordering::SeqCst);
+        gate.release();
         assert_eq!(
             (reads, outcomes.as_slice()),
             (1, [ConsentRead::Unknown; 3].as_slice()),
@@ -321,13 +331,24 @@ mod tests {
     #[tokio::test]
     async fn a_late_answer_reaches_a_poll_that_joins_the_stuck_read() {
         let reader = ConsentReader::new("mcp");
+        let gate = StallGate::new();
+        let held = gate.handle();
         let slow = reader
-            .read(SHORT, || {
-                std::thread::sleep(Duration::from_millis(200));
+            .read(SHORT, move || {
+                held.wait();
                 false
             })
             .await;
-        let joined = reader.read(Duration::from_secs(5), || true).await;
+        // Poll the joining read once, so it has joined the stuck read before that read can
+        // finish; only then let the stuck read answer.
+        let mut joining = std::pin::pin!(reader.read(FINISH, || true));
+        tokio::select! {
+            biased;
+            early = &mut joining => panic!("expected the joining poll to wait for the stuck read | received {early:?}"),
+            () = std::future::ready(()) => {}
+        }
+        gate.release();
+        let joined = joining.await;
         assert_eq!(
             (slow, joined),
             (ConsentRead::Unknown, ConsentRead::Denied),
@@ -374,10 +395,8 @@ mod tests {
     #[tokio::test]
     async fn a_panicking_read_is_unknown_and_frees_the_reader() {
         let reader = ConsentReader::new("mcp");
-        let panicked = reader
-            .read(SHORT * 10, || panic!("consent store broke"))
-            .await;
-        let next = reader.read(SHORT * 10, || true).await;
+        let panicked = reader.read(FINISH, || panic!("consent store broke")).await;
+        let next = reader.read(FINISH, || true).await;
         assert_eq!(
             (panicked, next),
             (ConsentRead::Unknown, ConsentRead::Granted),
