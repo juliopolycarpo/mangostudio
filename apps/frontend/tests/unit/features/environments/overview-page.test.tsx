@@ -402,6 +402,43 @@ describe('OverviewPage', () => {
     ).not.toBeInTheDocument();
   });
 
+  // Local has no fallback runtime, so a missing binary is the failure whose
+  // fix — a build or a reinstall — the card has to name.
+  it('names a missing Local runtime binary on the Local card', async () => {
+    const localBase = ENVIRONMENTS.find((environment) => environment.id === 'local');
+    if (!localBase) throw new Error('expected local fixture');
+    const missingBinary: Environment = {
+      ...localBase,
+      status: { state: 'error', errorCode: 'UNAVAILABLE', localFailureReason: 'binary-missing' },
+    };
+    scenario
+      .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
+      .respondWithJson('GET', '/api/environments', { body: [missingBinary, ENVIRONMENTS[1]] })
+      .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
+      .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
+      .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+      .respondWithJson('GET', '/api/library/resources', {
+        body: { resources: RESOURCES, unreadableEntries: [] },
+      })
+      .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+      .install();
+
+    await renderWithRouter(<OverviewPage />);
+
+    const local = await waitFor(() => {
+      const card = screen
+        .getAllByTestId('environment-entity-card')
+        .find((candidate) => candidate.getAttribute('data-environment-id') === 'local');
+      expect(card).toBeDefined();
+      return card as HTMLElement;
+    });
+
+    expect(within(local).getByTestId('local-failure-reason')).toHaveTextContent(
+      en.environments.entities.local.reason['binary-missing']
+    );
+  });
+
   it('shows a permissions row when the connected machine consents to readonly', async () => {
     const localBase = ENVIRONMENTS.find((environment) => environment.id === 'local');
     if (!localBase) throw new Error('expected local fixture');

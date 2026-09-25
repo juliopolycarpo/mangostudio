@@ -8,6 +8,8 @@ import {
   ContainerFailureReasonSchema,
   LOCAL_ENVIRONMENT_ID,
   LOCAL_ENVIRONMENT_NAME,
+  type LocalFailureReason,
+  LocalFailureReasonSchema,
   SshFailureReasonSchema,
 } from '@mangostudio/shared/environments';
 import {
@@ -22,7 +24,7 @@ import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { getVersion, isDevelopmentVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
-import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
+import { RuntimeBinaryNotFoundError, resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
   type EnvironmentStateTransitionRecorder,
   recordEnvironmentStateTransition,
@@ -454,24 +456,30 @@ function statusErrorCode(error: unknown): RuntimeErrorCode {
 /**
  * The transport-specific half of a failure, when the connector could name one.
  *
- * ssh and container launches both produce one, for the same reason: their
+ * ssh and container launches produce one for the same reason: their
  * clients report several unrelated causes — an unverified host key, a refused
  * credential, a daemon nobody started, an image that does not exist — through
  * one exit status that `errorCode` cannot distinguish, and each needs a
- * different fix. Validated rather than trusted: the values come back through an
- * untyped details bag.
+ * different fix. Local names a missing binary, whose fix is a build or a
+ * reinstall rather than a retry. Validated rather than trusted: the values come
+ * back through an untyped details bag.
  */
 function failureDetail(
   error: unknown
-): Pick<EnvironmentConnectionStatus, 'sshFailureReason' | 'containerFailureReason'> {
+): Pick<
+  EnvironmentConnectionStatus,
+  'sshFailureReason' | 'containerFailureReason' | 'localFailureReason'
+> {
   const details = error instanceof RemoteError ? error.details : undefined;
   const ssh = details?.sshFailureReason;
   const container = details?.containerFailureReason;
+  const local = details?.localFailureReason;
   return {
     ...(Value.Check(SshFailureReasonSchema, ssh) ? { sshFailureReason: ssh } : {}),
     ...(Value.Check(ContainerFailureReasonSchema, container)
       ? { containerFailureReason: container }
       : {}),
+    ...(Value.Check(LocalFailureReasonSchema, local) ? { localFailureReason: local } : {}),
   };
 }
 
@@ -1297,31 +1305,64 @@ export interface LocalRuntimeOpenOptions {
 async function openLocalRuntime(
   options: LocalRuntimeOpenOptions
 ): Promise<ManagedRuntimeConnection> {
-  const launch = resolveRuntimeLaunchCommand();
+  let launch: ReturnType<typeof resolveRuntimeLaunchCommand>;
+  try {
+    launch = resolveRuntimeLaunchCommand();
+  } catch (error) {
+    throw localLaunchFailure(error, error instanceof RuntimeBinaryNotFoundError);
+  }
   localLaunchLogger.info('launch_selected', {
     environmentId: LOCAL_ENVIRONMENT_ID,
     source: launch.source,
     command: launch.command,
   });
   const hubVersion = getVersion();
-  const connection = await spawnRuntimeChild({
-    environmentId: LOCAL_ENVIRONMENT_ID,
-    workspaceBinding: options.workspaceBinding,
-    launch,
-    hubVersion,
-    requireMatchingRelease: !isDevelopmentVersion(hubVersion),
-    externalAgentIsolation: options.externalAgentIsolation,
-    describeFailure: (failure: RuntimeLaunchFailure) =>
-      failure.spawnErrorCode === 'ENOENT'
-        ? `The Local runtime binary was not found at ${failure.command}. Reinstall MangoStudio so it ships beside the hub, or set MANGOSTUDIO_RUNTIME_BINARY to a runtime binary.`
-        : undefined,
-    onClosed: options.onUnavailable,
-    signal: options.signal,
-  });
+  let binaryMissing = false;
+  let connection: Awaited<ReturnType<typeof spawnRuntimeChild>>;
+  try {
+    connection = await spawnRuntimeChild({
+      environmentId: LOCAL_ENVIRONMENT_ID,
+      workspaceBinding: options.workspaceBinding,
+      launch,
+      hubVersion,
+      requireMatchingRelease: !isDevelopmentVersion(hubVersion),
+      externalAgentIsolation: options.externalAgentIsolation,
+      describeFailure: (failure: RuntimeLaunchFailure) => {
+        if (failure.spawnErrorCode !== 'ENOENT') return undefined;
+        binaryMissing = true;
+        return `The Local runtime binary was not found at ${failure.command}. Reinstall MangoStudio so it ships beside the hub, or set MANGOSTUDIO_RUNTIME_BINARY to a runtime binary.`;
+      },
+      onClosed: options.onUnavailable,
+      signal: options.signal,
+    });
+  } catch (error) {
+    throw localLaunchFailure(error, binaryMissing);
+  }
   return {
     client: new RuntimeClient(connection.hub, options.onUnavailable, LOCAL_ENVIRONMENT_ID),
     close: () => connection.close(),
   };
+}
+
+/**
+ * A failed Local launch as the connection manager reports it: `UNAVAILABLE`
+ * unless the launch produced a more specific code, with
+ * `localFailureReason: 'binary-missing'` when no binary was there to run, so
+ * the card names the build or reinstall instead of a generic outage.
+ *
+ * @example
+ * localLaunchFailure(new RuntimeBinaryNotFoundError(['/repo/target/debug/mangostudio-runtime']), true);
+ * // → RemoteError UNAVAILABLE, details: { localFailureReason: 'binary-missing' }
+ */
+export function localLaunchFailure(error: unknown, binaryMissing: boolean): RemoteError {
+  const typed = error instanceof RemoteError ? error : null;
+  if (!binaryMissing && typed) return typed;
+  const code = typed ? narrowRuntimeErrorCode(typed.code) : RESERVED_ERROR_CODES.UNAVAILABLE;
+  const message = error instanceof Error ? error.message : String(error);
+  return new RemoteError(code, message, {
+    ...typed?.details,
+    ...(binaryMissing ? { localFailureReason: 'binary-missing' satisfies LocalFailureReason } : {}),
+  });
 }
 
 /**

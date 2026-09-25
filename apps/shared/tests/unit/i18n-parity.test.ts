@@ -5,6 +5,7 @@ import { CapabilityReasonCodeSchema } from '../../src/capabilities';
 import {
   ContainerFailureReasonSchema,
   InstallGuardReasonSchema,
+  LocalFailureReasonSchema,
   LtsStatusSchema,
   RuntimeFindingCodeSchema,
   SshFailureReasonSchema,
@@ -87,6 +88,11 @@ const ENUM_COVERAGE = [
       en.environments.entities.container.reason,
       ptBR.environments.entities.container.reason,
     ],
+  },
+  {
+    path: 'environments.entities.local.reason',
+    values: literalValues(LocalFailureReasonSchema),
+    blocks: [en.environments.entities.local.reason, ptBR.environments.entities.local.reason],
   },
   {
     path: 'environments.install.guardBlocked',

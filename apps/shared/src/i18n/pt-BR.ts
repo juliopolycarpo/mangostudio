@@ -2983,6 +2983,12 @@ export const messages = {
       offlineCache: 'Cache offline',
       offlineCacheHint:
         'Não foi possível alcançar a release, então isto iniciou com um runtime que o hub já havia verificado.',
+      local: {
+        reason: {
+          'binary-missing':
+            'O binário do runtime Local não foi encontrado. Em um checkout do código-fonte, execute "cargo build -p mangostudio-runtime"; em um hub instalado, reinstale o MangoStudio ou defina MANGOSTUDIO_RUNTIME_BINARY.',
+        },
+      },
       boundElsewhereHint:
         'Outro registro de ambiente, neste hub ou em outro, está conectado a este runtime. Ele aceita uma conexão de hub por vez, então este registro tenta de novo no máximo uma vez por minuto, sem atrapalhar aquela conexão. Desconecte ou remova o outro registro para usar este.',
       status: {

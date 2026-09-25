@@ -110,6 +110,34 @@ describe('Local over the real Rust runtime', () => {
     await cleanupMangoHome(mangoHome);
   });
 
+  // No binary needed: this is what a hub with none sees.
+  it('names a missing binary on the Local status instead of a generic outage', async () => {
+    const user = await insertTestUser();
+    const missing = join(mangoHome, 'no-such-runtime');
+    const previousBinary = process.env.MANGOSTUDIO_RUNTIME_BINARY;
+    process.env.MANGOSTUDIO_RUNTIME_BINARY = missing;
+    try {
+      manager = localManager();
+      const error = await manager.getClient(user.id, LOCAL_ENVIRONMENT_ID).then(
+        () => null,
+        (thrown: unknown) => thrown
+      );
+
+      expect(error).toMatchObject({
+        code: 'UNAVAILABLE',
+        message: expect.stringContaining(`The Local runtime binary was not found at ${missing}`),
+      });
+      expect(manager.getStatus(user.id, LOCAL_ENVIRONMENT_ID)).toMatchObject({
+        state: 'error',
+        errorCode: 'UNAVAILABLE',
+        localFailureReason: 'binary-missing',
+      });
+    } finally {
+      if (previousBinary === undefined) delete process.env.MANGOSTUDIO_RUNTIME_BINARY;
+      else process.env.MANGOSTUDIO_RUNTIME_BINARY = previousBinary;
+    }
+  });
+
   it.skipIf(!binary.available)(
     'connects as the host slot and serves filesystem, shell and git methods',
     async () => {

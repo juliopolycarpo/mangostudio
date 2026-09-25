@@ -17,6 +17,7 @@ import {
 } from '@mangostudio/shared/runtime-home';
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
+import { RuntimeBinaryNotFoundError } from '../../../src/lib/runtime-paths';
 import type { EnvironmentStateTransition } from '../../../src/modules/environments/application/record-environment-activity';
 import { createRuntimeAuthoritativeAgentDiscovery } from '../../../src/modules/external-agents/application/external-agent-discovery';
 import { createExternalIdentityIsolationRegistry } from '../../../src/modules/external-agents/application/external-identity-isolation';
@@ -27,6 +28,7 @@ import {
   createLocalRuntimeConnector,
   getRuntimeClient,
   type LocalRuntimeOpenOptions,
+  localLaunchFailure,
   type ManagedRuntimeConnection,
   type RuntimeConnectContext,
   RuntimeConnectionManager,
@@ -552,6 +554,45 @@ describe('RuntimeConnectionManager', () => {
       state: 'error',
       errorCode: 'UNAVAILABLE',
       sshFailureReason: 'runtime-missing',
+    });
+  });
+
+  it('reports a missing Local binary as its own reason on the card', async () => {
+    const missing = localLaunchFailure(
+      new RuntimeBinaryNotFoundError(['/repo/target/debug/mangostudio-runtime']),
+      true
+    );
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(localDefinition('user-1')),
+      connectors: { 'in-process': () => Promise.reject(missing) },
+    });
+
+    await manager.connect('user-1', 'local').catch(() => undefined);
+
+    expect(missing.message).toContain('cargo build -p mangostudio-runtime');
+    expect(manager.getStatus('user-1', 'local')).toEqual({
+      state: 'error',
+      errorCode: 'UNAVAILABLE',
+      localFailureReason: 'binary-missing',
+    });
+  });
+
+  it('keeps a Local failure that is not a missing binary as it was', () => {
+    const mismatch = new RemoteError(RESERVED_ERROR_CODES.PROTOCOL_MISMATCH, 'old release', {
+      runtimeVersion: '0.0.1',
+    });
+    const handshake = new Error('the runtime did not complete its handshake');
+
+    expect(localLaunchFailure(mismatch, false)).toBe(mismatch);
+    expect(localLaunchFailure(handshake, false)).toMatchObject({
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
+      message: 'the runtime did not complete its handshake',
+      details: {},
+    });
+    // A missing binary keeps the code and details the launch produced.
+    expect(localLaunchFailure(mismatch, true)).toMatchObject({
+      code: RESERVED_ERROR_CODES.PROTOCOL_MISMATCH,
+      details: { runtimeVersion: '0.0.1', localFailureReason: 'binary-missing' },
     });
   });
 

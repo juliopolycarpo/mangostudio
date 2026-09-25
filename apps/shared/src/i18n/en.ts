@@ -2984,6 +2984,12 @@ export const messages: Messages = {
       offlineCache: 'Offline cache',
       offlineCacheHint:
         'The release could not be reached, so this started from a runtime the hub verified earlier.',
+      local: {
+        reason: {
+          'binary-missing':
+            'The Local runtime binary was not found. In a source checkout, run "cargo build -p mangostudio-runtime"; for an installed hub, reinstall MangoStudio or set MANGOSTUDIO_RUNTIME_BINARY.',
+        },
+      },
       boundElsewhereHint:
         'Another environment record, on this hub or another one, is connected to this runtime. It takes one hub connection at a time, so this record tries again at most once a minute, without disturbing that connection. Disconnect or remove the other record to use this one.',
       status: {
