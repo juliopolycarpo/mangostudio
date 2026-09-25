@@ -641,6 +641,48 @@ fn retry_windows_sharing<T>(mut operation: impl FnMut() -> io::Result<T>) -> io:
     unreachable!("the final attempt returns")
 }
 
+/// Portable pruning guarantees that hold identically on every platform.
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use crate::test_support::scratch_dir;
+
+    /// Another process weighing whether our update lock is abandoned holds
+    /// `runtime-update.lock.reclaim` while it decides; pruning inside a
+    /// commit must leave that guard (and the lock it guards) in place, or two
+    /// reclaimers could both conclude the lock is theirs. The version two
+    /// releases back is still collected.
+    #[test]
+    fn pruning_keeps_another_processs_reclaim_guard_and_the_update_lock() {
+        let dir = scratch_dir("slot-prune-reclaim");
+        let source = dir.join("source");
+        fs::write(&source, b"runtime").unwrap();
+        for version in ["0.9.0", "1.0.0", "1.1.0"] {
+            publish_slot_binary(&dir, version, &source).unwrap();
+        }
+        activate_slot_current(&dir, "1.1.0").unwrap();
+        let reclaim = dir.join("runtime-update.lock.reclaim");
+        let lock = dir.join("runtime-update.lock");
+        fs::write(&reclaim, b"").unwrap();
+        fs::write(&lock, b"{}").unwrap();
+
+        prune_slot_versions(&dir, "1.1.0", Some("1.0.0")).unwrap();
+
+        let survivors = [&reclaim, &lock].map(|path| path.exists());
+        assert_eq!(
+            survivors,
+            [true, true],
+            "expected [reclaim guard, update lock] to survive pruning | received: {survivors:?}"
+        );
+        let stale = dir.join("0.9.0");
+        assert!(
+            !stale.exists(),
+            "expected the version two releases back pruned | received: {} present",
+            stale.display()
+        );
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
