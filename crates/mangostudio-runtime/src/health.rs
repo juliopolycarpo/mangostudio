@@ -47,6 +47,7 @@ use tokio_util::sync::CancellationToken;
 use crate::blocking::run_blocking;
 use crate::consent::config::{ResolvedRuntimeSlotConfig, resolve_runtime_slot_config};
 use crate::consent::presets::consent_preset;
+use crate::diagnostics::{DiagnosticSink, StderrDiagnostics, diagnostic_line};
 use crate::file_identity::fingerprint;
 use crate::probe_cache::ProbeCache;
 use crate::registry::Registry;
@@ -729,7 +730,7 @@ async fn probe_git(
     path_override: Option<&std::ffi::OsStr>,
     cancel: &CancellationToken,
 ) -> Result<GitAvailability, GitProbeCancelled> {
-    probe_cli("git", path_override, cancel).await
+    probe_cli("git", path_override, cancel, ProbeDiagnostics::process()).await
 }
 
 async fn probe_gh(
@@ -740,13 +741,166 @@ async fn probe_gh(
     if !allowed {
         return Ok(unavailable_git());
     }
-    probe_cli("gh", path_override, cancel).await
+    probe_cli("gh", path_override, cancel, ProbeDiagnostics::process()).await
+}
+
+/// How a started or refused `--version` probe failed, as the
+/// `version_probe_failed` diagnostic reports it. The manifest reports every
+/// one of these as `available: false`, so this is where a machine with no
+/// usable CLI and a machine whose CLI is merely broken or slow differ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ProbeFailure {
+    /// The child could not be started: a broken shebang, a binary removed
+    /// after the `PATH` walk, a directory where a file was expected.
+    SpawnFailed { spawn_error: String },
+    /// Still running at [`GIT_PROBE_TIMEOUT`], and killed.
+    TimedOut,
+    /// Exited unsuccessfully on its own, with a code or a signal.
+    Exited {
+        exit_code: Option<i32>,
+        signal: Option<&'static str>,
+    },
+}
+
+impl ProbeFailure {
+    /// The spawn error's errno name when it has a well-known one, the same
+    /// vocabulary the TypeScript runtime reported (`ENOENT`, `EACCES`).
+    fn spawn_failed(error: &std::io::Error) -> Self {
+        let spawn_error = match error.kind() {
+            std::io::ErrorKind::NotFound => "ENOENT".to_owned(),
+            std::io::ErrorKind::PermissionDenied => "EACCES".to_owned(),
+            _ => error
+                .raw_os_error()
+                .map_or_else(|| "unknown".to_owned(), |code| format!("errno {code}")),
+        };
+        Self::SpawnFailed { spawn_error }
+    }
+
+    /// `{ killed, exitCode | signal | spawnError }`, the TypeScript detail
+    /// shape without its `executable`.
+    fn detail(&self) -> serde_json::Map<String, Value> {
+        let mut detail = serde_json::Map::new();
+        detail.insert(
+            "killed".to_owned(),
+            Value::Bool(matches!(self, Self::TimedOut)),
+        );
+        match self {
+            Self::SpawnFailed { spawn_error } => {
+                detail.insert("spawnError".to_owned(), json!(spawn_error));
+            }
+            Self::TimedOut => {}
+            Self::Exited {
+                signal: Some(signal),
+                ..
+            } => {
+                detail.insert("signal".to_owned(), json!(signal));
+            }
+            Self::Exited {
+                exit_code,
+                signal: None,
+            } => {
+                detail.insert("exitCode".to_owned(), json!(exit_code));
+            }
+        }
+        detail
+    }
+}
+
+/// The most failures remembered at once. Probes are keyed by resolved
+/// executable path and there are two CLIs, so this is only a backstop
+/// against a `PATH` that keeps changing under a long-lived process.
+const MAX_ANNOUNCED_PROBE_FAILURES: usize = 128;
+
+/// The last failure announced per executable, so a broken CLI says so once.
+///
+/// Failures are re-probed by design (see [`probe_cli`]), once per handshake
+/// and once per `runtime.health`, which the hub issues on every environment
+/// card refresh. The hub keeps only a bounded tail of this process's stderr,
+/// so repeating the same line would evict the lines that tail exists for.
+/// Keyed on the failure's shape, not only its path: a CLI that starts timing
+/// out after exiting non-zero is a new fact and is announced again.
+struct ProbeFailureLog(std::sync::Mutex<std::collections::VecDeque<(PathBuf, ProbeFailure)>>);
+
+impl ProbeFailureLog {
+    const fn new() -> Self {
+        Self(std::sync::Mutex::new(std::collections::VecDeque::new()))
+    }
+
+    fn entries(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::VecDeque<(PathBuf, ProbeFailure)>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Records `failure` for `executable` and reports whether it differs
+    /// from the last one announced for that path.
+    fn is_new(&self, executable: &Path, failure: &ProbeFailure) -> bool {
+        let mut entries = self.entries();
+        if let Some(index) = entries.iter().position(|(path, _)| path == executable) {
+            if entries[index].1 == *failure {
+                return false;
+            }
+            entries.remove(index);
+        }
+        if entries.len() >= MAX_ANNOUNCED_PROBE_FAILURES {
+            entries.pop_front();
+        }
+        entries.push_back((executable.to_path_buf(), failure.clone()));
+        true
+    }
+
+    /// Drops `executable`'s entry once it answers. Hygiene only: a success is
+    /// cached and short-circuits every later probe of the same binary.
+    fn forget(&self, executable: &Path) {
+        self.entries().retain(|(path, _)| path != executable);
+    }
+}
+
+/// Every announced probe failure in this process.
+static PROBE_FAILURES: ProbeFailureLog = ProbeFailureLog::new();
+
+/// Where [`probe_cli`] reports a failed probe: the dedup log and the sink.
+#[derive(Clone, Copy)]
+struct ProbeDiagnostics<'a> {
+    failures: &'a ProbeFailureLog,
+    sink: &'a dyn DiagnosticSink,
+}
+
+impl ProbeDiagnostics<'static> {
+    /// The process-wide log, writing to stderr.
+    fn process() -> Self {
+        Self {
+            failures: &PROBE_FAILURES,
+            sink: &StderrDiagnostics,
+        }
+    }
+}
+
+impl ProbeDiagnostics<'_> {
+    /// Writes one `version_probe_failed` line, unless the same failure was
+    /// already announced for `executable`. The executable is named; the
+    /// `PATH` that found it is not.
+    fn announce(self, executable: &Path, failure: &ProbeFailure) {
+        if !self.failures.is_new(executable, failure) {
+            return;
+        }
+        let mut detail = serde_json::Map::new();
+        detail.insert("executable".to_owned(), json!(executable.to_string_lossy()));
+        detail.extend(failure.detail());
+        self.sink.write_line(&diagnostic_line(
+            "version_probe_failed",
+            &Value::Object(detail),
+        ));
+    }
 }
 
 async fn probe_cli(
     program: &'static str,
     path_override: Option<&std::ffi::OsStr>,
     cancel: &CancellationToken,
+    diagnostics: ProbeDiagnostics<'_>,
 ) -> Result<GitAvailability, GitProbeCancelled> {
     let path_var = match path_override {
         Some(value) => Some(value.to_os_string()),
@@ -810,6 +964,7 @@ async fn probe_cli(
                 available: true,
                 version,
             };
+            diagnostics.failures.forget(&git_path);
             if let Some(fingerprint) = fingerprint {
                 GIT_PROBE_CACHE.insert(git_path, fingerprint, availability.clone());
             }
@@ -817,8 +972,22 @@ async fn probe_cli(
         }
         Err(ChildRunError::Cancelled) => Err(GitProbeCancelled),
         // A non-zero exit, a timeout and a failed spawn all say only "not
-        // usable right now" — never cached, never an error.
-        Ok(_) | Err(ChildRunError::TimedOut | ChildRunError::SpawnFailed(_)) => {
+        // usable right now": never cached, never an error, but said once on
+        // stderr so an operator can tell a broken CLI from a missing one.
+        Ok(outcome) => {
+            let failure = ProbeFailure::Exited {
+                exit_code: outcome.exit_code,
+                signal: outcome.signal,
+            };
+            diagnostics.announce(&git_path, &failure);
+            Ok(unavailable_git())
+        }
+        Err(ChildRunError::TimedOut) => {
+            diagnostics.announce(&git_path, &ProbeFailure::TimedOut);
+            Ok(unavailable_git())
+        }
+        Err(ChildRunError::SpawnFailed(error)) => {
+            diagnostics.announce(&git_path, &ProbeFailure::spawn_failed(&error));
             Ok(unavailable_git())
         }
     }
@@ -1407,6 +1576,97 @@ mod tests {
         assert_eq!(
             invocation_count, 1,
             "the fake git binary must have run exactly once across both probes"
+        );
+    }
+
+    /// A named fake for the stderr diagnostic channel: every line it was
+    /// given, in order.
+    #[cfg(unix)]
+    #[derive(Default)]
+    struct RecordingDiagnostics(std::sync::Mutex<Vec<String>>);
+
+    #[cfg(unix)]
+    impl crate::diagnostics::DiagnosticSink for RecordingDiagnostics {
+        fn write_line(&self, line: &str) {
+            self.0.lock().unwrap().push(line.to_owned());
+        }
+    }
+
+    #[cfg(unix)]
+    impl RecordingDiagnostics {
+        fn lines(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    /// Probes `program` on `path_var` through a fresh failure log, so a
+    /// test sees exactly the diagnostics its own probes produced.
+    #[cfg(unix)]
+    async fn probe_recorded(
+        program: &'static str,
+        path_var: &std::ffi::OsStr,
+        failures: &super::ProbeFailureLog,
+        sink: &RecordingDiagnostics,
+    ) -> mangostudio_runtime_contract::manifest::GitAvailability {
+        super::probe_cli(
+            program,
+            Some(path_var),
+            &CancellationToken::new(),
+            super::ProbeDiagnostics { failures, sink },
+        )
+        .await
+        .expect("an uncancelled probe must answer")
+    }
+
+    /// A fake `git` whose `--version` exits with the code stored in
+    /// `code_file`, so a test can change the failure without replacing the
+    /// binary (and so without changing its fingerprint).
+    #[cfg(unix)]
+    fn git_exiting_with(name: &str, code_file: &Path) -> (ScratchDir, std::ffi::OsString) {
+        fake_git(name, &format!("exit \"$(cat {})\"", code_file.display()))
+    }
+
+    /// A failed `--version` says why on stderr, once per failure shape: the
+    /// same exit code twice is one line, a different exit code is a new one.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_version_probe_says_why_once_per_failure_shape() {
+        let _exclusive = git_probe_test_lock().lock().await;
+        let state = scratch_home("probe-failed-diagnostic-state");
+        let code_file = state.join("code");
+        std::fs::write(&code_file, "1").unwrap();
+        let (dir, path_var) = git_exiting_with("probe-failed-diagnostic", &code_file);
+        let executable = dir.join("git");
+        let failures = super::ProbeFailureLog::new();
+        let sink = RecordingDiagnostics::default();
+
+        for _ in 0..2 {
+            let git = probe_recorded("git", &path_var, &failures, &sink).await;
+            assert!(!git.available, "a git whose --version exits 1 is absent");
+        }
+        let expected = format!(
+            "mangostudio-runtime: version_probe_failed {}",
+            serde_json::json!({ "executable": executable, "killed": false, "exitCode": 1 })
+        );
+        assert_eq!(
+            sink.lines(),
+            vec![expected.clone()],
+            "expected one version_probe_failed line for two identical failures"
+        );
+
+        std::fs::write(&code_file, "2").unwrap();
+        probe_recorded("git", &path_var, &failures, &sink).await;
+        probe_recorded("git", &path_var, &failures, &sink).await;
+        let lines = sink.lines();
+        assert_eq!(
+            lines.len(),
+            2,
+            "expected a second line once the failure changed shape | received: {lines:?}"
+        );
+        assert!(
+            lines[1].contains(r#""exitCode":2"#),
+            "expected the new line to report exitCode 2 | received: {}",
+            lines[1]
         );
     }
 
