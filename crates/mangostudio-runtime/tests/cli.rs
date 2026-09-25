@@ -606,3 +606,52 @@ fn connect_with_a_refused_credentials_file_prints_the_reason_and_remedy_not_the_
         "expected no consent recorded for a refused connect | received: runtime.json written"
     );
 }
+
+/// `setup --json` answers without a terminal and prints the resulting
+/// health report, which `health --json` and `doctor` then agree with.
+#[test]
+fn setup_json_reports_the_answer_that_health_and_doctor_then_read() {
+    let home = scratch_mango_home("setup-json");
+    let setup = Command::new(binary_path())
+        .args(["setup", "--profile", "readonly", "--yes", "--json"])
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    let stdout = String::from_utf8(setup.stdout).unwrap();
+    assert!(
+        setup.status.success(),
+        "expected setup exit 0 | received: {:?} {}",
+        setup.status.code(),
+        String::from_utf8_lossy(&setup.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("expected a JSON report | received: {stdout:?} ({error})"));
+    assert!(
+        report["profile"] == "readonly" && report["setup"]["state"] == "configured",
+        "expected profile readonly, setup configured | received: {report}"
+    );
+
+    let health = Command::new(binary_path())
+        .args(["health", "--json"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    let health: serde_json::Value = serde_json::from_slice(&health.stdout).unwrap();
+    assert!(
+        health["slot"] == "host" && health["allow"]["shell"] == false,
+        "expected slot host with shell denied | received: {health}"
+    );
+
+    let doctor = Command::new(binary_path())
+        .arg("doctor")
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    let stdout = String::from_utf8(doctor.stdout).unwrap();
+    assert!(
+        doctor.status.code() == Some(0) && stdout.contains("ok  Consent"),
+        "expected doctor exit 0 with an ok Consent line | received: {:?} {stdout:?}",
+        doctor.status.code()
+    );
+}
