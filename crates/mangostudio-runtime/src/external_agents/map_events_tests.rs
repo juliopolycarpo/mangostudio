@@ -1249,6 +1249,28 @@ fn request_id_names_either_pending_kind() {
 // Command catalog
 // ---------------------------------------------------------------------------
 
+/// A description that is empty or only whitespace says nothing, so the row
+/// carries none rather than a blank the picker would render.
+#[test]
+fn a_blank_command_description_is_omitted() {
+    let catalog = commands(&[
+        sdk::Command::new("review").with_description("   \n\t "),
+        sdk::Command::new("plan").with_description(""),
+        sdk::Command::new("fix").with_description("Fixes the build"),
+    ]);
+    let received = serde_json::to_value(&catalog).expect("catalog serializes");
+    assert_eq!(
+        received,
+        json!([
+            { "name": "review" },
+            { "name": "plan" },
+            { "name": "fix", "description": "Fixes the build" },
+        ]),
+        "expected blank descriptions omitted and a real one kept | received {received}"
+    );
+    assert_valid_event(&wire::Event::CommandsAvailable { commands: catalog });
+}
+
 /// An empty catalog is a fact (the vendor offers nothing to type), so it is
 /// an empty list on the wire, not a swallowed event. The SDK's catalog is a
 /// typed `Vec`, so the TypeScript "non-list" case cannot reach this mapper.
