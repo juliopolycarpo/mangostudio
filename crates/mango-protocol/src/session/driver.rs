@@ -195,6 +195,17 @@ impl<Tx: PortTx, Rx: PortRx> SessionDriver<Tx, Rx> {
                     }
                 }
                 Some(settled) = self.tracking.tasks.join_next_with_id(), if !self.tracking.tasks.is_empty() => {
+                    // §6.2: what the handler emitted before it returned goes
+                    // out ahead of its response. Its sends happened before the
+                    // task settled, so they are already in `commands`; this
+                    // branch sits above that one, so without the drain a `res`
+                    // would overtake events queued in the same wake.
+                    let queued = drain_queued(&mut self.commands, |command| {
+                        on_command(command, &mut self.pending, &writer)
+                    });
+                    if let Some(reason) = queued {
+                        break reason;
+                    }
                     dispatch::on_handler_settled(
                         &self.shared,
                         &mut self.tracking,
@@ -428,6 +439,34 @@ fn on_command<Tx: PortTx>(
     }
 }
 
+/// Hands `handle` every command already queued in `commands` when this is
+/// called, in order, and none sent after: the count is taken up front, so a
+/// sender that keeps the channel busy — a flood of emits from another task,
+/// or `handle` itself queueing more — cannot hold the caller here, and the
+/// response waiting behind this drain always goes out. Returns the first
+/// `Some` reason `handle` produces, leaving the rest queued for the main
+/// loop, which is about to break on that reason anyway.
+///
+/// ```ignore
+/// if let Some(reason) = drain_queued(&mut commands, |command| on_command(command, &mut pending, &writer)) {
+///     break reason;
+/// }
+/// ```
+fn drain_queued<T>(
+    commands: &mut mpsc::UnboundedReceiver<T>,
+    mut handle: impl FnMut(T) -> Option<Teardown>,
+) -> Option<Teardown> {
+    for _ in 0..commands.len() {
+        let Ok(command) = commands.try_recv() else {
+            return None;
+        };
+        if let Some(reason) = handle(command) {
+            return Some(reason);
+        }
+    }
+    None
+}
+
 /// Ticks `interval`, or never resolves if there is none (liveness disabled,
 /// or not yet built — see [`SessionDriver::liveness`]).
 async fn liveness_tick(interval: Option<&mut tokio::time::Interval>) {
@@ -465,5 +504,82 @@ fn on_handshake_timeout(shared: &Shared, handshake_timeout: Duration) -> Teardow
     Teardown::Local {
         code: close_codes::PROTOCOL_ERROR,
         reason: Some(super::options::HANDSHAKE_TIMEOUT_REASON.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drain_queued_hands_over_the_backlog_in_order_and_stops_there() {
+        let (sender, mut commands) = mpsc::unbounded_channel::<u32>();
+        for command in 0..4 {
+            sender.send(command).expect("the receiver is alive");
+        }
+        let mut handed = Vec::new();
+        // Every command handled queues another, the way a flood of emits
+        // keeps the channel busy: an until-empty drain would never return.
+        let reason = drain_queued(&mut commands, |command| {
+            handed.push(command);
+            assert!(
+                handed.len() <= 4,
+                "expected the drain to stop after the 4 commands queued before it; received {handed:?}"
+            );
+            sender.send(command + 100).expect("the receiver is alive");
+            None
+        });
+        assert!(reason.is_none(), "expected no teardown reason");
+        assert_eq!(
+            handed,
+            vec![0, 1, 2, 3],
+            "expected exactly the four commands queued before the drain"
+        );
+        assert_eq!(
+            commands.len(),
+            4,
+            "expected the four commands queued during the drain to stay queued"
+        );
+    }
+
+    #[test]
+    fn drain_queued_stops_at_the_first_teardown_and_leaves_the_rest() {
+        let (sender, mut commands) = mpsc::unbounded_channel::<u32>();
+        for command in 0..3 {
+            sender.send(command).expect("the receiver is alive");
+        }
+        let mut handed = Vec::new();
+        let reason = drain_queued(&mut commands, |command| {
+            handed.push(command);
+            (command == 1).then_some(Teardown::Local {
+                code: close_codes::RELEASED,
+                reason: None,
+            })
+        });
+        assert!(
+            matches!(
+                reason,
+                Some(Teardown::Local {
+                    code: close_codes::RELEASED,
+                    ..
+                })
+            ),
+            "expected the teardown the second command produced"
+        );
+        assert_eq!(
+            handed,
+            vec![0, 1],
+            "expected the drain to stop at command 1"
+        );
+        assert_eq!(commands.len(), 1, "expected command 2 to stay queued");
+    }
+
+    #[test]
+    fn drain_queued_returns_at_once_on_an_empty_channel() {
+        let (_sender, mut commands) = mpsc::unbounded_channel::<u32>();
+        let reason = drain_queued(&mut commands, |command| {
+            panic!("expected no command on an empty channel; received {command}")
+        });
+        assert!(reason.is_none(), "expected no teardown reason");
     }
 }
