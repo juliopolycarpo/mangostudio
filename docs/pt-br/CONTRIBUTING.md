@@ -8,6 +8,9 @@ Obrigado pelo seu interesse em contribuir com o MangoStudio!
 
 - [Bun](https://bun.sh/) 1.4.2 ou mais recente — `bun upgrade` ou
   `curl -fsSL https://bun.sh/install | bash` na primeira instalação
+- Um toolchain Rust via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. O hub inicia o
+  Local como o `mangostudio-runtime` construído com cargo; o `bun run dev` o compila antes, e o
+  `rust-toolchain.toml` fixa a versão
 - Git com assinatura GPG configurada (veja [Diretrizes de Commit](#diretrizes-de-commit))
 
 O repositório fixa o Bun 1.4.2. O pin passou para a linha 1.4.x na 1.4.0, a release que tornou o runtime pós-reescrita disponível de forma geral; até então ele seguia o canal `canary`. O `.bun-version` é o que a CI instala, e o `packageManager` precisa indicar a mesma versão — veja [`docs/reference/tooling.md`](../reference/tooling.md#bun).

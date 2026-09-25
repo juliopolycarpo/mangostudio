@@ -109,6 +109,16 @@ stream-text-turn.ts (orquestrador)
   └─ persiste o turno → produz eventos SSE
 ```
 
+### Execução Hub/Runtime
+
+Todo runtime, inclusive o Local, é o `mangostudio-runtime` construído com cargo a partir de
+`crates/mangostudio-runtime`. O hub inicia o Local na própria máquina via stdio: o binário
+irmão ao lado de um hub standalone ou, num checkout do código-fonte, o build mais recente de
+`target/debug` ou `target/release`, que o `bun run dev` compila antes. `MANGOSTUDIO_RUNTIME_BINARY`
+sobrepõe os dois, e um binário ausente faz a conexão falhar indicando `cargo build -p
+mangostudio-runtime` em vez de recorrer a outro runtime. Veja
+[`hub-runtime.md`](../../architecture/hub-runtime.md).
+
 ### Invalidação Em Tempo Real
 
 `/api/ws` é uma ponte somente de invalidação entre o bus no processo, limitado

@@ -289,7 +289,8 @@ fails silently:
   engines compare what the hub said the location resolves to against what it
   resolves to here. The hub's `destinationRoot` is where the user was told the
   bytes were going; the runtime's own `PathEnv` is where they would actually
-  land. Those agree in-process and are allowed to disagree between machines.
+  land. Those agree for Local, on the hub's own machine, and are allowed to disagree between
+  machines.
   The hub sends its MangoStudio directory pins (`SKILLS_DIR`/`AGENTS_DIR`) to
   Local only — for writes, remote source reads and undo exactly as for scans
   (`libraryWritePathEnv`) — so a remote machine resolves its own.
@@ -829,7 +830,10 @@ The build produces two binaries per platform: `mangostudio`, Bun-compiled from
 target by `cargo build`; see `docs/reference/releasing.md`). Both report the same release
 version and ship together in every channel — archives, npm platform packages, and the
 Docker images — because the hub resolves the runtime as a sibling of its own executable
-and the protocol handshake refuses a version mismatch.
+and the protocol handshake refuses a version mismatch. Local is that same binary, spawned by
+the hub over stdio (`openLocalRuntime` in `runtime-connection-manager.ts`); a source checkout
+launches the newest `target/debug` or `target/release` build instead, and `bun run dev`
+builds it first. There is no TypeScript fallback.
 
 ## Mango Protocol (spec, TypeScript SDK, Rust crate)
 
@@ -856,8 +860,8 @@ rather than restating them: `crates/mangostudio-runtime-contract/`, its behaviou
 typed dispatcher, fail-closed ports, and panic isolation are covered in
 [runtime-dispatcher.md](../architecture/runtime-dispatcher.md). Its binary is the
 `mangostudio-runtime` every distribution channel ships beside the hub (the "Config, Runtime, And
-Standalone Build" section above), so the hub reaches it through the default sibling-binary
-resolution in `apps/api/src/lib/runtime-paths.ts`. `scripts/lib/release-version.ts`'s
+Standalone Build" section above), so the hub reaches it through the resolution in
+`apps/api/src/lib/runtime-paths.ts` (override, sibling, then a source checkout's cargo build). `scripts/lib/release-version.ts`'s
 `APP_VERSIONED_CRATES` version-locks the crate to the app release, and the build stamps the exact
 distribution version in at compile time, which is what `requireMatchingRelease`
 (`apps/api/src/services/runtime-client/spawn-runtime-child.ts`) checks it against.
@@ -866,7 +870,7 @@ distribution version in at compile time, which is what `requireMatchingRelease`
 
 Open these first:
 
-- `apps/runtime/src/cli.ts` (binary entry), `apps/runtime/src/transports/stdio.ts` (NDJSON port)
+- `crates/mangostudio-runtime/src/cli.rs` (binary entry, `--stdio`)
 - `apps/api/src/services/runtime-client/spawn-runtime-child.ts` (spawn, handshake, teardown)
 - `apps/api/src/services/runtime-client/runtime-connection-manager.ts` (state machine, backoff)
 - `apps/api/src/services/runtime-client/target-paths.ts` (target path style, from the manifest)

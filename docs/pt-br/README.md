@@ -110,6 +110,9 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 
 - [Bun](https://bun.sh/) 1.4.2 ou mais recente (`bun upgrade` ou
   `curl -fsSL https://bun.sh/install | bash` na primeira instalação)
+- Um toolchain Rust via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). O hub inicia o
+  Local como o `mangostudio-runtime` construído com cargo, e o `rust-toolchain.toml` fixa a
+  versão que o rustup instala no primeiro build.
 - Uma ou mais chaves de API ou contas com login para provedores suportados
   (Gemini, compatíveis com OpenAI, Anthropic, DeepSeek, ChatGPT)
 
@@ -134,7 +137,9 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
    bun run dev
    ```
 
-   Isso inicia:
+   Primeiro ele executa `cargo build -p mangostudio-runtime` — o runtime Local que o hub
+   inicia —; sem cargo ele para e mostra o comando do rustup, e `MANGOSTUDIO_RUNTIME_BINARY`
+   aponta para um binário já construído. Depois inicia:
    - **API** em `http://localhost:3001` (Elysia + Kysely/SQLite)
    - **Frontend** servido pela mesma API em `http://localhost:3001` (React, empacotado com Bun)
 

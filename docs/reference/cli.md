@@ -385,10 +385,14 @@ as the main binary — that is how MangoStudio finds it. On another machine you 
 `stdio` also works as a bare word (`mangostudio-runtime stdio`).
 
 In `--stdio` mode stdout carries protocol frames and nothing else; every diagnostic
-goes to stderr, which MangoStudio collects into its own logs. `mangostudio doctor`
-reports whether this binary is present and whether its version matches the hub's —
-a mismatch is refused at the protocol handshake, so reinstall rather than mixing
-releases.
+goes to stderr, which MangoStudio collects into its own logs. The hub launches Local
+as this binary. `mangostudio doctor` reports the one Local would run —
+`MANGOSTUDIO_RUNTIME_BINARY`, the sibling beside a standalone hub, or a source checkout's
+newest cargo build — and fails the row when it is missing, since Local cannot start
+without it: reinstall MangoStudio (or set `MANGOSTUDIO_RUNTIME_BINARY`), or in a checkout
+run `cargo build -p mangostudio-runtime`. A version that differs from the hub's is a
+warning — the handshake refuses the mismatch, so reinstall rather than mixing releases —
+and is not reported against a development hub, which has no release to match.
 
 ### `connect`
 

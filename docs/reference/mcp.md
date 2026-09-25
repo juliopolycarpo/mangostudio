@@ -138,7 +138,7 @@ RFC4193 address gets a typed error naming TLS
 address cannot be proven local, so it is treated as public. Put the runtime behind a TLS
 reverse proxy, or keep the secret-bearing server on an environment the hub reaches privately.
 
-stdio, WSL and in-process environments never put the credential on a wire at all; ssh is
+stdio, WSL and Local environments never put the credential on a wire at all; ssh is
 encrypted by construction; a dial-in WebSocket runtime chose its own hub URL, and the hub sees
 a socket a reverse proxy may already have terminated — so those are not judged here.
 

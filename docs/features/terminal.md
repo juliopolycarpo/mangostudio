@@ -77,9 +77,10 @@ registry is in memory; sessions do not survive a hub restart.
 
 ## Who may open one
 
-Same capability as `shell.run`: `allow.shell` on the runtime. On the **Local** runtime — the
-hub's own process and OS account — a terminal additionally requires the `single-user-host`
-attestation the external-agent path already computes. A second MangoStudio user on the same
+Same capability as `shell.run`: `allow.shell` on the runtime. On the **Local** runtime — a
+child of the hub on the hub's own OS account — a terminal additionally requires the Local
+connection to be identity-attested: the single-owner claim the external-agent path already
+enforces. A second MangoStudio user on the same
 hub closes every Local terminal and refuses new ones with `TERMINAL_NOT_ISOLATED`.
 
 The shell's environment is the runtime's own with secret-shaped variables stripped exactly as
