@@ -207,6 +207,8 @@ fn read_workspace_directory(
             name: item.file_name().to_string_lossy().into_owned(),
             path: item.path(),
         });
+        #[cfg(test)]
+        tests::after_listed_entry(dir, cancel);
     }
     entries.sort_by(|left, right| compare_directory_entry_names(&left.name, &right.name));
     let truncated = entries.len() > MAX_WORKSPACE_DIRECTORY_ENTRIES;
@@ -1147,5 +1149,143 @@ mod tests {
             "expected browse refused as workspace_browser/FILESYSTEM/permission-denied | \
              received: {browsed:?}"
         );
+    }
+
+    type EntryHook = std::sync::Arc<dyn Fn(&CancellationToken) + Send + Sync>;
+
+    /// Hooks run after each listed entry, keyed by the directory a test owns
+    /// so concurrent tests never see each other's hook.
+    static ENTRY_HOOKS: std::sync::Mutex<Vec<(PathBuf, EntryHook)>> =
+        std::sync::Mutex::new(Vec::new());
+
+    /// Called by `read_workspace_directory` after it lists an entry of `dir`.
+    pub(super) fn after_listed_entry(dir: &std::path::Path, cancel: &CancellationToken) {
+        let hook = ENTRY_HOOKS
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(owned, _)| owned == dir)
+            .map(|(_, hook)| std::sync::Arc::clone(hook));
+        if let Some(hook) = hook {
+            hook(cancel);
+        }
+    }
+
+    /// Grants every capability, so the guard never refuses the browse.
+    struct GrantsAll;
+
+    impl crate::ports::authorization::Authorization for GrantsAll {
+        fn missing_capabilities<'a>(
+            &'a self,
+            _method: &'a str,
+            _capabilities: &'a [String],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<String>> + Send + 'a>> {
+            Box::pin(async { Vec::new() })
+        }
+    }
+
+    fn peer(role: &str) -> mango_protocol::frame::PeerInfo {
+        mango_protocol::frame::PeerInfo {
+            name: format!("workspace-test-{role}"),
+            version: "0.0.0".into(),
+            role: role.into(),
+        }
+    }
+
+    /// A hub cancel that lands while the registered handler is mid-listing
+    /// stops the listing at the next entry and answers CANCELLED instead of a
+    /// shaped result. The first entry's hook signals that the listing has
+    /// started, then holds the listing until the handler's own token has
+    /// fired, so the cancel lands mid-listing by construction, not by timing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hub_cancel_mid_listing_stops_the_registered_browse_handler() {
+        use mango_protocol::contract::Contract;
+        use mango_protocol::port::port_pair;
+        use mango_protocol::session::{RequestOptions, Session, SessionOptions};
+
+        let dir = scratch_root("browse-cancel-mid-listing");
+        for index in 0..64 {
+            std::fs::create_dir(dir.join(format!("dir-{index:02}"))).unwrap();
+        }
+        let hook_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+        let started_tx = std::sync::Mutex::new(Some(started_tx));
+        let calls = std::sync::Arc::clone(&hook_calls);
+        let hook: EntryHook = std::sync::Arc::new(move |cancel: &CancellationToken| {
+            if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) != 0 {
+                return;
+            }
+            if let Some(started) = started_tx.lock().unwrap().take() {
+                let _ = started.send(());
+            }
+            let cancel = cancel.clone();
+            let observed = tokio::runtime::Handle::current().block_on(tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                cancel.cancelled(),
+            ));
+            assert!(
+                observed.is_ok(),
+                "expected the hub cancel to reach the handler's token | received: no cancel in 10 s"
+            );
+        });
+        ENTRY_HOOKS.lock().unwrap().push((dir.to_path_buf(), hook));
+
+        let (hub_port, runtime_port) = port_pair();
+        let (hub, _hub_driver) = Session::spawn(hub_port, SessionOptions::new(peer("hub")));
+        let (runtime, _runtime_driver) =
+            Session::spawn(runtime_port, SessionOptions::new(peer("runtime")));
+        hub.ready().await.unwrap();
+        runtime.ready().await.unwrap();
+        let contract =
+            Contract::from_catalog(mangostudio_runtime_contract::catalog::catalog().clone())
+                .unwrap();
+        crate::serve::serve(
+            &contract,
+            &runtime,
+            super::register(crate::registry::Registry::new()),
+            std::sync::Arc::new(GrantsAll),
+            "host",
+        )
+        .unwrap()
+        .persist();
+
+        let cancel = CancellationToken::new();
+        let request_hub = hub.clone();
+        let request_cancel = cancel.clone();
+        let path = dir.to_string_lossy().into_owned();
+        let browse = tokio::spawn(async move {
+            request_hub
+                .request_with(
+                    "workspace.browse",
+                    serde_json::json!({ "path": path }),
+                    RequestOptions {
+                        cancel: Some(request_cancel),
+                        ..RequestOptions::default()
+                    },
+                )
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(10), started_rx)
+            .await
+            .expect("expected the listing to start within 10 s | received: no first entry")
+            .unwrap();
+        cancel.cancel();
+
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(10), browse)
+            .await
+            .expect("expected the cancelled browse to answer within 10 s")
+            .unwrap();
+        ENTRY_HOOKS
+            .lock()
+            .unwrap()
+            .retain(|(owned, _)| owned != &dir.to_path_buf());
+        let calls = hook_calls.load(std::sync::atomic::Ordering::SeqCst);
+        let code = answer.as_ref().err().map(|error| error.code.clone());
+        assert_eq!(
+            (code.as_deref(), calls),
+            (Some(mango_protocol::error::codes::CANCELLED), 1),
+            "expected (code, entries listed) = (CANCELLED, 1) of 64 | received: ({answer:?}, {calls})"
+        );
+        runtime.close_now(4000, None);
     }
 }
