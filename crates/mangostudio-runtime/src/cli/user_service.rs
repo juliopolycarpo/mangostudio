@@ -179,6 +179,20 @@ fn check_install(mode: ServiceMode, home: &Path) -> io::Result<PathBuf> {
             format!("{mode:?} is not configured; expected {field} in remote runtime config"),
         ));
     }
+    // A refused file (a schemaVersion this build does not speak, or one it
+    // cannot read) names its own reason and the one remedy, pointing at the
+    // command that writes credentials.json; `service install` never does.
+    // Mirrors `assertServicePreconditions`' `credentialsUnusableMessage`.
+    if let Some(reason) = crate::runtime_home::credentials_refusal(RuntimeSlot::Remote, home) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{reason} Move it aside, then run \"mangostudio-runtime {}\"; it will write a \
+                 fresh credentials.json in its place.",
+                mode.as_str()
+            ),
+        ));
+    }
     let credentials = read_runtime_slot_credentials(RuntimeSlot::Remote, home);
     if let Some(error) = credentials.error {
         return Err(io::Error::new(
@@ -1450,6 +1464,45 @@ mod tests {
                 .to_string()
                 .contains("expected --mode connect or --mode serve"),
             "expected the refusal to ask for --mode | received: {error}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn install_refuses_an_unconfigured_mode_and_an_unusable_credential() {
+        let home = configured_home(
+            "service-unconfigured-mode",
+            &[("hubUrl", Some(json!("wss://hub.example")))],
+            &[("pairingToken", Some(json!("pairing")))],
+            true,
+        );
+        let error = check_install(ServiceMode::Serve, &home).expect_err("serve is unconfigured");
+        assert!(
+            error.to_string().contains("expected serveListen"),
+            "expected the refusal to name serveListen | received: {error}"
+        );
+
+        let secret = "future-token-marker";
+        fs::write(
+            home.join("runtime/remote/credentials.json"),
+            format!(r#"{{"schemaVersion":2,"pairingToken":"{secret}"}}"#),
+        )
+        .unwrap();
+        let error = check_install(ServiceMode::Connect, &home)
+            .expect_err("a refused credentials file must refuse the install");
+        let message = error.to_string();
+        for expected in [
+            "schemaVersion 2",
+            "Move it aside, then run \"mangostudio-runtime connect\"",
+        ] {
+            assert!(
+                message.contains(expected),
+                "expected refusal containing: {expected} | received: {message}"
+            );
+        }
+        assert!(
+            !message.contains(secret),
+            "expected no stored token in the refusal | received: {message}"
         );
     }
 
