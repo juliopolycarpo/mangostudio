@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { rejectionOf } from '@mangostudio/protocol/testing';
 import {
   READ_FILE_MAX_BINARY_VIEW_BYTES,
   READ_FILE_MAX_LINE_CHARS,
@@ -126,9 +127,11 @@ describe('executeReadFile', () => {
   });
 
   it('rejects a relative path when no chat workdir is available', async () => {
-    await expect(executeReadFile({ path: 'src/index.ts' }, makeContext())).rejects.toThrow(
-      'no working directory is bound to this chat'
-    );
+    expect(
+      await rejectionOf(executeReadFile({ path: 'src/index.ts' }, makeContext()))
+    ).toMatchObject({
+      message: expect.stringContaining('no working directory is bound to this chat'),
+    });
   });
 
   it('rejects paths outside the workdir when restriction is enabled', async () => {
@@ -139,16 +142,20 @@ describe('executeReadFile', () => {
     try {
       const outsidePath = join(outsideDir, 'outside-read.txt');
 
-      await expect(
-        executeReadFile(
-          { path: outsidePath },
-          {
-            ...makeContext(),
-            workdir: tempDir,
-            workdirPolicy: { root: tempDir, restricted: true },
-          }
+      expect(
+        await rejectionOf(
+          executeReadFile(
+            { path: outsidePath },
+            {
+              ...makeContext(),
+              workdir: tempDir,
+              workdirPolicy: { root: tempDir, restricted: true },
+            }
+          )
         )
-      ).rejects.toThrow('outside the chat working directory');
+      ).toMatchObject({
+        message: expect.stringContaining('outside the chat working directory'),
+      });
     } finally {
       rmSync(outsideDir, { recursive: true, force: true });
     }
@@ -234,9 +241,11 @@ describe('executeReadFile', () => {
     const filePath = join(tempDir, 'short.txt');
     await seedFile(filePath, 'only\ntwo');
 
-    await expect(executeReadFile({ path: filePath, startLine: 5 }, makeContext())).rejects.toThrow(
-      'startLine 5 is past the end'
-    );
+    expect(
+      await rejectionOf(executeReadFile({ path: filePath, startLine: 5 }, makeContext()))
+    ).toMatchObject({
+      message: expect.stringContaining('startLine 5 is past the end'),
+    });
   });
 
   it('truncates long lines with an inline marker and sets truncated', async () => {
@@ -337,9 +346,13 @@ describe('executeReadFile', () => {
     const filePath = join(tempDir, 'notes.md');
     await seedFile(filePath, 'hi\n');
 
-    await expect(
-      executeReadFile({ path: filePath, view: 'hex', startLine: 1 }, makeContext())
-    ).rejects.toThrow('apply to view "text" only');
+    expect(
+      await rejectionOf(
+        executeReadFile({ path: filePath, view: 'hex', startLine: 1 }, makeContext())
+      )
+    ).toMatchObject({
+      message: expect.stringContaining('apply to view "text" only'),
+    });
   });
 
   it('leaves a text read shaped exactly as it was before view existed', async () => {
@@ -395,9 +408,11 @@ describe('executeReadFile', () => {
     const filePath = join(tempDir, 'unread.bin');
     await seedFile(filePath, new Uint8Array([0x50, 0x4b, 0x00, 0x01]));
 
-    await expect(
-      executeWriteFile({ path: filePath, content: 'text' }, makeContext())
-    ).rejects.toThrow(/it is a binary file/);
+    expect(
+      await rejectionOf(executeWriteFile({ path: filePath, content: 'text' }, makeContext()))
+    ).toMatchObject({
+      message: expect.stringMatching(/it is a binary file/),
+    });
   });
 
   it('does not offer the byte view for a binary file past its bound', async () => {
@@ -443,9 +458,11 @@ describe('executeReadFile', () => {
 
     await executeReadFile({ path: filePath, startLine: 1, maxLines: 2 }, makeContext());
 
-    await expect(
-      executeWriteFile({ path: filePath, content: 'replaced\n' }, makeContext())
-    ).rejects.toThrow(/only lines 1-2 have been read/);
+    expect(
+      await rejectionOf(executeWriteFile({ path: filePath, content: 'replaced\n' }, makeContext()))
+    ).toMatchObject({
+      message: expect.stringMatching(/only lines 1-2 have been read/),
+    });
     expect(await Bun.file(filePath).text()).toBe('one\ntwo\nthree\nfour');
   });
 
@@ -470,9 +487,11 @@ describe('executeReadFile', () => {
 
     await executeReadFile({ path: filePath, startLine: 3, maxLines: 2 }, makeContext());
 
-    await expect(
-      executeWriteFile({ path: filePath, content: 'replaced\n' }, makeContext())
-    ).rejects.toThrow(/it has not been read from line 1/);
+    expect(
+      await rejectionOf(executeWriteFile({ path: filePath, content: 'replaced\n' }, makeContext()))
+    ).toMatchObject({
+      message: expect.stringMatching(/it has not been read from line 1/),
+    });
   });
 
   it('treats a read that reaches the last line as full coverage', async () => {
@@ -503,12 +522,14 @@ describe('executeReadFile', () => {
     const filePath = join(tempDir, 'blob.bin');
     await seedFile(filePath, new Uint8Array([0x50, 0x4b, 0x00, 0x01]));
 
-    await expect(executeReadFile({ path: filePath }, makeContext())).rejects.toThrow(
-      /appears to be a binary file/
-    );
-    await expect(
-      executeWriteFile({ path: filePath, content: 'text' }, makeContext())
-    ).rejects.toThrow(/it is a binary file/);
+    expect(await rejectionOf(executeReadFile({ path: filePath }, makeContext()))).toMatchObject({
+      message: expect.stringMatching(/appears to be a binary file/),
+    });
+    expect(
+      await rejectionOf(executeWriteFile({ path: filePath, content: 'text' }, makeContext()))
+    ).toMatchObject({
+      message: expect.stringMatching(/it is a binary file/),
+    });
   });
 
   it.skipIf(skipWithoutRustBinary(targetHomeRuntime, 'read-file-tool'))(
@@ -568,9 +589,9 @@ describe('executeReadFile', () => {
     const dirPath = join(tempDir, 'a-directory');
     mkdirSync(dirPath);
 
-    await expect(executeReadFile({ path: dirPath }, makeContext())).rejects.toThrow(
-      'not a regular file'
-    );
+    expect(await rejectionOf(executeReadFile({ path: dirPath }, makeContext()))).toMatchObject({
+      message: expect.stringContaining('not a regular file'),
+    });
   });
 
   it('throws when path is outside allowed paths', async () => {
