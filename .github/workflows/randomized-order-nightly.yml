@@ -44,7 +44,7 @@ name: Randomized Order Nightly
 # ` N fail` summary) still reports non-zero, because the retry proves the
 # isolate runner recovered, not that those failures didn't happen.
 #
-# `--parallel=1` stays on the `api`/`shared`/`runtime` lanes rather than
+# `--parallel=1` stays on the `api`/`shared` lanes rather than
 # sharding it away: it is the only detector for *within-file* order
 # dependence under the merge gate's own unit-lane mode, and dropping it on
 # `api` would duplicate the `api-integration` entry instead of adding
@@ -101,10 +101,6 @@ jobs:
             path: tests/integration
           - lane: shared
             workspace: shared
-            isolation: "--parallel=1"
-            path: ""
-          - lane: runtime
-            workspace: runtime
             isolation: "--parallel=1"
             path: ""
     env:

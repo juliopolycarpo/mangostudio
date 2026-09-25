@@ -21,13 +21,8 @@ on:
       - "apps/shared/src/external-agents/**"
       - "apps/shared/src/schema-helpers.ts"
       - "apps/shared/src/environments/toolchain-schemas.ts"
-      - "apps/runtime/src/**"
-      - "apps/runtime/scripts/generate-home-fixtures.ts"
-      - "apps/runtime/scripts/generate-library-fixtures.ts"
-      - "apps/runtime/scripts/library-backup-fixtures.ts"
       - "apps/shared/src/library/**"
       - "apps/shared/src/markdown/**"
-      - "apps/runtime/package.json"
       - "apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts"
       - "apps/api/tests/integration/services/rust-runtime-external-agents-qualification.integration.test.ts"
       - "apps/api/src/modules/external-agents/application/external-identity-isolation.ts"
@@ -117,30 +112,23 @@ jobs:
             exit 1
           fi
 
-          # The TypeScript-side paths this feeds — runtime-home.ts, the
-          # runtime host's own config parser, the fixture generator,
-          # apps/shared/src/runtime-home, and the whole chain its schemas
-          # import from (external-agents, schema-helpers,
-          # environments/toolchain-schemas), plus the package.json that
-          # names the generator's script — feed the ts-home half of
-          # `runtime-home-fixture-freshness`: a TypeScript-only PR touching
-          # only those must still run this workflow, or that job's own
-          # regenerate-and-diff step never runs and ts-home goes stale
-          # silently — the same gap the job itself exists to close. The
+          # Beyond the Rust workspace itself, these paths feed the Rust lanes:
+          # apps/shared/src/runtime-home and the chain its schemas import from
+          # (external-agents, schema-helpers, environments/toolchain-schemas)
+          # are the TypeScript half of the slot and contract shapes the
+          # runtime reads and writes; the library readers
+          # (apps/shared/src/library/, apps/shared/src/markdown/) are the hub
+          # half of what the runtime's library methods answer. The
           # qualification suite's own test and support files feed
-          # `real-binary-qualification` the identical way. So does the hub
-          # code that job's own tests actually exercise
-          # (apps/api/src/services/runtime-client/, the local-launch path
-          # in runtime-paths.ts, the paired-connect accept route, and the
-          # pairing service/repository it depends on) -- without these, a
-          # change that broke spawnRuntimeChild's cancellation path, say,
-          # touches none of the paths above, rust evaluates false, the job
-          # is skipped and allowed to be, and Gate reports green having
-          # exercised none of it. The library readers' TypeScript baseline
-          # (apps/shared/src/library/, apps/shared/src/markdown/) and its
-          # corpus generator feed the ts-library half of the same freshness
-          # job, so a TypeScript-only change to them reruns the parity check.
-          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/scripts/(generate-library-fixtures|library-backup-fixtures)\.ts$|apps/shared/src/library/|apps/shared/src/markdown/|apps/runtime/package\.json$|apps/api/tests/integration/services/(rust-runtime-qualification|rust-runtime-external-agents-qualification|rust-filesystem-search-compat|rust-snapshot-compat|rust-command-compat|rust-runtime-mcp-qualification|rust-runtime-library-qualification|rust-runtime-library-propagation|rust-runtime-library-removal|local-rust-runtime)\.integration\.test\.ts$|apps/api/tests/support/fixtures/mcp/|apps/api/tests/support/(fake-runtime-host|fake-runtime-websocket-server)\.ts$|apps/api/src/services/mcp/|apps/api/src/modules/external-agents/application/external-identity-isolation\.ts$|apps/api/src/modules/library/|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/tests/support/rust-runtime-install-fixture\.ts$|apps/api/tests/support/(rust-runtime-client|rust-stdio-runtime|rust-serve-runtime)\.ts$|apps/api/tests/support/fixtures/rust-filesystem-search-recorded\.ts$|apps/api/tests/integration/routes/(terminal-socket|environment-entities)\.integration\.test\.ts$|apps/api/tests/integration/services/(hub-isolation-claim|connect-http-runtime|environment-install-execution)\.integration\.test\.ts$|apps/api/tests/integration/modules/library/library-undo-missing-backup\.integration\.test\.ts$|apps/api/tests/unit/services/tools/(support/target-home|read-file-tool|write-file-tool|list-directory-tool|glob-tool)\.(ts|test\.ts)$|apps/api/tests/support/rust-library-boxes\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$|\.github/actions/setup-zigbuild/|\.cargo/config\.toml$)'
+          # `real-binary-qualification`, and so does the hub code that job's
+          # tests actually exercise (apps/api/src/services/runtime-client/,
+          # the local-launch path in runtime-paths.ts, the paired-connect
+          # accept route, and the pairing service/repository it depends on)
+          # -- without these, a change that broke spawnRuntimeChild's
+          # cancellation path, say, touches none of the paths above, rust
+          # evaluates false, the job is skipped and allowed to be, and Gate
+          # reports green having exercised none of it.
+          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/shared/src/library/|apps/shared/src/markdown/|apps/api/tests/integration/services/(rust-runtime-qualification|rust-runtime-external-agents-qualification|rust-filesystem-search-compat|rust-snapshot-compat|rust-command-compat|rust-runtime-mcp-qualification|rust-runtime-library-qualification|rust-runtime-library-propagation|rust-runtime-library-removal|local-rust-runtime)\.integration\.test\.ts$|apps/api/tests/support/fixtures/mcp/|apps/api/tests/support/(fake-runtime-host|fake-runtime-websocket-server)\.ts$|apps/api/src/services/mcp/|apps/api/src/modules/external-agents/application/external-identity-isolation\.ts$|apps/api/src/modules/library/|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/tests/support/rust-runtime-install-fixture\.ts$|apps/api/tests/support/(rust-runtime-client|rust-stdio-runtime|rust-serve-runtime)\.ts$|apps/api/tests/support/fixtures/rust-filesystem-search-recorded\.ts$|apps/api/tests/integration/routes/(terminal-socket|environment-entities)\.integration\.test\.ts$|apps/api/tests/integration/services/(hub-isolation-claim|connect-http-runtime|environment-install-execution)\.integration\.test\.ts$|apps/api/tests/integration/modules/library/library-undo-missing-backup\.integration\.test\.ts$|apps/api/tests/unit/services/tools/(support/target-home|read-file-tool|write-file-tool|list-directory-tool|glob-tool)\.(ts|test\.ts)$|apps/api/tests/support/rust-library-boxes\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$|\.github/actions/setup-zigbuild/|\.cargo/config\.toml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
@@ -263,22 +251,25 @@ jobs:
       - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --no-deps --format-version 1
 
   runtime-home-fixture-freshness:
-    # Both `tests/fixtures/rust-home` and `tests/fixtures/ts-home` are
-    # committed output, not built at test time: `ts_compat.rs` reads
-    # `ts-home` directly, and `generate_rust_fixture.rs`'s own
-    # `#[ignore]`d regenerator (plus
-    # `apps/runtime/tests/unit/runtime-home-rust-compat.test.ts`) reads
-    # `rust-home`. Nothing else regenerates either one, so if either
-    # language's write shape ever changes, both keep passing against a
-    # stale fixture and silently stop proving anything about the direction
-    # they cover. This job is the freshness check that gap needs for both
-    # directions: it is the only place either regenerator actually runs.
+    # `tests/fixtures/rust-home` is committed output, not built at test time:
+    # `generate_rust_fixture.rs`'s own `#[ignore]`d regenerator writes it and
+    # the hub's slot probe test
+    # (`apps/api/tests/unit/cli/runtime-slot-probe-rust-home.test.ts`) reads
+    # it. Nothing else regenerates it, so if the Rust write shape ever
+    # changes, both keep passing against a stale fixture. This job is the
+    # only place the regenerator actually runs. It stages the fixture
+    # directory before diffing the index against `HEAD`, not a plain
+    # `git diff --exit-code` against the worktree: staging is what makes a
+    # brand-new file the regenerator starts emitting show up as a failure
+    # too, not only a changed byte in a file that already existed.
     #
-    # Each freshness check stages the fixture directory before diffing the
-    # index against `HEAD`, not a plain `git diff --exit-code` against the
-    # worktree: staging is what makes a brand-new file the regenerator
-    # starts emitting show up as a failure too, not only a changed byte in
-    # a file that already existed.
+    # `tests/fixtures/ts-home` and `tests/fixtures/ts-library` are frozen.
+    # They record what the TypeScript runtime wrote and answered before it was
+    # deleted, and `ts_compat.rs` / `src/library/ts_compat_tests.rs` replay
+    # them so a Rust runtime keeps reading homes and backup sets that runtime
+    # left on operators' machines. Their generators went with it, so there is
+    # nothing to regenerate; instead the job pins each directory's git tree,
+    # and a change to either has to update the pin here on purpose.
     name: Runtime-home fixture freshness
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
@@ -300,36 +291,28 @@ jobs:
           git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home
           git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - run: bun install --frozen-lockfile
-
-      - run: bun run --filter @mangostudio/runtime fixtures:home
-
-      - name: Fail if regenerating changed the committed ts-home fixture
+      - name: Fail if a frozen TypeScript-runtime fixture changed
+        env:
+          TS_HOME_TREE: 814a421cef442f2dd6c24b13a70fcea00e45576b
+          TS_LIBRARY_TREE: 5ecbf15d46a87ac2c2e8c24dc9d14a47a76b209e
         run: |
-          git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-home
-          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-home
-
-      # `src/library/ts_compat_tests.rs` replays this corpus; regenerating it
-      # from the real TypeScript readers is the only thing that notices a
-      # baseline change the committed file no longer describes.
-      - run: bun run --filter @mangostudio/runtime fixtures:library
-
-      - name: Fail if regenerating changed the committed ts-library corpus
-        run: |
-          git add -A -- crates/mangostudio-runtime/tests/fixtures/ts-library
-          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/ts-library
+          status=0
+          for pinned in "ts-home:$TS_HOME_TREE" "ts-library:$TS_LIBRARY_TREE"; do
+            name="${pinned%%:*}"
+            expected="${pinned#*:}"
+            actual="$(git rev-parse "HEAD:crates/mangostudio-runtime/tests/fixtures/$name")"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::frozen fixture $name changed: expected tree $expected | received $actual" >&2
+              status=1
+            fi
+          done
+          exit "$status"
 
   real-binary-qualification:
     # Proves the hub's own real code actually talks to the real compiled
     # mangostudio-runtime binary over its three transports (stdio, direct-URL
-    # serve, paired connect) — every other apps/api integration test spawns
-    # or dials the TypeScript in-process runtime instead. Targets the `rust-*`
-    # qualification and compat files directly rather than the whole apps/api
-    # suite, which does not need a Rust binary at all.
+    # serve, paired connect), on every OS. Targets the `rust-*` qualification
+    # and compat files directly rather than the whole apps/api suite.
     name: Real-binary qualification (${{ matrix.os }})
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'

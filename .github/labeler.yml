@@ -19,7 +19,6 @@
 "area: runtime":
   - changed-files:
       - any-glob-to-any-file:
-          - "apps/runtime/**"
           - "apps/shared/src/runtime-contract/**"
           - "apps/api/src/services/runtime-client/**"
           # The Mango Protocol: the wire contract the hub and the runtime speak,
@@ -126,7 +125,7 @@
       - any-glob-to-any-file:
           - "apps/api/src/services/mcp/**"
           - "apps/api/src/modules/mcp-servers/**"
-          - "apps/runtime/src/services/mcp/**"
+          - "crates/mangostudio-runtime/src/mcp/**"
           - "apps/frontend/src/features/settings/mcp/**"
           - "apps/shared/src/mcp/**"
 

@@ -157,7 +157,8 @@ describe('labeler coverage', () => {
 
     expect(labeler).toContain('"area: runtime":');
     const runtimeSection = extractLabelSection(labeler, '"area: runtime":', '"area: git":');
-    expect(runtimeSection).toContain('- "apps/runtime/**"');
+    expect(runtimeSection).not.toContain('apps/runtime/');
+    expect(runtimeSection).toContain('- "crates/mangostudio-runtime/**"');
     expect(runtimeSection).toContain('- "apps/shared/src/runtime-contract/**"');
     expect(runtimeSection).toContain('- "apps/api/src/services/runtime-client/**"');
     // The Mango Protocol is the hub/runtime wire contract; without these globs a
