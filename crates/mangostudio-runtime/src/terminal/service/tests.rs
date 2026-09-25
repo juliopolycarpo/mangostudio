@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     AckParams, Entry, OpenParams, ResizeParams, Service, SessionParams, Slot, WriteParams, count,
-    default_shell, resolve_cwd, shell_program, size,
+    default_shell, resolve_cwd, size,
 };
 use crate::consent::source::ConsentSource;
 use crate::probing::detection::path_env::PathEnv;
@@ -243,6 +243,7 @@ fn default_shell_prefers_login_shell_only_when_present() {
 #[cfg(unix)]
 #[test]
 fn terminal_offers_powershell_only_on_windows() {
+    use super::shell_program;
     use std::os::unix::fs::PermissionsExt;
     let dir = crate::test_support::scratch_dir("terminal-shell-parity");
     for name in ["pwsh", "powershell"] {

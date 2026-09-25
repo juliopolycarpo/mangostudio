@@ -1110,10 +1110,13 @@ mod tests {
             Some(expected.as_path()),
             "expected Cursor's effective installation: {expected:?} | received: {reported:?}"
         );
+        // The launch runs the resolved path (`/private/var/...` on macOS),
+        // while the report's `rawPath` is the PATH candidate as found.
+        let expected_launch = std::fs::canonicalize(&expected).unwrap();
         assert_eq!(
             launched.as_deref(),
-            Some(expected.as_path()),
-            "expected Cursor to launch {expected:?}, not Grok's agent | received: {launched:?}"
+            Some(expected_launch.as_path()),
+            "expected Cursor to launch {expected_launch:?}, not Grok's agent | received: {launched:?}"
         );
     }
 
