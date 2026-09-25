@@ -1,23 +1,19 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  HUB_BINDING_KEY_CAPABILITY,
-  HUB_BINDING_KEY_MAX_LENGTH,
-  hubBindingKeyOf,
-} from '@mangostudio/shared/runtime-contract';
+import { HUB_BINDING_KEY_LENGTH, HubBindingKeySchema } from '@mangostudio/shared/runtime-contract';
+import Value from 'typebox/value';
 
-describe('hubBindingKeyOf', () => {
-  it('reads a bounded, non-empty string key', () => {
-    expect(hubBindingKeyOf({ [HUB_BINDING_KEY_CAPABILITY]: 'record-a' })).toBe('record-a');
-    const longest = 'k'.repeat(HUB_BINDING_KEY_MAX_LENGTH);
-    expect(hubBindingKeyOf({ [HUB_BINDING_KEY_CAPABILITY]: longest })).toBe(longest);
+describe('HubBindingKeySchema', () => {
+  it('accepts a lowercase hex digest of the fixed length', () => {
+    expect(Value.Check(HubBindingKeySchema, 'a'.repeat(HUB_BINDING_KEY_LENGTH))).toBe(true);
   });
 
   it.each([
-    ['absent', {}],
-    ['empty', { [HUB_BINDING_KEY_CAPABILITY]: '' }],
-    ['not a string', { [HUB_BINDING_KEY_CAPABILITY]: 7 }],
-    ['too long', { [HUB_BINDING_KEY_CAPABILITY]: 'k'.repeat(HUB_BINDING_KEY_MAX_LENGTH + 1) }],
-  ])('treats a %s key as no key', (_why, capabilities) => {
-    expect(hubBindingKeyOf(capabilities)).toBeUndefined();
+    ['empty', ''],
+    ['one short', 'a'.repeat(HUB_BINDING_KEY_LENGTH - 1)],
+    ['one long', 'a'.repeat(HUB_BINDING_KEY_LENGTH + 1)],
+    ['uppercase', 'A'.repeat(HUB_BINDING_KEY_LENGTH)],
+    ['not hex', 'g'.repeat(HUB_BINDING_KEY_LENGTH)],
+  ])('refuses a %s key', (_why, key) => {
+    expect(Value.Check(HubBindingKeySchema, key)).toBe(false);
   });
 });

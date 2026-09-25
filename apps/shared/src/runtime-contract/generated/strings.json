@@ -51,8 +51,8 @@
   "updateExitCode": 75,
   "pairingTokenPrefix": "mrt_",
   "binding": {
-    "capability": "bindingKey",
-    "maxLength": 128,
+    "header": "x-mangostudio-hub-binding",
+    "length": 64,
     "alreadyBoundCloseCode": 4423,
     "alreadyBoundReason": "runtime already bound to another environment"
   },

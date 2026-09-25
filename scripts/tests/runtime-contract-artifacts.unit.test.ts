@@ -142,8 +142,8 @@ describe('runtime contract artifacts', () => {
     expect(strings.updateExitCode).toBe(75);
     expect(strings.pairingTokenPrefix).toBe('mrt_');
     expect(strings.binding).toEqual({
-      capability: 'bindingKey',
-      maxLength: 128,
+      header: 'x-mangostudio-hub-binding',
+      length: 64,
       alreadyBoundCloseCode: 4423,
       alreadyBoundReason: 'runtime already bound to another environment',
     });

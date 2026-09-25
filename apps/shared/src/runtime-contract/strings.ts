@@ -41,19 +41,24 @@ export const RUNTIME_UPDATE_EXIT_CODE = 75;
 export const RUNTIME_PAIRING_TOKEN_PREFIX = 'mrt_';
 
 /**
- * The `hello.capabilities` member a hub announces its binding key under.
+ * The WebSocket upgrade request header a hub sends its binding key in, beside
+ * the bearer token.
  *
  * A binding key names the environment record a connection speaks for, opaque
  * to the runtime. A `serve` runtime holds one hub connection at a time; the
  * key is what lets it tell the same record reconnecting (which supersedes the
  * old socket) from a second record pointing at the same runtime (which is
- * refused while the first is live). Beside `hub` rather than inside it, for
- * the reason `HubExternalAgentIsolationSchema` gives.
+ * refused while the first is live). It rides on the upgrade rather than in
+ * `hello` so the runtime decides before either side's `hello`, exactly where
+ * it already checks the credential.
  */
-export const HUB_BINDING_KEY_CAPABILITY = 'bindingKey';
+export const HUB_BINDING_KEY_HEADER = 'x-mangostudio-hub-binding';
 
-/** Longest binding key a runtime compares; a longer one is treated as absent. */
-export const HUB_BINDING_KEY_MAX_LENGTH = 128;
+/**
+ * Exact length of a binding key: a SHA-256 digest in lowercase hex. A runtime
+ * refuses any other value in {@link HUB_BINDING_KEY_HEADER}.
+ */
+export const HUB_BINDING_KEY_LENGTH = 64;
 
 /**
  * The close code a runtime refuses a hub connection with when a live

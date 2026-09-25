@@ -14,8 +14,8 @@
 import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   CONSENT_DENIED_KIND,
-  HUB_BINDING_KEY_CAPABILITY,
-  HUB_BINDING_KEY_MAX_LENGTH,
+  HUB_BINDING_KEY_HEADER,
+  HUB_BINDING_KEY_LENGTH,
   HUB_CONTRACT,
   HubIdentitySchema,
   RUNTIME_ALREADY_BOUND_CLOSE_CODE,
@@ -163,8 +163,8 @@ function stringsDocument(): Record<string, unknown> {
     updateExitCode: RUNTIME_UPDATE_EXIT_CODE,
     pairingTokenPrefix: RUNTIME_PAIRING_TOKEN_PREFIX,
     binding: {
-      capability: HUB_BINDING_KEY_CAPABILITY,
-      maxLength: HUB_BINDING_KEY_MAX_LENGTH,
+      header: HUB_BINDING_KEY_HEADER,
+      length: HUB_BINDING_KEY_LENGTH,
       alreadyBoundCloseCode: RUNTIME_ALREADY_BOUND_CLOSE_CODE,
       alreadyBoundReason: RUNTIME_ALREADY_BOUND_REASON,
     },

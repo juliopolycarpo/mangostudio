@@ -59,15 +59,15 @@ pub const RUNTIME_PAIRING_TOKEN_PREFIX: &str = "mrt_";
 /// How a `serve` runtime tells one environment record reconnecting from a
 /// second record pointing at the same runtime.
 ///
-/// A hub announces an opaque binding key under [`binding::CAPABILITY`] in its
-/// `hello.capabilities`. While a live connection holds a key, a connection
-/// with a different key is refused with [`binding::ALREADY_BOUND_CLOSE_CODE`]
-/// instead of superseding it.
+/// A hub sends an opaque binding key in the [`binding::HEADER`] upgrade
+/// request header, beside its bearer token. While a live connection holds a
+/// key, a connection with a different key is refused with
+/// [`binding::ALREADY_BOUND_CLOSE_CODE`] before either side's `hello`.
 pub mod binding {
-    /// The `hello.capabilities` member the hub's binding key rides under.
-    pub const CAPABILITY: &str = "bindingKey";
-    /// Longest binding key compared, in characters; a longer one is ignored.
-    pub const MAX_LENGTH: usize = 128;
+    /// The upgrade request header the hub's binding key rides in.
+    pub const HEADER: &str = "x-mangostudio-hub-binding";
+    /// Exact length of a binding key: a SHA-256 digest in lowercase hex.
+    pub const LENGTH: usize = 64;
     /// Close code refusing a connection for a different binding key. Unnamed
     /// by the protocol, so application-owned; 423 is HTTP's "Locked".
     pub const ALREADY_BOUND_CLOSE_CODE: u16 = 4423;
@@ -175,12 +175,12 @@ mod tests {
     fn the_binding_constants_mirror_strings_json() {
         let binding_document = &document()["binding"];
         assert_eq!(
-            binding::CAPABILITY,
-            binding_document["capability"].as_str().expect("a string")
+            binding::HEADER,
+            binding_document["header"].as_str().expect("a string")
         );
         assert_eq!(
-            binding::MAX_LENGTH as u64,
-            binding_document["maxLength"].as_u64().expect("a number")
+            binding::LENGTH as u64,
+            binding_document["length"].as_u64().expect("a number")
         );
         assert_eq!(
             u64::from(binding::ALREADY_BOUND_CLOSE_CODE),
