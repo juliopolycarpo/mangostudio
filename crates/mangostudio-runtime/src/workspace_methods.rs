@@ -15,6 +15,7 @@ use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 
 use crate::blocking::run_blocking;
 use crate::registry::Registry;
@@ -32,15 +33,16 @@ use crate::workspace_path::{WorkspacePathError, resolve_workspace_path};
 /// — none of these handlers checks consent itself.
 ///
 /// Each registered closure is a thin wrapper over a `build_*_result`
-/// function that takes no [`CallContext`] — none of these three methods
-/// needs one (no cancellation probe, unlike [`crate::health`]'s `git`
-/// probe) — which is what lets this module's own tests call that function
-/// directly, the same way [`crate::health`]'s tests call
-/// `build_health_report` rather than going through a registered handler.
+/// function that takes no [`CallContext`] — `workspace.browse` takes only
+/// the call's cancellation token, since a directory listing can be large
+/// and must stop for a caller that gave up — which is what lets this
+/// module's own tests call that function directly, the same way
+/// [`crate::health`]'s tests call `build_health_report` rather than going
+/// through a registered handler.
 pub(crate) fn register(registry: Registry) -> Registry {
     registry
-        .implement("workspace.browse", |params, _context: CallContext| {
-            build_browse_result(params)
+        .implement("workspace.browse", |params, context: CallContext| {
+            build_browse_result(params, context.cancel().clone())
         })
         .implement("workspace.validate", |params, _context: CallContext| {
             build_validate_result(params)
@@ -74,7 +76,10 @@ struct ResolveContainedParams {
 /// host filesystem (`home`, `roots`, `separator`) for a caller to build a
 /// picker on top of it. See [`read_workspace_directory`] for the listing
 /// itself.
-async fn build_browse_result(params: BrowseParams) -> Result<Value, RemoteError> {
+async fn build_browse_result(
+    params: BrowseParams,
+    cancel: CancellationToken,
+) -> Result<Value, RemoteError> {
     let input_path = match params.path {
         Some(path) => path,
         None => home_dir()
@@ -85,10 +90,18 @@ async fn build_browse_result(params: BrowseParams) -> Result<Value, RemoteError>
 
     let resolved = resolve_workspace_path(&input_path, true).map_err(browse_path_shape_error)?;
 
+    check_browse_cancel(&cancel)?;
     let listing_dir = resolved.clone();
-    let (entries, truncated) = run_blocking(move || read_workspace_directory(&listing_dir))
-        .await
-        .map_err(browse_filesystem_error)?;
+    let listing_cancel = cancel.clone();
+    let (entries, truncated) =
+        run_blocking(move || read_workspace_directory(&listing_dir, &listing_cancel))
+            .await
+            .map_err(|error| {
+                check_browse_cancel(&cancel)
+                    .err()
+                    .unwrap_or_else(|| browse_filesystem_error(error))
+            })?;
+    check_browse_cancel(&cancel)?;
 
     let entries_json: Vec<Value> = entries
         .into_iter()
@@ -124,6 +137,18 @@ async fn build_browse_result(params: BrowseParams) -> Result<Value, RemoteError>
     Ok(result)
 }
 
+/// Refuses a `workspace.browse` whose caller has cancelled, so a large
+/// directory is never scanned (or its result shaped) for nobody.
+fn check_browse_cancel(cancel: &CancellationToken) -> Result<(), RemoteError> {
+    if cancel.is_cancelled() {
+        return Err(RemoteError::new(
+            codes::CANCELLED,
+            "Workspace browse cancelled",
+        ));
+    }
+    Ok(())
+}
+
 /// One `workspace.browse` result entry, before it is shaped into JSON.
 #[derive(Debug)]
 struct BrowseEntry {
@@ -154,9 +179,18 @@ struct BrowseEntry {
 /// that itself, costing an extra `stat` only for an entry that is actually a
 /// symlink — an ordinary file or directory costs no more syscalls than
 /// `lstat` alone.
-fn read_workspace_directory(dir: &Path) -> std::io::Result<(Vec<BrowseEntry>, bool)> {
+fn read_workspace_directory(
+    dir: &Path,
+    cancel: &CancellationToken,
+) -> std::io::Result<(Vec<BrowseEntry>, bool)> {
     let mut entries = Vec::new();
     for item in std::fs::read_dir(dir)? {
+        if cancel.is_cancelled() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "workspace browse cancelled mid-listing",
+            ));
+        }
         let item = item?;
         let file_type = item.file_type()?;
         let is_directory = if file_type.is_dir() {
@@ -459,6 +493,7 @@ mod tests {
     use crate::result_check::{check_result, compile_result_schema};
     use crate::test_support::scratch_dir as scratch_root;
     use crate::workspace_path::WorkspacePathError;
+    use tokio_util::sync::CancellationToken;
 
     /// `compare_directory_entry_names` itself only has indirect coverage
     /// through `read_workspace_directory`'s own listing tests elsewhere in
@@ -487,7 +522,8 @@ mod tests {
         std::fs::write(dir.join("file.txt"), b"").unwrap();
         std::fs::create_dir(dir.join("sub")).unwrap();
 
-        let (entries, truncated) = read_workspace_directory(&dir).unwrap();
+        let (entries, truncated) =
+            read_workspace_directory(&dir, &CancellationToken::new()).unwrap();
         assert!(!truncated);
         assert_eq!(entries.len(), 1, "a plain file must never be listed");
         assert_eq!(entries[0].name, "sub");
@@ -506,7 +542,8 @@ mod tests {
         std::fs::write(dir.join("target.txt"), b"").unwrap();
         std::os::unix::fs::symlink(dir.join("target.txt"), dir.join("file-alias")).unwrap();
 
-        let (entries, _truncated) = read_workspace_directory(&dir).unwrap();
+        let (entries, _truncated) =
+            read_workspace_directory(&dir, &CancellationToken::new()).unwrap();
         let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
         assert!(
             names.contains(&"alias"),
@@ -522,7 +559,7 @@ mod tests {
     #[test]
     fn an_unreadable_path_is_a_plain_io_error_the_caller_maps_to_workspace_browser() {
         let missing = std::env::temp_dir().join("mango-workspace-methods-does-not-exist");
-        let error = read_workspace_directory(&missing).unwrap_err();
+        let error = read_workspace_directory(&missing, &CancellationToken::new()).unwrap_err();
         let mapped = browse_filesystem_error(error);
         assert_eq!(mapped.code, mango_protocol::error::codes::INTERNAL);
         let details = mapped.details.expect("details present");
@@ -619,7 +656,8 @@ mod tests {
         }
         std::fs::create_dir(dir.join("zz-dir")).unwrap();
 
-        let (entries, truncated) = read_workspace_directory(&dir).unwrap();
+        let (entries, truncated) =
+            read_workspace_directory(&dir, &CancellationToken::new()).unwrap();
         assert!(
             !truncated,
             "the real, unfiltered directory count (1) is nowhere near the cap"
@@ -637,7 +675,7 @@ mod tests {
     #[tokio::test]
     async fn browse_defaults_to_the_home_directory_when_path_is_omitted() {
         let home = crate::runtime_home::home_dir().expect("this test host has a home directory");
-        let result = build_browse_result(BrowseParams { path: None })
+        let result = build_browse_result(BrowseParams { path: None }, CancellationToken::new())
             .await
             .expect("this test host's home directory is browsable");
         assert_eq!(result["path"], home.to_string_lossy().into_owned());
@@ -650,9 +688,12 @@ mod tests {
         std::fs::create_dir(dir.join(".git")).unwrap();
         std::fs::create_dir(dir.join("src")).unwrap();
 
-        let result = build_browse_result(BrowseParams {
-            path: Some(dir.to_string_lossy().into_owned()),
-        })
+        let result = build_browse_result(
+            BrowseParams {
+                path: Some(dir.to_string_lossy().into_owned()),
+            },
+            CancellationToken::new(),
+        )
         .await
         .unwrap();
         let entries = result["entries"].as_array().expect("an array of entries");
@@ -681,9 +722,12 @@ mod tests {
     /// only meaningful at an actual root.
     #[tokio::test]
     async fn browsing_the_real_root_reports_a_null_parent() {
-        let result = build_browse_result(BrowseParams {
-            path: Some("/".to_string()),
-        })
+        let result = build_browse_result(
+            BrowseParams {
+                path: Some("/".to_string()),
+            },
+            CancellationToken::new(),
+        )
         .await
         .expect("the real filesystem root is browsable in this test environment");
         assert!(result["parent"].is_null());
@@ -692,9 +736,12 @@ mod tests {
     #[tokio::test]
     async fn browse_of_a_nonexistent_path_reports_the_workspace_browser_filesystem_shape() {
         let missing = std::env::temp_dir().join("mango-browse-handler-missing-xyz");
-        let error = build_browse_result(BrowseParams {
-            path: Some(missing.to_string_lossy().into_owned()),
-        })
+        let error = build_browse_result(
+            BrowseParams {
+                path: Some(missing.to_string_lossy().into_owned()),
+            },
+            CancellationToken::new(),
+        )
         .await
         .expect_err("a nonexistent path must not browse");
         let details = error.details.expect("details present");
@@ -705,9 +752,12 @@ mod tests {
 
     #[tokio::test]
     async fn browse_of_a_relative_path_is_a_thrown_workspace_browser_validation_error() {
-        let error = build_browse_result(BrowseParams {
-            path: Some("relative/path".to_string()),
-        })
+        let error = build_browse_result(
+            BrowseParams {
+                path: Some("relative/path".to_string()),
+            },
+            CancellationToken::new(),
+        )
         .await
         .expect_err("browse always requires an absolute path");
         let details = error.details.expect("details present");
@@ -719,9 +769,12 @@ mod tests {
     #[tokio::test]
     async fn browse_result_validates_against_its_own_catalog_schema() {
         let dir = scratch_root("browse-schema");
-        let result = build_browse_result(BrowseParams {
-            path: Some(dir.to_string_lossy().into_owned()),
-        })
+        let result = build_browse_result(
+            BrowseParams {
+                path: Some(dir.to_string_lossy().into_owned()),
+            },
+            CancellationToken::new(),
+        )
         .await
         .unwrap();
         let declared = method("workspace.browse").expect("the catalog declares workspace.browse");
@@ -976,5 +1029,44 @@ mod tests {
         let validator = compile_result_schema(&declared.result);
         check_result("workspace.resolve-contained", &validator, &result)
             .expect("the real handler output must validate against its own schema");
+    }
+
+    fn browse_params(dir: &std::path::Path) -> BrowseParams {
+        BrowseParams {
+            path: Some(dir.to_string_lossy().into_owned()),
+        }
+    }
+
+    /// A pre-cancelled browse is refused as CANCELLED instead of listing:
+    /// the directory here is browsable, so any `Ok` means the scan ran.
+    #[tokio::test]
+    async fn browse_refuses_a_pre_cancelled_call_without_scanning() {
+        let dir = scratch_root("browse-precancel");
+        std::fs::create_dir(dir.join("child")).unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let refused = build_browse_result(browse_params(&dir), cancel).await;
+        let code = refused.as_ref().err().map(|error| error.code.clone());
+        assert_eq!(
+            code.as_deref(),
+            Some(mango_protocol::error::codes::CANCELLED),
+            "expected a pre-cancelled workspace.browse refused as CANCELLED | received: {refused:?}"
+        );
+
+        let stopped = read_workspace_directory(&dir, &cancelled_token());
+        let kind = stopped.as_ref().err().map(std::io::Error::kind);
+        assert_eq!(
+            kind,
+            Some(std::io::ErrorKind::Interrupted),
+            "expected a cancelled listing to stop at its first entry | received: {:?}",
+            stopped.map(|(entries, _)| entries.len())
+        );
+    }
+
+    fn cancelled_token() -> CancellationToken {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        cancel
     }
 }
