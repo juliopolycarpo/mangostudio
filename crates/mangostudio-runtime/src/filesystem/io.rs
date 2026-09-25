@@ -33,6 +33,7 @@ pub(super) struct FileInfo {
 
 struct PathMetadata {
     is_file: bool,
+    is_dir: bool,
     len: u64,
 }
 
@@ -152,6 +153,32 @@ pub(super) fn check_cancel(cancel: &CancellationToken) -> Result<(), RemoteError
     Ok(())
 }
 
+fn not_a_regular_file(path: &Path) -> RemoteError {
+    path_error(format!(
+        "Cannot read \"{}\": it is not a regular file.",
+        path.display()
+    ))
+}
+
+/// Whether a failed file open was Windows refusing a directory.
+///
+/// POSIX opens a directory for reading, and refuses an exclusive create on
+/// one as "already exists"; Windows refuses both opens with "Access is
+/// denied" unless the caller asks for backup semantics. This classifies that
+/// refusal after the fact, through the same policy-bound, link-preserving
+/// lookup as the other diagnostics, so the failure reads the same on every
+/// host and no directory is ever opened. Always false elsewhere, where POSIX
+/// already reports the directory.
+///
+/// # Example
+///
+/// ```ignore
+/// if windows_refused_directory(&policy, path) { return Err(not_a_regular_file(path)); }
+/// ```
+fn windows_refused_directory(policy: &CompiledPolicy, path: &Path) -> bool {
+    cfg!(windows) && metadata_for_diagnostic(policy, path).is_ok_and(|metadata| metadata.is_dir)
+}
+
 pub(super) fn read(
     policy: &CompiledPolicy,
     path: &Path,
@@ -161,17 +188,16 @@ pub(super) fn read(
     check_cancel(cancel)?;
     let mut file = open_read_scoped(policy, path).map_err(|error| {
         if is_missing_path_error(&error) {
-            file_not_found(path)
-        } else {
-            error
+            return file_not_found(path);
         }
+        if windows_refused_directory(policy, path) {
+            return not_a_regular_file(path);
+        }
+        error
     })?;
     let before = file.metadata().map_err(io_error)?;
     if !before.is_file() {
-        return Err(path_error(format!(
-            "Cannot read \"{}\": it is not a regular file.",
-            path.display()
-        )));
+        return Err(not_a_regular_file(path));
     }
     if before.len() > max_bytes as u64 {
         return Err(too_large(
@@ -457,6 +483,7 @@ fn metadata_for_diagnostic(
         return match fs::symlink_metadata(path) {
             Ok(metadata) => Ok(PathMetadata {
                 is_file: metadata.is_file(),
+                is_dir: metadata.is_dir(),
                 len: metadata.len(),
             }),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(file_not_found(path)),
@@ -467,6 +494,7 @@ fn metadata_for_diagnostic(
     parent.with_parent(|dir, leaf| match dir.symlink_metadata(leaf) {
         Ok(metadata) => Ok(PathMetadata {
             is_file: metadata.is_file(),
+            is_dir: metadata.is_dir(),
             len: metadata.len(),
         }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(file_not_found(path)),
@@ -575,13 +603,26 @@ pub(super) fn create_new(
     path: &Path,
     bytes: &[u8],
 ) -> Result<f64, RemoteError> {
-    if !policy.is_unrestricted() {
+    let created = if policy.is_unrestricted() {
+        let parent = path.parent().unwrap_or(Path::new("."));
+        fs::create_dir_all(parent).map_err(|error| parent_creation_error(path, parent, error))?;
+        write_exclusive(path, bytes).map_err(create_error)
+    } else {
         let parent = capability::verified_parent(policy, path, true)?;
-        return write_exclusive_bound(&parent, path, bytes, create_error);
-    }
-    let parent = path.parent().unwrap_or(Path::new("."));
-    fs::create_dir_all(parent).map_err(|error| parent_creation_error(path, parent, error))?;
-    write_exclusive(path, bytes).map_err(create_error)
+        write_exclusive_bound(&parent, path, bytes, create_error)
+    };
+    created.map_err(|error| {
+        let refused_open = error.details.as_ref().is_some_and(|details| {
+            details
+                .get("alreadyExists")
+                .and_then(serde_json::Value::as_bool)
+                == Some(false)
+        });
+        if refused_open && windows_refused_directory(policy, path) {
+            return error.with_detail("alreadyExists", true);
+        }
+        error
+    })
 }
 
 fn create_error(error: std::io::Error) -> RemoteError {
@@ -3725,6 +3766,66 @@ mod tests {
         write_atomic(&policy, &path, b"second", false).unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"second");
         assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn reading_a_directory_names_it_as_not_a_regular_file_on_every_host() {
+        let root = scratch_dir("fs-io-read-directory");
+        let directory = root.join("directory");
+        fs::create_dir(&directory).unwrap();
+        let restricted = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        let expected = format!(
+            "Cannot read \"{}\": it is not a regular file.",
+            directory.display()
+        );
+
+        for (label, policy) in [("unrestricted", unrestricted()), ("restricted", restricted)] {
+            let error = read(&policy, &directory, 1024, &CancellationToken::new())
+                .expect_err("a directory is not readable as a file");
+            assert_eq!(
+                error.message, expected,
+                "{label} policy: expected the regular-file refusal | received: {:?}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn creating_over_a_directory_reports_an_occupied_path_on_every_host() {
+        let root = scratch_dir("fs-io-create-over-directory");
+        let directory = root.join("directory");
+        fs::create_dir(&directory).unwrap();
+        let restricted = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+
+        for (label, policy) in [("unrestricted", unrestricted()), ("restricted", restricted)] {
+            let error = create_new(&policy, &directory, b"content")
+                .expect_err("an exclusive create must not replace a directory");
+            let already_exists = error
+                .details
+                .as_ref()
+                .and_then(|details| details.get("alreadyExists"))
+                .cloned();
+            assert_eq!(
+                already_exists,
+                Some(serde_json::Value::Bool(true)),
+                "{label} policy: expected alreadyExists: true | received: {already_exists:?} ({:?})",
+                error.message
+            );
+            assert!(
+                directory.is_dir(),
+                "{label} policy: the directory must survive"
+            );
+        }
     }
 
     #[test]
