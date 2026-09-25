@@ -1261,6 +1261,64 @@ fn native_sessions_convert_times_and_cap_at_fifty() {
     );
 }
 
+/// One listed row with only the fields a vendor filled.
+fn listed_row(title: Option<&str>, preview: Option<&str>) -> sdk::SessionPage {
+    sdk::SessionPage {
+        sessions: vec![sdk::NativeSession {
+            native_session_id: String::from("native-row"),
+            title: title.map(String::from),
+            preview: preview.map(String::from),
+            workspace_path: None,
+            updated_at: None,
+        }],
+        next_cursor: None,
+        truncated: false,
+    }
+}
+
+/// A Codex thread with no name keeps its preview beside an absent title,
+/// so the picker's `title ?? preview` heading shows the first message rather
+/// than a blank row. The runtime must never invent a title from the preview:
+/// the hub persists the title as the vendor's own name for the thread.
+#[test]
+fn an_unnamed_codex_thread_carries_its_preview_and_no_title() {
+    let listed = native_sessions(
+        TargetId::Codex,
+        listed_row(None, Some("add a migration for the lease table")),
+    );
+    let received = serde_json::to_value(&listed.sessions).expect("serializable");
+    assert_eq!(
+        received,
+        json!([{
+            "targetId": "codex",
+            "nativeSessionId": "native-row",
+            "preview": "add a migration for the lease table",
+        }]),
+        "expected an absent title beside the preview | received {received}"
+    );
+    assert_valid(
+        "external-agent.list-sessions",
+        &serde_json::to_value(&listed).expect("serializable"),
+    );
+}
+
+/// Cursor lists no title and no preview; the row must stay untitled rather
+/// than gain a placeholder the vendor never wrote.
+#[test]
+fn an_untitled_cursor_row_stays_untitled() {
+    let listed = native_sessions(TargetId::Cursor, listed_row(None, None));
+    let received = serde_json::to_value(&listed.sessions).expect("serializable");
+    assert_eq!(
+        received,
+        json!([{ "targetId": "cursor", "nativeSessionId": "native-row" }]),
+        "expected neither a title nor a preview on an untitled row | received {received}"
+    );
+    assert_valid(
+        "external-agent.list-sessions",
+        &serde_json::to_value(&listed).expect("serializable"),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Errors and reasons
 // ---------------------------------------------------------------------------

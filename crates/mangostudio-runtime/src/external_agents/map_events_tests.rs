@@ -981,6 +981,84 @@ fn a_question_with_more_choices_than_a_card_carries_is_declined() {
     );
 }
 
+/// The option ids of a mapped card, in wire order.
+fn card_option_ids(mapped: &MappedEvent) -> Vec<String> {
+    let Some(wire::Event::ApprovalRequested { request }) = &mapped.wire else {
+        panic!("expected an approval card | received {:?}", mapped.wire);
+    };
+    request
+        .options
+        .iter()
+        .map(|option| option.id.clone())
+        .collect()
+}
+
+/// Sixteen is the cap itself, not past it: a card with exactly
+/// `APPROVAL_MAX_OPTIONS` choices is shown, never declined.
+#[test]
+fn a_question_with_exactly_the_maximum_choices_is_a_card() {
+    assert_eq!(
+        APPROVAL_MAX_OPTIONS, 16,
+        "expected the card cap the wire carries"
+    );
+    let ids: Vec<String> = (0..APPROVAL_MAX_OPTIONS)
+        .map(|index| format!("c{index}"))
+        .collect();
+    let choices = ids.iter().map(|id| choice(id, id)).collect();
+    let question = sdk::Question::new(sdk::QuestionId::new("q-1"), "Pick", single_choice(choices));
+    let mapped = map(sdk::EventKind::QuestionAsked {
+        request: question_round(vec![question]),
+    });
+    assert!(
+        mapped.unrenderable.is_none(),
+        "expected 16 choices shown, not declined | received {:?}",
+        mapped.unrenderable.as_ref().map(|(_, reason)| reason)
+    );
+    assert_eq!(
+        card_option_ids(&mapped),
+        ids,
+        "expected every one of the 16 choices on the card"
+    );
+    assert_valid_event(mapped.wire.as_ref().expect("a card"));
+}
+
+/// The same cap for a vendor approval: all 16 options reach the card and
+/// the pending approval, and the envelope fits the wire schema.
+#[test]
+fn an_approval_with_exactly_the_maximum_options_is_a_card() {
+    let ids: Vec<String> = (0..APPROVAL_MAX_OPTIONS)
+        .map(|index| format!("o{index}"))
+        .collect();
+    let options = ids
+        .iter()
+        .map(|id| {
+            sdk::PermissionOption::new(id.clone(), sdk::PermissionEffect::Other).with_label(id)
+        })
+        .collect();
+    let request = sdk::PermissionRequest::new(
+        interaction("item-16", sdk::InteractionKind::Permission),
+        sdk::ActivityKind::Command,
+        "pick one of sixteen",
+        options,
+    );
+    let mapped = map(sdk::EventKind::ApprovalRequested { request });
+    assert_eq!(
+        card_option_ids(&mapped),
+        ids,
+        "expected every one of the 16 options on the card"
+    );
+    assert_eq!(
+        mapped.opened,
+        Some(PendingInteraction::Approval {
+            request_id: String::from("item-16"),
+            option_ids: ids,
+            expires_at_ms: EXPIRES_AT_MS,
+        }),
+        "expected the approval pending with all 16 option ids"
+    );
+    assert_valid_event(mapped.wire.as_ref().expect("a card"));
+}
+
 #[test]
 fn a_round_with_no_questions_is_declined() {
     assert_declined(&question_round(Vec::new()), unrenderable::NO_QUESTIONS);
@@ -1165,4 +1243,27 @@ fn request_id_names_either_pending_kind() {
         "round-1",
         "expected the question's request id"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Command catalog
+// ---------------------------------------------------------------------------
+
+/// An empty catalog is a fact (the vendor offers nothing to type), so it is
+/// an empty list on the wire, not a swallowed event. The SDK's catalog is a
+/// typed `Vec`, so the TypeScript "non-list" case cannot reach this mapper.
+#[test]
+fn an_empty_command_catalog_is_an_empty_list_on_the_wire() {
+    let catalog = commands(&[]);
+    assert!(
+        catalog.is_empty(),
+        "expected an empty catalog | received {catalog:?}"
+    );
+    let event = wire::Event::CommandsAvailable { commands: catalog };
+    assert_eq!(
+        serde_json::to_value(&event).expect("event serializes"),
+        json!({ "type": "commands_available", "commands": [] }),
+        "expected an empty commands list, not an absent one"
+    );
+    assert_valid_event(&event);
 }
