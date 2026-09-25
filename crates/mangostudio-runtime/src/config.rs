@@ -1,7 +1,7 @@
 //! Every environment variable the Rust runtime host reads, parsed here and
-//! nowhere else — the same discipline `apps/runtime/src/config.ts` enforces
-//! on the TypeScript side, and the root `AGENTS.md` rule this module exists
-//! to satisfy on the Rust one.
+//! nowhere else — the root `AGENTS.md` rule this module exists to satisfy,
+//! and the discipline the deleted TypeScript host's `apps/runtime/src/config.ts`
+//! kept before it.
 //!
 //! Mirrors `loadRuntimeConfig` in `apps/runtime/src/config.ts`, with one
 //! deliberate omission: `NODE_ENV`. See [`RuntimeConfig`]'s doc comment for
@@ -85,7 +85,7 @@ pub const MANGOSTUDIO_RUNTIME_SETUP: &str = "MANGOSTUDIO_RUNTIME_SETUP";
 ///
 /// Deliberately carries no `validate_in_process_frames` or
 /// `validate_handler_results` field, unlike the TypeScript
-/// [`RuntimeConfig`](https://github.com/juliopolycarpo/mangostudio/blob/main/apps/runtime/src/config.ts):
+/// [`RuntimeConfig`](https://github.com/juliopolycarpo/mangostudio/blob/f1b12518ee7aaba85b155bd227df981b4da94f76/apps/runtime/src/config.ts):
 ///
 /// - `validateHandlerResults` is `!production` in TypeScript, off in
 ///   production so an invalid result still reaches a caller who did nothing
@@ -94,8 +94,8 @@ pub const MANGOSTUDIO_RUNTIME_SETUP: &str = "MANGOSTUDIO_RUNTIME_SETUP";
 ///   success, with no environment escape — so there is no flag left to
 ///   read here, in either environment.
 /// - `validateInProcessFrames` exists only for the hub-embeds-runtime
-///   in-process transport, which is a Node concept
-///   (`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`).
+///   in-process transport, which was a Node concept (the since-deleted
+///   `apps/api/src/services/runtime-client/connect-in-process-runtime.ts`).
 ///   A Rust binary is never embedded in the hub process, so the transport
 ///   the flag guards does not exist here to guard.
 ///

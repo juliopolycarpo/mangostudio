@@ -1,17 +1,13 @@
 //! Regenerates `tests/fixtures/rust-home/`: a runtime home written by *this*
-//! crate, committed so `apps/runtime/tests/unit/runtime-home-rust-compat.test.ts`
-//! can prove the TypeScript implementation reads it back with no error —
-//! the other direction of the compatibility claim `tests/ts_compat.rs`
-//! proves for TypeScript-written homes.
+//! crate, committed so `apps/api/tests/unit/cli/runtime-slot-probe-rust-home.test.ts`
+//! can prove the hub's slot probe reads it back with no error — the other
+//! direction of the compatibility claim `tests/ts_compat.rs` proves for
+//! TypeScript-written homes.
 //!
 //! Also writes one `audit.log` line with [`FileAudit`], under the same
-//! directory the freshness gate already diffs — there is no TypeScript-
-//! authored counterpart yet: `audit-log.ts`'s `createRuntimeAuditSink` has
-//! no clock override (its `ts` always comes from `new Date().toISOString()`
-//! at generation time), so a fixture it wrote could never be reproducible
-//! enough to commit. Adding that override, and the matching TypeScript-to-
-//! Rust `tests/audit_ts_compat.rs`, is left for whichever change first
-//! needs that direction proven.
+//! directory the freshness gate already diffs, so a change to the line this
+//! crate writes shows up as a fixture diff. The TypeScript runtime that used
+//! to read it back is gone, and the hub does not read audit logs.
 //!
 //! `#[ignore]`d: this writes fixture files, it does not check anything, and
 //! a `cargo test` on every gate run should not regenerate committed output

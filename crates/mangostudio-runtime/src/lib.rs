@@ -68,11 +68,13 @@
 //!
 //! # Runtime home
 //!
-//! `apps/runtime` is the TypeScript runtime host; this crate is the
-//! foundation of its Rust rewrite. Its on-disk half — the pieces that must
-//! agree byte-for-byte with what `apps/runtime` reads and writes — owns
-//! exactly four things, each mirroring one TypeScript module so the two
-//! hosts agree on-disk without either side reading the other's language.
+//! This crate is the Rust rewrite of the TypeScript runtime host that lived
+//! in `apps/runtime`, which has since been deleted. Module docs that name an
+//! `apps/runtime/...` file name the TypeScript source a module was ported
+//! from; it is in git history. Its on-disk half — the pieces that had to
+//! agree byte-for-byte with what `apps/runtime` read and wrote, and still
+//! read homes it left behind — owns exactly four things, each mirroring one
+//! TypeScript module.
 //! (The crate as a whole is considerably larger: 22 modules spanning
 //! dispatch, consent, workspace, probing, subprocess handling and this
 //! on-disk layer — the four below are only the part that has a

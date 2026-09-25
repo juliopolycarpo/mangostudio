@@ -8,7 +8,8 @@
 //! and `apps/runtime/src/services/library/service.ts`. Those TypeScript
 //! modules are the parity baseline: `ts_compat_tests` and
 //! `mutation::ts_backup_compat_tests` replay a corpus the real TypeScript
-//! code produced (`apps/runtime/scripts/generate-library-fixtures.ts`).
+//! code produced (`apps/runtime/scripts/generate-library-fixtures.ts`, since
+//! deleted; the corpus is frozen).
 //!
 //! # Method inventory
 //!

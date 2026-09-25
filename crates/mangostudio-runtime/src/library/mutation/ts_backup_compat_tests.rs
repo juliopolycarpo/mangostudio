@@ -9,8 +9,8 @@
 //! byte — manifests included, with only the scratch root and separator
 //! substituted for this machine — and then listed and undone by the Rust
 //! store. Every expectation is what TypeScript answered from the same
-//! snapshot; none is restated. Regenerate with
-//! `bun run --filter @mangostudio/runtime fixtures:library`.
+//! snapshot; none is restated. The corpus is frozen with the TypeScript
+//! runtime that wrote it; backup sets it left behind still have to undo.
 
 use std::path::Path;
 use std::sync::Arc;
