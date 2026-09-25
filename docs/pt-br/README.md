@@ -137,7 +137,7 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
    bun run dev
    ```
 
-   Primeiro ele executa `cargo build -p mangostudio-runtime` — o runtime Local que o hub
+   Primeiro ele executa `cargo build -p mangostudio-runtime --locked` — o runtime Local que o hub
    inicia —; sem cargo ele para e mostra o comando do rustup, e `MANGOSTUDIO_RUNTIME_BINARY`
    aponta para um binário já construído. Depois inicia:
    - **API** em `http://localhost:3001` (Elysia + Kysely/SQLite)

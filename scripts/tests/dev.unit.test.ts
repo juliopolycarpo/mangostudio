@@ -94,7 +94,7 @@ describe('dev script', () => {
   test('builds the Local runtime before the hub when cargo is present', () => {
     expect(planLocalRuntimeBuild({}, true)).toEqual({
       kind: 'build',
-      command: ['cargo', 'build', '-p', 'mangostudio-runtime'],
+      command: ['cargo', 'build', '-p', 'mangostudio-runtime', '--locked'],
     });
   });
 
@@ -126,6 +126,12 @@ describe('dev script', () => {
     expect(devScript.indexOf('planLocalRuntimeBuild(')).toBeLessThan(
       devScript.indexOf('createTurboDevCommand(runnableWorkspaces')
     );
-    expect(LOCAL_RUNTIME_BUILD_COMMAND).toEqual(['cargo', 'build', '-p', 'mangostudio-runtime']);
+    expect(LOCAL_RUNTIME_BUILD_COMMAND).toEqual([
+      'cargo',
+      'build',
+      '-p',
+      'mangostudio-runtime',
+      '--locked',
+    ]);
   });
 });

@@ -139,7 +139,7 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
    bun run dev
    ```
 
-   This first runs `cargo build -p mangostudio-runtime` — the Local runtime the hub spawns —
+   This first runs `cargo build -p mangostudio-runtime --locked` — the Local runtime the hub spawns —
    then starts one server at `http://localhost:3001` (Elysia + Kysely/SQLite) that also
    builds and serves the React frontend. There is no separate frontend port. Without cargo it
    stops and prints the rustup one-liner; set `MANGOSTUDIO_RUNTIME_BINARY` to use a binary you

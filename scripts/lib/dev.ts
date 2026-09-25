@@ -58,7 +58,15 @@ function isDevWorkspace(workspace: WorkspaceName): boolean {
 }
 
 /** Builds the runtime binary the hub launches for Local in a source checkout. */
-export const LOCAL_RUNTIME_BUILD_COMMAND = ['cargo', 'build', '-p', 'mangostudio-runtime'] as const;
+export const LOCAL_RUNTIME_BUILD_COMMAND = [
+  'cargo',
+  'build',
+  '-p',
+  'mangostudio-runtime',
+  // The lockfile CI builds with, so a drifted Cargo.lock fails here too
+  // instead of producing a runtime only this machine can build.
+  '--locked',
+] as const;
 
 /** The rustup one-liner for a machine with no Rust toolchain. */
 export const RUSTUP_INSTALL_COMMAND =
@@ -83,7 +91,7 @@ export type LocalRuntimeBuildPlan =
  *
  * @example
  * planLocalRuntimeBuild(process.env, Bun.which('cargo') !== null);
- * // → { kind: 'build', command: ['cargo', 'build', '-p', 'mangostudio-runtime'] }
+ * // → { kind: 'build', command: ['cargo', 'build', '-p', 'mangostudio-runtime', '--locked'] }
  */
 export function planLocalRuntimeBuild(
   env: NodeJS.ProcessEnv,

@@ -83,7 +83,7 @@ O job de browser-smoke em CI roda em `ubuntu-24.04` porque o Playwright 1.60 ain
 
 `playwright.config.ts` na raiz do repositório inicia ambos os servidores via `webServer` antes de rodar os testes. Em CI, força `workers: 1` e faz upload de traces e screenshots em caso de falha.
 
-O servidor web é `bun run dev --api`, que executa `cargo build -p mangostudio-runtime` antes de o hub iniciar, porque o hub inicia o Local como esse binário. O CI baixa o binário compilado uma vez por run, e `MANGOSTUDIO_RUNTIME_BINARY` faz o `bun run dev` pular o próprio build (veja [Binário do runtime no CI](#binário-do-runtime-no-ci)).
+O servidor web é `bun run dev --api`, que executa `cargo build -p mangostudio-runtime --locked` antes de o hub iniciar, porque o hub inicia o Local como esse binário. O CI baixa o binário compilado uma vez por run, e `MANGOSTUDIO_RUNTIME_BINARY` faz o `bun run dev` pular o próprio build (veja [Binário do runtime no CI](#binário-do-runtime-no-ci)).
 
 Cenários em `tests/browser-smoke/auth-flow.spec.ts`:
 

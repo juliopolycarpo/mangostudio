@@ -29,7 +29,7 @@ cp .mango/.env.example ~/.mango/.env
 bun run dev
 ```
 
-Ele executa `cargo build -p mangostudio-runtime` antes, para que o Local tenha um binário para
+Ele executa `cargo build -p mangostudio-runtime --locked` antes, para que o Local tenha um binário para
 iniciar; defina `MANGOSTUDIO_RUNTIME_BINARY` para usar um que você já compilou. Os testes da API
 que alcançam o Local precisam do mesmo binário.
 
