@@ -661,7 +661,7 @@ export class RuntimeClient {
    * only there to rely on when this is at least that minor.
    *
    * @example
-   * const ordered = client.effectiveMinor >= 2; // spec §6.2, wire 1.2
+   * const ordered = client.effectiveMinor >= ORDERED_ANSWER_MINOR; // spec §6.2
    */
   get effectiveMinor(): number {
     return this.hub.effectiveMinor;

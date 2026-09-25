@@ -97,12 +97,20 @@ pub const ORDERED_ANSWER_MINOR: u16 = 2;
 
 #[cfg(test)]
 mod tests {
-    use super::{PROTOCOL_MAJOR, PROTOCOL_MINOR, PROTOCOL_VERSION};
+    use super::{ORDERED_ANSWER_MINOR, PROTOCOL_MAJOR, PROTOCOL_MINOR, PROTOCOL_VERSION};
 
     #[test]
     fn speaks_wire_one_two() {
         assert_eq!(PROTOCOL_MAJOR, 1);
         assert_eq!(PROTOCOL_MINOR, 2);
+    }
+
+    #[test]
+    fn keeps_the_answer_ordering_feature_minor_at_two() {
+        assert_eq!(
+            ORDERED_ANSWER_MINOR, 2,
+            "expected the feature minor from spec 6.2 | received {ORDERED_ANSWER_MINOR}"
+        );
     }
 
     #[test]
