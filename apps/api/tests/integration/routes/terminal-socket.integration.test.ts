@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { createLocalRuntimeHost, createSlotConsentSource } from '@mangostudio/runtime';
 import {
   decodeTerminalServerMessage,
   encodeTerminalClientMessage,
@@ -15,12 +14,10 @@ import {
   type TerminalSessionService,
 } from '../../../src/modules/terminals/application/terminal-session-service';
 import { createTerminalSocketRoutes } from '../../../src/modules/terminals/http/terminal-socket-routes';
-import {
-  connectInProcessRuntime,
-  type InProcessRuntimeConnection,
-} from '../../../src/services/runtime-client/connect-in-process-runtime';
 import { insertTestUser } from '../../support/factories';
 import { FakeTerminalRuntimeClient } from '../../support/mocks/fake-terminal-runtime-client';
+import { resolveRustRuntimeBinary } from '../../support/rust-runtime-binary';
+import { spawnRustStdioRuntime } from '../../support/rust-stdio-runtime';
 
 const ENVIRONMENT_ID = 'workshop';
 
@@ -525,78 +522,50 @@ describe('terminal socket relay', () => {
   });
 });
 
-/**
- * Probes whether this worktree's `apps/runtime` build both supports a PTY and
- * has the `terminal.*` handlers wired into the Local host. Neither the runtime
- * work landing this feature relies on nor this hub's tests can assume the
- * other half is done: this hub half was built while `terminal.open` had no
- * handler registered anywhere in `apps/runtime`, so a real Local terminal
- * would answer `METHOD_UNSUPPORTED`. The probe result gates one `it` below
- * with a stated reason rather than letting that surface as a failure.
- */
-async function probeLocalTerminalSupport(): Promise<{ ok: boolean; reason: string }> {
-  const definition = createLocalRuntimeHost({
-    runtimeVersion: 'terminal-probe',
-    consent: createSlotConsentSource({ slot: 'host' }),
-  });
-  let connection: InProcessRuntimeConnection | undefined;
-  try {
-    connection = await connectInProcessRuntime(definition, { hubVersion: 'hub-test' });
-    if (connection.hub.manifest.terminal !== true) {
-      return {
-        ok: false,
-        reason: 'this machine reports no PTY/shell consent (manifest.terminal !== true)',
-      };
-    }
-    const sessionId = crypto.randomUUID();
-    await connection.hub.request('terminal.open', { sessionId, cols: 80, rows: 24 });
-    await connection.hub.request('terminal.close', { sessionId });
-    return { ok: true, reason: '' };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: `terminal.* handlers are not wired into this worktree's apps/runtime yet (${
-        error instanceof Error ? error.message : String(error)
-      })`,
-    };
-  } finally {
-    await connection?.close();
-  }
-}
+const binary = resolveRustRuntimeBinary();
 
-const localTerminalSupport = await probeLocalTerminalSupport();
-
-describe('terminal socket over a real Local runtime', () => {
-  it.skipIf(!localTerminalSupport.ok)(
-    `opens, attaches, and relays real PTY output for printf hi (skip reason if skipped: ${localTerminalSupport.reason})`,
+describe('terminal socket over a real Rust runtime', () => {
+  it.skipIf(!binary.available)(
+    'opens, attaches, and relays real PTY output for printf hi',
     async () => {
       const user = await insertTestUser();
-      // The attestation is answered by the process-wide connection manager,
-      // and earlier files in the same run connect other users to the Local
-      // runtime, which is exactly what un-proves single-user-host. The gate is
-      // covered by the unit tests; this case proves the PTY relay.
-      const service = createTerminalSessionService({ isIdentityAttested: () => true });
-      const session = await service.open(user.id, {
-        environmentId: 'local',
-        shell: 'bash',
-      });
-      const hub = startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
-      const viewer = connect(`${hub.url}/${session.id}`);
-      await waitForOpen(viewer.socket);
+      const runtime = await spawnRustStdioRuntime(binary.path, { label: 'terminal-socket' });
+      try {
+        // Consent and ability together: a fresh host slot grants shell, and
+        // this build answers terminal.* on a machine with a PTY and bash.
+        expect(runtime.client.manifest.terminal).toBe(true);
+        // The attestation gate is covered by the unit tests; this case proves
+        // the PTY relay from a real runtime through the hub's socket route.
+        const service = createTerminalSessionService({
+          getRuntimeClient: () => Promise.resolve(runtime.client),
+          isIdentityAttested: () => true,
+        });
+        const session = await service.open(user.id, {
+          environmentId: 'rust-terminal',
+          shell: 'bash',
+        });
+        const hub = startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
+        const viewer = connect(`${hub.url}/${session.id}`);
+        await waitForOpen(viewer.socket);
 
-      viewer.socket.send(
-        encodeTerminalClientMessage({
-          type: 'data',
-          data: new TextEncoder().encode('printf hi\n'),
-        })
-      );
+        viewer.socket.send(
+          encodeTerminalClientMessage({
+            type: 'data',
+            data: new TextEncoder().encode('printf hi\n'),
+          })
+        );
 
-      const withHi = await viewer.nextMessage(
-        (message) => message.type === 'data' && Buffer.from(message.data).toString().includes('hi')
-      );
-      expect(withHi).toBeDefined();
+        const withHi = await viewer.nextMessage(
+          (message) =>
+            message.type === 'data' && Buffer.from(message.data).toString().includes('hi')
+        );
+        expect(withHi).toBeDefined();
 
-      await service.close(user.id, session.id);
-    }
+        await service.close(user.id, session.id);
+      } finally {
+        await runtime.close();
+      }
+    },
+    30_000
   );
 });
