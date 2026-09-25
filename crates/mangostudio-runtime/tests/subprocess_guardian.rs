@@ -42,12 +42,12 @@ async fn guardian_kills_the_tree_when_its_runtime_parent_dies() {
         None,
     );
 
-    wait_for_file(&target_pid).await;
-    wait_for_file(&descendant_pid).await;
+    let target = wait_for_pid(&target_pid).await;
+    let descendant = wait_for_pid(&descendant_pid).await;
     kill_fixture_parent(&mut parent);
 
-    assert_process_is_gone(&target_pid).await;
-    assert_process_is_gone(&descendant_pid).await;
+    assert_process_is_gone(target, &target_pid).await;
+    assert_process_is_gone(descendant, &descendant_pid).await;
 }
 
 /// A direct target may exit while its descendant keeps stdout open. The guardian reports that
@@ -73,12 +73,12 @@ async fn guardian_keeps_parent_death_cleanup_after_direct_target_exit() {
         Some(LEADER_EXIT_CASE),
     );
 
-    wait_for_file(&target_pid).await;
-    wait_for_file(&descendant_pid).await;
+    let target = wait_for_pid(&target_pid).await;
+    let descendant = wait_for_pid(&descendant_pid).await;
     kill_fixture_parent(&mut parent);
 
-    assert_process_is_gone(&target_pid).await;
-    assert_process_is_gone(&descendant_pid).await;
+    assert_process_is_gone(target, &target_pid).await;
+    assert_process_is_gone(descendant, &descendant_pid).await;
 }
 
 /// Two starts deliberately reach their launch checks together. Each guardian must close every
@@ -103,12 +103,12 @@ async fn concurrent_guardians_do_not_retain_each_others_parent_death_leases() {
         Some(CONCURRENT_CASE),
     );
 
-    wait_for_file(&first_pid).await;
-    wait_for_file(&second_pid).await;
+    let first = wait_for_pid(&first_pid).await;
+    let second = wait_for_pid(&second_pid).await;
     kill_fixture_parent(&mut parent);
 
-    assert_process_is_gone(&first_pid).await;
-    assert_process_is_gone(&second_pid).await;
+    assert_process_is_gone(first, &first_pid).await;
+    assert_process_is_gone(second, &second_pid).await;
 }
 
 async fn run_killed_parent_fixture(directory: PathBuf) {
@@ -118,9 +118,9 @@ async fn run_killed_parent_fixture(directory: PathBuf) {
         &directory,
         "target.sh",
         &format!(
-            "echo $$ > {}\nsleep 30 & echo $! > {}\nsleep 30",
-            target_pid.display(),
-            descendant_pid.display(),
+            "{}\nsleep 30 & {}\nsleep 30",
+            publish_pid("$$", &target_pid),
+            publish_pid("$!", &descendant_pid),
         ),
     );
     let control = start_fixture_target(script, Arc::new(AlwaysAllow)).await;
@@ -138,9 +138,9 @@ async fn run_leader_exit_fixture(directory: PathBuf) {
         &directory,
         "leader-exits.sh",
         &format!(
-            "echo $$ > {}\nsleep 30 & echo $! > {}\nexit 0",
-            target_pid.display(),
-            descendant_pid.display(),
+            "{}\nsleep 30 & {}\nexit 0",
+            publish_pid("$$", &target_pid),
+            publish_pid("$!", &descendant_pid),
         ),
     );
     let control = start_fixture_target(script, Arc::new(AlwaysAllow)).await;
@@ -156,16 +156,16 @@ async fn run_concurrent_fixture(directory: PathBuf) {
         &directory,
         "first.sh",
         &format!(
-            "echo $$ > {}\nsleep 30",
-            directory.join("first.pid").display()
+            "{}\nsleep 30",
+            publish_pid("$$", &directory.join("first.pid"))
         ),
     );
     let second = write_script(
         &directory,
         "second.sh",
         &format!(
-            "echo $$ > {}\nsleep 30",
-            directory.join("second.pid").display()
+            "{}\nsleep 30",
+            publish_pid("$$", &directory.join("second.pid"))
         ),
     );
     let check: Arc<dyn LaunchCheck> = Arc::new(ConcurrentStartBarrier(Barrier::new(2)));
@@ -242,22 +242,41 @@ fn write_script(directory: &Path, name: &str, body: &str) -> PathBuf {
     script
 }
 
-async fn wait_for_file(path: &Path) {
+/// Shell text that publishes `pid` to `path` in one rename, so a reader never
+/// sees the empty file `echo > path` creates before it writes.
+///
+/// # Example
+///
+/// ```ignore
+/// let line = publish_pid("$$", &directory.join("target.pid"));
+/// ```
+fn publish_pid(pid: &str, path: &Path) -> String {
+    let path = path.display();
+    format!("echo {pid} > {path}.partial && mv {path}.partial {path}")
+}
+
+/// The pid in `path` once its writer published a whole newline-terminated
+/// line; `None` while the file is missing, empty or partial.
+fn published_pid(path: &Path) -> Option<i32> {
+    let text = std::fs::read_to_string(path).ok()?;
+    text.strip_suffix('\n')?.trim().parse().ok()
+}
+
+async fn wait_for_pid(path: &Path) -> i32 {
     for _ in 0..500 {
-        if path.exists() {
-            return;
+        if let Some(pid) = published_pid(path) {
+            return pid;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    panic!("{} was never created", path.display());
+    panic!(
+        "expected a published pid in {} | received: {:?}",
+        path.display(),
+        std::fs::read_to_string(path)
+    );
 }
 
-async fn assert_process_is_gone(pid_file: &Path) {
-    let pid: i32 = std::fs::read_to_string(pid_file)
-        .unwrap_or_else(|error| panic!("{} was never written: {error}", pid_file.display()))
-        .trim()
-        .parse()
-        .expect("the fixture wrote a numeric pid");
+async fn assert_process_is_gone(pid: i32, pid_file: &Path) {
     for _ in 0..300 {
         if matches!(
             nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
@@ -271,4 +290,53 @@ async fn assert_process_is_gone(pid_file: &Path) {
         "pid {pid} from {} survived runtime-parent death",
         pid_file.display()
     );
+}
+
+/// A pid file caught between `echo`'s create and its write is empty; the
+/// wait must treat it, and a partial line, as not yet published.
+#[test]
+fn a_pid_file_counts_only_once_a_whole_line_is_published() {
+    let directory = scratch_dir("guardian-pid-publish");
+    let path = directory.join("target.pid");
+    assert_eq!(
+        published_pid(&path),
+        None,
+        "expected a missing file unpublished"
+    );
+    std::fs::write(&path, "").unwrap();
+    assert_eq!(
+        published_pid(&path),
+        None,
+        "expected an empty file unpublished"
+    );
+    std::fs::write(&path, "12").unwrap();
+    assert_eq!(
+        published_pid(&path),
+        None,
+        "expected a partial line unpublished"
+    );
+    std::fs::write(&path, "12\n").unwrap();
+    assert_eq!(published_pid(&path), Some(12));
+}
+
+/// The fixture scripts publish through a rename, so the final name only ever
+/// holds a whole line and no partial file is left behind.
+#[test]
+fn fixture_scripts_publish_their_pid_in_one_rename() {
+    let directory = scratch_dir("guardian-pid-rename");
+    let path = directory.join("target.pid");
+    let status = Command::new("/bin/sh")
+        .args(["-c", &publish_pid("$$", &path)])
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "expected the publish snippet to succeed | received: {status}"
+    );
+    assert!(published_pid(&path).is_some_and(|pid| pid > 0));
+    let leftovers: Vec<_> = std::fs::read_dir(&directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(leftovers, vec![std::ffi::OsString::from("target.pid")]);
 }
