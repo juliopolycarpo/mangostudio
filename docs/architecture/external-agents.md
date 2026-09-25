@@ -891,22 +891,32 @@ External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
-Three product facts come from SDK surfaces that `dyn Harness` alone does not cover:
+These product facts come from SDK surfaces that `dyn Harness` alone does not cover:
 
 - **Codex account fingerprint.** Discovery goes through `HarnessFactory::discover`, which the
   product factory overrides so Codex runs `CodexHarness::discover_with_account`. The key is
-  `host_local_digest_key`'s hex text as bytes, so `account.fingerprint` is the value
-  `codex/adapter.ts` stored on continuations, and `account.planType` comes with it. The email is
-  only the HMAC input inside the SDK. A home the runtime cannot read sends no fingerprint.
+  `host_local_digest_key`'s hex text as bytes, read again for every Codex discovery, so
+  `account.fingerprint` is the value `codex/adapter.ts` stored on continuations, and
+  `account.planType` comes with it. The email is only the HMAC input inside the SDK. When the home
+  cannot be read, discovery runs under a fixed plan-only key and drops its fingerprint: the plan
+  still arrives and no fingerprint is sent.
 - **Account limits.** `credits`, `spendControl` and `resetCredits` are relayed with times in
   epoch milliseconds and at most 64 reset-credit rows. Per-limit buckets and `reachedType` have
   no SDK source and stay absent.
-- **Turn endings and progress.** Codex command, MCP and patch progress arrive as coalesced
-  `activity_updated` events (at most one per 5 s per activity, the last 2,000 characters), which
-  keeps a command streaming for the whole hard deadline inside the payload budget. An ACP turn
-  stopped at `max_tokens`, `max_turn_requests` or `refusal` ends with an `error` whose code is
-  `vendor-turn-incomplete` and whose `vendorCode` is the stop reason. The turn footer shows the
-  code and the message.
+- **Progress.** Codex command, MCP and patch progress arrive as coalesced `activity_updated`
+  events, at most one per 5 s per activity, each with up to the last 2,000 characters. The bound
+  is on characters, not bytes. One activity with mostly ASCII output fits the payload budget for
+  the whole one-hour hard deadline (about 1.6 MB for 720 updates). Output that is mostly non-ASCII
+  or JSON-escaped, or several activities streaming at once, can reach the limit sooner, the same
+  as in the TypeScript runtime. At the limit the runtime ends the turn with its own
+  `adapter-stream` error ("External-agent turn exceeded its persisted payload limit.") and cancels
+  the vendor turn.
+- **Turn endings.** A turn the SDK ends for silence, or for a lapsed approval, arrives as
+  `Cancelled { reason: Timeout }`. The runtime reports it as an `adapter-stream` error, "External-agent
+  turn exceeded its idle timeout.", as the TypeScript supervisor did, not as a bare `cancelled`.
+  An ACP turn stopped at `max_tokens`, `max_turn_requests` or `refusal` ends with an `error`
+  whose code is `vendor-turn-incomplete` and whose `vendorCode` is the stop reason. The turn
+  footer shows the code and the message.
 
 ### Method map
 
@@ -1027,7 +1037,7 @@ protocols to the SDK and are not repeated here.
 | turns a mid-stream adapter crash into a bounded error and cancellation                         | `error_carries_code_message_vendor_code_request_id_and_retryable`, `a_mid_stream_adapter_crash_ends_the_turn_with_its_error_and_frees_the_session`                                                                                                                                                                                              | covered: the SDK commits the crash as the terminal and owns the child |
 | refuses unknown additive and host-tool event shapes at the runtime boundary                    | every mapped event validates against the topic schema (`map_events_tests.rs`)                                                                                                                                                                                                                                                                   | covered                                                               |
 | enforces the hard turn deadline even while a stream remains active                             | `a_turn_past_its_hard_deadline_ends_with_its_own_error_and_frees_the_session`, `the_hard_deadline_fires_while_the_stream_never_pauses`                                                                                                                                                                                                          | covered                                                               |
-| idle deadline; not idle while awaiting an approval; stops waiting once the approval expired    | SDK `Limits::idle_timeout` and `approval_timeout`: ACP turns observe it since 0.3.0, and Codex command output, MCP progress and patch updates restart it                                                                                                                                                                                        | moved to the SDK                                                      |
+| idle deadline; not idle while awaiting an approval; stops waiting once the approval expired    | SDK `Limits::idle_timeout` and `approval_timeout`: ACP turns observe it since 0.3.0, and Codex command output, MCP progress and patch updates restart it; the runtime reports its expiry as an error (`an_idle_timeout_ends_the_turn_with_its_own_error_not_a_bare_cancel`)                                                                     | moved to the SDK                                                      |
 | refuses a listing for an unauthorized workspace; passes the canonical workspace through        | `listing_sessions_never_opens_a_conversation_and_authorizes_its_workspace`                                                                                                                                                                                                                                                                      | covered                                                               |
 | refuses a target whose adapter has no listing; bounds listed text                              | `listing_a_target_without_session_listing_is_refused_by_name`, `native_sessions_convert_times_and_cap_at_fifty`                                                                                                                                                                                                                                 | covered                                                               |
 | refuses a session that advertises nativeReview without implementing it                         | SDK core conformance (0.3.0) fails a harness that declares native review but refuses it                                                                                                                                                                                                                                                         | moved to the SDK                                                      |
