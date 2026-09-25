@@ -13,6 +13,7 @@ import {
 import {
   type HubExternalAgentIsolation,
   narrowRuntimeErrorCode,
+  RUNTIME_ALREADY_BOUND_CLOSE_CODE,
   type RuntimeCapabilityManifest,
   type RuntimeErrorCode,
 } from '@mangostudio/shared/runtime-contract';
@@ -246,6 +247,26 @@ interface RuntimeConnectionEntry {
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
+
+/**
+ * How long a record a runtime refused as bound elsewhere waits before a lazy
+ * caller may try it again. Deliberately slower than the crash backoff: the
+ * refusal is not a fault that goes away on its own in seconds, and every retry
+ * is a dial the holder's runtime has to answer.
+ */
+const BOUND_ELSEWHERE_RETRY_MS = 60_000;
+
+/**
+ * True when the runtime closed the handshake with the already-bound code.
+ *
+ * @example
+ * isBoundElsewhere(new RemoteError('UNAVAILABLE', 'closed', { closeCode: 4423 })); // true
+ */
+export function isBoundElsewhere(error: unknown): error is RemoteError {
+  return (
+    error instanceof RemoteError && error.details?.closeCode === RUNTIME_ALREADY_BOUND_CLOSE_CODE
+  );
+}
 
 /**
  * How long a connection must survive to count as healthy. A runtime that dies
@@ -670,6 +691,9 @@ export class RuntimeConnectionManager {
         return connection.client;
       })
       .catch((error: unknown) => {
+        if (isBoundElsewhere(error)) {
+          throw this.#markBoundElsewhere(entry, userId, revision, environmentId, error);
+        }
         if (entry.revision === revision) {
           const errorCode = statusErrorCode(error);
           const dialIn = isDialIn(entry.transportKind);
@@ -1001,6 +1025,42 @@ export class RuntimeConnectionManager {
     // terms: tools resolve `~` and relative input through the connection's
     // manifest, and the runtime re-checks the result against its own filesystem.
     return await connector(definition, onUnavailable, context);
+  }
+
+  /**
+   * Records a runtime that refused this record because another record's live
+   * connection holds it, and returns the rejection to throw.
+   *
+   * Not a failure toward the latch: nothing is wrong with this record, and the
+   * holder may go away at any time. So the failure count is left alone and the
+   * next lazy attempt waits {@link BOUND_ELSEWHERE_RETRY_MS} — slow enough that
+   * two records pointing at one runtime cannot flap, and harmless because the
+   * runtime refuses before it disturbs the holder.
+   */
+  #markBoundElsewhere(
+    entry: RuntimeConnectionEntry,
+    userId: string,
+    revision: number,
+    environmentId: string,
+    error: RemoteError
+  ): RemoteError {
+    if (entry.revision === revision) {
+      entry.connection = undefined;
+      entry.retryAfterMs = Date.now() + BOUND_ELSEWHERE_RETRY_MS;
+      entry.status = {
+        state: 'error',
+        errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,
+        boundElsewhere: true,
+        ...this.#cachedPeer(entry),
+      };
+      this.#publish(userId);
+    }
+    const retrySeconds = BOUND_ELSEWHERE_RETRY_MS / 1_000;
+    return new RemoteError(
+      RESERVED_ERROR_CODES.UNAVAILABLE,
+      `Environment "${environmentId}" was refused: its runtime is already bound to another environment record (close code ${RUNTIME_ALREADY_BOUND_CLOSE_CODE}); expected no live connection from another record. Retrying in ${retrySeconds}s; disconnect or remove the other record to use this one. (${error.message})`,
+      { ...error.details, environmentId }
+    );
   }
 
   /**

@@ -928,11 +928,20 @@ is plaintext HTTP to a public host. On the runtime side, inject a per-run serve 
 `MANGOSTUDIO_RUNTIME_SERVE_TOKEN` (or stdin); that path does not write the credential to
 disk. `MANGOSTUDIO_RUNTIME_TOKEN` stays the pairing credential for `connect`.
 
-**One serve process maps to one user environment.** A second hub (or a second connection
-from the same hub) that upgrades successfully supersedes the previous socket with close
-code `4409`. Multi-user sharing of one listening runtime is therefore a supersede race,
-not a multiplexed session; give each environment its own listen address or its own token
-and process if more than one hub should use that machine.
+**One serve process maps to one user environment.** The hub announces an opaque binding
+key in `hello.capabilities.bindingKey`, a digest of the user and environment record it
+connects for. The Rust runtime reads the hub's `hello` before sending its own and decides:
+
+- The same key reconnecting (a network drop the runtime has not noticed yet), or either
+  side without a key (an older hub), supersedes the previous socket with close code `4409`.
+- A different key while the previous connection is live is refused with the
+  application close code `4423` (`RUNTIME_ALREADY_BOUND_CLOSE_CODE`) before the runtime
+  announces itself. The live connection is not touched. The hub shows the refused record
+  as `boundElsewhere` and lets a lazy caller retry at most once a minute.
+
+Multi-user sharing of one listening runtime is not a multiplexed session. Give each
+environment its own listen address, or its own token and process, if more than one hub
+should use that machine.
 
 The runtime does not terminate TLS. Put a reverse proxy in front when the dial crosses an
 untrusted network. The same Bun self-signed client caveat as paired WebSocket applies when

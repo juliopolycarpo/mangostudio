@@ -2982,6 +2982,8 @@ export const messages = {
       offlineCache: 'Cache offline',
       offlineCacheHint:
         'Não foi possível alcançar a release, então isto iniciou com um runtime que o hub já havia verificado.',
+      boundElsewhereHint:
+        'Outro registro de ambiente, neste hub ou em outro, está conectado a este runtime. Ele aceita uma conexão de hub por vez, então este registro tenta de novo no máximo uma vez por minuto, sem atrapalhar aquela conexão. Desconecte ou remova o outro registro para usar este.',
       status: {
         connected: 'Conectado',
         connecting: 'Conectando',
@@ -2989,6 +2991,7 @@ export const messages = {
         error: 'Falha na conexão',
         updating: 'Atualizando',
         pulling: 'Baixando imagem',
+        boundElsewhere: 'Vinculado a outro',
       },
       transport: {
         'in-process': 'No processo',

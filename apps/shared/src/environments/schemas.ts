@@ -461,6 +461,14 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
      * silently stops noticing it has been offline for weeks.
      */
     offlineRuntimeCache: Type.Optional(Type.Boolean()),
+    /**
+     * Set when the runtime refused this environment because a live connection
+     * for another environment record — on this hub or another — already holds
+     * it. A `serve` runtime takes one hub connection at a time; two records
+     * pointing at it would otherwise take each other offline. The hub retries
+     * only slowly and never disturbs the connection that holds it.
+     */
+    boundElsewhere: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false }
 );

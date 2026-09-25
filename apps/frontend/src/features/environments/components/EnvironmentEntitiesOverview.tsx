@@ -226,9 +226,20 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
               ? labels.status.updating
               : environment.status.pullingImage
                 ? labels.status.pulling
-                : labels.status[state]}
+                : environment.status.boundElsewhere
+                  ? labels.status.boundElsewhere
+                  : labels.status[state]}
           </span>
         </div>
+
+        {environment.status.boundElsewhere ? (
+          <p
+            className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant"
+            data-testid="environment-bound-elsewhere"
+          >
+            {labels.boundElsewhereHint}
+          </p>
+        ) : null}
 
         <CapabilityChips environment={environment} />
 
