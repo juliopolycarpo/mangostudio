@@ -116,10 +116,16 @@ Windows-only environment variable:
 ## Production Build
 
 ```bash
-bun run build --binary
+bun run build --binary --platform linux-x64                  # this machine's platform
+bun run build --binary --runtime-dir .mango/runtime-prebuilt # all 8, with prebuilt runtimes
 ```
 
-This compiles the API into binaries under `.mango/out/<platform>/` with the frontend assets as sidecar files.
+This compiles the hub (with the frontend embedded) into `.mango/out/<platform>/mangostudio`
+and places the cargo-built `mangostudio-runtime` beside it. Without `--runtime-dir`, only the
+host's own platform can be built, because only its runtime is built locally with `cargo build`.
+Any other platform needs a prebuilt runtime at `<dir>/<platform>/mangostudio-runtime[.exe]`
+(`bun run build:runtime`, or the CI artifact); see
+[releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built).
 
 ## Platform Targets
 

@@ -255,7 +255,7 @@ mangostudio/
 | `bun run dev`             | Inicia todos os servidores de dev simultaneamente                      |
 | `bun run dev --api`       | Inicia apenas o servidor de dev da API                                 |
 | `bun run build`           | Build do frontend para produção                                        |
-| `bun run build --binary`  | Gera binários standalone com frontend embutido                         |
+| `bun run build --binary`  | Gera os binários standalone do host (hub + runtime cargo)              |
 | `bun run check`           | Executa Biome, dprint, madge e typecheck                               |
 | `bun run test`            | Executa as lanes unit e integration                                    |
 | `bun run test --unit`     | Executa apenas as suítes unitárias                                     |
@@ -458,7 +458,7 @@ Quando uma alteração relevante for feita em `docs/`, a versão correspondente 
 
 ## Notas de Build Standalone
 
-O comando `bun run build --binary` compila a API em binários específicos por plataforma em `.mango/out/<platform>/`.
+O comando `bun run build --binary` compila a API em binários específicos por plataforma em `.mango/out/<platform>/`, ao lado do `mangostudio-runtime` construído com cargo. Localmente ele constrói a plataforma do próprio host (`--platform <host>`); outras plataformas precisam de runtimes pré-construídos via `--runtime-dir <dir>` (veja [releasing](reference/releasing.md#como-o-binário-do-runtime-é-construído)).
 
 - O banco de dados é persistido em `~/.mango/database.sqlite` por padrão.
 - Os assets do frontend são embarcados no executável em tempo de compilação.
