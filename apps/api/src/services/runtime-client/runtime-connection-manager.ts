@@ -135,9 +135,10 @@ export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
  * still waits it out; see {@link connectWslRuntime}. Every connector that
  * spawns a process — Local, `stdio`, `wsl`, `ssh` and `container` — threads
  * `signal` into `spawnRuntimeChild`, which terminates the child the moment it
- * fires instead of waiting out its own handshake timeout. A connector that neither watches
- * the signal nor spawns anything is bounded by the manager instead; see
- * {@link CONNECT_DEADLINE_MS}.
+ * fires instead of waiting out its own handshake timeout; `http` threads it
+ * into its WebSocket dial and handshake, which close the socket the same way.
+ * A connector that neither watches the signal nor spawns anything is bounded
+ * by the manager instead; see {@link CONNECT_DEADLINE_MS}.
  */
 export interface RuntimeConnectContext {
   readonly report: (phase: RuntimeConnectPhase) => void;

@@ -981,7 +981,8 @@ A dial that neither opens nor fails is bounded here rather than by the connectio
 host that accepts the TCP connection and then says nothing produces no `open`, no `error` and
 no `close`, so `connect-http-runtime.ts` carries a `dialDeadline`
 (`apps/shared/src/utils/dial-deadline.ts`) that aborts the dial with the
-message the card will show.
+message the card will show. A connect released mid-dial or mid-handshake — a disconnect, a
+delete, shutdown — aborts both, closes the socket and settles as `CANCELLED`.
 
 Config is `{ baseUrl }` (`http://` or `https://`). The serve token is write-only: it is
 never returned by the API, only whether one is stored (`hasRuntimeToken`). Private and
