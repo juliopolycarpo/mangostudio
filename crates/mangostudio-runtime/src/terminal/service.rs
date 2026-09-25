@@ -801,10 +801,22 @@ fn shell_program(shell: RuntimeShellKind, host: &PathEnv) -> Result<PathBuf, Rem
         .ok_or_else(|| {
             RemoteError::new(
                 codes::INTERNAL,
-                format!("The {shell:?} shell is not available on this system."),
+                format!(
+                    "The \"{}\" shell is not available on this system.",
+                    shell_wire_name(shell)
+                ),
             )
             .with_detail("kind", "shell_execution")
         })
+}
+
+/// The shell's wire name, as `terminal.open` takes it and the TypeScript refusal quoted it.
+fn shell_wire_name(shell: RuntimeShellKind) -> &'static str {
+    match shell {
+        RuntimeShellKind::Bash => "bash",
+        RuntimeShellKind::Zsh => "zsh",
+        RuntimeShellKind::Powershell => "powershell",
+    }
 }
 
 fn resolve_cwd(requested: Option<&str>, home: &std::path::Path) -> PathBuf {

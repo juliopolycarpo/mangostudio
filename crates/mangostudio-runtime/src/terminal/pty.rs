@@ -695,6 +695,61 @@ mod tests {
         ));
     }
 
+    /// A daemon the user started in its own session (`setsid`, as `tmux` or `ssh-agent` do) is
+    /// outside terminal containment: closing the tab kills the shell, not the daemon.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn closing_a_terminal_leaves_a_setsid_daemon_running() {
+        let _serial = REAL_PTY_TEST.lock().await;
+        let dir = crate::test_support::scratch_dir("pty-setsid-daemon");
+        let pid_file = dir.join("daemon.pid");
+        let script = format!(
+            "setsid sleep 60 </dev/null >/dev/null 2>&1 & echo $! > '{0}.tmp'; mv '{0}.tmp' '{0}'; \
+             sleep 60",
+            pid_file.display()
+        );
+        let request = PtyRequest::new("/bin/sh", ["-c", script.as_str()], 80, 24);
+        let handle = DefaultPtySpawner
+            .spawn(
+                request,
+                Arc::new(AlwaysAllow),
+                Arc::new(|_| {}),
+                Arc::new(|_| {}),
+            )
+            .await
+            .expect("terminal starts");
+        let daemon: u32 = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(pid) = std::fs::read_to_string(&pid_file)
+                    .ok()
+                    .and_then(|text| text.trim().parse().ok())
+                {
+                    return pid;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("expected the shell to record its daemon pid | received nothing in 5s");
+        handle.close().await.expect("terminal closes");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let running = std::fs::read_to_string(format!("/proc/{daemon}/stat"))
+            .ok()
+            .and_then(|stat| {
+                stat.rsplit_once(')')
+                    .and_then(|(_, rest)| rest.split_whitespace().next().map(str::to_owned))
+            })
+            .is_some_and(|state| state != "Z");
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &daemon.to_string()])
+            .status();
+        assert!(
+            running,
+            "expected the setsid daemon {daemon} to survive closing its terminal | received: \
+             killed with the tab"
+        );
+    }
+
     #[tokio::test]
     async fn unix_pty_has_controlling_tty_and_reports_native_exit() {
         let _serial = REAL_PTY_TEST.lock().await;

@@ -255,7 +255,11 @@ mod tests {
 
     #[test]
     fn row_env_then_secret_env_override_inherited_values() {
-        let source = MapEnv::from([("HOME", "/home/owner"), ("PATH", "/usr/bin")]);
+        let source = MapEnv::from([
+            ("HOME", "/home/owner"),
+            ("LANG", "pt_BR.UTF-8"),
+            ("PATH", "/usr/bin"),
+        ]);
         let configured = BTreeMap::from([
             ("PATH".into(), "/custom/bin".into()),
             ("MCP_FLAG".into(), "on".into()),
@@ -266,6 +270,13 @@ mod tests {
         assert_eq!(env.get("MCP_FLAG").map(String::as_str), Some("secret"));
         #[cfg(not(windows))]
         assert_eq!(env.get("HOME").map(String::as_str), Some("/home/owner"));
+        #[cfg(not(windows))]
+        assert_eq!(
+            env.get("LANG").map(String::as_str),
+            Some("pt_BR.UTF-8"),
+            "expected the inherited LANG forwarded to the MCP child | received {:?}",
+            env.get("LANG")
+        );
     }
 
     #[test]

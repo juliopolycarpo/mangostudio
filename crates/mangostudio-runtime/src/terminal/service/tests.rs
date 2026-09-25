@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     AckParams, Entry, OpenParams, ResizeParams, Service, SessionParams, Slot, WriteParams, count,
-    default_shell, resolve_cwd, size,
+    default_shell, prepare, resolve_cwd, size,
 };
 use crate::consent::source::ConsentSource;
 use crate::probing::detection::path_env::PathEnv;
@@ -579,4 +579,164 @@ async fn fake_pty_exit_refuses_write_with_typed_error_and_preserves_native_code(
         .unwrap_err();
     assert_eq!(error.details.unwrap()["kind"], "terminal_exited");
     assert_eq!(service.list().unwrap()["sessions"][0]["exitCode"], 7);
+}
+
+/// A host on `platform` whose `PATH` is one scratch directory holding a fake of each `shells`
+/// name. Files without an extension resolve on every OS, so these run on every CI host.
+fn host_with_shells(label: &str, platform: &str, shells: &[&str]) -> (ScratchDir, PathEnv) {
+    let scratch = ScratchDir::created(label);
+    for name in shells {
+        let path = scratch.join(name);
+        std::fs::write(&path, b"fake shell").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let path = scratch.to_string_lossy().into_owned();
+    let host = PathEnv {
+        platform: platform.into(),
+        home_dir: path.clone(),
+        env: HashMap::from([("PATH".into(), path)]),
+    };
+    (scratch, host)
+}
+
+#[tokio::test]
+async fn a_duplicate_terminal_session_id_is_refused() {
+    let (_scratch, service, state) = prepared_service();
+    service
+        .open(open_params(), fake_session(), CancellationToken::new())
+        .await
+        .unwrap();
+    let error = service
+        .open(open_params(), fake_session(), CancellationToken::new())
+        .await
+        .expect_err("expected a second open of terminal-1 to be refused | received a session");
+    assert_eq!(
+        (
+            error.code.as_str(),
+            error.details.as_ref().map(|d| d["kind"].clone())
+        ),
+        (codes::INTERNAL, Some(serde_json::json!("tool_argument"))),
+        "expected a tool_argument refusal | received {error:?}"
+    );
+    assert!(
+        error.message.contains("\"terminal-1\"") && error.message.contains("fresh"),
+        "expected the refusal to name the id and ask for a fresh one | received {:?}",
+        error.message
+    );
+    assert_eq!(
+        service.list().unwrap()["sessions"].as_array().map(Vec::len),
+        Some(1),
+        "expected the first session to stay the only one"
+    );
+    assert_eq!(
+        state.lock().unwrap().closes,
+        0,
+        "expected the live session left open"
+    );
+}
+
+#[test]
+fn windows_prefers_powershell_over_a_path_bash_and_falls_back_to_bash() {
+    let (_all, mut host) =
+        host_with_shells("terminal-win-shells", "win32", &["bash", "zsh", "pwsh"]);
+    host.env.insert("SHELL".into(), "/usr/bin/bash".into());
+    let chosen = default_shell(&host);
+    assert_eq!(
+        chosen,
+        RuntimeShellKind::Powershell,
+        "expected PowerShell on win32 even with bash on PATH | received {chosen:?}"
+    );
+    let (_bash, host) = host_with_shells("terminal-win-bash", "win32", &["bash"]);
+    let chosen = default_shell(&host);
+    assert_eq!(
+        chosen,
+        RuntimeShellKind::Bash,
+        "expected bash on win32 without PowerShell | received {chosen:?}"
+    );
+}
+
+#[test]
+fn an_unavailable_explicit_shell_is_refused() {
+    let (_scratch, host) = host_with_shells("terminal-no-zsh", "linux", &["bash"]);
+    for shell in [RuntimeShellKind::Zsh, RuntimeShellKind::Powershell] {
+        let mut params = open_params();
+        params.shell = Some(shell);
+        let Err(error) = prepare(params, host.clone()) else {
+            panic!("expected an unavailable {shell:?} to be refused | received a launch request");
+        };
+        let wire = serde_json::to_value(shell).unwrap();
+        let expected = format!(
+            "The \"{}\" shell is not available on this system.",
+            wire.as_str().unwrap()
+        );
+        assert_eq!(
+            error.message, expected,
+            "expected {expected:?} | received {:?}",
+            error.message
+        );
+        assert_eq!(
+            error.details.unwrap()["kind"],
+            "shell_execution",
+            "expected kind shell_execution for {shell:?}"
+        );
+    }
+}
+
+#[test]
+fn the_session_env_layers_terminal_markers_and_caller_env_and_drops_secrets() {
+    let (_scratch, mut host) = host_with_shells("terminal-env", "linux", &["bash"]);
+    host.env.insert("ANTHROPIC_API_KEY".into(), "secret".into());
+    host.env.insert("TERM".into(), "dumb".into());
+    let mut params = open_params();
+    params.env = Some(std::collections::BTreeMap::from([(
+        "CUSTOM".into(),
+        "value".into(),
+    )]));
+    let prepared = prepare(params, host.clone()).unwrap();
+    let env = prepared
+        .request
+        .env
+        .expect("a terminal replaces the environment");
+    let get = |key: &str| env.get(std::ffi::OsStr::new(key)).and_then(|v| v.to_str());
+    for (key, expected) in [
+        ("PATH", host.env["PATH"].as_str()),
+        ("TERM", "xterm-256color"),
+        ("COLORTERM", "truecolor"),
+        ("MANGOSTUDIO_TERMINAL", "1"),
+        ("CUSTOM", "value"),
+    ] {
+        assert_eq!(
+            get(key),
+            Some(expected),
+            "expected {key}={expected:?} in the terminal env | received {:?}",
+            get(key)
+        );
+    }
+    assert_eq!(
+        get("ANTHROPIC_API_KEY"),
+        None,
+        "expected the provider secret dropped from the terminal env"
+    );
+}
+
+#[test]
+fn darwin_launches_a_login_shell_and_other_platforms_do_not() {
+    for (platform, expected) in [("darwin", vec!["-l"]), ("linux", vec![])] {
+        let (_scratch, host) = host_with_shells("terminal-login", platform, &["bash"]);
+        let prepared = prepare(open_params(), host).unwrap();
+        let args: Vec<_> = prepared
+            .request
+            .args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args, expected,
+            "expected bash args {expected:?} on {platform} | received {args:?}"
+        );
+    }
 }

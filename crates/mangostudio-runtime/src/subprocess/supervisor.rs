@@ -79,12 +79,15 @@ pub struct ProcessRequest {
     /// Receives every chunk read from stdout and stderr while the process runs.
     pub output_tap: Option<ProcessOutputTap>,
     /// Starts the process without a console window on Windows (`CREATE_NO_WINDOW`); ignored
-    /// elsewhere.
+    /// elsewhere and by the ConPTY terminal path. [`ProcessRequest::new`] sets it, so every git,
+    /// gh, shell, MCP, install, and probe child stays hidden; `tests/spawn_boundary.rs` keeps
+    /// spawn sites from bypassing the request.
     pub hide_window: bool,
 }
 
 impl ProcessRequest {
-    /// Builds a request with inherited environment, null stdin, and a five-second 64-KiB budget.
+    /// Builds a request with inherited environment, null stdin, a five-second 64-KiB budget, and
+    /// no console window on Windows.
     ///
     /// # Example
     ///
@@ -107,7 +110,7 @@ impl ProcessRequest {
             stdin: ProcessStdin::Null,
             budget: ProcessBudget::new(Duration::from_secs(5), 64 * 1024, 64 * 1024),
             output_tap: None,
-            hide_window: false,
+            hide_window: true,
         }
     }
 
@@ -549,7 +552,7 @@ struct ControlCommand {
     reply: oneshot::Sender<io::Result<()>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum StopRequest {
     Interrupt,
     Force,
@@ -953,9 +956,17 @@ impl OwnedChild {
     }
 
     fn finalize(&mut self) -> io::Result<()> {
+        self.finalize_with(false)
+    }
+
+    /// Finalizes, asking the Unix guardian to also sweep adopted escapees when `sweep_escapees`.
+    /// A Windows Job already kills every member, escaped or not, so the flag is not needed there.
+    fn finalize_with(&mut self, sweep_escapees: bool) -> io::Result<()> {
+        #[cfg(not(unix))]
+        let _ = sweep_escapees;
         match self {
             #[cfg(unix)]
-            Self::Guardian(child) => child.finalize(),
+            Self::Guardian(child) => child.finalize_with(sweep_escapees),
             #[cfg(windows)]
             Self::WindowsJob(child) => child.finalize(),
             #[cfg(all(not(unix), not(windows)))]
@@ -1041,19 +1052,15 @@ async fn supervise_child(
         })
     });
 
-    let mut cause = ProcessTerminalCause::Exited;
-    let mut graceful_requested = false;
-    let mut force_requested = false;
+    let mut stops = StopState::default();
     let mut stopped_capture = StoppedCapture::default();
     if let Some(request) = initial_stop {
-        cause = cause_for(request);
         let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
         let dispatched = dispatch_stop(&mut child, pid, request).is_ok();
-        graceful_requested = dispatched && !request.is_forceful();
         // Only a dispatched stop latches: `force_requested` is what disables the deadline arm
         // below, so latching it on a *failed* dispatch would retire this worker's only remaining
         // bound and leave the target running with nothing left to stop it.
-        force_requested = dispatched && request.is_forceful();
+        stops.record_initial(request, dispatched);
         if dispatched && request.is_forceful() {
             stopped_capture.record(capture_was_open);
         }
@@ -1061,11 +1068,10 @@ async fn supervise_child(
     let status = loop {
         tokio::select! {
             status = child.wait_target() => break status.ok(),
-            () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)), if !force_requested => {
-                cause = ProcessTerminalCause::TimedOut;
+            () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)), if stops.deadline_armed() => {
                 let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
                 let dispatch = dispatch_stop(&mut child, pid, StopRequest::Force);
-                force_requested = true;
+                stops.record(StopRequest::Timeout);
                 stopped_capture.record(capture_was_open);
                 if let Err(error) = dispatch {
                     // The tree could not be signalled at all (Windows `TerminateJobObject`
@@ -1083,18 +1089,14 @@ async fn supervise_child(
             }
             Some(command) = commands.recv() => {
                 // `request_stop` never sends `Timeout`, so "forceful" here means Force or Cancel.
-                if (!command.request.is_forceful() && (graceful_requested || force_requested))
-                    || (command.request.is_forceful() && force_requested)
-                {
+                if !stops.admits(command.request) {
                     let _ = command.reply.send(Ok(()));
                     continue;
                 }
                 let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
                 match dispatch_stop(&mut child, pid, command.request) {
                     Ok(()) => {
-                        cause = cause_for(command.request);
-                        graceful_requested |= !command.request.is_forceful();
-                        force_requested |= command.request.is_forceful();
+                        stops.record(command.request);
                         if command.request.is_forceful() {
                             stopped_capture.record(capture_was_open);
                         }
@@ -1119,6 +1121,7 @@ async fn supervise_child(
         &stderr_stop,
     )
     .await;
+    let mut cause = stops.cause;
     if drain_reached_deadline && cause == ProcessTerminalCause::Exited {
         cause = ProcessTerminalCause::TimedOut;
     }
@@ -1130,7 +1133,10 @@ async fn supervise_child(
     if drain_reached_deadline {
         let _ = child.force();
     }
-    let _ = child.finalize();
+    // A child this supervisor stopped (a cancel, a force, an interrupt, or the deadline, which
+    // includes a drain held open past it) also loses its `setsid` escapees; one that exited on
+    // its own keeps the helpers it detached.
+    let _ = child.finalize_with(cause != ProcessTerminalCause::Exited);
     // Bounded for the reason [`CLEANUP_TIMEOUT`] documents: the empty-tree proof belongs to a
     // separate process (Unix) or a kernel-object poll (Windows), neither of which is guaranteed
     // to conclude. Past the bound this worker publishes its terminal record anyway rather than
@@ -1154,6 +1160,57 @@ async fn supervise_child(
         stdout,
         stderr,
     }));
+}
+
+/// Which stop reached the child first, and which later stops are still worth dispatching.
+///
+/// The first forceful stop is sticky: a cancel followed by the deadline stays `Cancelled`, and a
+/// deadline followed by a cancel stays `TimedOut`, because the forced tree kill already happened.
+#[derive(Debug)]
+struct StopState {
+    cause: ProcessTerminalCause,
+    graceful_requested: bool,
+    force_requested: bool,
+}
+
+impl Default for StopState {
+    fn default() -> Self {
+        Self {
+            cause: ProcessTerminalCause::Exited,
+            graceful_requested: false,
+            force_requested: false,
+        }
+    }
+}
+
+impl StopState {
+    /// Whether the deadline can still force the tree; a dispatched forceful stop retires it.
+    fn deadline_armed(&self) -> bool {
+        !self.force_requested
+    }
+
+    /// Whether `request` would change anything that an earlier dispatched stop did not.
+    fn admits(&self, request: StopRequest) -> bool {
+        if request.is_forceful() {
+            return !self.force_requested;
+        }
+        !(self.graceful_requested || self.force_requested)
+    }
+
+    /// Records a dispatched stop, including the deadline's own `Timeout`.
+    fn record(&mut self, request: StopRequest) {
+        self.cause = cause_for(request);
+        self.graceful_requested |= !request.is_forceful();
+        self.force_requested |= request.is_forceful();
+    }
+
+    /// Records a stop requested before the worker started: its cause holds even when the
+    /// dispatch failed, but only a dispatched stop latches.
+    fn record_initial(&mut self, request: StopRequest, dispatched: bool) {
+        self.cause = cause_for(request);
+        self.graceful_requested = dispatched && !request.is_forceful();
+        self.force_requested = dispatched && request.is_forceful();
+    }
 }
 
 fn cause_for(request: StopRequest) -> ProcessTerminalCause {
@@ -1422,11 +1479,91 @@ fn signal_name(number: i32) -> &'static str {
     }
 }
 
+/// Launch defaults every spawn site inherits from [`ProcessRequest::new`]. Platform-neutral, so
+/// the Windows console rule is checked on every CI host, not only on Windows.
+#[cfg(test)]
+mod request_defaults {
+    use super::ProcessRequest;
+
+    #[test]
+    fn a_new_request_hides_its_console_window() {
+        let request = ProcessRequest::new("git", ["--version"]);
+        assert!(
+            request.hide_window,
+            "expected ProcessRequest::new hide_window: true | received: false (a git, gh, shell, \
+             MCP, install, or probe child would open a console window on Windows)"
+        );
+    }
+}
+
 /// Cap edges for [`read_capped`], which the launched-child tests only reach indirectly.
 /// Unlike the supervisor tests below, these need no process and run on every platform.
 #[cfg(test)]
 mod stop_requests {
-    use super::StopRequest;
+    use super::{ProcessTerminalCause, StopRequest, StopState};
+
+    #[test]
+    fn a_cancel_before_the_deadline_stays_cancelled() {
+        let mut stops = StopState::default();
+        stops.record(StopRequest::Cancel);
+        assert!(
+            !stops.deadline_armed(),
+            "expected a dispatched cancel to retire the deadline arm | received: still armed"
+        );
+        assert_eq!(
+            stops.cause,
+            ProcessTerminalCause::Cancelled,
+            "expected cause Cancelled after cancel then deadline | received {:?}",
+            stops.cause
+        );
+    }
+
+    #[test]
+    fn a_cancel_after_the_deadline_stays_timed_out() {
+        let mut stops = StopState::default();
+        stops.record(StopRequest::Timeout);
+        for later in [
+            StopRequest::Cancel,
+            StopRequest::Force,
+            StopRequest::Interrupt,
+        ] {
+            assert!(
+                !stops.admits(later),
+                "expected {later:?} after the deadline to be absorbed | received: admitted"
+            );
+        }
+        assert_eq!(
+            stops.cause,
+            ProcessTerminalCause::TimedOut,
+            "expected cause TimedOut after deadline then cancel | received {:?}",
+            stops.cause
+        );
+    }
+
+    #[test]
+    fn an_interrupt_still_admits_a_later_forceful_stop() {
+        let mut stops = StopState::default();
+        stops.record(StopRequest::Interrupt);
+        assert!(
+            stops.deadline_armed() && stops.admits(StopRequest::Cancel),
+            "expected an interrupt to leave the deadline and a cancel live | received {stops:?}"
+        );
+        assert!(
+            !stops.admits(StopRequest::Interrupt),
+            "expected a second interrupt to be absorbed | received: admitted"
+        );
+    }
+
+    #[test]
+    fn an_undispatched_initial_stop_keeps_its_cause_without_latching() {
+        let mut stops = StopState::default();
+        stops.record_initial(StopRequest::Cancel, false);
+        assert_eq!(stops.cause, ProcessTerminalCause::Cancelled);
+        assert!(
+            stops.deadline_armed(),
+            "expected a failed initial cancel to keep the deadline armed | received: retired"
+        );
+    }
 
     #[test]
     fn only_an_interrupt_is_not_forceful() {
@@ -2193,6 +2330,78 @@ exit 0",
         assert_eq!(terminal.cause, ProcessTerminalCause::TimedOut);
         assert!(terminal.stdout.incomplete);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// A leader that exits on its own while its `setsid` child still holds stdout is published
+    /// as `TimedOut` once the drain reaches the deadline, so the supervisor stopped it and the
+    /// escapee goes with it, even though no signal ever reached the leader.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_timed_out_drain_reaps_a_setsid_escapee_holding_the_pipe() {
+        let _guard = process_test_guard().await;
+        let dir = scratch_dir("process-drain-escapee");
+        let pid_file = dir.join("escapee.pid");
+        let sh = script(
+            &dir,
+            "escapee-holds-stdout.sh",
+            &format!(
+                "setsid sleep 60 &\necho $! > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nexit 0",
+                pid_file.display()
+            ),
+        );
+        let mut process_request = request(sh);
+        process_request.budget.deadline = Duration::from_millis(1_500);
+        // Longer than the deadline, so the held drain reaches the deadline rather than its own
+        // bound.
+        process_request.budget.post_exit_drain = Duration::from_secs(10);
+
+        let terminal = DefaultProcessSpawner
+            .start(
+                process_request,
+                Arc::new(AlwaysAllow),
+                CancellationToken::new(),
+            )
+            .await
+            .expect("script starts")
+            .wait()
+            .await;
+        let escapee: u32 = std::fs::read_to_string(&pid_file)
+            .expect("the script recorded its escapee")
+            .trim()
+            .parse()
+            .expect("a pid");
+        let alive = || {
+            std::fs::read_to_string(format!("/proc/{escapee}/stat"))
+                .ok()
+                .and_then(|stat| {
+                    stat.rsplit_once(')')
+                        .and_then(|(_, rest)| rest.split_whitespace().next().map(str::to_owned))
+                })
+                .is_some_and(|state| state != "Z")
+        };
+        let gone = tokio::time::timeout(Duration::from_secs(5), async {
+            while alive() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .is_ok();
+        if !gone {
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", &escapee.to_string()])
+                .status();
+        }
+        assert_eq!(
+            terminal.cause,
+            ProcessTerminalCause::TimedOut,
+            "expected the held drain to time out | received {:?}",
+            terminal.cause
+        );
+        assert!(
+            gone,
+            "expected the setsid escapee {escapee} holding stdout to be reaped after the \
+             timed-out drain | received: still running 5s later"
+        );
     }
 
     /// A forced timeout must retain the observation that each capture stream was still open

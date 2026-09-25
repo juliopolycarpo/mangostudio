@@ -414,6 +414,24 @@ mod tests {
     }
 
     #[test]
+    fn fnm_root_candidates_use_the_macos_default_not_the_xdg_one() {
+        let path_env = PathEnv {
+            platform: "darwin".to_string(),
+            home_dir: "/Users/t".to_string(),
+            env: StdHashMap::new(),
+        };
+        let candidates = fnm_root_candidates(&path_env);
+        assert_eq!(
+            candidates,
+            vec![
+                "/Users/t/Library/Application Support/fnm".to_string(),
+                "/Users/t/.fnm".to_string()
+            ],
+            "expected the macOS fnm default then the legacy root | received {candidates:?}"
+        );
+    }
+
+    #[test]
     fn fnm_root_candidates_has_no_legacy_root_on_windows() {
         let path_env = PathEnv {
             platform: "win32".to_string(),

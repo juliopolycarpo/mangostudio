@@ -229,6 +229,29 @@ fn select_runtime_definitions(
         .collect())
 }
 
+/// Whether `probing.runtimes` asks winget who owns Node: only on win32, and only when Node is
+/// among the scanned definitions.
+fn needs_winget_ownership(platform: &str, definitions: &[RuntimeDefinition]) -> bool {
+    platform == "win32"
+        && definitions
+            .iter()
+            .any(|definition| definition.id == RuntimeId::Node)
+}
+
+/// Attributes system Program Files Node installations to winget, but only for Node and only on
+/// an `Owned` verdict: `NotOwned` and `Unknown` keep the scan's own path sources.
+fn with_winget_ownership(
+    id: RuntimeId,
+    ownership: Option<WingetOwnership>,
+    installations: Vec<RuntimeInstallation>,
+    program_files: Option<&str>,
+) -> Vec<RuntimeInstallation> {
+    if id != RuntimeId::Node || ownership != Some(WingetOwnership::Owned) {
+        return installations;
+    }
+    mark_winget_owned_node_installations(&installations, program_files)
+}
+
 /// Builds the `probing.runtimes` result, mirroring `probeRuntimes` in
 /// `service.ts`: every requested (or all five) [`RuntimeDefinition`] is
 /// scanned concurrently, alongside the one winget-ownership probe the
@@ -249,10 +272,7 @@ async fn handle_probe_runtimes(
     ));
     let definitions = select_runtime_definitions(params.ids.as_deref())?;
 
-    let needs_winget = path_env.platform == "win32"
-        && definitions
-            .iter()
-            .any(|definition| definition.id == RuntimeId::Node);
+    let needs_winget = needs_winget_ownership(&path_env.platform, &definitions);
 
     let mut scan_tasks: tokio::task::JoinSet<(usize, RuntimeScanResult)> =
         tokio::task::JoinSet::new();
@@ -298,16 +318,12 @@ async fn handle_probe_runtimes(
         // Only Node needs this: winget's own MSI and the nodejs.org MSI
         // are indistinguishable by path, so `system` there is ambiguous
         // in a way no other runtime's `system` is.
-        let installations = if definition.id == RuntimeId::Node
-            && winget_ownership == Some(WingetOwnership::Owned)
-        {
-            mark_winget_owned_node_installations(
-                &scan.installations,
-                path_env.env_var("ProgramFiles"),
-            )
-        } else {
-            scan.installations
-        };
+        let installations = with_winget_ownership(
+            definition.id,
+            winget_ownership,
+            scan.installations,
+            path_env.env_var("ProgramFiles"),
+        );
         let installable = params
             .installable
             .as_ref()
@@ -1451,6 +1467,319 @@ mod tests {
         let validator = compile_result_schema(&declared.result);
         check_result("probing.agent-clis", &validator, &result)
             .expect("the real handler output must validate against its own schema");
+    }
+
+    #[cfg(unix)]
+    fn finding_codes(status: &Value) -> Vec<String> {
+        status["findings"]
+            .as_array()
+            .expect("a status carries findings")
+            .iter()
+            .map(|finding| finding["code"].as_str().unwrap_or_default().to_owned())
+            .collect()
+    }
+
+    /// An installed CLI whose config home is missing reports `config-home-missing` and not
+    /// `cli-not-installed`; an absent CLI reports only `cli-not-installed`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_missing_config_home_is_distinct_from_a_missing_cli() {
+        let installed = scratch_dir("agent-clis-config-home-installed");
+        fake_binary_on_path(&installed, "claude", "2.1.220 (Claude Code)");
+        let missing_home = installed.join("no-such-claude-home");
+        for (dir, expected, absent) in [
+            (&installed, "config-home-missing", "cli-not-installed"),
+            (
+                &scratch_dir("agent-clis-config-home-absent"),
+                "cli-not-installed",
+                "config-home-missing",
+            ),
+        ] {
+            let mut env = params_with_path(dir);
+            env.insert(
+                "CLAUDE_CONFIG_DIR".to_string(),
+                missing_home.to_string_lossy().into_owned(),
+            );
+            let params = ProbeAgentClisParams {
+                budget: None,
+                path_env: Some(PathEnvOverride { env: Some(env) }),
+                target_ids: Some(vec![AgentTargetId::Claude]),
+                installable: None,
+                self_: self_params("9.9.9"),
+            };
+            let result = handle_probe_agent_clis(params, CancellationToken::new())
+                .await
+                .unwrap();
+            let codes = finding_codes(&result["statuses"][0]);
+            assert!(
+                codes.iter().any(|code| code == expected)
+                    && !codes.iter().any(|code| code == absent),
+                "expected {expected} without {absent} | received {codes:?}"
+            );
+        }
+    }
+
+    fn location(id: &'static str, path: &str, access: &'static str) -> LocationStatus {
+        LocationStatus {
+            id,
+            kind: "directory",
+            scope: "user",
+            path: Some(path.to_owned()),
+            access,
+            exists: true,
+            readable: true,
+            writable: false,
+            target_ids: vec![AgentTargetId::Claude],
+            entry_count: None,
+        }
+    }
+
+    #[test]
+    fn location_unwritable_is_reported_once_per_existing_read_write_path() {
+        let mut missing = location("missing", "/missing", "read-write");
+        missing.exists = false;
+        let mut writable = location("writable", "/writable", "read-write");
+        writable.writable = true;
+        let locations = [
+            location("first", "/shared", "read-write"),
+            location("second", "/shared", "read-write"),
+            location("read-only", "/read-only", "read-only"),
+            missing,
+            writable,
+        ];
+        let mut findings = Vec::new();
+        append_location_findings(&mut findings, &locations);
+        let reported: Vec<_> = findings
+            .iter()
+            .map(|finding| (finding.code, finding.params.clone()))
+            .collect();
+        assert_eq!(
+            reported,
+            vec![(
+                RuntimeFindingCode::LocationUnwritable,
+                finding_params(&[("locationId", "first".into()), ("path", "/shared".into())])
+            )],
+            "expected one location-unwritable for /shared | received {reported:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_agent_clis_reports_cancelled_when_the_token_already_fired() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let params = ProbeAgentClisParams {
+            budget: None,
+            path_env: None,
+            target_ids: Some(vec![AgentTargetId::Mangostudio]),
+            installable: None,
+            self_: self_params("9.9.9"),
+        };
+        let error = handle_probe_agent_clis(params, cancel)
+            .await
+            .expect_err("a pre-cancelled agent probe must refuse");
+        assert_eq!(
+            error.code,
+            codes::CANCELLED,
+            "expected CANCELLED | received {} ({})",
+            error.code,
+            error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_runtimes_takes_installable_from_the_caller() {
+        let dir = scratch_dir("runtimes-installable");
+        for (installable, expected) in [(json!({"bun": true}), true), (json!({}), false)] {
+            let params: ProbeRuntimesParams = serde_json::from_value(json!({
+                "ids": ["bun"],
+                "installable": installable,
+                "pathEnv": {"env": params_with_path(&dir)},
+            }))
+            .unwrap();
+            let result = handle_probe_runtimes(params, CancellationToken::new())
+                .await
+                .unwrap();
+            let received = &result["statuses"][0]["installable"];
+            assert_eq!(
+                received,
+                &json!(expected),
+                "expected installable {expected} for {installable} | received {received}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_caller_budget_reaches_the_binary_scan() {
+        let params: ProbeRuntimesParams = serde_json::from_value(json!({
+            "budget": {"probeTimeoutMs": 1234, "totalTimeoutMs": 5678, "maxConcurrency": 3},
+        }))
+        .unwrap();
+        let options = build_binary_scan_options(&params.budget);
+        assert_eq!(
+            (
+                options.probe_timeout_ms,
+                options.total_timeout_ms,
+                options.max_concurrency
+            ),
+            (Some(1234), 5678, 3),
+            "expected the wire budget (Some(1234), 5678, 3) in the scan options"
+        );
+        let defaults = BinaryScanOptions::default();
+        let options = build_binary_scan_options(&None);
+        assert_eq!(
+            (
+                options.probe_timeout_ms,
+                options.total_timeout_ms,
+                options.max_concurrency
+            ),
+            (
+                defaults.probe_timeout_ms,
+                defaults.total_timeout_ms,
+                defaults.max_concurrency
+            ),
+            "expected no budget to keep the scan defaults"
+        );
+    }
+
+    #[test]
+    fn winget_is_asked_only_on_win32_and_only_an_owned_verdict_marks_node() {
+        let node = [NODE_RUNTIME_DEFINITION];
+        let others = [BUN_RUNTIME_DEFINITION, GIT_RUNTIME_DEFINITION];
+        for (platform, definitions, expected) in [
+            ("win32", &node[..], true),
+            ("win32", &others[..], false),
+            ("linux", &node[..], false),
+            ("darwin", &node[..], false),
+        ] {
+            let received = needs_winget_ownership(platform, definitions);
+            assert_eq!(
+                received, expected,
+                "expected winget asked={expected} on {platform} | received {received}"
+            );
+        }
+
+        let mut system = installation(r"C:\Program Files\nodejs\node.exe", Some("22.1.0"), true);
+        system.path_source = Some(crate::probing::detection::types::PathSource::System);
+        let program_files = Some(r"C:\Program Files");
+        for (id, ownership, expected) in [
+            (
+                RuntimeId::Node,
+                Some(WingetOwnership::Owned),
+                crate::probing::detection::types::PathSource::Winget,
+            ),
+            (
+                RuntimeId::Node,
+                Some(WingetOwnership::NotOwned),
+                crate::probing::detection::types::PathSource::System,
+            ),
+            (
+                RuntimeId::Node,
+                Some(WingetOwnership::Unknown),
+                crate::probing::detection::types::PathSource::System,
+            ),
+            (
+                RuntimeId::Node,
+                None,
+                crate::probing::detection::types::PathSource::System,
+            ),
+            (
+                RuntimeId::Bun,
+                Some(WingetOwnership::Owned),
+                crate::probing::detection::types::PathSource::System,
+            ),
+        ] {
+            let marked = with_winget_ownership(id, ownership, vec![system.clone()], program_files);
+            assert_eq!(
+                marked[0].path_source,
+                Some(expected),
+                "expected {expected:?} for {id:?} with {ownership:?} | received {:?}",
+                marked[0].path_source
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_version_managers_answers_both_managers_when_not_narrowed() {
+        let dir = scratch_dir("version-managers-default");
+        let params = ProbeVersionManagersParams {
+            path_env: Some(PathEnvOverride {
+                env: Some(params_with_path(&dir)),
+            }),
+            ..Default::default()
+        };
+        let result = handle_probe_version_managers(params, CancellationToken::new())
+            .await
+            .unwrap();
+        let ids: Vec<_> = result["statuses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|status| status["id"].clone())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![json!("nvm"), json!("fnm")],
+            "expected both managers in order | received {ids:?}"
+        );
+    }
+
+    /// fnm's `--version` comes from the fnm runtime scan itself, so one call runs fnm once.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_fnm_runtime_scan_is_reused_for_the_manager_version() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch_dir("version-managers-fnm-once");
+        let calls = dir.join("fnm-calls");
+        let fnm = dir.join("fnm");
+        std::fs::write(
+            &fnm,
+            format!(
+                "#!/bin/sh
+echo \"$@\" >> '{}'
+echo 'fnm 1.37.1'
+",
+                calls.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fnm, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut env = params_with_path(&dir);
+        env.insert("FNM_DIR".to_string(), dir.to_string_lossy().into_owned());
+        let params = ProbeVersionManagersParams {
+            ids: Some(vec![VersionManagerId::Fnm]),
+            path_env: Some(PathEnvOverride { env: Some(env) }),
+            ..Default::default()
+        };
+        let result = handle_probe_version_managers(params, CancellationToken::new())
+            .await
+            .unwrap();
+        let invocations = std::fs::read_to_string(&calls).unwrap_or_default();
+        assert_eq!(
+            invocations.lines().count(),
+            1,
+            "expected fnm run once for the whole call | received {invocations:?}"
+        );
+        assert_eq!(
+            result["statuses"][0]["managerVersion"], "1.37.1",
+            "expected the scan's fnm version reported | received {}",
+            result["statuses"][0]["managerVersion"]
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_version_managers_reports_cancelled_when_the_token_already_fired() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let error = handle_probe_version_managers(ProbeVersionManagersParams::default(), cancel)
+            .await
+            .expect_err("a pre-cancelled version-manager probe must refuse");
+        assert_eq!(
+            error.code,
+            codes::CANCELLED,
+            "expected CANCELLED | received {} ({})",
+            error.code,
+            error.message
+        );
     }
 
     /// A cancelled call must fail with `CANCELLED`, not answer with a
