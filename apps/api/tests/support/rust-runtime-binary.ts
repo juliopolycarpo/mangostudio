@@ -4,9 +4,9 @@
  *
  * `MANGOSTUDIO_RUNTIME_BINARY` names the exact binary CI just built, the same
  * variable `resolveRuntimeLaunchCommand` reads in production. Outside CI this
- * falls back to the workspace's own `target/debug/mangostudio-runtime`, so
- * `cargo build -p mangostudio-runtime` followed by the workspace's own test
- * command exercises the same suite locally. An explicit env var pointing at a
+ * falls back to the workspace's newest cargo build, resolved exactly as
+ * production resolves it, so `cargo build -p mangostudio-runtime` followed by
+ * the workspace's own test command exercises the same suite locally. An explicit env var pointing at a
  * binary that does not exist is a broken CI job, not a reason to skip
  * quietly — only the fallback path is missing-tolerant.
  *
@@ -22,12 +22,14 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { newestRuntimeBuild, workspaceRuntimeBinaryCandidates } from '../../src/lib/runtime-paths';
 
-const FALLBACK_DEBUG_BINARY = join(
-  import.meta.dir,
-  '../../../../target/debug',
-  process.platform === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime'
-);
+/**
+ * The workspace builds production would launch in a source checkout, so a
+ * test and the hub it drives pick the same binary: the newest of
+ * `target/debug` and `target/release`, debug on a tie.
+ */
+const WORKSPACE_BUILDS = workspaceRuntimeBinaryCandidates();
 
 export interface RustRuntimeBinary {
   readonly path: string;
@@ -53,7 +55,10 @@ export function resolveRustRuntimeBinary(): RustRuntimeBinary {
     }
     return { path: configured, available: true };
   }
-  return { path: FALLBACK_DEBUG_BINARY, available: existsSync(FALLBACK_DEBUG_BINARY) };
+  const built = newestRuntimeBuild(WORKSPACE_BUILDS);
+  return built
+    ? { path: built, available: true }
+    : { path: WORKSPACE_BUILDS[0] as string, available: false };
 }
 
 /**
