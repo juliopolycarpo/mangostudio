@@ -43,6 +43,11 @@ import { connectSshRuntime } from './connect-ssh-runtime';
 import { isAuthorizedEnvironmentWorkspace } from './hub-workspace-authority';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
+import {
+  type RuntimeDiscoveryCache,
+  runtimeDiscoveryCache,
+  runtimeDiscoveryKey,
+} from './runtime-discovery-cache';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
 
 /** Last `runtime.health` retained across disconnect the way the manifest is. */
@@ -165,6 +170,8 @@ export interface RuntimeConnectionManagerOptions {
    * `Date.now()` and not timers, so the real 10s would be waited out for real.
    */
   readonly connectDeadlinesMs?: Partial<Record<EnvironmentTransportKind, number>>;
+  /** Told of every new connection's manifest, so a changed build drops its cached surface. */
+  readonly discoveryCache?: RuntimeDiscoveryCache;
 }
 
 /**
@@ -479,6 +486,7 @@ export class RuntimeConnectionManager {
   readonly #publishHook: (userId: string) => void;
   readonly #recordTransition: EnvironmentStateTransitionRecorder;
   readonly #resolveEnvironment: RuntimeEnvironmentResolver;
+  readonly #discoveryCache: RuntimeDiscoveryCache;
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
   #terminalsRevoked: TerminalsRevokedObserver | undefined;
@@ -489,6 +497,7 @@ export class RuntimeConnectionManager {
     this.#publishHook = options.publish ?? (() => undefined);
     this.#recordTransition = options.recordTransition ?? recordEnvironmentStateTransition;
     this.#resolveEnvironment = options.resolveEnvironment;
+    this.#discoveryCache = options.discoveryCache ?? runtimeDiscoveryCache;
   }
 
   /**
@@ -671,6 +680,10 @@ export class RuntimeConnectionManager {
         }
         entry.connection = connection;
         entry.announcedManifest = connection.client.manifest;
+        this.#discoveryCache.observe(
+          runtimeDiscoveryKey(userId, environmentId),
+          connection.client.manifest
+        );
         entry.connectedAtMs = Date.now();
         entry.manifestReadAtMs = entry.connectedAtMs;
         // The failure count is not cleared here: a handshake only shows the
@@ -839,6 +852,10 @@ export class RuntimeConnectionManager {
 
     entry.connection = connection;
     entry.announcedManifest = connection.client.manifest;
+    this.#discoveryCache.observe(
+      runtimeDiscoveryKey(userId, environmentId),
+      connection.client.manifest
+    );
     entry.connectedAtMs = Date.now();
     entry.manifestReadAtMs = entry.connectedAtMs;
     entry.failureCount = 0;

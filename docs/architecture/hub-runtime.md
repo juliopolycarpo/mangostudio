@@ -184,6 +184,21 @@ independent of the protocol version, and neither has to move for an additive met
   `externalAgents` is the deliberate exception: spawning a vendor CLI is newly privileged, so an
   older stored allow set that lacks this key normalizes it to `false`. Adapter availability is a
   separate optional top-level manifest list, and absence there means the runtime has no adapter.
+- **Three discovery questions, three answers.** `rpc.discover` returns the whole contract
+  catalog, the same for every build, so it never proves a method is implemented. The optional
+  `hello.capabilities.implementation` (`{ schema, fingerprint, features }`,
+  `apps/shared/src/runtime-contract/implementation.ts`) is the build's feature-group ceiling,
+  independent of consent and machine availability, sent with the handshake so the common path
+  costs no round-trip. `runtime.discover` (no consent capability) answers the detailed surface
+  — the sorted implemented methods beside the same ceiling and fingerprint — and the hub caches
+  it per environment by fingerprint (`runtime-discovery-cache.ts`); a reconnect announcing
+  another fingerprint drops the cached surface. The fingerprint is a SHA-256 over the schema
+  version, the sorted methods and the sorted implemented groups, so consent never moves it.
+  The hub composes each effective feature as consented ∩ available ∩ implemented. For a peer
+  that sends `implementation` a later consent grant shows up on the next health refresh while a
+  build gap stays closed. For one that does not (older runtimes, including the TypeScript host)
+  the handshake `features` are the ceiling, fail-closed: a grant made after the handshake needs
+  a reconnect.
 - **Refreshing the cached manifest.** `runtime.health` exposes the same report mid-session.
   Consent is answered on the machine, so the hub has nothing to invalidate on: reading an
   environment re-asks in the background when the cached manifest is older than the

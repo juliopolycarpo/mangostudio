@@ -9,6 +9,7 @@ import type {
 import {
   RUNTIME_ALREADY_BOUND_CLOSE_CODE,
   type RuntimeCapabilityManifest,
+  type RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
@@ -30,6 +31,10 @@ import {
   type RuntimeEnvironmentConnector,
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
+import {
+  RuntimeDiscoveryCache,
+  runtimeDiscoveryKey,
+} from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { connectTestRuntime } from '../../support/runtime-fixture';
 
@@ -105,6 +110,44 @@ function fakeConnection(
     client: { manifest } as RuntimeClient,
     close: onClose,
   };
+}
+
+/** A connection to a build that announces `fingerprint` and serves `runtime.discover`. */
+class DiscoveringConnection implements ManagedRuntimeConnection {
+  discoverCalls = 0;
+  readonly client: RuntimeClient;
+  readonly close = () => undefined;
+
+  constructor(fingerprint: string) {
+    const implementation = {
+      schema: 1,
+      fingerprint,
+      features: {
+        git: true,
+        probing: false,
+        mcp: false,
+        library: false,
+        checkpoints: true,
+        fsRead: false,
+        fsWrite: false,
+        shell: false,
+        update: false,
+        externalAgents: false,
+        terminal: false,
+      },
+    };
+    const discover = (): Promise<RuntimeDiscoverResult> => {
+      this.discoverCalls += 1;
+      return Promise.resolve({
+        ...implementation,
+        methods: ['runtime.discover', 'runtime.health'],
+      });
+    };
+    this.client = {
+      manifest: { ...TEST_MANIFEST, implementation },
+      discoverImplementation: discover,
+    } as unknown as RuntimeClient;
+  }
 }
 
 /**
@@ -258,6 +301,34 @@ describe('RuntimeConnectionManager', () => {
     await manager.connect('user-1', 'devbox', { force: true });
 
     expect(manager.getStatus('user-1', 'devbox').offlineRuntimeCache).toBeUndefined();
+  });
+
+  it('drops the cached runtime.discover surface when a reconnect announces another build', async () => {
+    const cache = new RuntimeDiscoveryCache();
+    const builds = [
+      new DiscoveringConnection('a'.repeat(64)),
+      new DiscoveringConnection('a'.repeat(64)),
+      new DiscoveringConnection('b'.repeat(64)),
+    ];
+    let next = 0;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(builds[next++] as DiscoveringConnection) },
+      discoveryCache: cache,
+    });
+    const key = runtimeDiscoveryKey('user-1', 'devbox');
+    const reconnect = async () => {
+      manager.disconnect('user-1', 'devbox');
+      return await manager.connect('user-1', 'devbox', { force: true });
+    };
+
+    await cache.resolve(key, await manager.connect('user-1', 'devbox'));
+    const sameBuild = await cache.resolve(key, await reconnect());
+    const otherBuild = await cache.resolve(key, await reconnect());
+
+    expect(builds.map((build) => build.discoverCalls)).toEqual([1, 0, 1]);
+    expect(sameBuild?.fingerprint).toBe('a'.repeat(64));
+    expect(otherBuild?.fingerprint).toBe('b'.repeat(64));
   });
 
   // #792: the pull is bounded at half an hour, which no proxy or browser holds
