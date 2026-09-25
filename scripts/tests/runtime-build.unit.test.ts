@@ -210,6 +210,25 @@ describe('runtimeHeaderProblems', () => {
     ).toEqual(['expected glibc loader /lib64/ld-linux-x86-64.so.2 | received: none (static)']);
   });
 
+  test('a Windows runtime may not depend on the Visual C++ Redistributable', () => {
+    const options = { enforceGlibcFloor: true };
+    const dynamicCrt = readExecutableHeader(
+      fakePe('arm64', {
+        imports: ['KERNEL32.dll', 'VCRUNTIME140.dll', 'api-ms-win-crt-runtime-l1-1-0.dll'],
+        delayImports: ['msvcp140_1.dll'],
+      })
+    );
+    expect(runtimeHeaderProblems('windows-arm64', dynamicCrt, options)).toEqual([
+      'expected no Visual C++ Redistributable imports (link with +crt-static) | received: VCRUNTIME140.dll, msvcp140_1.dll',
+    ]);
+
+    // What a +crt-static build imports: Windows' own DLLs only.
+    const staticCrt = readExecutableHeader(
+      fakePe('x64', { imports: ['KERNEL32.dll', 'ntdll.dll', 'bcryptprimitives.dll'] })
+    );
+    expect(runtimeHeaderProblems('windows-x64', staticCrt, options)).toEqual([]);
+  });
+
   test('enforces the glibc floor only when asked', () => {
     const header = glibcX64(['GLIBC_2.17', 'GLIBC_2.34']);
     expect(runtimeHeaderProblems('linux-x64', header, { enforceGlibcFloor: true })).toEqual([
@@ -265,7 +284,7 @@ describe('runtime version check', () => {
         enforceGlibcFloor: true,
       });
       expect(result).toEqual({
-        header: { format: 'pe', arch: 'arm64', interpreter: null, maxGlibc: null },
+        header: { format: 'pe', arch: 'arm64', interpreter: null, maxGlibc: null, dllImports: [] },
         reportedVersion: null,
         problems: [],
       });

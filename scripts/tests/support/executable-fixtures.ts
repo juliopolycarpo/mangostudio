@@ -54,18 +54,66 @@ export function fakeMachO(arch: Arch): Uint8Array {
 }
 
 /**
- * A PE32+ (or, with `pe32`, a 32-bit PE32) header for one CPU.
+ * A PE32+ (or, with `pe32`, a 32-bit PE32) header for one CPU. `imports` and
+ * `delayImports` become one `.idata`-style section holding the import and
+ * delay-import descriptor tables and their DLL names, laid out as a linker
+ * would: descriptors at RVAs the data directories point to, names by RVA.
  *
  * @example
- * fakePe('x64');
+ * fakePe('x64', { imports: ['KERNEL32.dll', 'VCRUNTIME140.dll'] });
  */
-export function fakePe(arch: Arch, options: { pe32?: boolean } = {}): Uint8Array {
-  const bytes = new Uint8Array(0x40 + 24 + 8);
+export function fakePe(
+  arch: Arch,
+  options: { pe32?: boolean; imports?: readonly string[]; delayImports?: readonly string[] } = {}
+): Uint8Array {
+  const imports = options.imports ?? [];
+  const delayImports = options.delayImports ?? [];
+  const peOffset = 0x40;
+  const optionalOffset = peOffset + 24;
+  const optionalSize = 112 + 16 * 8;
+  const sectionTable = optionalOffset + optionalSize;
+  const rawOffset = 0x200;
+  const sectionRva = 0x1000;
+
+  const importTable = 0;
+  const delayTable = (imports.length + 1) * 20;
+  let nameCursor = delayTable + (delayImports.length + 1) * 32;
+  const encoder = new TextEncoder();
+  const names = [...imports, ...delayImports].map((name) => {
+    const at = nameCursor;
+    nameCursor += name.length + 1;
+    return { at, bytes: encoder.encode(name) };
+  });
+  const rawSize = nameCursor;
+
+  const bytes = new Uint8Array(rawOffset + rawSize);
   const view = new DataView(bytes.buffer);
   bytes.set([0x4d, 0x5a], 0);
-  view.setUint32(0x3c, 0x40, true);
-  view.setUint32(0x40, 0x5045_0000, false);
-  view.setUint16(0x44, PE_MACHINE[arch], true);
-  view.setUint16(0x40 + 24, options.pe32 ? 0x10b : 0x20b, true);
+  view.setUint32(0x3c, peOffset, true);
+  view.setUint32(peOffset, 0x5045_0000, false);
+  view.setUint16(peOffset + 4, PE_MACHINE[arch], true);
+  view.setUint16(peOffset + 6, 1, true);
+  view.setUint16(peOffset + 20, optionalSize, true);
+  view.setUint16(optionalOffset, options.pe32 ? 0x10b : 0x20b, true);
+  view.setUint32(optionalOffset + 108, 16, true);
+  if (imports.length > 0)
+    view.setUint32(optionalOffset + 112 + 1 * 8, sectionRva + importTable, true);
+  if (delayImports.length > 0) {
+    view.setUint32(optionalOffset + 112 + 13 * 8, sectionRva + delayTable, true);
+  }
+
+  view.setUint32(sectionTable + 8, rawSize, true);
+  view.setUint32(sectionTable + 12, sectionRva, true);
+  view.setUint32(sectionTable + 16, rawSize, true);
+  view.setUint32(sectionTable + 20, rawOffset, true);
+
+  names.forEach((name, index) => {
+    const descriptor =
+      index < imports.length
+        ? importTable + index * 20 + 12
+        : delayTable + (index - imports.length) * 32 + 4;
+    view.setUint32(rawOffset + descriptor, sectionRva + name.at, true);
+    bytes.set(name.bytes, rawOffset + name.at);
+  });
   return bytes;
 }

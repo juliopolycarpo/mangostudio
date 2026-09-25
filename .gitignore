@@ -50,6 +50,8 @@ uploads/
 .env.local
 .env.*.local
 config.toml
+# Cargo build configuration, not a secret: static MSVC CRT for Windows builds.
+!/.cargo/config.toml
 
 # ─── Mango local config/runtime — keep only examples ─── #
 .mango/*

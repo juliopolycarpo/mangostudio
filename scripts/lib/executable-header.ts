@@ -15,6 +15,8 @@ export interface ExecutableHeader {
   readonly interpreter: string | null;
   /** ELF only: the highest `GLIBC_x.y` symbol version the file names, or `null`. */
   readonly maxGlibc: string | null;
+  /** PE only: every DLL the import and delay-import tables name, in table order. */
+  readonly dllImports: readonly string[];
 }
 
 const ELF_MACHINES: Readonly<Record<number, ExecutableArch>> = { 62: 'x64', 183: 'arm64' };
@@ -28,6 +30,13 @@ const PT_INTERP = 3;
 const MACHO_MAGIC_64 = 0xfeed_facf;
 const PE32_PLUS_MAGIC = 0x20b;
 const GLIBC_VERSION_RE = /GLIBC_(\d+)\.(\d+)(?:\.(\d+))?/g;
+/** PE32+ data directory indexes: imports and delay-load imports. */
+const PE_IMPORT_DIRECTORY = 1;
+const PE_DELAY_IMPORT_DIRECTORY = 13;
+const PE_IMPORT_DESCRIPTOR_BYTES = 20;
+const PE_DELAY_DESCRIPTOR_BYTES = 32;
+/** Upper bound on descriptors walked, so a corrupt table cannot loop the reader. */
+const PE_MAX_DESCRIPTORS = 4096;
 
 /**
  * Identify a 64-bit little-endian ELF, Mach-O, or PE32+ executable and its
@@ -48,7 +57,7 @@ export function readExecutableHeader(bytes: Uint8Array): ExecutableHeader {
 
   if (view.getUint32(0, false) === 0x7f45_4c46) return readElf(bytes, view);
   if (view.getUint32(0, true) === MACHO_MAGIC_64) return readMachO(view);
-  if (bytes[0] === 0x4d && bytes[1] === 0x5a) return readPe(view);
+  if (bytes[0] === 0x4d && bytes[1] === 0x5a) return readPe(bytes, view);
 
   throw new Error(
     `expected an ELF, Mach-O (64-bit), or PE executable | received magic bytes: ${hex(bytes.subarray(0, 4))}`
@@ -73,6 +82,7 @@ function readElf(bytes: Uint8Array, view: DataView): ExecutableHeader {
     arch,
     interpreter: readElfInterpreter(bytes, view),
     maxGlibc: maxGlibcVersion(bytes),
+    dllImports: [],
   };
 }
 
@@ -117,10 +127,10 @@ function readMachO(view: DataView): ExecutableHeader {
       `expected Mach-O cputype x86_64 (0x01000007) or arm64 (0x0100000c) | received: 0x${cpuType.toString(16)}`
     );
   }
-  return { format: 'macho', arch, interpreter: null, maxGlibc: null };
+  return { format: 'macho', arch, interpreter: null, maxGlibc: null, dllImports: [] };
 }
 
-function readPe(view: DataView): ExecutableHeader {
+function readPe(bytes: Uint8Array, view: DataView): ExecutableHeader {
   const peOffset = view.getUint32(0x3c, true);
   if (peOffset + 26 > view.byteLength || view.getUint32(peOffset, false) !== 0x5045_0000) {
     throw new Error(
@@ -140,7 +150,98 @@ function readPe(view: DataView): ExecutableHeader {
       `expected a PE32+ optional header (magic 0x20b) | received: 0x${optionalMagic.toString(16)}`
     );
   }
-  return { format: 'pe', arch, interpreter: null, maxGlibc: null };
+  return {
+    format: 'pe',
+    arch,
+    interpreter: null,
+    maxGlibc: null,
+    dllImports: readPeDllImports(bytes, view, peOffset),
+  };
+}
+
+interface PeSection {
+  readonly virtualAddress: number;
+  readonly virtualSize: number;
+  readonly rawOffset: number;
+  readonly rawSize: number;
+}
+
+/**
+ * DLL names from the import directory (`IMAGE_IMPORT_DESCRIPTOR.Name`) and the
+ * delay-import directory (`ImgDelayDescr.DllNameRVA`). A delay-loaded DLL is
+ * still a DLL the process cannot run without once it calls into it.
+ */
+function readPeDllImports(bytes: Uint8Array, view: DataView, peOffset: number): string[] {
+  const optionalOffset = peOffset + 24;
+  if (optionalOffset + 112 > view.byteLength) return [];
+  const sections = readPeSections(view, peOffset, optionalOffset);
+  const directoryCount = view.getUint32(optionalOffset + 108, true);
+  const directory = (index: number): number =>
+    index < directoryCount ? view.getUint32(optionalOffset + 112 + index * 8, true) : 0;
+
+  return [
+    ...readDescriptorNames(bytes, view, sections, directory(PE_IMPORT_DIRECTORY), {
+      size: PE_IMPORT_DESCRIPTOR_BYTES,
+      nameField: 12,
+    }),
+    ...readDescriptorNames(bytes, view, sections, directory(PE_DELAY_IMPORT_DIRECTORY), {
+      size: PE_DELAY_DESCRIPTOR_BYTES,
+      nameField: 4,
+    }),
+  ];
+}
+
+function readPeSections(view: DataView, peOffset: number, optionalOffset: number): PeSection[] {
+  const count = view.getUint16(peOffset + 6, true);
+  const optionalSize = view.getUint16(peOffset + 20, true);
+  const first = optionalOffset + optionalSize;
+  const sections: PeSection[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const entry = first + index * 40;
+    if (entry + 40 > view.byteLength) break;
+    sections.push({
+      virtualSize: view.getUint32(entry + 8, true),
+      virtualAddress: view.getUint32(entry + 12, true),
+      rawSize: view.getUint32(entry + 16, true),
+      rawOffset: view.getUint32(entry + 20, true),
+    });
+  }
+  return sections;
+}
+
+function rvaToOffset(sections: readonly PeSection[], rva: number): number | null {
+  for (const section of sections) {
+    const span = Math.max(section.virtualSize, section.rawSize);
+    if (rva >= section.virtualAddress && rva < section.virtualAddress + span) {
+      return section.rawOffset + (rva - section.virtualAddress);
+    }
+  }
+  return null;
+}
+
+function readDescriptorNames(
+  bytes: Uint8Array,
+  view: DataView,
+  sections: readonly PeSection[],
+  tableRva: number,
+  layout: { readonly size: number; readonly nameField: number }
+): string[] {
+  const table = tableRva === 0 ? null : rvaToOffset(sections, tableRva);
+  if (table === null) return [];
+  const names: string[] = [];
+  for (let index = 0; index < PE_MAX_DESCRIPTORS; index += 1) {
+    const entry = table + index * layout.size;
+    if (entry + layout.size > bytes.length) break;
+    if (bytes.subarray(entry, entry + layout.size).every((byte) => byte === 0)) break;
+    const nameOffset = rvaToOffset(sections, view.getUint32(entry + layout.nameField, true));
+    if (nameOffset !== null) names.push(readCString(bytes, nameOffset));
+  }
+  return names;
+}
+
+function readCString(bytes: Uint8Array, offset: number): string {
+  const end = bytes.indexOf(0, offset);
+  return new TextDecoder('latin1').decode(bytes.subarray(offset, end === -1 ? undefined : end));
 }
 
 /**

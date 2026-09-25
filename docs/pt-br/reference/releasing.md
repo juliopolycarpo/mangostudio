@@ -113,6 +113,11 @@ imagens Docker e instaladores veem os mesmos dois arquivos de antes.
   alvo; `aws-lc` não está no grafo. No Linux o zig é o toolchain C deles;
   `windows-arm64` é compilado de forma cruzada na imagem Windows x64, que traz as
   bibliotecas MSVC ARM64 e o clang de que o `ring` precisa.
+- **CRT estático no Windows.** `.cargo/config.toml` linka o runtime C do MSVC
+  estaticamente (`+crt-static`). Um CRT dinâmico importa `VCRUNTIME140.dll`, que
+  vem do Visual C++ Redistributable e não do Windows, e o runtime não iniciaria
+  numa máquina sem ele. A verificação de staging rejeita qualquer runtime
+  Windows que importe DLLs `VCRUNTIME*`/`MSVCP*`.
 - **Pins.** Rust vem de `rust-toolchain.toml`; zig é baixado com versão e
   SHA-256 fixos (`ZIG_VERSION`/`ZIG_SHA256`); cargo-zigbuild é instalado em
   versão fixa pelo `taiki-e/install-action`, que verifica o checksum.

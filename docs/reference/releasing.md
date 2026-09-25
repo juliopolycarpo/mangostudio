@@ -212,6 +212,13 @@ packages, Docker images and installers all see the same two files as before.
   the x64 Windows image, which carries the ARM64 MSVC libraries and the clang
   that `ring` needs for aarch64 Windows; a native `windows-11-arm` runner is the
   fallback if that image ever drops them.
+- **Static CRT on Windows.** `.cargo/config.toml` links the MSVC C runtime
+  statically (`+crt-static`). A dynamic CRT imports `VCRUNTIME140.dll`, which
+  comes from the Visual C++ Redistributable rather than Windows, so the runtime
+  would fail to start on a machine without it (CI images have it, which hides
+  the gap). The Bun hub has no such import either. A `RUSTFLAGS` override
+  replaces that setting, so the staging check also rejects any Windows runtime
+  importing `VCRUNTIME*`/`MSVCP*` DLLs.
 - **Toolchain pins.** Rust comes from `rust-toolchain.toml`; zig is downloaded
   at a pinned version and SHA-256 (`ZIG_VERSION`/`ZIG_SHA256` in
   `runtime-build.yml`); cargo-zigbuild is installed at a pinned version by
@@ -222,8 +229,9 @@ packages, Docker images and installers all see the same two files as before.
   line the hub's doctor and WSL/SSH provisioning compare verbatim.
 - **Checks.** `scripts/build-runtime.ts` and the `--runtime-dir` staging both
   read each binary's header (`scripts/lib/executable-header.ts`): ELF, Mach-O,
-  or PE; x64 or arm64; the glibc loader for gnu, no interpreter for musl; and no
-  `GLIBC_` symbol above the floor. A runtime this machine can execute must also
+  or PE; x64 or arm64; the glibc loader for gnu, no interpreter for musl; no
+  `GLIBC_` symbol above the floor; and no Visual C++ Redistributable DLL in a PE's
+  import or delay-import table. A runtime this machine can execute must also
   answer `--version` with the release version.
 
 Locally, `bun run build --binary --platform <host>` runs

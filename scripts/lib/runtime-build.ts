@@ -79,6 +79,13 @@ const FORMAT_BY_OS: Readonly<Record<RuntimeOs, ExecutableFormat>> = {
   windows: 'pe',
 };
 
+/**
+ * DLLs that ship only with the Visual C++ Redistributable, not with Windows:
+ * a runtime importing one dies with STATUS_DLL_NOT_FOUND on a machine that
+ * never installed it. The CRT is linked statically instead (`.cargo/config.toml`).
+ */
+const MSVC_REDIST_DLL = /^(?:vcruntime|msvcp)\d.*\.dll$/i;
+
 /** The glibc dynamic loader each gnu target must name as its `PT_INTERP`. */
 const GLIBC_LOADER: Readonly<Record<ExecutableArch, string>> = {
   x64: '/lib64/ld-linux-x86-64.so.2',
@@ -245,7 +252,8 @@ export function canRunOnHost(
 /**
  * Everything wrong with a runtime's header for a target, or `[]`. Checks the
  * container format and CPU, that a gnu build asks for the glibc loader and a
- * musl build is static, and — when `enforceGlibcFloor` — that a gnu build
+ * musl build is static, that a Windows build imports no Visual C++
+ * Redistributable DLL, and — when `enforceGlibcFloor` — that a gnu build
  * needs nothing newer than {@link GLIBC_FLOOR}.
  *
  * @example
@@ -272,6 +280,12 @@ export function runtimeHeaderProblems(
   if (spec.libc === 'gnu' && header.interpreter !== GLIBC_LOADER[spec.arch]) {
     problems.push(
       `expected glibc loader ${GLIBC_LOADER[spec.arch]} | received: ${header.interpreter ?? 'none (static)'}`
+    );
+  }
+  const redistributable = header.dllImports.filter((dll) => MSVC_REDIST_DLL.test(dll));
+  if (redistributable.length > 0) {
+    problems.push(
+      `expected no Visual C++ Redistributable imports (link with +crt-static) | received: ${redistributable.join(', ')}`
     );
   }
   if (

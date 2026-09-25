@@ -71,7 +71,7 @@ jobs:
             exit 1
           fi
 
-          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|\.github/workflows/runtime-build\.yml$|scripts/release/|scripts/install/|scripts/build(-runtime)?\.ts$|scripts/lib/|packages/cli/|crates/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|Dockerfile$)'
+          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|\.github/workflows/runtime-build\.yml$|scripts/release/|scripts/install/|scripts/build(-runtime)?\.ts$|scripts/lib/|packages/cli/|crates/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo/config\.toml$|\.github/actions/setup-zigbuild/|Dockerfile$)'
           if grep -Eq "$release_pattern" "$RUNNER_TEMP/changed-files"; then
             echo "release=true" >> "$GITHUB_OUTPUT"
           else

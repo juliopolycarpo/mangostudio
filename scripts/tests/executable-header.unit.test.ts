@@ -18,12 +18,19 @@ describe('readExecutableHeader', () => {
       arch: 'x64',
       interpreter: '/lib64/ld-linux-x86-64.so.2',
       maxGlibc: '2.17',
+      dllImports: [],
     });
   });
 
   test('reads a static aarch64 ELF as having no interpreter', () => {
     const header = readExecutableHeader(fakeElf({ arch: 'arm64', interpreter: null }));
-    expect(header).toEqual({ format: 'elf', arch: 'arm64', interpreter: null, maxGlibc: null });
+    expect(header).toEqual({
+      format: 'elf',
+      arch: 'arm64',
+      interpreter: null,
+      maxGlibc: null,
+      dllImports: [],
+    });
   });
 
   test('reads Mach-O and PE32+ CPUs', () => {
@@ -34,6 +41,25 @@ describe('readExecutableHeader', () => {
     expect(readExecutableHeader(fakeMachO('x64'))).toMatchObject({ format: 'macho', arch: 'x64' });
     expect(readExecutableHeader(fakePe('arm64'))).toMatchObject({ format: 'pe', arch: 'arm64' });
     expect(readExecutableHeader(fakePe('x64'))).toMatchObject({ format: 'pe', arch: 'x64' });
+  });
+
+  test('lists PE imports and delay-load imports by DLL name', () => {
+    const header = readExecutableHeader(
+      fakePe('x64', {
+        imports: ['KERNEL32.dll', 'VCRUNTIME140.dll', 'ws2_32.dll'],
+        delayImports: ['MSVCP140.dll'],
+      })
+    );
+    expect(header.dllImports).toEqual([
+      'KERNEL32.dll',
+      'VCRUNTIME140.dll',
+      'ws2_32.dll',
+      'MSVCP140.dll',
+    ]);
+  });
+
+  test('a PE with no import directory imports nothing', () => {
+    expect(readExecutableHeader(fakePe('arm64')).dllImports).toEqual([]);
   });
 
   test('rejects a script with the magic it found', () => {
