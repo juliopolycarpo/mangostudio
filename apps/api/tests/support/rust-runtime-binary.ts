@@ -10,16 +10,12 @@
  * binary that does not exist is a broken CI job, not a reason to skip
  * quietly — only the fallback path is missing-tolerant.
  *
- * The fallback's own tolerance is deliberate, including in CI: the ordinary
- * `bun run test` lane (`.github/workflows/test.yml`) runs every apps/api
- * test, including the `rust-*` qualification and compat files, without ever
- * building Rust or setting this override — that lane has no Rust binary and
- * is not supposed to. Only `cargo-shim.yml`'s dedicated `real-binary-qualification`
- * job builds the binary and must set the override; that job's own workflow
- * definition is asserted in `ci-gate.unit.test.ts`, which is where "this job
- * forgot to wire it" actually gets caught — not here, where the check cannot
- * tell that job apart from every other CI lane that never needed a Rust
- * binary in the first place.
+ * The fallback's own tolerance is for a developer who has not run cargo yet.
+ * CI never relies on it: every lane that starts a hub — the `bun run test`
+ * shards (`.github/workflows/test.yml`), the browser smoke, and
+ * `cargo-shim.yml`'s `real-binary-qualification` job — sets the override to a
+ * binary it built or downloaded (`.github/actions/local-runtime`), because the
+ * hub launches Local as this binary and there is no runtime to fall back to.
  */
 
 import { existsSync } from 'node:fs';

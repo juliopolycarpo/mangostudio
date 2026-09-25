@@ -119,9 +119,16 @@ jobs:
     name: Check
     uses: ./.github/workflows/lint.yml
 
+  local-runtime:
+    name: Local Runtime
+    uses: ./.github/workflows/local-runtime.yml
+
   test:
     name: Test
+    needs: [local-runtime]
     uses: ./.github/workflows/test.yml
+    with:
+      runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
 
   build:
     name: Build
@@ -129,7 +136,10 @@ jobs:
 
   browser-smoke:
     name: Smoke — Browser
+    needs: [local-runtime]
     uses: ./.github/workflows/browser-smoke.yml
+    with:
+      runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
 
   qa-metrics:
     # Report-only metrics envelope for the PR QA comment: PR runs produce the
@@ -186,6 +196,7 @@ jobs:
       changes,
       distribution,
       check,
+      local-runtime,
       test,
       build,
       browser-smoke,
