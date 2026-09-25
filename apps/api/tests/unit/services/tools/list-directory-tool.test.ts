@@ -12,7 +12,7 @@ import {
 } from '../../../../src/services/tools/builtin/list-directory';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { withTargetHome } from './support/target-home';
+import { targetHomeRuntime, withTargetHome } from './support/target-home';
 import {
   ABSENT_STRING_ARGUMENTS,
   REJECTED_STRING_ARGUMENTS,
@@ -168,14 +168,17 @@ describe('executeListDirectory', () => {
     expect(result.entries.some((e) => e.name === 'allowed.txt')).toBe(true);
   });
 
-  it('expands ~ to the home directory the runtime reports', async () => {
-    mkdirSync(join(tempDir, 'home-sub'));
+  it.skipIf(!targetHomeRuntime.available)(
+    'expands ~ to the home directory the runtime reports',
+    async () => {
+      mkdirSync(join(tempDir, 'home-sub'));
 
-    const result = await withTargetHome(tempDir, () =>
-      executeListDirectory({ path: '~/' }, makeContext())
-    );
-    expect(result.entries.some((e) => e.name === 'home-sub')).toBe(true);
-  });
+      const result = await withTargetHome(tempDir, () =>
+        executeListDirectory({ path: '~/' }, makeContext())
+      );
+      expect(result.entries.some((e) => e.name === 'home-sub')).toBe(true);
+    }
+  );
 
   it('ignores disabled allowed paths', async () => {
     let threw = false;

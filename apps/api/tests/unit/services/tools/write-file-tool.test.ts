@@ -23,7 +23,7 @@ import {
 } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { withTargetHome } from './support/target-home';
+import { targetHomeRuntime, withTargetHome } from './support/target-home';
 import {
   EMPTY_STRING_ARGUMENTS,
   NON_STRING_ARGUMENTS,
@@ -346,13 +346,16 @@ describe('executeWriteFile', () => {
     expect(result.bytesWritten).toBeGreaterThan(0);
   });
 
-  it('expands ~ to the home directory the runtime reports', async () => {
-    const result = await withTargetHome(tempDir, () =>
-      executeWriteFile({ path: '~/home-write.txt', content: 'home content' }, makeContext())
-    );
-    expect(result.created).toBe(true);
-    expect(await readBack(join(tempDir, 'home-write.txt'))).toBe('home content');
-  });
+  it.skipIf(!targetHomeRuntime.available)(
+    'expands ~ to the home directory the runtime reports',
+    async () => {
+      const result = await withTargetHome(tempDir, () =>
+        executeWriteFile({ path: '~/home-write.txt', content: 'home content' }, makeContext())
+      );
+      expect(result.created).toBe(true);
+      expect(await readBack(join(tempDir, 'home-write.txt'))).toBe('home content');
+    }
+  );
 
   it('throws when path is outside allowed paths', async () => {
     const filePath = join(tempDir, 'secret.txt');

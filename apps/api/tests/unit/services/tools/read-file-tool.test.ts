@@ -20,7 +20,7 @@ import {
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { withTargetHome } from './support/target-home';
+import { targetHomeRuntime, withTargetHome } from './support/target-home';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
@@ -502,15 +502,18 @@ describe('executeReadFile', () => {
     ).rejects.toThrow(/it is a binary file/);
   });
 
-  it('expands ~ to the home directory the runtime reports', async () => {
-    const filePath = join(tempDir, 'home-test.txt');
-    await seedFile(filePath, 'home content');
+  it.skipIf(!targetHomeRuntime.available)(
+    'expands ~ to the home directory the runtime reports',
+    async () => {
+      const filePath = join(tempDir, 'home-test.txt');
+      await seedFile(filePath, 'home content');
 
-    const result = await withTargetHome(tempDir, () =>
-      executeReadFile({ path: '~/home-test.txt' }, makeContext())
-    );
-    expect(result.content).toBe(numbered(1, 'home content'));
-  });
+      const result = await withTargetHome(tempDir, () =>
+        executeReadFile({ path: '~/home-test.txt' }, makeContext())
+      );
+      expect(result.content).toBe(numbered(1, 'home content'));
+    }
+  );
 
   it('throws when file does not exist', async () => {
     const filePath = join(tempDir, 'missing.txt');

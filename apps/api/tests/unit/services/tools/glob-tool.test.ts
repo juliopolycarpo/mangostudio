@@ -14,7 +14,7 @@ import {
 } from '../../../../src/services/tools/builtin/glob';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { withTargetHome } from './support/target-home';
+import { targetHomeRuntime, withTargetHome } from './support/target-home';
 import {
   ABSENT_STRING_ARGUMENTS,
   EMPTY_STRING_ARGUMENTS,
@@ -256,13 +256,16 @@ describe('executeGlob', () => {
     expect(threw).toBe(true);
   });
 
-  it('expands ~ in cwd to the home directory the runtime reports', async () => {
-    await seedTree();
-    const result = await withTargetHome(tempDir, () =>
-      executeGlob({ pattern: '*.ts', cwd: '~' }, { ...makeContext(), workdir: tempDir })
-    );
-    expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
-  });
+  it.skipIf(!targetHomeRuntime.available)(
+    'expands ~ in cwd to the home directory the runtime reports',
+    async () => {
+      await seedTree();
+      const result = await withTargetHome(tempDir, () =>
+        executeGlob({ pattern: '*.ts', cwd: '~' }, { ...makeContext(), workdir: tempDir })
+      );
+      expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
+    }
+  );
 
   it('returns no matches when nothing matches the pattern', async () => {
     await seedTree();
