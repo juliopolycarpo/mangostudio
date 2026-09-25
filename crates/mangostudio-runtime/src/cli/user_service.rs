@@ -577,8 +577,6 @@ mod windows {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     const TASK: &str = "MangoStudio Runtime";
-    /// `CREATE_NO_WINDOW` from the Win32 process-creation flags.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const MANAGER_TIMEOUT: Duration = Duration::from_secs(30);
     const UPDATE_SETTLE: Duration = Duration::from_secs(25);
     /// PowerShell startup plus the verbs around the wait, reserved from the budget.
@@ -602,9 +600,10 @@ mod windows {
                 // `doctor` also run from a hub-driven ssh session or a
                 // service-hosted parent, where a flashing console is noise.
                 // Only the operator CLI reaches this; no runtime method does.
-                // A local constant until the shared `windows_job` spawn
-                // helper lands on this branch.
-                .creation_flags(CREATE_NO_WINDOW)
+                // `windows_job`'s flag helper builds `CreateProcessW` flags
+                // for a `ProcessRequest`, not a std `Command`, so the Win32
+                // constant is used directly here.
+                .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
                 .args([
                     "-NoProfile",
                     "-NonInteractive",

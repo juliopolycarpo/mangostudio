@@ -40,7 +40,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
         "cli/user_service.rs",
         "Command::new(",
         3,
-        "operator CLI service verbs, run attached to the operator's own console",
+        "operator CLI service verbs: systemctl/launchctl on the operator's console, powershell.exe hidden with CREATE_NO_WINDOW",
     ),
     (
         "subprocess/supervisor.rs",
