@@ -7,7 +7,6 @@ import {
 } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import { connectWebSocket, WEBSOCKET_SUBPROTOCOL } from '@mangostudio/protocol/ws';
-import { createRuntimeSession, staticConsentSource } from '@mangostudio/runtime';
 import type { RuntimePairingIssue } from '@mangostudio/shared/environments';
 import {
   RUNTIME_HEARTBEAT_TOPIC,
@@ -27,7 +26,12 @@ import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/r
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { LEGACY_HELLO_1_0_1_CHUNKS } from '../../fixtures/legacy-hello-1-0-1';
 import { insertTestUser } from '../../support/factories';
-import { FakeRuntimeDefinition, type TestHandler } from '../../support/runtime-fixture';
+import { serveFakeRuntime } from '../../support/fake-runtime-host';
+import {
+  FakeRuntimeDefinition,
+  fixedConsent,
+  type TestHandler,
+} from '../../support/runtime-fixture';
 
 const TEST_USER = {
   id: 'runtime-socket-user',
@@ -208,12 +212,12 @@ async function dialRuntime(
   const port = await connectWebSocket(url, {
     headers: { authorization: `Bearer ${token}` },
   });
-  const session = createRuntimeSession(
+  const session = serveFakeRuntime(
     port,
     new FakeRuntimeDefinition({
       runtimeVersion: 'runtime-test',
       manifest: MANIFEST,
-      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
       handlers,
     })
   );

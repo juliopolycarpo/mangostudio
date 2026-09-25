@@ -53,8 +53,13 @@ import {
 } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestUser } from '../../support/factories';
+import { connectFakeRuntime } from '../../support/fake-runtime-host';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
-import { FakeRuntimeDefinition, TEST_RUNTIME_MANIFEST } from '../../support/runtime-fixture';
+import {
+  FakeRuntimeDefinition,
+  fixedConsent,
+  TEST_RUNTIME_MANIFEST,
+} from '../../support/runtime-fixture';
 
 const TEST_USER = {
   id: 'environment-entities-user',
@@ -1368,7 +1373,7 @@ describe('environment entity routes', () => {
     const definition = new FakeRuntimeDefinition({
       runtimeVersion: 'discover-test',
       manifest: { ...TEST_RUNTIME_MANIFEST, implementation },
-      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
       handlers: {
         'runtime.discover': () => {
           if (discoverFails) throw new Error('runtime.discover is unavailable');
@@ -1378,7 +1383,7 @@ describe('environment entity routes', () => {
     });
     const { app, repository, manager } = createTestApp({
       http: async (_definition, onUnavailable) => {
-        const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
+        const connection = await connectFakeRuntime(definition, { hubVersion: 'dev' });
         return {
           client: new RuntimeClient(connection.hub, onUnavailable),
           close: () => connection.close(),
@@ -1436,13 +1441,13 @@ describe('environment entity routes', () => {
           },
         },
       },
-      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
       handlers: { 'runtime.discover': () => new Promise<never>(() => undefined) },
     });
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
+          const connection = await connectFakeRuntime(definition, { hubVersion: 'dev' });
           return {
             client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),

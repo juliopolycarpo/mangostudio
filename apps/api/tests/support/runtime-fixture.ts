@@ -4,28 +4,28 @@
  * Every frame goes through the real codec, so a test proves the same thing a
  * remote transport would: the parameters encode, the result decodes, the events
  * arrive in order. What it does not do is spawn anything — the handlers are the
- * test's own.
+ * test's own, served by `fake-runtime-host.ts` over the protocol SDK alone.
  */
 
 import type { EventInput } from '@mangostudio/protocol';
-import {
-  createRuntimeEventRelay,
-  type RuntimeAuditSink,
-  type RuntimeConsentSource,
-  type RuntimeHandlers,
-  type RuntimeHostDefinition,
-  staticConsentSource,
-} from '@mangostudio/runtime';
-import {
-  type HubExternalAgentIsolation,
-  RUNTIME_CONTRACT,
-  type RuntimeCapabilityManifest,
-  type RuntimeMethod,
+import type {
+  HubExternalAgentIsolation,
+  RuntimeCapabilityManifest,
+  RuntimeMethod,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import { connectInProcessRuntime } from '../../src/services/runtime-client/connect-in-process-runtime';
 import type { HubSession } from '../../src/services/runtime-client/hub-session';
 import { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
+import {
+  connectFakeRuntime,
+  type FakeConsentSource,
+  type FakeRuntimeAudit,
+  FakeRuntimeDefinition,
+  fixedConsent,
+  type TestHandler,
+} from './fake-runtime-host';
+
+export { FakeRuntimeDefinition, fixedConsent, type TestHandler };
 
 /** A manifest that claims nothing beyond "this peer exists and can be asked". */
 export const TEST_RUNTIME_MANIFEST: RuntimeCapabilityManifest = {
@@ -45,75 +45,16 @@ export const TEST_RUNTIME_MANIFEST: RuntimeCapabilityManifest = {
   },
 };
 
-/** One method of a fixture runtime; `params` is the contract's, unnarrowed. */
-export type TestHandler = (params: never, context: { readonly signal: AbortSignal }) => unknown;
-
-/**
- * A host definition whose methods are the test's, and whose unnamed methods
- * fail loudly.
- *
- * The contract requires a handler for every method, and a default that
- * answered `{}` would let a test pass while calling something it never meant
- * to — so the default throws with the method name in it.
- *
- * @example
- * const definition = new FakeRuntimeDefinition({
- *   runtimeVersion: 'runtime-test',
- *   manifest: TEST_RUNTIME_MANIFEST,
- *   consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
- *   handlers: { 'shell.run': () => ({ exitCode: 0 }) },
- * });
- */
-export class FakeRuntimeDefinition implements RuntimeHostDefinition {
-  readonly runtimeVersion: string;
-  readonly manifest: () => RuntimeCapabilityManifest;
-  readonly handlers: RuntimeHandlers;
-  readonly consent: RuntimeConsentSource;
-  readonly isUpdateActive = () => false;
-  readonly events = createRuntimeEventRelay();
-  readonly onClose = () => undefined;
-  readonly audit: RuntimeAuditSink | undefined;
-
-  constructor(options: {
-    readonly runtimeVersion: string;
-    readonly manifest: RuntimeCapabilityManifest;
-    readonly consent: RuntimeConsentSource;
-    readonly handlers: Partial<Record<RuntimeMethod, TestHandler>>;
-    /** Absent means auditing is off, the way the `host` slot ships. */
-    readonly audit?: RuntimeAuditSink;
-  }) {
-    this.runtimeVersion = options.runtimeVersion;
-    this.audit = options.audit;
-    this.manifest = () => options.manifest;
-    this.consent = options.consent;
-    this.handlers = Object.fromEntries(
-      Object.keys(RUNTIME_CONTRACT.definition.methods).map((name) => {
-        const method = name as RuntimeMethod;
-        const handle = options.handlers[method];
-        return [
-          method,
-          handle ??
-            (() => {
-              throw new Error(
-                `Runtime method "${method}" has no handler in this fixture; expected one of ${Object.keys(options.handlers).join(', ') || '(none)'}.`
-              );
-            }),
-        ];
-      })
-    ) as unknown as RuntimeHandlers;
-  }
-}
-
 export interface TestRuntimeOptions {
   readonly handlers: Partial<Record<RuntimeMethod, TestHandler>>;
   readonly manifest?: RuntimeCapabilityManifest;
   /** Defaults to a full grant on the `host` slot, so the gate never refuses. */
-  readonly consent?: RuntimeConsentSource;
+  readonly consent?: FakeConsentSource;
   readonly runtimeVersion?: string;
   readonly hubVersion?: string;
   readonly externalAgentIsolation?: HubExternalAgentIsolation;
   /** Records what the runtime side saw, including who the hub said it is. */
-  readonly audit?: RuntimeAuditSink;
+  readonly audit?: FakeRuntimeAudit;
 }
 
 export interface TestRuntime {
@@ -138,13 +79,12 @@ export async function connectTestRuntime(options: TestRuntimeOptions): Promise<T
   const definition = new FakeRuntimeDefinition({
     runtimeVersion: options.runtimeVersion ?? 'runtime-test',
     manifest: options.manifest ?? TEST_RUNTIME_MANIFEST,
-    consent: options.consent ?? staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+    consent: options.consent ?? fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
     handlers: options.handlers,
     ...(options.audit ? { audit: options.audit } : {}),
   });
-  const connection = await connectInProcessRuntime(definition, {
+  const connection = await connectFakeRuntime(definition, {
     hubVersion: options.hubVersion ?? 'hub-test',
-    validateFrames: true,
     ...(options.externalAgentIsolation
       ? { externalAgentIsolation: options.externalAgentIsolation }
       : {}),
@@ -154,7 +94,7 @@ export async function connectTestRuntime(options: TestRuntimeOptions): Promise<T
     client: new RuntimeClient(connection.hub),
     hub: connection.hub,
     emit: (event) => {
-      definition.events.emit(event);
+      definition.emit(event);
     },
     close: () => connection.close(),
   };
