@@ -817,6 +817,9 @@ fn entry_json(name: &std::ffi::OsStr, is_dir: bool) -> Value {
 
 fn occupied_path(policy: &CompiledPolicy, params: &WriteParams, create: bool) -> RemoteError {
     if !create {
+        if let Some(refusal) = io::symlink_write_refusal(policy, &params.resolved_path) {
+            return refusal;
+        }
         if io::assert_regular(policy, &params.resolved_path, "write").is_ok() {
             return io::explain_unread(
                 policy,
@@ -2829,5 +2832,103 @@ mod tests {
             assert_eq!(error_kind(&result), Some(json!("path_access")));
         }
         assert_eq!(std::fs::read(&parent).unwrap(), b"x");
+    }
+
+    /// TypeScript refused to write through any symbolic link, even one whose
+    /// target stays inside the root, naming the link's target.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_refuses_an_in_root_symlink_and_names_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let target = home.join("target.txt");
+        let link = home.join("link.txt");
+        std::fs::write(&target, b"original").unwrap();
+        symlink(&target, &link).unwrap();
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for policy in [None, Some(&restricted)] {
+            let mut read = read_params(&link);
+            read.path_policy = policy.map(|value| decode(value.clone()));
+            Arc::clone(&service)
+                .read(read, ResponseBudget::unbounded(), CancellationToken::new())
+                .await
+                .unwrap();
+            let mut params = write_params(&link, "via link");
+            params.mutation.path_policy = policy.map(|value| decode(value.clone()));
+            let result = Arc::clone(&service)
+                .write(
+                    params,
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot write \"{}\": it is a symbolic link to \"{}\". Write to the link target instead.",
+                link.display(),
+                target.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy:?} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+            assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+            assert_eq!(std::fs::read(&target).unwrap(), b"original");
+        }
+    }
+
+    /// A link out of the containment root is refused by containment before
+    /// the symlink rule is reached, with the TypeScript policy message.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_refuses_an_escaping_symlink_as_outside_the_policy() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let workspace = home.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let secret = home.join("secret.txt");
+        std::fs::write(&secret, b"outside").unwrap();
+        let link = workspace.join("link.txt");
+        symlink(&secret, &link).unwrap();
+        lock(&service.state.ledger).record_read(
+            "chat",
+            &link,
+            b"outside",
+            f64::NAN,
+            ReadObservation::WholeFile,
+        );
+        let mut params = write_params(&link, "pwned");
+        params.mutation.path_policy = Some(decode(
+            json!({"allowedRoots":[],"deniedRoots":[],"containmentRoot":workspace}),
+        ));
+        let result = Arc::clone(&service)
+            .write(
+                params,
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        let expected = format!(
+            "Path \"{}\" resolves outside the paths this chat may access on this environment.",
+            link.display()
+        );
+        assert_eq!(
+            result
+                .as_ref()
+                .map_err(|error| error.message.as_str())
+                .err(),
+            Some(expected.as_str()),
+            "received: {result:?}"
+        );
+        assert_eq!(error_kind(&result), Some(json!("path_access")));
+        assert_eq!(std::fs::read(&secret).unwrap(), b"outside");
     }
 }
