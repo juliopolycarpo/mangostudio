@@ -853,6 +853,17 @@ mod tests {
         );
     }
 
+    /// The stdio fixture's `timeoutMs`: how long its start (spawn plus `initialize`) may take.
+    ///
+    /// Far above a production row's bound on purpose. The fixture is a `bun` script, and on a
+    /// loaded Windows runner a script interpreter's cold start can stall for tens of seconds:
+    /// in one Cargo Shim run, every `bun` fixture spawned while two Windows PowerShell 5.1 tests
+    /// were starting (45 to 59 s each, against under 2 s normally) made no progress for about
+    /// 30 s, while in-process tests kept completing. A 10 s bound turned that stall into a
+    /// connection failure. Production keeps whatever bound its row configures; only this
+    /// fixture's row changes.
+    const FIXTURE_START_TIMEOUT_MS: f64 = 120_000.0;
+
     fn fixture_config() -> McpConfig {
         let fixture =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp_server.mjs");
@@ -864,7 +875,7 @@ mod tests {
             args: vec![fixture.to_string_lossy().into_owned()],
             env: BTreeMap::new(),
             url: None,
-            timeout_ms: Some(10_000.0),
+            timeout_ms: Some(FIXTURE_START_TIMEOUT_MS),
         }
     }
 

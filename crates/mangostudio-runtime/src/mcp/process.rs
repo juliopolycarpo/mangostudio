@@ -756,6 +756,9 @@ mod windows_tests {
     use super::*;
     use crate::subprocess::AlwaysAllow;
 
+    /// How long the `.cmd` shim below may take to run its recorder and exit.
+    const SHIM_EXIT_TIMEOUT: Duration = Duration::from_secs(120);
+
     /// A `.cmd` shim resolved like `npx` receives shell syntax as literal text through `%*`, and
     /// an argument cmd.exe cannot quote is refused before anything runs (BatBadBut).
     #[tokio::test]
@@ -804,7 +807,16 @@ mod windows_tests {
             .await
             .unwrap_or_else(|error| panic!("expected the shim to start | received {error:?}"));
         drop(owned.stdin);
-        let _ = tokio::time::timeout(Duration::from_secs(30), owned.process.exited()).await;
+        // The recorder writes its file before it exits, so the file is read only once the shim
+        // has exited and its tree is gone. The bound is generous because the shim is cmd.exe
+        // starting `bun`, and an interpreter cold start on a loaded Windows runner can stall
+        // for tens of seconds.
+        let exited = tokio::time::timeout(SHIM_EXIT_TIMEOUT, owned.process.exited()).await;
+        assert!(
+            matches!(exited, Ok(Ok(()))),
+            "expected the shim to exit and its tree to be cleaned up within \
+             {SHIM_EXIT_TIMEOUT:?} | received {exited:?}"
+        );
         let received: Vec<String> = serde_json::from_str(
             &std::fs::read_to_string(&output).expect("the shim recorded its arguments"),
         )
