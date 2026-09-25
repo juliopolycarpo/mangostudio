@@ -3,17 +3,17 @@
  * agentic turn as namespaced `mcp__<slug>__<tool>` definitions, the scripted
  * model calls one, and the result is recorded in the persisted message parts —
  * all through the real connection manager, tool bridge, and in-memory database.
- * A real SDK server (over the in-memory transport) backs the calls, so failure
- * modes (server error, oversized output, per-server timeout) degrade to typed
- * error/capped results without failing the turn. Transport spawn/HTTP specifics
- * are covered by the dedicated MCP transport integration tests.
+ * A real SDK server, spawned by the Local runtime as a stdio server through the
+ * relay fixture, backs the calls, so failure modes (server error, oversized
+ * output, per-server timeout) degrade to typed error/capped results without
+ * failing the turn. Transport spawn/HTTP specifics are covered by the dedicated
+ * MCP transport integration tests.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setMcpTransportFactoryForTest } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { MCP_RESULT_TRUNCATION_MARKER } from '@mangostudio/shared/mcp/content-mapping';
 import { getDb } from '../../../../src/db/database';
@@ -25,10 +25,7 @@ import {
   resetSkillsCache,
   setThirdPartySkillDirsForTest,
 } from '../../../../src/modules/skills/application/skill-discovery';
-import {
-  closeAllMcpClients,
-  setMcpClientConnectorForTest,
-} from '../../../../src/services/mcp/connection-manager';
+import { closeAllMcpClients } from '../../../../src/services/mcp/connection-manager';
 import {
   getProvider,
   registerProvider,
@@ -41,10 +38,11 @@ import type {
 import { makeAgentProfile } from '../../../integration/routes/_respond-stream-helpers';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
 import {
-  inMemoryMcpConnector,
+  type ControlledTurnMcpFixture,
   PICTURE_TOOL_NOTES_TEXT,
   PICTURE_TOOL_RESOURCE_TEXT,
-} from '../../../support/fixtures/mcp/in-memory-mcp';
+  startControlledTurnMcpFixture,
+} from '../../../support/fixtures/mcp/turn-mcp-fixture';
 
 const RESOLVED_MODEL = {
   modelId: 'mcp-e2e-model',
@@ -56,6 +54,7 @@ let user: UserFixture;
 let chatId: string;
 let skillsDir: string;
 let mediaDir: string;
+let fixture: ControlledTurnMcpFixture;
 let previousProvider: AIProvider | null = null;
 let captured = false;
 
@@ -169,8 +168,8 @@ async function insertServer(slug: string, timeoutMs: number | null = null): Prom
       slug,
       transport: 'stdio',
       environmentId: LOCAL_ENVIRONMENT_ID,
-      command: 'bun',
-      argsJson: '[]',
+      command: fixture.launch.command,
+      argsJson: JSON.stringify(fixture.launch.args),
       envJson: '{}',
       url: null,
       enabled: 1,
@@ -263,7 +262,7 @@ beforeEach(async () => {
   });
   setThirdPartySkillDirsForTest({});
   resetSkillsCache();
-  setMcpClientConnectorForTest(inMemoryMcpConnector());
+  fixture = await startControlledTurnMcpFixture();
   user = await insertTestUser();
   const chat = await insertTestChat(user.id);
   chatId = chat.id;
@@ -273,9 +272,9 @@ afterEach(async () => {
   if (previousProvider) registerProvider(previousProvider);
   previousProvider = null;
   captured = false;
-  setMcpClientConnectorForTest(null);
-  setMcpTransportFactoryForTest(null);
   await closeAllMcpClients();
+  await fixture.close();
+  fixture.assertNoOpenServers();
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
   rmSync(skillsDir, { recursive: true, force: true });
@@ -454,7 +453,9 @@ describe('MCP tool round trip end-to-end', () => {
   });
 
   it('honors the per-server timeout for a hanging tool', async () => {
-    await insertServer('echo-server', 150);
+    // Long enough to cover the stdio spawn and initialize the Rust runtime
+    // also bounds by the row timeout; the tool itself never answers.
+    await insertServer('echo-server', 1_000);
     installProvider(new SingleToolCallProvider('mcp__echo-server__hang'));
 
     const events = await collectTurn('Call the slow tool.');

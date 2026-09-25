@@ -1,20 +1,15 @@
 /**
- * In-memory MCP fixture for turn-level end-to-end tests: a real SDK server
- * (text, rich content, elicitation, delay, disconnect, and failure tools) linked
- * to the runtime's own client over the SDK's in-memory transport. Only the
- * transport is substituted, so the hub → runtime → SDK path — including the
- * elicitation hop back — runs exactly as it does in production.
- *
- * The transport wiring specifics (stdio spawn, HTTP) are covered by the
- * dedicated transport integration tests; this fixture keeps the turn tests
- * deterministic while still exercising the real SDK request/response path.
+ * MCP fixture for turn-level end-to-end tests: a real SDK server (text, rich content,
+ * elicitation, delay, disconnect, and failure tools) that the runtime reaches as an ordinary
+ * stdio server through the relay in `mcp-relay-host.ts`. The server row stores the relay launch,
+ * so the hub → runtime → stdio → SDK path — including the elicitation hop back — runs exactly as
+ * it does in production, for whichever runtime serves the Local environment. The SDK server stays
+ * in the test process, which is what lets the controls below synchronize on it.
  */
 
-import { setMcpTransportFactoryForTest } from '@mangostudio/runtime';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
+import { type McpStdioLaunch, startMcpRelayHost } from './mcp-relay-host';
 
 /** Length of the oversized `big` tool payload; well past the 64 KiB result cap. */
 const OVERSIZED_TOOL_OUTPUT_LENGTH = 100_000;
@@ -81,9 +76,12 @@ function createTurnMcpFixtureControls(): MutableTurnMcpFixtureControls {
 }
 
 export interface ControlledTurnMcpFixture {
-  connector: typeof connectMcpClient;
+  /** stdio launch to store on the server row; every spawn gets a fresh turn server. */
+  launch: McpStdioLaunch;
   controls: TurnMcpFixtureControls;
+  /** Waits for the runtime to release every session, then stops the relay. */
   close(): Promise<void>;
+  /** Throws when a session outlived the runtime's teardown. */
   assertNoOpenServers(): void;
 }
 
@@ -292,51 +290,23 @@ function createTurnMcpServer(
 }
 
 /**
- * Creates a controlled SDK fixture with explicit synchronization and teardown.
- * Tests must call `close()` and can then assert that every server was released.
+ * Starts a controlled turn fixture with explicit synchronization and teardown. Tests store
+ * `launch` on a stdio server row, close their MCP clients, then call `close()` and
+ * `assertNoOpenServers()`.
+ *
+ * @example
+ * const fixture = await startControlledTurnMcpFixture();
+ * await insertRow({ command: fixture.launch.command, argsJson: JSON.stringify(fixture.launch.args) });
+ * await fixture.controls.waitForCall('delayed');
+ * fixture.controls.release('key');
  */
-export function createControlledTurnMcpFixture(): ControlledTurnMcpFixture {
+export async function startControlledTurnMcpFixture(): Promise<ControlledTurnMcpFixture> {
   const controls = createTurnMcpFixtureControls();
-  const servers = new Set<Server>();
-
-  setMcpTransportFactoryForTest(async () => {
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createTurnMcpServer(controls);
-    servers.add(server);
-    server.onclose = () => servers.delete(server);
-    await server.connect(serverTransport);
-    return clientTransport;
-  });
-
+  const host = await startMcpRelayHost();
   return {
-    connector: connectMcpClient,
+    launch: host.route(() => createTurnMcpServer(controls)),
     controls,
-    async close() {
-      setMcpTransportFactoryForTest(null);
-      await Promise.allSettled([...servers].map((server) => server.close()));
-    },
-    assertNoOpenServers() {
-      if (servers.size > 0) {
-        throw new Error(`MCP fixture leaked ${servers.size} in-memory server(s).`);
-      }
-    },
+    close: () => host.close(),
+    assertNoOpenServers: () => host.assertNoOpenServers(),
   };
-}
-
-/**
- * Returns a connection-manager connector that links a fresh in-memory server to
- * each session the runtime opens, so a reconnect after a dropped session gets a
- * live server. The connector itself is the real one — only the transport under
- * it is a fixture, so the hub → runtime → SDK path is fully exercised.
- * // Usage: setMcpClientConnectorForTest(inMemoryMcpConnector())
- */
-export function inMemoryMcpConnector(
-  createServer: () => Server = createTurnMcpServer
-): typeof connectMcpClient {
-  setMcpTransportFactoryForTest(async () => {
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await createServer().connect(serverTransport);
-    return clientTransport;
-  });
-  return connectMcpClient;
 }
