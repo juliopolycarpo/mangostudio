@@ -320,6 +320,45 @@ describe('capabilityManifestFromHealth', () => {
       }).toEqual({ shell: false, externalAgents: false });
       expect(granted.implementation).toBeUndefined();
     });
+
+    it('keeps a handshake terminal refusal closed until the peer reconnects', () => {
+      const noneReport: RuntimeHealthReport = {
+        ...baseReport,
+        profile: 'none',
+        allow: RUNTIME_CONSENT_PRESETS.none,
+        terminal: false,
+      };
+      const handshake = capabilityManifestFromHealth(noneReport);
+      expect(handshake.terminal).toBe(false);
+
+      const granted = capabilityManifestFromHealth(
+        {
+          ...baseReport,
+          profile: 'custom',
+          allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true },
+          terminal: true,
+        },
+        handshake
+      );
+
+      expect(granted.terminal).toBe(false);
+    });
+
+    it('takes a later terminal report from a handshake that never answered', () => {
+      const hello = capabilityManifestFromHealth({
+        ...baseReport,
+        profile: 'none',
+        allow: RUNTIME_CONSENT_PRESETS.none,
+      });
+      expect(hello.terminal).toBeUndefined();
+
+      const refreshed = capabilityManifestFromHealth(
+        { ...baseReport, profile: 'full', allow: RUNTIME_CONSENT_PRESETS.full, terminal: true },
+        hello
+      );
+
+      expect(refreshed.terminal).toBe(true);
+    });
   });
 
   it('derives tools from effective groups, not raw consent, without a handshake (#1100)', () => {

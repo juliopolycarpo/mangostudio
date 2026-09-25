@@ -77,7 +77,7 @@ export function capabilityManifestFromHealth(
     ...(report.gh ? { gh: report.gh } : {}),
     // Same rule as `gh`: absent stays absent, so "too old to say" is never
     // rewritten as "said no".
-    ...terminalOf(report, implementation),
+    ...terminalOf(report, handshake, implementation),
     features: applyImplementationCeiling(
       allowedFeatures,
       implementationCeiling(handshake, implementation)
@@ -107,15 +107,18 @@ export function capabilityManifestFromHealth(
 }
 
 /**
- * The refreshed `terminal` flag: absent stays absent, and a peer that declared
- * its implementation cannot report a PTY its build does not carry.
+ * The refreshed `terminal` flag: absent stays absent, and a PTY is capped by
+ * the same ceiling as `features` — the build's own answer when it declared one,
+ * otherwise the handshake's `terminal`, which folds consent in and therefore
+ * holds a refusal until the peer reconnects.
  */
 function terminalOf(
   report: RuntimeHealthReport,
+  handshake: RuntimeCapabilityManifest | undefined,
   implementation: RuntimeImplementation | undefined
 ): Pick<RuntimeCapabilityManifest, 'terminal'> {
   if (report.terminal === undefined) return {};
-  const implemented = implementation?.features.terminal ?? true;
+  const implemented = implementation?.features.terminal ?? handshake?.terminal ?? true;
   return { terminal: report.terminal && implemented };
 }
 
