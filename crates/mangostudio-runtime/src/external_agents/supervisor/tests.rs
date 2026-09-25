@@ -54,6 +54,12 @@ struct HarnessLog {
     /// Makes every later turn start fail the way the Codex harness answers
     /// once it has sealed a session it closed itself.
     sealed: AtomicBool,
+    /// The `PATH` each vendor open was handed in its `HostContext`.
+    open_paths: Mutex<Vec<Option<String>>>,
+    /// The reason of every turn cancel a [`ScriptedSession`] received.
+    cancel_reasons: Mutex<Vec<CancelReason>>,
+    /// Reviews a [`ScriptedSession`] started.
+    reviews: AtomicUsize,
 }
 
 impl HarnessLog {
@@ -63,6 +69,10 @@ impl HarnessLog {
 
     fn closes(&self) -> Vec<CloseReason> {
         self.closes.lock().unwrap().clone()
+    }
+
+    fn cancel_reasons(&self) -> Vec<CancelReason> {
+        self.cancel_reasons.lock().unwrap().clone()
     }
 }
 
@@ -89,6 +99,8 @@ enum OpenBehaviour {
     SteerFailingOnGate(watch::Receiver<bool>),
     /// Opens a session whose vendor close records its reason, then never ends.
     CloseStalls,
+    /// Opens a [`ScriptedSession`] whose turns and reviews follow the script.
+    Scripted(Script),
 }
 
 /// How a [`CountingHarness`] answers a probe.
@@ -106,6 +118,8 @@ struct CountingHarness {
     log: Arc<HarnessLog>,
     open: OpenBehaviour,
     probe: ProbeBehaviour,
+    /// Whether the vendor can list its own sessions at all.
+    lists_sessions: bool,
 }
 
 #[async_trait::async_trait]
@@ -140,6 +154,11 @@ impl Harness for CountingHarness {
         request: OpenSession,
     ) -> mango_external_agents::Result<Box<dyn Session>> {
         self.log.opens.fetch_add(1, Ordering::SeqCst);
+        self.log
+            .open_paths
+            .lock()
+            .unwrap()
+            .push(host.environment().get("PATH").map(str::to_owned));
         match &self.open {
             OpenBehaviour::Succeed => {}
             OpenBehaviour::Gated(gate) => {
@@ -162,7 +181,8 @@ impl Harness for CountingHarness {
             OpenBehaviour::AskingOneChoice
             | OpenBehaviour::Flooding
             | OpenBehaviour::SteerFailingOnGate(_)
-            | OpenBehaviour::CloseStalls => {}
+            | OpenBehaviour::CloseStalls
+            | OpenBehaviour::Scripted(_) => {}
             OpenBehaviour::FailNeedingCleanup(control) => {
                 return Err(SdkError::CleanupRequired {
                     control: Arc::clone(control) as Arc<dyn ProcessControl>,
@@ -174,6 +194,15 @@ impl Harness for CountingHarness {
             }
         }
         let inner = self.inner.open_session(host, request).await?;
+        if let OpenBehaviour::Scripted(script) = &self.open {
+            return Ok(Box::new(ScriptedSession {
+                inner,
+                log: Arc::clone(&self.log),
+                host: host.clone(),
+                script: script.clone(),
+                sink: Mutex::new(None),
+            }));
+        }
         if matches!(self.open, OpenBehaviour::Flooding) {
             return Ok(Box::new(FloodingSession {
                 inner,
@@ -207,6 +236,11 @@ impl Harness for CountingHarness {
         _query: SessionQuery,
     ) -> mango_external_agents::Result<SessionPage> {
         self.log.listings.fetch_add(1, Ordering::SeqCst);
+        if !self.lists_sessions {
+            return Err(SdkError::not_supported(
+                mango_external_agents::Capability::SessionListing,
+            ));
+        }
         Ok(SessionPage {
             sessions: Vec::new(),
             next_cursor: None,
@@ -511,6 +545,7 @@ struct CountingHarnesses {
     fake: FakeHarness,
     open: OpenBehaviour,
     probes: Mutex<Vec<(TargetId, ProbeBehaviour)>>,
+    lists_sessions: bool,
 }
 
 impl HarnessFactory for CountingHarnesses {
@@ -527,6 +562,7 @@ impl HarnessFactory for CountingHarnesses {
             log: Arc::clone(&self.log),
             open: self.open.clone(),
             probe,
+            lists_sessions: self.lists_sessions,
         })
     }
 }
@@ -582,6 +618,8 @@ impl ExecutableResolver for FixedExecutables {
 struct StallableConsent {
     granted: AtomicBool,
     held: AtomicBool,
+    /// Every read the watcher made.
+    reads: AtomicUsize,
 }
 
 /// The longest a held read blocks, so a failing test cannot hang the runtime's
@@ -593,6 +631,7 @@ impl StallableConsent {
         Arc::new(Self {
             granted: AtomicBool::new(true),
             held: AtomicBool::new(false),
+            reads: AtomicUsize::new(0),
         })
     }
 
@@ -610,7 +649,12 @@ impl StallableConsent {
         self.held.store(false, Ordering::SeqCst);
     }
 
+    fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
+    }
+
     fn read(&self) -> bool {
+        self.reads.fetch_add(1, Ordering::SeqCst);
         let started = std::time::Instant::now();
         while self.held.load(Ordering::SeqCst) && started.elapsed() < MAX_HELD_READ {
             std::thread::sleep(Duration::from_millis(5));
@@ -636,6 +680,8 @@ struct Rig {
     workspaces: Arc<AllowListedWorkspaces>,
     executables: Arc<FixedExecutables>,
     consent: Arc<StallableConsent>,
+    /// How many times a `HostContext` read the machine environment.
+    environment_reads: Arc<AtomicUsize>,
     hub: HubSession,
     /// The hub's side of the connection, kept open for the rig's lifetime.
     _observer: HubSession,
@@ -654,6 +700,9 @@ struct RigOptions {
     authority_gate: Option<watch::Receiver<bool>>,
     fake: FakeHarness,
     hard_turn_timeout: Duration,
+    /// The machine environment every `HostContext` is built from.
+    environment: PathEnv,
+    lists_sessions: bool,
 }
 
 impl Default for RigOptions {
@@ -667,6 +716,8 @@ impl Default for RigOptions {
             authority_gate: None,
             fake: FakeHarness::new(),
             hard_turn_timeout: super::HARD_TURN_TIMEOUT,
+            environment: PathEnv::default(),
+            lists_sessions: true,
         }
     }
 }
@@ -708,6 +759,15 @@ async fn rig(options: RigOptions) -> Rig {
     let consent = StallableConsent::granted();
     let consent_read = Arc::clone(&consent);
     let private_root = private_dir.path().join("external-agents");
+    let environment_reads = Arc::new(AtomicUsize::new(0));
+    let environment = {
+        let reads = Arc::clone(&environment_reads);
+        let snapshot = options.environment;
+        move || {
+            reads.fetch_add(1, Ordering::SeqCst);
+            snapshot.clone()
+        }
+    };
     let supervisor = Supervisor::new(Ports {
         launcher: Arc::new(FakeLauncher::new()),
         harnesses: Arc::new(CountingHarnesses {
@@ -715,10 +775,11 @@ async fn rig(options: RigOptions) -> Rig {
             fake: options.fake,
             open: options.open,
             probes: Mutex::new(options.probes),
+            lists_sessions: options.lists_sessions,
         }),
         workspaces: Arc::clone(&workspaces) as Arc<dyn WorkspaceAuthority>,
         executables: Arc::clone(&executables) as Arc<dyn ExecutableResolver>,
-        environment: Arc::new(PathEnv::default),
+        environment: Arc::new(environment),
         consent: Arc::new(move || consent_read.read()),
         private_root: private_root.clone(),
         runtime_version: String::from("0.0.0-test"),
@@ -737,6 +798,7 @@ async fn rig(options: RigOptions) -> Rig {
         workspaces,
         executables,
         consent,
+        environment_reads,
         hub,
         _observer: observer,
         events,
@@ -2700,5 +2762,1092 @@ async fn a_review_on_a_target_without_native_review_is_refused_before_any_reserv
         )
         .await
         .expect("the refused review reserved neither the slot nor the id");
+    rig.close("one").await;
+}
+
+// ---------------------------------------------------------------------------
+// Scripted vendor sessions
+// ---------------------------------------------------------------------------
+
+/// What a [`ScriptedSession`] does with each turn and review.
+#[derive(Clone)]
+enum Script {
+    /// Accepts every turn under this vendor handle, then stays silent until
+    /// it is cancelled.
+    NativeTurnId(String),
+    /// Streams one text delta, then fails the turn the way a crashed adapter
+    /// does: the SDK commits the error as the turn's terminal.
+    CrashMidStream,
+    /// Streams a text delta every millisecond, far inside any idle bound,
+    /// until cancelled: a stream that is never quiet.
+    NeverPausing,
+    /// Offers native review. A turn streams one text delta and completes. A
+    /// review streams one finding under the thread named here (the session's
+    /// own when `None`) and the vendor handle `review_turn`, then completes
+    /// once `finish` reads `true`.
+    Reviewing {
+        thread: Option<String>,
+        review_turn: String,
+        finish: watch::Receiver<bool>,
+    },
+}
+
+/// Delegates session state to the SDK's fake and runs every turn and review
+/// from its [`Script`]. A cancel ends the running stream the way a vendor
+/// that honours it would, and records its reason.
+struct ScriptedSession {
+    inner: Box<dyn Session>,
+    log: Arc<HarnessLog>,
+    host: HostContext,
+    script: Script,
+    /// The running turn's or review's sink, so a cancel or close can end it.
+    sink: Mutex<Option<mango_external_agents::EventSink>>,
+}
+
+impl ScriptedSession {
+    fn open_stream(
+        &self,
+        turn_id: &mango_external_agents::TurnId,
+        attempt: mango_external_agents::AttemptId,
+    ) -> (
+        mango_external_agents::EventSink,
+        mango_external_agents::stream::EventReceiver,
+    ) {
+        let (sink, events) = mango_external_agents::EventSink::with_limits(
+            self.snapshot().ids.session_id.clone(),
+            turn_id.clone(),
+            attempt,
+            Arc::clone(self.host.clock()),
+            self.host.limits(),
+        );
+        *self.sink.lock().unwrap() = Some(sink.clone());
+        (sink, events)
+    }
+}
+
+fn text(text: &str) -> mango_external_agents::EventKind {
+    mango_external_agents::EventKind::TextDelta {
+        text: text.to_owned(),
+    }
+}
+
+#[async_trait::async_trait]
+impl Session for ScriptedSession {
+    fn state(&self) -> &SessionState {
+        self.inner.state()
+    }
+
+    fn capabilities(&self) -> mango_external_agents::SessionCapabilities {
+        let mut capabilities = *self.inner.capabilities().capabilities();
+        capabilities.native_review = matches!(self.script, Script::Reviewing { .. });
+        mango_external_agents::SessionCapabilities::new(capabilities)
+    }
+
+    async fn start_turn(&self, request: TurnRequest) -> mango_external_agents::Result<TurnStream> {
+        self.log.turns_started.fetch_add(1, Ordering::SeqCst);
+        let (sink, events) = self.open_stream(&request.turn_id, request.attempt);
+        let native = match &self.script {
+            Script::NativeTurnId(native) => native.clone(),
+            Script::CrashMidStream => {
+                sink.emit(text("before crash")).await?;
+                sink.fail(mango_external_agents::VendorError::new(
+                    mango_external_agents::ErrorCode::from_static("adapter-crashed"),
+                    "fixture crashed",
+                ))
+                .await?;
+                String::from("crash-turn")
+            }
+            Script::NeverPausing => {
+                tokio::spawn(async move {
+                    // Ends once the turn is terminal and the sink refuses.
+                    while sink.emit(text("tick")).await.is_ok() {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                });
+                String::from("busy-turn")
+            }
+            Script::Reviewing { .. } => {
+                sink.emit(text("turn text")).await?;
+                sink.complete().await?;
+                String::from("scripted-turn")
+            }
+        };
+        Ok(TurnStream::accepted(
+            request.turn_id,
+            request.attempt,
+            native,
+            events,
+        ))
+    }
+
+    async fn start_review(
+        &self,
+        request: mango_external_agents::ReviewRequest,
+    ) -> mango_external_agents::Result<mango_external_agents::ReviewStream> {
+        let Script::Reviewing {
+            thread,
+            review_turn,
+            finish,
+        } = &self.script
+        else {
+            return Err(SdkError::not_supported(
+                mango_external_agents::Capability::NativeReview,
+            ));
+        };
+        self.log.reviews.fetch_add(1, Ordering::SeqCst);
+        let attempt = mango_external_agents::AttemptId::FIRST;
+        let (sink, events) = self.open_stream(&request.turn_id, attempt);
+        sink.emit(text("P1: the retry loop never exits.")).await?;
+        let mut finish = finish.clone();
+        tokio::spawn(async move {
+            if finish.wait_for(|open| *open).await.is_ok() {
+                let _ = sink.complete().await;
+            }
+        });
+        Ok(mango_external_agents::ReviewStream {
+            turn: TurnStream::accepted(request.turn_id, attempt, review_turn.clone(), events),
+            review_thread_id: thread
+                .clone()
+                .unwrap_or_else(|| self.ids().native_session_id),
+        })
+    }
+
+    async fn respond(&self, _response: PermissionResponse) -> mango_external_agents::Result<()> {
+        Ok(())
+    }
+
+    async fn cancel(&self, reason: CancelReason) -> mango_external_agents::Result<()> {
+        self.log.cancels.fetch_add(1, Ordering::SeqCst);
+        self.log.cancel_reasons.lock().unwrap().push(reason);
+        let running = self.sink.lock().unwrap().clone();
+        if let Some(sink) = running {
+            let _ = sink.cancel(reason).await;
+        }
+        Ok(())
+    }
+
+    async fn close(&self, reason: CloseReason) -> mango_external_agents::Result<()> {
+        self.log.closes.lock().unwrap().push(reason);
+        let running = self.sink.lock().unwrap().take();
+        if let Some(sink) = running {
+            let _ = sink.cancel(CancelReason::Shutdown).await;
+        }
+        self.inner.close(reason).await
+    }
+}
+
+impl Rig {
+    fn review_params(&self, session_id: &str, client_message_id: &str) -> StartReviewParams {
+        StartReviewParams {
+            session_id: session_id.into(),
+            client_message_id: client_message_id.into(),
+            target: crate::external_agents::wire::ReviewTarget::UncommittedChanges,
+        }
+    }
+
+    fn state_of(&self, session_id: &str) -> &'static str {
+        self.supervisor
+            .live_sessions()
+            .1
+            .iter()
+            .find(|row| row.session_id == session_id)
+            .map_or("absent", |row| row.state)
+    }
+
+    /// Waits until `session_id` has no running turn.
+    async fn idle(&self, session_id: &str, after: &str) {
+        eventually(
+            &format!("session {session_id:?} idle after {after}"),
+            || self.state_of(session_id),
+            |state| *state == "idle",
+        )
+        .await;
+    }
+}
+
+use crate::external_agents::wire::StartReviewParams;
+
+// ---------------------------------------------------------------------------
+// Replacement-map coverage
+// ---------------------------------------------------------------------------
+
+/// The toolchain an open carried is resolved into that session's own
+/// `HostContext`, once: a turn runs on the session it opened and never
+/// rebuilds the environment. An open without one keeps the machine's `PATH`.
+#[tokio::test]
+async fn open_resolves_its_toolchain_into_the_session_host_and_turns_reuse_it() {
+    let rig = rig(RigOptions {
+        environment: PathEnv {
+            platform: String::from("linux"),
+            home_dir: String::from("/home/tester"),
+            env: std::collections::HashMap::from([(
+                String::from("PATH"),
+                String::from("/usr/bin"),
+            )]),
+        },
+        ..RigOptions::default()
+    })
+    .await;
+    let mut params = rig.open_params("chosen");
+    params.toolchain = Some(crate::commands::toolchain::Selection {
+        node: String::from("/opt/custom/node/bin/node"),
+        bun: String::from("/opt/custom/bun/bin/bun"),
+    });
+    rig.supervisor
+        .open(params, &rig.hub, &CancellationToken::new())
+        .await
+        .expect("an open with a toolchain");
+    rig.supervisor
+        .turn(
+            rig.turn_params("chosen", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("a turn on the opened session");
+    let reads = rig.environment_reads.load(Ordering::SeqCst);
+    assert_eq!(
+        (reads, rig.log.turns_started.load(Ordering::SeqCst)),
+        (1, 1),
+        "expected (environment reads, turns) = (1, 1): the turn reuses the open's host | \
+         received ({reads}, _)"
+    );
+    rig.close("chosen").await;
+
+    rig.open("plain")
+        .await
+        .expect("an open without a toolchain");
+    let paths = rig.log.open_paths.lock().unwrap().clone();
+    assert_eq!(
+        paths,
+        vec![
+            Some(String::from(
+                "/opt/custom/node/bin:/opt/custom/bun/bin:/usr/bin"
+            )),
+            Some(String::from("/usr/bin")),
+        ],
+        "expected the selected toolchain prepended, then PATH untouched without one | \
+         received {paths:?}"
+    );
+    rig.close("plain").await;
+}
+
+#[tokio::test]
+async fn steering_a_session_that_is_not_open_is_refused_before_the_vendor() {
+    let rig = rig(RigOptions::default()).await;
+    let steer = |session_id: &str| SteerParams {
+        session_id: session_id.into(),
+        native_turn_id: "fake-turn-1".into(),
+        client_message_id: "s1".into(),
+        input: "more".into(),
+    };
+    let never = rig
+        .supervisor
+        .steer(steer("never-opened"))
+        .await
+        .expect_err("a steer on a session that never opened must be refused");
+    assert!(
+        never.message.contains("is not open"),
+        "expected a not-open refusal | received: {}",
+        never.message
+    );
+
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    rig.events_until("approval_requested").await;
+    rig.close("one").await;
+    let closed = rig
+        .supervisor
+        .steer(steer("one"))
+        .await
+        .expect_err("a steer on a closed session must be refused");
+    assert!(
+        closed.message.contains("is not open"),
+        "expected a not-open refusal | received: {}",
+        closed.message
+    );
+    assert_eq!(
+        rig.log.steers.load(Ordering::SeqCst),
+        0,
+        "expected no steer to reach a vendor"
+    );
+}
+
+#[tokio::test]
+async fn closing_a_session_returns_its_capacity_to_the_next_open() {
+    let rig = rig(RigOptions {
+        session_cap: 1,
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let full = rig
+        .open("two")
+        .await
+        .expect_err("a second session past the cap must fail");
+    assert!(
+        full.message.contains("capacity is 1"),
+        "expected a capacity refusal | received: {}",
+        full.message
+    );
+    rig.close("one").await;
+    let reopened = rig.open("two").await.unwrap_or_else(|error| {
+        panic!("expected the freed slot to admit an open | received: {error}")
+    });
+    assert!(!reopened.resumed, "expected a fresh session");
+    assert_eq!(
+        (rig.live_count(), rig.log.opens()),
+        (1, 2),
+        "expected (live sessions, vendor opens) = (1, 2)"
+    );
+    rig.close("two").await;
+}
+
+/// A caller that gave up on an open leaves no live session, but the open is
+/// still settling in its stop grace and may yet produce a vendor session.
+/// The consent watcher must keep reading consent for it until it settles,
+/// and stop once nothing is left.
+#[tokio::test]
+async fn the_consent_watcher_keeps_reading_while_a_cancelled_open_settles() {
+    let (release, gate) = watch::channel(false);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Gated(gate),
+        ..RigOptions::default()
+    })
+    .await;
+    let caller = CancellationToken::new();
+    let opening = {
+        let supervisor = Arc::clone(&rig.supervisor);
+        let hub = rig.hub.clone();
+        let params = rig.open_params("one");
+        let caller = caller.clone();
+        tokio::spawn(async move { supervisor.open(params, &hub, &caller).await })
+    };
+    eventually(
+        "the open to reach the vendor",
+        || rig.log.opens(),
+        |opens| *opens == 1,
+    )
+    .await;
+    caller.cancel();
+    let refused = opening
+        .await
+        .unwrap()
+        .expect_err("a cancelled open must fail");
+    assert_eq!(refused.code, codes::CANCELLED, "received: {refused:?}");
+    assert_eq!(
+        (rig.live_count(), rig.supervisor.slots().len()),
+        (0, 1),
+        "expected (live sessions, pending slots) = (0, 1) while the open settles"
+    );
+
+    let before = rig.consent.reads();
+    rig.consent.revoke();
+    eventually(
+        "a consent read after revocation while the open settles",
+        || rig.consent.reads(),
+        |reads| *reads > before,
+    )
+    .await;
+
+    release.send_replace(true);
+    eventually(
+        "the late vendor session closed",
+        || rig.log.closes(),
+        |closes| !closes.is_empty(),
+    )
+    .await;
+    // The caller's cancel was recorded first, so it is the close cause.
+    assert_eq!(rig.log.closes(), vec![CloseReason::Requested]);
+    eventually(
+        "every slot released",
+        || rig.supervisor.slots().len(),
+        |slots| *slots == 0,
+    )
+    .await;
+    // An absence needs a window: ten poll periods. One read already queued
+    // before the slot emptied may still land; a watcher that kept polling
+    // would add about ten.
+    let settled = rig.consent.reads();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let later = rig.consent.reads();
+    assert!(
+        later <= settled + 1,
+        "expected no new consent reads once nothing is live or opening | \
+         received {later} reads, {settled} when it settled"
+    );
+}
+
+/// A vendor turn handle is echoed back on `respond`, `steer` and `cancel`,
+/// so one past the 128-code-point opaque-id bound is refused rather than
+/// cut: the turn call fails, the vendor turn is told to stop, and no event
+/// under that handle reaches the hub. Exactly 128 is still a usable handle.
+#[tokio::test]
+async fn an_unbounded_native_turn_id_is_refused_and_its_vendor_turn_stopped() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::NativeTurnId("x".repeat(129))),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    // Virtual time from here on, so the no-event window below costs nothing
+    // and cannot pass early. Opening stays on real time: it waits on the
+    // process-wide blocking pool, which a paused clock would skip past.
+    tokio::time::pause();
+    let refused = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("an unbounded native turn id must be refused");
+    assert!(
+        refused.message.contains("expected a usable native turn id"),
+        "expected a refusal naming the native turn id | received: {}",
+        refused.message
+    );
+    assert_eq!(
+        refused
+            .details
+            .as_ref()
+            .and_then(|details| details.get("dispatch")),
+        Some(&json!("accepted")),
+        "expected the refusal to say the vendor accepted the turn, so it is not resent | \
+         received: {:?}",
+        refused.details
+    );
+    eventually(
+        "the vendor turn stopped",
+        || rig.log.cancel_reasons(),
+        |reasons| !reasons.is_empty(),
+    )
+    .await;
+    assert_eq!(rig.log.cancel_reasons(), vec![CancelReason::Requested]);
+    rig.idle("one", "the refused turn").await;
+    let mut events = rig.events.lock().await;
+    let leaked = tokio::time::timeout(Duration::from_secs(1), events.recv()).await;
+    assert!(
+        leaked.is_err(),
+        "expected no event under the unbounded handle | received: {leaked:?}"
+    );
+    drop(events);
+    let again = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a resend is answered from the refused receipt");
+    assert_eq!(
+        (&again.code, &again.message),
+        (&refused.code, &refused.message),
+        "expected the resend to receive the first refusal"
+    );
+    assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 1);
+    rig.close("one").await;
+    tokio::time::resume();
+
+    let bounded = "x".repeat(128);
+    let at_cap = self::rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::NativeTurnId(bounded.clone())),
+        ..RigOptions::default()
+    })
+    .await;
+    at_cap.open("one").await.unwrap();
+    let started = at_cap
+        .supervisor
+        .turn(
+            at_cap.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("a 128-code-point handle is usable");
+    assert_eq!(started.native_turn_id, bounded);
+    let first = at_cap
+        .next_event("the catalog under the bounded handle")
+        .await;
+    assert_eq!(first["nativeTurnId"], json!(bounded), "received {first}");
+    at_cap.close("one").await;
+}
+
+#[tokio::test]
+async fn a_mid_stream_adapter_crash_ends_the_turn_with_its_error_and_frees_the_session() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::CrashMidStream),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let events = rig.events_until("error").await;
+    let kinds: Vec<_> = events
+        .iter()
+        .map(|event| event["event"]["type"].as_str().unwrap_or("?").to_owned())
+        .collect();
+    assert_eq!(
+        kinds,
+        ["commands_available", "text_delta", "error"],
+        "expected the text before the crash, then its error | received {kinds:?}"
+    );
+    let error = &events[2]["event"]["error"];
+    assert_eq!(
+        (&error["code"], &error["message"]),
+        (&json!("adapter-crashed"), &json!("fixture crashed")),
+        "expected the adapter's own bounded error | received {error}"
+    );
+    rig.idle("one", "the crashed turn").await;
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m2", "again"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the crash freed the session for the next turn");
+    assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 2);
+    rig.close("one").await;
+}
+
+/// A stream that never pauses cannot starve or keep resetting the hard
+/// deadline: the turn still ends with the runtime's own timeout error.
+#[tokio::test]
+async fn the_hard_deadline_fires_while_the_stream_never_pauses() {
+    let hard = Duration::from_millis(200);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::NeverPausing),
+        hard_turn_timeout: hard,
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    // Paused only once the session is open (see the unbounded-id test): the
+    // hard deadline starts with the turn, and the stream's millisecond beat
+    // runs on virtual time, so the turn sees exactly 200 ms of activity.
+    tokio::time::pause();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let events = rig.events_until("error").await;
+    let ticks = events
+        .iter()
+        .filter(|event| event["event"]["type"] == "text_delta")
+        .count();
+    assert!(
+        ticks >= 100,
+        "expected the stream active right up to the deadline | received {ticks} text deltas"
+    );
+    let error = &events.last().unwrap()["event"]["error"];
+    assert_eq!(
+        (&error["code"], &error["message"]),
+        (
+            &json!("adapter-stream"),
+            &json!("External-agent turn exceeded its hard timeout.")
+        ),
+        "expected the runtime's hard-timeout error | received {error}"
+    );
+    eventually(
+        "the vendor turn stopped",
+        || rig.log.cancel_reasons(),
+        |reasons| !reasons.is_empty(),
+    )
+    .await;
+    assert_eq!(rig.log.cancel_reasons(), vec![CancelReason::Timeout]);
+    rig.idle("one", "the timed-out turn").await;
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn listing_a_target_without_session_listing_is_refused_by_name() {
+    let rig = rig(RigOptions {
+        lists_sessions: false,
+        ..RigOptions::default()
+    })
+    .await;
+    let error = rig
+        .supervisor
+        .list_sessions(
+            ListSessionsParams {
+                target_id: TargetId::Cursor,
+                workspace_path: None,
+                cursor: None,
+                limit: None,
+                session_id: None,
+                timeout_ms: 5_000,
+            },
+            &rig.hub,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a target without listing must be refused");
+    assert!(
+        error.message.contains("\"cursor\" cannot list sessions"),
+        "expected a refusal naming the target | received: {}",
+        error.message
+    );
+    assert_eq!(
+        error
+            .details
+            .as_ref()
+            .and_then(|details| details.get("kind")),
+        Some(&json!("tool_argument")),
+        "expected an argument refusal | received: {:?}",
+        error.details
+    );
+    assert_eq!(rig.log.opens(), 0, "expected no conversation opened");
+}
+
+/// A review is a turn: it continues the session's own sequence on the same
+/// topic, answers a repeated id from its receipt, shares the id space with
+/// turns, and holds the one turn slot until its stream ends.
+#[tokio::test]
+async fn a_review_follows_the_session_sequence_topic_receipt_and_slot_rules() {
+    let (finish, finish_gate) = watch::channel(false);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::Reviewing {
+            thread: None,
+            review_turn: String::from("review-turn"),
+            finish: finish_gate,
+        }),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let turn_events = rig.events_until("completed").await;
+    let last_turn_sequence = turn_events.last().unwrap()["sequence"].as_u64().unwrap();
+    rig.idle("one", "the first turn").await;
+
+    let started = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect("a review on the session's own thread");
+    assert_eq!(
+        (
+            started.native_turn_id.as_str(),
+            started.review_thread_id.as_str()
+        ),
+        ("review-turn", "fake-session-1"),
+        "expected the review's handle and the session's own thread"
+    );
+    let busy = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m2", "meanwhile"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a turn during a review must be refused");
+    assert!(
+        busy.message.contains("already has an active turn"),
+        "expected the review to hold the turn slot | received: {}",
+        busy.message
+    );
+    let repeated = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect("a repeated review id is answered from its receipt");
+    assert_eq!(repeated, started);
+    let reused = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "r1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a review id reused by a turn must be refused");
+    assert!(
+        reused.message.contains("reused with different turn input"),
+        "received: {}",
+        reused.message
+    );
+    assert_eq!(
+        rig.log.reviews.load(Ordering::SeqCst),
+        1,
+        "expected one vendor review for a repeated id"
+    );
+
+    finish.send_replace(true);
+    let review_events = rig.events_until("completed").await;
+    let sequences: Vec<u64> = review_events
+        .iter()
+        .map(|event| event["sequence"].as_u64().unwrap())
+        .collect();
+    let expected: Vec<u64> =
+        (last_turn_sequence + 1..=last_turn_sequence + review_events.len() as u64).collect();
+    assert_eq!(
+        sequences, expected,
+        "expected the review to continue the session's sequence"
+    );
+    for event in &review_events {
+        assert_eq!(
+            (&event["sessionId"], &event["nativeTurnId"]),
+            (&json!("one"), &json!("review-turn")),
+            "expected every review event under the session and the review's handle | \
+             received {event}"
+        );
+    }
+    assert!(
+        review_events.iter().any(|event| event["event"]
+            == json!({ "type": "text_delta", "text": "P1: the retry loop never exits." })),
+        "expected the finding on the wire | received {review_events:?}"
+    );
+    rig.idle("one", "the review").await;
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m2", "meanwhile"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the finished review released the turn slot");
+    rig.close("one").await;
+}
+
+/// The SDK names the thread a review ran on so the host can refuse one it is
+/// not subscribed to: its events would never reach this session, and the
+/// review would hold the slot until it idled out.
+#[tokio::test]
+async fn a_review_on_another_thread_is_refused_and_stopped_before_the_hub_sees_it() {
+    let (_finish, finish_gate) = watch::channel(false);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::Reviewing {
+            thread: Some(String::from("another-thread")),
+            review_turn: String::from("review-turn"),
+            finish: finish_gate,
+        }),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let refused = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect_err("a review on another thread must be refused");
+    assert!(
+        refused.message.contains("another vendor thread"),
+        "expected a refusal naming the foreign thread | received: {}",
+        refused.message
+    );
+    assert_eq!(
+        refused
+            .details
+            .as_ref()
+            .and_then(|details| details.get("dispatch")),
+        Some(&json!("accepted")),
+        "expected the refusal to say the vendor accepted the review | received: {:?}",
+        refused.details
+    );
+    eventually(
+        "the foreign review told to stop",
+        || rig.log.cancel_reasons(),
+        |reasons| !reasons.is_empty(),
+    )
+    .await;
+    rig.idle("one", "the refused review").await;
+    assert_eq!(
+        rig.log.cancel_reasons(),
+        vec![CancelReason::Requested],
+        "expected the foreign review told to stop once"
+    );
+    let again = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect_err("a repeated refused review is answered from its receipt");
+    assert_eq!(
+        (&again.code, &again.message),
+        (&refused.code, &refused.message),
+        "expected the repeat to receive the first refusal"
+    );
+    assert_eq!(
+        rig.log.reviews.load(Ordering::SeqCst),
+        1,
+        "expected one vendor review for the refused id"
+    );
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the refused review released the turn slot");
+    let first = rig.next_event("the next turn's first event").await;
+    assert_eq!(
+        (&first["sequence"], &first["nativeTurnId"]),
+        (&json!(1), &json!("scripted-turn")),
+        "expected nothing of the refused review published | received {first}"
+    );
+    rig.close("one").await;
+}
+
+/// A review is admitted through the same handle bound as a turn, so the two
+/// cannot drift apart: an unbounded review handle is refused, stopped, and
+/// never published, even on the session's own thread.
+#[tokio::test]
+async fn an_unbounded_review_turn_id_is_refused_and_its_vendor_review_stopped() {
+    let (_finish, finish_gate) = watch::channel(false);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::Reviewing {
+            thread: None,
+            review_turn: "x".repeat(129),
+            finish: finish_gate,
+        }),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let refused = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect_err("an unbounded review handle must be refused");
+    assert!(
+        refused.message.contains("expected a usable native turn id"),
+        "expected a refusal naming the native turn id | received: {}",
+        refused.message
+    );
+    assert_eq!(
+        refused
+            .details
+            .as_ref()
+            .and_then(|details| details.get("dispatch")),
+        Some(&json!("accepted")),
+        "expected the refusal to say the vendor accepted the review | received: {:?}",
+        refused.details
+    );
+    eventually(
+        "the review told to stop",
+        || rig.log.cancel_reasons(),
+        |reasons| !reasons.is_empty(),
+    )
+    .await;
+    rig.idle("one", "the refused review").await;
+    assert_eq!(rig.log.cancel_reasons(), vec![CancelReason::Requested]);
+    let again = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect_err("a resend is answered from the refused receipt");
+    assert_eq!(
+        (&again.code, &again.message, &again.details),
+        (&refused.code, &refused.message, &refused.details),
+        "expected the resend to receive the first refusal"
+    );
+    assert_eq!(
+        rig.log.reviews.load(Ordering::SeqCst),
+        1,
+        "expected one vendor review for the refused id"
+    );
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the refused review released the turn slot");
+    let first = rig.next_event("the next turn's first event").await;
+    assert_eq!(
+        (&first["sequence"], &first["nativeTurnId"]),
+        (&json!(1), &json!("scripted-turn")),
+        "expected nothing of the refused review published | received {first}"
+    );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn an_unstructured_steer_failure_is_returned_as_its_mapped_error() {
+    let (_open, gate) = watch::channel(true);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::SteerFailingOnGate(gate),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let turn = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    rig.events_until("approval_requested").await;
+    let failure = rig
+        .supervisor
+        .steer(SteerParams {
+            session_id: "one".into(),
+            native_turn_id: turn.native_turn_id,
+            client_message_id: "s1".into(),
+            input: "more".into(),
+        })
+        .await
+        .expect_err("a steer lost in transit must fail, not be answered");
+    let expected = crate::external_agents::map::remote_error(&SdkError::Link {
+        peer: String::from("fake-agent"),
+        message: String::from("steer lost in transit"),
+    });
+    assert_eq!(
+        (&failure.code, &failure.message, &failure.details),
+        (&expected.code, &expected.message, &expected.details),
+        "expected the SDK failure mapped as-is | received {failure:?}"
+    );
+    rig.close("one").await;
+}
+
+#[tokio::test]
+async fn a_steer_naming_another_turn_is_refused_without_reaching_the_vendor() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    rig.events_until("approval_requested").await;
+    let answered = rig
+        .supervisor
+        .steer(SteerParams {
+            session_id: "one".into(),
+            native_turn_id: "another-turn".into(),
+            client_message_id: "s1".into(),
+            input: "more".into(),
+        })
+        .await
+        .expect("a mismatched steer is answered, not thrown");
+    assert_eq!(
+        serde_json::to_value(answered).unwrap(),
+        json!({ "accepted": false, "reasonCode": "turn-already-completed" }),
+        "expected the mismatched handle refused as a finished turn"
+    );
+    assert_eq!(
+        rig.log.steers.load(Ordering::SeqCst),
+        0,
+        "expected no steer to reach the vendor"
+    );
+    rig.close("one").await;
+}
+
+fn catalog_events(events: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    events
+        .iter()
+        .filter(|event| event["event"]["type"] == "commands_available")
+        .map(|event| event["event"]["commands"].clone())
+        .collect()
+}
+
+/// The hub listens to a session only while a turn runs, so every turn
+/// replays the catalog under its own handle, and a catalog the vendor
+/// re-announces mid-turn is forwarded then.
+#[tokio::test]
+async fn the_command_catalog_is_replayed_each_turn_and_a_mid_turn_change_is_forwarded() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    let review = json!([{ "name": "review", "description": "Reviews the diff" }]);
+    for (index, message) in ["m1", "m2"].into_iter().enumerate() {
+        let turn = rig
+            .supervisor
+            .turn(
+                rig.turn_params("one", message, "go"),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let events = rig.events_until("approval_requested").await;
+        assert_eq!(
+            catalog_events(&events),
+            vec![review.clone()],
+            "expected turn {} to replay the catalog once | received {events:?}",
+            index + 1
+        );
+        let catalog = events
+            .iter()
+            .find(|event| event["event"]["type"] == "commands_available")
+            .unwrap();
+        assert_eq!(
+            catalog["nativeTurnId"],
+            json!(turn.native_turn_id),
+            "expected the catalog under this turn's handle"
+        );
+        if index == 1 {
+            let live = rig.supervisor.require_live("one").unwrap();
+            live.session.state().set_commands(vec![
+                mango_external_agents::Command::new("review").with_description("Reviews the diff"),
+                mango_external_agents::Command::new("plan"),
+            ]);
+            let changed = rig.events_until("commands_available").await;
+            assert_eq!(
+                changed.last().unwrap()["event"]["commands"],
+                json!([
+                    { "name": "review", "description": "Reviews the diff" },
+                    { "name": "plan" },
+                ]),
+                "expected the mid-turn catalog forwarded | received {changed:?}"
+            );
+        }
+        let request = &events.last().unwrap()["event"]["request"];
+        rig.supervisor
+            .respond(RespondParams {
+                session_id: "one".into(),
+                native_turn_id: turn.native_turn_id.clone(),
+                request_id: request["requestId"].as_str().unwrap().into(),
+                option_id: request["options"][0]["id"].as_str().unwrap().into(),
+            })
+            .await
+            .unwrap();
+        rig.events_until("completed").await;
+        rig.idle("one", message).await;
+    }
+    rig.close("one").await;
+}
+
+/// A vendor that offers no commands still says so: the turn opens with an
+/// empty catalog rather than none.
+#[tokio::test]
+async fn an_empty_command_catalog_still_reaches_the_hub() {
+    let rig = rig(RigOptions {
+        fake: FakeHarness::new().without_session_updates(),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let events = rig.events_until("approval_requested").await;
+    assert_eq!(
+        catalog_events(&events),
+        vec![json!([])],
+        "expected one empty catalog on the wire | received {events:?}"
+    );
     rig.close("one").await;
 }
