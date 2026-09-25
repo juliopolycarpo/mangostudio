@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'bun:test';
-import { RUNTIME_SETUP_PENDING_MESSAGE } from '@mangostudio/runtime';
 import type { SshEnvironmentConfig, SshFailureReason } from '@mangostudio/shared/environments';
+import { RUNTIME_SETUP_PENDING_SIGNATURE } from '@mangostudio/shared/runtime-contract';
 import {
   classifySshFailure,
   describeSshFailure,
 } from '../../../../src/modules/environments/domain/ssh-failure';
+
+/**
+ * The sentence the runtime binary prints on a stdio refusal for a pending
+ * slot: `setup_pending_message()` in
+ * `crates/mangostudio-runtime/src/consent/invocation.rs`, built from the same
+ * shared signature the classifier keys on.
+ */
+const RUNTIME_SETUP_PENDING_MESSAGE = `${RUNTIME_SETUP_PENDING_SIGNATURE}. Run "mangostudio-runtime setup --profile <full|readonly|none>" there before connecting it.`;
 
 const CONFIG: SshEnvironmentConfig = { host: 'build-01.internal', user: 'deploy' };
 
