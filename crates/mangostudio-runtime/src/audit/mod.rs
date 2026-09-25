@@ -54,6 +54,24 @@ const DEFAULT_MAX_FILES: u32 = 3;
 /// growing without bound.
 const MAX_BUFFERED_RECORDS: usize = 1_024;
 
+/// Methods whose successful calls are per-interaction rather than
+/// per-operation. Mirrors `audit-log.ts`'s `HIGH_FREQUENCY_METHODS`: a
+/// terminal sends one `terminal.write` per keystroke and one `terminal.ack`
+/// per output window, so recording their successes would rotate the whole
+/// retention window (`DEFAULT_MAX_BYTES` x `DEFAULT_MAX_FILES`) away in
+/// hours and put keystroke timing on disk. `terminal.open`, `.attach`,
+/// `.detach` and `.close` are the operations, and they stay.
+const HIGH_FREQUENCY_METHODS: [&str; 3] = ["terminal.write", "terminal.ack", "terminal.resize"];
+
+/// Whether one call earns a line. A denial or a failure always does; only
+/// the successful high-frequency legs are dropped. Mirrors
+/// `audit-log.ts`'s `shouldRecordAudit`.
+///
+/// Usage: `should_record("terminal.write", Outcome::Ok)` is `false`.
+fn should_record(method: &str, outcome: Outcome) -> bool {
+    !matches!(outcome, Outcome::Ok) || !HIGH_FREQUENCY_METHODS.contains(&method)
+}
+
 /// Who a recorded call's hub was, once its handshake identifies it. Mirrors
 /// TypeScript's `HubIdentity`.
 #[derive(Debug, Clone)]
@@ -85,7 +103,8 @@ struct State {
     error_maybe_present: bool,
 }
 
-/// Records every call's outcome as one JSON line per call in `audit.log`,
+/// Records every call's outcome (bar a successful keystroke-rate terminal
+/// leg, as `audit-log.ts` drops) as one JSON line per call in `audit.log`,
 /// under `slot`'s runtime-home directory.
 ///
 /// # Example
@@ -396,6 +415,9 @@ impl FileAudit {
 impl Audit for FileAudit {
     fn record<'a>(&'a self, entry: AuditEntry) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
+            if !should_record(&entry.method, entry.outcome) {
+                return;
+            }
             let hub_label = lock(&self.state).hub_label.clone();
             let line = self.build_line(&entry, &hub_label);
             self.enqueue(line);
@@ -955,6 +977,39 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0]["method"], "FIRST");
         assert_eq!(lines[1]["method"], "SECOND");
+    }
+
+    #[tokio::test]
+    async fn successful_keystroke_terminal_calls_write_no_line_but_their_denials_do() {
+        let dir = scratch_dir("high-frequency");
+        let path = dir.join("audit.log");
+        let audit = FileAudit::new(
+            path.clone(),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+
+        for _ in 0..100 {
+            audit.record(entry("terminal.write", Outcome::Ok)).await;
+        }
+        audit.record(entry("terminal.ack", Outcome::Ok)).await;
+        audit.record(entry("terminal.resize", Outcome::Ok)).await;
+        audit.record(entry("terminal.write", Outcome::Denied)).await;
+        audit.record(entry("terminal.resize", Outcome::Error)).await;
+        audit.record(entry("terminal.open", Outcome::Ok)).await;
+
+        let methods: Vec<String> = read_lines(&path)
+            .iter()
+            .map(|line| format!("{} {}", line["method"], line["outcome"]))
+            .collect();
+        let expected = vec![
+            r#""terminal.write" "denied""#.to_string(),
+            r#""terminal.resize" "error""#.to_string(),
+            r#""terminal.open" "ok""#.to_string(),
+        ];
+        assert!(
+            methods == expected,
+            "expected lines: {expected:?} | received: {methods:?}"
+        );
     }
 
     #[tokio::test]
