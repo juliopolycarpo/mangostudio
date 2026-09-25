@@ -14,7 +14,7 @@
 //! same synchronisation point (see [`crate::supervisor`]'s module docs for
 //! why that matters).
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use mango_protocol::close::close_codes;
@@ -342,8 +342,11 @@ impl ServeState {
     /// Clears the active slot, but only if it is still `generation` — a
     /// generation that has already been superseded must not clear the
     /// *newer* one out from under it.
+    ///
+    /// Tolerates a poisoned lock: [`AdmittedGeneration`] calls this from
+    /// `Drop`, possibly while unwinding, where a second panic would abort.
     fn clear_if_current(&self, generation: u64) {
-        let mut inner = self.inner.lock().expect("ServeState mutex poisoned");
+        let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         if inner.active.as_ref().map(|active| active.generation) == Some(generation) {
             inner.active = None;
         }
@@ -355,6 +358,33 @@ impl ServeState {
         let mut inner = self.inner.lock().expect("ServeState mutex poisoned");
         inner.closed = true;
         inner.active.take()
+    }
+}
+
+/// Owns one admitted generation's claim on the active slot for as long as
+/// its connection task runs, and clears it on drop — on every return path,
+/// but also when the task panics or is aborted. Without it, a keyed
+/// placeholder whose task died between admission and its own cleanup would
+/// refuse every other environment record for the life of the process.
+/// Clearing is generation-checked, so a generation that was already
+/// superseded clears nothing.
+struct AdmittedGeneration {
+    state: Arc<ServeState>,
+    generation: u64,
+}
+
+impl AdmittedGeneration {
+    fn new(state: &Arc<ServeState>, generation: u64) -> Self {
+        Self {
+            state: Arc::clone(state),
+            generation,
+        }
+    }
+}
+
+impl Drop for AdmittedGeneration {
+    fn drop(&mut self) {
+        self.state.clear_if_current(self.generation);
     }
 }
 
@@ -506,6 +536,9 @@ async fn handle_connection(
             return;
         }
     };
+    // Declared before anything that can fail or be cancelled, so the slot
+    // this admission claimed is released however this task ends.
+    let _admitted = AdmittedGeneration::new(&state, generation);
 
     if let Some(previous) = previous {
         release_active(previous, close_codes::SUPERSEDED, "Superseded").await;
@@ -682,7 +715,7 @@ mod tests {
     use mango_protocol::port::port_pair;
     use mango_protocol::session::{Session, SessionOptions, SessionState};
 
-    use super::{ActiveGeneration, Admission, ServeState};
+    use super::{ActiveGeneration, Admission, AdmittedGeneration, ServeState};
 
     /// The property `serve`'s single `Mutex` exists for: however many
     /// connections race to admit at the exact instant shutdown begins, none
@@ -988,6 +1021,64 @@ mod tests {
         let (runtime, _hub) = live_session().await;
         let first = incumbent(&state, Some("record-a"), Some(runtime));
         state.clear_if_current(first);
+
+        let admission = state.try_admit(Some("record-b"));
+        assert!(
+            matches!(admission, Admission::Admitted { previous: None, .. }),
+            "expected admission: admitted with nothing to supersede | received: {}",
+            outcome(&admission)
+        );
+    }
+
+    /// A keyed placeholder whose connection task panics after admission is
+    /// released by its guard: another record is admitted afterwards, with
+    /// nothing left to supersede.
+    #[tokio::test]
+    async fn a_keyed_admission_is_released_when_its_task_panics() {
+        let state = Arc::new(ServeState::new());
+        let task_state = Arc::clone(&state);
+        let task = tokio::spawn(async move {
+            let Admission::Admitted { generation, .. } = task_state.try_admit(Some("record-a"))
+            else {
+                panic!("expected an empty runtime to admit the incumbent");
+            };
+            let _admitted = AdmittedGeneration::new(&task_state, generation);
+            panic!("the connection task failed after admission");
+        });
+        assert!(task.await.expect_err("the task panics").is_panic());
+
+        let admission = state.try_admit(Some("record-b"));
+        assert!(
+            matches!(admission, Admission::Admitted { previous: None, .. }),
+            "expected admission: admitted with nothing to supersede | received: {}",
+            outcome(&admission)
+        );
+    }
+
+    /// The same for a task that is aborted while it holds the admission.
+    #[tokio::test]
+    async fn a_keyed_admission_is_released_when_its_task_is_aborted() {
+        let state = Arc::new(ServeState::new());
+        let task_state = Arc::clone(&state);
+        let (admitted_tx, admitted_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let Admission::Admitted { generation, .. } = task_state.try_admit(Some("record-a"))
+            else {
+                panic!("expected an empty runtime to admit the incumbent");
+            };
+            let _admitted = AdmittedGeneration::new(&task_state, generation);
+            let _ = admitted_tx.send(());
+            std::future::pending::<()>().await;
+        });
+        admitted_rx.await.expect("the task admits before it parks");
+        let refused = state.try_admit(Some("record-b"));
+        assert!(
+            matches!(refused, Admission::AlreadyBound),
+            "expected the live admission to refuse another record | received: {}",
+            outcome(&refused)
+        );
+        task.abort();
+        assert!(task.await.expect_err("the task is aborted").is_cancelled());
 
         let admission = state.try_admit(Some("record-b"));
         assert!(
