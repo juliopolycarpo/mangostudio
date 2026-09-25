@@ -946,8 +946,15 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
         )
     };
     if fds.terminal {
+        // `TIOCSCTTY` is declared as `ioctl`'s own request type on Linux (a
+        // `c_ulong` on glibc, a `c_int` on musl) but as a `c_uint` on Apple
+        // targets, where `ioctl` takes a `c_ulong`.
+        #[cfg(target_vendor = "apple")]
+        let set_controlling_terminal = libc::c_ulong::from(libc::TIOCSCTTY);
+        #[cfg(not(target_vendor = "apple"))]
+        let set_controlling_terminal = libc::TIOCSCTTY;
         if unsafe { libc::setsid() } < 0
-            || unsafe { libc::ioctl(fds.stdin_target, libc::c_ulong::from(libc::TIOCSCTTY), 0) } < 0
+            || unsafe { libc::ioctl(fds.stdin_target, set_controlling_terminal, 0) } < 0
         {
             exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
         }
