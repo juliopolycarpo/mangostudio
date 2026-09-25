@@ -332,6 +332,43 @@ async fn a_malformed_binding_is_refused_without_superseding_the_incumbent() {
     server.await.unwrap().unwrap();
 }
 
+/// An unauthenticated dialler learns nothing about the binding: against a
+/// runtime bound to one record, a wrong bearer with another record's key or
+/// with a malformed key is refused with exactly `UNAUTHORIZED`, never the
+/// already-bound or malformed-binding code — and the incumbent stays.
+#[tokio::test]
+async fn a_wrong_bearer_is_refused_as_unauthorized_whatever_binding_it_sends() {
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let log = CollectingLog::new();
+    let (_home, server) = spawn_serve(listener, "binding-unauthorized", &cancel, &log);
+
+    let first = dial_bound(addr, Some(TOKEN), Some(RECORD_A))
+        .await
+        .expect("first dial succeeds");
+    for (label, key) in [
+        ("another record's key", RECORD_B),
+        ("a malformed key", "NOT-A-KEY"),
+    ] {
+        let refused = dial_bound(addr, Some("wrong-token"), Some(key)).await;
+        assert_eq!(
+            refused.as_ref().err().copied(),
+            Some(close_codes::UNAUTHORIZED),
+            "expected a wrong bearer with {label} refused with exactly {} | received: {}",
+            close_codes::UNAUTHORIZED,
+            match &refused {
+                Ok(_) => "an admitted session".to_owned(),
+                Err(code) => format!("close code {code}"),
+            }
+        );
+    }
+    assert_eq!(first.state(), SessionState::Ready);
+    assert_eq!(count_logged(&log, "Refused a hub connection"), 0);
+
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}
+
 /// Cancelling the token drains the active connection (closing it with
 /// `RELEASED`) before `run` returns — a caller awaiting `run`'s handle never
 /// observes it finish while a session is still open.
