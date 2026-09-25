@@ -222,70 +222,21 @@ pub(super) fn run_doctor(json_output: bool, env: &impl EnvSource, version: &str)
         Ok(report) => report,
         Err(error) => return report_error(json_output, &error.to_string()),
     };
-    let mut findings = Vec::new();
     let slot = report["slot"].as_str().unwrap_or("remote");
-    if let Some(error) = report["lastError"].as_str() {
-        findings.push(json!({"severity":"fail","title":"Config","detail":error,"fix":format!("mangostudio-runtime setup --slot {slot}")}));
-    }
-    if report["setup"]["state"] == "pending" {
-        findings.push(json!({"severity":"fail","title":"Consent","detail":"setup is pending","fix":format!("mangostudio-runtime setup --slot {slot}")}));
-    } else {
-        findings.push(json!({"severity":"ok","title":"Consent","detail":"configured"}));
-    }
-    let root = slot_dir(slot.parse().unwrap_or(RuntimeSlot::Remote), &home);
-    match read_slot_current(&root) {
-        Ok(Some(version)) => {
-            let binary = root.join(&version).join(crate::runtime_home::binary_name());
-            if !binary.is_file() {
-                findings.push(json!({"severity":"fail","title":"Slot","detail":format!("current points to {version}, but {} is missing",binary.display()),"fix":format!("mangostudio-runtime install --slot {slot}")}));
-            }
-        }
-        Ok(None) if slot == "remote" && report["version"].is_string() => {
-            findings.push(json!({"severity":"warn","title":"Slot","detail":"current pointer is missing","fix":format!("mangostudio-runtime install --slot {slot}")}));
-        }
-        Err(error) => {
-            findings.push(json!({"severity":"fail","title":"Slot","detail":format!("current pointer is invalid: {error}"),"fix":format!("mangostudio-runtime install --slot {slot}")}));
-        }
-        Ok(None) => {}
-    }
+    let audit_error = read_audit_error(slot.parse().unwrap_or(RuntimeSlot::Remote), &home);
+    let mut findings = health_findings(&report, audit_error.as_deref());
+    findings.extend(slot_findings(&report, &home));
     if slot == "remote" {
         let config = read_runtime_slot_config(RuntimeSlot::Remote, &home);
         let paired = config.stored_string("hubUrl").is_some()
             || config.stored_string("serveListen").is_some();
         if paired {
-            match user_service::run(ServiceAction::Status, None, false, &home) {
-                Ok(status) if status["error"].is_string() => {
-                    findings.push(
-                        json!({"severity":"warn","title":"Service","detail":status["error"]}),
-                    );
-                }
-                Ok(status) if status["installed"] != true => {
-                    findings.push(json!({"severity":"warn","title":"Service","detail":"no user-level service keeps this runtime running across logout or reboot","fix":"mangostudio-runtime service install"}));
-                }
-                Ok(status) => {
-                    for (field, severity, detail) in [
-                        ("enabled", "warn", "the user service is not enabled"),
-                        ("running", "fail", "the user service is not running"),
-                        (
-                            "execUsesCurrent",
-                            "warn",
-                            "the user service does not use the current pointer",
-                        ),
-                        (
-                            "currentBinaryPresent",
-                            "fail",
-                            "the current slot binary is missing",
-                        ),
-                    ] {
-                        if status[field] == false {
-                            findings.push(json!({"severity":severity,"title":"Service","detail":detail,"fix":"mangostudio-runtime service install"}));
-                        }
-                    }
-                }
-                Err(error) => {
-                    findings.push(json!({"severity":"warn","title":"Service","detail":format!("could not read the user service: {error}")}));
-                }
-            }
+            findings.extend(service_findings(&user_service::run(
+                ServiceAction::Status,
+                None,
+                false,
+                &home,
+            )));
         }
     }
     let failed = findings.iter().any(|finding| finding["severity"] == "fail");
@@ -302,6 +253,126 @@ pub(super) fn run_doctor(json_output: bool, env: &impl EnvSource, version: &str)
         }
     }
     i32::from(failed)
+}
+
+/// The last audit write failure `slot`'s sink left in its sidecar
+/// `audit.log.error`, or `None` when the last write landed (a successful
+/// write removes the sidecar) or nothing was ever written.
+fn read_audit_error(slot: RuntimeSlot, home: &Path) -> Option<String> {
+    let mut path = slot_audit_log_path(slot, home).into_os_string();
+    path.push(".error");
+    let message = fs::read_to_string(PathBuf::from(path)).ok()?;
+    let message = message.trim();
+    (!message.is_empty()).then(|| message.to_owned())
+}
+
+/// What `doctor` concludes from a `runtime.health` report plus the audit
+/// sink's last write failure. Mirrors the operator-actionable part of
+/// `health.ts`'s `diagnoseRuntimeHealth`: the config error, consent, a
+/// config that records another version than this binary, and an audit
+/// log that stopped landing. The version finding names no fix: unlike
+/// `setup.ts`, this crate's `setup` command does not rewrite `version`.
+/// Only the launch that records consent on a first answer does
+/// (`consent::invocation`), so no command an operator runs resyncs it.
+///
+/// Usage: `health_findings(&report, None)` for a slot whose audit writes land.
+fn health_findings(report: &Value, audit_error: Option<&str>) -> Vec<Value> {
+    let mut findings = Vec::new();
+    let slot = report["slot"].as_str().unwrap_or("remote");
+    // Names `--profile`: this crate's `setup` never prompts, so a bare
+    // `setup --slot <slot>` only answers "Nothing to answer with".
+    let setup = crate::consent::invocation::setup_command(slot.parse().ok());
+    if let Some(error) = report["lastError"].as_str() {
+        findings.push(json!({"severity":"fail","title":"Config","detail":error,"fix":setup}));
+    }
+    if report["setup"]["state"] == "pending" {
+        findings.push(
+            json!({"severity":"fail","title":"Consent","detail":"setup is pending","fix":setup}),
+        );
+    } else {
+        findings.push(json!({"severity":"ok","title":"Consent","detail":"configured"}));
+    }
+    if let (Some(recorded), Some(running)) = (
+        report["version"].as_str(),
+        report["runtimeVersion"].as_str(),
+    ) && recorded != running
+    {
+        findings.push(json!({"severity":"warn","title":"Version","detail":format!("the config records {recorded} but this binary is {running}; the install was replaced without updating the config")}));
+    }
+    // Only while audit is on, as `health.ts` gates `readRuntimeAuditError`:
+    // a sidecar left from an earlier enabled period is not a current fault.
+    if report["audit"]["enabled"] == true
+        && let Some(error) = audit_error
+    {
+        findings.push(json!({"severity":"warn","title":"Audit","detail":format!("the last audit write failed: {error}")}));
+    }
+    findings
+}
+
+/// What `doctor` concludes about the slot's `current` pointer.
+fn slot_findings(report: &Value, home: &Path) -> Vec<Value> {
+    let mut findings = Vec::new();
+    let slot = report["slot"].as_str().unwrap_or("remote");
+    let root = slot_dir(slot.parse().unwrap_or(RuntimeSlot::Remote), home);
+    match read_slot_current(&root) {
+        Ok(Some(version)) => {
+            let binary = root.join(&version).join(crate::runtime_home::binary_name());
+            if !binary.is_file() {
+                findings.push(json!({"severity":"fail","title":"Slot","detail":format!("current points to {version}, but {} is missing",binary.display()),"fix":format!("mangostudio-runtime install --slot {slot}")}));
+            }
+        }
+        Ok(None) if slot == "remote" && report["version"].is_string() => {
+            findings.push(json!({"severity":"warn","title":"Slot","detail":"current pointer is missing","fix":format!("mangostudio-runtime install --slot {slot}")}));
+        }
+        Err(error) => {
+            findings.push(json!({"severity":"fail","title":"Slot","detail":format!("current pointer is invalid: {error}"),"fix":format!("mangostudio-runtime install --slot {slot}")}));
+        }
+        Ok(None) => {}
+    }
+    findings
+}
+
+/// What `doctor` concludes from `service status` on a paired remote slot.
+///
+/// Usage: `service_findings(&Ok(status))`, with `status` the JSON
+/// `service status --json` prints.
+fn service_findings(status: &io::Result<Value>) -> Vec<Value> {
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            return vec![
+                json!({"severity":"warn","title":"Service","detail":format!("could not read the user service: {error}")}),
+            ];
+        }
+    };
+    if status["error"].is_string() {
+        return vec![json!({"severity":"warn","title":"Service","detail":status["error"]})];
+    }
+    if status["installed"] != true {
+        return vec![
+            json!({"severity":"warn","title":"Service","detail":"no user-level service keeps this runtime running across logout or reboot","fix":"mangostudio-runtime service install"}),
+        ];
+    }
+    [
+        ("enabled", "warn", "the user service is not enabled"),
+        ("running", "fail", "the user service is not running"),
+        (
+            "execUsesCurrent",
+            "warn",
+            "the user service does not use the current pointer",
+        ),
+        (
+            "currentBinaryPresent",
+            "fail",
+            "the current slot binary is missing",
+        ),
+    ]
+    .into_iter()
+    .filter(|(field, _, _)| status[*field] == false)
+    .map(|(_, severity, detail)| {
+        json!({"severity":severity,"title":"Service","detail":detail,"fix":"mangostudio-runtime service install"})
+    })
+    .collect()
 }
 
 pub(super) fn run_service(args: ServiceArgs, env: &impl EnvSource) -> i32 {
@@ -527,5 +598,191 @@ mod tests {
         assert!(parse_since("impossible").is_err());
         assert!(parse_since("-1h").is_err());
         assert!(parse_since("24H").is_ok());
+    }
+
+    fn titled<'a>(findings: &'a [Value], title: &str) -> Vec<&'a Value> {
+        findings
+            .iter()
+            .filter(|finding| finding["title"] == title)
+            .collect()
+    }
+
+    fn health_report(version: Value) -> Value {
+        json!({
+            "slot": "remote",
+            "version": version,
+            "runtimeVersion": "2.0.0",
+            "setup": {"state": "configured"},
+            "audit": {"enabled": true},
+            "lastError": null,
+        })
+    }
+
+    #[test]
+    fn doctor_warns_when_the_config_records_another_version_than_this_binary() {
+        let findings = health_findings(&health_report(json!("1.9.0")), None);
+        let version = titled(&findings, "Version");
+        assert!(
+            version.len() == 1
+                && version[0]["severity"] == "warn"
+                && version[0]["detail"]
+                    .as_str()
+                    .is_some_and(|detail| detail.contains("records 1.9.0 but this binary is 2.0.0")),
+            "expected one Version warning naming both versions | received: {findings:?}"
+        );
+        for matching in [json!("2.0.0"), Value::Null] {
+            let findings = health_findings(&health_report(matching.clone()), None);
+            assert!(
+                titled(&findings, "Version").is_empty(),
+                "expected no Version finding for config version {matching} | received: {findings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn doctor_surfaces_the_audit_sidecar_write_failure() {
+        let home = scratch_dir("doctor-audit-error");
+        assert!(
+            read_audit_error(RuntimeSlot::Remote, &home).is_none(),
+            "expected no audit error without a sidecar | received: one"
+        );
+        let mut sidecar = slot_audit_log_path(RuntimeSlot::Remote, &home).into_os_string();
+        sidecar.push(".error");
+        let sidecar = PathBuf::from(sidecar);
+        fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        fs::write(
+            &sidecar,
+            "No space left on device (os error 28) (3 record(s) dropped)\n",
+        )
+        .unwrap();
+
+        let error = read_audit_error(RuntimeSlot::Remote, &home);
+        let findings = health_findings(&health_report(json!("2.0.0")), error.as_deref());
+        let audit = titled(&findings, "Audit");
+        assert!(
+            audit.len() == 1
+                && audit[0]["severity"] == "warn"
+                && audit[0]["detail"]
+                    == "the last audit write failed: No space left on device (os error 28) (3 record(s) dropped)",
+            "expected one Audit warning quoting the sidecar | received: {findings:?}"
+        );
+
+        let mut disabled = health_report(json!("2.0.0"));
+        disabled["audit"]["enabled"] = json!(false);
+        let findings = health_findings(&disabled, error.as_deref());
+        assert!(
+            titled(&findings, "Audit").is_empty(),
+            "expected no Audit finding for a stale sidecar while audit is off | received: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn doctor_consent_pending_is_a_failure_with_a_setup_fix() {
+        let mut report = health_report(json!("2.0.0"));
+        report["setup"]["state"] = json!("pending");
+        let findings = health_findings(&report, None);
+        let consent = titled(&findings, "Consent");
+        assert!(
+            consent.len() == 1
+                && consent[0]["severity"] == "fail"
+                && consent[0]["fix"]
+                    .as_str()
+                    .is_some_and(|fix| fix.starts_with("mangostudio-runtime setup --slot remote")),
+            "expected a failing Consent finding with a setup fix | received: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn doctor_service_findings_follow_the_status_report() {
+        let cases = [
+            (
+                Err(io::Error::other("systemctl vanished")),
+                vec![(
+                    "warn",
+                    "could not read the user service: systemctl vanished",
+                )],
+            ),
+            (
+                Ok(json!({"installed": false, "error": "no session bus"})),
+                vec![("warn", "no session bus")],
+            ),
+            (
+                Ok(json!({"installed": false})),
+                vec![(
+                    "warn",
+                    "no user-level service keeps this runtime running across logout or reboot",
+                )],
+            ),
+            (
+                Ok(
+                    json!({"installed": true, "enabled": true, "running": true, "execUsesCurrent": true, "currentBinaryPresent": true}),
+                ),
+                vec![],
+            ),
+            (
+                Ok(
+                    json!({"installed": true, "enabled": false, "running": false, "execUsesCurrent": false, "currentBinaryPresent": false}),
+                ),
+                vec![
+                    ("warn", "the user service is not enabled"),
+                    ("fail", "the user service is not running"),
+                    ("warn", "the user service does not use the current pointer"),
+                    ("fail", "the current slot binary is missing"),
+                ],
+            ),
+        ];
+        for (status, expected) in cases {
+            let findings = service_findings(&status);
+            let received: Vec<(String, String)> = findings
+                .iter()
+                .map(|finding| {
+                    (
+                        finding["severity"].as_str().unwrap_or("?").to_owned(),
+                        finding["detail"].as_str().unwrap_or("?").to_owned(),
+                    )
+                })
+                .collect();
+            let expected: Vec<(String, String)> = expected
+                .into_iter()
+                .map(|(severity, detail)| (severity.to_owned(), detail.to_owned()))
+                .collect();
+            assert!(
+                received == expected,
+                "status {status:?} expected findings: {expected:?} | received: {received:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn install_refuses_a_source_binary_already_inside_a_slot() {
+        let home = scratch_dir("native-install-from-slot");
+        let source = slot_version_binary_path(RuntimeSlot::Remote, "1.0.0", &home);
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"runtime bytes").unwrap();
+        let error = install_source(&source, RuntimeSlot::Host, "1.2.3", &home)
+            .expect_err("a binary inside a slot must not be installed again");
+        assert!(
+            error.kind() == io::ErrorKind::InvalidInput
+                && error
+                    .to_string()
+                    .contains("already runs from a runtime slot"),
+            "expected InvalidInput naming the slot source | received: {:?} {error}",
+            error.kind()
+        );
+        assert!(
+            read_slot_current(&slot_dir(RuntimeSlot::Host, &home))
+                .unwrap()
+                .is_none(),
+            "expected no current pointer published | received: one"
+        );
+    }
+
+    #[test]
+    fn since_past_the_supported_date_range_is_refused_by_name() {
+        let error = parse_since("999999999d").expect_err("two million years back is out of range");
+        assert!(
+            error == "--since \"999999999d\" is outside the supported date range",
+            "expected the out-of-range message | received: {error}"
+        );
     }
 }

@@ -44,6 +44,7 @@ import {
   RUNTIME_SLOTS,
   RuntimeAuditRecordSchema,
   RuntimeHealthReportSchema,
+  RuntimeServiceStatusSchema,
   RuntimeSlotConfigSchema,
   RuntimeSlotCredentialsSchema,
 } from '@mangostudio/shared/runtime-home';
@@ -97,13 +98,14 @@ function runtimeHomeDocument(): Record<string, unknown> {
         slotConfig: RuntimeSlotConfigSchema,
         credentials: RuntimeSlotCredentialsSchema,
         auditRecord: RuntimeAuditRecordSchema,
+        serviceStatus: RuntimeServiceStatusSchema,
       },
     },
     {
       id: 'runtime-home.json',
       title: 'MangoStudio runtime home',
       description:
-        'What a runtime keeps under its slot directory: runtime.json, credentials.json, and one line of audit.log. The file and directory names these shapes are stored under are in strings.json.',
+        "What a runtime keeps under its slot directory: runtime.json, credentials.json, and one line of audit.log, plus the `service status --json` report about the slot's user service. The file and directory names these shapes are stored under are in strings.json.",
     }
   );
 }

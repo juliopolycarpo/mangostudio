@@ -421,6 +421,31 @@ fn an_empty_explicit_token_source_refuses_without_writing_credentials() {
     );
 }
 
+/// A bad `--profile` value says what was wrong with it on stderr, not
+/// that the flag is unknown.
+#[test]
+fn setup_with_an_invalid_profile_says_which_values_it_takes() {
+    let home = scratch_mango_home("setup-invalid-profile");
+    let output = Command::new(binary_path())
+        .args(["setup", "--profile", "everything"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        output.status.code() == Some(1)
+            && stderr.contains("--profile takes full, readonly, or none, not \"everything\".")
+            && !stderr.contains("unrecognised argument"),
+        "expected exit 1 naming the profile choices | received: {:?} {stderr:?}",
+        output.status.code()
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "expected empty stdout | received: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
 /// `setup --profile` writes a real answer non-interactively and exits `0`.
 #[test]
 fn setup_writes_a_profile_and_exits_zero() {
@@ -557,5 +582,254 @@ fn connect_on_a_fresh_slot_reports_a_setup_command_that_actually_works() {
         recorded_line.contains("--profile"),
         "the reported command must name --profile, or it is the same dead end \
          setup_pending_message was fixed for: {recorded_line:?}"
+    );
+}
+
+/// A `credentials.json` this build refuses (here a schemaVersion a newer
+/// build wrote before a rollback) is not "no pairing token": `connect` must
+/// name the refusal and the remedy, and never quote the stored token.
+#[test]
+fn connect_with_a_refused_credentials_file_prints_the_reason_and_remedy_not_the_token() {
+    let home = scratch_mango_home("connect-refused-credentials");
+    let remote = home.join("runtime").join("remote");
+    std::fs::create_dir_all(&remote).unwrap();
+    let secret = "future-pairing-token-marker";
+    std::fs::write(
+        remote.join("credentials.json"),
+        format!(r#"{{"schemaVersion":2,"pairingToken":"{secret}"}}"#),
+    )
+    .unwrap();
+
+    let output = Command::new(binary_path())
+        .args(["connect", "--hub", "wss://hub.example"])
+        .env("MANGO_HOME", &home)
+        .env_remove("MANGOSTUDIO_RUNTIME_TOKEN")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        output.status.code() == Some(1),
+        "expected exit code: 1 | received: {:?} ({stderr:?})",
+        output.status.code()
+    );
+    for expected in ["schemaVersion 2", "Move it aside"] {
+        assert!(
+            stderr.contains(expected),
+            "expected stderr containing: {expected} | received: {stderr:?}"
+        );
+    }
+    for unexpected in ["no pairing token", secret] {
+        assert!(
+            !stderr.contains(unexpected),
+            "expected stderr without: {unexpected} | received: {stderr:?}"
+        );
+    }
+    assert!(
+        !remote.join("runtime.json").exists(),
+        "expected no consent recorded for a refused connect | received: runtime.json written"
+    );
+}
+
+/// `setup --json` answers without a terminal and prints the resulting
+/// health report, which `health --json` and `doctor` then agree with.
+#[test]
+fn setup_json_reports_the_answer_that_health_and_doctor_then_read() {
+    let home = scratch_mango_home("setup-json");
+    let setup = Command::new(binary_path())
+        .args(["setup", "--profile", "readonly", "--yes", "--json"])
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    let stdout = String::from_utf8(setup.stdout).unwrap();
+    assert!(
+        setup.status.success(),
+        "expected setup exit 0 | received: {:?} {}",
+        setup.status.code(),
+        String::from_utf8_lossy(&setup.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("expected a JSON report | received: {stdout:?} ({error})"));
+    assert!(
+        report["profile"] == "readonly" && report["setup"]["state"] == "configured",
+        "expected profile readonly, setup configured | received: {report}"
+    );
+
+    let health = Command::new(binary_path())
+        .args(["health", "--json"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    let health: serde_json::Value = serde_json::from_slice(&health.stdout).unwrap();
+    assert!(
+        health["slot"] == "host" && health["allow"]["shell"] == false,
+        "expected slot host with shell denied | received: {health}"
+    );
+
+    let doctor = Command::new(binary_path())
+        .arg("doctor")
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    let stdout = String::from_utf8(doctor.stdout).unwrap();
+    assert!(
+        doctor.status.code() == Some(0) && stdout.contains("ok  Consent"),
+        "expected doctor exit 0 with an ok Consent line | received: {:?} {stdout:?}",
+        doctor.status.code()
+    );
+}
+
+/// A slot an installer armed `pending` fails `doctor` on Consent, and the
+/// fix doctor prints, run as printed (with a profile picked for its
+/// placeholder), actually clears it.
+#[test]
+fn doctor_consent_pending_fix_round_trips_to_a_passing_doctor() {
+    let home = scratch_mango_home("doctor-consent-round-trip");
+    let host = home.join("runtime").join("host");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(
+        host.join("runtime.json"),
+        br#"{"schemaVersion":1,"slot":"host","setup":{"state":"pending","at":"2024-01-01T00:00:00.000Z","by":"install"}}"#,
+    )
+    .unwrap();
+
+    let doctor = |home: &std::path::Path| {
+        let output = Command::new(binary_path())
+            .args(["doctor", "--json"])
+            .env("MANGO_HOME", home)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the binary runs");
+        let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let consent = body["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|finding| finding["title"] == "Consent")
+            .cloned()
+            .unwrap_or_else(|| panic!("expected a Consent finding | received: {body}"));
+        (output.status.code(), consent)
+    };
+
+    let (code, consent) = doctor(&home);
+    assert!(
+        code == Some(1) && consent["severity"] == "fail",
+        "expected doctor exit 1 with a failing Consent | received: {code:?} {consent}"
+    );
+    let fix = consent["fix"].as_str().unwrap_or_default().to_owned();
+    assert!(
+        fix.contains("--profile <full|readonly|none>"),
+        "expected a fix that names --profile (setup cannot prompt) | received: {fix:?}"
+    );
+    let fix = fix.replace("<full|readonly|none>", "readonly");
+    let mut words = fix.split_whitespace();
+    assert!(
+        words.next() == Some("mangostudio-runtime"),
+        "expected the fix to start with the binary name | received: {fix:?}"
+    );
+    let applied = Command::new(binary_path())
+        .args(words)
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(
+        applied.status.success(),
+        "expected the printed fix {fix:?} to succeed | received: {:?} {}",
+        applied.status.code(),
+        String::from_utf8_lossy(&applied.stderr)
+    );
+
+    let (code, consent) = doctor(&home);
+    assert!(
+        code == Some(0) && consent["severity"] == "ok",
+        "expected doctor exit 0 with an ok Consent after the fix | received: {code:?} {consent}"
+    );
+}
+
+/// A `--stdio` launch the consent gate refuses exits non-zero with the
+/// setup-pending signature on stderr and not one byte on stdout: a hub
+/// decoding stdout as frames must see nothing to decode.
+#[test]
+fn a_refused_stdio_launch_keeps_stdout_byte_empty() {
+    let home = scratch_mango_home("stdio-refused-stdout");
+    let host = home.join("runtime").join("host");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(
+        host.join("runtime.json"),
+        br#"{"schemaVersion":1,"slot":"host","setup":{"state":"pending","at":"2024-01-01T00:00:00.000Z","by":"install"}}"#,
+    )
+    .unwrap();
+    let output = Command::new(binary_path())
+        .arg("--stdio")
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.code() == Some(1)
+            && stderr.contains("runtime setup is pending on this machine"),
+        "expected exit 1 with the setup-pending signature | received: {:?} {stderr:?}",
+        output.status.code()
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "expected zero stdout bytes | received: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+/// Garbage on stdin gets the runtime's own hello, then a PROTOCOL_ERROR
+/// close naming the refusal, exit 1, and the same reason on stderr.
+#[test]
+fn garbage_on_stdio_closes_with_protocol_error_and_exits_one() {
+    use std::io::Write as _;
+
+    let home = scratch_mango_home("stdio-garbage");
+    let mut child = Command::new(binary_path())
+        .arg("--stdio")
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    // Held open until the child exits, so the close comes from the garbage,
+    // not from end of input.
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"this is not json\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    drop(stdin);
+
+    let frames: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("every stdout line is a frame"))
+        .collect();
+    let types: Vec<&str> = frames
+        .iter()
+        .map(|frame| frame["type"].as_str().unwrap_or("?"))
+        .collect();
+    assert!(
+        types == ["hello", "close"],
+        "expected frames: [hello, close] | received: {types:?}"
+    );
+    let close = &frames[1];
+    assert!(
+        close["code"] == 4400
+            && close["reason"]
+                .as_str()
+                .is_some_and(|r| r.contains("invalid-json")),
+        "expected close 4400 (PROTOCOL_ERROR) naming invalid-json | received: {close}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.code() == Some(1)
+            && stderr.contains("session closed with 4400: invalid-json"),
+        "expected exit 1 with the close reason on stderr | received: {:?} {stderr:?}",
+        output.status.code()
     );
 }

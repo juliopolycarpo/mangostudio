@@ -257,3 +257,291 @@ async fn cancellation_stops_the_loop_and_releases_the_session() {
         "a clean cancellation is not a failure to reconnect from: {messages:?}"
     );
 }
+
+/// Polls `slot`'s audit log until it holds a line, then returns the last
+/// line's `hub` field.
+async fn last_audited_hub(slot: RuntimeSlot, home: &std::path::Path) -> String {
+    let path = mangostudio_runtime::runtime_home::slot_audit_log_path(slot, home);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let contents = std::fs::read_to_string(&path).unwrap_or_default();
+            if let Some(line) = contents.lines().last() {
+                let line: serde_json::Value = serde_json::from_str(line).unwrap();
+                return line["hub"].as_str().unwrap_or_default().to_string();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "expected an audit line in {} | received: none",
+            path.display()
+        )
+    })
+}
+
+/// Accepts one connection announcing `capabilities`, makes one
+/// `runtime.health` call, and returns the hub field of the audit line that
+/// call wrote.
+async fn audited_hub_after_a_hello_with(capabilities: serde_json::Value) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (slot, home) = create_definition_slot();
+    let cancel = CancellationToken::new();
+    let cancel_for_run = cancel.clone();
+    let home_for_run = home.to_path_buf();
+    let run_handle = tokio::spawn(async move {
+        run(
+            ConnectConfig {
+                hub_url: format!("ws://{addr}/"),
+                token: "irrelevant-token".to_string(),
+                slot,
+                mango_home: home_for_run,
+                runtime_version: "0.0.0".to_string(),
+            },
+            cancel_for_run,
+            &FixedJitter(0.0),
+            CollectingLog::new().sink(),
+        )
+        .await
+    });
+
+    let (stream, _addr) = listener.accept().await.unwrap();
+    let port = accept_websocket(
+        stream,
+        AcceptOptions::from(WebSocketOptions::default()),
+        |_upgrade| Ok(()),
+    )
+    .await
+    .unwrap();
+    let options = SessionOptions::new(support::peer("hub"))
+        .with_capabilities(capabilities.as_object().unwrap().clone());
+    let (session, _driver) = Session::spawn(port, options);
+    session.ready().await.expect("the handshake completes");
+    let _ = session
+        .request("runtime.health", serde_json::json!({}))
+        .await;
+    let hub = last_audited_hub(slot, &home).await;
+
+    cancel.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(5), run_handle).await;
+    hub
+}
+
+/// The hub's `hello.capabilities.hub` names every audit line written after
+/// the handshake, as `session.ts` did through `setHub`.
+#[tokio::test]
+async fn a_hub_hello_identity_names_the_next_audit_line() {
+    let hub = audited_hub_after_a_hello_with(
+        serde_json::json!({ "hub": { "user": "bob", "host": "desk" } }),
+    )
+    .await;
+    assert!(
+        hub == "bob@desk",
+        "expected audit hub: bob@desk | received: {hub}"
+    );
+}
+
+/// A hub identity that fails `HubIdentitySchema` is not trusted.
+#[tokio::test]
+async fn an_invalid_hub_hello_identity_leaves_the_audit_line_unidentified() {
+    let hub =
+        audited_hub_after_a_hello_with(serde_json::json!({ "hub": { "user": "bob", "host": "" } }))
+            .await;
+    assert!(
+        hub == "unidentified hub",
+        "expected audit hub: unidentified hub | received: {hub}"
+    );
+}
+
+/// Refuses the first `refusals` dials before any upgrade, then accepts
+/// every later one, completes its handshake and closes it with `code`.
+/// Counts accepted sessions in `accepted`.
+async fn fake_hub_refusing_then_closing_each_with(
+    listener: TcpListener,
+    refusals: usize,
+    code: u16,
+    accepted: Arc<AtomicUsize>,
+) {
+    for _ in 0..refusals {
+        let (stream, _addr) = listener.accept().await.unwrap();
+        drop(stream);
+    }
+    loop {
+        let (stream, _addr) = listener.accept().await.unwrap();
+        let Ok(port) = accept_websocket(
+            stream,
+            AcceptOptions::from(WebSocketOptions::default()),
+            |_upgrade| Ok(()),
+        )
+        .await
+        else {
+            continue;
+        };
+        let (session, _driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+        if session.ready().await.is_ok() {
+            accepted.fetch_add(1, Ordering::SeqCst);
+        }
+        session.close(code, Some("test hub closing")).await;
+    }
+}
+
+fn spawn_run(
+    addr: std::net::SocketAddr,
+    jitter: f64,
+) -> (
+    CancellationToken,
+    CollectingLog,
+    tokio::task::JoinHandle<ConnectOutcome>,
+    ScratchDir,
+) {
+    let (slot, home) = create_definition_slot();
+    let cancel = CancellationToken::new();
+    let log = CollectingLog::new();
+    let handle = tokio::spawn({
+        let cancel = cancel.clone();
+        let log = log.clone();
+        let mango_home = home.to_path_buf();
+        async move {
+            run(
+                ConnectConfig {
+                    hub_url: format!("ws://{addr}/"),
+                    token: "irrelevant-token".to_string(),
+                    slot,
+                    mango_home,
+                    runtime_version: "0.0.0".to_string(),
+                },
+                cancel,
+                &FixedJitter(jitter),
+                log.sink(),
+            )
+            .await
+        }
+    });
+    (cancel, log, handle, home)
+}
+
+/// Waits until `log` holds `count` reconnect lines, then returns them.
+async fn reconnect_lines(log: &CollectingLog, count: usize) -> Vec<String> {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let lines: Vec<String> = log
+                .messages()
+                .into_iter()
+                .filter(|message| message.contains("Reconnecting in"))
+                .collect();
+            if lines.len() >= count {
+                return lines;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "expected {count} reconnect lines | received: {:?}",
+            log.messages()
+        )
+    })
+}
+
+/// A dial that served resets the failure streak: after two refused dials
+/// (0.5s, then 1s at zero jitter) a served connection waits the first
+/// window again, not the third (2s).
+#[tokio::test]
+async fn a_served_connection_resets_the_backoff() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let hub = tokio::spawn(fake_hub_refusing_then_closing_each_with(
+        listener,
+        2,
+        close_codes::INTERNAL,
+        Arc::clone(&accepted),
+    ));
+    let (cancel, log, handle, _home) = spawn_run(addr, 0.0);
+
+    let lines = reconnect_lines(&log, 3).await;
+    cancel.cancel();
+    let outcome = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("run must return promptly once cancelled")
+        .unwrap();
+    hub.abort();
+
+    let delays: Vec<&str> = lines
+        .iter()
+        .map(|line| line.rsplit("Reconnecting in ").next().unwrap_or("?"))
+        .collect();
+    assert!(
+        delays == ["0s.", "1s.", "0s."] && lines[2].contains("Connection to the hub ended (4500"),
+        "expected delays [0s., 1s., 0s.] with the reset after the served dial | received: {lines:?}"
+    );
+    assert!(
+        outcome == ConnectOutcome::Stopped,
+        "expected: Stopped | received: {outcome:?}"
+    );
+}
+
+/// A rate-limited close waits `RATE_LIMITED_DELAY` (30s), whatever the
+/// failure streak, and does not redial inside it.
+#[tokio::test]
+async fn a_rate_limited_close_waits_thirty_seconds() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let hub = tokio::spawn(fake_hub_refusing_then_closing_each_with(
+        listener,
+        0,
+        close_codes::RATE_LIMITED,
+        Arc::clone(&accepted),
+    ));
+    let (cancel, log, handle, _home) = spawn_run(addr, 0.0);
+
+    let lines = reconnect_lines(&log, 1).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let dials = accepted.load(Ordering::SeqCst);
+    cancel.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    hub.abort();
+
+    assert!(
+        lines[0] == "The hub is rate limiting connections from this address. Reconnecting in 30s.",
+        "expected the 30s rate-limited wait | received: {lines:?}"
+    );
+    assert!(
+        dials == 1,
+        "expected dials inside the wait: 1 | received: {dials}"
+    );
+}
+
+/// Cancelling while the loop sleeps out a backoff returns `Stopped` at
+/// once, not after the wait.
+#[tokio::test]
+async fn cancel_during_the_backoff_sleep_returns_stopped_promptly() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hub = tokio::spawn(fake_hub_refusing_then_closing_each_with(
+        listener,
+        0,
+        close_codes::RATE_LIMITED,
+        Arc::new(AtomicUsize::new(0)),
+    ));
+    let (cancel, log, handle, _home) = spawn_run(addr, 0.0);
+
+    reconnect_lines(&log, 1).await;
+    let started = std::time::Instant::now();
+    cancel.cancel();
+    let outcome = tokio::time::timeout(Duration::from_secs(2), handle)
+        .await
+        .expect("cancel must cut the 30s backoff short")
+        .unwrap();
+    hub.abort();
+
+    assert!(
+        outcome == ConnectOutcome::Stopped && started.elapsed() < Duration::from_secs(2),
+        "expected Stopped within 2s | received: {outcome:?} after {:?}",
+        started.elapsed()
+    );
+}

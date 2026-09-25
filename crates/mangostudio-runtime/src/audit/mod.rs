@@ -54,6 +54,24 @@ const DEFAULT_MAX_FILES: u32 = 3;
 /// growing without bound.
 const MAX_BUFFERED_RECORDS: usize = 1_024;
 
+/// Methods whose successful calls are per-interaction rather than
+/// per-operation. Mirrors `audit-log.ts`'s `HIGH_FREQUENCY_METHODS`: a
+/// terminal sends one `terminal.write` per keystroke and one `terminal.ack`
+/// per output window, so recording their successes would rotate the whole
+/// retention window (`DEFAULT_MAX_BYTES` x `DEFAULT_MAX_FILES`) away in
+/// hours and put keystroke timing on disk. `terminal.open`, `.attach`,
+/// `.detach` and `.close` are the operations, and they stay.
+const HIGH_FREQUENCY_METHODS: [&str; 3] = ["terminal.write", "terminal.ack", "terminal.resize"];
+
+/// Whether one call earns a line. A denial or a failure always does; only
+/// the successful high-frequency legs are dropped. Mirrors
+/// `audit-log.ts`'s `shouldRecordAudit`.
+///
+/// Usage: `should_record("terminal.write", Outcome::Ok)` is `false`.
+fn should_record(method: &str, outcome: Outcome) -> bool {
+    !matches!(outcome, Outcome::Ok) || !HIGH_FREQUENCY_METHODS.contains(&method)
+}
+
 /// Who a recorded call's hub was, once its handshake identifies it. Mirrors
 /// TypeScript's `HubIdentity`.
 #[derive(Debug, Clone)]
@@ -64,7 +82,46 @@ pub struct HubIdentity {
     pub host: String,
 }
 
+/// `HubIdentitySchema`'s `maxLength` on both fields, counted the way
+/// TypeBox counts a string's length: in UTF-16 code units.
+const HUB_IDENTITY_FIELD_MAX: usize = 255;
+
 impl HubIdentity {
+    /// The hub's identity from its `hello.capabilities`, validated rather
+    /// than trusted: `capabilities.hub` must be exactly `{ host, user }`,
+    /// both non-empty strings of at most 255 characters, as the shared
+    /// `HubIdentitySchema` requires. Anything else is `None`, so an audit
+    /// line never names a host taken from an unvalidated field. Mirrors
+    /// `session.ts`'s `hubIdentityOf`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::audit::HubIdentity;
+    ///
+    /// let capabilities = serde_json::json!({ "hub": { "user": "bob", "host": "desk" } });
+    /// let hub = HubIdentity::from_capabilities(capabilities.as_object().unwrap()).unwrap();
+    /// assert_eq!((hub.user.as_str(), hub.host.as_str()), ("bob", "desk"));
+    /// ```
+    #[must_use]
+    pub fn from_capabilities(capabilities: &Map<String, Value>) -> Option<Self> {
+        let hub = capabilities.get("hub")?.as_object()?;
+        if hub.len() != 2 {
+            return None;
+        }
+        let field = |name: &str| -> Option<String> {
+            let value = hub.get(name)?.as_str()?;
+            let length = value.encode_utf16().count();
+            (1..=HUB_IDENTITY_FIELD_MAX)
+                .contains(&length)
+                .then(|| value.to_string())
+        };
+        Some(Self {
+            user: field("user")?,
+            host: field("host")?,
+        })
+    }
+
     fn label(&self) -> String {
         format!("{}@{}", self.user, self.host)
     }
@@ -85,7 +142,8 @@ struct State {
     error_maybe_present: bool,
 }
 
-/// Records every call's outcome as one JSON line per call in `audit.log`,
+/// Records every call's outcome (bar a successful keystroke-rate terminal
+/// leg, as `audit-log.ts` drops) as one JSON line per call in `audit.log`,
 /// under `slot`'s runtime-home directory.
 ///
 /// # Example
@@ -396,6 +454,9 @@ impl FileAudit {
 impl Audit for FileAudit {
     fn record<'a>(&'a self, entry: AuditEntry) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
+            if !should_record(&entry.method, entry.outcome) {
+                return;
+            }
             let hub_label = lock(&self.state).hub_label.clone();
             let line = self.build_line(&entry, &hub_label);
             self.enqueue(line);
@@ -412,7 +473,7 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     use super::{FileAudit, HubIdentity};
     use crate::ports::audit::{Audit, AuditEntry, Outcome, lock};
@@ -614,6 +675,35 @@ mod tests {
         let lines = read_lines(&dir.join("audit.log"));
         assert_eq!(lines[0]["hub"], "unidentified hub");
         assert_eq!(lines[1]["hub"], "ada@hub.example");
+    }
+
+    #[test]
+    fn hub_identity_is_read_only_from_a_schema_valid_capabilities_hub() {
+        let long = "x".repeat(256);
+        let cases = [
+            (
+                json!({ "hub": { "user": "bob", "host": "desk" } }),
+                Some("bob@desk"),
+            ),
+            (json!({}), None),
+            (json!({ "hub": "bob@desk" }), None),
+            (json!({ "hub": { "user": "bob" } }), None),
+            (json!({ "hub": { "user": "", "host": "desk" } }), None),
+            (json!({ "hub": { "user": "bob", "host": 7 } }), None),
+            (json!({ "hub": { "user": "bob", "host": long } }), None),
+            (
+                json!({ "hub": { "user": "bob", "host": "desk", "extra": "x" } }),
+                None,
+            ),
+        ];
+        for (capabilities, expected) in cases {
+            let received = HubIdentity::from_capabilities(capabilities.as_object().unwrap())
+                .map(|hub| hub.label());
+            assert!(
+                received.as_deref() == expected,
+                "capabilities {capabilities} expected: {expected:?} | received: {received:?}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -955,6 +1045,63 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0]["method"], "FIRST");
         assert_eq!(lines[1]["method"], "SECOND");
+    }
+
+    #[tokio::test]
+    async fn successful_keystroke_terminal_calls_write_no_line_but_their_denials_do() {
+        let dir = scratch_dir("high-frequency");
+        let path = dir.join("audit.log");
+        let audit = FileAudit::new(
+            path.clone(),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+
+        for _ in 0..100 {
+            audit.record(entry("terminal.write", Outcome::Ok)).await;
+        }
+        audit.record(entry("terminal.ack", Outcome::Ok)).await;
+        audit.record(entry("terminal.resize", Outcome::Ok)).await;
+        audit.record(entry("terminal.write", Outcome::Denied)).await;
+        audit.record(entry("terminal.resize", Outcome::Error)).await;
+        audit.record(entry("terminal.open", Outcome::Ok)).await;
+
+        let methods: Vec<String> = read_lines(&path)
+            .iter()
+            .map(|line| format!("{} {}", line["method"], line["outcome"]))
+            .collect();
+        let expected = vec![
+            r#""terminal.write" "denied""#.to_string(),
+            r#""terminal.resize" "error""#.to_string(),
+            r#""terminal.open" "ok""#.to_string(),
+        ];
+        assert!(
+            methods == expected,
+            "expected lines: {expected:?} | received: {methods:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_sidecar_error_names_how_many_records_the_buffer_dropped() {
+        let dir = scratch_dir("dropped-count");
+        let path = dir.join("audit.log");
+        std::fs::create_dir(&path).unwrap();
+        let audit = FileAudit::new(
+            path.clone(),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+
+        // MAX_BUFFERED_RECORDS (1_024) plus three: three oldest are dropped.
+        for index in 0..1_027u32 {
+            audit
+                .record(entry(&format!("runtime.health.{index}"), Outcome::Ok))
+                .await;
+        }
+
+        let message = std::fs::read_to_string(dir.join("audit.log.error")).unwrap();
+        assert!(
+            message.contains("(3 record(s) dropped)"),
+            "expected sidecar containing: (3 record(s) dropped) | received: {message:?}"
+        );
     }
 
     #[tokio::test]

@@ -613,6 +613,34 @@ pub fn read_runtime_slot_credentials(slot: RuntimeSlot, mango_home: &Path) -> Sl
     )
 }
 
+/// Why `slot`'s `credentials.json` is refused outright, or `None` when it
+/// is absent, usable, or unusable in a way a rewrite may repair.
+///
+/// A refused file is one this process cannot see into (unreadable) or
+/// one naming a `schemaVersion` this build does not speak, the same
+/// judgement [`write_runtime_slot_credentials`] makes before it would
+/// replace the file. A reader that finds no token must tell this apart
+/// from a genuine absence: only an operator can decide the file is safe
+/// to discard. Mirrors the `refused` kind of `runtime-home.ts`'s
+/// `readRuntimeSlotCredentialsState`. The message names the path and the
+/// reason, never a stored value.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::runtime_home::{RuntimeSlot, credentials_refusal};
+///
+/// let home = std::env::temp_dir().join("mango-credentials-refusal-doctest");
+/// assert!(credentials_refusal(RuntimeSlot::Remote, &home).is_none());
+/// ```
+#[must_use]
+pub fn credentials_refusal(slot: RuntimeSlot, mango_home: &Path) -> Option<String> {
+    match credentials_write_gate(&slot_credentials_path(slot, mango_home)) {
+        CredentialsWriteGate::Refuse(reason) => Some(reason),
+        CredentialsWriteGate::Proceed(_) => None,
+    }
+}
+
 /// Why a merged write to a runtime-home document failed.
 #[derive(Debug)]
 pub enum WriteError {
@@ -1495,6 +1523,14 @@ mod tests {
         )
         .expect_err("schemaVersion 2 is newer than this build speaks");
         assert!(matches!(error, WriteError::Refused { .. }));
+        let message = error.to_string();
+        assert!(
+            message.contains(
+                "is schemaVersion 2, which this build of the runtime does not understand"
+            ) && !message.contains("keep-me")
+                && !message.contains("precious"),
+            "expected the schema reason without any stored value | received: {message}"
+        );
 
         // Untouched: still exactly the bytes this test wrote, not a
         // downgrade to `{"schemaVersion":1,"serveToken":"new"}`.
@@ -1608,6 +1644,175 @@ mod tests {
         assert_eq!(
             super::SlotFileState::default().stored_string("hubUrl"),
             None
+        );
+    }
+
+    /// Writes `raw` as the remote slot's `credentials.json` and returns its path.
+    fn raw_credentials(home: &Path, raw: &[u8]) -> PathBuf {
+        let path = slot_credentials_path(RuntimeSlot::Remote, home);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, raw).unwrap();
+        path
+    }
+
+    fn stored_credentials(home: &Path) -> Value {
+        let path = slot_credentials_path(RuntimeSlot::Remote, home);
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_rotation_does_not_carry_a_malformed_sibling_forward() {
+        let home = scratch_home("malformed-sibling");
+        raw_credentials(
+            &home,
+            br#"{"schemaVersion":1,"pairingToken":"mrt_selector.good","serveToken":12345}"#,
+        );
+        write_runtime_slot_credentials(
+            RuntimeSlot::Remote,
+            &home,
+            &[("pairingToken", Some(json!("mrt_selector.rotated")))],
+        )
+        .expect("a schema-invalid, same-version file is replaceable");
+        let stored = stored_credentials(&home);
+        let expected = json!({"schemaVersion": 1, "pairingToken": "mrt_selector.rotated"});
+        assert!(
+            stored == expected,
+            "expected: {expected} | received: {stored}"
+        );
+    }
+
+    #[test]
+    fn a_same_version_unknown_field_survives_a_rotation() {
+        let home = scratch_home("extra-field");
+        raw_credentials(
+            &home,
+            br#"{"schemaVersion":1,"pairingToken":"mrt_selector.extra","refreshToken":"rft_keepme"}"#,
+        );
+        write_runtime_slot_credentials(
+            RuntimeSlot::Remote,
+            &home,
+            &[("serveToken", Some(json!("srv_selector.new")))],
+        )
+        .unwrap();
+        let stored = stored_credentials(&home);
+        let expected = json!({
+            "schemaVersion": 1,
+            "pairingToken": "mrt_selector.extra",
+            "refreshToken": "rft_keepme",
+            "serveToken": "srv_selector.new",
+        });
+        assert!(
+            stored == expected,
+            "expected: {expected} | received: {stored}"
+        );
+    }
+
+    #[test]
+    fn an_empty_null_or_array_document_reads_as_no_token_and_is_replaceable() {
+        for raw in ["{}", "null", "[]"] {
+            let home = scratch_home("not-a-credentials-object");
+            raw_credentials(&home, raw.as_bytes());
+            let state = read_runtime_slot_credentials(RuntimeSlot::Remote, &home);
+            assert!(
+                state.stored_string("pairingToken").is_none(),
+                "{raw}: expected no pairing token | received: {:?}",
+                state.stored
+            );
+            assert!(
+                super::credentials_refusal(RuntimeSlot::Remote, &home).is_none(),
+                "{raw}: expected a replaceable file | received: a refusal"
+            );
+            write_runtime_slot_credentials(
+                RuntimeSlot::Remote,
+                &home,
+                &[("pairingToken", Some(json!("mrt_selector.new")))],
+            )
+            .unwrap_or_else(|error| {
+                panic!("{raw}: expected the write to replace it | received: {error}")
+            });
+            let stored = stored_credentials(&home);
+            assert!(
+                stored["pairingToken"] == "mrt_selector.new",
+                "{raw}: expected the new token stored | received: {stored}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_unreadable_credentials_diagnostic_names_the_path_once() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let home = scratch_home("unreadable-diagnostic");
+        let path = raw_credentials(&home, br#"{"schemaVersion":1,"pairingToken":"keep-me"}"#);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // A process that can read a mode-000 file (root) cannot exercise this.
+        if std::fs::read(&path).is_ok() {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            return;
+        }
+        let read = read_runtime_slot_credentials(RuntimeSlot::Remote, &home)
+            .error
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        let refusal = super::credentials_refusal(RuntimeSlot::Remote, &home).unwrap_or_default();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let shown = path.display().to_string();
+        for message in [read, refusal] {
+            let count = message.matches(&shown).count();
+            assert!(
+                count == 1 && !message.contains("keep-me"),
+                "expected the path exactly once and no token | received {count} in: {message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_truncated_token_is_never_quoted_in_the_diagnostic() {
+        let home = scratch_home("truncated-token");
+        raw_credentials(
+            &home,
+            br#"{ "schemaVersion": 1, "pairingToken": "mrt_selector.truncated"#,
+        );
+        let state = read_runtime_slot_credentials(RuntimeSlot::Remote, &home);
+        let message = state
+            .error
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(
+            message.contains("is not valid JSON") && !message.contains("mrt_selector"),
+            "expected a not-valid-JSON diagnostic without the token | received: {message:?}"
+        );
+    }
+
+    #[test]
+    fn the_slot_comes_from_the_directory_not_from_the_file() {
+        let home = scratch_home("slot-from-directory");
+        let path = slot_config_path(RuntimeSlot::Remote, &home);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"slot":"host","setup":{"state":"configured"}}"#,
+        )
+        .unwrap();
+        let state = read_runtime_slot_config(RuntimeSlot::Remote, &home);
+        let resolved = crate::consent::config::resolve_runtime_slot_config(
+            RuntimeSlot::Remote,
+            state.stored.as_ref(),
+            "bundled",
+        );
+        assert!(
+            resolved.slot == "remote",
+            "expected slot: remote | received: {}",
+            resolved.slot
+        );
+
+        write_runtime_slot_config(RuntimeSlot::Remote, &home, &[]).unwrap();
+        let stored: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(
+            stored["slot"] == "remote",
+            "expected a write to stamp slot: remote | received: {}",
+            stored["slot"]
         );
     }
 }

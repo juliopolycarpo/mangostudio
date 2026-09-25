@@ -618,3 +618,103 @@ async fn get_health_answers_status_and_version_over_the_same_listener() {
     cancel.cancel();
     server.await.unwrap().unwrap();
 }
+
+/// Writes `remote`'s `runtime.json` with setup answered and `audit.enabled`.
+fn configure_remote_audit(home: &std::path::Path, enabled: bool) {
+    mangostudio_runtime::runtime_home::write_runtime_slot_config(
+        RuntimeSlot::Remote,
+        home,
+        &[
+            (
+                "setup",
+                Some(serde_json::json!({"state": "configured", "by": "cli"})),
+            ),
+            ("audit", Some(serde_json::json!({ "enabled": enabled }))),
+        ],
+    )
+    .unwrap();
+}
+
+/// Serves one session on `home`, announcing `capabilities`, makes one
+/// `runtime.health` call and returns once `run` has shut down.
+async fn serve_one_health_call(home: &std::path::Path, capabilities: serde_json::Value) {
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let server = tokio::spawn(run(
+        listener,
+        TOKEN.to_string(),
+        RuntimeSlot::Remote,
+        home.to_path_buf(),
+        "0.0.0".to_string(),
+        cancel.clone(),
+        |_message| {},
+    ));
+    let options = WebSocketConnectOptions::default().with_bearer(TOKEN);
+    let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
+    let port = connect_websocket(&format!("ws://{addr}/"), &options, &deadline)
+        .await
+        .expect("the dial reaches the listener");
+    let options = SessionOptions::new(support::peer("hub"))
+        .with_capabilities(capabilities.as_object().unwrap().clone());
+    let (session, _driver) = Session::spawn(port, options);
+    session.ready().await.expect("the handshake completes");
+    session
+        .request("runtime.health", serde_json::json!({}))
+        .await
+        .expect("runtime.health answers");
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}
+
+/// A slot whose `runtime.json` turns audit off writes no `audit.log`, and
+/// one that turns it on does, as `createRuntimeAuditSink`'s disabled sink.
+#[tokio::test]
+async fn audit_log_follows_the_slots_audit_setting() {
+    for enabled in [false, true] {
+        let home = scratch_home(&format!("audit-enabled-{enabled}"));
+        configure_remote_audit(&home, enabled);
+        serve_one_health_call(&home, serde_json::json!({})).await;
+        let path =
+            mangostudio_runtime::runtime_home::slot_audit_log_path(RuntimeSlot::Remote, &home);
+        let lines = std::fs::read_to_string(&path)
+            .map(|contents| contents.lines().count())
+            .unwrap_or(0);
+        let expected = usize::from(enabled);
+        assert!(
+            lines == expected,
+            "audit.enabled={enabled}: expected audit lines: {expected} | received: {lines}"
+        );
+    }
+}
+
+/// The hub's `hello.capabilities.hub` names every audit line written after
+/// the handshake, as `session.ts` did through `setHub`.
+#[tokio::test]
+async fn a_hub_hello_identity_names_the_next_audit_line() {
+    let home = scratch_home("hub-identity");
+    configure_remote_audit(&home, true);
+    serve_one_health_call(
+        &home,
+        serde_json::json!({ "hub": { "user": "bob", "host": "desk" } }),
+    )
+    .await;
+    let path = mangostudio_runtime::runtime_home::slot_audit_log_path(RuntimeSlot::Remote, &home);
+    let contents = std::fs::read_to_string(&path).unwrap_or_default();
+    let hub = contents
+        .lines()
+        .last()
+        .map(|line| {
+            let line: serde_json::Value = serde_json::from_str(line).unwrap();
+            line["hub"].as_str().unwrap_or_default().to_string()
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "expected an audit line in {} | received: none",
+                path.display()
+            )
+        });
+    assert!(
+        hub == "bob@desk",
+        "expected audit hub: bob@desk | received: {hub}"
+    );
+}

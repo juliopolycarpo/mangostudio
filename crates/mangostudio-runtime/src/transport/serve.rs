@@ -597,6 +597,7 @@ async fn handle_connection(
         let _ = join_owned(driver_handle).await;
         return;
     }
+    crate::transport::identify_hub(&session, host.audit.as_ref());
     if !state.still_current(generation) {
         // Superseded or stopped in the instant between publishing and the
         // handshake completing; the superseding/stopping call already owns

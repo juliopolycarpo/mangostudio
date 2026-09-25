@@ -62,6 +62,68 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
     let _ = driver.await;
 }
 
+/// The hub's `hello.capabilities.hub` names every audit line the stdio
+/// child writes after the handshake, as `session.ts` did through `setHub`.
+#[tokio::test]
+async fn a_hub_hello_identity_names_the_stdio_childs_next_audit_line() {
+    let home = scratch_home("hub-identity");
+    // The host slot audits nothing by default; turn it on for this test.
+    let host = home.join("runtime").join("host");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(
+        host.join("runtime.json"),
+        br#"{"schemaVersion":1,"slot":"host","audit":{"enabled":true}}"#,
+    )
+    .unwrap();
+    let env = sanitized_env([(
+        "MANGO_HOME".to_string(),
+        home.to_string_lossy().into_owned(),
+    )]);
+    let options = SpawnOptions::new([binary_path(), "stdio".to_string()]).with_env(env);
+    let (port, _launched) = spawn_port(options).expect("the argv names a real binary");
+    let capabilities = serde_json::json!({ "hub": { "user": "bob", "host": "desk" } });
+    let options = SessionOptions::new(support::peer("hub"))
+        .with_capabilities(capabilities.as_object().unwrap().clone());
+    let (session, driver) = Session::spawn(port, options);
+    tokio::time::timeout(Duration::from_secs(10), session.ready())
+        .await
+        .expect("the child must say hello within the timeout")
+        .expect("the handshake succeeds");
+    let _ = session
+        .request("runtime.health", serde_json::json!({}))
+        .await;
+
+    let path = mangostudio_runtime::runtime_home::slot_audit_log_path(
+        mangostudio_runtime::runtime_home::RuntimeSlot::Host,
+        &home,
+    );
+    let hub = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let contents = std::fs::read_to_string(&path).unwrap_or_default();
+            if let Some(line) = contents.lines().last() {
+                let line: serde_json::Value = serde_json::from_str(line).unwrap();
+                return line["hub"].as_str().unwrap_or_default().to_string();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "expected an audit line in {} | received: none",
+            path.display()
+        )
+    });
+    session
+        .close(close_codes::RELEASED, Some("test done"))
+        .await;
+    let _ = driver.await;
+    assert!(
+        hub == "bob@desk",
+        "expected audit hub: bob@desk | received: {hub}"
+    );
+}
+
 /// `SIGINT` sent before any hub writes a byte must still exit through this crate's own
 /// controlled path (a normal `exit()`, never the process dying to
 /// `SIGINT`'s default disposition). Checked directly against the child's

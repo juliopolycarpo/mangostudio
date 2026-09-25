@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mangostudio.dev/runtime/schema/1/runtime-home.json",
   "title": "MangoStudio runtime home",
-  "description": "What a runtime keeps under its slot directory: runtime.json, credentials.json, and one line of audit.log. The file and directory names these shapes are stored under are in strings.json.",
+  "description": "What a runtime keeps under its slot directory: runtime.json, credentials.json, and one line of audit.log, plus the `service status --json` report about the slot's user service. The file and directory names these shapes are stored under are in strings.json.",
   "$defs": {
     "slotConfig": {
       "type": "object",
@@ -276,6 +276,127 @@
         },
         "code": {
           "type": "string"
+        }
+      }
+    },
+    "serviceStatus": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "platform",
+        "unitName",
+        "installed",
+        "enabled",
+        "running",
+        "mode"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "linux"
+            },
+            {
+              "type": "string",
+              "const": "darwin"
+            },
+            {
+              "type": "string",
+              "const": "win32"
+            },
+            {
+              "type": "string",
+              "const": "unsupported"
+            }
+          ]
+        },
+        "unitName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "installed": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "linger": {
+          "type": "boolean"
+        },
+        "execPath": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "manager": {
+          "type": "object",
+          "properties": {
+            "unitPath": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "activeState": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "subState": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "errorCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "no-systemd"
+            },
+            {
+              "type": "string",
+              "const": "no-session-bus"
+            }
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "connect"
+                },
+                {
+                  "type": "string",
+                  "const": "serve"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execUsesCurrent": {
+          "type": "boolean"
+        },
+        "currentBinaryPresent": {
+          "type": "boolean"
         }
       }
     }

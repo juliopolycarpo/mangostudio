@@ -273,6 +273,8 @@ pub enum RuntimeHomeDocument {
     Credentials,
     /// One line of `audit.log`.
     AuditRecord,
+    /// The `service status --json` report about the slot's user service.
+    ServiceStatus,
 }
 
 impl RuntimeHomeDocument {
@@ -281,6 +283,7 @@ impl RuntimeHomeDocument {
             RuntimeHomeDocument::SlotConfig => "slotConfig",
             RuntimeHomeDocument::Credentials => "credentials",
             RuntimeHomeDocument::AuditRecord => "auditRecord",
+            RuntimeHomeDocument::ServiceStatus => "serviceStatus",
         }
     }
 }
@@ -325,6 +328,7 @@ pub fn validate_runtime_home(
             RuntimeHomeDocument::SlotConfig,
             RuntimeHomeDocument::Credentials,
             RuntimeHomeDocument::AuditRecord,
+            RuntimeHomeDocument::ServiceStatus,
         ]
         .into_iter()
         .map(|document| {
