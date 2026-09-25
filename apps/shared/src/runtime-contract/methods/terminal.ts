@@ -6,7 +6,7 @@
  * Schema-first, like its siblings — the schema is the source and the type is
  * `Static<>` of it. `cols`/`rows` on the two calls that open or resize a
  * session carry the one hand-asserted bound in this family, mirroring
- * `assertTerminalSize` in `apps/runtime/src/services/terminal/session.ts`;
+ * `PtyError::InvalidSize` in `crates/mangostudio-runtime/src/terminal/pty.rs`;
  * everywhere else, including the `cols`/`rows` read back off a live session
  * in {@link RuntimeTerminalSessionSummarySchema}, a number stays a number.
  */

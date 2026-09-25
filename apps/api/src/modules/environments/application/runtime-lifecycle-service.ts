@@ -1431,7 +1431,7 @@ function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
  * `remote` either way; that is where the SSH transport reads it from.
  *
  * `custom` is not a `--profile` value the CLI accepts — `setup` requires a
- * base preset whenever `--yes` is set (`apps/runtime/src/setup.ts`), so
+ * base preset whenever `--yes` is set (`crates/mangostudio-runtime/src/cli.rs`), so
  * `custom` sends the narrowest preset (`none`) and lets `--allow` override
  * every key explicitly; the CLI derives the `custom` name itself from the
  * resulting non-preset allow set.

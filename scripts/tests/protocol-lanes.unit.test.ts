@@ -324,12 +324,7 @@ describe('the protocol tree at the repository root', () => {
     // A registry range here would resolve the published tarball instead of the
     // sibling directory, so a wire change would not reach its consumers until
     // it was released.
-    for (const file of [
-      'package.json',
-      'apps/api/package.json',
-      'apps/runtime/package.json',
-      'apps/shared/package.json',
-    ]) {
+    for (const file of ['package.json', 'apps/api/package.json', 'apps/shared/package.json']) {
       expect(readText(file), file).toContain('"@mangostudio/protocol": "workspace:*"');
     }
   });

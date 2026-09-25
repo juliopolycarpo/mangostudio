@@ -1,6 +1,6 @@
 import { WORKSPACES, type WorkspaceName } from './config';
 
-const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api', 'runtime'];
+const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
 
 export interface BinaryCompileDefines {
   readonly buildTime: string;

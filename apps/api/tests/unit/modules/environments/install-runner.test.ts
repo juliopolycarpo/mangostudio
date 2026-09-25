@@ -1,7 +1,7 @@
 /**
  * The hub half of an install: it asks a machine to run an argv it built and
  * relays that machine's output frames back onto the stream a browser reads.
- * Execution itself lives in `apps/runtime`; what is tested here is the seam.
+ * Execution itself lives in `crates/mangostudio-runtime`; what is tested here is the seam.
  */
 
 import { describe, expect, it } from 'bun:test';
