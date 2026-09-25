@@ -1117,6 +1117,60 @@ async fn writes_every_event_a_handler_emitted_before_its_response() {
     }
 }
 
+// A close queued behind a handler's events must not swallow the answer the
+// handler already produced: the drain that writes those events ahead of the
+// `res` stops at the close, and the settled answer still goes out before the
+// transport is closed — as it did before the drain existed.
+#[tokio::test]
+async fn answers_a_settled_handler_even_when_its_events_are_followed_by_a_close() {
+    let (a, b) = port_pair();
+    let options = SessionOptions::new(peer("a")).handle(
+        "test.announce_and_close",
+        |_params, context: CallContext| async move {
+            context.session().emit(EventInput {
+                topic: "test.announce".into(),
+                payload: Value::from(0),
+                stream_id: None,
+                end: false,
+            })?;
+            context
+                .session()
+                .close_now(close_codes::RELEASED, Some("done"));
+            Ok(Value::from("answered"))
+        },
+    );
+    let (session, _driver) = Session::spawn(a, options);
+    let mut raw = RawPeer::new(b);
+    raw.send(hello_frame("b")).await;
+    within("ready()", session.ready())
+        .await
+        .expect("handshake succeeds");
+
+    raw.send(Frame::Req(Request {
+        id: "announce-and-close".into(),
+        method: "test.announce_and_close".into(),
+        params: Value::Null,
+    }))
+    .await;
+    let mut received = Vec::new();
+    loop {
+        match within("the next frame from the responder", raw.next()).await {
+            Inbound::Frame(Frame::Hello(_)) => {}
+            Inbound::Frame(Frame::Evt(_)) => received.push("evt"),
+            Inbound::Frame(Frame::Res(response)) if response.id == "announce-and-close" => {
+                received.push("res");
+            }
+            Inbound::Closed(_) => break,
+            other => panic!("expected an evt, the res or the close; received {other:?}"),
+        }
+    }
+    assert_eq!(
+        received,
+        vec!["evt", "res"],
+        "expected the event, then the settled answer, before the transport closed"
+    );
+}
+
 #[tokio::test]
 async fn emit_burns_no_stream_key_when_the_driver_is_gone() {
     // `state()` only changes when the driver runs, so it stays `Ready` after

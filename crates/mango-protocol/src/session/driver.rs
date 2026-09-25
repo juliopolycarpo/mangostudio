@@ -203,15 +203,18 @@ impl<Tx: PortTx, Rx: PortRx> SessionDriver<Tx, Rx> {
                     let queued = drain_queued(&mut self.commands, |command| {
                         on_command(command, &mut self.pending, &writer)
                     });
-                    if let Some(reason) = queued {
-                        break reason;
-                    }
+                    // The answer is already computed, so it goes out even when
+                    // the drain stopped at a close: teardown flushes the
+                    // writer before it closes the port.
                     dispatch::on_handler_settled(
                         &self.shared,
                         &mut self.tracking,
                         &writer,
                         settled,
                     );
+                    if let Some(reason) = queued {
+                        break reason;
+                    }
                 }
                 Some(command) = self.commands.recv() => {
                     if let Some(reason) = on_command(command, &mut self.pending, &writer) {
