@@ -552,7 +552,7 @@ struct ControlCommand {
     reply: oneshot::Sender<io::Result<()>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum StopRequest {
     Interrupt,
     Force,
@@ -1044,19 +1044,15 @@ async fn supervise_child(
         })
     });
 
-    let mut cause = ProcessTerminalCause::Exited;
-    let mut graceful_requested = false;
-    let mut force_requested = false;
+    let mut stops = StopState::default();
     let mut stopped_capture = StoppedCapture::default();
     if let Some(request) = initial_stop {
-        cause = cause_for(request);
         let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
         let dispatched = dispatch_stop(&mut child, pid, request).is_ok();
-        graceful_requested = dispatched && !request.is_forceful();
         // Only a dispatched stop latches: `force_requested` is what disables the deadline arm
         // below, so latching it on a *failed* dispatch would retire this worker's only remaining
         // bound and leave the target running with nothing left to stop it.
-        force_requested = dispatched && request.is_forceful();
+        stops.record_initial(request, dispatched);
         if dispatched && request.is_forceful() {
             stopped_capture.record(capture_was_open);
         }
@@ -1064,11 +1060,10 @@ async fn supervise_child(
     let status = loop {
         tokio::select! {
             status = child.wait_target() => break status.ok(),
-            () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)), if !force_requested => {
-                cause = ProcessTerminalCause::TimedOut;
+            () = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)), if stops.deadline_armed() => {
                 let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
                 let dispatch = dispatch_stop(&mut child, pid, StopRequest::Force);
-                force_requested = true;
+                stops.record(StopRequest::Timeout);
                 stopped_capture.record(capture_was_open);
                 if let Err(error) = dispatch {
                     // The tree could not be signalled at all (Windows `TerminateJobObject`
@@ -1086,18 +1081,14 @@ async fn supervise_child(
             }
             Some(command) = commands.recv() => {
                 // `request_stop` never sends `Timeout`, so "forceful" here means Force or Cancel.
-                if (!command.request.is_forceful() && (graceful_requested || force_requested))
-                    || (command.request.is_forceful() && force_requested)
-                {
+                if !stops.admits(command.request) {
                     let _ = command.reply.send(Ok(()));
                     continue;
                 }
                 let capture_was_open = capture_was_open(&stdout_reader, &stderr_reader);
                 match dispatch_stop(&mut child, pid, command.request) {
                     Ok(()) => {
-                        cause = cause_for(command.request);
-                        graceful_requested |= !command.request.is_forceful();
-                        force_requested |= command.request.is_forceful();
+                        stops.record(command.request);
                         if command.request.is_forceful() {
                             stopped_capture.record(capture_was_open);
                         }
@@ -1122,6 +1113,7 @@ async fn supervise_child(
         &stderr_stop,
     )
     .await;
+    let mut cause = stops.cause;
     if drain_reached_deadline && cause == ProcessTerminalCause::Exited {
         cause = ProcessTerminalCause::TimedOut;
     }
@@ -1157,6 +1149,57 @@ async fn supervise_child(
         stdout,
         stderr,
     }));
+}
+
+/// Which stop reached the child first, and which later stops are still worth dispatching.
+///
+/// The first forceful stop is sticky: a cancel followed by the deadline stays `Cancelled`, and a
+/// deadline followed by a cancel stays `TimedOut`, because the forced tree kill already happened.
+#[derive(Debug)]
+struct StopState {
+    cause: ProcessTerminalCause,
+    graceful_requested: bool,
+    force_requested: bool,
+}
+
+impl Default for StopState {
+    fn default() -> Self {
+        Self {
+            cause: ProcessTerminalCause::Exited,
+            graceful_requested: false,
+            force_requested: false,
+        }
+    }
+}
+
+impl StopState {
+    /// Whether the deadline can still force the tree; a dispatched forceful stop retires it.
+    fn deadline_armed(&self) -> bool {
+        !self.force_requested
+    }
+
+    /// Whether `request` would change anything that an earlier dispatched stop did not.
+    fn admits(&self, request: StopRequest) -> bool {
+        if request.is_forceful() {
+            return !self.force_requested;
+        }
+        !(self.graceful_requested || self.force_requested)
+    }
+
+    /// Records a dispatched stop, including the deadline's own `Timeout`.
+    fn record(&mut self, request: StopRequest) {
+        self.cause = cause_for(request);
+        self.graceful_requested |= !request.is_forceful();
+        self.force_requested |= request.is_forceful();
+    }
+
+    /// Records a stop requested before the worker started: its cause holds even when the
+    /// dispatch failed, but only a dispatched stop latches.
+    fn record_initial(&mut self, request: StopRequest, dispatched: bool) {
+        self.cause = cause_for(request);
+        self.graceful_requested = dispatched && !request.is_forceful();
+        self.force_requested = dispatched && request.is_forceful();
+    }
 }
 
 fn cause_for(request: StopRequest) -> ProcessTerminalCause {
@@ -1446,7 +1489,70 @@ mod request_defaults {
 /// Unlike the supervisor tests below, these need no process and run on every platform.
 #[cfg(test)]
 mod stop_requests {
-    use super::StopRequest;
+    use super::{ProcessTerminalCause, StopRequest, StopState};
+
+    #[test]
+    fn a_cancel_before_the_deadline_stays_cancelled() {
+        let mut stops = StopState::default();
+        stops.record(StopRequest::Cancel);
+        assert!(
+            !stops.deadline_armed(),
+            "expected a dispatched cancel to retire the deadline arm | received: still armed"
+        );
+        assert_eq!(
+            stops.cause,
+            ProcessTerminalCause::Cancelled,
+            "expected cause Cancelled after cancel then deadline | received {:?}",
+            stops.cause
+        );
+    }
+
+    #[test]
+    fn a_cancel_after_the_deadline_stays_timed_out() {
+        let mut stops = StopState::default();
+        stops.record(StopRequest::Timeout);
+        for later in [
+            StopRequest::Cancel,
+            StopRequest::Force,
+            StopRequest::Interrupt,
+        ] {
+            assert!(
+                !stops.admits(later),
+                "expected {later:?} after the deadline to be absorbed | received: admitted"
+            );
+        }
+        assert_eq!(
+            stops.cause,
+            ProcessTerminalCause::TimedOut,
+            "expected cause TimedOut after deadline then cancel | received {:?}",
+            stops.cause
+        );
+    }
+
+    #[test]
+    fn an_interrupt_still_admits_a_later_forceful_stop() {
+        let mut stops = StopState::default();
+        stops.record(StopRequest::Interrupt);
+        assert!(
+            stops.deadline_armed() && stops.admits(StopRequest::Cancel),
+            "expected an interrupt to leave the deadline and a cancel live | received {stops:?}"
+        );
+        assert!(
+            !stops.admits(StopRequest::Interrupt),
+            "expected a second interrupt to be absorbed | received: admitted"
+        );
+    }
+
+    #[test]
+    fn an_undispatched_initial_stop_keeps_its_cause_without_latching() {
+        let mut stops = StopState::default();
+        stops.record_initial(StopRequest::Cancel, false);
+        assert_eq!(stops.cause, ProcessTerminalCause::Cancelled);
+        assert!(
+            stops.deadline_armed(),
+            "expected a failed initial cancel to keep the deadline armed | received: retired"
+        );
+    }
 
     #[test]
     fn only_an_interrupt_is_not_forceful() {
