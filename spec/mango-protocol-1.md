@@ -1,6 +1,6 @@
 # Mango Protocol 1
 
-Status: draft. This document is normative for wire major 1, up to and including minor 1.
+Status: draft. This document is normative for wire major 1, up to and including minor 2.
 `spec/schema/1/protocol.json` is the normative JSON Schema for every shape named here; where
 prose and schema disagree, the schema wins and the prose is a bug.
 
@@ -8,6 +8,7 @@ prose and schema disagree, the schema wins and the prose is a bug.
 | ----- | ----------------------------------------------------------------------------------------------------------------------- |
 | `1.0` | Everything else in this document.                                                                                       |
 | `1.1` | `hello.limits.maxInFlight` ([§11.2](#112-session-limits)) and the `rpc.discover` method ([§6.4](#64-reserved-methods)). |
+| `1.2` | A handler's frames go out ahead of its answer ([§6.2](#62-res-and-err)).                                                |
 
 The key words MUST, MUST NOT, SHOULD and MAY are to be read as in RFC 2119.
 
@@ -185,13 +186,18 @@ session, including requests it refused, cancelled, or could not route:
   local timeout).
 - A `req` whose `id` duplicates an in-flight request is answered with `err` code
   `INVALID_REQUEST` and the original request continues.
-- The responder MUST send every frame it produced while handling a request, before that
-  request's `res` or `err`: an `evt` the handler emitted, or a `req` it sent, before it returned
-  goes on the transport ahead of the answer. A requester MAY therefore treat the answer as the
-  end of what the handler emitted in the course of the call, and stop listening for it. Frames
-  produced after the answer, or by work outside the handler, carry no such order. This rule
-  holds at every minor: it changes no byte on the wire, only the order a responder writes the
-  frames it already sends.
+- From minor 2, a responder MUST order a handler's frames causally ahead of its answer: every
+  `evt` and `req` its session was asked to send before the handler completed — by the handler
+  itself, or by work whose completion the handler awaited — goes on the transport before that
+  request's `res` or `err`. Frames the session produces on its own (a `pong`, a `close`), frames
+  asked for after the handler completed, and frames from work the handler did not await carry
+  no such order. When the [effective minor](#52-negotiation) is at least 2, a requester MAY
+  therefore treat the answer as the end of what the handler emitted in the course of the call
+  and stop listening for it. Below that, a responder MAY write the answer ahead of frames the
+  handler asked for earlier, so a requester that needs them keeps listening past the answer.
+  The rule changes no byte on the wire, only the order a responder writes frames it already
+  sends; a minor carries it because a requester can rely on it only when both peers implement
+  it.
 
 ### 6.3 Reserved error codes
 
@@ -263,8 +269,8 @@ minor and is part of the wire, not of any contract:
   event on the same key starts again at `0`.
 - Events carry no acknowledgement. Flow control is the application's responsibility; this
   specification only makes gaps and reordering detectable.
-- An event a handler emitted before it returned precedes that request's answer
-  ([§6.2](#62-res-and-err)).
+- From minor 2, an event a handler asked for before it completed precedes that request's
+  answer ([§6.2](#62-res-and-err)).
 - A receiver that observes a gap on a stream key MAY discard that stream; it MUST NOT close the
   session for it.
 
