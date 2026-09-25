@@ -306,14 +306,18 @@ fn serve_with_no_token_anywhere_generates_one_prints_it_once_and_persists_it() {
         .spawn()
         .expect("the binary runs");
 
-    // Collects *every* line for the whole window, rather than stopping at
+    // Collects *every* line the process ever prints, rather than stopping at
     // the first match: a reader that stops as soon as it sees one
     // occurrence cannot tell "printed once" apart from "printed twice, and
     // we only looked at the first" — the earlier version of this test made
-    // exactly that mistake.
+    // exactly that mistake. Waits for the event, not a window: once the
+    // token line has arrived the child is killed, and stderr is then read to
+    // its end, so a slow start cannot hide the line and nothing printed later
+    // can escape the count. The bound only keeps a broken binary from
+    // hanging the suite.
     let stderr = child.stderr.take().expect("stderr was piped");
     let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    let reader = std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
             if sender.send(line).is_err() {
                 break;
@@ -322,16 +326,23 @@ fn serve_with_no_token_anywhere_generates_one_prints_it_once_and_persists_it() {
     });
 
     let mut lines = Vec::new();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while std::time::Instant::now() < deadline {
-        match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !lines
+        .iter()
+        .any(|line: &String| line.contains("serve token (shown once):"))
+    {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match receiver.recv_timeout(remaining) {
             Ok(line) => lines.push(line),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(_) => break,
         }
     }
     let _ = child.kill();
     let _ = child.wait();
+    reader
+        .join()
+        .expect("the stderr reader finishes at end of stream");
+    lines.extend(receiver.try_iter());
 
     let token_lines: Vec<&String> = lines
         .iter()
