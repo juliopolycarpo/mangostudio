@@ -55,6 +55,13 @@ interface WorkflowRunStep {
   readonly env: ReadonlySet<string>;
 }
 
+function parseNeeds(block: string): string[] {
+  return (/\n {4}needs: \[([^\]]*)\]/.exec(block)?.[1] ?? '')
+    .split(',')
+    .map((need) => need.trim())
+    .filter(Boolean);
+}
+
 function expectJobNeeds(workflow: string, job: string, needs: string): void {
   const block = extractJobBlock(workflow, job);
   expect(block, `job "${job}" not found in workflow`).not.toBe('');
@@ -473,6 +480,29 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('name: Build Docker binary (manual fallback)');
     expect(workflow).toMatch(
       /name: Build Docker binary \(manual fallback\)\n\s+if: \$\{\{ inputs\.rebuild \}\}/
+    );
+  });
+
+  test('the manual rebuild stages release-built cargo runtimes into every leg, never skipping one', () => {
+    const workflow = readText('.github/workflows/smoke-binary.yml');
+    const runtime = extractJobBlock(workflow, 'runtime');
+    const gate =
+      'if: $' +
+      "{{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}";
+
+    expect(runtime).toContain('uses: ./.github/workflows/runtime-build.yml');
+    expect(runtime).toContain('if: $' + '{{ inputs.rebuild }}');
+    for (const job of ['binary', 'docker']) {
+      const block = extractJobBlock(workflow, job);
+      expect(parseNeeds(block), job).toEqual(['runtime']);
+      // A failed runtime build fails the legs' dependency instead of letting
+      // them run without a runtime; a skipped one is only fine off the rebuild path.
+      expect(block, job).toContain(gate);
+      expect(block, job).toContain('name: smoke-rebuild-runtime-$' + '{{ matrix.');
+    }
+    expect(extractJobBlock(workflow, 'binary')).toContain('RUNTIME_DIR: .mango/runtime-prebuilt');
+    expect(extractJobBlock(workflow, 'docker')).toContain(
+      'bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt'
     );
   });
 
