@@ -356,6 +356,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       'tests/integration/routes/environment-entities.integration.test.ts',
       'tests/integration/services/hub-isolation-claim.integration.test.ts',
       'tests/integration/services/connect-http-runtime.integration.test.ts',
+      'tests/integration/services/environment-install-execution.integration.test.ts',
       'tests/integration/modules/library/library-undo-missing-backup.integration.test.ts',
       'tests/unit/services/tools/read-file-tool.test.ts',
       'tests/unit/services/tools/write-file-tool.test.ts',
@@ -378,6 +379,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     const matcher = new RegExp(relevant ?? '');
 
     for (const input of [
+      'apps/api/tests/integration/services/environment-install-execution.integration.test.ts',
       'apps/api/tests/support/rust-runtime-client.ts',
       'apps/api/tests/support/rust-stdio-runtime.ts',
       'apps/api/tests/support/rust-serve-runtime.ts',
