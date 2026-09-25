@@ -956,9 +956,17 @@ impl OwnedChild {
     }
 
     fn finalize(&mut self) -> io::Result<()> {
+        self.finalize_with(false)
+    }
+
+    /// Finalizes, asking the Unix guardian to also sweep adopted escapees when `sweep_escapees`.
+    /// A Windows Job already kills every member, escaped or not, so the flag is not needed there.
+    fn finalize_with(&mut self, sweep_escapees: bool) -> io::Result<()> {
+        #[cfg(not(unix))]
+        let _ = sweep_escapees;
         match self {
             #[cfg(unix)]
-            Self::Guardian(child) => child.finalize(),
+            Self::Guardian(child) => child.finalize_with(sweep_escapees),
             #[cfg(windows)]
             Self::WindowsJob(child) => child.finalize(),
             #[cfg(all(not(unix), not(windows)))]
@@ -1125,7 +1133,10 @@ async fn supervise_child(
     if drain_reached_deadline {
         let _ = child.force();
     }
-    let _ = child.finalize();
+    // A child this supervisor stopped (a cancel, a force, an interrupt, or the deadline, which
+    // includes a drain held open past it) also loses its `setsid` escapees; one that exited on
+    // its own keeps the helpers it detached.
+    let _ = child.finalize_with(cause != ProcessTerminalCause::Exited);
     // Bounded for the reason [`CLEANUP_TIMEOUT`] documents: the empty-tree proof belongs to a
     // separate process (Unix) or a kernel-object poll (Windows), neither of which is guaranteed
     // to conclude. Past the bound this worker publishes its terminal record anyway rather than
@@ -2319,6 +2330,78 @@ exit 0",
         assert_eq!(terminal.cause, ProcessTerminalCause::TimedOut);
         assert!(terminal.stdout.incomplete);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// A leader that exits on its own while its `setsid` child still holds stdout is published
+    /// as `TimedOut` once the drain reaches the deadline, so the supervisor stopped it and the
+    /// escapee goes with it, even though no signal ever reached the leader.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_timed_out_drain_reaps_a_setsid_escapee_holding_the_pipe() {
+        let _guard = process_test_guard().await;
+        let dir = scratch_dir("process-drain-escapee");
+        let pid_file = dir.join("escapee.pid");
+        let sh = script(
+            &dir,
+            "escapee-holds-stdout.sh",
+            &format!(
+                "setsid sleep 60 &\necho $! > '{0}.tmp'\nmv '{0}.tmp' '{0}'\nexit 0",
+                pid_file.display()
+            ),
+        );
+        let mut process_request = request(sh);
+        process_request.budget.deadline = Duration::from_millis(1_500);
+        // Longer than the deadline, so the held drain reaches the deadline rather than its own
+        // bound.
+        process_request.budget.post_exit_drain = Duration::from_secs(10);
+
+        let terminal = DefaultProcessSpawner
+            .start(
+                process_request,
+                Arc::new(AlwaysAllow),
+                CancellationToken::new(),
+            )
+            .await
+            .expect("script starts")
+            .wait()
+            .await;
+        let escapee: u32 = std::fs::read_to_string(&pid_file)
+            .expect("the script recorded its escapee")
+            .trim()
+            .parse()
+            .expect("a pid");
+        let alive = || {
+            std::fs::read_to_string(format!("/proc/{escapee}/stat"))
+                .ok()
+                .and_then(|stat| {
+                    stat.rsplit_once(')')
+                        .and_then(|(_, rest)| rest.split_whitespace().next().map(str::to_owned))
+                })
+                .is_some_and(|state| state != "Z")
+        };
+        let gone = tokio::time::timeout(Duration::from_secs(5), async {
+            while alive() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .is_ok();
+        if !gone {
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", &escapee.to_string()])
+                .status();
+        }
+        assert_eq!(
+            terminal.cause,
+            ProcessTerminalCause::TimedOut,
+            "expected the held drain to time out | received {:?}",
+            terminal.cause
+        );
+        assert!(
+            gone,
+            "expected the setsid escapee {escapee} holding stdout to be reaped after the \
+             timed-out drain | received: still running 5s later"
+        );
     }
 
     /// A forced timeout must retain the observation that each capture stream was still open

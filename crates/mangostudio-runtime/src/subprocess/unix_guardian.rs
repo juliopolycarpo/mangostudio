@@ -35,6 +35,9 @@ use crate::blocking::run_blocking;
 const READY: u8 = b'R';
 const RELEASE: u8 = b'G';
 const FINALIZE: u8 = b'F';
+/// [`FINALIZE`], plus: kill the session escapees this guardian adopted. Sent only for a bounded
+/// child the supervisor stopped, never for a terminal.
+const FINALIZE_SWEEP: u8 = b'S';
 const STATUS_BYTES: usize = std::mem::size_of::<libc::c_int>();
 const READY_BYTES: usize = STATUS_BYTES + 1;
 /// Seconds the guardian may spend sweeping a terminal session. Typed `i32`, not
@@ -163,10 +166,24 @@ impl GuardianChild {
 
     /// Lets the guardian terminate its group after capture has reached a bounded conclusion.
     pub(super) fn finalize(&mut self) -> io::Result<()> {
+        self.finalize_with(false)
+    }
+
+    /// [`Self::finalize`], and when `sweep_escapees` is set, also kill the descendants that left
+    /// the target's process group (a `setsid` child) and were adopted by the guardian. Linux
+    /// only: elsewhere the guardian is no subreaper and the byte means a plain finalize.
+    ///
+    /// Usage: `child.finalize_with(stopped_by_supervisor)`.
+    pub(super) fn finalize_with(&mut self, sweep_escapees: bool) -> io::Result<()> {
         let Some(finalize) = self.finalize.take() else {
             return Ok(());
         };
-        write_one_parent(finalize.as_raw_fd(), FINALIZE)
+        let byte = if sweep_escapees {
+            FINALIZE_SWEEP
+        } else {
+            FINALIZE
+        };
+        write_one_parent(finalize.as_raw_fd(), byte)
     }
 
     pub(super) fn take_stdout(&mut self) -> Option<Box<dyn tokio::io::AsyncRead + Send + Unpin>> {
@@ -891,7 +908,8 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     // The parent either acknowledges bounded capture or disappears. In both cases, terminate
     // every ordinary descendant before the guardian exits. The watchdog stays alive during this
     // wait, so a runtime SIGKILL cannot open a leader-exit cleanup gap.
-    if read_one_raw(fds.finalize_read) != Some(FINALIZE) {
+    let finalize = read_one_raw(fds.finalize_read);
+    if !matches!(finalize, Some(FINALIZE | FINALIZE_SWEEP)) {
         kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
     }
     unsafe { libc::close(fds.finalize_read) };
@@ -911,13 +929,16 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     {
         wait_group_empty(target_pgid);
     }
-    // Only a target that was stopped by a signal takes its session escapees with it. A natural
-    // exit keeps a deliberately detached helper (`git gc --auto` daemonizes) alive, matching the
+    // Only a bounded child the supervisor stopped takes its session escapees with it, and only
+    // when the parent says so. A natural exit keeps a deliberately detached helper (`git gc
+    // --auto` daemonizes) alive, and a terminal never sweeps: a session the user started with
+    // `setsid`, `tmux`, or `ssh-agent` is outside terminal containment. Both match the
     // TypeScript runtime, which walked the tree only when it terminated a call.
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    if libc::WIFSIGNALED(status) {
+    if finalize == Some(FINALIZE_SWEEP) && !fds.terminal {
         unsafe { reap_adopted_orphans(watchdog) };
     }
+
     unsafe { libc::kill(watchdog, libc::SIGKILL) };
     let _ = unsafe { wait_raw(watchdog) };
     unsafe { libc::_exit(0) }
