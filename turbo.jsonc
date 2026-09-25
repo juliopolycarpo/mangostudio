@@ -19,8 +19,7 @@
     // Names the repository whose Actions cache usage the gate job reports.
     "GITHUB_REPOSITORY",
     "GITHUB_SHA",
-    // The vendor-drift job renders its findings here. Additive drift does not
-    // fail the run, so the step summary is the only place a maintainer sees it.
+    // The gate's cache-usage report renders its table here.
     "GITHUB_STEP_SUMMARY",
     // Read only by the gate's cache-usage report, which needs `actions: read`.
     "GITHUB_TOKEN",

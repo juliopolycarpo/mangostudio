@@ -28,7 +28,6 @@ const INTEGRATION_PR_WORKFLOWS = [
   '.github/workflows/dependency-review.yml',
   '.github/workflows/protocol-ci.yml',
   '.github/workflows/release-dry-run.yml',
-  '.github/workflows/vendor-drift.yml',
 ] as const;
 
 // GitHub expression opener, assembled out of band so the literal `${{` never
