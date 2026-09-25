@@ -419,6 +419,32 @@ mod tests {
         }
     }
 
+    /// The serve bearer check: equal bytes pass, and neither a differing
+    /// byte at either end nor a length mismatch does. The prefix case is the
+    /// one a comparison that zipped the two tokens without checking length
+    /// first would wrongly accept.
+    #[test]
+    fn tokens_equal_accepts_only_identical_bytes() {
+        for (presented, expected, equal) in [
+            (&b"s3cret-token"[..], &b"s3cret-token"[..], true),
+            (b"", b"", true),
+            (b"x3cret-token", b"s3cret-token", false),
+            (b"s3cret-tokex", b"s3cret-token", false),
+            (b"s3cret", b"s3cret-token", false),
+            (b"s3cret-token", b"s3cret", false),
+            (b"", b"s3cret-token", false),
+        ] {
+            assert_eq!(
+                super::tokens_equal(presented, expected),
+                equal,
+                "expected tokens_equal({:?}, {:?}): {equal} | received: {}",
+                String::from_utf8_lossy(presented),
+                String::from_utf8_lossy(expected),
+                !equal
+            );
+        }
+    }
+
     /// The heartbeat's only two real behaviours: it actually publishes on
     /// its own cadence (not just "the function returns without panicking"),
     /// and it actually stops when cancelled — the two things this crate's
