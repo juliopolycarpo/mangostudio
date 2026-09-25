@@ -26,8 +26,8 @@ use base64::Engine as _;
 use mango_external_agents::normalize;
 use mango_external_agents::{
     Attachment as SdkAttachment, AttachmentKind as SdkAttachmentKind, CancelReason, Capability,
-    Error as SdkError, ReviewRequest, ReviewTarget as SdkReviewTarget, Steer, SteerOutcome,
-    SteerRejection as SdkSteerRejection, TurnRequest, TurnStream,
+    Error as SdkError, ReviewRequest, ReviewStream, ReviewTarget as SdkReviewTarget, Steer,
+    SteerOutcome, SteerRejection as SdkSteerRejection, TurnRequest, TurnStream,
 };
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::{EventInput, Session as HubSession};
@@ -342,7 +342,7 @@ impl Supervisor {
         // Not raced against the caller's cancel either, for the same reason
         // as a turn: a resend under the same id is answered from the receipt.
         let result = match live.session.start_review(request).await {
-            Ok(review) => match bounded_native_turn_id(&review.turn) {
+            Ok(review) => match admissible_review(&live, &review) {
                 Ok(native) => {
                     self.relay(&live, &params.client_message_id, review.turn);
                     Ok(StartReviewResult {
@@ -797,6 +797,20 @@ fn bounded_native_turn_id(stream: &TurnStream) -> Result<String, RemoteError> {
         Err(error) => error,
     };
     Err(map::remote_error(&refused.with_dispatch(stream.dispatch())))
+}
+
+/// A started review's handle, when the review also runs on the vendor thread
+/// this session is subscribed to. A review the vendor detached onto another
+/// thread would stream nothing this session hears and stall until the SDK's
+/// idle bound, so it is refused instead.
+fn admissible_review(live: &LiveSession, review: &ReviewStream) -> Result<String, RemoteError> {
+    if review.review_thread_id != live.session.ids().native_session_id {
+        return Err(argument(format!(
+            "External-agent review on session {:?} ran on another vendor thread than the session's; expected a review on the session's own thread.",
+            live.session_id
+        )));
+    }
+    bounded_native_turn_id(&review.turn)
 }
 
 /// Whether the SDK refused because the session can run no more work:

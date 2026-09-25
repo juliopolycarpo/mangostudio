@@ -3518,6 +3518,74 @@ async fn a_review_follows_the_session_sequence_topic_receipt_and_slot_rules() {
     rig.close("one").await;
 }
 
+/// The SDK names the thread a review ran on so the host can refuse one it is
+/// not subscribed to: its events would never reach this session, and the
+/// review would hold the slot until it idled out.
+#[tokio::test]
+async fn a_review_on_another_thread_is_refused_and_stopped_before_the_hub_sees_it() {
+    let (_finish, finish_gate) = watch::channel(false);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::Reviewing {
+            thread: Some(String::from("another-thread")),
+            finish: finish_gate,
+        }),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let refused = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect_err("a review on another thread must be refused");
+    assert!(
+        refused.message.contains("another vendor thread"),
+        "expected a refusal naming the foreign thread | received: {}",
+        refused.message
+    );
+    eventually(
+        "the foreign review told to stop",
+        || rig.log.cancel_reasons(),
+        |reasons| !reasons.is_empty(),
+    )
+    .await;
+    rig.idle("one", "the refused review").await;
+    assert_eq!(
+        rig.log.cancel_reasons(),
+        vec![CancelReason::Requested],
+        "expected the foreign review told to stop once"
+    );
+    let again = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect_err("a repeated refused review is answered from its receipt");
+    assert_eq!(
+        (&again.code, &again.message),
+        (&refused.code, &refused.message),
+        "expected the repeat to receive the first refusal"
+    );
+    assert_eq!(
+        rig.log.reviews.load(Ordering::SeqCst),
+        1,
+        "expected one vendor review for the refused id"
+    );
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the refused review released the turn slot");
+    let first = rig.next_event("the next turn's first event").await;
+    assert_eq!(
+        (&first["sequence"], &first["nativeTurnId"]),
+        (&json!(1), &json!("scripted-turn")),
+        "expected nothing of the refused review published | received {first}"
+    );
+    rig.close("one").await;
+}
+
 #[tokio::test]
 async fn an_unstructured_steer_failure_is_returned_as_its_mapped_error() {
     let (_open, gate) = watch::channel(true);
