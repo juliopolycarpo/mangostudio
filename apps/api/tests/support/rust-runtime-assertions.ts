@@ -32,7 +32,10 @@ import {
   readBackupManifest,
   scanLibraryInstances,
 } from '@mangostudio/shared/library/machine';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+import {
+  effectiveTools,
+  type RuntimeCapabilityManifest,
+} from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
@@ -108,16 +111,7 @@ export function assertRustRuntimeFeatureCeiling(
   // All ten library methods are implemented, so the feature follows consent
   // exactly — the readonly preset included, which grants library alone.
   const library = manifest.allow?.library === true;
-  expect(manifest.features).toEqual({
-    tools:
-      shell ||
-      git ||
-      expected.probing ||
-      expected.fsRead ||
-      expected.fsWrite ||
-      expected.checkpoints ||
-      expected.mcp ||
-      library,
+  const groups = {
     git,
     probing: expected.probing,
     mcp: expected.mcp,
@@ -126,6 +120,10 @@ export function assertRustRuntimeFeatureCeiling(
     fsRead: expected.fsRead,
     fsWrite: expected.fsWrite,
     shell,
+  };
+  expect(manifest.features).toEqual({
+    tools: effectiveTools(groups),
+    ...groups,
     update: manifest.allow?.update === true,
     // All ten external-agent methods are implemented: the feature follows consent.
     externalAgents: manifest.allow?.externalAgents === true,

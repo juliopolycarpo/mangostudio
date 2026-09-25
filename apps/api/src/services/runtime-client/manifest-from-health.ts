@@ -11,11 +11,22 @@
  * arrive on `hello` — so they are carried forward from the handshake rather
  * than recomputed. Dropping them would silently downgrade a peer to "older"
  * on the first refresh of a connection it already completed.
+ *
+ * The effective feature is consented ∩ available ∩ implemented, each from its
+ * own source. A peer that announces `implementation` in hello names the
+ * implemented set directly, so a later consent grant shows up on the next
+ * refresh while a build gap stays closed. A peer that does not (an older
+ * runtime, including the TypeScript host) folds consent into its hello
+ * `features`, so those are the ceiling, fail-closed: a grant made after the
+ * handshake needs a reconnect before the hub offers it.
  */
 
-import type {
-  RuntimeCapabilityManifest,
-  RuntimeShellKind,
+import {
+  acceptedRuntimeImplementation,
+  effectiveTools,
+  type RuntimeCapabilityManifest,
+  type RuntimeImplementation,
+  type RuntimeShellKind,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 
@@ -26,21 +37,12 @@ export function capabilityManifestFromHealth(
   handshake?: RuntimeCapabilityManifest
 ): RuntimeCapabilityManifest {
   const allow = report.allow;
+  // Judged once: a descriptor this build cannot interpret is not announced.
+  const implementation = acceptedRuntimeImplementation(handshake?.implementation);
   const shells = allow.shell
     ? report.shells.filter((shell): shell is RuntimeShellKind => SHELL_KINDS.has(shell))
     : [];
-  const tools =
-    allow.fsRead ||
-    allow.fsWrite ||
-    allow.shell ||
-    allow.git ||
-    allow.mcp ||
-    allow.probing ||
-    allow.library ||
-    allow.checkpoints;
-
-  const allowedFeatures: RuntimeCapabilityManifest['features'] = {
-    tools,
+  const allowedFeatures: Omit<RuntimeCapabilityManifest['features'], 'tools'> = {
     git: allow.git && report.git.available,
     probing: allow.probing,
     mcp: allow.mcp,
@@ -75,8 +77,11 @@ export function capabilityManifestFromHealth(
     ...(report.gh ? { gh: report.gh } : {}),
     // Same rule as `gh`: absent stays absent, so "too old to say" is never
     // rewritten as "said no".
-    ...(report.terminal === undefined ? {} : { terminal: report.terminal }),
-    features: applyImplementationCeiling(allowedFeatures, implementedAtHandshake(handshake)),
+    ...terminalOf(report, handshake, implementation),
+    features: applyImplementationCeiling(
+      allowedFeatures,
+      implementationCeiling(handshake, implementation)
+    ),
     ...(report.externalAgents?.targets.length
       ? { externalAgents: [...report.externalAgents.targets] }
       : {}),
@@ -95,54 +100,73 @@ export function capabilityManifestFromHealth(
     ...(handshake?.terminalCloseAfterRevocation === undefined
       ? {}
       : { terminalCloseAfterRevocation: handshake.terminalCloseAfterRevocation }),
+    ...(implementation ? { implementation } : {}),
     profile: report.profile,
     allow,
   };
 }
 
-type CeilingKey = Exclude<keyof RuntimeCapabilityManifest['features'], 'tools' | 'toolchain'>;
-
-const CEILING_KEYS: readonly CeilingKey[] = [
-  'git',
-  'probing',
-  'mcp',
-  'library',
-  'checkpoints',
-  'fsRead',
-  'fsWrite',
-  'shell',
-  'update',
-  'externalAgents',
-];
+/**
+ * The refreshed `terminal` flag: absent stays absent, and a PTY is capped by
+ * the same ceiling as `features` — the build's own answer when it declared one,
+ * otherwise the handshake's `terminal`, which folds consent in and therefore
+ * holds a refusal until the peer reconnects.
+ */
+function terminalOf(
+  report: RuntimeHealthReport,
+  handshake: RuntimeCapabilityManifest | undefined,
+  implementation: RuntimeImplementation | undefined
+): Pick<RuntimeCapabilityManifest, 'terminal'> {
+  if (report.terminal === undefined) return {};
+  const implemented = implementation?.features.terminal ?? handshake?.terminal ?? true;
+  return { terminal: report.terminal && implemented };
+}
 
 /**
- * The part of the handshake's `features` that describes the build, not consent.
+ * What the peer's build implements, as a `features`-shaped ceiling.
  *
- * `hello` reports each feature as consent AND implementation, so a `false`
- * whose handshake-time consent was also refused says nothing about the build.
- * Such keys are lifted to `true` so a later grant is not capped by an old
- * refusal; current consent still comes from the health report.
+ * With `implementation` announced, the ceiling comes from it and is
+ * independent of the consent that was in force at the handshake. Without it,
+ * the handshake `features` are the ceiling exactly as sent: they fold consent
+ * in, so a refusal there cannot be told apart from a build gap and must stay a
+ * refusal until the peer reconnects. `toolchain` is a request shape rather
+ * than an implemented group, so it is always the handshake's own answer.
  *
- * @example implementedAtHandshake(hello)?.shell // true when hello refused shell consent
+ * @example
+ * implementationCeiling(hello, accepted)?.shell // accepted.features.shell when announced
  */
-function implementedAtHandshake(
-  handshake?: RuntimeCapabilityManifest
+function implementationCeiling(
+  handshake: RuntimeCapabilityManifest | undefined,
+  implementation: RuntimeImplementation | undefined
 ): RuntimeCapabilityManifest['features'] | undefined {
   if (!handshake) return undefined;
-  const consent = handshake.allow;
-  if (!consent) return handshake.features;
-  const features = { ...handshake.features };
-  for (const key of CEILING_KEYS) {
-    if (consent[key] === false && features[key] === false) features[key] = true;
-  }
-  return features;
+  if (!implementation) return handshake.features;
+  const implemented = implementation.features;
+  return {
+    tools: true,
+    git: implemented.git,
+    probing: implemented.probing,
+    mcp: implemented.mcp,
+    library: implemented.library,
+    checkpoints: implemented.checkpoints,
+    fsRead: implemented.fsRead,
+    fsWrite: implemented.fsWrite,
+    shell: implemented.shell,
+    update: implemented.update,
+    externalAgents: implemented.externalAgents,
+    ...(handshake.features.toolchain === undefined
+      ? {}
+      : { toolchain: handshake.features.toolchain }),
+  };
 }
 
 function applyImplementationCeiling(
-  allowed: RuntimeCapabilityManifest['features'],
+  allowed: Omit<RuntimeCapabilityManifest['features'], 'tools'>,
   implemented?: RuntimeCapabilityManifest['features']
 ): RuntimeCapabilityManifest['features'] {
-  if (!implemented) return allowed;
+  // Every branch derives `tools` from effective groups only (#1100): ORing raw
+  // consent would claim tools for a group the machine or build cannot serve.
+  if (!implemented) return { tools: effectiveTools(allowed), ...allowed };
 
   const effective = {
     git: allowed.git && implemented.git,
@@ -164,20 +188,8 @@ function applyImplementationCeiling(
     ...(implemented.toolchain === undefined ? {} : { toolchain: implemented.toolchain }),
   } satisfies Omit<RuntimeCapabilityManifest['features'], 'tools'>;
 
-  return {
-    // This aggregate must describe at least one effective tool group. The
-    // permission and implementation operands can each be true for a different
-    // group, so intersecting their precomputed aggregates would be unsound.
-    tools: Boolean(
-      effective.git ||
-        effective.probing ||
-        effective.mcp ||
-        effective.library ||
-        effective.checkpoints ||
-        effective.fsRead ||
-        effective.fsWrite ||
-        effective.shell
-    ),
-    ...effective,
-  };
+  // The permission and implementation operands can each be true for a
+  // different group, so intersecting their precomputed aggregates would be
+  // unsound; only the effective groups decide.
+  return { tools: effectiveTools(effective), ...effective };
 }

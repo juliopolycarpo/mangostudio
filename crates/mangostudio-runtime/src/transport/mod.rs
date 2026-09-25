@@ -198,6 +198,8 @@ pub(crate) fn build_host_with_restart(
     );
     let registry = crate::external_agents::service::register(registry, external_agents);
     let registry = crate::update::register(registry, &update, exclusivity);
+    // Last: its answer is the finished registry.
+    let registry = crate::discovery::register(registry);
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
@@ -618,6 +620,7 @@ mod tests {
                 "probing.agent-clis",
                 "probing.runtimes",
                 "probing.version-managers",
+                "runtime.discover",
                 "runtime.health",
                 "runtime.update.begin",
                 "runtime.update.chunk",

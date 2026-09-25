@@ -16,6 +16,7 @@ import {
 } from '../external-agents/schemas';
 import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '../library/hash';
 import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
+import { RuntimeImplementationSchema } from './implementation';
 
 export const RuntimeShellKindSchema = Type.Union([
   Type.Literal('bash'),
@@ -172,8 +173,51 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * distinction must handle its absence rather than assume a refusal.
    */
   allow: Type.Optional(RuntimeCapabilityAllowSchema),
+  /**
+   * Which feature groups this *build* implements, independent of consent and
+   * machine availability — the ceiling `features` is intersected with.
+   *
+   * Absent means **unknown**: an older peer (including the TypeScript runtime)
+   * folds implementation into `features`, so a hub must use the handshake
+   * `features` as the ceiling and cannot tell a build gap from a refusal. See
+   * `implementation.ts` for how this relates to `rpc.discover` and
+   * `runtime.discover`.
+   */
+  implementation: Type.Optional(RuntimeImplementationSchema),
 });
 export type RuntimeCapabilityManifest = Static<typeof RuntimeCapabilityManifestSchema>;
+
+/**
+ * The feature groups that count towards `features.tools`. `update` and
+ * `externalAgents` are capabilities, not tool groups.
+ */
+export const RUNTIME_TOOL_GROUPS = [
+  'git',
+  'probing',
+  'mcp',
+  'library',
+  'checkpoints',
+  'fsRead',
+  'fsWrite',
+  'shell',
+] as const satisfies readonly (keyof RuntimeCapabilityManifest['features'])[];
+
+/**
+ * `features.tools` for a set of *effective* feature flags: true when at least
+ * one tool group is usable. Pass flags that are already consented ∩ available
+ * ∩ implemented — ORing raw consent would claim tools for a group the machine
+ * or build cannot serve. An absent flag counts as unusable here.
+ *
+ * @example
+ * effectiveTools({ git: false, fsRead: true }); // true
+ */
+export function effectiveTools(
+  features: Partial<
+    Pick<RuntimeCapabilityManifest['features'], (typeof RUNTIME_TOOL_GROUPS)[number]>
+  >
+): boolean {
+  return RUNTIME_TOOL_GROUPS.some((group) => features[group] === true);
+}
 
 /**
  * What a hub claims about who reaches the machine its runtime serves.

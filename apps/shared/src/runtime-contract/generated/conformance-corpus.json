@@ -20238,6 +20238,451 @@
     {
       "subject": {
         "kind": "method",
+        "name": "runtime.discover",
+        "side": "params"
+      },
+      "mutation": "seed",
+      "value": {},
+      "expect": "valid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "params"
+      },
+      "mutation": "extraProperty",
+      "value": {
+        "__unexpected_extra_field__": "unexpected-value"
+      },
+      "expect": "valid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "seed",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "valid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "drop:schema",
+      "value": {
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "drop:fingerprint",
+      "value": {
+        "schema": 1,
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "drop:features",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "drop:methods",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        }
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "wrongType:schema",
+      "value": {
+        "schema": "wrong-type",
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "outOfRange:schema",
+      "value": {
+        "schema": 0,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "nullValue:schema",
+      "value": {
+        "schema": null,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "wrongType:fingerprint",
+      "value": {
+        "schema": 1,
+        "fingerprint": 12345,
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "badPattern:fingerprint",
+      "value": {
+        "schema": 1,
+        "fingerprint": "",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "nullValue:fingerprint",
+      "value": {
+        "schema": 1,
+        "fingerprint": null,
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "wrongType:features",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": "wrong-type",
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "nullValue:features",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": null,
+        "methods": []
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "wrongType:methods",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": "wrong-type"
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "dupItems:methods",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": [
+          " ",
+          " "
+        ]
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "nullValue:methods",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": null
+      },
+      "expect": "invalid"
+    },
+    {
+      "subject": {
+        "kind": "method",
+        "name": "runtime.discover",
+        "side": "result"
+      },
+      "mutation": "extraProperty",
+      "value": {
+        "schema": 1,
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "features": {
+          "git": false,
+          "probing": false,
+          "mcp": false,
+          "library": false,
+          "checkpoints": false,
+          "fsRead": false,
+          "fsWrite": false,
+          "shell": false,
+          "update": false,
+          "externalAgents": false,
+          "terminal": false
+        },
+        "methods": [],
+        "__unexpected_extra_field__": "unexpected-value"
+      },
+      "expect": "valid"
+    },
+    {
+      "subject": {
+        "kind": "method",
         "name": "runtime.update.begin",
         "side": "params"
       },

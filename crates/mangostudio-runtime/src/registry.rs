@@ -236,6 +236,14 @@ impl Registry {
             !self
                 .implemented
                 .iter()
+                .any(|implemented| implemented == crate::discovery::DISCOVER_METHOD),
+            "\"{method_name}\" was registered after runtime.discover, whose answer is fixed when \
+             it is registered; register runtime.discover last"
+        );
+        assert!(
+            !self
+                .implemented
+                .iter()
                 .any(|implemented| implemented == &method_name),
             "\"{method_name}\" is already implemented; Session::handle's own HashMap::insert \
              would silently shadow the first handler, and implemented_methods() would report \

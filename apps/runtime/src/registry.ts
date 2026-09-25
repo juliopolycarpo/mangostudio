@@ -1,4 +1,4 @@
-import type { EventInput } from '@mangostudio/protocol';
+import { type EventInput, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import type { RuntimeSlot } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
@@ -197,6 +197,16 @@ export function createRuntimeMethodHandlers(
             ...identityIsolationOf(options),
           },
         }),
+      // Not implemented by this host. It announces no `implementation` in hello,
+      // so a hub never asks; the contract's handler map is exhaustive, so this
+      // answers exactly what an unregistered method would.
+      'runtime.discover': () => {
+        throw new RemoteError(
+          RESERVED_ERROR_CODES.METHOD_UNSUPPORTED,
+          'Method "runtime.discover" has no handler on this peer.',
+          { method: 'runtime.discover' }
+        );
+      },
       'runtime.update.begin': (params) => update.begin(params),
       'runtime.update.chunk': (params) => update.chunk(params),
       'runtime.update.commit': (params) => update.commit(params),

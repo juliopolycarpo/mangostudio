@@ -218,6 +218,128 @@ pub struct RuntimeCapabilityFeatures {
     pub toolchain: bool,
 }
 
+/// Version of the implementation descriptor — its feature key set and the
+/// fingerprint recipe. Mirrors `RUNTIME_IMPLEMENTATION_SCHEMA_VERSION` in
+/// `apps/shared/src/runtime-contract/implementation.ts`.
+pub const IMPLEMENTATION_SCHEMA_VERSION: u32 = 1;
+
+/// Feature groups a build implements, independent of consent and machine
+/// availability. Mirrors `RuntimeImplementationFeaturesSchema`: every key is
+/// required, so a descriptor can never say "yes" by omission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeImplementationFeatures {
+    /// `git.exec` and its `gh.*` siblings.
+    pub git: bool,
+    /// `probing.*`.
+    pub probing: bool,
+    /// `mcp.*`.
+    pub mcp: bool,
+    /// `library.*`.
+    pub library: bool,
+    /// `snapshot.*`.
+    pub checkpoints: bool,
+    /// The reading `fs.*` and `workspace.*` methods.
+    pub fs_read: bool,
+    /// The mutating `fs.*` methods.
+    pub fs_write: bool,
+    /// `shell.run` and the other shell-gated methods.
+    pub shell: bool,
+    /// `runtime.update.*`, on a platform that can publish.
+    pub update: bool,
+    /// `external-agent.*`.
+    pub external_agents: bool,
+    /// `terminal.*`, on a platform with PTY support.
+    pub terminal: bool,
+}
+
+impl RuntimeImplementationFeatures {
+    /// The wire names of every implemented group, sorted — the `features=`
+    /// line of the fingerprint recipe.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime_contract::manifest::RuntimeImplementationFeatures;
+    ///
+    /// let features = RuntimeImplementationFeatures { shell: true, git: true, ..Default::default() };
+    /// assert_eq!(features.implemented_keys(), vec!["git", "shell"]);
+    /// ```
+    #[must_use]
+    pub fn implemented_keys(&self) -> Vec<&'static str> {
+        let mut keys: Vec<&'static str> = [
+            ("git", self.git),
+            ("probing", self.probing),
+            ("mcp", self.mcp),
+            ("library", self.library),
+            ("checkpoints", self.checkpoints),
+            ("fsRead", self.fs_read),
+            ("fsWrite", self.fs_write),
+            ("shell", self.shell),
+            ("update", self.update),
+            ("externalAgents", self.external_agents),
+            ("terminal", self.terminal),
+        ]
+        .into_iter()
+        .filter_map(|(key, implemented)| implemented.then_some(key))
+        .collect();
+        keys.sort_unstable();
+        keys
+    }
+}
+
+/// The implementation ceiling a runtime announces in `hello.capabilities`.
+/// Mirrors `RuntimeImplementationSchema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeImplementation {
+    /// [`IMPLEMENTATION_SCHEMA_VERSION`].
+    pub schema: u32,
+    /// Lowercase hex SHA-256 over the schema version, the sorted implemented
+    /// methods, and the sorted implemented feature keys.
+    pub fingerprint: String,
+    /// Which feature groups this build implements.
+    pub features: RuntimeImplementationFeatures,
+}
+
+/// `runtime.discover`'s answer. Mirrors `RuntimeDiscoverResultSchema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeDiscovery {
+    /// [`IMPLEMENTATION_SCHEMA_VERSION`].
+    pub schema: u32,
+    /// The same fingerprint `hello` announced.
+    pub fingerprint: String,
+    /// Which feature groups this build implements.
+    pub features: RuntimeImplementationFeatures,
+    /// Every method this build registers, sorted and unique.
+    pub methods: Vec<String>,
+}
+
+impl RuntimeDiscovery {
+    /// The `hello` half of this answer: everything but the method list.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime_contract::manifest::{RuntimeDiscovery, RuntimeImplementationFeatures};
+    ///
+    /// let discovery = RuntimeDiscovery {
+    ///     schema: 1,
+    ///     fingerprint: "0".repeat(64),
+    ///     features: RuntimeImplementationFeatures::default(),
+    ///     methods: vec!["runtime.discover".into()],
+    /// };
+    /// assert_eq!(discovery.implementation().fingerprint, "0".repeat(64));
+    /// ```
+    #[must_use]
+    pub fn implementation(&self) -> RuntimeImplementation {
+        RuntimeImplementation {
+            schema: self.schema,
+            fingerprint: self.fingerprint.clone(),
+            features: self.features,
+        }
+    }
+}
+
 /// What a runtime announces about itself in `hello.capabilities`.
 ///
 /// See the module docs for the `features`-vs-optional-top-level-member
@@ -319,6 +441,10 @@ pub struct RuntimeCapabilityManifest {
     /// machine actually has. Absent on older peers.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub allow: Option<RuntimeCapabilityAllow>,
+    /// What this build implements, independent of consent and availability —
+    /// the ceiling `features` is intersected with. Absent on older peers.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub implementation: Option<RuntimeImplementation>,
 }
 
 /// Keeps the first occurrence of each value in `items` and drops every later repeat,
@@ -416,6 +542,7 @@ impl RuntimeCapabilityManifest {
             directory_hash_domain: None,
             profile: None,
             allow: None,
+            implementation: None,
         }
     }
 }
@@ -425,8 +552,9 @@ mod tests {
     use serde_json::{Value, to_value};
 
     use super::{
-        ExternalAgentTarget, GitAvailability, PathStyle, RuntimeCapabilityAllow,
-        RuntimeCapabilityManifest, RuntimeShellKind, capability_keys,
+        ExternalAgentTarget, GitAvailability, IMPLEMENTATION_SCHEMA_VERSION, PathStyle,
+        RuntimeCapabilityAllow, RuntimeCapabilityManifest, RuntimeDiscovery,
+        RuntimeImplementationFeatures, RuntimeShellKind, capability_keys,
     };
     use crate::schemas::validate_manifest;
 
@@ -467,6 +595,109 @@ mod tests {
         assert!(manifest.directory_hash_domain.is_none());
         assert!(manifest.profile.is_none());
         assert!(manifest.allow.is_none());
+        assert!(manifest.implementation.is_none());
+    }
+
+    /// The Rust mirror must carry exactly the implementation feature keys the
+    /// TypeBox schema declares — no more, no fewer — so the hub's ceiling
+    /// never reads a group this build forgot to announce as absent.
+    #[test]
+    fn implementation_features_mirror_manifest_schema_json_exactly() {
+        let schema: Value =
+            serde_json::from_str(crate::schemas::MANIFEST_SCHEMA_JSON).expect("well-formed JSON");
+        let mut declared: Vec<String> =
+            schema["properties"]["implementation"]["properties"]["features"]["properties"]
+                .as_object()
+                .expect("implementation.features has named properties")
+                .keys()
+                .cloned()
+                .collect();
+        declared.sort();
+        let all = RuntimeImplementationFeatures {
+            git: true,
+            probing: true,
+            mcp: true,
+            library: true,
+            checkpoints: true,
+            fs_read: true,
+            fs_write: true,
+            shell: true,
+            update: true,
+            external_agents: true,
+            terminal: true,
+        };
+        let wire = to_value(all).expect("serialises");
+        let mut wire_keys: Vec<String> = wire
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect();
+        wire_keys.sort();
+        assert_eq!(
+            wire_keys, declared,
+            "expected implementation.features keys: {declared:?} | received: {wire_keys:?}"
+        );
+        let mut listed: Vec<String> = all
+            .implemented_keys()
+            .iter()
+            .map(|key| (*key).to_string())
+            .collect();
+        listed.sort();
+        assert_eq!(listed, declared, "implemented_keys() must name every group");
+    }
+
+    /// `catalog.json` bounds the method list and each name, so a peer cannot
+    /// answer an unbounded document; this pins that the Rust validator reads
+    /// those bounds from the embedded schema.
+    #[test]
+    fn a_discovery_answer_beyond_the_catalog_bounds_is_refused() {
+        let discovery = |methods: Vec<String>| {
+            to_value(RuntimeDiscovery {
+                schema: IMPLEMENTATION_SCHEMA_VERSION,
+                fingerprint: "0".repeat(64),
+                features: RuntimeImplementationFeatures::default(),
+                methods,
+            })
+            .expect("serialises")
+        };
+        let at_limit: Vec<String> = (0..1024).map(|index| format!("m.m{index}")).collect();
+        let over_limit: Vec<String> = (0..1025).map(|index| format!("m.m{index}")).collect();
+        let long_name = vec![format!("m.{}", "a".repeat(127))];
+
+        assert!(crate::schemas::validate_result("runtime.discover", &discovery(at_limit)).is_ok());
+        assert!(
+            crate::schemas::validate_result("runtime.discover", &discovery(over_limit)).is_err(),
+            "expected 1025 methods to exceed maxItems 1024"
+        );
+        assert!(
+            crate::schemas::validate_result("runtime.discover", &discovery(long_name)).is_err(),
+            "expected a 129-character method name to exceed maxLength 128"
+        );
+    }
+
+    #[test]
+    fn a_manifest_announcing_its_implementation_validates() {
+        let mut manifest = minimal();
+        let discovery = RuntimeDiscovery {
+            schema: IMPLEMENTATION_SCHEMA_VERSION,
+            fingerprint: "0".repeat(64),
+            features: RuntimeImplementationFeatures {
+                shell: true,
+                ..RuntimeImplementationFeatures::default()
+            },
+            methods: vec!["runtime.discover".into()],
+        };
+        manifest.implementation = Some(discovery.implementation());
+
+        let value = to_value(&manifest).expect("serialises");
+        assert_eq!(value["implementation"]["features"]["shell"], true);
+        assert!(validate_manifest(&value).is_ok(), "{value}");
+        let discovered = to_value(&discovery).expect("serialises");
+        assert!(
+            crate::schemas::validate_result("runtime.discover", &discovered).is_ok(),
+            "{discovered}"
+        );
     }
 
     #[test]

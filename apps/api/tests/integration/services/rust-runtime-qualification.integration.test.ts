@@ -78,6 +78,7 @@ import {
   RuntimeConnectionManager,
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { setRuntimeTokenStoreForTests } from '../../../src/services/runtime-client/runtime-token-secrets';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { insertTestUser } from '../../support/factories';
@@ -827,6 +828,69 @@ describe('Real Rust runtime qualification', () => {
         await setRustRuntimeProfile(mangoHome, 'full');
         const restored = await manager.refreshManifest(TEST_USER.id, 'rust-serve-refresh-box');
         expect(restored.manifest?.allow).toEqual(RUNTIME_CONSENT_PRESETS.full);
+        assertRustRuntimeFeatureCeiling(client.manifest, {
+          probing: true,
+          fsRead: true,
+          fsWrite: true,
+          checkpoints: true,
+          mcp: true,
+        });
+      },
+      30_000
+    );
+
+    it.skipIf(!binary.available)(
+      'announces its implementation, serves runtime.discover, and applies a later grant without a reconnect',
+      async () => {
+        await insertTestUser(TEST_USER);
+        const store = new InMemorySecretStore();
+        setRuntimeTokenStoreForTests(store);
+        const token = 'rust-serve-qualification-discover-token';
+        mangoHome = await scratchMangoHome('serve-discover');
+        await setRustRuntimeProfile(mangoHome, 'none');
+        const port = reserveEphemeralPort();
+
+        child = Bun.spawn({
+          cmd: [binary.path, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
+          env: { ...process.env, MANGO_HOME: mangoHome, MANGOSTUDIO_RUNTIME_SERVE_TOKEN: token },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+
+        const discoveryCache = new RuntimeDiscoveryCache();
+        const repository = createEnvironmentRepository(getDb());
+        const manager = new RuntimeConnectionManager({
+          resolveEnvironment: async (userId, environmentId) =>
+            repository.find(userId, environmentId),
+          connectors: { http: connectHttpRuntime },
+          discoveryCache,
+        });
+        setRuntimeConnectionManagerForTests(manager);
+        const service = createEnvironmentService(repository, manager, () => undefined, store);
+        const environmentId = 'rust-serve-discover-box';
+
+        await service.create(TEST_USER.id, {
+          id: environmentId,
+          name: 'Rust serve discover box',
+          transportKind: 'http',
+          config: { baseUrl: `http://127.0.0.1:${port}` },
+          token,
+        });
+        await connectUntilListening(() => service.connect(TEST_USER.id, environmentId));
+        const client = await manager.getClient(TEST_USER.id, environmentId);
+        const announced = client.manifest.implementation;
+        expect(announced?.features).toMatchObject({ fsRead: true, probing: true, mcp: true });
+        expect(client.manifest.features.fsRead).toBe(false);
+
+        const surface = await manager.discoverImplementation(TEST_USER.id, environmentId);
+        expect(surface?.fingerprint).toBe(announced?.fingerprint);
+        expect(surface?.methods).toContain('runtime.discover');
+        expect(surface?.methods).toContain('fs.read-file');
+        expect(surface?.methods).toEqual([...(surface?.methods ?? [])].sort());
+
+        await setRustRuntimeProfile(mangoHome, 'full');
+        const granted = await manager.refreshManifest(TEST_USER.id, environmentId);
+        expect(granted.manifest?.implementation).toEqual(announced);
         assertRustRuntimeFeatureCeiling(client.manifest, {
           probing: true,
           fsRead: true,

@@ -52,7 +52,7 @@ export type TestHandler = (params: never, context: { readonly signal: AbortSigna
  * A host definition whose methods are the test's, and whose unnamed methods
  * fail loudly.
  *
- * The contract requires a handler for all 67 methods, and a default that
+ * The contract requires a handler for every method, and a default that
  * answered `{}` would let a test pass while calling something it never meant
  * to — so the default throws with the method name in it.
  *

@@ -7,6 +7,7 @@ import {
 } from '../library';
 import { ProfileIdSchema } from '../profiles';
 import { RuntimeErrorCodeSchema } from '../runtime-contract/errors';
+import { RuntimeDiscoverResultSchema } from '../runtime-contract/implementation';
 import { RuntimeCapabilityManifestSchema } from '../runtime-contract/manifest';
 import { RuntimeCapabilityAllowSchema, RuntimeHealthReportSchema } from '../runtime-home/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
@@ -1180,6 +1181,14 @@ export const RuntimeLifecycleViewSchema = Type.Object({
   directoryHashDomain: Type.Optional(
     Type.Integer({ minimum: 1, maximum: MAX_DIRECTORY_HASH_DOMAIN_VERSION })
   ),
+  /**
+   * What the connected runtime's build implements, method by method
+   * (`runtime.discover`), cached by the hub per build fingerprint. Absent while
+   * disconnected, for a peer that announced no implementation (older runtimes),
+   * and when the peer could not be asked — never inferred from `rpc.discover`,
+   * which lists the whole contract.
+   */
+  implementation: Type.Optional(RuntimeDiscoverResultSchema),
 });
 export type RuntimeLifecycleView = Static<typeof RuntimeLifecycleViewSchema>;
 

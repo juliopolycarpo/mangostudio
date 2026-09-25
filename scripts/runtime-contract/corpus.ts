@@ -87,6 +87,9 @@ function patternSeed(pattern: string): string {
     // `runtime.health`'s `digest`.
     case '^sha256:[a-f0-9]{64}$':
       return `sha256:${'0'.repeat(64)}`;
+    // `runtime.discover`'s and the manifest's implementation `fingerprint`.
+    case '^[0-9a-f]{64}$':
+      return '0'.repeat(64);
     default:
       throw new CorpusSeedError(
         `runtime-contract corpus: no seed generator for pattern ${JSON.stringify(pattern)}. ` +

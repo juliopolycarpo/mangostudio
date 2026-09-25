@@ -264,6 +264,8 @@ pub(crate) async fn build_capability_manifest(
     manifest.gh = Some(gh_probe.unwrap_or_else(|_| unavailable_git()));
     manifest.profile = Some(resolved.profile);
     manifest.allow = Some(allow);
+    // What this build implements, independent of the consent read above.
+    manifest.implementation = Some(crate::discovery::discovery_of(registry).implementation());
     manifest.enforces_path_policy = Some(true);
     // Sent before the peer's hello, so a hub withdrawal cannot shape it; the
     // hub strips a withdrawn attestation on its side (`applyHubIsolationClaim`).

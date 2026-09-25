@@ -106,7 +106,7 @@ describe('runtime contract artifacts', () => {
    * Health must answer regardless of consent, and terminal.close must still
    * terminate an existing PTY after shell consent has been withdrawn.
    */
-  test('every method declares a capability list, with health and terminal cleanup ungated', () => {
+  test('every method declares a capability list, with health, discovery and terminal cleanup ungated', () => {
     const withoutList = renderedCatalog()
       .methods.filter((method) => method.capabilities === undefined)
       .map((method) => method.name);
@@ -115,7 +115,7 @@ describe('runtime contract artifacts', () => {
     const ungated = renderedCatalog()
       .methods.filter((method) => (method.capabilities ?? []).length === 0)
       .map((method) => method.name);
-    expect(ungated).toEqual(['terminal.close', 'runtime.health']);
+    expect(ungated).toEqual(['terminal.close', 'runtime.health', 'runtime.discover']);
   });
 
   test('the catalog carries the events and the manifest a peer negotiates with', () => {

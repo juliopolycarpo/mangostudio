@@ -9,6 +9,7 @@ import type {
 import {
   RUNTIME_ALREADY_BOUND_CLOSE_CODE,
   type RuntimeCapabilityManifest,
+  type RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
@@ -30,6 +31,7 @@ import {
   type RuntimeEnvironmentConnector,
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { connectTestRuntime } from '../../support/runtime-fixture';
 
@@ -105,6 +107,44 @@ function fakeConnection(
     client: { manifest } as RuntimeClient,
     close: onClose,
   };
+}
+
+/** A connection to a build that announces `fingerprint` and serves `runtime.discover`. */
+class DiscoveringConnection implements ManagedRuntimeConnection {
+  discoverCalls = 0;
+  readonly client: RuntimeClient;
+  readonly close = () => undefined;
+
+  constructor(fingerprint: string) {
+    const implementation = {
+      schema: 1,
+      fingerprint,
+      features: {
+        git: true,
+        probing: false,
+        mcp: false,
+        library: false,
+        checkpoints: true,
+        fsRead: false,
+        fsWrite: false,
+        shell: false,
+        update: false,
+        externalAgents: false,
+        terminal: false,
+      },
+    };
+    const discover = (): Promise<RuntimeDiscoverResult> => {
+      this.discoverCalls += 1;
+      return Promise.resolve({
+        ...implementation,
+        methods: ['runtime.discover', 'runtime.health'],
+      });
+    };
+    this.client = {
+      manifest: { ...TEST_MANIFEST, implementation },
+      discoverImplementation: discover,
+    } as unknown as RuntimeClient;
+  }
 }
 
 /**
@@ -258,6 +298,65 @@ describe('RuntimeConnectionManager', () => {
     await manager.connect('user-1', 'devbox', { force: true });
 
     expect(manager.getStatus('user-1', 'devbox').offlineRuntimeCache).toBeUndefined();
+  });
+
+  describe('runtime.discover cache', () => {
+    /** A manager whose every connect hands out the next of `builds`. */
+    function managerOver(builds: readonly DiscoveringConnection[]) {
+      let next = 0;
+      let drop: (() => void) | undefined;
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: {
+          stdio: (_definition, onUnavailable) => {
+            drop = onUnavailable;
+            return Promise.resolve(builds[next++] as DiscoveringConnection);
+          },
+        },
+        discoveryCache: new RuntimeDiscoveryCache(),
+      });
+      const reconnectAfterDrop = async () => {
+        drop?.();
+        await manager.connect('user-1', 'devbox', { force: true });
+      };
+      return { manager, reconnectAfterDrop };
+    }
+
+    it('drops the cached surface when a reconnect announces another build', async () => {
+      const builds = [
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('b'.repeat(64)),
+      ];
+      const { manager, reconnectAfterDrop } = managerOver(builds);
+
+      await manager.connect('user-1', 'devbox');
+      await manager.discoverImplementation('user-1', 'devbox');
+      await reconnectAfterDrop();
+      const sameBuild = await manager.discoverImplementation('user-1', 'devbox');
+      await reconnectAfterDrop();
+      const otherBuild = await manager.discoverImplementation('user-1', 'devbox');
+
+      expect(builds.map((build) => build.discoverCalls)).toEqual([1, 0, 1]);
+      expect(sameBuild?.fingerprint).toBe('a'.repeat(64));
+      expect(otherBuild?.fingerprint).toBe('b'.repeat(64));
+    });
+
+    it('forgets the cached surface when the environment is disconnected deliberately', async () => {
+      const builds = [
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('a'.repeat(64)),
+      ];
+      const { manager } = managerOver(builds);
+
+      await manager.connect('user-1', 'devbox');
+      await manager.discoverImplementation('user-1', 'devbox');
+      manager.disconnect('user-1', 'devbox');
+      await manager.connect('user-1', 'devbox', { force: true });
+      await manager.discoverImplementation('user-1', 'devbox');
+
+      expect(builds.map((build) => build.discoverCalls)).toEqual([1, 1]);
+    });
   });
 
   // #792: the pull is bounded at half an hour, which no proxy or browser holds

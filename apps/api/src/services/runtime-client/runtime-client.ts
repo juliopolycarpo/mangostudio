@@ -680,6 +680,19 @@ export class RuntimeClient {
   }
 
   /**
+   * The methods and feature groups this peer's build implements
+   * (`runtime.discover`). Only a peer that announced `implementation` in hello
+   * serves it; read it through `RuntimeConnectionManager.discoverImplementation`,
+   * which caches it by fingerprint, rather than calling this per request.
+   *
+   * @example
+   * const { methods } = await client.discoverImplementation();
+   */
+  discoverImplementation(options?: RequestOptions) {
+    return this.request('runtime.discover', {}, options);
+  }
+
+  /**
    * Replaces the handshake manifest after a consent change.
    *
    * Used when the hub re-reads `runtime.health` so the cosmetic filter and the

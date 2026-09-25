@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { RuntimeImplementation } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { capabilityManifestFromHealth } from '../../../../src/services/runtime-client/manifest-from-health';
@@ -193,56 +194,189 @@ describe('capabilityManifestFromHealth', () => {
     });
   });
 
-  it('lets a later consent grant through when the handshake refused it by consent', () => {
+  describe('a peer that announces its implementation in hello', () => {
     const noneReport: RuntimeHealthReport = {
       ...baseReport,
       profile: 'none',
       allow: RUNTIME_CONSENT_PRESETS.none,
     };
-    const handshake = capabilityManifestFromHealth(noneReport);
-    expect(handshake.features.shell).toBe(false);
-
-    const granted = capabilityManifestFromHealth(
-      {
-        ...baseReport,
-        profile: 'custom',
-        allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true, externalAgents: true },
+    const grantedReport: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'custom',
+      allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true, externalAgents: true, git: true },
+      terminal: true,
+    };
+    const implementation: RuntimeImplementation = {
+      schema: 1,
+      fingerprint: 'a'.repeat(64),
+      features: {
+        git: false,
+        probing: true,
+        mcp: true,
+        library: true,
+        checkpoints: true,
+        fsRead: true,
+        fsWrite: true,
+        shell: true,
+        update: true,
+        externalAgents: true,
+        terminal: false,
       },
-      handshake
-    );
+    };
+    // Hello under a `none` profile: every effective feature is false.
+    const handshake = { ...capabilityManifestFromHealth(noneReport), implementation };
 
-    expect({
-      shell: granted.features.shell,
-      externalAgents: granted.features.externalAgents,
-    }).toEqual({
-      shell: true,
-      externalAgents: true,
+    it('applies a later consent grant without a reconnect', () => {
+      const granted = capabilityManifestFromHealth(grantedReport, handshake);
+
+      expect({
+        shell: granted.features.shell,
+        externalAgents: granted.features.externalAgents,
+      }).toEqual({ shell: true, externalAgents: true });
+    });
+
+    it('keeps a build gap closed even after consent is granted', () => {
+      const granted = capabilityManifestFromHealth(grantedReport, handshake);
+
+      expect({ git: granted.features.git, terminal: granted.terminal }).toEqual({
+        git: false,
+        terminal: false,
+      });
+    });
+
+    it('carries the implementation forward unchanged across consent changes', () => {
+      const granted = capabilityManifestFromHealth(grantedReport, handshake);
+      const revoked = capabilityManifestFromHealth(noneReport, granted);
+
+      expect(granted.implementation).toEqual(implementation);
+      expect(revoked.implementation).toEqual(implementation);
+      expect(revoked.features.shell).toBe(false);
     });
   });
 
-  // Known trade-off: hello cannot tell "build lacks it" from "consent refused
-  // it", so a build gap hidden behind a consent refusal is lifted on a later
-  // grant, and the runtime rejects the call itself. This is not build detection.
-  it('lifts a build gap hidden behind a handshake consent refusal on a later grant', () => {
+  it('treats an implementation at another schema version as not announced', () => {
     const noneReport: RuntimeHealthReport = {
       ...baseReport,
       profile: 'none',
       allow: RUNTIME_CONSENT_PRESETS.none,
     };
-    // A build without shell reports the same `shell: false` as a refusal.
     const hello = capabilityManifestFromHealth(noneReport);
-    const handshake = { ...hello, features: { ...hello.features, shell: false } };
+    const handshake = {
+      ...hello,
+      implementation: {
+        schema: 2,
+        fingerprint: 'a'.repeat(64),
+        features: {
+          git: true,
+          probing: true,
+          mcp: true,
+          library: true,
+          checkpoints: true,
+          fsRead: true,
+          fsWrite: true,
+          shell: true,
+          update: true,
+          externalAgents: true,
+          terminal: true,
+        },
+      },
+    };
 
     const granted = capabilityManifestFromHealth(
-      {
-        ...baseReport,
-        profile: 'custom',
-        allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true },
-      },
+      { ...baseReport, profile: 'custom', allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true } },
       handshake
     );
 
-    expect(granted.features.shell).toBe(true);
+    expect({ shell: granted.features.shell, implementation: granted.implementation }).toEqual({
+      shell: false,
+      implementation: undefined,
+    });
+  });
+
+  describe('a peer that does not announce its implementation', () => {
+    it('keeps a handshake consent refusal closed until the peer reconnects', () => {
+      const noneReport: RuntimeHealthReport = {
+        ...baseReport,
+        profile: 'none',
+        allow: RUNTIME_CONSENT_PRESETS.none,
+      };
+      const handshake = capabilityManifestFromHealth(noneReport);
+      expect(handshake.implementation).toBeUndefined();
+
+      const granted = capabilityManifestFromHealth(
+        {
+          ...baseReport,
+          profile: 'custom',
+          allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true, externalAgents: true },
+        },
+        handshake
+      );
+
+      // Hello cannot tell a build gap from a refusal, so the refusal is the
+      // ceiling: fail-closed, never lifted.
+      expect({
+        shell: granted.features.shell,
+        externalAgents: granted.features.externalAgents,
+      }).toEqual({ shell: false, externalAgents: false });
+      expect(granted.implementation).toBeUndefined();
+    });
+
+    it('keeps a handshake terminal refusal closed until the peer reconnects', () => {
+      const noneReport: RuntimeHealthReport = {
+        ...baseReport,
+        profile: 'none',
+        allow: RUNTIME_CONSENT_PRESETS.none,
+        terminal: false,
+      };
+      const handshake = capabilityManifestFromHealth(noneReport);
+      expect(handshake.terminal).toBe(false);
+
+      const granted = capabilityManifestFromHealth(
+        {
+          ...baseReport,
+          profile: 'custom',
+          allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true },
+          terminal: true,
+        },
+        handshake
+      );
+
+      expect(granted.terminal).toBe(false);
+    });
+
+    it('takes a later terminal report from a handshake that never answered', () => {
+      const hello = capabilityManifestFromHealth({
+        ...baseReport,
+        profile: 'none',
+        allow: RUNTIME_CONSENT_PRESETS.none,
+      });
+      expect(hello.terminal).toBeUndefined();
+
+      const refreshed = capabilityManifestFromHealth(
+        { ...baseReport, profile: 'full', allow: RUNTIME_CONSENT_PRESETS.full, terminal: true },
+        hello
+      );
+
+      expect(refreshed.terminal).toBe(true);
+    });
+  });
+
+  it('derives tools from effective groups, not raw consent, without a handshake (#1100)', () => {
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      git: { available: false },
+      profile: 'custom',
+      allow: { ...RUNTIME_CONSENT_PRESETS.none, git: true, update: true, externalAgents: true },
+    };
+
+    const refreshed = capabilityManifestFromHealth(report);
+
+    // git is consented but the binary is missing; update and externalAgents
+    // are not tool groups. No effective tool group remains.
+    expect({ tools: refreshed.features.tools, git: refreshed.features.git }).toEqual({
+      tools: false,
+      git: false,
+    });
   });
 
   it('derives tools from capabilities that are both allowed and implemented', () => {

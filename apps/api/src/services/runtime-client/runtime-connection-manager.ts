@@ -15,6 +15,7 @@ import {
   narrowRuntimeErrorCode,
   RUNTIME_ALREADY_BOUND_CLOSE_CODE,
   type RuntimeCapabilityManifest,
+  type RuntimeDiscoverResult,
   type RuntimeErrorCode,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
@@ -43,6 +44,11 @@ import { connectSshRuntime } from './connect-ssh-runtime';
 import { isAuthorizedEnvironmentWorkspace } from './hub-workspace-authority';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
+import {
+  type RuntimeDiscoveryCache,
+  runtimeDiscoveryCache,
+  runtimeDiscoveryKey,
+} from './runtime-discovery-cache';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
 
 /** Last `runtime.health` retained across disconnect the way the manifest is. */
@@ -165,6 +171,8 @@ export interface RuntimeConnectionManagerOptions {
    * `Date.now()` and not timers, so the real 10s would be waited out for real.
    */
   readonly connectDeadlinesMs?: Partial<Record<EnvironmentTransportKind, number>>;
+  /** Told of every new connection's manifest, so a changed build drops its cached surface. */
+  readonly discoveryCache?: RuntimeDiscoveryCache;
 }
 
 /**
@@ -479,6 +487,7 @@ export class RuntimeConnectionManager {
   readonly #publishHook: (userId: string) => void;
   readonly #recordTransition: EnvironmentStateTransitionRecorder;
   readonly #resolveEnvironment: RuntimeEnvironmentResolver;
+  readonly #discoveryCache: RuntimeDiscoveryCache;
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
   #terminalsRevoked: TerminalsRevokedObserver | undefined;
@@ -489,6 +498,7 @@ export class RuntimeConnectionManager {
     this.#publishHook = options.publish ?? (() => undefined);
     this.#recordTransition = options.recordTransition ?? recordEnvironmentStateTransition;
     this.#resolveEnvironment = options.resolveEnvironment;
+    this.#discoveryCache = options.discoveryCache ?? runtimeDiscoveryCache;
   }
 
   /**
@@ -671,6 +681,10 @@ export class RuntimeConnectionManager {
         }
         entry.connection = connection;
         entry.announcedManifest = connection.client.manifest;
+        this.#discoveryCache.observe(
+          runtimeDiscoveryKey(userId, environmentId),
+          connection.client.manifest
+        );
         entry.connectedAtMs = Date.now();
         entry.manifestReadAtMs = entry.connectedAtMs;
         // The failure count is not cleared here: a handshake only shows the
@@ -839,6 +853,10 @@ export class RuntimeConnectionManager {
 
     entry.connection = connection;
     entry.announcedManifest = connection.client.manifest;
+    this.#discoveryCache.observe(
+      runtimeDiscoveryKey(userId, environmentId),
+      connection.client.manifest
+    );
     entry.connectedAtMs = Date.now();
     entry.manifestReadAtMs = entry.connectedAtMs;
     entry.failureCount = 0;
@@ -852,7 +870,28 @@ export class RuntimeConnectionManager {
     return connection.client;
   }
 
+  /**
+   * The detailed implementation surface of the environment's live runtime
+   * (`runtime.discover`), read through the fingerprint-keyed cache this
+   * manager invalidates. `undefined` for a peer that announced none; rejects
+   * like {@link getExistingClient} when nothing is connected.
+   *
+   * @example
+   * const surface = await manager.discoverImplementation(userId, environmentId);
+   */
+  async discoverImplementation(
+    userId: string,
+    environmentId: string
+  ): Promise<RuntimeDiscoverResult | undefined> {
+    const client = await this.getExistingClient(userId, environmentId);
+    return await this.#discoveryCache.resolve(runtimeDiscoveryKey(userId, environmentId), client, {
+      userId,
+      environmentId,
+    });
+  }
+
   disconnect(userId: string, environmentId: string): void {
+    this.#discoveryCache.forget(runtimeDiscoveryKey(userId, environmentId));
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry) return;
 
@@ -953,6 +992,7 @@ export class RuntimeConnectionManager {
    * show the previous host.
    */
   clearHealth(userId: string, environmentId: string): void {
+    this.#discoveryCache.forget(runtimeDiscoveryKey(userId, environmentId));
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry) return;
     const hadPeer =
