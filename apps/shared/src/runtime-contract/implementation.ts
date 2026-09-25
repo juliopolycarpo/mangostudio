@@ -77,6 +77,16 @@ export const RuntimeImplementationSchema = Type.Object({
 export type RuntimeImplementation = Static<typeof RuntimeImplementationSchema>;
 
 /**
+ * Upper bound on `runtime.discover`'s method list: far above the contract's
+ * size today (under a hundred methods), low enough that a misbehaving peer
+ * cannot hand the hub an unbounded document.
+ */
+export const RUNTIME_DISCOVER_MAX_METHODS = 1024;
+
+/** Longest method name the protocol allows (its `METHOD_MAX_LENGTH`). */
+export const RUNTIME_METHOD_NAME_MAX_LENGTH = 128;
+
+/**
  * `runtime.discover`'s answer: the implementation ceiling plus every method
  * this build registers, sorted and unique.
  *
@@ -87,7 +97,10 @@ export const RuntimeDiscoverResultSchema = Type.Object({
   schema: Type.Integer({ minimum: 1 }),
   fingerprint: RuntimeImplementationFingerprintSchema,
   features: RuntimeImplementationFeaturesSchema,
-  methods: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
+  methods: Type.Array(Type.String({ minLength: 1, maxLength: RUNTIME_METHOD_NAME_MAX_LENGTH }), {
+    maxItems: RUNTIME_DISCOVER_MAX_METHODS,
+    uniqueItems: true,
+  }),
 });
 export type RuntimeDiscoverResult = Static<typeof RuntimeDiscoverResultSchema>;
 

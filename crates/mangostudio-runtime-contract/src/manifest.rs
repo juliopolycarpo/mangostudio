@@ -647,6 +647,35 @@ mod tests {
         assert_eq!(listed, declared, "implemented_keys() must name every group");
     }
 
+    /// `catalog.json` bounds the method list and each name, so a peer cannot
+    /// answer an unbounded document; this pins that the Rust validator reads
+    /// those bounds from the embedded schema.
+    #[test]
+    fn a_discovery_answer_beyond_the_catalog_bounds_is_refused() {
+        let discovery = |methods: Vec<String>| {
+            to_value(RuntimeDiscovery {
+                schema: IMPLEMENTATION_SCHEMA_VERSION,
+                fingerprint: "0".repeat(64),
+                features: RuntimeImplementationFeatures::default(),
+                methods,
+            })
+            .expect("serialises")
+        };
+        let at_limit: Vec<String> = (0..1024).map(|index| format!("m.m{index}")).collect();
+        let over_limit: Vec<String> = (0..1025).map(|index| format!("m.m{index}")).collect();
+        let long_name = vec![format!("m.{}", "a".repeat(127))];
+
+        assert!(crate::schemas::validate_result("runtime.discover", &discovery(at_limit)).is_ok());
+        assert!(
+            crate::schemas::validate_result("runtime.discover", &discovery(over_limit)).is_err(),
+            "expected 1025 methods to exceed maxItems 1024"
+        );
+        assert!(
+            crate::schemas::validate_result("runtime.discover", &discovery(long_name)).is_err(),
+            "expected a 129-character method name to exceed maxLength 128"
+        );
+    }
+
     #[test]
     fn a_manifest_announcing_its_implementation_validates() {
         let mut manifest = minimal();

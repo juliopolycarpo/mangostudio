@@ -8,9 +8,12 @@ import {
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_NAME,
   RUNTIME_CONTRACT_VERSION,
+  RUNTIME_DISCOVER_MAX_METHODS,
   RUNTIME_IMPLEMENTATION_SCHEMA_VERSION,
+  RUNTIME_METHOD_NAME_MAX_LENGTH,
   RUNTIME_TOOL_GROUPS,
   RuntimeCapabilityManifestSchema,
+  RuntimeDiscoverResultSchema,
 } from '@mangostudio/shared/runtime-contract';
 import Type from 'typebox';
 import Value from 'typebox/value';
@@ -315,5 +318,48 @@ describe('acceptedRuntimeImplementation', () => {
     expect(acceptedRuntimeImplementation({ ...implementation, schema: 2 })).toBeUndefined();
     expect(acceptedRuntimeImplementation({ ...implementation, features: {} })).toBeUndefined();
     expect(acceptedRuntimeImplementation(undefined)).toBeUndefined();
+  });
+});
+
+describe('RuntimeDiscoverResultSchema', () => {
+  const answer = (methods: string[]) => ({
+    schema: RUNTIME_IMPLEMENTATION_SCHEMA_VERSION,
+    fingerprint: '0'.repeat(64),
+    features: {
+      git: false,
+      probing: false,
+      mcp: false,
+      library: false,
+      checkpoints: false,
+      fsRead: false,
+      fsWrite: false,
+      shell: false,
+      update: false,
+      externalAgents: false,
+      terminal: false,
+    },
+    methods,
+  });
+  const names = (count: number) => Array.from({ length: count }, (_, index) => `m.m${index}`);
+
+  it('bounds the method list and each method name', () => {
+    expect(
+      Value.Check(RuntimeDiscoverResultSchema, answer(names(RUNTIME_DISCOVER_MAX_METHODS)))
+    ).toBe(true);
+    expect(
+      Value.Check(RuntimeDiscoverResultSchema, answer(names(RUNTIME_DISCOVER_MAX_METHODS + 1)))
+    ).toBe(false);
+    expect(
+      Value.Check(
+        RuntimeDiscoverResultSchema,
+        answer([`m.${'a'.repeat(RUNTIME_METHOD_NAME_MAX_LENGTH - 1)}`])
+      )
+    ).toBe(false);
+  });
+
+  it('leaves room above the contract it describes', () => {
+    expect(Object.keys(RUNTIME_CONTRACT.definition.methods).length).toBeLessThan(
+      RUNTIME_DISCOVER_MAX_METHODS / 4
+    );
   });
 });

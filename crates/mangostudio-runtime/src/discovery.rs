@@ -293,6 +293,12 @@ mod tests {
             expected.methods
         );
 
+        let wire = serde_json::to_value(&expected).expect("serialises");
+        assert!(
+            mangostudio_runtime_contract::schemas::validate_result(DISCOVER_METHOD, &wire).is_ok(),
+            "the production answer must fit the runtime.discover result schema: {wire}"
+        );
+
         let manifest = crate::health::build_capability_manifest(
             RuntimeSlot::Host,
             &home,
