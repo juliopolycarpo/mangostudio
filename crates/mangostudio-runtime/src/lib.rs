@@ -109,6 +109,18 @@
 //! [`runtime_home::DefaultSetupState`], which slots start pre-consented —
 //! and [`consent`] builds the rest on top of it rather than duplicating it.
 
+// Panic isolation (`panic.rs`, `abandoned_call.rs`, and
+// `mango_protocol::session::dispatch`'s own `JoinSet`) recovers a handler's
+// panic by catching its unwind. Under `panic = "abort"` there is no unwind to
+// catch: one panicking request would kill the process and every session in
+// it. The workspace release profile pins `panic = "unwind"`; this refuses to
+// build the crate if any profile or `-C panic` flag ever overrides that.
+#[cfg(panic = "abort")]
+compile_error!(
+    "mangostudio-runtime requires panic = \"unwind\": handler panic isolation catches unwinds, \
+     and panic = \"abort\" would turn one panicking request into a process exit"
+);
+
 mod abandoned_call;
 pub mod audit;
 pub mod blocking;

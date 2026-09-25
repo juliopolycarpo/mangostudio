@@ -217,3 +217,28 @@ async fn a_panicking_concurrent_request_does_not_take_down_a_normal_one() {
     .expect("the session must still be open after a handler panic");
     assert_eq!(after["slot"], json!("host"));
 }
+
+/// The shipped binary is built with the workspace `[profile.release]`, and
+/// the isolation proved above only exists while that profile unwinds: tests
+/// always build with `panic = "unwind"` whatever the release profile says,
+/// so they cannot notice an `abort` there on their own. `src/lib.rs` also
+/// refuses to compile under `cfg(panic = "abort")`; this names the profile
+/// setting itself so the failure points at the line to fix.
+#[test]
+fn the_release_profile_unwinds() {
+    let manifest_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml");
+    let manifest: toml::Table = std::fs::read_to_string(manifest_path)
+        .expect("read the workspace Cargo.toml")
+        .parse()
+        .expect("parse the workspace Cargo.toml");
+    let panic = manifest
+        .get("profile")
+        .and_then(|profile| profile.get("release"))
+        .and_then(|release| release.get("panic"))
+        .and_then(|panic| panic.as_str());
+    assert_eq!(
+        panic,
+        Some("unwind"),
+        "expected [profile.release] panic = \"unwind\" in {manifest_path} | received: {panic:?}"
+    );
+}
