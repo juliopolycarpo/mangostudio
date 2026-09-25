@@ -189,7 +189,13 @@ mod tests {
         /// Reads started, once at least one has: the stalled read stays held by the gate, so
         /// no further read can start while this waits.
         async fn reads_after_the_first(&self) -> usize {
-            let _ = tokio::time::timeout(Duration::from_secs(5), self.first_read.notified()).await;
+            let started = tokio::time::timeout(Duration::from_secs(5), self.first_read.notified())
+                .await
+                .is_ok();
+            assert!(
+                started,
+                "expected the stalled consent read to start within 5s | received no read started"
+            );
             self.reads()
         }
     }

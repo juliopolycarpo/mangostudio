@@ -323,7 +323,13 @@ mod tests {
         }
         // A poll can give up on its bound before the blocking pool has started the read at
         // all, so wait for that start before counting. The gate keeps any second read out.
-        let _ = tokio::time::timeout(FINISH, first_read.notified()).await;
+        let first_started = tokio::time::timeout(FINISH, first_read.notified())
+            .await
+            .is_ok();
+        assert!(
+            first_started,
+            "expected the stuck read to start within {FINISH:?} | received no read started"
+        );
         let reads = started.load(Ordering::SeqCst);
         gate.release();
         assert_eq!(
