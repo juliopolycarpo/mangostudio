@@ -400,9 +400,11 @@ describe('release workflow binary gate', () => {
     // one, and zig is fetched only against a pinned checksum.
     for (const target of ALL_BINARY_TARGETS) expect(runtime).toContain(`"${target.arch}"`);
     expect(runtime).toContain('bun --no-install ./scripts/build-runtime.ts --platform "$PLATFORM"');
-    expect(runtime).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
-    expect(runtime).toContain('sha256sum --check --strict');
-    expect(runtime).toContain('tool: cargo-zigbuild@0.23.4');
+    expect(runtime).toContain('uses: ./.github/actions/setup-zigbuild');
+    const zigbuild = readText('.github/actions/setup-zigbuild/action.yml');
+    expect(zigbuild).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
+    expect(zigbuild).toContain('sha256sum --check --strict');
+    expect(zigbuild).toContain('tool: cargo-zigbuild@0.23.4');
   });
 
   test('archive upload payloads skip artifact re-compression', () => {

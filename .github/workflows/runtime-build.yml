@@ -37,11 +37,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Pinned zig for cargo-zigbuild; checksum from https://ziglang.org/download/index.json.
-  ZIG_VERSION: 0.15.2
-  ZIG_SHA256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
-
 jobs:
   runtime:
     name: Runtime ${{ matrix.platform }}
@@ -64,22 +59,9 @@ jobs:
       # Installs the toolchain rust-toolchain.toml pins.
       - run: rustup show active-toolchain
 
-      - name: Install zig
+      - name: Install zig and cargo-zigbuild
         if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          archive="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
-          curl --fail --silent --show-error --location --retry 3 \
-            "https://ziglang.org/download/${ZIG_VERSION}/${archive}" -o "${RUNNER_TEMP}/${archive}"
-          echo "${ZIG_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
-          tar -xJf "${RUNNER_TEMP}/${archive}" -C "$RUNNER_TEMP"
-          echo "${RUNNER_TEMP}/zig-x86_64-linux-${ZIG_VERSION}" >> "$GITHUB_PATH"
-
-      - name: Install cargo-zigbuild
-        if: runner.os == 'Linux'
-        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
-        with:
-          tool: cargo-zigbuild@0.23.4
+        uses: ./.github/actions/setup-zigbuild
 
       - name: Build runtime
         shell: bash

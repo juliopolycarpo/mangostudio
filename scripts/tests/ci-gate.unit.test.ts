@@ -252,6 +252,19 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(msrvBlock).toContain('cargo test -p mangostudio --all-targets --locked');
   });
 
+  test('the musl clippy lane fails on musl-only warnings for both shipped musl targets', () => {
+    const muslBlock = extractJobBlock(workflow, 'musl-clippy');
+
+    expect(parseNeedsList(muslBlock)).toEqual(['changes']);
+    expect(muslBlock).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(muslBlock).toContain('uses: ./.github/actions/setup-zigbuild');
+    for (const triple of ['x86_64-unknown-linux-musl', 'aarch64-unknown-linux-musl']) {
+      expect(muslBlock).toContain(
+        `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target ${triple} -- -D warnings`
+      );
+    }
+  });
+
   test('the fixture freshness lane regenerates and diffs both rust-home and ts-home', () => {
     const freshnessBlock = extractJobBlock(workflow, 'runtime-home-fixture-freshness');
 
@@ -281,7 +294,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace runtime-home-fixture-freshness real-binary-qualification' || '' }}`
+      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness real-binary-qualification' || '' }}`
     );
   });
 
