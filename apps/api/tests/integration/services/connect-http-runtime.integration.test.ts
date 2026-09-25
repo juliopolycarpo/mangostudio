@@ -228,7 +228,7 @@ describe('Direct URL http runtime', () => {
         token: firstToken,
       });
 
-      await expect(service.connect(TEST_USER.id, 'rotate-box')).rejects.toThrow();
+      expect(await rejectionOf(service.connect(TEST_USER.id, 'rotate-box'))).toBeInstanceOf(Error);
 
       await service.update(TEST_USER.id, 'rotate-box', { token: secondToken });
       const connected = await service.connect(TEST_USER.id, 'rotate-box');

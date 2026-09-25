@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { rejectionOf } from '@mangostudio/protocol/testing';
 import {
   GrepPatternError,
   PathAccessError,
@@ -183,27 +184,31 @@ describe.skipIf(!binary.available)('Rust filesystem search matches the TypeScrip
 
   it('preserves typed pattern and inaccessible-root errors at the Hub boundary', async () => {
     for (const pattern of ['(', 'a'.repeat(1001)]) {
-      await expect(
-        rust.fs.grep({
-          pattern,
-          inputPath: '.',
-          resolvedPath: directory,
-          caseInsensitive: false,
-          maxResults: 10,
-          maxMatchesPerFile: 10,
-          maxFileSizeBytes: 1024,
-          includeDotfiles: false,
-        })
-      ).rejects.toBeInstanceOf(GrepPatternError);
+      expect(
+        await rejectionOf(
+          rust.fs.grep({
+            pattern,
+            inputPath: '.',
+            resolvedPath: directory,
+            caseInsensitive: false,
+            maxResults: 10,
+            maxMatchesPerFile: 10,
+            maxFileSizeBytes: 1024,
+            includeDotfiles: false,
+          })
+        )
+      ).toBeInstanceOf(GrepPatternError);
     }
-    await expect(
-      rust.fs.glob({
-        pattern: '*',
-        cwd: join(directory, 'missing'),
-        maxResults: 10,
-        includeDotfiles: false,
-        absolute: false,
-      })
-    ).rejects.toBeInstanceOf(PathAccessError);
+    expect(
+      await rejectionOf(
+        rust.fs.glob({
+          pattern: '*',
+          cwd: join(directory, 'missing'),
+          maxResults: 10,
+          includeDotfiles: false,
+          absolute: false,
+        })
+      )
+    ).toBeInstanceOf(PathAccessError);
   });
 });
