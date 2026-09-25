@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { rejectionOf } from '@mangostudio/protocol/testing';
 import { FileNotReadError, StaleFileError } from '@mangostudio/shared/runtime-contract';
 import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
@@ -125,9 +126,13 @@ describe('executeWriteFile', () => {
     const relativePath = `write-file-no-workdir-${crypto.randomUUID()}/index.ts`;
     const processRelativePath = join(process.cwd(), relativePath);
 
-    await expect(
-      executeWriteFile({ path: relativePath, content: 'must not be written' }, makeContext())
-    ).rejects.toThrow('no working directory is bound to this chat');
+    expect(
+      await rejectionOf(
+        executeWriteFile({ path: relativePath, content: 'must not be written' }, makeContext())
+      )
+    ).toMatchObject({
+      message: expect.stringContaining('no working directory is bound to this chat'),
+    });
     expect(existsSync(processRelativePath)).toBe(false);
   });
 
@@ -166,9 +171,9 @@ describe('executeWriteFile', () => {
     const filePath = join(tempDir, 'unread.txt');
     await seedFile(filePath, 'keep me');
 
-    await expect(
-      executeWriteFile({ path: filePath, content: 'replacement' }, makeContext())
-    ).rejects.toBeInstanceOf(FileNotReadError);
+    expect(
+      await rejectionOf(executeWriteFile({ path: filePath, content: 'replacement' }, makeContext()))
+    ).toBeInstanceOf(FileNotReadError);
     expect(await readBack(filePath)).toBe('keep me');
   });
 
@@ -178,9 +183,9 @@ describe('executeWriteFile', () => {
     await executeReadFile({ path: filePath }, makeContext());
     await seedFile(filePath, 'changed outside the tool');
 
-    await expect(
-      executeWriteFile({ path: filePath, content: 'replacement' }, makeContext())
-    ).rejects.toBeInstanceOf(StaleFileError);
+    expect(
+      await rejectionOf(executeWriteFile({ path: filePath, content: 'replacement' }, makeContext()))
+    ).toBeInstanceOf(StaleFileError);
     expect(await readBack(filePath)).toBe('changed outside the tool');
   });
 
@@ -224,12 +229,14 @@ describe('executeWriteFile', () => {
     await seedFile(filePath, 'initial');
     await executeReadFile({ path: filePath }, makeContext());
 
-    await expect(
-      executeWriteFile(
-        { path: filePath, content: 'other chat' },
-        { ...makeContext(), chatId: 'c2' }
+    expect(
+      await rejectionOf(
+        executeWriteFile(
+          { path: filePath, content: 'other chat' },
+          { ...makeContext(), chatId: 'c2' }
+        )
       )
-    ).rejects.toBeInstanceOf(FileNotReadError);
+    ).toBeInstanceOf(FileNotReadError);
     expect(await readBack(filePath)).toBe('initial');
   });
 
