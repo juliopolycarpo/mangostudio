@@ -125,7 +125,7 @@ function terminalStatus(events: readonly InstallStreamEvent[]) {
   )?.status;
 }
 
-/** The success case's own assertions, shared by the in-process and Rust-backed runs. */
+/** The success case's own assertions, shared by the production Local run and the fresh stdio run. */
 function expectStreamedSuccess(result: Awaited<ReturnType<typeof execute>>) {
   expect(result.events).toContainEqual({
     type: 'log',

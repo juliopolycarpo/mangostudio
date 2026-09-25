@@ -85,7 +85,7 @@ pub const MANGOSTUDIO_RUNTIME_SETUP: &str = "MANGOSTUDIO_RUNTIME_SETUP";
 ///
 /// Deliberately carries no `validate_in_process_frames` or
 /// `validate_handler_results` field, unlike the TypeScript
-/// [`RuntimeConfig`](https://github.com/juliopolycarpo/mangostudio/blob/f1b12518ee7aaba85b155bd227df981b4da94f76/apps/runtime/src/config.ts):
+/// [`RuntimeConfig`](https://github.com/juliopolycarpo/mangostudio/blob/ef72e2f09cb82a4e73a06c6ea6ef91ff66032992/apps/runtime/src/config.ts):
 ///
 /// - `validateHandlerResults` is `!production` in TypeScript, off in
 ///   production so an invalid result still reaches a caller who did nothing

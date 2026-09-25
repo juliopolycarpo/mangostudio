@@ -226,7 +226,7 @@ async function readManifestAt(setPath: string, fs: BackupStoreFs): Promise<Backu
   try {
     raw = await fs.readFile(join(setPath, MANIFEST_NAME));
   } catch (error) {
-    // Missing set → null so undo can answer with LibraryBackupMissingError.
+    // Missing set → null so the runtime's undo can answer 404 / library_backup_missing.
     // Permission or other I/O failures must propagate: collapsing them into
     // "missing" tells the user retention pruned the set when the file is still
     // there and unreadable.
