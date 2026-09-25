@@ -22,6 +22,8 @@ use mangostudio_runtime_contract::manifest::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use mangostudio_runtime_contract::catalog::catalog;
+
 use crate::manifest::capability_ready;
 use crate::registry::{Classification, Registry};
 
@@ -55,11 +57,24 @@ pub fn implemented_features(registry: &Registry) -> RuntimeImplementationFeature
         shell: capability_ready(registry, "shell"),
         update: cfg!(any(unix, windows)) && capability_ready(registry, "update"),
         external_agents: capability_ready(registry, "externalAgents"),
-        terminal: cfg!(any(unix, windows))
-            && crate::terminal::TERMINAL_METHODS
-                .iter()
-                .all(|method| registry.classify(method) == Classification::Implemented),
+        terminal: cfg!(any(unix, windows)) && family_ready(registry, TERMINAL_PREFIX),
     }
+}
+
+/// The method-name prefix of the PTY family.
+const TERMINAL_PREFIX: &str = "terminal.";
+
+/// Whether every catalog method whose name starts with `prefix` is
+/// implemented. `false` when the catalog declares no such method, so a
+/// family nothing backs is never announced.
+fn family_ready(registry: &Registry, prefix: &str) -> bool {
+    let mut family = catalog()
+        .methods
+        .iter()
+        .filter(|declared| declared.name.starts_with(prefix))
+        .peekable();
+    family.peek().is_some()
+        && family.all(|declared| registry.classify(&declared.name) == Classification::Implemented)
 }
 
 /// Lowercase hex SHA-256 of the UTF-8 text
@@ -264,6 +279,11 @@ mod tests {
         let home = scratch_dir("discovery-answer");
         let host = crate::transport::build_host(RuntimeSlot::Host, &home, "9.9.9");
         let expected = discovery_of(&host.registry);
+        assert_eq!(
+            expected.features.terminal,
+            cfg!(any(unix, windows)),
+            "expected the production build to implement the whole terminal.* family"
+        );
         assert!(
             expected
                 .methods
@@ -322,6 +342,35 @@ mod tests {
             announced[0].1, announced[1].1
         );
         assert!(announced[0].1.as_ref().is_some_and(|i| i.features.shell));
+    }
+
+    /// `health.rs` still attests terminal cleanup through the hand-kept
+    /// `TERMINAL_METHODS`; this keeps that list equal to the catalog family
+    /// the implementation ceiling derives from.
+    #[test]
+    fn the_hand_kept_terminal_list_is_the_catalog_terminal_family() {
+        let mut declared: Vec<&str> = mangostudio_runtime_contract::catalog::catalog()
+            .methods
+            .iter()
+            .map(|method| method.name.as_str())
+            .filter(|name| name.starts_with(super::TERMINAL_PREFIX))
+            .collect();
+        declared.sort_unstable();
+        let mut listed: Vec<&str> = crate::terminal::TERMINAL_METHODS.to_vec();
+        listed.sort_unstable();
+        assert_eq!(
+            listed, declared,
+            "expected TERMINAL_METHODS: {declared:?} | received: {listed:?}"
+        );
+    }
+
+    #[test]
+    fn a_partial_terminal_family_is_not_announced() {
+        let registry =
+            Registry::new().implement("terminal.list", |_params: Value, _context| async move {
+                Ok::<_, mango_protocol::RemoteError>(json!({ "sessions": [] }))
+            });
+        assert!(!implemented_features(&registry).terminal);
     }
 
     #[test]
