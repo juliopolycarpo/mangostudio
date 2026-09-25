@@ -2772,6 +2772,9 @@ async fn a_review_on_a_target_without_native_review_is_refused_before_any_reserv
 /// What a [`ScriptedSession`] does with each turn and review.
 #[derive(Clone)]
 enum Script {
+    /// Accepts every turn under this vendor handle, then stays silent until
+    /// it is cancelled.
+    NativeTurnId(String),
     /// Streams one text delta, then fails the turn the way a crashed adapter
     /// does: the SDK commits the error as the turn's terminal.
     CrashMidStream,
@@ -2842,6 +2845,7 @@ impl Session for ScriptedSession {
         self.log.turns_started.fetch_add(1, Ordering::SeqCst);
         let (sink, events) = self.open_stream(&request.turn_id, request.attempt);
         let native = match &self.script {
+            Script::NativeTurnId(native) => native.clone(),
             Script::CrashMidStream => {
                 sink.emit(text("before crash")).await?;
                 sink.fail(mango_external_agents::VendorError::new(
@@ -3170,6 +3174,100 @@ async fn the_consent_watcher_keeps_reading_while_a_cancelled_open_settles() {
         "expected no new consent reads once nothing is live or opening | \
          received {later} reads, {settled} when it settled"
     );
+}
+
+/// A vendor turn handle is echoed back on `respond`, `steer` and `cancel`,
+/// so one past the 128-code-point opaque-id bound is refused rather than
+/// cut: the turn call fails, the vendor turn is told to stop, and no event
+/// under that handle reaches the hub. Exactly 128 is still a usable handle.
+#[tokio::test]
+async fn an_unbounded_native_turn_id_is_refused_and_its_vendor_turn_stopped() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::NativeTurnId("x".repeat(129))),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    // Virtual time from here on, so the no-event window below costs nothing
+    // and cannot pass early. Opening stays on real time: it waits on the
+    // process-wide blocking pool, which a paused clock would skip past.
+    tokio::time::pause();
+    let refused = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("an unbounded native turn id must be refused");
+    assert!(
+        refused.message.contains("expected a usable native turn id"),
+        "expected a refusal naming the native turn id | received: {}",
+        refused.message
+    );
+    assert_eq!(
+        refused
+            .details
+            .as_ref()
+            .and_then(|details| details.get("dispatch")),
+        Some(&json!("accepted")),
+        "expected the refusal to say the vendor accepted the turn, so it is not resent | \
+         received: {:?}",
+        refused.details
+    );
+    eventually(
+        "the vendor turn stopped",
+        || rig.log.cancel_reasons(),
+        |reasons| !reasons.is_empty(),
+    )
+    .await;
+    assert_eq!(rig.log.cancel_reasons(), vec![CancelReason::Requested]);
+    rig.idle("one", "the refused turn").await;
+    let mut events = rig.events.lock().await;
+    let leaked = tokio::time::timeout(Duration::from_secs(1), events.recv()).await;
+    assert!(
+        leaked.is_err(),
+        "expected no event under the unbounded handle | received: {leaked:?}"
+    );
+    drop(events);
+    let again = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a resend is answered from the refused receipt");
+    assert_eq!(
+        (&again.code, &again.message),
+        (&refused.code, &refused.message),
+        "expected the resend to receive the first refusal"
+    );
+    assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 1);
+    rig.close("one").await;
+    tokio::time::resume();
+
+    let bounded = "x".repeat(128);
+    let at_cap = self::rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::NativeTurnId(bounded.clone())),
+        ..RigOptions::default()
+    })
+    .await;
+    at_cap.open("one").await.unwrap();
+    let started = at_cap
+        .supervisor
+        .turn(
+            at_cap.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("a 128-code-point handle is usable");
+    assert_eq!(started.native_turn_id, bounded);
+    let first = at_cap
+        .next_event("the catalog under the bounded handle")
+        .await;
+    assert_eq!(first["nativeTurnId"], json!(bounded), "received {first}");
+    at_cap.close("one").await;
 }
 
 #[tokio::test]

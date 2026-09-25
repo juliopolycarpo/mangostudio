@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
+use mango_external_agents::normalize;
 use mango_external_agents::{
     Attachment as SdkAttachment, AttachmentKind as SdkAttachmentKind, CancelReason, Capability,
     Error as SdkError, ReviewRequest, ReviewTarget as SdkReviewTarget, Steer, SteerOutcome,
@@ -286,13 +287,18 @@ impl Supervisor {
         // lost reply by sending this same id again, and the receipt has to
         // hold what really happened, not that the first caller stopped waiting.
         let result = match live.session.start_turn(request).await {
-            Ok(stream) => {
-                let native = stream.native_turn_id().to_owned();
-                self.relay(&live, &params.client_message_id, stream);
-                Ok(TurnResult {
-                    native_turn_id: native,
-                })
-            }
+            Ok(stream) => match bounded_native_turn_id(&stream) {
+                Ok(native) => {
+                    self.relay(&live, &params.client_message_id, stream);
+                    Ok(TurnResult {
+                        native_turn_id: native,
+                    })
+                }
+                Err(refusal) => {
+                    self.discard(&live, &params.client_message_id, stream);
+                    Err(refusal)
+                }
+            },
             Err(error) => Err(self
                 .refused_start(&live, &params.client_message_id, error)
                 .await),
@@ -336,14 +342,19 @@ impl Supervisor {
         // Not raced against the caller's cancel either, for the same reason
         // as a turn: a resend under the same id is answered from the receipt.
         let result = match live.session.start_review(request).await {
-            Ok(review) => {
-                let native = review.turn.native_turn_id().to_owned();
-                self.relay(&live, &params.client_message_id, review.turn);
-                Ok(StartReviewResult {
-                    native_turn_id: native,
-                    review_thread_id: review.review_thread_id,
-                })
-            }
+            Ok(review) => match bounded_native_turn_id(&review.turn) {
+                Ok(native) => {
+                    self.relay(&live, &params.client_message_id, review.turn);
+                    Ok(StartReviewResult {
+                        native_turn_id: native,
+                        review_thread_id: review.review_thread_id,
+                    })
+                }
+                Err(refusal) => {
+                    self.discard(&live, &params.client_message_id, review.turn);
+                    Err(refusal)
+                }
+            },
             Err(error) => Err(self
                 .refused_start(&live, &params.client_message_id, error)
                 .await),
@@ -383,15 +394,7 @@ impl Supervisor {
         } else {
             None
         };
-        {
-            let mut active = lock(&live.turns.active);
-            if active
-                .as_ref()
-                .is_some_and(|turn| turn.client_message_id == client_message_id)
-            {
-                *active = None;
-            }
-        }
+        release_turn(live, client_message_id);
         if error.dispatch().is_safe_to_replay() {
             lock(&live.turns.receipts).remove(client_message_id);
         }
@@ -479,13 +482,31 @@ impl Supervisor {
             }
             lock(&live.turns.interactions).clear();
             lock(&live.turns.steers).clear();
-            let mut active = lock(&live.turns.active);
-            if active
-                .as_ref()
-                .is_some_and(|turn| turn.client_message_id == client_message_id)
-            {
-                *active = None;
-            }
+            release_turn(&live, &client_message_id);
+        });
+    }
+
+    /// Stops a turn the hub must never see and drains it unpublished.
+    ///
+    /// The session's turn slot stays taken until the SDK ends the stream, as
+    /// for a relayed turn: a vendor still stopping must not be handed the
+    /// next turn. The drain is bounded by the hard turn deadline; past it the
+    /// stream is dropped, which asks the SDK for native cleanup.
+    fn discard(
+        self: &Arc<Self>,
+        live: &Arc<LiveSession>,
+        client_message_id: &str,
+        mut stream: TurnStream,
+    ) {
+        let deadline = self.hard_turn_timeout();
+        let live = Arc::clone(live);
+        let client_message_id = client_message_id.to_owned();
+        self.tasks.spawn(async move {
+            let _ = live.session.cancel(CancelReason::Requested).await;
+            let drained = async { while stream.recv().await.is_some() {} };
+            let _ = tokio::time::timeout(deadline, drained).await;
+            drop(stream);
+            release_turn(&live, &client_message_id);
         });
     }
 
@@ -739,6 +760,43 @@ impl Relay {
             },
         );
     }
+}
+
+/// Frees the session's turn slot, if `client_message_id` still holds it.
+fn release_turn(live: &LiveSession, client_message_id: &str) {
+    let mut active = lock(&live.turns.active);
+    if active
+        .as_ref()
+        .is_some_and(|turn| turn.client_message_id == client_message_id)
+    {
+        *active = None;
+    }
+}
+
+/// The vendor's handle for a started turn, when it is a usable opaque id
+/// exactly as sent: the hub echoes it back on `respond`, `steer` and
+/// `cancel`, so a handle the wire bound would cut names a different turn.
+///
+/// The refusal carries the stream's dispatch: the vendor may already be
+/// running the turn, so the hub must not read it as safe to resend.
+///
+/// # Example
+///
+/// ```ignore
+/// let native = bounded_native_turn_id(&stream)?;
+/// ```
+fn bounded_native_turn_id(stream: &TurnStream) -> Result<String, RemoteError> {
+    const FIELD: &str = "native turn id";
+    let native = stream.native_turn_id();
+    let refused = match normalize::opaque_id(native, FIELD) {
+        Ok(bounded) if bounded == native => return Ok(bounded),
+        Ok(received) => SdkError::InvalidVendorValue {
+            field: FIELD,
+            received,
+        },
+        Err(error) => error,
+    };
+    Err(map::remote_error(&refused.with_dispatch(stream.dispatch())))
 }
 
 /// Whether the SDK refused because the session can run no more work:
