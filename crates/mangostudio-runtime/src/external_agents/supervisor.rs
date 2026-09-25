@@ -187,6 +187,12 @@ impl HarnessFactory for ProductHarnesses {
     }
 }
 
+/// This machine's Codex account-fingerprint key, read fresh for each Codex
+/// discovery so a home that becomes readable later is picked up without a
+/// restart, as `hostLocalDigestKey()` was per call in the TypeScript adapter.
+/// Blocking: the production source stats the home.
+pub(crate) type AccountKeySource = Arc<dyn Fn() -> Option<AccountFingerprintKey> + Send + Sync>;
+
 /// Whether `externalAgents` consent is granted right now. A read that fails
 /// closed answers `false`.
 pub(crate) type ConsentProbe = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -214,8 +220,9 @@ pub(crate) struct Ports {
     /// The SDK caps every harness reads.
     pub limits: Limits,
     /// The host-local key Codex account fingerprints are computed under; see
-    /// `isolation::account_fingerprint_key`. `None` sends no fingerprint.
-    pub account_key: Option<AccountFingerprintKey>,
+    /// `isolation::account_fingerprint_key`. A `None` read sends no
+    /// fingerprint.
+    pub account_key: AccountKeySource,
     /// Live plus opening sessions allowed at once.
     pub session_cap: usize,
     /// How often consent is re-read while anything is live or opening.
@@ -564,10 +571,11 @@ impl Supervisor {
             let probe_dir = self.probe_dir()?;
             let host = self.host_context(&probe_dir, None, None, &host_cancel)?;
             stopped_before_launch(cancel, &host_cancel)?;
+            let key = self.account_key(target).await;
             let found = self
                 .ports
                 .harnesses
-                .discover(target, executable, &host, self.ports.account_key.as_ref())
+                .discover(target, executable, &host, key.as_ref())
                 .await;
             let found = match found {
                 Ok(found) => found,
@@ -1161,6 +1169,19 @@ impl Supervisor {
             builder = builder.scratch(scratch.to_path_buf());
         }
         builder.build().map_err(|error| map::remote_error(&error))
+    }
+
+    /// The fingerprint key for a Codex discovery, read off the async runtime;
+    /// no other target reports an account fingerprint, so none reads it.
+    async fn account_key(&self, target: TargetId) -> Option<AccountFingerprintKey> {
+        if target != TargetId::Codex {
+            return None;
+        }
+        let source = Arc::clone(&self.ports.account_key);
+        tokio::task::spawn_blocking(move || source())
+            .await
+            .ok()
+            .flatten()
     }
 
     /// The private directory probes run in. Created owner-only on first use.

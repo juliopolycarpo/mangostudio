@@ -21,8 +21,8 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    CloseCause, ExecutableResolver, HarnessFactory, PortFuture, Ports, Supervisor, TargetDiscovery,
-    WorkspaceAuthority,
+    AccountKeySource, CloseCause, ExecutableResolver, HarnessFactory, PortFuture, Ports,
+    Supervisor, TargetDiscovery, WorkspaceAuthority,
 };
 use crate::external_agents::wire::{
     ApprovalRouting, CloseParams, Configuration, DiscoverParams, ListSessionsParams, OpenParams,
@@ -728,8 +728,8 @@ struct RigOptions {
     /// The machine environment every `HostContext` is built from.
     environment: PathEnv,
     lists_sessions: bool,
-    /// The key every Codex account fingerprint is computed under.
-    account_key: Option<AccountFingerprintKey>,
+    /// Where every Codex discovery reads its fingerprint key.
+    account_key: AccountKeySource,
     /// The address a [`CountingHarnesses`] Codex probe reads from `account/read`.
     codex_email: Option<&'static str>,
 }
@@ -747,7 +747,7 @@ impl Default for RigOptions {
             hard_turn_timeout: super::HARD_TURN_TIMEOUT,
             environment: PathEnv::default(),
             lists_sessions: true,
-            account_key: None,
+            account_key: Arc::new(|| None),
             codex_email: None,
         }
     }
@@ -1580,7 +1580,9 @@ async fn discovered_accounts(options: RigOptions) -> (serde_json::Value, serde_j
 #[tokio::test]
 async fn codex_discovery_sends_the_fingerprint_the_typescript_adapter_stored() {
     let (codex, claude) = discovered_accounts(RigOptions {
-        account_key: crate::external_agents::isolation::account_fingerprint_key("host-local-key"),
+        account_key: Arc::new(|| {
+            crate::external_agents::isolation::account_fingerprint_key("host-local-key")
+        }),
         codex_email: Some("user@example.com"),
         ..RigOptions::default()
     })
@@ -1596,6 +1598,55 @@ async fn codex_discovery_sends_the_fingerprint_the_typescript_adapter_stored() {
     assert!(
         claude.get("fingerprint").is_none(),
         "expected no fingerprint for a target that reports none | received {claude}"
+    );
+}
+
+#[tokio::test]
+async fn a_host_key_that_becomes_readable_is_used_by_the_next_discovery() {
+    let key: Arc<Mutex<Option<AccountFingerprintKey>>> = Arc::new(Mutex::new(None));
+    let reads = Arc::new(AtomicUsize::new(0));
+    let source: AccountKeySource = {
+        let (key, reads) = (Arc::clone(&key), Arc::clone(&reads));
+        Arc::new(move || {
+            reads.fetch_add(1, Ordering::SeqCst);
+            key.lock().unwrap().clone()
+        })
+    };
+    let rig = rig(RigOptions {
+        account_key: source,
+        codex_email: Some("user@example.com"),
+        ..RigOptions::default()
+    })
+    .await;
+    let cancel = CancellationToken::new();
+    let params = || DiscoverParams {
+        target_ids: vec![TargetId::Codex, TargetId::Claude],
+        timeout_ms: 5_000,
+    };
+    let fingerprint = |result: &crate::external_agents::wire::DiscoverResult| {
+        result.descriptors[0]
+            .account
+            .as_ref()
+            .and_then(|account| account.fingerprint.clone())
+    };
+    let before = rig.supervisor.discover(params(), &cancel).await.unwrap();
+    assert_eq!(
+        fingerprint(&before),
+        None,
+        "expected no fingerprint without a key"
+    );
+    *key.lock().unwrap() =
+        crate::external_agents::isolation::account_fingerprint_key("host-local-key");
+    let after = rig.supervisor.discover(params(), &cancel).await.unwrap();
+    assert_eq!(
+        fingerprint(&after).as_deref(),
+        Some("bcd4e5c63495974573261faadb33d8be"),
+        "expected the key read at this discovery, not at startup"
+    );
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "expected one key read per Codex discovery and none for Claude"
     );
 }
 

@@ -195,7 +195,7 @@ pub(crate) fn host_local_digest_key(home: &Path) -> Option<String> {
 /// # Example
 ///
 /// ```ignore
-/// ports.account_key = detect_account_fingerprint_key();
+/// let key = detect_account_fingerprint_key();
 /// ```
 pub(crate) fn detect_account_fingerprint_key() -> Option<AccountFingerprintKey> {
     let home = crate::runtime_home::home_dir().ok()?;
