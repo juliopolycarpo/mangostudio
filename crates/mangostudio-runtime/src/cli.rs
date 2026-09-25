@@ -507,7 +507,10 @@ fn parse_connect(args: &[String]) -> Invocation {
 pub fn run(args: &[String], env: &impl EnvSource) -> i32 {
     match parse(args) {
         Invocation::Version => {
-            println!("mangostudio-runtime {VERSION}");
+            // The bare version, the same line the TypeScript runtime prints:
+            // the hub's doctor probe and the WSL/SSH provisioning checks
+            // compare `--version` stdout to a release string verbatim.
+            println!("{VERSION}");
             0
         }
         Invocation::Help | Invocation::Empty => {
