@@ -1053,7 +1053,8 @@ describe('environment entity routes', () => {
       // The documented cache location, and a checksum line to check it with.
       expect(body).toContain('runtime-cache');
       expect(body).toContain('mangostudio-runtime-9.9.9-test-linux-x64-musl');
-      expect(body).toContain('sha256sum -c -');
+      // Shaped for the hub's own shell: a stock Windows hub has no sha256sum.
+      expect(body).toContain(process.platform === 'win32' ? 'Get-FileHash' : 'sha256sum -c -');
       // Nothing reached the distribution. `ensure` is the only path that writes
       // bytes into a WSL slot, so its not having run is the whole claim.
       expect(ensured).toBe(false);
@@ -1153,7 +1154,11 @@ describe('environment entity routes', () => {
       // A checksum line, pinned to the digest this run just verified rather
       // than to a SHA256SUMS fetch a rolling tag can outrun, and checking the
       // archive where it actually landed.
-      expect(reported[1]).toBe(`echo "${hash}  ${archivePath}" | sha256sum -c -`);
+      expect(reported[1]).toBe(
+        process.platform === 'win32'
+          ? `if ((Get-FileHash "${archivePath}" -Algorithm SHA256).Hash -ne "${hash}") { throw 'checksum mismatch' } else { 'OK' }`
+          : `echo "${hash}  ${archivePath}" | sha256sum -c -`
+      );
       // The raw runtime asset was never published for this platform, so nothing
       // the run reports may claim it is on disk.
       expect(reported.join('\n')).not.toContain('mangostudio-runtime-9.9.9-test');
