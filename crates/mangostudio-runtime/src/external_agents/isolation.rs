@@ -281,26 +281,10 @@ fn current_uid() -> Option<u32> {
 /// serial and 64-bit file index from [`crate::file_identity`], which is what
 /// Bun's `statSync` reports as `dev` and `ino`.
 fn stat_identity(path: &Path) -> Option<(u64, u64)> {
-    let file = open_for_identity(path)?;
+    let file = crate::file_identity::open_for_identity(path).ok()?;
     let metadata = file.metadata().ok()?;
     let identity = crate::file_identity::object_identity(&file, &metadata).ok()?;
     Some((identity.device(), identity.inode()))
-}
-
-#[cfg(not(windows))]
-fn open_for_identity(path: &Path) -> Option<std::fs::File> {
-    std::fs::File::open(path).ok()
-}
-
-#[cfg(windows)]
-fn open_for_identity(path: &Path) -> Option<std::fs::File> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-    // A directory handle needs backup semantics on Windows.
-    std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS)
-        .open(path)
-        .ok()
 }
 
 /// `realpathSync` stand-in: `canonicalize`, as a string.

@@ -1,6 +1,6 @@
 //! Open-file identity shared by mutation guards and non-authoritative caches.
 
-use std::fs::{File, Metadata};
+use std::fs::{File, Metadata, OpenOptions};
 use std::path::Path;
 
 #[cfg(not(windows))]
@@ -67,8 +67,32 @@ pub(crate) fn object_identity(file: &File, _: &Metadata) -> std::io::Result<Obje
     })
 }
 
+/// Opens `path` read-only so its object identity can be read from the handle.
+///
+/// Directories need `FILE_FLAG_BACKUP_SEMANTICS` on Windows: without it
+/// `CreateFileW` refuses a directory, and every directory identity read fails.
+/// The flag does not change how a regular file is opened for reading.
+///
+/// # Example
+///
+/// ```ignore
+/// let directory = open_for_identity(Path::new("C:/Users/me/AppData/Roaming/fnm"))?;
+/// ```
+pub(crate) fn open_for_identity(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS,
+    );
+    options.open(path)
+}
+
 /// Fingerprints an executable cache entry; failed identity reads bypass caching.
-/// This never represents consent or any other authority.
+/// This never represents consent or any other authority. An object this process
+/// cannot open for reading, such as a Unix execute-only binary, has no
+/// fingerprint and stays uncached: a path-based `stat` would not identify the object.
 ///
 /// # Example
 ///
@@ -76,7 +100,7 @@ pub(crate) fn object_identity(file: &File, _: &Metadata) -> std::io::Result<Obje
 /// let key = fingerprint(Path::new("/usr/bin/git"));
 /// ```
 pub(crate) fn fingerprint(path: &Path) -> Option<String> {
-    let file = File::open(path).ok()?;
+    let file = open_for_identity(path).ok()?;
     let metadata = file.metadata().ok()?;
     let identity = object_identity(&file, &metadata).ok()?;
     let modified = metadata
@@ -128,6 +152,19 @@ mod tests {
         assert_ne!(fingerprint(&path).unwrap(), first);
         std::fs::remove_file(&path).unwrap();
         assert_eq!(fingerprint(&path), None);
+    }
+
+    /// Regression for Windows, where a plain `File::open` cannot open a directory.
+    #[test]
+    fn directories_have_a_stable_fingerprint() {
+        let versions = scratch_dir("file-identity-directory");
+        let Some(first) = fingerprint(&versions) else {
+            panic!(
+                "expected a fingerprint for directory {} | received: None",
+                versions.display()
+            );
+        };
+        assert_eq!(fingerprint(&versions), Some(first));
     }
 
     #[cfg(unix)]
