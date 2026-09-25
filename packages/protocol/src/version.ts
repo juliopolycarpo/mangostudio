@@ -9,7 +9,7 @@ import { CLOSE_CODES } from './close';
 export const PROTOCOL_MAJOR = 1 as const;
 
 /** The highest minor of that major this SDK implements. */
-export const PROTOCOL_MINOR = 1 as const;
+export const PROTOCOL_MINOR = 2 as const;
 
 /** The `protocol` member of a `hello` frame. */
 export interface ProtocolVersion {

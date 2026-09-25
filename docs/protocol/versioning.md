@@ -6,7 +6,7 @@ depends on the SDK.
 ## Two numbers
 
 - The **wire version** is what two peers negotiate in `hello`: `{ major, minor }`. Both SDKs
-  export it as `PROTOCOL_VERSION`. Wire 1.1 is the current one; `spec/versioning.md` lists what
+  export it as `PROTOCOL_VERSION`. Wire 1.2 is the current one; `spec/versioning.md` lists what
   each minor added.
 - The **package version** is what you pin in `package.json` or `Cargo.toml`. Both packages
   share it and release together. Its changelog names the highest wire minor each release
@@ -20,6 +20,9 @@ build implements and negotiates the lower minor with the peer.
 - Same major, different minors: the session runs at the lower minor. Members added in a later
   minor are optional, so the older peer ignores them and the newer peer must not require them.
   `session.remote.effectiveMinor` says which minor was negotiated.
+- A behaviour a minor added is only yours to rely on at that minor. From 1.2, for instance, a
+  handler's events arrive ahead of its answer (spec §6.2); below 1.2 a responder may write the
+  answer first, so a caller that needs every event keeps listening briefly past the answer.
 - Different majors: both peers close with `4426 PROTOCOL_MISMATCH`, `ready` rejects with an
   error of code `PROTOCOL_MISMATCH`, and the client should not redial with the same build.
   A peer that receives a `hello` its schema refuses (for instance a frame from a protocol that
