@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
 use mango_external_agents::testing::{FakeHarness, FakeLauncher};
 use mango_external_agents::{
     AccountUsage, CancelReason, CloseReason, Discovery, Error as SdkError, ExitStatus, Harness,
@@ -20,7 +21,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    CloseCause, ExecutableResolver, HarnessFactory, PortFuture, Ports, Supervisor,
+    CloseCause, ExecutableResolver, HarnessFactory, PortFuture, Ports, Supervisor, TargetDiscovery,
     WorkspaceAuthority,
 };
 use crate::external_agents::wire::{
@@ -546,6 +547,9 @@ struct CountingHarnesses {
     open: OpenBehaviour,
     probes: Mutex<Vec<(TargetId, ProbeBehaviour)>>,
     lists_sessions: bool,
+    /// When set, a Codex probe reports this signed-in ChatGPT address the way
+    /// `CodexHarness::discover_with_account` digests it: under the key given.
+    codex_email: Option<&'static str>,
 }
 
 impl HarnessFactory for CountingHarnesses {
@@ -563,6 +567,27 @@ impl HarnessFactory for CountingHarnesses {
             open: self.open.clone(),
             probe,
             lists_sessions: self.lists_sessions,
+        })
+    }
+
+    fn discover<'a>(
+        &'a self,
+        target: TargetId,
+        executable: Option<PathBuf>,
+        host: &'a HostContext,
+        key: Option<&'a AccountFingerprintKey>,
+    ) -> PortFuture<'a, mango_external_agents::Result<TargetDiscovery>> {
+        let harness = self.harness(target, executable);
+        Box::pin(async move {
+            let discovery = harness.discover(host).await?;
+            let account = match (target, key, self.codex_email) {
+                (TargetId::Codex, Some(key), Some(email)) => CodexAccount::from_account_read(
+                    &json!({ "account": { "type": "chatgpt", "email": email, "planType": "plus" } }),
+                    key,
+                ),
+                _ => None,
+            };
+            Ok(TargetDiscovery { discovery, account })
         })
     }
 }
@@ -703,6 +728,10 @@ struct RigOptions {
     /// The machine environment every `HostContext` is built from.
     environment: PathEnv,
     lists_sessions: bool,
+    /// The key every Codex account fingerprint is computed under.
+    account_key: Option<AccountFingerprintKey>,
+    /// The address a [`CountingHarnesses`] Codex probe reads from `account/read`.
+    codex_email: Option<&'static str>,
 }
 
 impl Default for RigOptions {
@@ -718,6 +747,8 @@ impl Default for RigOptions {
             hard_turn_timeout: super::HARD_TURN_TIMEOUT,
             environment: PathEnv::default(),
             lists_sessions: true,
+            account_key: None,
+            codex_email: None,
         }
     }
 }
@@ -776,6 +807,7 @@ async fn rig(options: RigOptions) -> Rig {
             open: options.open,
             probes: Mutex::new(options.probes),
             lists_sessions: options.lists_sessions,
+            codex_email: options.codex_email,
         }),
         workspaces: Arc::clone(&workspaces) as Arc<dyn WorkspaceAuthority>,
         executables: Arc::clone(&executables) as Arc<dyn ExecutableResolver>,
@@ -784,6 +816,7 @@ async fn rig(options: RigOptions) -> Rig {
         private_root: private_root.clone(),
         runtime_version: String::from("0.0.0-test"),
         limits: Limits::default(),
+        account_key: options.account_key,
         session_cap: options.session_cap,
         consent_poll: Duration::from_millis(10),
         consent_read_timeout: Duration::from_millis(20),
@@ -1515,6 +1548,67 @@ async fn discovery_omits_a_failing_target_and_keeps_the_rest() {
         rig.log.opens(),
         0,
         "expected discovery to open no conversation"
+    );
+}
+
+/// Discovers Codex and Claude through a rig and answers each descriptor's
+/// serialized `account`.
+async fn discovered_accounts(options: RigOptions) -> (serde_json::Value, serde_json::Value) {
+    let rig = rig(options).await;
+    let result = rig
+        .supervisor
+        .discover(
+            DiscoverParams {
+                target_ids: vec![TargetId::Codex, TargetId::Claude],
+                timeout_ms: 5_000,
+            },
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let wire = serde_json::to_value(&result).expect("serializable");
+    assert!(
+        !wire.to_string().contains("user@example.com"),
+        "expected the account address never to reach the wire | received {wire}"
+    );
+    (
+        wire["descriptors"][0]["account"].clone(),
+        wire["descriptors"][1]["account"].clone(),
+    )
+}
+
+#[tokio::test]
+async fn codex_discovery_sends_the_fingerprint_the_typescript_adapter_stored() {
+    let (codex, claude) = discovered_accounts(RigOptions {
+        account_key: crate::external_agents::isolation::account_fingerprint_key("host-local-key"),
+        codex_email: Some("user@example.com"),
+        ..RigOptions::default()
+    })
+    .await;
+    // `createHmac('sha256', 'host-local-key').update('codex:user@example.com')
+    //  .digest('hex').slice(0, 32)`, the SDK's own pinned vector.
+    assert_eq!(
+        codex["fingerprint"],
+        json!("bcd4e5c63495974573261faadb33d8be"),
+        "expected the TypeScript adapter's fingerprint | received {codex}"
+    );
+    assert_eq!(codex["planType"], json!("plus"), "received {codex}");
+    assert!(
+        claude.get("fingerprint").is_none(),
+        "expected no fingerprint for a target that reports none | received {claude}"
+    );
+}
+
+#[tokio::test]
+async fn codex_discovery_without_a_host_key_sends_no_fingerprint() {
+    let (codex, _) = discovered_accounts(RigOptions {
+        codex_email: Some("user@example.com"),
+        ..RigOptions::default()
+    })
+    .await;
+    assert!(
+        codex.is_object() && codex.get("fingerprint").is_none(),
+        "expected a signed-in account without a fingerprint | received {codex}"
     );
 }
 

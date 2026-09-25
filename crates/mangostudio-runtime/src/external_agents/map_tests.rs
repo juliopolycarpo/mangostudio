@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mango_agent_claude::auth::AccountKind;
 use mango_agent_claude::permissions::ModeAvailability;
+use mango_agent_codex::account::CodexAccount;
 use mango_external_agents as sdk;
 use mango_external_agents::Harness as _;
 use mango_protocol::error::codes;
@@ -176,7 +177,7 @@ fn cursor_missing_surface() -> sdk::Discovery {
 }
 
 fn describe(target: TargetId, discovery: &sdk::Discovery) -> Value {
-    serde_json::to_value(descriptor(target, discovery, PROBED_AT_MS)).expect("serializable")
+    serde_json::to_value(descriptor(target, discovery, None, PROBED_AT_MS)).expect("serializable")
 }
 
 fn live() -> Value {
@@ -1375,6 +1376,81 @@ fn reset_credit_rows_drop_what_the_wire_refuses_and_cap_at_sixty_four() {
     );
 }
 
+/// What `CodexHarness::discover_with_account` reports for a ChatGPT sign-in
+/// under the runtime's key built from `digest_key`.
+fn codex_account(digest_key: &str, email: &str) -> CodexAccount {
+    let key = super::super::isolation::account_fingerprint_key(digest_key).expect("a key");
+    CodexAccount::from_account_read(
+        &json!({ "account": { "type": "chatgpt", "email": email, "planType": "plus" } }),
+        &key,
+    )
+    .expect("a ChatGPT account")
+}
+
+#[test]
+fn a_codex_account_carries_the_typescript_adapters_fingerprint_and_plan() {
+    let account = codex_account("host-local-key", "user@example.com");
+    let received = serde_json::to_value(descriptor(
+        TargetId::Codex,
+        &codex_signed_in(),
+        Some(&account),
+        PROBED_AT_MS,
+    ))
+    .expect("serializable");
+    // The SDK's `the_fingerprint_matches_the_digest_the_typescript_adapter_stored`
+    // vector: `createHmac('sha256', key).update('codex:' + email).digest('hex').slice(0, 32)`.
+    assert_eq!(
+        received["account"],
+        json!({
+            "label": "ChatGPT",
+            "planType": "plus",
+            "fingerprint": "bcd4e5c63495974573261faadb33d8be",
+        }),
+        "account drifted | received {received}"
+    );
+    assert!(
+        !received.to_string().contains("user@example.com"),
+        "expected no address on the wire | received {received}"
+    );
+    assert_valid(
+        "external-agent.discover",
+        &json!({ "descriptors": [received] }),
+    );
+}
+
+#[test]
+fn codex_account_facts_apply_only_to_a_signed_in_codex_account() {
+    let account = codex_account("host-local-key", "user@example.com");
+    let claude = serde_json::to_value(descriptor(
+        TargetId::Claude,
+        &claude_signed_in_subscription(),
+        Some(&account),
+        PROBED_AT_MS,
+    ))
+    .expect("serializable");
+    assert!(
+        claude["account"].get("fingerprint").is_none(),
+        "expected Codex facts never on another target | received {claude}"
+    );
+    let signed_out = sdk::Discovery {
+        auth: sdk::AuthState::LoggedOut {
+            login_hint: String::from("codex login"),
+        },
+        ..codex_signed_in()
+    };
+    let codex = serde_json::to_value(descriptor(
+        TargetId::Codex,
+        &signed_out,
+        Some(&account),
+        PROBED_AT_MS,
+    ))
+    .expect("serializable");
+    assert!(
+        codex.get("account").is_none(),
+        "expected no account on a signed-out descriptor | received {codex}"
+    );
+}
+
 fn native_page(count: usize) -> sdk::SessionPage {
     sdk::SessionPage {
         sessions: (0..count)
@@ -1644,7 +1720,7 @@ fn every_mapped_result_validates_against_the_catalog() {
     ];
     for (target, discovery) in &fixtures {
         let result = wire::DiscoverResult {
-            descriptors: vec![descriptor(*target, discovery, PROBED_AT_MS)],
+            descriptors: vec![descriptor(*target, discovery, None, PROBED_AT_MS)],
         };
         assert_valid(
             "external-agent.discover",

@@ -26,6 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mango_agent_acp::AcpHarness;
 use mango_agent_claude::ClaudeHarness;
 use mango_agent_codex::CodexHarness;
+use mango_agent_codex::account::CodexAccount;
 use mango_external_agents as sdk;
 use mango_protocol::error::{RemoteError, codes};
 
@@ -96,13 +97,7 @@ pub(crate) fn harness_for(target: TargetId, executable: Option<PathBuf>) -> Arc<
                 None => harness,
             })
         }
-        TargetId::Codex => {
-            let harness = CodexHarness::new();
-            Arc::new(match executable {
-                Some(path) => harness.with_executable(sdk::ExecutablePath::resolved(path)),
-                None => harness,
-            })
-        }
+        TargetId::Codex => Arc::new(codex_harness(executable)),
         TargetId::Cursor => {
             let harness = AcpHarness::builtin(CURSOR_PROFILE)
                 .expect("mango-agent-acp ships the cursor profile");
@@ -111,6 +106,23 @@ pub(crate) fn harness_for(target: TargetId, executable: Option<PathBuf>) -> Arc<
                 None => harness,
             })
         }
+    }
+}
+
+/// The Codex harness, concretely: discovery needs
+/// [`CodexHarness::discover_with_account`], which `dyn Harness` does not reach.
+///
+/// # Example
+///
+/// ```ignore
+/// let harness = codex_harness(Some(PathBuf::from("/usr/local/bin/codex")));
+/// let found = harness.discover_with_account(&host, &key).await?;
+/// ```
+pub(crate) fn codex_harness(executable: Option<PathBuf>) -> CodexHarness {
+    let harness = CodexHarness::new();
+    match executable {
+        Some(path) => harness.with_executable(sdk::ExecutablePath::resolved(path)),
+        None => harness,
     }
 }
 
@@ -172,18 +184,21 @@ enum GateRefusal {
 /// The descriptor for one target from one SDK probe, reproducing what the
 /// TypeScript adapter's `discover` returned for the same facts.
 ///
-/// Never carries an account email or other raw identity: the SDK has none to
-/// give, and `account.fingerprint` stays absent (see the module report).
+/// `account` is what only a Codex probe reports: the plan and the host-keyed
+/// account fingerprint the hub compares continuations against. It is applied
+/// to a signed-in Codex account and ignored everywhere else. Never carries an
+/// account email or other raw identity: the SDK hands over only the digest.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let descriptor = descriptor(TargetId::Codex, &sdk::Discovery::not_installed(), 1_000);
+/// let descriptor = descriptor(TargetId::Codex, &sdk::Discovery::not_installed(), None, 1_000);
 /// assert!(!descriptor.installed);
 /// ```
 pub(crate) fn descriptor(
     target: TargetId,
     discovery: &sdk::Discovery,
+    account: Option<&CodexAccount>,
     probed_at_ms: u64,
 ) -> wire::Descriptor {
     let report = Some(wire::DiscoveryReport {
@@ -199,7 +214,7 @@ pub(crate) fn descriptor(
         sdk::GateVerdict::MissingRequiredSurface { .. } => {
             refused(target, discovery, surface_floor(target), report)
         }
-        _ => usable(target, discovery, report),
+        _ => usable(target, discovery, account, report),
     }
 }
 
@@ -261,9 +276,14 @@ fn refused(
 fn usable(
     target: TargetId,
     discovery: &sdk::Discovery,
+    codex_account: Option<&CodexAccount>,
     report: Option<wire::DiscoveryReport>,
 ) -> wire::Descriptor {
-    let (auth_state, login, account) = auth_facts(target, &discovery.auth);
+    let (auth_state, login, mut account) = auth_facts(target, &discovery.auth);
+    if let (TargetId::Codex, Some(account), Some(facts)) = (target, account.as_mut(), codex_account)
+    {
+        with_codex_account(account, facts);
+    }
     let signed_out = auth_state == wire::AuthState::SignedOut;
     let models: Vec<wire::Model> = discovery
         .models
@@ -457,6 +477,17 @@ fn auth_facts(
             None,
         ),
     }
+}
+
+/// The plan and fingerprint a Codex probe reported, as `codex/adapter.ts`'s
+/// `mapAccount` shipped them: both optional, the fingerprint already the
+/// 32-hex-character keyed digest the TypeScript adapter stored.
+fn with_codex_account(account: &mut wire::Account, facts: &CodexAccount) {
+    account.plan_type = facts.plan_type.clone().filter(|plan| !plan.is_empty());
+    account.fingerprint = facts
+        .fingerprint
+        .as_ref()
+        .map(|fingerprint| fingerprint.as_str().to_owned());
 }
 
 /// The account label the owner recognises, never an email or organisation.

@@ -35,6 +35,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
 use mango_external_agents::{
     CancelToken, CloseReason, EnvSource, Error as SdkError, Harness, HostContext, Limits,
     OpenSession, ProcessLauncher, ResumeMode as SdkResumeMode, Session, SessionQuery,
@@ -108,10 +109,45 @@ pub(crate) trait ExecutableResolver: Send + Sync {
     ) -> PortFuture<'a, Option<PathBuf>>;
 }
 
+/// What one target's probe found, with the account facts only a Codex probe
+/// can report.
+pub(crate) struct TargetDiscovery {
+    /// The bounded discovery [`Harness::discover`] returns.
+    pub discovery: mango_external_agents::Discovery,
+    /// The signed-in Codex account's plan and keyed fingerprint, when known.
+    pub account: Option<CodexAccount>,
+}
+
 /// Builds the harness for one target around the executable it resolved.
 pub(crate) trait HarnessFactory: Send + Sync {
     /// The harness `target` is served by, launching `executable` when known.
     fn harness(&self, target: TargetId, executable: Option<PathBuf>) -> Arc<dyn Harness>;
+
+    /// Probes `target`. The default asks [`Harness::discover`] and reports no
+    /// account facts; the product factory overrides it so Codex reports its
+    /// keyed account fingerprint under `key`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let found = factory.discover(TargetId::Codex, executable, &host, Some(&key)).await?;
+    /// ```
+    fn discover<'a>(
+        &'a self,
+        target: TargetId,
+        executable: Option<PathBuf>,
+        host: &'a HostContext,
+        key: Option<&'a AccountFingerprintKey>,
+    ) -> PortFuture<'a, mango_external_agents::Result<TargetDiscovery>> {
+        let _ = key;
+        let harness = self.harness(target, executable);
+        Box::pin(async move {
+            Ok(TargetDiscovery {
+                discovery: harness.discover(host).await?,
+                account: None,
+            })
+        })
+    }
 }
 
 /// The production factory: the three product harnesses, through [`map`].
@@ -120,6 +156,34 @@ pub(crate) struct ProductHarnesses;
 impl HarnessFactory for ProductHarnesses {
     fn harness(&self, target: TargetId, executable: Option<PathBuf>) -> Arc<dyn Harness> {
         map::harness_for(target, executable)
+    }
+
+    /// Codex discovers through [`mango_agent_codex::CodexHarness::discover_with_account`]
+    /// when the host has a key: the email `account/read` returns is only the
+    /// HMAC input inside the SDK and never reaches this crate. Without a key
+    /// there is no fingerprint, never an unkeyed one.
+    fn discover<'a>(
+        &'a self,
+        target: TargetId,
+        executable: Option<PathBuf>,
+        host: &'a HostContext,
+        key: Option<&'a AccountFingerprintKey>,
+    ) -> PortFuture<'a, mango_external_agents::Result<TargetDiscovery>> {
+        Box::pin(async move {
+            let (TargetId::Codex, Some(key)) = (target, key) else {
+                return Ok(TargetDiscovery {
+                    discovery: map::harness_for(target, executable).discover(host).await?,
+                    account: None,
+                });
+            };
+            let found = map::codex_harness(executable)
+                .discover_with_account(host, key)
+                .await?;
+            Ok(TargetDiscovery {
+                discovery: found.discovery,
+                account: found.account,
+            })
+        })
     }
 }
 
@@ -149,6 +213,9 @@ pub(crate) struct Ports {
     pub runtime_version: String,
     /// The SDK caps every harness reads.
     pub limits: Limits,
+    /// The host-local key Codex account fingerprints are computed under; see
+    /// `isolation::account_fingerprint_key`. `None` sends no fingerprint.
+    pub account_key: Option<AccountFingerprintKey>,
     /// Live plus opening sessions allowed at once.
     pub session_cap: usize,
     /// How often consent is re-read while anything is live or opening.
@@ -494,17 +561,22 @@ impl Supervisor {
         let host_cancel = CancelToken::new();
         let work = async {
             let executable = self.ports.executables.resolve(target, cancel).await;
-            let harness = self.ports.harnesses.harness(target, executable);
             let probe_dir = self.probe_dir()?;
             let host = self.host_context(&probe_dir, None, None, &host_cancel)?;
             stopped_before_launch(cancel, &host_cancel)?;
-            let discovery = match harness.discover(&host).await {
-                Ok(discovery) => discovery,
+            let found = self
+                .ports
+                .harnesses
+                .discover(target, executable, &host, self.ports.account_key.as_ref())
+                .await;
+            let found = match found {
+                Ok(found) => found,
                 Err(error) => return Err(self.sdk_failure(error).await),
             };
             Ok(map::descriptor(
                 target,
-                &discovery,
+                &found.discovery,
+                found.account.as_ref(),
                 epoch_ms(SystemTime::now()),
             ))
         };
