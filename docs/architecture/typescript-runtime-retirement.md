@@ -61,6 +61,10 @@ The three skips are Cursor-turn cases that need a vendor CLI; they were not diff
 comparison now checks the Rust answer against the TypeScript answer recorded from that run. Paths
 are normalised to `<ROOT>` and `<HOME>`, and `durationMs` is dropped as before. Test names are
 unchanged.
+The Windows legs of the same CI run (`cargo-shim.yml`, `real-binary-qualification`, all three OSes
+green on that SHA) asserted Rust equal to TypeScript. The two Windows-only values, a BOM written
+as `?text` and a timed-out PowerShell ending with exit code 1 and no signal, are recorded from that
+leg.
 
 | Suite                                        | `it` (count)                                                                                                                        | Compared                                   | Last result | Now                                                                                |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ----------- | ---------------------------------------------------------------------------------- |
