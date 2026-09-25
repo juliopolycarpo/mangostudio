@@ -42,7 +42,26 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
         3,
         "operator CLI service verbs, run attached to the operator's own console",
     ),
+    (
+        "subprocess/supervisor.rs",
+        PROCESS_COMMAND_IMPORT,
+        1,
+        "tokio's Command for the portable fallback above",
+    ),
+    (
+        "cli/user_service.rs",
+        PROCESS_COMMAND_IMPORT,
+        1,
+        "std's Command for the operator CLI service verbs above",
+    ),
 ];
+
+/// Signature for a `use` that brings a `process::Command` into scope under any name, so a
+/// renamed import (`use std::process::Command as Proc`) cannot hide a spawner from the scan.
+const PROCESS_COMMAND_IMPORT: &str = "use of process::Command";
+
+/// Signature for a `process::Command` path written inline, outside a `use`.
+const PROCESS_COMMAND_PATH: &str = "process::Command path";
 
 /// Shapes that start a process, or undo the hidden-window default, without the shared request.
 const SPAWN_SHAPES: &[&str] = &[
@@ -174,6 +193,61 @@ fn host_lines(source: &str) -> Vec<(usize, &str)> {
     kept
 }
 
+/// Whether `text` names `Command` as a whole path segment, not `CommandExt` or `ControlCommand`.
+fn names_command(text: &str) -> bool {
+    text.split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+        .any(|token| token == "Command")
+}
+
+/// Whether a complete `use` statement imports a `process::Command`, directly, in a group, under
+/// a rename, or through a `process::*` glob.
+fn imports_process_command(statement: &str) -> bool {
+    let compact: String = statement.split_whitespace().collect();
+    compact.contains("process::") && (names_command(statement) || compact.contains("process::*"))
+}
+
+/// Whether a line outside a `use` spells a `process::Command` path.
+fn has_process_command_path(line: &str) -> bool {
+    line.match_indices("process::Command")
+        .any(|(index, found)| {
+            !line[index + found.len()..]
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+        })
+}
+
+/// `(line, signature)` for every `process::Command` import or inline path in `lines`.
+fn process_command_sites(lines: &[(usize, &str)]) -> Vec<(usize, &'static str)> {
+    let mut sites = Vec::new();
+    let mut statement: Option<(usize, String)> = None;
+    for &(number, line) in lines {
+        let trimmed = line.trim_start();
+        let starts_use = trimmed.starts_with("use ")
+            || trimmed.starts_with("pub use ")
+            || trimmed.starts_with("pub(crate) use ")
+            || trimmed.starts_with("pub(super) use ");
+        if statement.is_none() && starts_use {
+            statement = Some((number, String::new()));
+        }
+        if let Some((start, text)) = statement.as_mut() {
+            text.push_str(line);
+            text.push(' ');
+            if line.contains(';') {
+                if imports_process_command(text) {
+                    sites.push((*start, PROCESS_COMMAND_IMPORT));
+                }
+                statement = None;
+            }
+            continue;
+        }
+        if has_process_command_path(line) {
+            sites.push((number, PROCESS_COMMAND_PATH));
+        }
+    }
+    sites
+}
+
 fn spawn_sites(src_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
     let mut sites: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
     let mut stack = vec![src_dir.to_path_buf()];
@@ -196,7 +270,14 @@ fn spawn_sites(src_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
                 continue;
             }
             let source = std::fs::read_to_string(&path).expect("source file reads as utf8");
-            for (number, line) in host_lines(&source) {
+            let lines = host_lines(&source);
+            for (number, signature) in process_command_sites(&lines) {
+                sites
+                    .entry((relative.clone(), signature.to_string()))
+                    .or_default()
+                    .push(number);
+            }
+            for (number, line) in lines {
                 for shape in SPAWN_SHAPES {
                     if line.contains(shape) && !is_declaration(line, shape) {
                         sites
@@ -264,5 +345,28 @@ fn test_gated_blocks_are_not_host_code() {
         kept,
         vec![1, 6, 12],
         "expected host Command::new lines [1, 6, 12] | received {kept:?}"
+    );
+}
+
+#[test]
+fn a_renamed_or_grouped_process_command_import_is_still_a_spawn_site() {
+    let source = "use std::process::Command as Proc;\n\
+                  use std::process::{\n    Child,\n    Command,\n};\n\
+                  use tokio::process::*;\n\
+                  use std::os::unix::process::CommandExt;\n\
+                  use crate::subprocess::ControlCommand;\n\
+                  fn spawn() { std::process::Command::new(\"x\"); }\n\
+                  fn trait_only() { let _ = std::process::CommandExt::exec; }\n";
+    let lines = host_lines(source);
+    let found = process_command_sites(&lines);
+    assert_eq!(
+        found,
+        vec![
+            (1, PROCESS_COMMAND_IMPORT),
+            (2, PROCESS_COMMAND_IMPORT),
+            (6, PROCESS_COMMAND_IMPORT),
+            (9, PROCESS_COMMAND_PATH),
+        ],
+        "expected the rename, the group, the glob, and the inline path | received {found:?}"
     );
 }
