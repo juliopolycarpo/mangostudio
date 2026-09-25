@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
 use mango_external_agents::testing::{FakeHarness, FakeLauncher};
 use mango_external_agents::{
     AccountUsage, CancelReason, CloseReason, Discovery, Error as SdkError, ExitStatus, Harness,
@@ -20,8 +21,8 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    CloseCause, ExecutableResolver, HarnessFactory, PortFuture, Ports, Supervisor,
-    WorkspaceAuthority,
+    AccountKeySource, CloseCause, ExecutableResolver, HarnessFactory, PortFuture, Ports,
+    Supervisor, TargetDiscovery, WorkspaceAuthority,
 };
 use crate::external_agents::wire::{
     ApprovalRouting, CloseParams, Configuration, DiscoverParams, ListSessionsParams, OpenParams,
@@ -546,6 +547,9 @@ struct CountingHarnesses {
     open: OpenBehaviour,
     probes: Mutex<Vec<(TargetId, ProbeBehaviour)>>,
     lists_sessions: bool,
+    /// When set, a Codex probe reports this signed-in ChatGPT address the way
+    /// `CodexHarness::discover_with_account` digests it: under the key given.
+    codex_email: Option<&'static str>,
 }
 
 impl HarnessFactory for CountingHarnesses {
@@ -563,6 +567,27 @@ impl HarnessFactory for CountingHarnesses {
             open: self.open.clone(),
             probe,
             lists_sessions: self.lists_sessions,
+        })
+    }
+
+    fn discover<'a>(
+        &'a self,
+        target: TargetId,
+        executable: Option<PathBuf>,
+        host: &'a HostContext,
+        key: Option<&'a AccountFingerprintKey>,
+    ) -> PortFuture<'a, mango_external_agents::Result<TargetDiscovery>> {
+        let harness = self.harness(target, executable);
+        Box::pin(async move {
+            let discovery = harness.discover(host).await?;
+            let account = match (target, key, self.codex_email) {
+                (TargetId::Codex, Some(key), Some(email)) => CodexAccount::from_account_read(
+                    &json!({ "account": { "type": "chatgpt", "email": email, "planType": "plus" } }),
+                    key,
+                ),
+                _ => None,
+            };
+            Ok(TargetDiscovery { discovery, account })
         })
     }
 }
@@ -703,6 +728,10 @@ struct RigOptions {
     /// The machine environment every `HostContext` is built from.
     environment: PathEnv,
     lists_sessions: bool,
+    /// Where every Codex discovery reads its fingerprint key.
+    account_key: AccountKeySource,
+    /// The address a [`CountingHarnesses`] Codex probe reads from `account/read`.
+    codex_email: Option<&'static str>,
 }
 
 impl Default for RigOptions {
@@ -718,6 +747,8 @@ impl Default for RigOptions {
             hard_turn_timeout: super::HARD_TURN_TIMEOUT,
             environment: PathEnv::default(),
             lists_sessions: true,
+            account_key: Arc::new(|| None),
+            codex_email: None,
         }
     }
 }
@@ -776,6 +807,7 @@ async fn rig(options: RigOptions) -> Rig {
             open: options.open,
             probes: Mutex::new(options.probes),
             lists_sessions: options.lists_sessions,
+            codex_email: options.codex_email,
         }),
         workspaces: Arc::clone(&workspaces) as Arc<dyn WorkspaceAuthority>,
         executables: Arc::clone(&executables) as Arc<dyn ExecutableResolver>,
@@ -784,6 +816,7 @@ async fn rig(options: RigOptions) -> Rig {
         private_root: private_root.clone(),
         runtime_version: String::from("0.0.0-test"),
         limits: Limits::default(),
+        account_key: options.account_key,
         session_cap: options.session_cap,
         consent_poll: Duration::from_millis(10),
         consent_read_timeout: Duration::from_millis(20),
@@ -1515,6 +1548,118 @@ async fn discovery_omits_a_failing_target_and_keeps_the_rest() {
         rig.log.opens(),
         0,
         "expected discovery to open no conversation"
+    );
+}
+
+/// Discovers Codex and Claude through a rig and answers each descriptor's
+/// serialized `account`.
+async fn discovered_accounts(options: RigOptions) -> (serde_json::Value, serde_json::Value) {
+    let rig = rig(options).await;
+    let result = rig
+        .supervisor
+        .discover(
+            DiscoverParams {
+                target_ids: vec![TargetId::Codex, TargetId::Claude],
+                timeout_ms: 5_000,
+            },
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let wire = serde_json::to_value(&result).expect("serializable");
+    assert!(
+        !wire.to_string().contains("user@example.com"),
+        "expected the account address never to reach the wire | received {wire}"
+    );
+    (
+        wire["descriptors"][0]["account"].clone(),
+        wire["descriptors"][1]["account"].clone(),
+    )
+}
+
+#[tokio::test]
+async fn codex_discovery_sends_the_fingerprint_the_typescript_adapter_stored() {
+    let (codex, claude) = discovered_accounts(RigOptions {
+        account_key: Arc::new(|| {
+            crate::external_agents::isolation::account_fingerprint_key("host-local-key")
+        }),
+        codex_email: Some("user@example.com"),
+        ..RigOptions::default()
+    })
+    .await;
+    // `createHmac('sha256', 'host-local-key').update('codex:user@example.com')
+    //  .digest('hex').slice(0, 32)`, the SDK's own pinned vector.
+    assert_eq!(
+        codex["fingerprint"],
+        json!("bcd4e5c63495974573261faadb33d8be"),
+        "expected the TypeScript adapter's fingerprint | received {codex}"
+    );
+    assert_eq!(codex["planType"], json!("plus"), "received {codex}");
+    assert!(
+        claude.get("fingerprint").is_none(),
+        "expected no fingerprint for a target that reports none | received {claude}"
+    );
+}
+
+#[tokio::test]
+async fn a_host_key_that_becomes_readable_is_used_by_the_next_discovery() {
+    let key: Arc<Mutex<Option<AccountFingerprintKey>>> = Arc::new(Mutex::new(None));
+    let reads = Arc::new(AtomicUsize::new(0));
+    let source: AccountKeySource = {
+        let (key, reads) = (Arc::clone(&key), Arc::clone(&reads));
+        Arc::new(move || {
+            reads.fetch_add(1, Ordering::SeqCst);
+            key.lock().unwrap().clone()
+        })
+    };
+    let rig = rig(RigOptions {
+        account_key: source,
+        codex_email: Some("user@example.com"),
+        ..RigOptions::default()
+    })
+    .await;
+    let cancel = CancellationToken::new();
+    let params = || DiscoverParams {
+        target_ids: vec![TargetId::Codex, TargetId::Claude],
+        timeout_ms: 5_000,
+    };
+    let fingerprint = |result: &crate::external_agents::wire::DiscoverResult| {
+        result.descriptors[0]
+            .account
+            .as_ref()
+            .and_then(|account| account.fingerprint.clone())
+    };
+    let before = rig.supervisor.discover(params(), &cancel).await.unwrap();
+    assert_eq!(
+        fingerprint(&before),
+        None,
+        "expected no fingerprint without a key"
+    );
+    *key.lock().unwrap() =
+        crate::external_agents::isolation::account_fingerprint_key("host-local-key");
+    let after = rig.supervisor.discover(params(), &cancel).await.unwrap();
+    assert_eq!(
+        fingerprint(&after).as_deref(),
+        Some("bcd4e5c63495974573261faadb33d8be"),
+        "expected the key read at this discovery, not at startup"
+    );
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "expected one key read per Codex discovery and none for Claude"
+    );
+}
+
+#[tokio::test]
+async fn codex_discovery_without_a_host_key_sends_no_fingerprint() {
+    let (codex, _) = discovered_accounts(RigOptions {
+        codex_email: Some("user@example.com"),
+        ..RigOptions::default()
+    })
+    .await;
+    assert!(
+        codex.is_object() && codex.get("fingerprint").is_none(),
+        "expected a signed-in account without a fingerprint | received {codex}"
     );
 }
 
@@ -2781,6 +2926,13 @@ enum Script {
     /// Streams a text delta every millisecond, far inside any idle bound,
     /// until cancelled: a stream that is never quiet.
     NeverPausing,
+    /// Runs one command that prints for the whole hard deadline: the Codex
+    /// harness's coalesced updates, one per interval, each carrying the full
+    /// output tail, then the command's completion and the turn's.
+    StreamingCommand { updates: usize },
+    /// Streams one text delta, then goes quiet until the SDK's idle deadline
+    /// ends the turn as `Cancelled { reason: Timeout }`.
+    IdleTimeout,
     /// Offers native review. A turn streams one text delta and completes. A
     /// review streams one finding under the thread named here (the session's
     /// own when `None`) and the vendor handle `review_turn`, then completes
@@ -2825,6 +2977,48 @@ impl ScriptedSession {
     }
 }
 
+/// One command's lifetime as the Codex harness reports it: started, `updates`
+/// coalesced output tails of the most characters it keeps, completed.
+async fn stream_one_command(
+    sink: &mango_external_agents::EventSink,
+    updates: usize,
+) -> mango_external_agents::Result<()> {
+    use mango_agent_codex::turn_reducer::ACTIVITY_UPDATE_DETAIL_MAX_CHARS;
+    use mango_external_agents::{
+        Activity, ActivityKind, ActivityResult, ActivityStatus, ActivityUpdate, EventKind,
+    };
+    let call_id = String::from("cmd-1");
+    sink.emit(EventKind::ActivityStarted {
+        call_id: call_id.clone(),
+        activity: Activity::new("shell", ActivityKind::Command, "cargo build --workspace"),
+    })
+    .await?;
+    for index in 0..updates {
+        let tail: String = (index..)
+            .flat_map(|line| {
+                format!("   Compiling crate-{line} v0.1.0\n")
+                    .chars()
+                    .collect::<Vec<_>>()
+            })
+            .take(ACTIVITY_UPDATE_DETAIL_MAX_CHARS)
+            .collect();
+        let mut update = ActivityUpdate::new();
+        update.detail = Some(tail);
+        sink.emit(EventKind::ActivityUpdated {
+            call_id: call_id.clone(),
+            update,
+        })
+        .await?;
+    }
+    sink.emit(EventKind::ActivityCompleted {
+        call_id,
+        result: ActivityResult::new(ActivityStatus::Completed),
+    })
+    .await?;
+    sink.emit(text("built")).await?;
+    sink.complete().await
+}
+
 fn text(text: &str) -> mango_external_agents::EventKind {
     mango_external_agents::EventKind::TextDelta {
         text: text.to_owned(),
@@ -2865,6 +3059,18 @@ impl Session for ScriptedSession {
                     }
                 });
                 String::from("busy-turn")
+            }
+            Script::StreamingCommand { updates } => {
+                let updates = *updates;
+                tokio::spawn(async move {
+                    let _ = stream_one_command(&sink, updates).await;
+                });
+                String::from("command-turn")
+            }
+            Script::IdleTimeout => {
+                sink.emit(text("before the silence")).await?;
+                sink.cancel(CancelReason::Timeout).await?;
+                String::from("idle-turn")
             }
             Script::Reviewing { .. } => {
                 sink.emit(text("turn text")).await?;
@@ -3317,6 +3523,109 @@ async fn a_mid_stream_adapter_crash_ends_the_turn_with_its_error_and_frees_the_s
         .await
         .expect("the crash freed the session for the next turn");
     assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 2);
+    rig.close("one").await;
+}
+
+/// A command that prints for the whole hard deadline reaches the hub update
+/// by update and still leaves the turn room to complete: the harness's
+/// coalescing, not the relay, is what keeps it inside the persisted budget.
+#[tokio::test]
+async fn a_long_streaming_command_stays_inside_the_persisted_budget() {
+    use mango_agent_codex::turn_reducer::ACTIVITY_UPDATE_INTERVAL;
+    let updates =
+        usize::try_from(super::HARD_TURN_TIMEOUT.as_secs() / ACTIVITY_UPDATE_INTERVAL.as_secs())
+            .expect("a small count");
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::StreamingCommand { updates }),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "build it"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let events = rig.events_until("completed").await;
+    let count = |kind: &str| {
+        events
+            .iter()
+            .filter(|event| event["event"]["type"] == json!(kind))
+            .count()
+    };
+    assert_eq!(
+        (
+            count("error"),
+            count("activity_updated"),
+            count("activity_completed")
+        ),
+        (0, updates, 1),
+        "expected (errors, updates, completions) = (0, {updates}, 1)"
+    );
+    let bytes: usize = events
+        .iter()
+        .map(|event| serde_json::to_vec(event).unwrap().len())
+        .sum();
+    assert!(
+        bytes < 2 * 1024 * 1024 - 4_096,
+        "expected an hour of command output inside the persisted budget | received {bytes} bytes"
+    );
+    rig.idle("one", "the command turn").await;
+    rig.close("one").await;
+}
+
+/// The SDK ends a silent turn as a timeout cancellation. The hub must hear
+/// why, as the TypeScript supervisor's idle-timeout error told it, rather
+/// than a bare `cancelled` it renders as the agent stopping on its own.
+#[tokio::test]
+async fn an_idle_timeout_ends_the_turn_with_its_own_error_not_a_bare_cancel() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::IdleTimeout),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let mut kinds = Vec::new();
+    let terminal = loop {
+        let event = rig.next_event("the idle turn's terminal").await;
+        let kind = event["event"]["type"].as_str().unwrap_or("?").to_owned();
+        kinds.push(kind.clone());
+        if kind == "error" || kind == "completed" {
+            break event;
+        }
+    };
+    assert_eq!(
+        kinds,
+        ["commands_available", "text_delta", "error"],
+        "expected the text, then the idle-timeout error | received {kinds:?}"
+    );
+    let error = &terminal["event"]["error"];
+    assert_eq!(
+        (&error["code"], &error["message"]),
+        (
+            &json!("adapter-stream"),
+            &json!("External-agent turn exceeded its idle timeout.")
+        ),
+        "expected the TypeScript supervisor's idle-timeout error | received {error}"
+    );
+    let mut events = rig.events.lock().await;
+    let late = tokio::time::timeout(Duration::from_millis(200), events.recv()).await;
+    assert!(
+        late.is_err(),
+        "expected nothing after the error | received {:?}",
+        late.ok().flatten().map(|event| event.payload)
+    );
+    drop(events);
+    rig.idle("one", "the idle turn").await;
     rig.close("one").await;
 }
 

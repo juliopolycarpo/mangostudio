@@ -26,6 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mango_agent_acp::AcpHarness;
 use mango_agent_claude::ClaudeHarness;
 use mango_agent_codex::CodexHarness;
+use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
 use mango_external_agents as sdk;
 use mango_protocol::error::{RemoteError, codes};
 
@@ -96,13 +97,7 @@ pub(crate) fn harness_for(target: TargetId, executable: Option<PathBuf>) -> Arc<
                 None => harness,
             })
         }
-        TargetId::Codex => {
-            let harness = CodexHarness::new();
-            Arc::new(match executable {
-                Some(path) => harness.with_executable(sdk::ExecutablePath::resolved(path)),
-                None => harness,
-            })
-        }
+        TargetId::Codex => Arc::new(codex_harness(executable)),
         TargetId::Cursor => {
             let harness = AcpHarness::builtin(CURSOR_PROFILE)
                 .expect("mango-agent-acp ships the cursor profile");
@@ -112,6 +107,56 @@ pub(crate) fn harness_for(target: TargetId, executable: Option<PathBuf>) -> Arc<
             })
         }
     }
+}
+
+/// The Codex harness, concretely: discovery needs
+/// [`CodexHarness::discover_with_account`], which `dyn Harness` does not reach.
+///
+/// # Example
+///
+/// ```ignore
+/// let harness = codex_harness(Some(PathBuf::from("/usr/local/bin/codex")));
+/// let found = harness.discover_with_account(&host, &key).await?;
+/// ```
+pub(crate) fn codex_harness(executable: Option<PathBuf>) -> CodexHarness {
+    let harness = CodexHarness::new();
+    match executable {
+        Some(path) => harness.with_executable(sdk::ExecutablePath::resolved(path)),
+        None => harness,
+    }
+}
+
+/// The key a Codex discovery runs under when the host has none of its own.
+///
+/// `discover_with_account` needs a key to report the plan at all. A digest
+/// under this fixed key is reproducible anywhere, so it must never leave the
+/// runtime: [`plan_only`] drops it before the account reaches the mapper.
+///
+/// # Example
+///
+/// ```ignore
+/// let found = codex_harness(None).discover_with_account(&host, plan_only_key()).await?;
+/// let account = found.account.map(plan_only);
+/// ```
+pub(crate) fn plan_only_key() -> &'static AccountFingerprintKey {
+    static KEY: std::sync::OnceLock<AccountFingerprintKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        AccountFingerprintKey::new(b"mangostudio/codex-plan-only").expect("a non-empty literal key")
+    })
+}
+
+/// A Codex account read under [`plan_only_key`]: the plan, without the
+/// fingerprint that key cannot make private.
+///
+/// # Example
+///
+/// ```ignore
+/// let account = plan_only(account);
+/// assert!(account.fingerprint.is_none());
+/// ```
+pub(crate) fn plan_only(mut account: CodexAccount) -> CodexAccount {
+    account.fingerprint = None;
+    account
 }
 
 /// The registry of exactly the three product targets, each with its default
@@ -172,18 +217,21 @@ enum GateRefusal {
 /// The descriptor for one target from one SDK probe, reproducing what the
 /// TypeScript adapter's `discover` returned for the same facts.
 ///
-/// Never carries an account email or other raw identity: the SDK has none to
-/// give, and `account.fingerprint` stays absent (see the module report).
+/// `account` is what only a Codex probe reports: the plan and the host-keyed
+/// account fingerprint the hub compares continuations against. It is applied
+/// to a signed-in Codex account and ignored everywhere else. Never carries an
+/// account email or other raw identity: the SDK hands over only the digest.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let descriptor = descriptor(TargetId::Codex, &sdk::Discovery::not_installed(), 1_000);
+/// let descriptor = descriptor(TargetId::Codex, &sdk::Discovery::not_installed(), None, 1_000);
 /// assert!(!descriptor.installed);
 /// ```
 pub(crate) fn descriptor(
     target: TargetId,
     discovery: &sdk::Discovery,
+    account: Option<&CodexAccount>,
     probed_at_ms: u64,
 ) -> wire::Descriptor {
     let report = Some(wire::DiscoveryReport {
@@ -199,7 +247,7 @@ pub(crate) fn descriptor(
         sdk::GateVerdict::MissingRequiredSurface { .. } => {
             refused(target, discovery, surface_floor(target), report)
         }
-        _ => usable(target, discovery, report),
+        _ => usable(target, discovery, account, report),
     }
 }
 
@@ -261,9 +309,14 @@ fn refused(
 fn usable(
     target: TargetId,
     discovery: &sdk::Discovery,
+    codex_account: Option<&CodexAccount>,
     report: Option<wire::DiscoveryReport>,
 ) -> wire::Descriptor {
-    let (auth_state, login, account) = auth_facts(target, &discovery.auth);
+    let (auth_state, login, mut account) = auth_facts(target, &discovery.auth);
+    if let (TargetId::Codex, Some(account), Some(facts)) = (target, account.as_mut(), codex_account)
+    {
+        with_codex_account(account, facts);
+    }
     let signed_out = auth_state == wire::AuthState::SignedOut;
     let models: Vec<wire::Model> = discovery
         .models
@@ -457,6 +510,17 @@ fn auth_facts(
             None,
         ),
     }
+}
+
+/// The plan and fingerprint a Codex probe reported, as `codex/adapter.ts`'s
+/// `mapAccount` shipped them: both optional, the fingerprint already the
+/// 32-hex-character keyed digest the TypeScript adapter stored.
+fn with_codex_account(account: &mut wire::Account, facts: &CodexAccount) {
+    account.plan_type = facts.plan_type.clone().filter(|plan| !plan.is_empty());
+    account.fingerprint = facts
+        .fingerprint
+        .as_ref()
+        .map(|fingerprint| fingerprint.as_str().to_owned());
 }
 
 /// The account label the owner recognises, never an email or organisation.
@@ -671,9 +735,11 @@ fn routing_to_wire(routing: sdk::ApprovalRouting) -> wire::ApprovalRouting {
 /// The wire's account limits from the SDK's, stamped `observed_at`.
 ///
 /// Carries what the SDK carries: each window's label, used percentage,
-/// duration and reset time, and the plan name. Everything else
-/// `codex/rate-limits.ts` produced (per-limit buckets, credits, spend control,
-/// reset credits, `reachedType`) has no SDK source and stays absent.
+/// duration and reset time, the plan name, credits, spend control and reset
+/// credits. Times become epoch milliseconds, an absent fact stays absent, and
+/// empty vendor text is dropped rather than sent where the wire needs a
+/// non-empty value. Per-limit buckets and `reachedType`, which
+/// `codex/rate-limits.ts` also produced, have no SDK source and stay absent.
 ///
 /// # Example
 ///
@@ -699,13 +765,68 @@ pub(crate) fn account_limits(
             })
             .collect(),
         by_limit_id: None,
-        credits: None,
-        spend_control: None,
-        reset_credits: None,
+        credits: limits.credits.as_ref().map(credits),
+        spend_control: limits.spend_control.as_ref().map(spend_control),
+        reset_credits: limits.reset_credits.as_ref().map(reset_credits),
         plan_type: limits.plan_type.clone(),
         reached_type: None,
         observed_at_ms: epoch_ms(observed_at).unwrap_or(0),
     }
+}
+
+/// `ExternalCredits`: every field optional, so unknown is never zero.
+fn credits(credits: &sdk::Credits) -> wire::Credits {
+    wire::Credits {
+        has_credits: credits.has_credits,
+        unlimited: credits.unlimited,
+        balance: non_empty(credits.balance.as_deref()),
+    }
+}
+
+/// `ExternalSpendControl`. A percentage that is not a finite number is not one
+/// the wire can carry, and reads as unknown.
+fn spend_control(spend: &sdk::SpendControl) -> wire::SpendControl {
+    wire::SpendControl {
+        limit: non_empty(spend.limit.as_deref()),
+        used: non_empty(spend.used.as_deref()),
+        remaining_percent: spend
+            .remaining_percent
+            .filter(|percent| percent.is_finite()),
+        resets_at_ms: spend.resets_at.and_then(epoch_ms),
+        reached: spend.reached,
+    }
+}
+
+/// `ExternalResetCredits`: the count as reported, and at most
+/// [`sdk::RESET_CREDIT_MAX_ITEMS`] detail rows. A row without the id or status
+/// the wire requires is dropped; `availableCount` stays authoritative.
+fn reset_credits(resets: &sdk::ResetCredits) -> wire::ResetCredits {
+    wire::ResetCredits {
+        available_count: resets.available_count,
+        credits: resets.credits.as_ref().map(|rows| {
+            rows.iter()
+                .filter_map(reset_credit)
+                .take(sdk::RESET_CREDIT_MAX_ITEMS)
+                .collect()
+        }),
+    }
+}
+
+fn reset_credit(credit: &sdk::ResetCredit) -> Option<wire::ResetCredit> {
+    Some(wire::ResetCredit {
+        id: non_empty(Some(&credit.id))?,
+        reset_type: non_empty(credit.reset_type.as_deref()),
+        status: non_empty(Some(&credit.status))?,
+        granted_at_ms: credit.granted_at.and_then(epoch_ms),
+        expires_at_ms: credit.expires_at.and_then(epoch_ms),
+        title: non_empty(credit.title.as_deref()),
+        description: non_empty(credit.description.as_deref()),
+    })
+}
+
+/// Vendor text the wire requires non-empty, or nothing.
+fn non_empty(text: Option<&str>) -> Option<String> {
+    text.filter(|text| !text.is_empty()).map(str::to_owned)
 }
 
 /// One page of the vendor's own sessions, capped at the wire's fifty rows.

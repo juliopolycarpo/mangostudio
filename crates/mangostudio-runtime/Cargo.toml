@@ -77,10 +77,10 @@ jsonschema = { version = "0.56", default-features = false }
 # stdio through this crate's own launcher, so neither `websocket` nor the SDK's
 # `launcher-tokio` spawner is compiled in. Exact pins while the adoption is
 # qualified; a bump is a deliberate `build(runtime)` change.
-mango-agent-acp = "=0.2.0"
-mango-agent-claude = "=0.2.0"
-mango-agent-codex = "=0.2.0"
-mango-external-agents = { version = "=0.2.0", default-features = false, features = ["stdio"] }
+mango-agent-acp = "=0.3.0"
+mango-agent-claude = "=0.3.0"
+mango-agent-codex = "=0.3.0"
+mango-external-agents = { version = "=0.3.0", default-features = false, features = ["stdio"] }
 # The `tokio` feature is what brings in `Contract`/`ContractHandlers`/`Guard`/
 # `Session` — this crate's whole reason to exist is serving a contract over a
 # session, so it is a normal dependency, not optional.
@@ -154,8 +154,8 @@ webpki-roots = "1"
 # `FakeLauncher`/`FakeHarness` for the external-agent host's own tests.
 # `FakeAcpAgent` is what `examples/fake_cursor_agent.rs` pipes its stdio
 # through for the compiled-runtime qualification suite.
-mango-agent-acp = { version = "=0.2.0", features = ["testing"] }
-mango-external-agents = { version = "=0.2.0", default-features = false, features = ["stdio", "testing"] }
+mango-agent-acp = { version = "=0.3.0", features = ["testing"] }
+mango-external-agents = { version = "=0.3.0", default-features = false, features = ["stdio", "testing"] }
 mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
 tokio = { version = "1.53", features = ["io-std", "test-util"] }
 

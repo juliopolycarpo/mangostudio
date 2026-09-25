@@ -530,16 +530,14 @@ fn thread_usage_maps_one_to_one() {
 
 #[test]
 fn account_limits_go_through_the_session_mapper() {
-    let limits = sdk::AccountLimits {
-        windows: vec![sdk::RateLimitWindow {
-            label: Some(String::from("5h")),
-            used_percent: 42.5,
-            window_duration_minutes: Some(300),
-            resets_at: Some(epoch_plus_ms(EXPIRES_AT_MS)),
-        }],
-        plan_type: Some(String::from("pro")),
-        observed_at: epoch_plus_ms(EVENT_AT_MS),
-    };
+    let mut limits = sdk::AccountLimits::unknown(epoch_plus_ms(EVENT_AT_MS));
+    limits.windows = vec![sdk::RateLimitWindow {
+        label: Some(String::from("5h")),
+        used_percent: 42.5,
+        window_duration_minutes: Some(300),
+        resets_at: Some(epoch_plus_ms(EXPIRES_AT_MS)),
+    }];
+    limits.plan_type = Some(String::from("pro"));
     assert_wire(
         sdk::EventKind::AccountLimits { limits },
         &json!({
@@ -576,6 +574,41 @@ fn cancelled_is_a_marker_and_completed_is_the_terminal() {
 }
 
 #[test]
+fn account_limits_carry_credits_and_reset_credits_through_the_session_mapper() {
+    let mut limits = sdk::AccountLimits::unknown(epoch_plus_ms(EVENT_AT_MS));
+    let mut credits = sdk::Credits::default();
+    credits.has_credits = Some(true);
+    credits.balance = Some(String::from("4.20"));
+    limits.credits = Some(credits);
+    let mut spend = sdk::SpendControl::default();
+    spend.reached = Some(true);
+    spend.resets_at = Some(epoch_plus_ms(EXPIRES_AT_MS));
+    limits.spend_control = Some(spend);
+    let mut credit = sdk::ResetCredit::new("credit-1", "available");
+    credit.expires_at = Some(epoch_plus_ms(EXPIRES_AT_MS));
+    let mut resets = sdk::ResetCredits::new(1);
+    resets.credits = Some(vec![credit]);
+    limits.reset_credits = Some(resets);
+    assert_wire(
+        sdk::EventKind::AccountLimits { limits },
+        &json!({
+            "type": "account_limits",
+            "limits": {
+                "targetId": "codex",
+                "windows": [],
+                "credits": { "hasCredits": true, "balance": "4.20" },
+                "spendControl": { "resetsAtMs": EXPIRES_AT_MS, "reached": true },
+                "resetCredits": {
+                    "availableCount": 1,
+                    "credits": [{ "id": "credit-1", "status": "available", "expiresAtMs": EXPIRES_AT_MS }],
+                },
+                "observedAtMs": EVENT_AT_MS,
+            },
+        }),
+    );
+}
+
+#[test]
 fn error_carries_code_message_vendor_code_request_id_and_retryable() {
     let mut error = sdk::VendorError::new(
         sdk::ErrorCode::from_static("codex-turn-failed"),
@@ -597,6 +630,39 @@ fn error_carries_code_message_vendor_code_request_id_and_retryable() {
             },
         }),
     );
+}
+
+#[test]
+fn an_acp_turn_stopped_short_ends_as_vendor_turn_incomplete_with_its_stop_reason() {
+    for (stop_reason, message) in [
+        ("refusal", "the agent refused to continue the turn"),
+        (
+            "max_tokens",
+            "the agent stopped the turn at its token limit",
+        ),
+        (
+            "max_turn_requests",
+            "the agent stopped the turn at its request limit",
+        ),
+    ] {
+        let error = sdk::VendorError::new(
+            sdk::ErrorCode::from_static(mango_agent_acp::reducer::TURN_INCOMPLETE_CODE),
+            message,
+        )
+        .with_vendor_code(stop_reason, false);
+        assert_wire(
+            sdk::EventKind::Error { error },
+            &json!({
+                "type": "error",
+                "error": {
+                    "code": "vendor-turn-incomplete",
+                    "message": message,
+                    "retryable": false,
+                    "vendorCode": stop_reason,
+                },
+            }),
+        );
+    }
 }
 
 #[test]

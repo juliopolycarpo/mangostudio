@@ -183,6 +183,7 @@ pub(crate) fn production_supervisor(
         private_root: slot_dir(slot, mango_home).join("external-agents"),
         runtime_version: runtime_version.to_owned(),
         limits,
+        account_key: Arc::new(super::isolation::detect_account_fingerprint_key),
         session_cap: DEFAULT_SESSION_CAP,
         consent_poll: CONSENT_POLL,
         consent_read_timeout: CONSENT_READ_TIMEOUT,
