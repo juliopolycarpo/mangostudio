@@ -900,7 +900,7 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     // `waitid(WNOWAIT)` leaves the target as this guardian's zombie child until final cleanup.
     // The target remains the process-group leader during that interval, so a recycled numeric PID
     // can never redirect a later `kill(-target_pgid, ...)` at an unrelated process.
-    let status = wait_unreaped_raw(target);
+    let status = unsafe { wait_target_reaping_adopted(target) };
     if !write_status_raw(fds.status_write, status) {
         kill_target_and_guardian_and_exit(target_pgid, guardian_pgid, fds.terminal);
     }
@@ -949,12 +949,97 @@ unsafe fn guardian_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 const ORPHAN_SWEEP_ROUNDS: usize = 256;
 
+/// Waits for `target` to exit, leaving it unreaped, while reaping every other child as it exits.
+///
+/// As a Linux subreaper the guardian adopts every orphaned descendant, and an adopted child that
+/// exits stays a zombie until this guardian reaps it: a long terminal, MCP server, or agent would
+/// otherwise collect `<defunct>` entries against `pids.max` for its whole life.
+unsafe fn wait_target_reaping_adopted(target: libc::pid_t) -> libc::c_int {
+    // SAFETY: `siginfo_t` is an all-zeroable C output structure that `waitid` fills on success.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    loop {
+        let waited =
+            unsafe { libc::waitid(libc::P_ALL, 0, &raw mut info, libc::WEXITED | libc::WNOWAIT) };
+        if waited != 0 {
+            if unsafe { errno_raw() } == libc::EINTR {
+                continue;
+            }
+            // ECHILD cannot happen while the target is unreaped; fall back to the direct wait.
+            return unsafe { wait_unreaped_raw(target) };
+        }
+        let pid = unsafe { info.si_pid() };
+        if pid == target {
+            return siginfo_status(&info);
+        }
+        // Any other child is adopted or the watchdog. Reaping the watchdog is harmless: it only
+        // exits after killing this guardian's whole group.
+        let mut status = 0;
+        let _ = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+    }
+}
+
+fn siginfo_status(info: &libc::siginfo_t) -> libc::c_int {
+    // SAFETY: `info` was filled by a successful `waitid` for an exited child.
+    let status = unsafe { info.si_status() };
+    match info.si_code {
+        libc::CLD_EXITED => status << 8,
+        libc::CLD_KILLED => status,
+        libc::CLD_DUMPED => status | 0x80,
+        _ => 127 << 8,
+    }
+}
+
+/// The monotonic clock now, or `None` when it cannot be read. Returns the whole `timespec`
+/// rather than naming `time_t`, which musl deprecates.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn monotonic_now() -> Option<libc::timespec> {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } < 0 {
+        return None;
+    }
+    Some(now)
+}
+
+/// Whether `pid` is still this guardian's own child, exited or not. A listing read through a
+/// mismatched pid namespace can name a process that is not; it must never be signalled.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn is_own_child(pid: libc::pid_t) -> bool {
+    // SAFETY: `siginfo_t` is an all-zeroable C output structure.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    loop {
+        let waited = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &raw mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if waited == 0 {
+            return true;
+        }
+        if unsafe { errno_raw() } != libc::EINTR {
+            return false;
+        }
+    }
+}
+
 /// Kills and reaps every process this subreaper guardian adopted, other than `watchdog`.
 ///
-/// Each listed pid is this guardian's own unreaped child, so it cannot be recycled between the
-/// read and the signal. Reads `/proc/thread-self/children`; a kernel without it is left as is.
+/// Each listed pid is checked to be this guardian's own unreaped child, so it cannot be recycled
+/// between the check and the signal. Bounded by [`TERMINAL_SESSION_CLEANUP_SECONDS`] on the
+/// monotonic clock: an escapee stuck in uninterruptible sleep cannot hold the guardian open.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 unsafe fn reap_adopted_orphans(watchdog: libc::pid_t) {
+    let Some(start) = (unsafe { monotonic_now() }) else {
+        return;
+    };
+    let deadline = start
+        .tv_sec
+        .saturating_add(TERMINAL_SESSION_CLEANUP_SECONDS.into());
     for _ in 0..ORPHAN_SWEEP_ROUNDS {
         let mut buffer = [0_u8; 4096];
         let Some(length) = (unsafe { read_own_children(&mut buffer) }) else {
@@ -966,22 +1051,42 @@ unsafe fn reap_adopted_orphans(watchdog: libc::pid_t) {
             return;
         }
         for pid in &adopted[..count] {
-            unsafe { libc::kill(*pid, libc::SIGKILL) };
+            if unsafe { is_own_child(*pid) } {
+                unsafe { libc::kill(*pid, libc::SIGKILL) };
+            }
         }
         for pid in &adopted[..count] {
-            let _ = unsafe { wait_raw(*pid) };
+            loop {
+                let mut status = 0;
+                let waited = unsafe { libc::waitpid(*pid, &mut status, libc::WNOHANG) };
+                if waited != 0 && !(waited < 0 && unsafe { errno_raw() } == libc::EINTR) {
+                    break;
+                }
+                if unsafe { monotonic_now() }.is_none_or(|now| now.tv_sec >= deadline) {
+                    return;
+                }
+                unsafe { pause_between_group_probes() };
+            }
         }
     }
 }
 
+/// Reads this guardian's `children` listing into `buffer`. Prefers `/proc/thread-self` and
+/// falls back to `/proc/self/task/<pid>/children` for kernels before 3.17; the guardian is
+/// single-threaded after `fork`, so its thread id is its pid.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 unsafe fn read_own_children(buffer: &mut [u8]) -> Option<usize> {
-    let file = unsafe {
+    let mut file = unsafe {
         libc::open(
             c"/proc/thread-self/children".as_ptr(),
             libc::O_RDONLY | libc::O_CLOEXEC,
         )
     };
+    if file < 0 {
+        let mut path = [0_u8; 64];
+        task_children_path(unsafe { libc::getpid() }, &mut path)?;
+        file = unsafe { libc::open(path.as_ptr().cast(), libc::O_RDONLY | libc::O_CLOEXEC) };
+    }
     if file < 0 {
         return None;
     }
@@ -1008,6 +1113,35 @@ unsafe fn read_own_children(buffer: &mut [u8]) -> Option<usize> {
     }
     unsafe { libc::close(file) };
     Some(filled)
+}
+
+/// Writes `/proc/self/task/<pid>/children` and a NUL into `out` without allocating, returning
+/// the path length. Allocation is not async-signal-safe in the post-`fork` guardian.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn task_children_path(pid: libc::pid_t, out: &mut [u8]) -> Option<usize> {
+    const PREFIX: &[u8] = b"/proc/self/task/";
+    const SUFFIX: &[u8] = b"/children\0";
+    if pid <= 0 {
+        return None;
+    }
+    let mut digits = [0_u8; 10];
+    let mut count = 0;
+    let mut rest = pid;
+    while rest > 0 {
+        digits[count] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+        count += 1;
+    }
+    let length = PREFIX.len() + count + SUFFIX.len();
+    if length > out.len() {
+        return None;
+    }
+    out[..PREFIX.len()].copy_from_slice(PREFIX);
+    for index in 0..count {
+        out[PREFIX.len() + index] = digits[count - 1 - index];
+    }
+    out[PREFIX.len() + count..length].copy_from_slice(SUFFIX);
+    Some(length - 1)
 }
 
 /// Writes the space-terminated pids of a `children` listing into `out`, skipping `excluded`.
@@ -1269,13 +1403,7 @@ unsafe fn wait_unreaped_raw(pid: libc::pid_t) -> libc::c_int {
             )
         };
         if waited == 0 {
-            let status = unsafe { info.si_status() };
-            return match info.si_code {
-                libc::CLD_EXITED => status << 8,
-                libc::CLD_KILLED => status,
-                libc::CLD_DUMPED => status | 0x80,
-                _ => 127 << 8,
-            };
+            return siginfo_status(&info);
         }
         if unsafe { errno_raw() } == libc::EINTR {
             continue;
@@ -1805,6 +1933,89 @@ mod tests {
         assert_eq!(parse_proc_pid(b"12x\0"), None);
         assert_eq!(parse_proc_pid(b"999999999999\0"), None);
         assert_eq!(parse_proc_pid(b"12"), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn the_task_children_fallback_path_names_this_pid() {
+        let mut out = [0_u8; 64];
+        let length = super::task_children_path(4096, &mut out).expect("path fits");
+        assert_eq!(
+            &out[..=length],
+            b"/proc/self/task/4096/children\0",
+            "expected the pre-3.17 children path | received {:?}",
+            String::from_utf8_lossy(&out[..=length])
+        );
+        assert_eq!(super::task_children_path(0, &mut out), None);
+        assert_eq!(super::task_children_path(4096, &mut [0_u8; 8]), None);
+    }
+
+    /// `<defunct>` children of `parent`, read from `/proc`.
+    #[cfg(target_os = "linux")]
+    fn zombie_children(parent: libc::pid_t) -> Vec<libc::pid_t> {
+        std::fs::read_dir("/proc")
+            .expect("proc is readable")
+            .filter_map(|entry| {
+                entry
+                    .ok()?
+                    .file_name()
+                    .to_str()?
+                    .parse::<libc::pid_t>()
+                    .ok()
+            })
+            .filter(|pid| {
+                let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                    return false;
+                };
+                let Some((_, rest)) = stat.rsplit_once(')') else {
+                    return false;
+                };
+                let mut fields = rest.split_whitespace();
+                let state = fields.next();
+                let ppid = fields
+                    .next()
+                    .and_then(|value| value.parse::<libc::pid_t>().ok());
+                state == Some("Z") && ppid == Some(parent)
+            })
+            .collect()
+    }
+
+    /// As a subreaper the guardian adopts orphans; one that exits while the target still runs
+    /// must be reaped then, not left `<defunct>` for the target's whole life.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn adopted_children_that_exit_are_reaped_while_the_target_runs() {
+        use crate::subprocess::ProcessRequest;
+
+        let request = ProcessRequest::new(
+            "/bin/sh",
+            [
+                "-c",
+                "for i in 1 2 3 4 5; do /bin/sh -c 'sleep 0.05 &'; done; sleep 30",
+            ],
+        );
+        let mut child = crate::blocking::run_blocking(move || super::spawn(&request))
+            .await
+            .expect("guardian starts");
+        child.wait_ready().await.expect("target is ready");
+        child.release_start().expect("target is released");
+        child.wait_exec().await.expect("target executes");
+        let guardian = child.pid;
+
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        let zombies = zombie_children(guardian);
+
+        child.force().expect("target group is killed");
+        let _ = child.wait_target().await;
+        child.finalize().expect("guardian is finalized");
+        child.wait_guardian().await.expect("guardian exits");
+        crate::blocking::run_blocking(move || drop(child)).await;
+        assert_eq!(
+            zombies,
+            Vec::<libc::pid_t>::new(),
+            "expected no zombies under guardian {guardian} while its target runs | received \
+             {zombies:?}"
+        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
