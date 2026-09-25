@@ -2783,9 +2783,11 @@ enum Script {
     NeverPausing,
     /// Offers native review. A turn streams one text delta and completes. A
     /// review streams one finding under the thread named here (the session's
-    /// own when `None`), then completes once `finish` reads `true`.
+    /// own when `None`) and the vendor handle `review_turn`, then completes
+    /// once `finish` reads `true`.
     Reviewing {
         thread: Option<String>,
+        review_turn: String,
         finish: watch::Receiver<bool>,
     },
 }
@@ -2882,7 +2884,12 @@ impl Session for ScriptedSession {
         &self,
         request: mango_external_agents::ReviewRequest,
     ) -> mango_external_agents::Result<mango_external_agents::ReviewStream> {
-        let Script::Reviewing { thread, finish } = &self.script else {
+        let Script::Reviewing {
+            thread,
+            review_turn,
+            finish,
+        } = &self.script
+        else {
             return Err(SdkError::not_supported(
                 mango_external_agents::Capability::NativeReview,
             ));
@@ -2898,7 +2905,7 @@ impl Session for ScriptedSession {
             }
         });
         Ok(mango_external_agents::ReviewStream {
-            turn: TurnStream::accepted(request.turn_id, attempt, "review-turn", events),
+            turn: TurnStream::accepted(request.turn_id, attempt, review_turn.clone(), events),
             review_thread_id: thread
                 .clone()
                 .unwrap_or_else(|| self.ids().native_session_id),
@@ -3414,6 +3421,7 @@ async fn a_review_follows_the_session_sequence_topic_receipt_and_slot_rules() {
     let rig = rig(RigOptions {
         open: OpenBehaviour::Scripted(Script::Reviewing {
             thread: None,
+            review_turn: String::from("review-turn"),
             finish: finish_gate,
         }),
         ..RigOptions::default()
@@ -3527,6 +3535,7 @@ async fn a_review_on_another_thread_is_refused_and_stopped_before_the_hub_sees_i
     let rig = rig(RigOptions {
         open: OpenBehaviour::Scripted(Script::Reviewing {
             thread: Some(String::from("another-thread")),
+            review_turn: String::from("review-turn"),
             finish: finish_gate,
         }),
         ..RigOptions::default()
@@ -3564,6 +3573,80 @@ async fn a_review_on_another_thread_is_refused_and_stopped_before_the_hub_sees_i
         (&again.code, &again.message),
         (&refused.code, &refused.message),
         "expected the repeat to receive the first refusal"
+    );
+    assert_eq!(
+        rig.log.reviews.load(Ordering::SeqCst),
+        1,
+        "expected one vendor review for the refused id"
+    );
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("the refused review released the turn slot");
+    let first = rig.next_event("the next turn's first event").await;
+    assert_eq!(
+        (&first["sequence"], &first["nativeTurnId"]),
+        (&json!(1), &json!("scripted-turn")),
+        "expected nothing of the refused review published | received {first}"
+    );
+    rig.close("one").await;
+}
+
+/// A review is admitted through the same handle bound as a turn, so the two
+/// cannot drift apart: an unbounded review handle is refused, stopped, and
+/// never published, even on the session's own thread.
+#[tokio::test]
+async fn an_unbounded_review_turn_id_is_refused_and_its_vendor_review_stopped() {
+    let (_finish, finish_gate) = watch::channel(false);
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::Reviewing {
+            thread: None,
+            review_turn: "x".repeat(129),
+            finish: finish_gate,
+        }),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let refused = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect_err("an unbounded review handle must be refused");
+    assert!(
+        refused.message.contains("expected a usable native turn id"),
+        "expected a refusal naming the native turn id | received: {}",
+        refused.message
+    );
+    assert_eq!(
+        refused
+            .details
+            .as_ref()
+            .and_then(|details| details.get("dispatch")),
+        Some(&json!("accepted")),
+        "expected the refusal to say the vendor accepted the review | received: {:?}",
+        refused.details
+    );
+    eventually(
+        "the review told to stop",
+        || rig.log.cancel_reasons(),
+        |reasons| !reasons.is_empty(),
+    )
+    .await;
+    rig.idle("one", "the refused review").await;
+    assert_eq!(rig.log.cancel_reasons(), vec![CancelReason::Requested]);
+    let again = rig
+        .supervisor
+        .start_review(rig.review_params("one", "r1"), &CancellationToken::new())
+        .await
+        .expect_err("a resend is answered from the refused receipt");
+    assert_eq!(
+        (&again.code, &again.message, &again.details),
+        (&refused.code, &refused.message, &refused.details),
+        "expected the resend to receive the first refusal"
     );
     assert_eq!(
         rig.log.reviews.load(Ordering::SeqCst),
