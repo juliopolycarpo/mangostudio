@@ -209,24 +209,17 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(onBlock).toContain('- "Cargo.lock"');
   });
 
-  test('the push filter and the changes job both cover the shared shapes the Rust lanes read', () => {
-    // The slot and contract shapes the Rust runtime reads and writes have a
-    // TypeScript half in apps/shared; a PR touching only one of them must
-    // still run this workflow.
-    const onBlock = extractOnBlock(workflow);
+  test('the changes job classifies the diff through the rust-lanes manifest', () => {
     const changesBlock = extractJobBlock(workflow, 'changes');
-    const sharedInputs = [
-      'apps/shared/src/runtime-home/',
-      'apps/shared/src/external-agents/',
-      'apps/shared/src/schema-helpers.ts',
-      'apps/shared/src/environments/toolchain-schemas.ts',
-    ];
 
-    for (const input of sharedInputs) {
-      expect(onBlock).toContain(`"${input}${input.endsWith('/') ? '**' : ''}"`);
-      const escaped = input.replaceAll('.', String.raw`\.`);
-      expect(changesBlock).toContain(escaped);
-    }
+    expect(changesBlock).toContain(`rust: ${EXPR} steps.changed.outputs.rust }}`);
+    expect(changesBlock).toContain(`qualification: ${EXPR} steps.changed.outputs.qualification }}`);
+    expect(changesBlock).toContain(
+      'bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/lanes"'
+    );
+    // No second, hand-maintained path list may creep back into the job.
+    expect(changesBlock).not.toContain('relevant=');
+    expect(changesBlock).not.toContain('grep -Eq');
     // The TypeScript runtime is gone; nothing may still filter on its tree.
     expect(workflow).not.toContain('apps/runtime/');
   });
@@ -303,7 +296,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness real-binary-qualification' || '' }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
     );
   });
 
@@ -342,77 +335,16 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(qualificationBlock).toContain(
       'fake-cursor-agent: target/debug/examples/fake_cursor_agent.exe'
     );
+    // The files come from scripts/lib/rust-lanes.ts discovery, never from
+    // a list in the job; scripts/tests/rust-lanes.unit.test.ts owns what it finds.
+    expect(qualificationBlock).toContain("if: needs.changes.outputs.qualification == 'true'");
     expect(qualificationBlock).toContain(
-      'tests/integration/services/rust-runtime-qualification.integration.test.ts'
+      'run: bun ./scripts/ci/rust-lanes.ts qualify --suite integration'
     );
     expect(qualificationBlock).toContain(
-      'tests/integration/services/rust-runtime-external-agents-qualification.integration.test.ts'
+      'run: bun ./scripts/ci/rust-lanes.ts qualify --suite unit'
     );
-    expect(qualificationBlock).toContain(
-      'tests/integration/services/rust-filesystem-search-compat.integration.test.ts'
-    );
-    expect(qualificationBlock).toContain(
-      'tests/integration/services/rust-snapshot-compat.integration.test.ts'
-    );
-    expect(qualificationBlock).toContain(
-      'tests/integration/services/rust-command-compat.integration.test.ts'
-    );
-    expect(qualificationBlock).toContain(
-      'tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts'
-    );
-    // The api cases that became Rust-backed when the hub tests stopped using
-    // the TypeScript runtime; the ordinary lane has no binary and skips them.
-    for (const suite of [
-      'tests/integration/routes/terminal-socket.integration.test.ts',
-      'tests/integration/routes/environment-entities.integration.test.ts',
-      'tests/integration/services/hub-isolation-claim.integration.test.ts',
-      'tests/integration/services/connect-http-runtime.integration.test.ts',
-      'tests/integration/services/environment-install-execution.integration.test.ts',
-      'tests/integration/modules/library/library-undo-missing-backup.integration.test.ts',
-      'tests/unit/services/tools/read-file-tool.test.ts',
-      'tests/unit/services/tools/write-file-tool.test.ts',
-      'tests/unit/services/tools/list-directory-tool.test.ts',
-      'tests/unit/services/tools/glob-tool.test.ts',
-    ]) {
-      expect(qualificationBlock, `real-binary-qualification does not run ${suite}`).toContain(
-        suite
-      );
-    }
-  });
-
-  test('the push filter and the changes job both cover the Rust-only oracle and its helpers', () => {
-    // Editing a recorded expectation or a Rust spawn helper must rerun the
-    // qualification job that reads it, or the edit is never checked.
-    const onBlock = extractOnBlock(workflow);
-    const changesBlock = extractJobBlock(workflow, 'changes');
-    const relevant = /relevant='([^']+)'/.exec(changesBlock)?.[1];
-    expect(relevant, 'cargo-shim.yml changes job has no `relevant=` regex').toBeDefined();
-    const matcher = new RegExp(relevant ?? '');
-
-    for (const input of [
-      'apps/api/tests/integration/services/environment-install-execution.integration.test.ts',
-      'apps/api/tests/support/rust-runtime-client.ts',
-      'apps/api/tests/support/rust-stdio-runtime.ts',
-      'apps/api/tests/support/rust-serve-runtime.ts',
-      'apps/api/tests/support/fixtures/rust-filesystem-search-recorded.ts',
-      'apps/api/tests/unit/services/tools/support/target-home.ts',
-      'apps/api/tests/support/fake-runtime-host.ts',
-      'apps/api/tests/support/fake-runtime-websocket-server.ts',
-    ]) {
-      expect(onBlock).toContain(`"${input}"`);
-      expect(matcher.test(input), `changes regex misses ${input}`).toBe(true);
-    }
-    // The MCP fixtures, including the stdio relay pair, are matched as a tree:
-    // the relay's host half and its spawned half change together.
-    expect(onBlock).toContain('"apps/api/tests/support/fixtures/mcp/**"');
-    for (const input of [
-      'apps/api/tests/support/fixtures/mcp/mcp-relay-host.ts',
-      'apps/api/tests/support/fixtures/mcp/mcp-stdio-relay.ts',
-      'apps/api/tests/support/fixtures/mcp/qualification-mcp-server.ts',
-    ]) {
-      expect(matcher.test(input), `changes regex misses ${input}`).toBe(true);
-    }
-    expect(workflow).not.toContain('rust-typescript-runtimes');
+    expect(qualificationBlock).not.toMatch(/\.test\.ts/);
   });
 });
 

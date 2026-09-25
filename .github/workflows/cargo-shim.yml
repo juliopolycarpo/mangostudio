@@ -8,6 +8,10 @@ name: Cargo Shim
 #
 # Pull requests always start the workflow so the Gate check reports even when
 # the Rust lanes are irrelevant. Pushes to main keep a path filter.
+#
+# Which paths make which lane relevant, and which api tests the real-binary
+# lane runs, live in one manifest: scripts/lib/rust-lanes.ts. The push filter
+# below, the `changes` job, and the qualification steps all derive from it.
 
 on:
   pull_request:
@@ -15,6 +19,8 @@ on:
   push:
     branches: [main]
     paths:
+      # Generated from scripts/lib/rust-lanes.ts QUALIFICATION_PATHS; the
+      # rust-lanes unit test fails if the two differ.
       - "crates/**"
       - "apps/shared/src/runtime-contract/**"
       - "apps/shared/src/runtime-home/**"
@@ -23,55 +29,22 @@ on:
       - "apps/shared/src/environments/toolchain-schemas.ts"
       - "apps/shared/src/library/**"
       - "apps/shared/src/markdown/**"
-      - "apps/api/tests/integration/services/rust-runtime-qualification.integration.test.ts"
-      - "apps/api/tests/integration/services/rust-runtime-external-agents-qualification.integration.test.ts"
-      - "apps/api/src/modules/external-agents/application/external-identity-isolation.ts"
-      - "apps/api/tests/integration/services/rust-filesystem-search-compat.integration.test.ts"
-      - "apps/api/tests/integration/services/rust-snapshot-compat.integration.test.ts"
-      - "apps/api/tests/integration/services/rust-command-compat.integration.test.ts"
-      - "apps/api/tests/integration/services/rust-runtime-mcp-qualification.integration.test.ts"
-      - "apps/api/tests/integration/services/rust-runtime-library-qualification.integration.test.ts"
-      - "apps/api/tests/integration/services/rust-runtime-library-propagation.integration.test.ts"
-      - "apps/api/tests/integration/services/rust-runtime-library-removal.integration.test.ts"
-      - "apps/api/tests/integration/services/local-rust-runtime.integration.test.ts"
-      - "apps/api/src/modules/library/**"
-      - "apps/api/tests/support/fixtures/mcp/**"
-      - "apps/api/tests/support/fake-runtime-host.ts"
-      - "apps/api/tests/support/fake-runtime-websocket-server.ts"
-      - "apps/api/src/services/mcp/**"
-      - "apps/api/tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts"
-      - "apps/api/tests/support/rust-runtime-binary.ts"
-      - "apps/api/tests/support/rust-runtime-assertions.ts"
-      - "apps/api/tests/support/rust-runtime-install-fixture.ts"
-      - "apps/api/tests/support/rust-runtime-client.ts"
-      - "apps/api/tests/support/rust-stdio-runtime.ts"
-      - "apps/api/tests/support/rust-serve-runtime.ts"
-      - "apps/api/tests/support/fixtures/rust-filesystem-search-recorded.ts"
-      - "apps/api/tests/integration/routes/terminal-socket.integration.test.ts"
-      - "apps/api/tests/integration/routes/environment-entities.integration.test.ts"
-      - "apps/api/tests/integration/services/hub-isolation-claim.integration.test.ts"
-      - "apps/api/tests/integration/services/connect-http-runtime.integration.test.ts"
-      - "apps/api/tests/integration/services/environment-install-execution.integration.test.ts"
-      - "apps/api/tests/integration/modules/library/library-undo-missing-backup.integration.test.ts"
-      - "apps/api/tests/unit/services/tools/support/target-home.ts"
-      - "apps/api/tests/unit/services/tools/read-file-tool.test.ts"
-      - "apps/api/tests/unit/services/tools/write-file-tool.test.ts"
-      - "apps/api/tests/unit/services/tools/list-directory-tool.test.ts"
-      - "apps/api/tests/unit/services/tools/glob-tool.test.ts"
-      - "apps/api/tests/support/rust-library-boxes.ts"
-      - "apps/api/src/services/runtime-client/**"
-      - "apps/api/src/lib/runtime-paths.ts"
-      - "apps/api/src/modules/environments/http/runtime-socket-routes.ts"
-      - "apps/api/src/modules/environments/application/runtime-pairing-service.ts"
-      - "apps/api/src/modules/environments/infrastructure/runtime-pairing-repository.ts"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
       - "rustfmt.toml"
       - "rust-toolchain.toml"
+      - ".cargo/config.toml"
       - ".github/workflows/cargo-shim.yml"
       - ".github/actions/setup-zigbuild/**"
-      - ".cargo/config.toml"
+      - "apps/api/**"
+      - "apps/shared/**"
+      - "package.json"
+      - "bun.lock"
+      - ".bun-version"
+      - "patches/**"
+      - "scripts/lib/rust-lanes.ts"
+      - "scripts/ci/rust-lanes.ts"
   workflow_dispatch:
 
 permissions:
@@ -88,52 +61,39 @@ jobs:
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
+      qualification: ${{ steps.changed.outputs.qualification }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
       - id: changed
-        name: Check Rust workspace paths
+        name: Classify changed paths
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # RUST_WORKSPACE_PATHS decides the Rust workspace lanes and
+        # QUALIFICATION_PATHS (a superset: the whole hub and shared tree)
+        # decides real-binary-qualification; both in scripts/lib/rust-lanes.ts.
+        # The script refuses an empty diff instead of skipping every lane.
+        # Dependency-free script; runs without `bun install`.
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "qualification=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
-            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip the Rust lanes" >&2
-            exit 1
-          fi
-
-          # Beyond the Rust workspace itself, these paths feed the Rust lanes:
-          # apps/shared/src/runtime-home and the chain its schemas import from
-          # (external-agents, schema-helpers, environments/toolchain-schemas)
-          # are the TypeScript half of the slot and contract shapes the
-          # runtime reads and writes; the library readers
-          # (apps/shared/src/library/, apps/shared/src/markdown/) are the hub
-          # half of what the runtime's library methods answer. The
-          # qualification suite's own test and support files feed
-          # `real-binary-qualification`, and so does the hub code that job's
-          # tests actually exercise (apps/api/src/services/runtime-client/,
-          # the local-launch path in runtime-paths.ts, the paired-connect
-          # accept route, and the pairing service/repository it depends on)
-          # -- without these, a change that broke spawnRuntimeChild's
-          # cancellation path, say, touches none of the paths above, rust
-          # evaluates false, the job is skipped and allowed to be, and Gate
-          # reports green having exercised none of it.
-          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/shared/src/library/|apps/shared/src/markdown/|apps/api/tests/integration/services/(rust-runtime-qualification|rust-runtime-external-agents-qualification|rust-filesystem-search-compat|rust-snapshot-compat|rust-command-compat|rust-runtime-mcp-qualification|rust-runtime-library-qualification|rust-runtime-library-propagation|rust-runtime-library-removal|local-rust-runtime)\.integration\.test\.ts$|apps/api/tests/support/fixtures/mcp/|apps/api/tests/support/(fake-runtime-host|fake-runtime-websocket-server)\.ts$|apps/api/src/services/mcp/|apps/api/src/modules/external-agents/application/external-identity-isolation\.ts$|apps/api/src/modules/library/|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/tests/support/rust-runtime-install-fixture\.ts$|apps/api/tests/support/(rust-runtime-client|rust-stdio-runtime|rust-serve-runtime)\.ts$|apps/api/tests/support/fixtures/rust-filesystem-search-recorded\.ts$|apps/api/tests/integration/routes/(terminal-socket|environment-entities)\.integration\.test\.ts$|apps/api/tests/integration/services/(hub-isolation-claim|connect-http-runtime|environment-install-execution)\.integration\.test\.ts$|apps/api/tests/integration/modules/library/library-undo-missing-backup\.integration\.test\.ts$|apps/api/tests/unit/services/tools/(support/target-home|read-file-tool|write-file-tool|list-directory-tool|glob-tool)\.(ts|test\.ts)$|apps/api/tests/support/rust-library-boxes\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$|\.github/actions/setup-zigbuild/|\.cargo/config\.toml$)'
-          if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "rust=false" >> "$GITHUB_OUTPUT"
-          fi
+          bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/lanes"
+          cat "$RUNNER_TEMP/lanes" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/lanes"
 
   workspace:
     name: Workspace (${{ matrix.os }})
@@ -311,11 +271,12 @@ jobs:
   real-binary-qualification:
     # Proves the hub's own real code actually talks to the real compiled
     # mangostudio-runtime binary over its three transports (stdio, direct-URL
-    # serve, paired connect), on every OS. Targets the `rust-*` qualification
-    # and compat files directly rather than the whole apps/api suite.
+    # serve, paired connect), on every OS. Runs every api test file that
+    # reaches tests/support/rust-runtime-binary.ts, discovered by
+    # scripts/lib/rust-lanes.ts, rather than the whole apps/api suite.
     name: Real-binary qualification (${{ matrix.os }})
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.qualification == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -355,48 +316,23 @@ jobs:
       - run: bun install --frozen-lockfile
 
       - name: Qualify the real binary over stdio, serve, and connect
-        working-directory: apps/api
         env:
           MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/${{ matrix.runtime-binary }}
           MANGOSTUDIO_FAKE_CURSOR_AGENT: ${{ github.workspace }}/${{ matrix.fake-cursor-agent }}
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
-        run: >
-          bun test --timeout 15000
-          tests/integration/services/rust-runtime-qualification.integration.test.ts
-          tests/integration/services/rust-runtime-external-agents-qualification.integration.test.ts
-          tests/integration/services/rust-filesystem-search-compat.integration.test.ts
-          tests/integration/services/rust-snapshot-compat.integration.test.ts
-          tests/integration/services/rust-command-compat.integration.test.ts
-          tests/integration/services/rust-runtime-mcp-qualification.integration.test.ts
-          tests/integration/services/rust-runtime-library-qualification.integration.test.ts
-          tests/integration/services/rust-runtime-library-propagation.integration.test.ts
-          tests/integration/services/rust-runtime-library-removal.integration.test.ts
-          tests/integration/services/local-rust-runtime.integration.test.ts
-          tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts
-          tests/integration/routes/terminal-socket.integration.test.ts
-          tests/integration/routes/environment-entities.integration.test.ts
-          tests/integration/services/hub-isolation-claim.integration.test.ts
-          tests/integration/services/connect-http-runtime.integration.test.ts
-          tests/integration/services/environment-install-execution.integration.test.ts
-          tests/integration/modules/library/library-undo-missing-backup.integration.test.ts
+        run: bun ./scripts/ci/rust-lanes.ts qualify --suite integration
 
-      # The `~` cases of the file tools, which spawn the binary as Local. Unit
-      # files, so they keep the unit lane's one isolated worker.
+      # The Rust-backed unit files (the `~` cases of the file tools, which
+      # spawn the binary as Local) keep the unit lane's one isolated worker.
       - name: Qualify ~ expansion against the real binary
-        working-directory: apps/api
         env:
           MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/${{ matrix.runtime-binary }}
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
-        run: >
-          bun test --timeout 15000 --parallel=1
-          tests/unit/services/tools/read-file-tool.test.ts
-          tests/unit/services/tools/write-file-tool.test.ts
-          tests/unit/services/tools/list-directory-tool.test.ts
-          tests/unit/services/tools/glob-tool.test.ts
+        run: bun ./scripts/ci/rust-lanes.ts qualify --suite unit
 
   gate:
-    # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only
-    # after the changes job proves the pull request has no Rust workspace diff.
+    # Stable required check ("Cargo Shim / Gate"): each Rust lane may skip only
+    # after the changes job proves its relevance predicate false for this run.
     name: Gate
     needs: [
       changes,
@@ -424,6 +360,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness real-binary-qualification' || '' }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
