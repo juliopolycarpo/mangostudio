@@ -819,13 +819,17 @@ Open these first:
 - `.mango/config.toml.example`
 - `.mango/.env.example`
 - `scripts/build.ts`
+- `scripts/build-runtime.ts`, `scripts/lib/runtime-build.ts` (cargo runtime per target)
+- `.github/workflows/runtime-build.yml` (per-target runtime builds for distribution)
 - `scripts/test-build.ts` (binary smoke)
 
-The build produces two binaries per platform: `mangostudio` and the
-`mangostudio-runtime` execution host, compiled from `apps/runtime/src/cli.ts`. They
-carry the same build stamp and ship together in every channel — archives, npm
-platform packages, and the Docker images — because the hub resolves the runtime as a
-sibling of its own executable and the protocol handshake refuses a version mismatch.
+The build produces two binaries per platform: `mangostudio`, Bun-compiled from
+`apps/api`, and the `mangostudio-runtime` execution host, the cargo binary from
+`crates/mangostudio-runtime` (built per target by `runtime-build.yml`, or for the host
+target by `cargo build`; see `docs/reference/releasing.md`). Both report the same release
+version and ship together in every channel — archives, npm platform packages, and the
+Docker images — because the hub resolves the runtime as a sibling of its own executable
+and the protocol handshake refuses a version mismatch.
 
 ## Mango Protocol (spec, TypeScript SDK, Rust crate)
 
@@ -850,17 +854,13 @@ rather than restating them: `crates/mangostudio-runtime-contract/`, its behaviou
 `generated/conformance-corpus.json`, and [runtime-contract.md](../architecture/runtime-contract.md).
 `crates/mangostudio-runtime/` serves that embedded contract over a `mango-protocol` session — its
 typed dispatcher, fail-closed ports, and panic isolation are covered in
-[runtime-dispatcher.md](../architecture/runtime-dispatcher.md). Its binary target shares a name
-with the existing Bun-compiled `mangostudio-runtime` execution host from the "Config, Runtime, And
-Standalone Build" section above. The two do not collide today because the Rust binary is not part
-of that build at all: `scripts/build.ts` and `distribution-build.yml` never build or ship it, and a
-release archive cannot carry two files both named `mangostudio-runtime` if they did. The hub only
-ever reaches it through an explicit opt-in — the `MANGOSTUDIO_RUNTIME_BINARY` environment override
-or a per-environment `binaryPath` (see `apps/api/src/lib/runtime-paths.ts`) — never through the
-sibling-binary resolution the Bun host uses by default. `scripts/lib/release-version.ts`'s
-`APP_VERSIONED_CRATES` version-locks the crate to the app release regardless, so that when it does
-ship, `requireMatchingRelease` (`apps/api/src/services/runtime-client/spawn-runtime-child.ts`)
-already has a version to check it against.
+[runtime-dispatcher.md](../architecture/runtime-dispatcher.md). Its binary is the
+`mangostudio-runtime` every distribution channel ships beside the hub (the "Config, Runtime, And
+Standalone Build" section above), so the hub reaches it through the default sibling-binary
+resolution in `apps/api/src/lib/runtime-paths.ts`. `scripts/lib/release-version.ts`'s
+`APP_VERSIONED_CRATES` version-locks the crate to the app release, and the build stamps the exact
+distribution version in at compile time, which is what `requireMatchingRelease`
+(`apps/api/src/services/runtime-client/spawn-runtime-child.ts`) checks it against.
 
 ## Out-Of-Process Environments (stdio, WSL, paired WebSocket, Direct URL)
 

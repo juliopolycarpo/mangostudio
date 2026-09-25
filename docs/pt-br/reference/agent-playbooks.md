@@ -278,7 +278,15 @@ Abra estes arquivos primeiro:
 - `.mango/config.toml.example`
 - `.mango/.env.example`
 - `scripts/build.ts`
+- `scripts/build-runtime.ts`, `scripts/lib/runtime-build.ts` (runtime cargo por alvo)
+- `.github/workflows/runtime-build.yml` (builds do runtime por alvo para a distribuição)
 - `scripts/test-build.ts` (binary smoke)
+
+O build produz dois binários por plataforma: `mangostudio`, compilado com Bun a partir
+de `apps/api`, e o host de execução `mangostudio-runtime`, o binário cargo de
+`crates/mangostudio-runtime` (construído por alvo pelo `runtime-build.yml`, ou para o
+alvo do host via `cargo build`; veja `docs/reference/releasing.md`). Os dois reportam a
+mesma versão de release e são distribuídos juntos em todos os canais.
 
 ## CLI E Ciclo De Vida Do Servidor
 
