@@ -545,9 +545,7 @@ impl Service {
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
             lock(&self.state.ledger).assert_line_numbers(&params.mutation.chat_id, &params.resolved_path, params.end_line as u64)?;
             let total = text::total_lines(&observed.bytes);
-            let start = positive_integer(params.start_line, "startLine")?;
-            let end = positive_integer(params.end_line, "endLine")?;
-            if start > end || end > total { return Err(argument(format!("Invalid line range {start}-{end} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",params.input_path))); }
+            let (start, end) = validated_range(&params, total)?;
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
             if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let written = ContentDigest::of(&updated);
@@ -929,6 +927,38 @@ fn committed_move_error(from: &Path, to: &Path, cause: RemoteError) -> RemoteErr
         cause.message
     ))
     .with_detail("changedPaths", json!([from, to]))
+}
+
+/// Validates an `fs.replace-range` pair against the file's line count with the
+/// TypeScript runtime's single range message, which also covers a zero or
+/// fractional line.
+///
+/// # Example
+///
+/// ```ignore
+/// let (start, end) = validated_range(&params, text::total_lines(&bytes))?;
+/// ```
+fn validated_range(params: &RangeParams, total: usize) -> Result<(usize, usize), RemoteError> {
+    let (start, end) = (params.start_line, params.end_line);
+    let whole = |value: f64| value.fract() == 0.0;
+    if whole(start) && whole(end) && start >= 1.0 && start <= end && end <= total as f64 {
+        return Ok((start as usize, end as usize));
+    }
+    Err(argument(format!(
+        "Invalid line range {}-{} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",
+        js_number(start),
+        js_number(end),
+        params.input_path
+    )))
+}
+
+/// Formats a wire number the way JavaScript prints it in a template literal,
+/// so an echoed argument reads the same as the TypeScript runtime's message.
+fn js_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    value.to_string()
 }
 
 fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
@@ -2686,5 +2716,41 @@ mod tests {
             "expected replaceAll to count every match it replaces"
         );
         assert_eq!(edit_match_count(b"x\nx\nx\n", b"x", false), 3);
+    }
+
+    /// The TypeScript runtime rejected every out-of-range pair, including a
+    /// zero or fractional start, with one range message naming the file's size.
+    #[tokio::test]
+    async fn replace_range_reports_every_invalid_range_like_typescript() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"one\ntwo\nthree").await;
+        for (start, end, shown) in [
+            (json!(0), json!(1), "0-1"),
+            (json!(2), json!(1), "2-1"),
+            (json!(1), json!(4), "1-4"),
+            (json!(1.5), json!(2), "1.5-2"),
+        ] {
+            let error = Arc::clone(&service)
+                .replace_range(
+                    decode(json!({
+                        "chatId":"chat", "captureSnapshot":false, "inputPath":"file",
+                        "resolvedPath":path, "startLine":start, "endLine":end, "content":"x"
+                    })),
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.message,
+                format!(
+                    "Invalid line range {shown} for \"file\" (3 lines). Expected 1 <= startLine \
+                     <= endLine <= 3."
+                )
+            );
+            assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"one\ntwo\nthree");
     }
 }
