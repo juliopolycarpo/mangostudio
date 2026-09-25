@@ -300,6 +300,39 @@ fn shell_acceptance_matches_the_advertised_shell_rule_per_platform() {
     }
 }
 
+/// A shell kind with no executable on `PATH` fails as a shell execution error that names the
+/// kind, the same wording the TypeScript runtime used, before anything is launched.
+#[test]
+fn an_unavailable_shell_kind_is_reported_as_not_available() {
+    let home = scratch_dir("commands-shell-unavailable");
+    let host = PathEnv {
+        platform: "linux".into(),
+        home_dir: home.to_string_lossy().into_owned(),
+        env: std::collections::HashMap::from([(
+            "PATH".into(),
+            home.to_string_lossy().into_owned(),
+        )]),
+    };
+    for kind in ["bash", "zsh", "powershell"] {
+        let params = json!({"kind":kind,"command":"true","timeoutMs":5000,"maxOutputBytes":1000});
+        let Err(error) = prepare_shell(params, &host, 100_000) else {
+            panic!("expected shell.run {kind} with an empty PATH to fail | received a launch");
+        };
+        let expected = format!("The \"{kind}\" shell is not available on this system.");
+        assert_eq!(
+            error.message, expected,
+            "expected message {expected:?} | received {:?}",
+            error.message
+        );
+        let details = error.details.expect("shell errors carry details");
+        assert_eq!(
+            details["kind"], "shell_execution",
+            "expected kind shell_execution | received {}",
+            details["kind"]
+        );
+    }
+}
+
 #[test]
 fn results_preserve_nonzero_acceptance_incomplete_capture_and_error_details() {
     let prepared = prepare(
