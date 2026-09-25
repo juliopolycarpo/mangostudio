@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use mango_protocol::close::close_codes;
-use mango_protocol::port::{Port, PortTx};
+use mango_protocol::port::{Inbound, Port, PortRx, PortTx};
 use mango_protocol::session::{
     DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_LIVENESS_INTERVAL, Session, SessionClosure, SessionOptions,
     SessionState,
@@ -481,13 +481,15 @@ async fn handle_connection(
         BindingHeader::Absent => None,
         BindingHeader::Key(key) => Some(key),
         BindingHeader::Malformed(why) => {
+            // Logged first: `close_port` waits for the peer's close, which
+            // the peer has already seen by then.
+            (context.log)(&format!("Refused a hub connection: {why}."));
             close_port(
                 port,
                 close_codes::PROTOCOL_ERROR,
                 &format!("invalid hub binding header: {why}"),
             )
             .await;
-            (context.log)(&format!("Refused a hub connection: {why}."));
             return;
         }
     };
@@ -523,16 +525,16 @@ async fn handle_connection(
         Admission::AlreadyBound => {
             // Refused before this side's `hello` goes out, so the incumbent
             // is never disturbed and the refused hub learns only the code
-            // and reason.
+            // and reason. Logged first, as for a malformed header.
+            (context.log)(
+                "Refused a hub connection: this runtime is already bound to another environment.",
+            );
             close_port(
                 port,
                 binding::ALREADY_BOUND_CLOSE_CODE,
                 binding::ALREADY_BOUND_REASON,
             )
             .await;
-            (context.log)(
-                "Refused a hub connection: this runtime is already bound to another environment.",
-            );
             return;
         }
     };
@@ -620,11 +622,30 @@ async fn handle_connection(
     (context.log)("Hub connection ended.");
 }
 
+/// How long a refused connection is given to answer this side's close
+/// before its socket is dropped anyway. Bounds [`close_port`]'s drain.
+const REFUSAL_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
 /// Closes a port nothing ever became a session over — a refused admission,
 /// or one that lost the race before a session was ever built.
+///
+/// Then reads the port until the peer's own close arrives (bounded by
+/// [`REFUSAL_DRAIN_GRACE`]) instead of dropping it at once: by now the hub
+/// has usually sent its `hello`, and a socket dropped with those bytes still
+/// unread is reset rather than closed on Windows (and on BSD-derived
+/// stacks — see [`drain_request_headers`]), which throws away the close
+/// frame and leaves the hub with no code to act on.
 async fn close_port<P: Port>(port: P, code: u16, reason: &str) {
-    let (tx, _rx) = port.split();
+    let (tx, mut rx) = port.split();
     tx.close(code, Some(reason.to_string())).await;
+    let _ = tokio::time::timeout(REFUSAL_DRAIN_GRACE, async {
+        while let Some(inbound) = rx.recv().await {
+            if matches!(inbound, Inbound::Closed(_)) {
+                return;
+            }
+        }
+    })
+    .await;
 }
 
 /// The exact bytes a plain `GET /health` request line starts with, checked
