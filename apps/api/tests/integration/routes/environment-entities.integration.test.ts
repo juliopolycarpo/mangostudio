@@ -1,16 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
-import {
-  createLocalRuntimeHost,
-  createLocalRuntimeManifest,
-  createRuntimeEventRelay,
-  createRuntimeMethodHandlers,
-  type RuntimeHostDefinition,
-  staticConsentSource,
-} from '@mangostudio/runtime';
+import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type {
   CreateEnvironmentBody,
   Environment,
@@ -18,10 +10,14 @@ import type {
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
 import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
+import type { RuntimeUpdateCommitResult } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
   type RuntimePlatformId,
+  type RuntimeSlot,
+  runtimeSlotCurrentBinaryPath,
+  runtimeSlotVersionBinaryPath,
 } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
@@ -45,16 +41,36 @@ import {
   createRealtimeBus,
   setRealtimeBusForTests,
 } from '../../../src/services/realtime/realtime-bus';
-import { connectInProcessRuntime } from '../../../src/services/runtime-client/connect-in-process-runtime';
+import { connectHttpRuntime } from '../../../src/services/runtime-client/connect-http-runtime';
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,
   type RuntimeConnectionManagerOptions,
+  type RuntimeEnvironmentConnector,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
+import {
+  persistRuntimeToken,
+  setRuntimeTokenStoreForTests,
+} from '../../../src/services/runtime-client/runtime-token-secrets';
 import { insertTestUser } from '../../support/factories';
+import { connectFakeRuntime, type FakeRuntimeConnection } from '../../support/fake-runtime-host';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
-import { FakeRuntimeDefinition, TEST_RUNTIME_MANIFEST } from '../../support/runtime-fixture';
+import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
+import {
+  FakeRuntimeDefinition,
+  fixedConsent,
+  TEST_RUNTIME_MANIFEST,
+} from '../../support/runtime-fixture';
+import {
+  resolveRustRuntimeBinary,
+  rustRuntimeVersion,
+  scratchMangoHome,
+  skipWithoutRustBinary,
+} from '../../support/rust-runtime-binary';
+import { connectUntilListening, reserveEphemeralPort } from '../../support/rust-serve-dial';
+
+const rustBinary = resolveRustRuntimeBinary();
 
 const TEST_USER = {
   id: 'environment-entities-user',
@@ -64,10 +80,18 @@ const TEST_USER = {
 
 let restoreAuth: (() => void) | null = null;
 const tempHomes: string[] = [];
+const rustChildren: ReturnType<typeof Bun.spawn>[] = [];
 
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
+  await Promise.all(
+    rustChildren.splice(0).map(async (child) => {
+      child.kill();
+      await child.exited;
+    })
+  );
+  setRuntimeTokenStoreForTests(undefined);
   await getDb().deleteFrom('chats').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('library_backups').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
@@ -122,46 +146,219 @@ function createTestApp(
   return { app, repository, manager };
 }
 
-/** A real update-capable runtime whose health matches installed release bytes. */
-function createProvisionedRuntimeDefinition(
-  options: Parameters<typeof createLocalRuntimeHost>[0],
-  platformId?: RuntimePlatformId,
-  // Simulates a peer whose runtime predates the `platformId` field: `platform`
-  // and `arch` still arrive, but nothing names the exact release identity.
-  stripPlatformId = false
-): RuntimeHostDefinition {
-  const events = createRuntimeEventRelay();
-  const registry = createRuntimeMethodHandlers({
+/**
+ * The `runtime.health` answer a provisioned peer sends, built to the shared
+ * schema. The routes below read `source`, `platformId`, `platform`, `slot`,
+ * `allow` and `runtimeVersion` from it; everything else is only there to make
+ * the report whole.
+ *
+ * `platformId: null` stands for a peer that predates the field: `platform`
+ * and `arch` still arrive, but nothing names the exact release identity.
+ *
+ * @example
+ * provisionedHealthReport({ runtimeVersion: '0.0.1-old', slot: 'wsl', platformId: 'linux-x64-musl' });
+ */
+function provisionedHealthReport(options: {
+  readonly runtimeVersion: string;
+  readonly slot: RuntimeSlot;
+  readonly platformId: RuntimePlatformId | null;
+}): RuntimeHealthReport {
+  return {
+    schemaVersion: 1,
+    slot: options.slot,
+    source: 'provisioned',
     runtimeVersion: options.runtimeVersion,
-    emit: events.emit,
-    ...(options.slot ? { slot: options.slot } : {}),
-    ...(options.update ? { update: options.update } : {}),
+    version: options.runtimeVersion,
+    binaryPath: null,
+    digest: null,
+    profile: 'full',
+    allow: RUNTIME_CONSENT_PRESETS.full,
+    setup: { state: 'configured' },
+    platform: 'linux',
+    arch: 'x64',
+    ...(options.platformId ? { platformId: options.platformId } : {}),
+    homeDir: '/home/test',
+    shells: ['bash'],
+    git: { available: false },
+    lastError: null,
+    audit: { enabled: false },
+  };
+}
+
+interface FakeUpdateOptions {
+  /** What `runtime.update.commit` answers: `scheduled` is a supervised peer. */
+  readonly restart: RuntimeUpdateCommitResult['restart'];
+  /** Awaited before a chunk is accepted; a test holds the transfer open here. */
+  readonly beforeChunk?: (seq: number) => Promise<void>;
+  /** Runs once the commit answer has had time to leave, the way a supervised peer exits. */
+  readonly onRestart?: () => void;
+}
+
+/** What the fake update endpoint was asked to do. */
+interface FakeUpdateRecord {
+  begun: number;
+  committed: number;
+}
+
+/**
+ * `runtime.update.begin`/`chunk`/`commit` answered by the test. There is no
+ * slot behind them: the cases using this assert what the hub does around a
+ * transfer (reconnect, cancel, drop), not what a runtime does with the bytes.
+ *
+ * @example
+ * const { handlers, record } = fakeUpdateHandlers({ restart: 'scheduled', onRestart: exit });
+ */
+function fakeUpdateHandlers(options: FakeUpdateOptions) {
+  const record: FakeUpdateRecord = { begun: 0, committed: 0 };
+  let begin: { version: string; digest: string } | undefined;
+  const handlers = {
+    'runtime.update.begin': (params: { version: string; digest: string }) => {
+      record.begun += 1;
+      begin = { version: params.version, digest: params.digest };
+      return { sessionId: `fake-update-${record.begun}`, maxChunkBytes: 32 * 1024 };
+    },
+    'runtime.update.chunk': async (params: { seq: number; bytesBase64: string }) => {
+      await options.beforeChunk?.(params.seq);
+      const size = Buffer.from(params.bytesBase64, 'base64').byteLength;
+      return { acceptedBytes: size, receivedBytes: size };
+    },
+    'runtime.update.commit': (): RuntimeUpdateCommitResult => {
+      if (!begin) throw new Error('runtime.update.commit arrived before runtime.update.begin');
+      record.committed += 1;
+      if (options.onRestart) setTimeout(options.onRestart, 20);
+      return { version: begin.version, digest: begin.digest, restart: options.restart };
+    },
+  };
+  return { handlers, record };
+}
+
+/**
+ * A fake provisioned peer: a constructed health report, plus the update
+ * endpoint when a case streams bytes to it.
+ *
+ * @example
+ * const definition = provisionedFakeRuntime({ runtimeVersion: '0.0.1-old', slot: 'wsl' });
+ */
+function provisionedFakeRuntime(options: {
+  readonly runtimeVersion: string;
+  readonly slot?: RuntimeSlot;
+  /** Defaults to the glibc x64 identity; `null` omits it. */
+  readonly platformId?: RuntimePlatformId | null;
+  readonly update?: ReturnType<typeof fakeUpdateHandlers>['handlers'];
+}): FakeRuntimeDefinition {
+  const slot = options.slot ?? 'host';
+  const health = provisionedHealthReport({
+    runtimeVersion: options.runtimeVersion,
+    slot,
+    platformId: options.platformId === undefined ? 'linux-x64' : options.platformId,
   });
-  const health = registry.handlers['runtime.health'];
+  return new FakeRuntimeDefinition({
+    runtimeVersion: options.runtimeVersion,
+    manifest: { ...TEST_RUNTIME_MANIFEST, platform: health.platform, arch: health.arch },
+    consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, slot),
+    handlers: { 'runtime.health': () => health, ...options.update },
+  });
+}
+
+/**
+ * A connector that dials `definition` through the fake host.
+ *
+ * @example
+ * createTestApp({ wsl: fakeConnector(definition) });
+ */
+function fakeConnector(
+  definition: FakeRuntimeDefinition,
+  onConnected?: (connection: FakeRuntimeConnection) => void
+): RuntimeEnvironmentConnector {
+  return async (_definition, onUnavailable) => {
+    const connection = await connectFakeRuntime(definition, { hubVersion: 'dev' });
+    onConnected?.(connection);
+    return {
+      client: new RuntimeClient(connection.hub, onUnavailable),
+      close: () => connection.close(),
+    };
+  };
+}
+
+interface ProvisionedRustServe {
+  readonly mangoHome: string;
+  readonly baseUrl: string;
+  readonly runtimeVersion: string;
+  /** Where a committed update lands for this slot on this platform. */
+  publishedBinaryPath(version: string): string;
+}
+
+/**
+ * Serves the real Rust runtime from inside a scratch `MANGO_HOME` slot, and
+ * stores the token an `http` environment dials it with.
+ *
+ * Running from the slot's version directory is what makes it report
+ * `source: "provisioned"`, the one source the hub offers a live update to.
+ * `serve` always answers as the `remote` slot, is never supervised (so it
+ * commits with `restart: "manual"`), and has no `current` until an update
+ * publishes one.
+ *
+ * @example
+ * const peer = await serveProvisionedRustRuntime('http-live-update');
+ */
+async function serveProvisionedRustRuntime(environmentId: string): Promise<ProvisionedRustServe> {
+  const mangoHome = await scratchMangoHome(environmentId);
+  tempHomes.push(mangoHome);
+  const runtimeVersion = await rustRuntimeVersion(rustBinary.path);
+  const installed = runtimeSlotVersionBinaryPath('remote', runtimeVersion, {
+    mangoHome,
+    platform: process.platform,
+  });
+  await mkdir(dirname(installed), { recursive: true });
+  await copyFile(rustBinary.path, installed);
+
+  const env = { ...process.env, MANGO_HOME: mangoHome };
+  const setup = Bun.spawn({
+    cmd: [installed, 'setup', '--slot', 'remote', '--profile', 'full'],
+    env,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [setupExit, setupStderr] = await Promise.all([
+    setup.exited,
+    new Response(setup.stderr).text(),
+  ]);
+  if (setupExit !== 0) {
+    throw new Error(
+      `expected "setup --slot remote --profile full" to exit 0 | received: ${setupExit} (${setupStderr.trim()})`
+    );
+  }
+
+  const token = `${environmentId}-token`;
+  const port = reserveEphemeralPort();
+  const serve = Bun.spawn({
+    cmd: [installed, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
+    env: { ...env, MANGOSTUDIO_RUNTIME_SERVE_TOKEN: token },
+    stdout: 'ignore',
+    stderr: 'pipe',
+  });
+  // Drained for the child's whole life, so a chatty runtime can never fill
+  // the pipe and stall while a test is waiting on it.
+  void new Response(serve.stderr).text();
+  rustChildren.push(serve);
+  const store = new InMemorySecretStore();
+  setRuntimeTokenStoreForTests(store);
+  await persistRuntimeToken(TEST_USER.id, environmentId, token, store);
 
   return {
-    runtimeVersion: options.runtimeVersion,
-    manifest: () => createLocalRuntimeManifest(options.allow),
-    handlers: {
-      ...registry.handlers,
-      'runtime.health': async (params, context) => {
-        const report = (await health(params, context)) as RuntimeHealthReport;
-        const { platformId: _omitted, ...withoutPlatformId } = report;
-        return {
-          ...(stripPlatformId ? withoutPlatformId : report),
-          source: 'provisioned',
-          ...(platformId ? { platformId } : {}),
-        } satisfies RuntimeHealthReport;
-      },
-    },
-    consent: staticConsentSource(
-      options.allow ?? RUNTIME_CONSENT_PRESETS.full,
-      options.slot ?? 'host'
-    ),
-    isUpdateActive: registry.updateActive,
-    onClose: () => registry.close(),
-    events,
+    mangoHome,
+    baseUrl: `http://127.0.0.1:${port}`,
+    runtimeVersion,
+    publishedBinaryPath: (version) =>
+      process.platform === 'win32'
+        ? runtimeSlotVersionBinaryPath('remote', version, { mangoHome, platform: process.platform })
+        : runtimeSlotCurrentBinaryPath('remote', { mangoHome, platform: process.platform }),
   };
+}
+
+/** Resolves to what is at `path`, or `absent` when nothing was published there. */
+async function publishedAt(path: string): Promise<string> {
+  return await readFile(path, 'utf8').catch(() => 'absent');
 }
 
 function jsonRequest(method: string, body?: unknown): RequestInit {
@@ -648,19 +845,13 @@ describe('environment entity routes', () => {
     const originalVersion = process.env.VERSION;
     process.env.VERSION = '9.9.9-test';
     try {
-      const definition = createProvisionedRuntimeDefinition(
-        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
-        undefined,
-        true
-      );
+      const definition = provisionedFakeRuntime({
+        runtimeVersion: '0.0.1-old',
+        slot: 'wsl',
+        platformId: null,
+      });
       const { app, repository, manager } = createTestApp({
-        wsl: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-          return {
-            client: new RuntimeClient(connection.hub, onUnavailable),
-            close: () => connection.close(),
-          };
-        },
+        wsl: fakeConnector(definition),
       });
       await repository.create({
         id: 'wsl-no-platform-id',
@@ -737,16 +928,10 @@ describe('environment entity routes', () => {
 
   it('keeps a connected WSL upgrade on the out-of-band provisioner path', async () => {
     let ensured = false;
-    const definition = createLocalRuntimeHost({ runtimeVersion: '0.0.1-legacy', slot: 'wsl' });
+    const definition = provisionedFakeRuntime({ runtimeVersion: '0.0.1-legacy', slot: 'wsl' });
     const { app, repository, manager } = createTestApp(
       {
-        wsl: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-          return {
-            client: new RuntimeClient(connection.hub, onUnavailable),
-            close: () => connection.close(),
-          };
-        },
+        wsl: fakeConnector(definition),
       },
       undefined,
       undefined,
@@ -804,19 +989,14 @@ describe('environment entity routes', () => {
     try {
       let ensured = false;
       let loadedPlatformId: string | undefined;
-      const definition = createProvisionedRuntimeDefinition(
-        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
-        'linux-x64-musl'
-      );
+      const definition = provisionedFakeRuntime({
+        runtimeVersion: '0.0.1-old',
+        slot: 'wsl',
+        platformId: 'linux-x64-musl',
+      });
       const { app, repository, manager } = createTestApp(
         {
-          wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-            return {
-              client: new RuntimeClient(connection.hub, onUnavailable),
-              close: () => connection.close(),
-            };
-          },
+          wsl: fakeConnector(definition),
         },
         undefined,
         undefined,
@@ -873,7 +1053,8 @@ describe('environment entity routes', () => {
       // The documented cache location, and a checksum line to check it with.
       expect(body).toContain('runtime-cache');
       expect(body).toContain('mangostudio-runtime-9.9.9-test-linux-x64-musl');
-      expect(body).toContain('sha256sum -c -');
+      // Shaped for the hub's own shell: a stock Windows hub has no sha256sum.
+      expect(body).toContain(process.platform === 'win32' ? 'Get-FileHash' : 'sha256sum -c -');
       // Nothing reached the distribution. `ensure` is the only path that writes
       // bytes into a WSL slot, so its not having run is the whole claim.
       expect(ensured).toBe(false);
@@ -895,19 +1076,14 @@ describe('environment entity routes', () => {
     try {
       const bytes = new TextEncoder().encode('verified-platform-archive');
       const hash = createHash('sha256').update(bytes).digest('hex');
-      const definition = createProvisionedRuntimeDefinition(
-        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
-        'linux-x64-musl'
-      );
+      const definition = provisionedFakeRuntime({
+        runtimeVersion: '0.0.1-old',
+        slot: 'wsl',
+        platformId: 'linux-x64-musl',
+      });
       const { app, repository, manager } = createTestApp(
         {
-          wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-            return {
-              client: new RuntimeClient(connection.hub, onUnavailable),
-              close: () => connection.close(),
-            };
-          },
+          wsl: fakeConnector(definition),
         },
         undefined,
         undefined,
@@ -978,7 +1154,11 @@ describe('environment entity routes', () => {
       // A checksum line, pinned to the digest this run just verified rather
       // than to a SHA256SUMS fetch a rolling tag can outrun, and checking the
       // archive where it actually landed.
-      expect(reported[1]).toBe(`echo "${hash}  ${archivePath}" | sha256sum -c -`);
+      expect(reported[1]).toBe(
+        process.platform === 'win32'
+          ? `if ((Get-FileHash "${archivePath}" -Algorithm SHA256).Hash -ne "${hash}") { throw 'checksum mismatch' } else { 'OK' }`
+          : `echo "${hash}  ${archivePath}" | sha256sum -c -`
+      );
       // The raw runtime asset was never published for this platform, so nothing
       // the run reports may claim it is on disk.
       expect(reported.join('\n')).not.toContain('mangostudio-runtime-9.9.9-test');
@@ -996,19 +1176,14 @@ describe('environment entity routes', () => {
     const originalVersion = process.env.VERSION;
     process.env.VERSION = '9.9.9-test';
     try {
-      const definition = createProvisionedRuntimeDefinition(
-        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
-        'linux-x64-musl'
-      );
+      const definition = provisionedFakeRuntime({
+        runtimeVersion: '0.0.1-old',
+        slot: 'wsl',
+        platformId: 'linux-x64-musl',
+      });
       const { app, repository, manager } = createTestApp(
         {
-          wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-            return {
-              client: new RuntimeClient(connection.hub, onUnavailable),
-              close: () => connection.close(),
-            };
-          },
+          wsl: fakeConnector(definition),
         },
         undefined,
         undefined,
@@ -1073,20 +1248,15 @@ describe('environment entity routes', () => {
     process.env.VERSION = '9.9.9-test';
     try {
       let sawSignal: AbortSignal | undefined;
-      const definition = createProvisionedRuntimeDefinition(
-        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
-        'linux-x64-musl'
-      );
+      const definition = provisionedFakeRuntime({
+        runtimeVersion: '0.0.1-old',
+        slot: 'wsl',
+        platformId: 'linux-x64-musl',
+      });
       let lifecycle: RuntimeLifecycleService | undefined;
       const { app, repository, manager } = createTestApp(
         {
-          wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-            return {
-              client: new RuntimeClient(connection.hub, onUnavailable),
-              close: () => connection.close(),
-            };
-          },
+          wsl: fakeConnector(definition),
         },
         undefined,
         undefined,
@@ -1160,20 +1330,15 @@ describe('environment entity routes', () => {
     process.env.VERSION = '9.9.9-test';
     try {
       let sawSignal: AbortSignal | undefined;
-      const definition = createProvisionedRuntimeDefinition(
-        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
-        'linux-x64-musl'
-      );
+      const definition = provisionedFakeRuntime({
+        runtimeVersion: '0.0.1-old',
+        slot: 'wsl',
+        platformId: 'linux-x64-musl',
+      });
       let lifecycle: RuntimeLifecycleService | undefined;
       const { app, repository, manager } = createTestApp(
         {
-          wsl: async (_definition, onUnavailable) => {
-            const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-            return {
-              client: new RuntimeClient(connection.hub, onUnavailable),
-              close: () => connection.close(),
-            };
-          },
+          wsl: fakeConnector(definition),
         },
         undefined,
         {
@@ -1261,20 +1426,15 @@ describe('environment entity routes', () => {
   // The other half of #798: a real install still writes to that machine, so it
   // still holds the environment against an edit or a delete.
   it('keeps refusing an edit or a delete while a real install runs', async () => {
-    const definition = createProvisionedRuntimeDefinition(
-      { runtimeVersion: '0.0.1-old', slot: 'wsl' },
-      'linux-x64-musl'
-    );
+    const definition = provisionedFakeRuntime({
+      runtimeVersion: '0.0.1-old',
+      slot: 'wsl',
+      platformId: 'linux-x64-musl',
+    });
     let lifecycle: RuntimeLifecycleService | undefined;
     const { app, repository, manager } = createTestApp(
       {
-        wsl: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-          return {
-            client: new RuntimeClient(connection.hub, onUnavailable),
-            close: () => connection.close(),
-          };
-        },
+        wsl: fakeConnector(definition),
       },
       undefined,
       {
@@ -1368,7 +1528,7 @@ describe('environment entity routes', () => {
     const definition = new FakeRuntimeDefinition({
       runtimeVersion: 'discover-test',
       manifest: { ...TEST_RUNTIME_MANIFEST, implementation },
-      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
       handlers: {
         'runtime.discover': () => {
           if (discoverFails) throw new Error('runtime.discover is unavailable');
@@ -1378,7 +1538,7 @@ describe('environment entity routes', () => {
     });
     const { app, repository, manager } = createTestApp({
       http: async (_definition, onUnavailable) => {
-        const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
+        const connection = await connectFakeRuntime(definition, { hubVersion: 'dev' });
         return {
           client: new RuntimeClient(connection.hub, onUnavailable),
           close: () => connection.close(),
@@ -1436,13 +1596,13 @@ describe('environment entity routes', () => {
           },
         },
       },
-      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
       handlers: { 'runtime.discover': () => new Promise<never>(() => undefined) },
     });
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
+          const connection = await connectFakeRuntime(definition, { hubVersion: 'dev' });
           return {
             client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),
@@ -1473,30 +1633,123 @@ describe('environment entity routes', () => {
     await manager.closeAll();
   });
 
-  it('updates a connected runtime over its existing protocol connection', async () => {
-    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-live-update-route-'));
-    tempHomes.push(mangoHome);
-    const env = { MANGO_HOME: mangoHome };
-    const bytes = new TextEncoder().encode('verified-runtime-binary');
+  // Real runtime behaviour: what lands on the peer's disk, and the restart
+  // answer an unsupervised peer gives. Served by the Rust binary from inside a
+  // slot, dialled over the same Direct URL transport a LAN runtime uses.
+  it.skipIf(skipWithoutRustBinary(rustBinary, 'environment-entities'))(
+    'updates a connected runtime over its existing protocol connection',
+    async () => {
+      const peer = await serveProvisionedRustRuntime('http-live-update');
+      const bytes = new TextEncoder().encode('verified-runtime-binary');
+      const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+      let loadedPlatformId: string | undefined;
+      const { app, repository, manager } = createTestApp(
+        { http: connectHttpRuntime },
+        undefined,
+        undefined,
+        (runtimeManager) =>
+          createRuntimeLifecycleService({
+            manager: runtimeManager,
+            loadRuntimeAsset: (platformId) => {
+              loadedPlatformId = platformId;
+              return Promise.resolve({
+                bytes,
+                digest,
+                fromArchive: false as const,
+                cached: true,
+                offlineCache: false,
+              });
+            },
+          })
+      );
+      await repository.create({
+        id: 'http-live-update',
+        userId: TEST_USER.id,
+        name: 'LAN runtime',
+        transportKind: 'http',
+        config: { baseUrl: peer.baseUrl },
+        enabled: true,
+      });
+      await connectUntilListening(() => manager.connect(TEST_USER.id, 'http-live-update'));
+      await manager.refreshManifest(TEST_USER.id, 'http-live-update');
+
+      const viewResponse = await app.handle(
+        new Request('http://localhost/environments/http-live-update/runtime')
+      );
+      const view = (await viewResponse.json()) as RuntimeLifecycleView;
+      expect(view.actions).toEqual(['upgrade']);
+      const reportedPlatformId = view.health?.platformId;
+      expect(reportedPlatformId).toBeDefined();
+
+      const started = await app.handle(
+        new Request(
+          'http://localhost/environments/http-live-update/runtime/install',
+          jsonRequest('POST', { action: 'upgrade' })
+        )
+      );
+      expect(started.status).toBe(200);
+      const { runId } = (await started.json()) as { runId: string };
+      const log = await app.handle(
+        new Request(`http://localhost/environments/http-live-update/runtime/runs/${runId}/log`)
+      );
+      const body = await log.text();
+
+      expect(body).toContain('"status":"succeeded"');
+      expect(body).toContain('Restart this manually launched runtime');
+      // The exact identity the peer reported, not one the hub derived.
+      expect(loadedPlatformId).toBe(reportedPlatformId);
+      expect(await publishedAt(peer.publishedBinaryPath(getVersion()))).toBe(
+        'verified-runtime-binary'
+      );
+      await manager.closeAll();
+    },
+    60_000
+  );
+
+  // An open session refuses every ordinary call until it expires, and there is
+  // deliberately no fourth protocol method to abandon one. Dropping the
+  // connection is the whole cleanup path, so a transfer that dies before the
+  // peer answered has to take it. Hub behaviour: the fake peer holds the first
+  // chunk open so the cancel lands mid-transfer every time.
+  it('drops the connection when a live update dies mid-transfer', async () => {
+    const bytes = new TextEncoder().encode('a'.repeat(96 * 1024));
     const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    let releaseWrite: (() => void) | undefined;
+    const writeBlocked = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let firstWrite: (() => void) | undefined;
+    const reachedTransfer = new Promise<void>((resolve) => {
+      firstWrite = resolve;
+    });
+    let stalled = false;
+    let runtimeClosed = false;
     let loadedPlatformId: string | undefined;
-    const definition = createProvisionedRuntimeDefinition(
-      {
-        runtimeVersion: '0.0.1-old',
-        slot: 'host',
-        update: { env },
+
+    const update = fakeUpdateHandlers({
+      restart: 'manual',
+      beforeChunk: async () => {
+        if (stalled) return;
+        stalled = true;
+        firstWrite?.();
+        await writeBlocked;
       },
-      'linux-x64-musl'
-    );
+    });
+    const definition = provisionedFakeRuntime({
+      runtimeVersion: '0.0.1-old',
+      slot: 'host',
+      // Not this machine's identity, so a hub that derived one instead of
+      // loading the peer's would be caught.
+      platformId: 'linux-x64-musl',
+      update: update.handlers,
+    });
     const { app, repository, manager } = createTestApp(
       {
-        http: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-          return {
-            client: new RuntimeClient(connection.hub, onUnavailable),
-            close: () => connection.close(),
-          };
-        },
+        http: fakeConnector(definition, (connection) =>
+          connection.runtime.onClose(() => {
+            runtimeClosed = true;
+          })
+        ),
       },
       undefined,
       undefined,
@@ -1513,107 +1766,6 @@ describe('environment entity routes', () => {
               offlineCache: false,
             });
           },
-        })
-    );
-    await repository.create({
-      id: 'http-live-update',
-      userId: TEST_USER.id,
-      name: 'LAN runtime',
-      transportKind: 'http',
-      config: { baseUrl: 'http://runtime.test' },
-      enabled: true,
-    });
-    await manager.connect(TEST_USER.id, 'http-live-update');
-    await manager.refreshManifest(TEST_USER.id, 'http-live-update');
-
-    const viewResponse = await app.handle(
-      new Request('http://localhost/environments/http-live-update/runtime')
-    );
-    const view = (await viewResponse.json()) as RuntimeLifecycleView;
-    expect(view.actions).toEqual(['upgrade']);
-
-    const started = await app.handle(
-      new Request(
-        'http://localhost/environments/http-live-update/runtime/install',
-        jsonRequest('POST', { action: 'upgrade' })
-      )
-    );
-    expect(started.status).toBe(200);
-    const { runId } = (await started.json()) as { runId: string };
-    const log = await app.handle(
-      new Request(`http://localhost/environments/http-live-update/runtime/runs/${runId}/log`)
-    );
-    const body = await log.text();
-
-    expect(body).toContain('"status":"succeeded"');
-    expect(body).toContain('Restart this manually launched runtime');
-    expect(loadedPlatformId).toBe('linux-x64-musl');
-    expect(
-      await readFile(join(mangoHome, 'runtime', 'host', 'current', 'mangostudio-runtime'), 'utf8')
-    ).toBe('verified-runtime-binary');
-  });
-
-  // An open session refuses every ordinary call until it expires, and there is
-  // deliberately no fourth protocol method to abandon one. Dropping the
-  // connection is the whole cleanup path, so a transfer that dies before the
-  // peer answered has to take it.
-  it('drops the connection when a live update dies mid-transfer', async () => {
-    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-stalled-update-route-'));
-    tempHomes.push(mangoHome);
-    const env = { MANGO_HOME: mangoHome };
-    const bytes = new TextEncoder().encode('a'.repeat(96 * 1024));
-    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-    let releaseWrite: (() => void) | undefined;
-    const writeBlocked = new Promise<void>((resolve) => {
-      releaseWrite = resolve;
-    });
-    let firstWrite: (() => void) | undefined;
-    const reachedTransfer = new Promise<void>((resolve) => {
-      firstWrite = resolve;
-    });
-    let stalled = false;
-
-    const definition = createProvisionedRuntimeDefinition(
-      {
-        runtimeVersion: '0.0.1-old',
-        slot: 'host',
-        update: {
-          env,
-          writeChunk: async (handle, chunk) => {
-            if (!stalled) {
-              stalled = true;
-              firstWrite?.();
-              await writeBlocked;
-            }
-            return (await handle.write(chunk)).bytesWritten;
-          },
-        },
-      },
-      'linux-x64'
-    );
-    const { app, repository, manager } = createTestApp(
-      {
-        http: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-          return {
-            client: new RuntimeClient(connection.hub, onUnavailable),
-            close: () => connection.close(),
-          };
-        },
-      },
-      undefined,
-      undefined,
-      (runtimeManager) =>
-        createRuntimeLifecycleService({
-          manager: runtimeManager,
-          loadRuntimeAsset: () =>
-            Promise.resolve({
-              bytes,
-              digest,
-              fromArchive: false as const,
-              cached: true,
-              offlineCache: false,
-            }),
         })
     );
     await repository.create({
@@ -1660,98 +1812,86 @@ describe('environment entity routes', () => {
       await Bun.sleep(20);
     }
     expect(manager.getStatus(TEST_USER.id, 'http-stalled-update').state).toBe('disconnected');
-    expect(
-      await readFile(join(mangoHome, 'runtime', 'host', 'current', 'mangostudio-runtime'), 'utf8')
-        .then(() => 'published')
-        .catch(() => 'absent')
-    ).toBe('absent');
+    // The peer saw the session end — the close that makes a runtime discard its
+    // staged file — and was never asked to publish anything.
+    expect(runtimeClosed).toBe(true);
+    expect(update.record).toEqual({ begun: 1, committed: 0 });
+    // The asset loaded is the exact identity the peer reported.
+    expect(loadedPlatformId).toBe('linux-x64-musl');
     await manager.closeAll();
   });
 
   // A runtime that answered is a runtime that is still serving. Dropping it
   // would turn a refused upgrade into an outage, and leaving `updating` behind
-  // would let the card claim a handoff that is never coming.
-  it('keeps the connection and the old binary when a live update is refused', async () => {
-    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-refused-update-route-'));
-    tempHomes.push(mangoHome);
-    const env = { MANGO_HOME: mangoHome };
-    const bytes = new TextEncoder().encode('tampered-runtime-binary');
-    const wrongDigest = `sha256:${'0'.repeat(64)}`;
-    const definition = createProvisionedRuntimeDefinition(
-      { runtimeVersion: '0.0.1-old', slot: 'host', update: { env } },
-      'linux-x64'
-    );
-    const { app, repository, manager } = createTestApp(
-      {
-        http: async (_definition, onUnavailable) => {
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
-          return {
-            client: new RuntimeClient(connection.hub, onUnavailable),
-            close: () => connection.close(),
-          };
-        },
-      },
-      undefined,
-      undefined,
-      (runtimeManager) =>
-        createRuntimeLifecycleService({
-          manager: runtimeManager,
-          loadRuntimeAsset: () =>
-            Promise.resolve({
-              bytes,
-              digest: wrongDigest,
-              fromArchive: false as const,
-              cached: true,
-              offlineCache: false,
-            }),
-        })
-    );
-    await repository.create({
-      id: 'http-refused-update',
-      userId: TEST_USER.id,
-      name: 'LAN runtime',
-      transportKind: 'http',
-      config: { baseUrl: 'http://runtime.test' },
-      enabled: true,
-    });
-    await manager.connect(TEST_USER.id, 'http-refused-update');
-    await manager.refreshManifest(TEST_USER.id, 'http-refused-update');
+  // would let the card claim a handoff that is never coming. Real runtime
+  // behaviour: the Rust binary checks the digest and refuses the commit.
+  it.skipIf(skipWithoutRustBinary(rustBinary, 'environment-entities'))(
+    'keeps the connection and the old binary when a live update is refused',
+    async () => {
+      const peer = await serveProvisionedRustRuntime('http-refused-update');
+      const bytes = new TextEncoder().encode('tampered-runtime-binary');
+      const wrongDigest = `sha256:${'0'.repeat(64)}`;
+      const { app, repository, manager } = createTestApp(
+        { http: connectHttpRuntime },
+        undefined,
+        undefined,
+        (runtimeManager) =>
+          createRuntimeLifecycleService({
+            manager: runtimeManager,
+            loadRuntimeAsset: () =>
+              Promise.resolve({
+                bytes,
+                digest: wrongDigest,
+                fromArchive: false as const,
+                cached: true,
+                offlineCache: false,
+              }),
+          })
+      );
+      await repository.create({
+        id: 'http-refused-update',
+        userId: TEST_USER.id,
+        name: 'LAN runtime',
+        transportKind: 'http',
+        config: { baseUrl: peer.baseUrl },
+        enabled: true,
+      });
+      await connectUntilListening(() => manager.connect(TEST_USER.id, 'http-refused-update'));
+      await manager.refreshManifest(TEST_USER.id, 'http-refused-update');
 
-    const started = await app.handle(
-      new Request(
-        'http://localhost/environments/http-refused-update/runtime/install',
-        jsonRequest('POST', { action: 'upgrade' })
-      )
-    );
-    expect(started.status).toBe(200);
-    const { runId } = (await started.json()) as { runId: string };
-    const log = await app.handle(
-      new Request(`http://localhost/environments/http-refused-update/runtime/runs/${runId}/log`)
-    );
-    const body = await log.text();
+      const started = await app.handle(
+        new Request(
+          'http://localhost/environments/http-refused-update/runtime/install',
+          jsonRequest('POST', { action: 'upgrade' })
+        )
+      );
+      expect(started.status).toBe(200);
+      const { runId } = (await started.json()) as { runId: string };
+      const log = await app.handle(
+        new Request(`http://localhost/environments/http-refused-update/runtime/runs/${runId}/log`)
+      );
+      const body = await log.text();
 
-    expect(body).toContain('"status":"failed"');
-    expect(body).toContain('digest mismatch');
-    // Nothing published: `current` never existed on this slot, so a swap would
-    // have created it.
-    expect(
-      await readFile(join(mangoHome, 'runtime', 'host', 'current', 'mangostudio-runtime'), 'utf8')
-        .then(() => 'published')
-        .catch(() => 'absent')
-    ).toBe('absent');
-    const status = manager.getStatus(TEST_USER.id, 'http-refused-update');
-    expect(status.state).toBe('connected');
-    expect(status.updating).toBeUndefined();
+      expect(body).toContain('"status":"failed"');
+      expect(body).toContain('digest mismatch');
+      // Nothing published: `current` never existed on this slot, so a swap would
+      // have created it.
+      expect(await publishedAt(peer.publishedBinaryPath(getVersion()))).toBe('absent');
+      const status = manager.getStatus(TEST_USER.id, 'http-refused-update');
+      expect(status.state).toBe('connected');
+      expect(status.updating).toBeUndefined();
 
-    // The refusal ended the session too, so the runtime still answers.
-    const client = await manager.getClient(TEST_USER.id, 'http-refused-update');
-    await expect(client.health()).resolves.toMatchObject({ runtimeVersion: '0.0.1-old' });
-  });
+      // The refusal ended the session too, so the runtime still answers.
+      const client = await manager.getClient(TEST_USER.id, 'http-refused-update');
+      await expect(client.health()).resolves.toMatchObject({
+        runtimeVersion: peer.runtimeVersion,
+      });
+      await manager.closeAll();
+    },
+    60_000
+  );
 
   it('reconnects a supervised runtime and verifies the new handshake version', async () => {
-    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-supervised-update-route-'));
-    tempHomes.push(mangoHome);
-    const env = { MANGO_HOME: mangoHome };
     const bytes = new TextEncoder().encode('supervised-runtime-binary');
     const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     const targetVersion = getVersion();
@@ -1763,23 +1903,22 @@ describe('environment entity routes', () => {
         http: async (_definition, onUnavailable) => {
           connectionCount += 1;
           const firstConnection = connectionCount === 1;
-          const definition = createProvisionedRuntimeDefinition({
+          const definition = provisionedFakeRuntime({
             runtimeVersion: firstConnection ? '0.0.1-old' : targetVersion,
             ...(firstConnection
               ? {
-                  slot: 'host' as const,
-                  update: {
-                    env,
-                    supervised: true,
-                    requestRestart: () => {
+                  update: fakeUpdateHandlers({
+                    restart: 'scheduled',
+                    // A supervised peer exits after its commit answer has left.
+                    onRestart: () => {
                       activeConnection?.close();
                       onUnavailable();
                     },
-                  },
+                  }).handlers,
                 }
               : {}),
           });
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
+          const connection = await connectFakeRuntime(definition, { hubVersion: 'dev' });
           activeConnection = connection;
           return {
             client: new RuntimeClient(connection.hub, onUnavailable),
@@ -1842,9 +1981,6 @@ describe('environment entity routes', () => {
   // floor, so it is every time — and the single refusal failed a run whose
   // `current` already pointed at the new bytes.
   it('keeps dialling a supervised runtime that is still inside its restart interval', async () => {
-    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-restart-interval-route-'));
-    tempHomes.push(mangoHome);
-    const env = { MANGO_HOME: mangoHome };
     const bytes = new TextEncoder().encode('restart-interval-runtime-binary');
     const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     const targetVersion = getVersion();
@@ -1861,23 +1997,22 @@ describe('environment entity routes', () => {
             throw new Error('connect ECONNREFUSED runtime.test:443');
           }
           const firstConnection = connectionCount === 1;
-          const definition = createProvisionedRuntimeDefinition({
+          const definition = provisionedFakeRuntime({
             runtimeVersion: firstConnection ? '0.0.1-old' : targetVersion,
             ...(firstConnection
               ? {
-                  slot: 'host' as const,
-                  update: {
-                    env,
-                    supervised: true,
-                    requestRestart: () => {
+                  update: fakeUpdateHandlers({
+                    restart: 'scheduled',
+                    // A supervised peer exits after its commit answer has left.
+                    onRestart: () => {
                       activeConnection?.close();
                       onUnavailable();
                     },
-                  },
+                  }).handlers,
                 }
               : {}),
           });
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
+          const connection = await connectFakeRuntime(definition, { hubVersion: 'dev' });
           activeConnection = connection;
           return {
             client: new RuntimeClient(connection.hub, onUnavailable),
@@ -1935,9 +2070,6 @@ describe('environment entity routes', () => {
   });
 
   it('cancels restart waiting without disconnecting a replacement client', async () => {
-    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-cancelled-update-route-'));
-    tempHomes.push(mangoHome);
-    const env = { MANGO_HOME: mangoHome };
     const bytes = new TextEncoder().encode('cancelled-update-runtime');
     const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     const targetVersion = getVersion();
@@ -1950,20 +2082,18 @@ describe('environment entity routes', () => {
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
-          const definition = createProvisionedRuntimeDefinition({
+          const definition = provisionedFakeRuntime({
             runtimeVersion: replacement ? targetVersion : '0.0.1-old',
             ...(!replacement
               ? {
-                  slot: 'host' as const,
-                  update: {
-                    env,
-                    supervised: true,
-                    requestRestart: () => restartRequested?.(),
-                  },
+                  update: fakeUpdateHandlers({
+                    restart: 'scheduled',
+                    onRestart: () => restartRequested?.(),
+                  }).handlers,
                 }
               : {}),
           });
-          const connection = await connectInProcessRuntime(definition, { hubVersion: 'dev' });
+          const connection = await connectFakeRuntime(definition, { hubVersion: 'dev' });
           return {
             client: new RuntimeClient(connection.hub, onUnavailable),
             close: () => connection.close(),

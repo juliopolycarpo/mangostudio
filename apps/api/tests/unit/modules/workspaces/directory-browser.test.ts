@@ -1,5 +1,6 @@
 /**
- * Hub facade smoke tests. Algorithm coverage lives in `@mangostudio/runtime`.
+ * Hub facade smoke tests. Algorithm coverage lives with the runtime that serves
+ * `workspace.browse` (`crates/mangostudio-runtime`).
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';

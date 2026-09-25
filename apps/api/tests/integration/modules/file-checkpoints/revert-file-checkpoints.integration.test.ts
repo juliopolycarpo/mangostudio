@@ -29,7 +29,6 @@ import { executeWriteFile } from '../../../../src/services/tools/builtin/write-f
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
-import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 let outsideDir: string;
@@ -45,7 +44,8 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  clearFileFreshness();
+  // A fresh directory per case is what isolates read freshness: the runtime
+  // keys it by chat and path and keeps it as long as its process lives.
   tempDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-test-'));
   outsideDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-outside-'));
   chat = await insertTestChat(user.id);
@@ -72,7 +72,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
   rmSync(outsideDir, { recursive: true, force: true });
 });

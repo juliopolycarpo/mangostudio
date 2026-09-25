@@ -27,7 +27,6 @@ import {
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
-import { clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 let chat: ChatFixture;
@@ -42,7 +41,8 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  clearFileFreshness();
+  // A fresh directory per case is what isolates read freshness: the runtime
+  // keys it by chat and path and keeps it as long as its process lives.
   tempDir = mkdtempSync(join(tmpdir(), 'checkpoint-durability-test-'));
   chat = await insertTestChat(user.id);
   messageId = faker.string.uuid();
@@ -68,7 +68,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
 });
 

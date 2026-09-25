@@ -23,23 +23,31 @@ import {
 } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { clearFileFreshness } from '../../../support/runtime-file-freshness';
-import { withTargetHome } from './support/target-home';
+import {
+  skipWithoutRustBinary,
+  targetHomeRuntime,
+  withFakeTargetHome,
+  withTargetHome,
+} from './support/target-home';
 import {
   EMPTY_STRING_ARGUMENTS,
   NON_STRING_ARGUMENTS,
   useToolRegistry,
 } from './support/tool-registry-harness';
 
+/** The home a fake runtime announces; nothing reads it. */
+const FAKE_TARGET_HOME = '/target/home';
+const FAKE_SHA256 = '0'.repeat(64);
+
 let tempDir: string;
 
 beforeEach(() => {
-  clearFileFreshness();
+  // A fresh directory per case is what isolates read freshness: the runtime
+  // keys it by chat and path and keeps it as long as its process lives.
   tempDir = mkdtempSync(join(tmpdir(), 'write-file-test-'));
 });
 
 afterEach(() => {
-  clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -347,12 +355,40 @@ describe('executeWriteFile', () => {
     expect(result.bytesWritten).toBeGreaterThan(0);
   });
 
-  it('expands ~ to the home directory the runtime reports', async () => {
-    const result = await withTargetHome(tempDir, () =>
-      executeWriteFile({ path: '~/home-write.txt', content: 'home content' }, makeContext())
+  it.skipIf(skipWithoutRustBinary(targetHomeRuntime, 'write-file-tool'))(
+    'expands ~ to the home directory the runtime reports',
+    async () => {
+      const result = await withTargetHome(tempDir, () =>
+        executeWriteFile({ path: '~/home-write.txt', content: 'home content' }, makeContext())
+      );
+      expect(result.created).toBe(true);
+      expect(await readBack(join(tempDir, 'home-write.txt'))).toBe('home content');
+    }
+  );
+
+  it('expands ~ against the home directory the runtime announced', async () => {
+    let sentPath = '';
+    const result = await withFakeTargetHome(
+      FAKE_TARGET_HOME,
+      {
+        'fs.write-file': (params: { readonly resolvedPath: string }) => {
+          sentPath = params.resolvedPath;
+          return {
+            result: {
+              path: params.resolvedPath,
+              bytesWritten: 12,
+              created: true,
+              sha256: FAKE_SHA256,
+            },
+            mutations: [],
+          };
+        },
+      },
+      () => executeWriteFile({ path: '~/home-write.txt', content: 'home content' }, makeContext())
     );
+
+    expect(sentPath).toBe(`${FAKE_TARGET_HOME}/home-write.txt`);
     expect(result.created).toBe(true);
-    expect(await readBack(join(tempDir, 'home-write.txt'))).toBe('home content');
   });
 
   it('throws when path is outside allowed paths', async () => {

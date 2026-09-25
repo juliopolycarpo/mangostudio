@@ -5,16 +5,23 @@
  * workspace authority, all over a real stdio child.
  *
  * The claim the collision check depends on is byte identity. A spawned runtime
- * attests `os-account` (or `container`) and the in-process Local connector
- * attests `single-user-host`, but both digest the same credential-home identity
- * with no method prefix. So one OS account reached through Local by one user
- * and through a Rust stdio runtime by another produces one fingerprint, and
- * the hub refuses both. A Rust derivation that differed by a single byte would
- * let the second user through, silently.
+ * attests `os-account` (or `container`) and the in-process TypeScript Local
+ * connector attested `single-user-host`, but both digest the same
+ * credential-home identity with no method prefix. So one OS account reached
+ * through Local by one user and through a Rust stdio runtime by another
+ * produces one fingerprint, and the hub refuses both. A Rust derivation that
+ * differed by a single byte would let the second user through, silently.
+ *
+ * The TypeScript Local attestation is recorded here as its derivation
+ * (`localCredentialHomeAttestation`), since the digest input — the home's
+ * device and inode — is machine-dependent.
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { realpathSync, statSync } from 'node:fs';
 import { mkdir, realpath, symlink } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { sanitizedEnv, spawnPort } from '@mangostudio/protocol/spawn';
 import { rejectionOf } from '@mangostudio/protocol/testing';
@@ -25,7 +32,6 @@ import { createEnvironmentRepository } from '../../../src/modules/environments/i
 import { createExternalIdentityIsolationRegistry } from '../../../src/modules/external-agents/application/external-identity-isolation';
 import { cancelActiveTurn } from '../../../src/modules/generation/application/active-turn-registry';
 import { connectHttpRuntime } from '../../../src/services/runtime-client/connect-http-runtime';
-import { connectLocalRuntime } from '../../../src/services/runtime-client/connect-in-process-runtime';
 import { openHubSession } from '../../../src/services/runtime-client/hub-session';
 import type { HubWorkspaceBinding } from '../../../src/services/runtime-client/hub-workspace-authority';
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
@@ -57,6 +63,27 @@ import { connectUntilListening, reserveEphemeralPort } from '../../support/rust-
 
 const binary = resolveRustRuntimeBinary();
 const fakeCursorAgent = resolveFakeCursorAgent();
+
+/**
+ * The attestation the retired in-process TypeScript Local connector made for
+ * this process's credential home: `single-user-host`, digesting platform, uid,
+ * canonical home path, device and inode joined by NUL, with no method prefix.
+ */
+function localCredentialHomeAttestation() {
+  const home = realpathSync(homedir());
+  const info = statSync(home);
+  const identity = [
+    process.platform,
+    process.getuid?.() ?? 'no-uid',
+    home,
+    info.dev,
+    info.ino,
+  ].join('\0');
+  return {
+    method: 'single-user-host' as const,
+    credentialHomeFingerprint: `sha256:${createHash('sha256').update(identity).digest('hex')}`,
+  };
+}
 
 describe('Real Rust runtime external-agent admission', () => {
   let runtimeVersion: string;
@@ -110,20 +137,13 @@ describe('Real Rust runtime external-agent admission', () => {
     'attests the credential home Local attests, so the hub sees two users collide',
     async () => {
       const rust = await spawnRustRuntime('rust-external-agents-attest');
-      const local = await connectLocalRuntime({
-        authorizeWorkspace: () => false,
-        externalAgentIsolation: 'single-user',
-      });
-      cleanups.push(() => local.close());
-      const localClient = new RuntimeClient(local.hub, () => undefined, 'local');
 
       const rustAttestation = rust.manifest.identityIsolation;
-      const localAttestation = localClient.manifest.identityIsolation;
-      expect(localAttestation?.method).toBe('single-user-host');
+      const localAttestation = localCredentialHomeAttestation();
       expect(rustAttestation?.method).toMatch(/^(os-account|container)$/);
       // The whole point: one home, one digest, whichever route reached it.
       expect(rustAttestation?.credentialHomeFingerprint).toBe(
-        localAttestation?.credentialHomeFingerprint
+        localAttestation.credentialHomeFingerprint
       );
 
       const health = await rust.health();

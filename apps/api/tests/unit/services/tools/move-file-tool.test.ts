@@ -14,18 +14,17 @@ import { executeReadFile } from '../../../../src/services/tools/builtin/read-fil
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { assertFresh, clearFileFreshness } from '../../../support/runtime-file-freshness';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
 beforeEach(() => {
-  clearFileFreshness();
+  // A fresh directory per case is what isolates read freshness: the runtime
+  // keys it by chat and path and keeps it as long as its process lives.
   tempDir = mkdtempSync(join(tmpdir(), 'move-file-test-'));
 });
 
 afterEach(() => {
-  clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -105,8 +104,15 @@ describe('executeMoveFile', () => {
 
     await executeMoveFile({ from, to }, makeContext());
 
-    await expect(assertFresh('c1', from)).rejects.toBeInstanceOf(FileNotReadError);
-    await expect(assertFresh('c1', to)).resolves.toBeUndefined();
+    // The same bytes recreated at the source are a file this chat never read:
+    // the read moved with the file instead of staying behind at its old path.
+    await Bun.write(from, 'observed');
+    await expect(
+      executeWriteFile({ path: from, content: 'overwritten' }, makeContext())
+    ).rejects.toBeInstanceOf(FileNotReadError);
+    expect(await Bun.file(from).text()).toBe('observed');
+    // An overwrite needs a read of the current bytes, so this succeeding
+    // without a re-read is the destination still being fresh.
     const written = await executeWriteFile({ path: to, content: 'updated' }, makeContext());
     expect(written.created).toBe(false);
     expect(await Bun.file(to).text()).toBe('updated');

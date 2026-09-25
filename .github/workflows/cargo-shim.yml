@@ -45,7 +45,20 @@ on:
       - "apps/api/tests/support/rust-runtime-binary.ts"
       - "apps/api/tests/support/rust-runtime-assertions.ts"
       - "apps/api/tests/support/rust-runtime-install-fixture.ts"
-      - "apps/api/tests/support/rust-typescript-runtimes.ts"
+      - "apps/api/tests/support/rust-runtime-client.ts"
+      - "apps/api/tests/support/rust-stdio-runtime.ts"
+      - "apps/api/tests/support/rust-serve-runtime.ts"
+      - "apps/api/tests/support/fixtures/rust-filesystem-search-recorded.ts"
+      - "apps/api/tests/integration/routes/terminal-socket.integration.test.ts"
+      - "apps/api/tests/integration/routes/environment-entities.integration.test.ts"
+      - "apps/api/tests/integration/services/hub-isolation-claim.integration.test.ts"
+      - "apps/api/tests/integration/services/connect-http-runtime.integration.test.ts"
+      - "apps/api/tests/integration/modules/library/library-undo-missing-backup.integration.test.ts"
+      - "apps/api/tests/unit/services/tools/support/target-home.ts"
+      - "apps/api/tests/unit/services/tools/read-file-tool.test.ts"
+      - "apps/api/tests/unit/services/tools/write-file-tool.test.ts"
+      - "apps/api/tests/unit/services/tools/list-directory-tool.test.ts"
+      - "apps/api/tests/unit/services/tools/glob-tool.test.ts"
       - "apps/api/tests/support/rust-library-boxes.ts"
       - "apps/api/src/services/runtime-client/**"
       - "apps/api/src/lib/runtime-paths.ts"
@@ -123,7 +136,7 @@ jobs:
           # (apps/shared/src/library/, apps/shared/src/markdown/) and its
           # corpus generator feed the ts-library half of the same freshness
           # job, so a TypeScript-only change to them reruns the parity check.
-          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/scripts/(generate-library-fixtures|library-backup-fixtures)\.ts$|apps/shared/src/library/|apps/shared/src/markdown/|apps/runtime/package\.json$|apps/api/tests/integration/services/(rust-runtime-qualification|rust-runtime-external-agents-qualification|rust-filesystem-search-compat|rust-snapshot-compat|rust-command-compat|rust-runtime-mcp-qualification|rust-runtime-library-qualification|rust-runtime-library-propagation|rust-runtime-library-removal)\.integration\.test\.ts$|apps/api/tests/support/fixtures/mcp/qualification-mcp-server\.ts$|apps/api/src/services/mcp/|apps/api/src/modules/external-agents/application/external-identity-isolation\.ts$|apps/api/src/modules/library/|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/tests/support/rust-runtime-install-fixture\.ts$|apps/api/tests/support/rust-typescript-runtimes\.ts$|apps/api/tests/support/rust-library-boxes\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$|\.github/actions/setup-zigbuild/|\.cargo/config\.toml$)'
+          relevant='^(crates/|apps/shared/src/runtime-contract/|apps/shared/src/runtime-home/|apps/shared/src/external-agents/|apps/shared/src/schema-helpers\.ts$|apps/shared/src/environments/toolchain-schemas\.ts$|apps/runtime/src/|apps/runtime/scripts/generate-home-fixtures\.ts$|apps/runtime/scripts/(generate-library-fixtures|library-backup-fixtures)\.ts$|apps/shared/src/library/|apps/shared/src/markdown/|apps/runtime/package\.json$|apps/api/tests/integration/services/(rust-runtime-qualification|rust-runtime-external-agents-qualification|rust-filesystem-search-compat|rust-snapshot-compat|rust-command-compat|rust-runtime-mcp-qualification|rust-runtime-library-qualification|rust-runtime-library-propagation|rust-runtime-library-removal)\.integration\.test\.ts$|apps/api/tests/support/fixtures/mcp/qualification-mcp-server\.ts$|apps/api/src/services/mcp/|apps/api/src/modules/external-agents/application/external-identity-isolation\.ts$|apps/api/src/modules/library/|apps/api/tests/integration/routes/rust-runtime-qualification-connect\.integration\.test\.ts$|apps/api/tests/support/rust-runtime-binary\.ts$|apps/api/tests/support/rust-runtime-assertions\.ts$|apps/api/tests/support/rust-runtime-install-fixture\.ts$|apps/api/tests/support/(rust-runtime-client|rust-stdio-runtime|rust-serve-runtime)\.ts$|apps/api/tests/support/fixtures/rust-filesystem-search-recorded\.ts$|apps/api/tests/integration/routes/(terminal-socket|environment-entities)\.integration\.test\.ts$|apps/api/tests/integration/services/(hub-isolation-claim|connect-http-runtime)\.integration\.test\.ts$|apps/api/tests/integration/modules/library/library-undo-missing-backup\.integration\.test\.ts$|apps/api/tests/unit/services/tools/(support/target-home|read-file-tool|write-file-tool|list-directory-tool|glob-tool)\.(ts|test\.ts)$|apps/api/tests/support/rust-library-boxes\.ts$|apps/api/src/services/runtime-client/|apps/api/src/lib/runtime-paths\.ts$|apps/api/src/modules/environments/http/runtime-socket-routes\.ts$|apps/api/src/modules/environments/application/runtime-pairing-service\.ts$|apps/api/src/modules/environments/infrastructure/runtime-pairing-repository\.ts$|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$|\.github/actions/setup-zigbuild/|\.cargo/config\.toml$)'
           if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
@@ -372,6 +385,25 @@ jobs:
           tests/integration/services/rust-runtime-library-propagation.integration.test.ts
           tests/integration/services/rust-runtime-library-removal.integration.test.ts
           tests/integration/routes/rust-runtime-qualification-connect.integration.test.ts
+          tests/integration/routes/terminal-socket.integration.test.ts
+          tests/integration/routes/environment-entities.integration.test.ts
+          tests/integration/services/hub-isolation-claim.integration.test.ts
+          tests/integration/services/connect-http-runtime.integration.test.ts
+          tests/integration/modules/library/library-undo-missing-backup.integration.test.ts
+
+      # The `~` cases of the file tools, which spawn the binary as Local. Unit
+      # files, so they keep the unit lane's one isolated worker.
+      - name: Qualify ~ expansion against the real binary
+        working-directory: apps/api
+        env:
+          MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/${{ matrix.runtime-binary }}
+          MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
+        run: >
+          bun test --timeout 15000 --parallel=1
+          tests/unit/services/tools/read-file-tool.test.ts
+          tests/unit/services/tools/write-file-tool.test.ts
+          tests/unit/services/tools/list-directory-tool.test.ts
+          tests/unit/services/tools/glob-tool.test.ts
 
   gate:
     # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only

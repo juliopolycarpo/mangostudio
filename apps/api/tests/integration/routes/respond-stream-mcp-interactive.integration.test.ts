@@ -8,10 +8,7 @@ import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import { turnRecoveryRoutes } from '../../../src/modules/generation/http/turn-recovery-routes';
 import { mcpServerRoutes } from '../../../src/modules/mcp-servers/http/mcp-server-routes';
-import {
-  closeAllMcpClients,
-  setMcpClientConnectorForTest,
-} from '../../../src/services/mcp/connection-manager';
+import { closeAllMcpClients } from '../../../src/services/mcp/connection-manager';
 import { resetElicitationRegistryForTest } from '../../../src/services/mcp/elicitation-registry';
 import {
   getProvider,
@@ -31,8 +28,8 @@ import {
 } from '../../support/factories';
 import {
   type ControlledTurnMcpFixture,
-  createControlledTurnMcpFixture,
-} from '../../support/fixtures/mcp/in-memory-mcp';
+  startControlledTurnMcpFixture,
+} from '../../support/fixtures/mcp/turn-mcp-fixture';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { SseRecorder } from '../../support/harness/sse-recorder';
 import { buildRespondStreamRequest } from './_respond-stream-helpers';
@@ -101,8 +98,7 @@ let app: ReturnType<typeof createAuthenticatedApiTestApp>['app'];
 
 beforeEach(async () => {
   previousProvider = getProvider('openai-compatible');
-  fixture = createControlledTurnMcpFixture();
-  setMcpClientConnectorForTest(fixture.connector);
+  fixture = await startControlledTurnMcpFixture();
   user = await insertTestUser();
   chatId = (await insertTestChat(user.id)).id;
   serverId = `${user.id}-interactive-mcp`;
@@ -121,8 +117,8 @@ beforeEach(async () => {
       slug: SERVER_SLUG,
       transport: 'stdio',
       environmentId: LOCAL_ENVIRONMENT_ID,
-      command: 'bun',
-      argsJson: '[]',
+      command: fixture.launch.command,
+      argsJson: JSON.stringify(fixture.launch.args),
       envJson: '{}',
       url: null,
       enabled: 1,
@@ -147,7 +143,6 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   resetElicitationRegistryForTest();
-  setMcpClientConnectorForTest(null);
   await closeAllMcpClients();
   await fixture.close();
   fixture.assertNoOpenServers();
@@ -317,7 +312,10 @@ describe('POST /respond/stream — interactive MCP end to end', () => {
   it('distinguishes elicitation timeout from an explicit turn abort', async () => {
     await getDb()
       .updateTable('mcp_servers')
-      .set({ timeoutMs: 75 })
+      // The row timeout also bounds the relay spawn and initialize (the Rust
+      // runtime counts it at connect), so it must outlast a stdio start-up
+      // while still expiring long before anyone answers the elicitation.
+      .set({ timeoutMs: 1_000 })
       .where('id', '=', serverId)
       .execute();
     installProvider([{ callId: 'timeout-call', name: `mcp__${SERVER_SLUG}__elicit` }]);

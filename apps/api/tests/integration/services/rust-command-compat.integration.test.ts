@@ -1,4 +1,11 @@
-/** Read-only command parity through the real Hub codec and compiled Rust host. */
+/**
+ * Read-only command behaviour through the real Hub codec and compiled Rust host.
+ *
+ * The expected results were recorded from the retired in-process TypeScript
+ * runtime answering the same calls (bash on Linux). `durationMs` is the only
+ * field dropped, as before; paths and vendor-CLI output are machine-dependent
+ * and are rebuilt from the scratch home or read from the CLI itself.
+ */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,9 +18,9 @@ import {
   scratchMangoHome,
 } from '../../support/rust-runtime-binary';
 import {
-  type RustAndTypeScriptRuntimes,
-  spawnRustAndTypeScriptRuntimes,
-} from '../../support/rust-typescript-runtimes';
+  type SpawnedRustRuntimeClient,
+  spawnRustRuntimeClient,
+} from '../../support/rust-runtime-client';
 
 const binary = resolveRustRuntimeBinary();
 const kind: 'powershell' | 'bash' = process.platform === 'win32' ? 'powershell' : 'bash';
@@ -24,13 +31,32 @@ function semanticShell(result: RuntimeShellResult): Omit<RuntimeShellResult, 'du
   return semantic;
 }
 
+type SemanticShell = Omit<RuntimeShellResult, 'durationMs'>;
+
+/** A recorded TypeScript answer, stamped with the shell and command this platform ran. */
+function recordedShell(
+  command: string,
+  recorded: Omit<SemanticShell, 'shell' | 'command'>
+): SemanticShell {
+  return { shell: kind, command, ...recorded };
+}
+
+/** What `binary args` prints when run directly: the recorded shape of a gh or git pass-through. */
+function directRun(binaryName: string, args: readonly string[], cwd: string) {
+  const proc = Bun.spawnSync([binaryName, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  return {
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+    exitCode: proc.exitCode,
+  };
+}
+
 describe.skipIf(!binary.available)('Rust command parity', () => {
   let home = '';
   let previousHome: string | undefined;
   let previousFixture: string | undefined;
-  let runtimes: RustAndTypeScriptRuntimes | undefined;
+  let runtime: SpawnedRustRuntimeClient | undefined;
   let rust: RuntimeClient;
-  let typescript: RuntimeClient;
 
   beforeAll(async () => {
     previousHome = process.env.MANGO_HOME;
@@ -40,12 +66,12 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
     process.env.MANGO_COMMAND_FIXTURE = 'fixture value';
     await writeFile(join(home, 'first.txt'), 'first\n');
     await writeFile(join(home, 'second.txt'), 'second\n');
-    runtimes = await spawnRustAndTypeScriptRuntimes(binary.path, 'command-compat');
-    ({ rust, typescript } = runtimes);
+    runtime = await spawnRustRuntimeClient(binary.path, 'command-compat');
+    rust = runtime.client;
   }, 30_000);
 
   afterAll(async () => {
-    await runtimes?.close();
+    await runtime?.close();
     if (previousHome === undefined) delete process.env.MANGO_HOME;
     else process.env.MANGO_HOME = previousHome;
     if (previousFixture === undefined) delete process.env.MANGO_COMMAND_FIXTURE;
@@ -58,13 +84,37 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
       "printf '%s' 'stdout'; printf '%s' 'stderr' >&2",
       "[Console]::Out.Write('stdout'); [Console]::Error.Write('stderr')",
       4096,
+      { exitCode: 0, signal: null, stdout: 'stdout', stderr: 'stderr', truncated: false },
     ],
-    ['exit 7', 'exit 7', 4096],
-    ["printf '%s' 'abcdefg'", "[Console]::Out.Write('abcdefg')", 4],
-    ["printf '\\357\\273\\277text'", "[Console]::Out.Write([char]0xFEFF + 'text')", 4096],
+    [
+      'exit 7',
+      'exit 7',
+      4096,
+      { exitCode: 7, signal: null, stdout: '', stderr: '', truncated: false },
+    ],
+    [
+      "printf '%s' 'abcdefg'",
+      "[Console]::Out.Write('abcdefg')",
+      4,
+      { exitCode: 0, signal: null, stdout: 'abcd', stderr: '', truncated: true },
+    ],
+    [
+      "printf '\\357\\273\\277text'",
+      "[Console]::Out.Write([char]0xFEFF + 'text')",
+      4096,
+      // Windows PowerShell writes U+FEFF through a console code page that
+      // cannot carry it, so both runtimes answered '?text' on the Windows leg.
+      {
+        exitCode: 0,
+        signal: null,
+        stdout: process.platform === 'win32' ? '?text' : 'text',
+        stderr: '',
+        truncated: false,
+      },
+    ],
   ] as const)(
     'preserves shell output, exit and byte cap: %s',
-    async (posix, windows, maxOutputBytes) => {
+    async (posix, windows, maxOutputBytes, recorded) => {
       const params = {
         kind,
         command: kind === 'powershell' ? windows : posix,
@@ -72,8 +122,9 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
         timeoutMs: 5000,
         maxOutputBytes,
       };
-      const expected = await typescript.shell.run(params);
-      expect(semanticShell(await rust.shell.run(params))).toEqual(semanticShell(expected));
+      expect(semanticShell(await rust.shell.run(params))).toEqual(
+        recordedShell(params.command, { ...recorded, termination: { kind: 'exited' } })
+      );
     }
   );
 
@@ -85,13 +136,19 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
       timeoutMs: 2000,
       maxOutputBytes: 4096,
     };
-    // Both runtimes wait out the same timeout, so run them side by side.
-    const [expected, actual] = await Promise.all([
-      typescript.shell.run(params),
-      rust.shell.run(params),
-    ]);
-    expect(expected.termination).toEqual({ kind: 'timed_out' });
-    expect(semanticShell(actual)).toEqual(semanticShell(expected));
+    expect(semanticShell(await rust.shell.run(params))).toEqual(
+      recordedShell(params.command, {
+        // A job-object termination on Windows reports exit code 1 and no
+        // signal; POSIX reports the SIGKILL that ended the process group.
+        ...(process.platform === 'win32'
+          ? { exitCode: 1, signal: null }
+          : { exitCode: null, signal: 'SIGKILL' }),
+        stdout: '',
+        stderr: '',
+        truncated: true,
+        termination: { kind: 'timed_out' },
+      })
+    );
   }, 10_000);
 
   it.skipIf(process.platform === 'win32')(
@@ -104,13 +161,16 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
         timeoutMs: 2000,
         maxOutputBytes: 4096,
       };
-      const [expected, actual] = await Promise.all([
-        typescript.shell.run(params),
-        rust.shell.run(params),
-      ]);
-      expect(expected.truncated).toBe(false);
-      expect(expected.termination).toEqual({ kind: 'timed_out' });
-      expect(semanticShell(actual)).toEqual(semanticShell(expected));
+      expect(semanticShell(await rust.shell.run(params))).toEqual(
+        recordedShell(params.command, {
+          exitCode: null,
+          signal: 'SIGKILL',
+          stdout: '',
+          stderr: '',
+          truncated: false,
+          termination: { kind: 'timed_out' },
+        })
+      );
     },
     10_000
   );
@@ -124,12 +184,15 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
       'retains arrived bytes when a descendant holds pipes: %s',
       async (command, stdout, stderr) => {
         const params = { kind, command, cwd: home, timeoutMs: 5000, maxOutputBytes: 4096 };
-        const expected = await typescript.shell.run(params, { timeoutMs: 5000 });
-        expect(expected.stdout).toBe(stdout);
-        expect(expected.stderr).toBe(stderr);
-        expect(expected.termination).toEqual({ kind: 'exited' });
         expect(semanticShell(await rust.shell.run(params, { timeoutMs: 5000 }))).toEqual(
-          semanticShell(expected)
+          recordedShell(command, {
+            exitCode: 0,
+            signal: null,
+            stdout,
+            stderr,
+            truncated: true,
+            termination: { kind: 'exited' },
+          })
         );
       },
       12_000
@@ -149,9 +212,16 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
       maxOutputBytes: 4096,
       envPolicy: { deny: ['MANGO_COMMAND_FIXTURE'] },
     };
-    const expected = await typescript.shell.run(params);
-    expect(expected.stdout).toBe('');
-    expect(semanticShell(await rust.shell.run(params))).toEqual(semanticShell(expected));
+    expect(semanticShell(await rust.shell.run(params))).toEqual(
+      recordedShell(command, {
+        exitCode: 0,
+        signal: null,
+        stdout: '',
+        stderr: '',
+        truncated: false,
+        termination: { kind: 'exited' },
+      })
+    );
   });
 
   it.skipIf(!Bun.which('git'))('preserves direct Git argv and accepted nonzero exits', async () => {
@@ -169,7 +239,25 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
       cwd: home,
       acceptedExitCodes: [1],
     };
-    const expected = await typescript.git.exec(params);
+    const first = join(home, 'first.txt');
+    const second = join(home, 'second.txt');
+    // Recorded on POSIX, where git prints an absolute path as `a` + the path;
+    // Windows drive paths print differently, so there the recorded shape is git's own.
+    const expected =
+      process.platform === 'win32'
+        ? directRun('git', params.args, home)
+        : {
+            stdout:
+              `diff --git a${first} b${second}\n` +
+              'index 9c59e24..e019be0 100644\n' +
+              `--- a${first}\n` +
+              `+++ b${second}\n` +
+              '@@ -1 +1 @@\n' +
+              '-first\n' +
+              '+second\n',
+            stderr: '',
+            exitCode: 1,
+          };
     expect(expected.exitCode).toBe(1);
     expect(await rust.git.exec(params)).toEqual(expected);
   });
@@ -177,10 +265,24 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
   it.skipIf(!Bun.which('gh'))(
     'preserves gh reads and mutation-method help without contacting GitHub',
     async () => {
+      // The installed gh's version and help text vary by machine, so the
+      // recorded shape is gh's own direct output: stdout verbatim, no stderr, exit 0.
       const read = { args: ['--version'], cwd: home };
-      expect(await rust.gh.exec(read)).toEqual(await typescript.gh.exec(read));
+      const expectedRead = directRun('gh', read.args, home);
+      expect(expectedRead).toMatchObject({
+        stdout: expect.stringMatching(/^gh version /),
+        stderr: '',
+        exitCode: 0,
+      });
+      expect(await rust.gh.exec(read)).toEqual(expectedRead);
       const help = { args: ['pr', 'create', '--help'], cwd: home };
-      expect(await rust.gh.mutate(help)).toEqual(await typescript.gh.mutate(help));
+      const expectedHelp = directRun('gh', help.args, home);
+      expect(expectedHelp).toMatchObject({
+        stdout: expect.stringContaining('gh pr create [flags]'),
+        stderr: '',
+        exitCode: 0,
+      });
+      expect(await rust.gh.mutate(help)).toEqual(expectedHelp);
     }
   );
 
@@ -189,9 +291,7 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
       ['pr', 'private rejected prose'],
       ['api', 'graphql', '-f', 'query=query { viewer { login } }'],
     ]) {
-      for (const client of [typescript, rust]) {
-        await expect(client.gh.exec({ args, cwd: home })).rejects.toBeInstanceOf(ToolArgumentError);
-      }
+      await expect(rust.gh.exec({ args, cwd: home })).rejects.toBeInstanceOf(ToolArgumentError);
     }
   });
 });

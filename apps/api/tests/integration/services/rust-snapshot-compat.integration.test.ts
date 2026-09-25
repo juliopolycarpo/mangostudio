@@ -1,11 +1,11 @@
 /**
- * Differential qualification for the snapshot methods a real Rust runtime
- * serves through the Hub. The Rust connection is always a compiled child;
- * the TypeScript connection crosses the same Hub codec in process.
+ * Qualification for the snapshot methods a real Rust runtime serves through
+ * the Hub, held to the answers the retired in-process TypeScript runtime gave
+ * for the same calls. The Rust connection is always a compiled child.
  *
  * ## Assertion inventory
  *
- * | TypeScript assertion or implementation | Hub-level evidence here |
+ * | Retired TypeScript assertion or implementation | Hub-level evidence here |
  * | --- | --- |
  * | `apps/runtime/src/services/snapshot.ts` capture and hash | exact UTF-8 and binary bytes, SHA-256 hashes, in-root symlink or junction traversal, directories, and absent paths agree over the real wire |
  * | `apps/runtime/tests/unit/services/snapshot.test.ts` snapshot size refusal | an 8 MiB plus one byte capture reports the same typed refusal and leaves the file intact |
@@ -15,9 +15,9 @@
  * | `apps/runtime/tests/unit/services/snapshot.test.ts` containment | a symlink on Unix or junction on Windows cannot make `snapshot.revert` escape its root |
  * | `apps/runtime/src/services/snapshot.ts` `restoreBytes` | a restored file is immediately fresh for a same-chat overwrite |
  *
- * Destructive calls use different Rust and TypeScript trees. Read-only capture,
- * hash, and containment refusals share a tree so their full wire results and
- * errors compare directly, including the absolute path in the message.
+ * Each case runs in its own scratch tree. Answers that name a scratch path —
+ * the size refusal and the containment refusal — are recorded with that path
+ * substituted back in; everything else is recorded verbatim.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -50,22 +50,12 @@ import {
   scratchMangoHome,
 } from '../../support/rust-runtime-binary';
 import {
-  type RustAndTypeScriptRuntimes,
-  spawnRustAndTypeScriptRuntimes,
-} from '../../support/rust-typescript-runtimes';
+  type SpawnedRustRuntimeClient,
+  spawnRustRuntimeClient,
+} from '../../support/rust-runtime-client';
 
 const binary = resolveRustRuntimeBinary();
 const SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
-
-interface FixturePair {
-  readonly rust: string;
-  readonly typescript: string;
-}
-
-interface CrossDeviceFixturePair {
-  readonly rust: CrossDevicePaths;
-  readonly typescript: CrossDevicePaths;
-}
 
 interface CrossDevicePaths {
   readonly sourceRoot: string;
@@ -111,23 +101,15 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
   let root: string;
   let home: string;
   let previousHome: string | undefined;
-  let runtimes: RustAndTypeScriptRuntimes | undefined;
+  let runtime: SpawnedRustRuntimeClient | undefined;
   let rust: RuntimeClient;
-  let typescript: RuntimeClient;
   const crossDeviceRoots: string[] = [];
 
-  async function fixturePair(label: string): Promise<FixturePair> {
-    const parent = await mkdtemp(join(root, `${label}-`));
-    const rustRoot = join(parent, 'rust');
-    const typescriptRoot = join(parent, 'typescript');
-    await Promise.all([mkdir(rustRoot), mkdir(typescriptRoot)]);
-    return {
-      rust: await realpath(rustRoot),
-      typescript: await realpath(typescriptRoot),
-    };
+  async function fixtureRoot(label: string): Promise<string> {
+    return await realpath(await mkdtemp(join(root, `${label}-`)));
   }
 
-  async function crossDeviceFixturePair(label: string): Promise<CrossDeviceFixturePair | null> {
+  async function crossDeviceFixture(label: string): Promise<CrossDevicePaths | null> {
     if (process.platform !== 'linux') return null;
 
     let destinationParent: string;
@@ -136,20 +118,16 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     } catch {
       return null;
     }
-    const sources = await fixturePair(label);
+    const sourceRoot = await fixtureRoot(label);
     try {
-      if ((await stat(sources.rust)).dev === (await stat(destinationParent)).dev) {
+      if ((await stat(sourceRoot)).dev === (await stat(destinationParent)).dev) {
         await rm(destinationParent, { force: true, recursive: true });
         return null;
       }
-      const rustDestinationRoot = join(destinationParent, 'rust');
-      const typescriptDestinationRoot = join(destinationParent, 'typescript');
-      await Promise.all([mkdir(rustDestinationRoot), mkdir(typescriptDestinationRoot)]);
+      const destinationRoot = join(destinationParent, 'rust');
+      await mkdir(destinationRoot);
       crossDeviceRoots.push(destinationParent);
-      return {
-        rust: { sourceRoot: sources.rust, destinationRoot: rustDestinationRoot },
-        typescript: { sourceRoot: sources.typescript, destinationRoot: typescriptDestinationRoot },
-      };
+      return { sourceRoot, destinationRoot };
     } catch (error) {
       await rm(destinationParent, { force: true, recursive: true });
       throw error;
@@ -252,12 +230,12 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     home = await scratchMangoHome('snapshot-compat');
     process.env.MANGO_HOME = home;
     root = await mkdtemp(join(tmpdir(), 'mango-rust-snapshot-compat-'));
-    runtimes = await spawnRustAndTypeScriptRuntimes(binary.path, 'snapshot-compat');
-    ({ rust, typescript } = runtimes);
+    runtime = await spawnRustRuntimeClient(binary.path, 'snapshot-compat');
+    rust = runtime.client;
   }, 30_000);
 
   afterAll(async () => {
-    await runtimes?.close();
+    await runtime?.close();
     if (previousHome === undefined) delete process.env.MANGO_HOME;
     else process.env.MANGO_HOME = previousHome;
     if (home) await cleanupMangoHome(home);
@@ -285,17 +263,9 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     await writeFile(path, bytes);
 
     const expectedCapture = { exists: true, contentBase64: base64Of(bytes), hash: hashOf(bytes) };
-    expect(await typescript.snapshot.capture({ path })).toEqual(expectedCapture);
-    expect(await typescript.snapshot.hash({ path })).toEqual({ hash: hashOf(bytes) });
-    expect(await typescript.snapshot.capture({ path: linkedPath })).toEqual(expectedCapture);
-    expect(await typescript.snapshot.hash({ path: linkedPath })).toEqual({ hash: hashOf(bytes) });
-    expect(await typescript.snapshot.capture({ path: absent })).toEqual({ exists: false });
-    expect(await typescript.snapshot.hash({ path: absent })).toEqual({ hash: null });
-    expect(await typescript.snapshot.capture({ path: missingParent })).toEqual({ exists: false });
-    expect(await typescript.snapshot.hash({ path: missingParent })).toEqual({ hash: null });
-
-    const expectedDirectoryCapture = await typescript.snapshot.capture({ path: targetDirectory });
-    const expectedDirectoryHash = await typescript.snapshot.hash({ path: targetDirectory });
+    // Recorded from the TypeScript runtime: a directory is not a capturable file.
+    const expectedDirectoryCapture = { exists: false };
+    const expectedDirectoryHash = { hash: null };
 
     expect(await rust.snapshot.capture({ path })).toEqual(expectedCapture);
     expect(await rust.snapshot.hash({ path })).toEqual({ hash: hashOf(bytes) });
@@ -317,29 +287,30 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     const sizeBytes = SNAPSHOT_MAX_BYTES + 1;
     await writeFile(path, new Uint8Array(sizeBytes));
 
-    const expected = await rejectionFrom(RemoteError, () => typescript.snapshot.capture({ path }));
-    expect(expected).toMatchObject({
+    const actual = await rejectionFrom(RemoteError, () => rust.snapshot.capture({ path }));
+    expect({
+      name: actual.name,
+      message: actual.message,
+      code: actual.code,
+      details: actual.details,
+    }).toEqual({
+      name: 'RemoteError',
+      message: `Cannot checkpoint "${path}": it is ${sizeBytes} bytes, past the ${SNAPSHOT_MAX_BYTES}-byte snapshot limit.`,
       code: 'INTERNAL',
       details: { kind: 'snapshot_too_large', resolvedPath: path, sizeBytes },
     });
-    const actual = await rejectionFrom(RemoteError, () => rust.snapshot.capture({ path }));
-    expect(actual).toEqual(expected);
+    expect((await stat(path)).size).toBe(sizeBytes);
   });
 
   it('reverses create, restore, and move operations in isolated trees, then accepts a retry', async () => {
-    const roots = await fixturePair('reversal');
-    const rustFixture = await reversalFixture(roots.rust);
-    const typescriptFixture = await reversalFixture(roots.typescript);
-
-    await assertReversal(typescript, typescriptFixture);
-    await assertReversal(rust, rustFixture);
+    await assertReversal(rust, await reversalFixture(await fixtureRoot('reversal')));
   });
 
   it.each(['short', 'long'] as const)(
     'moves a snapshot with a %s source name back across Linux filesystems',
     async (nameLength) => {
-      const fixtures = await crossDeviceFixturePair('cross-device-move');
-      if (!fixtures) return;
+      const fixture = await crossDeviceFixture('cross-device-move');
+      if (!fixture) return;
       const bytes = Buffer.from('cross-device \u{1F30D}\n', 'utf8');
 
       async function assertCrossDeviceMove(
@@ -381,15 +352,14 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
         await expect(Bun.file(destination).exists()).resolves.toBe(false);
       }
 
-      await assertCrossDeviceMove(typescript, fixtures.typescript);
-      await assertCrossDeviceMove(rust, fixtures.rust);
+      await assertCrossDeviceMove(rust, fixture);
     }
   );
 
   it('can retry a cross-device revert after source removal is denied', async () => {
     if (process.getuid?.() === 0) return;
-    const fixtures = await crossDeviceFixturePair('cross-device-retry');
-    if (!fixtures) return;
+    const fixture = await crossDeviceFixture('cross-device-retry');
+    if (!fixture) return;
     const bytes = Buffer.from('retained until the reverse move commits');
 
     async function assertRetry(client: RuntimeClient, paths: CrossDevicePaths): Promise<void> {
@@ -419,13 +389,12 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       expect(await client.snapshot.capture({ path: movedTo })).toEqual({ exists: false });
     }
 
-    await assertRetry(typescript, fixtures.typescript);
-    await assertRetry(rust, fixtures.rust);
+    await assertRetry(rust, fixture);
   });
 
   it('preserves the exclusive-destination error for a cross-device revert collision', async () => {
-    const fixtures = await crossDeviceFixturePair('cross-device-collision');
-    if (!fixtures) return;
+    const fixture = await crossDeviceFixture('cross-device-collision');
+    if (!fixture) return;
     const movedBytes = Buffer.from('captured source');
     const occupiedBytes = Buffer.from('existing destination');
 
@@ -450,33 +419,26 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       await assertBytes(movedTo, movedBytes);
     }
 
-    await assertCollision(typescript, fixtures.typescript);
-    await assertCollision(rust, fixtures.rust);
+    await assertCollision(rust, fixture);
   });
 
   it('treats an empty containment root as omitted during replay', async () => {
-    const roots = await fixturePair('empty-containment');
+    const directory = await fixtureRoot('empty-containment');
     const bytes = Buffer.from('created');
-    for (const [client, directory] of [
-      [typescript, roots.typescript],
-      [rust, roots.rust],
-    ] as const) {
-      const path = join(directory, 'created.txt');
-      await writeFile(path, bytes);
-      expect(
-        await client.snapshot.revert({
-          chatId: 'empty-containment',
-          containmentRoot: '',
-          expected: [{ path, afterHash: hashOf(bytes) }],
-          operations: [{ type: 'create', path }],
-        })
-      ).toEqual({ revertedFiles: 1 });
-      expect(await client.snapshot.capture({ path })).toEqual({ exists: false });
-    }
+    const path = join(directory, 'created.txt');
+    await writeFile(path, bytes);
+    expect(
+      await rust.snapshot.revert({
+        chatId: 'empty-containment',
+        containmentRoot: '',
+        expected: [{ path, afterHash: hashOf(bytes) }],
+        operations: [{ type: 'create', path }],
+      })
+    ).toEqual({ revertedFiles: 1 });
+    expect(await rust.snapshot.capture({ path })).toEqual({ exists: false });
   });
 
   it('restores the same bytes from unpadded and malformed base64 strings, including a missing parent', async () => {
-    const roots = await fixturePair('base64');
     const afterBytes = Buffer.from('after\n');
 
     async function assertBase64Restore(client: RuntimeClient, root: string): Promise<void> {
@@ -532,12 +494,10 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       await assertBytes(missingParentPath, restoredBytes);
     }
 
-    await assertBase64Restore(typescript, roots.typescript);
-    await assertBase64Restore(rust, roots.rust);
+    await assertBase64Restore(rust, await fixtureRoot('base64'));
   });
 
   it('leaves both paths unchanged when a revert move has no source or would overwrite one', async () => {
-    const roots = await fixturePair('move-errors');
     const movedBytes = Buffer.from('moved bytes\n');
     const collisionBytes = Buffer.from('do not overwrite\n');
 
@@ -601,12 +561,10 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       await assertBytes(destinationPath, movedBytes);
     }
 
-    await assertMoveErrors(typescript, roots.typescript);
-    await assertMoveErrors(rust, roots.rust);
+    await assertMoveErrors(rust, await fixtureRoot('move-errors'));
   });
 
   it('replays repeated paths to their earliest bytes and refuses a mixed revert state', async () => {
-    const roots = await fixturePair('replay');
     const before = Buffer.from('first \u{1F34A}\n', 'utf8');
     const middle = Buffer.from('second \u{1F352}\n', 'utf8');
     const after = Buffer.from('third \u{1FAD0}\n', 'utf8');
@@ -627,8 +585,8 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       expect(await client.snapshot.revert(params)).toEqual({ revertedFiles: 1 });
     }
 
-    await assertRepeatedReplay(typescript, roots.typescript);
-    await assertRepeatedReplay(rust, roots.rust);
+    const directory = await fixtureRoot('replay');
+    await assertRepeatedReplay(rust, directory);
 
     async function assertMixedConflict(client: RuntimeClient, root: string): Promise<void> {
       const restoredPath = join(root, 'already-reverted.txt');
@@ -664,8 +622,7 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       await assertBytes(pendingPath, afterBytes);
     }
 
-    await assertMixedConflict(typescript, roots.typescript);
-    await assertMixedConflict(rust, roots.rust);
+    await assertMixedConflict(rust, directory);
   });
 
   it('rejects symlink or junction escapes before a revert can modify outside files', async () => {
@@ -684,10 +641,12 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       operations: [{ type: 'create' as const, path: escapedPath }],
     };
 
-    const expected = await rejectionFrom(Error, () => typescript.snapshot.revert(params));
-    expect(expected).toBeInstanceOf(PathAccessError);
-    const actual = await rejectionFrom(Error, () => rust.snapshot.revert(params));
-    expect(actual).toEqual(expected);
+    const actual = await rejectionFrom(PathAccessError, () => rust.snapshot.revert(params));
+    expect({ name: actual.name, message: actual.message, kind: actual.kind }).toEqual({
+      name: 'PathAccessError',
+      message: `Path "${escapedPath}" is outside the chat working directory. Use a path inside "${directory}".`,
+      kind: 'path_access',
+    });
     await expect(Bun.file(escapedPath).exists()).resolves.toBe(false);
   });
 });

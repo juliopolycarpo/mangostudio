@@ -14,13 +14,21 @@ import {
 } from '../../../../src/services/tools/builtin/glob';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { withTargetHome } from './support/target-home';
+import {
+  skipWithoutRustBinary,
+  targetHomeRuntime,
+  withFakeTargetHome,
+  withTargetHome,
+} from './support/target-home';
 import {
   ABSENT_STRING_ARGUMENTS,
   EMPTY_STRING_ARGUMENTS,
   REJECTED_STRING_ARGUMENTS,
   useToolRegistry,
 } from './support/tool-registry-harness';
+
+/** The home a fake runtime announces; nothing reads it. */
+const FAKE_TARGET_HOME = '/target/home';
 
 let tempDir: string;
 
@@ -256,11 +264,37 @@ describe('executeGlob', () => {
     expect(threw).toBe(true);
   });
 
-  it('expands ~ in cwd to the home directory the runtime reports', async () => {
-    await seedTree();
-    const result = await withTargetHome(tempDir, () =>
-      executeGlob({ pattern: '*.ts', cwd: '~' }, { ...makeContext(), workdir: tempDir })
+  it.skipIf(skipWithoutRustBinary(targetHomeRuntime, 'glob-tool'))(
+    'expands ~ in cwd to the home directory the runtime reports',
+    async () => {
+      await seedTree();
+      const result = await withTargetHome(tempDir, () =>
+        executeGlob({ pattern: '*.ts', cwd: '~' }, { ...makeContext(), workdir: tempDir })
+      );
+      expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
+    }
+  );
+
+  it('expands ~ in cwd against the home directory the runtime announced', async () => {
+    let sentCwd = '';
+    const result = await withFakeTargetHome(
+      FAKE_TARGET_HOME,
+      {
+        'fs.glob': (params: { readonly pattern: string; readonly cwd: string }) => {
+          sentCwd = params.cwd;
+          return {
+            pattern: params.pattern,
+            cwd: params.cwd,
+            matches: ['a.ts', 'b.ts'],
+            truncated: false,
+          };
+        },
+      },
+      () =>
+        executeGlob({ pattern: '*.ts', cwd: '~' }, { ...makeContext(), workdir: FAKE_TARGET_HOME })
     );
+
+    expect(sentCwd).toBe(FAKE_TARGET_HOME);
     expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
   });
 
@@ -303,7 +337,7 @@ describe('glob registry contract', () => {
     const result = await runGlob({ pattern: '**/*.ts' });
 
     expect(result.cwd).toBe(harness.dir);
-    expect(result.matches.sort()).toEqual(['a.ts', 'nested/b.ts']);
+    expect(result.matches.sort()).toEqual(['a.ts', join('nested', 'b.ts')]);
   });
 
   it('resolves an explicit relative cwd against the chat workdir', async () => {
