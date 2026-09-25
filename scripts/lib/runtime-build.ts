@@ -32,6 +32,28 @@ const RUNTIME_CARGO_PACKAGE = 'mangostudio-runtime';
 export const RUNTIME_RELEASE_VERSION_ENV = 'MANGOSTUDIO_RELEASE_VERSION';
 
 /**
+ * The version a source checkout's hub reports, and so the one a runtime it
+ * installs into a WSL distribution or mounts into a container must report:
+ * the handshake only accepts a hub-managed runtime of the same release.
+ */
+const DEVELOPMENT_RUNTIME_VERSION = 'dev';
+
+/**
+ * The version `bun run build:runtime` stamps: `dev` with `--dev`, otherwise
+ * the release version, resolved only when it is needed so a checkout without
+ * a valid one can still build for itself.
+ *
+ * @example
+ * runtimeBuildVersion({ dev: true }, resolveReleaseVersion); // → 'dev'
+ */
+export function runtimeBuildVersion(
+  options: { readonly dev: boolean },
+  resolveRelease: () => string
+): string {
+  return options.dev ? DEVELOPMENT_RUNTIME_VERSION : resolveRelease();
+}
+
+/**
  * Oldest glibc a released `linux-x64`/`linux-arm64` runtime may require. The
  * Bun-compiled hub beside it already needs `GLIBC_2.17` (its highest versioned
  * symbol), so a runtime linked against the same floor adds no new requirement

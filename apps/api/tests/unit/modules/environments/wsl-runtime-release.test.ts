@@ -262,12 +262,14 @@ describe('local runtime build', () => {
     );
   });
 
-  it('names a build with no version stamp, so the runtime reports dev like its hub', () => {
-    const command = localRuntimeBuildCommand('linux-x64-musl', '/repo/out/mangostudio-runtime');
+  it('names a Rust build stamped dev, so the runtime reports dev like its hub', () => {
+    const outfile = localRuntimeBuildPath('/repo', 'linux-x64-musl');
+    const command = localRuntimeBuildCommand('linux-x64-musl', outfile);
 
-    expect(command).toContain('--target=bun-linux-x64-musl');
-    expect(command).toContain('--outfile /repo/out/mangostudio-runtime');
-    expect(command).not.toContain('VERSION');
+    expect(command).toBe(
+      `bun run build:runtime --platform linux-x64-musl --dev --zig --rustup --out ${join('/repo', '.mango', 'out')}`
+    );
+    expect(command).not.toContain('apps/runtime');
   });
 });
 

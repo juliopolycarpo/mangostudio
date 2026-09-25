@@ -365,7 +365,7 @@ async function install(
           `The runtime installed in "${distro}" reports version`
         );
       if (isDevelopmentVersion(version) && message.includes('reports version')) {
-        message = `${message} A checkout's runtime has to be compiled without a version stamp: \`${localRuntimeBuildCommand(platformId, deps.localBuildPath(platformId))}\`.`;
+        message = `${message} A checkout's runtime has to report version dev; build one with \`${localRuntimeBuildCommand(platformId, deps.localBuildPath(platformId))}\`.`;
       }
       throw new WslProvisioningError(message);
     }
