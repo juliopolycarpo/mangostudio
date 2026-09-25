@@ -671,9 +671,11 @@ fn routing_to_wire(routing: sdk::ApprovalRouting) -> wire::ApprovalRouting {
 /// The wire's account limits from the SDK's, stamped `observed_at`.
 ///
 /// Carries what the SDK carries: each window's label, used percentage,
-/// duration and reset time, and the plan name. Everything else
-/// `codex/rate-limits.ts` produced (per-limit buckets, credits, spend control,
-/// reset credits, `reachedType`) has no SDK source and stays absent.
+/// duration and reset time, the plan name, credits, spend control and reset
+/// credits. Times become epoch milliseconds, an absent fact stays absent, and
+/// empty vendor text is dropped rather than sent where the wire needs a
+/// non-empty value. Per-limit buckets and `reachedType`, which
+/// `codex/rate-limits.ts` also produced, have no SDK source and stay absent.
 ///
 /// # Example
 ///
@@ -699,13 +701,68 @@ pub(crate) fn account_limits(
             })
             .collect(),
         by_limit_id: None,
-        credits: None,
-        spend_control: None,
-        reset_credits: None,
+        credits: limits.credits.as_ref().map(credits),
+        spend_control: limits.spend_control.as_ref().map(spend_control),
+        reset_credits: limits.reset_credits.as_ref().map(reset_credits),
         plan_type: limits.plan_type.clone(),
         reached_type: None,
         observed_at_ms: epoch_ms(observed_at).unwrap_or(0),
     }
+}
+
+/// `ExternalCredits`: every field optional, so unknown is never zero.
+fn credits(credits: &sdk::Credits) -> wire::Credits {
+    wire::Credits {
+        has_credits: credits.has_credits,
+        unlimited: credits.unlimited,
+        balance: non_empty(credits.balance.as_deref()),
+    }
+}
+
+/// `ExternalSpendControl`. A percentage that is not a finite number is not one
+/// the wire can carry, and reads as unknown.
+fn spend_control(spend: &sdk::SpendControl) -> wire::SpendControl {
+    wire::SpendControl {
+        limit: non_empty(spend.limit.as_deref()),
+        used: non_empty(spend.used.as_deref()),
+        remaining_percent: spend
+            .remaining_percent
+            .filter(|percent| percent.is_finite()),
+        resets_at_ms: spend.resets_at.and_then(epoch_ms),
+        reached: spend.reached,
+    }
+}
+
+/// `ExternalResetCredits`: the count as reported, and at most
+/// [`sdk::RESET_CREDIT_MAX_ITEMS`] detail rows. A row without the id or status
+/// the wire requires is dropped; `availableCount` stays authoritative.
+fn reset_credits(resets: &sdk::ResetCredits) -> wire::ResetCredits {
+    wire::ResetCredits {
+        available_count: resets.available_count,
+        credits: resets.credits.as_ref().map(|rows| {
+            rows.iter()
+                .filter_map(reset_credit)
+                .take(sdk::RESET_CREDIT_MAX_ITEMS)
+                .collect()
+        }),
+    }
+}
+
+fn reset_credit(credit: &sdk::ResetCredit) -> Option<wire::ResetCredit> {
+    Some(wire::ResetCredit {
+        id: non_empty(Some(&credit.id))?,
+        reset_type: non_empty(credit.reset_type.as_deref()),
+        status: non_empty(Some(&credit.status))?,
+        granted_at_ms: credit.granted_at.and_then(epoch_ms),
+        expires_at_ms: credit.expires_at.and_then(epoch_ms),
+        title: non_empty(credit.title.as_deref()),
+        description: non_empty(credit.description.as_deref()),
+    })
+}
+
+/// Vendor text the wire requires non-empty, or nothing.
+fn non_empty(text: Option<&str>) -> Option<String> {
+    text.filter(|text| !text.is_empty()).map(str::to_owned)
 }
 
 /// One page of the vendor's own sessions, capped at the wire's fifty rows.

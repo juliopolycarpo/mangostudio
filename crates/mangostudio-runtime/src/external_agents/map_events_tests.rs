@@ -574,6 +574,41 @@ fn cancelled_is_a_marker_and_completed_is_the_terminal() {
 }
 
 #[test]
+fn account_limits_carry_credits_and_reset_credits_through_the_session_mapper() {
+    let mut limits = sdk::AccountLimits::unknown(epoch_plus_ms(EVENT_AT_MS));
+    let mut credits = sdk::Credits::default();
+    credits.has_credits = Some(true);
+    credits.balance = Some(String::from("4.20"));
+    limits.credits = Some(credits);
+    let mut spend = sdk::SpendControl::default();
+    spend.reached = Some(true);
+    spend.resets_at = Some(epoch_plus_ms(EXPIRES_AT_MS));
+    limits.spend_control = Some(spend);
+    let mut credit = sdk::ResetCredit::new("credit-1", "available");
+    credit.expires_at = Some(epoch_plus_ms(EXPIRES_AT_MS));
+    let mut resets = sdk::ResetCredits::new(1);
+    resets.credits = Some(vec![credit]);
+    limits.reset_credits = Some(resets);
+    assert_wire(
+        sdk::EventKind::AccountLimits { limits },
+        &json!({
+            "type": "account_limits",
+            "limits": {
+                "targetId": "codex",
+                "windows": [],
+                "credits": { "hasCredits": true, "balance": "4.20" },
+                "spendControl": { "resetsAtMs": EXPIRES_AT_MS, "reached": true },
+                "resetCredits": {
+                    "availableCount": 1,
+                    "credits": [{ "id": "credit-1", "status": "available", "expiresAtMs": EXPIRES_AT_MS }],
+                },
+                "observedAtMs": EVENT_AT_MS,
+            },
+        }),
+    );
+}
+
+#[test]
 fn error_carries_code_message_vendor_code_request_id_and_retryable() {
     let mut error = sdk::VendorError::new(
         sdk::ErrorCode::from_static("codex-turn-failed"),

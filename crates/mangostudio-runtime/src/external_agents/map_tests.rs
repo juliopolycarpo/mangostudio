@@ -1220,6 +1220,161 @@ fn account_limits_carry_windows_plan_and_the_observation_time() {
     assert_eq!(received, expected, "account limits drifted");
 }
 
+/// Credits, spend control and reset credits as `account/rateLimits/read`
+/// reports them, times one second past a round epoch.
+fn codex_limits_with_credits() -> sdk::AccountLimits {
+    let at = |seconds: u64| Some(UNIX_EPOCH + Duration::from_secs(seconds));
+    let mut limits = codex_limits();
+    let mut credits = sdk::Credits::default();
+    credits.has_credits = Some(true);
+    credits.unlimited = Some(false);
+    credits.balance = Some(String::from("12.50"));
+    limits.credits = Some(credits);
+    let mut spend = sdk::SpendControl::default();
+    spend.limit = Some(String::from("$100"));
+    spend.used = Some(String::from("$40"));
+    spend.remaining_percent = Some(60.0);
+    spend.resets_at = at(1_790_000_100);
+    spend.reached = Some(false);
+    limits.spend_control = Some(spend);
+    let mut credit = sdk::ResetCredit::new("credit-1", "available");
+    credit.reset_type = Some(String::from("weekly"));
+    credit.granted_at = at(1_780_000_000);
+    credit.expires_at = at(1_800_000_000);
+    credit.title = Some(String::from("Weekly reset"));
+    credit.description = Some(String::from("Resets the weekly window."));
+    let mut resets = sdk::ResetCredits::new(3);
+    resets.credits = Some(vec![credit]);
+    limits.reset_credits = Some(resets);
+    limits
+}
+
+#[test]
+fn account_limits_carry_credits_spend_control_and_reset_credits_in_milliseconds() {
+    let received = serde_json::to_value(account_limits(
+        TargetId::Codex,
+        &codex_limits_with_credits(),
+        UNIX_EPOCH,
+    ))
+    .expect("serializable");
+    let expected = json!({
+        "hasCredits": true, "unlimited": false, "balance": "12.50",
+    });
+    assert_eq!(
+        received["credits"], expected,
+        "credits drifted | received {received}"
+    );
+    let expected = json!({
+        "limit": "$100", "used": "$40", "remainingPercent": 60.0,
+        "resetsAtMs": 1_790_000_100_000_u64, "reached": false,
+    });
+    assert_eq!(
+        received["spendControl"], expected,
+        "spend control drifted | received {received}"
+    );
+    let expected = json!({
+        "availableCount": 3,
+        "credits": [{
+            "id": "credit-1", "resetType": "weekly", "status": "available",
+            "grantedAtMs": 1_780_000_000_000_u64, "expiresAtMs": 1_800_000_000_000_u64,
+            "title": "Weekly reset", "description": "Resets the weekly window.",
+        }],
+    });
+    assert_eq!(
+        received["resetCredits"], expected,
+        "reset credits drifted | received {received}"
+    );
+}
+
+#[test]
+fn absent_quota_facts_stay_absent_and_a_bare_count_carries_no_rows() {
+    let received =
+        serde_json::to_value(account_limits(TargetId::Codex, &codex_limits(), UNIX_EPOCH))
+            .expect("serializable");
+    for field in ["credits", "spendControl", "resetCredits"] {
+        assert!(
+            received.get(field).is_none(),
+            "expected {field} absent when the vendor reported none | received {received}"
+        );
+    }
+
+    let mut limits = codex_limits();
+    limits.credits = Some(sdk::Credits::default());
+    limits.spend_control = Some(sdk::SpendControl::default());
+    limits.reset_credits = Some(sdk::ResetCredits::new(2));
+    let received = serde_json::to_value(account_limits(TargetId::Codex, &limits, UNIX_EPOCH))
+        .expect("serializable");
+    assert_eq!(received["credits"], json!({}), "received {received}");
+    assert_eq!(received["spendControl"], json!({}), "received {received}");
+    assert_eq!(
+        received["resetCredits"],
+        json!({ "availableCount": 2 }),
+        "expected only the count when no rows were fetched | received {received}"
+    );
+}
+
+#[test]
+fn reset_credit_rows_drop_what_the_wire_refuses_and_cap_at_sixty_four() {
+    let mut rows = vec![
+        sdk::ResetCredit::new("", "available"),
+        sdk::ResetCredit::new("no-status", ""),
+    ];
+    let mut blank = sdk::ResetCredit::new("blank-text", "available");
+    blank.reset_type = Some(String::new());
+    blank.title = Some(String::new());
+    rows.push(blank);
+    rows.extend((0..70).map(|index| sdk::ResetCredit::new(format!("credit-{index}"), "available")));
+    let mut resets = sdk::ResetCredits::new(72);
+    resets.credits = Some(rows);
+    let mut limits = codex_limits();
+    limits.reset_credits = Some(resets);
+    let mut credits = sdk::Credits::default();
+    credits.balance = Some(String::new());
+    limits.credits = Some(credits);
+    let mut spend = sdk::SpendControl::default();
+    spend.limit = Some(String::new());
+    spend.remaining_percent = Some(f64::NAN);
+    limits.spend_control = Some(spend);
+
+    let mapped = account_limits(TargetId::Codex, &limits, UNIX_EPOCH);
+    let resets = mapped.reset_credits.as_ref().expect("reset credits");
+    let rows = resets.credits.as_ref().expect("rows");
+    assert_eq!(
+        rows.len(),
+        sdk::RESET_CREDIT_MAX_ITEMS,
+        "expected the wire's 64-row cap | received {}",
+        rows.len()
+    );
+    assert_eq!(
+        resets.available_count, 72,
+        "expected the count kept authoritative"
+    );
+    assert_eq!(
+        rows[0].id, "blank-text",
+        "expected rows without an id or status dropped"
+    );
+    assert_eq!(
+        rows[0].reset_type, None,
+        "expected an empty reset type absent"
+    );
+    assert_eq!(rows[0].title, None, "expected an empty title absent");
+    let credits = mapped.credits.as_ref().expect("credits");
+    assert_eq!(credits.balance, None, "expected an empty balance absent");
+    let spend = mapped.spend_control.as_ref().expect("spend control");
+    assert_eq!(spend.limit, None, "expected an empty limit absent");
+    assert_eq!(
+        spend.remaining_percent, None,
+        "expected a non-finite percentage absent"
+    );
+    assert_valid(
+        "external-agent.refresh-account-usage",
+        &serde_json::to_value(wire::RefreshAccountUsageResult {
+            limits: Some(mapped),
+        })
+        .expect("serializable"),
+    );
+}
+
 fn native_page(count: usize) -> sdk::SessionPage {
     sdk::SessionPage {
         sessions: (0..count)
@@ -1497,7 +1652,11 @@ fn every_mapped_result_validates_against_the_catalog() {
         );
     }
 
-    let limits = account_limits(TargetId::Codex, &codex_limits(), SystemTime::UNIX_EPOCH);
+    let limits = account_limits(
+        TargetId::Codex,
+        &codex_limits_with_credits(),
+        SystemTime::UNIX_EPOCH,
+    );
     let open = open_result(
         &requested(Some("gpt-5.6-sol"), None),
         &snapshot(sdk::Configuration::unknown()),
