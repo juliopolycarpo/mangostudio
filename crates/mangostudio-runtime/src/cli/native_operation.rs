@@ -674,4 +674,98 @@ mod tests {
             "expected a failing Consent finding with a setup fix | received: {findings:?}"
         );
     }
+
+    #[test]
+    fn doctor_service_findings_follow_the_status_report() {
+        let cases = [
+            (
+                Err(io::Error::other("systemctl vanished")),
+                vec![(
+                    "warn",
+                    "could not read the user service: systemctl vanished",
+                )],
+            ),
+            (
+                Ok(json!({"installed": false, "error": "no session bus"})),
+                vec![("warn", "no session bus")],
+            ),
+            (
+                Ok(json!({"installed": false})),
+                vec![(
+                    "warn",
+                    "no user-level service keeps this runtime running across logout or reboot",
+                )],
+            ),
+            (
+                Ok(
+                    json!({"installed": true, "enabled": true, "running": true, "execUsesCurrent": true, "currentBinaryPresent": true}),
+                ),
+                vec![],
+            ),
+            (
+                Ok(
+                    json!({"installed": true, "enabled": false, "running": false, "execUsesCurrent": false, "currentBinaryPresent": false}),
+                ),
+                vec![
+                    ("warn", "the user service is not enabled"),
+                    ("fail", "the user service is not running"),
+                    ("warn", "the user service does not use the current pointer"),
+                    ("fail", "the current slot binary is missing"),
+                ],
+            ),
+        ];
+        for (status, expected) in cases {
+            let findings = service_findings(&status);
+            let received: Vec<(String, String)> = findings
+                .iter()
+                .map(|finding| {
+                    (
+                        finding["severity"].as_str().unwrap_or("?").to_owned(),
+                        finding["detail"].as_str().unwrap_or("?").to_owned(),
+                    )
+                })
+                .collect();
+            let expected: Vec<(String, String)> = expected
+                .into_iter()
+                .map(|(severity, detail)| (severity.to_owned(), detail.to_owned()))
+                .collect();
+            assert!(
+                received == expected,
+                "status {status:?} expected findings: {expected:?} | received: {received:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn install_refuses_a_source_binary_already_inside_a_slot() {
+        let home = scratch_dir("native-install-from-slot");
+        let source = slot_version_binary_path(RuntimeSlot::Remote, "1.0.0", &home);
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"runtime bytes").unwrap();
+        let error = install_source(&source, RuntimeSlot::Host, "1.2.3", &home)
+            .expect_err("a binary inside a slot must not be installed again");
+        assert!(
+            error.kind() == io::ErrorKind::InvalidInput
+                && error
+                    .to_string()
+                    .contains("already runs from a runtime slot"),
+            "expected InvalidInput naming the slot source | received: {:?} {error}",
+            error.kind()
+        );
+        assert!(
+            read_slot_current(&slot_dir(RuntimeSlot::Host, &home))
+                .unwrap()
+                .is_none(),
+            "expected no current pointer published | received: one"
+        );
+    }
+
+    #[test]
+    fn since_past_the_supported_date_range_is_refused_by_name() {
+        let error = parse_since("999999999d").expect_err("two million years back is out of range");
+        assert!(
+            error == "--since \"999999999d\" is outside the supported date range",
+            "expected the out-of-range message | received: {error}"
+        );
+    }
 }
