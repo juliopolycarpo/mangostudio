@@ -2875,6 +2875,10 @@ enum Script {
     /// Streams a text delta every millisecond, far inside any idle bound,
     /// until cancelled: a stream that is never quiet.
     NeverPausing,
+    /// Runs one command that prints for the whole hard deadline: the Codex
+    /// harness's coalesced updates, one per interval, each carrying the full
+    /// output tail, then the command's completion and the turn's.
+    StreamingCommand { updates: usize },
     /// Offers native review. A turn streams one text delta and completes. A
     /// review streams one finding under the thread named here (the session's
     /// own when `None`) and the vendor handle `review_turn`, then completes
@@ -2919,6 +2923,48 @@ impl ScriptedSession {
     }
 }
 
+/// One command's lifetime as the Codex harness reports it: started, `updates`
+/// coalesced output tails of the most characters it keeps, completed.
+async fn stream_one_command(
+    sink: &mango_external_agents::EventSink,
+    updates: usize,
+) -> mango_external_agents::Result<()> {
+    use mango_agent_codex::turn_reducer::ACTIVITY_UPDATE_DETAIL_MAX_CHARS;
+    use mango_external_agents::{
+        Activity, ActivityKind, ActivityResult, ActivityStatus, ActivityUpdate, EventKind,
+    };
+    let call_id = String::from("cmd-1");
+    sink.emit(EventKind::ActivityStarted {
+        call_id: call_id.clone(),
+        activity: Activity::new("shell", ActivityKind::Command, "cargo build --workspace"),
+    })
+    .await?;
+    for index in 0..updates {
+        let tail: String = (index..)
+            .flat_map(|line| {
+                format!("   Compiling crate-{line} v0.1.0\n")
+                    .chars()
+                    .collect::<Vec<_>>()
+            })
+            .take(ACTIVITY_UPDATE_DETAIL_MAX_CHARS)
+            .collect();
+        let mut update = ActivityUpdate::new();
+        update.detail = Some(tail);
+        sink.emit(EventKind::ActivityUpdated {
+            call_id: call_id.clone(),
+            update,
+        })
+        .await?;
+    }
+    sink.emit(EventKind::ActivityCompleted {
+        call_id,
+        result: ActivityResult::new(ActivityStatus::Completed),
+    })
+    .await?;
+    sink.emit(text("built")).await?;
+    sink.complete().await
+}
+
 fn text(text: &str) -> mango_external_agents::EventKind {
     mango_external_agents::EventKind::TextDelta {
         text: text.to_owned(),
@@ -2959,6 +3005,13 @@ impl Session for ScriptedSession {
                     }
                 });
                 String::from("busy-turn")
+            }
+            Script::StreamingCommand { updates } => {
+                let updates = *updates;
+                tokio::spawn(async move {
+                    let _ = stream_one_command(&sink, updates).await;
+                });
+                String::from("command-turn")
             }
             Script::Reviewing { .. } => {
                 sink.emit(text("turn text")).await?;
@@ -3411,6 +3464,56 @@ async fn a_mid_stream_adapter_crash_ends_the_turn_with_its_error_and_frees_the_s
         .await
         .expect("the crash freed the session for the next turn");
     assert_eq!(rig.log.turns_started.load(Ordering::SeqCst), 2);
+    rig.close("one").await;
+}
+
+/// A command that prints for the whole hard deadline reaches the hub update
+/// by update and still leaves the turn room to complete: the harness's
+/// coalescing, not the relay, is what keeps it inside the persisted budget.
+#[tokio::test]
+async fn a_long_streaming_command_stays_inside_the_persisted_budget() {
+    use mango_agent_codex::turn_reducer::ACTIVITY_UPDATE_INTERVAL;
+    let updates =
+        usize::try_from(super::HARD_TURN_TIMEOUT.as_secs() / ACTIVITY_UPDATE_INTERVAL.as_secs())
+            .expect("a small count");
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::StreamingCommand { updates }),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "build it"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let events = rig.events_until("completed").await;
+    let count = |kind: &str| {
+        events
+            .iter()
+            .filter(|event| event["event"]["type"] == json!(kind))
+            .count()
+    };
+    assert_eq!(
+        (
+            count("error"),
+            count("activity_updated"),
+            count("activity_completed")
+        ),
+        (0, updates, 1),
+        "expected (errors, updates, completions) = (0, {updates}, 1)"
+    );
+    let bytes: usize = events
+        .iter()
+        .map(|event| serde_json::to_vec(event).unwrap().len())
+        .sum();
+    assert!(
+        bytes < 2 * 1024 * 1024 - 4_096,
+        "expected an hour of command output inside the persisted budget | received {bytes} bytes"
+    );
+    rig.idle("one", "the command turn").await;
     rig.close("one").await;
 }
 

@@ -633,6 +633,39 @@ fn error_carries_code_message_vendor_code_request_id_and_retryable() {
 }
 
 #[test]
+fn an_acp_turn_stopped_short_ends_as_vendor_turn_incomplete_with_its_stop_reason() {
+    for (stop_reason, message) in [
+        ("refusal", "the agent refused to continue the turn"),
+        (
+            "max_tokens",
+            "the agent stopped the turn at its token limit",
+        ),
+        (
+            "max_turn_requests",
+            "the agent stopped the turn at its request limit",
+        ),
+    ] {
+        let error = sdk::VendorError::new(
+            sdk::ErrorCode::from_static(mango_agent_acp::reducer::TURN_INCOMPLETE_CODE),
+            message,
+        )
+        .with_vendor_code(stop_reason, false);
+        assert_wire(
+            sdk::EventKind::Error { error },
+            &json!({
+                "type": "error",
+                "error": {
+                    "code": "vendor-turn-incomplete",
+                    "message": message,
+                    "retryable": false,
+                    "vendorCode": stop_reason,
+                },
+            }),
+        );
+    }
+}
+
+#[test]
 fn an_error_message_past_the_cap_is_cut_and_marked() {
     let error = sdk::VendorError::new(sdk::ErrorCode::new(""), "e".repeat(3_000));
     let mapped = map(sdk::EventKind::Error { error });
