@@ -10,6 +10,8 @@
     "ACTIONS_ID_TOKEN_REQUEST_URL",
     "ALLOWED_SKIPS",
     "API_PORT",
+    // Where the runtime build scripts find cargo's output when it is not `target/`.
+    "CARGO_TARGET_DIR",
     "DISTRIBUTION_CHANNEL",
     "DISTRIBUTION_MANIFEST_PATH",
     "DRY_RUN",
@@ -31,6 +33,8 @@
     "ONLY_PLATFORM",
     "PLATFORM",
     "QA_FRONTEND_DIST",
+    // Prebuilt cargo runtimes `scripts/build.ts --binary` stages beside each hub.
+    "RUNTIME_DIR",
     "SKIP_BUILD",
     "SOURCE_SHA",
     "VERSION"
