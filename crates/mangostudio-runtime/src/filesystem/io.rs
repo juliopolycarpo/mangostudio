@@ -619,10 +619,7 @@ fn inspect_destination(path: &Path) -> Result<Option<fs::Permissions>, RemoteErr
     #[cfg(not(unix))]
     let writable = !metadata.permissions().readonly();
     if !writable {
-        return Err(path_error(format!(
-            "Cannot write \"{}\": the file is not writable.",
-            path.display()
-        )));
+        return Err(not_writable_error(path));
     }
     Ok(Some(metadata.permissions()))
 }
@@ -747,10 +744,7 @@ fn inspect_destination_in(
     #[cfg(not(unix))]
     let writable = !metadata.permissions().readonly();
     if !writable {
-        return Err(path_error(format!(
-            "Cannot write \"{}\": the file is not writable.",
-            path.display()
-        )));
+        return Err(not_writable_error(path));
     }
     Ok(Some(metadata.permissions()))
 }
@@ -784,6 +778,13 @@ fn symlink_write_error(dir: &cap_std::fs::Dir, leaf: &Path, path: &Path) -> Remo
     ))
 }
 
+fn not_writable_error(path: &Path) -> RemoteError {
+    path_error(format!(
+        "Cannot write \"{}\": the file is not writable.",
+        path.display()
+    ))
+}
+
 fn open_write_probe(
     dir: &cap_std::fs::Dir,
     leaf: &Path,
@@ -806,6 +807,11 @@ fn open_write_probe(
                     "Cannot write \"{}\": it is a symbolic link. Write to the link target instead.",
                     path.display()
                 ));
+            }
+            // A write open refused for permission is the read-only file the
+            // TypeScript runtime's access(W_OK) probe reported.
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                return not_writable_error(path);
             }
             path_error(format!(
                 "Cannot write \"{}\": the path changed while its writable handle was being verified. Cause: {error}",

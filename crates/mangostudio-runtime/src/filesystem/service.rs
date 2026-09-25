@@ -2931,4 +2931,48 @@ mod tests {
         assert_eq!(error_kind(&result), Some(json!("path_access")));
         assert_eq!(std::fs::read(&secret).unwrap(), b"outside");
     }
+
+    /// A read-only destination is reported as not writable, the phrase the
+    /// TypeScript runtime used, rather than as a changed path.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_over_a_read_only_file_reports_it_not_writable() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        if nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let (home, service) = fixture();
+        let path = home.join("readonly.txt");
+        seed_and_read(&service, &path, b"protected").await;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for policy in [None, Some(&restricted)] {
+            let mut params = write_params(&path, "replacement");
+            params.mutation.path_policy = policy.map(|value| decode(value.clone()));
+            let result = Arc::clone(&service)
+                .write(
+                    params,
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot write \"{}\": the file is not writable.",
+                path.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy:?} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"protected");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
 }
