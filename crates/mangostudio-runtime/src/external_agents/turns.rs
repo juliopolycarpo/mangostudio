@@ -802,13 +802,15 @@ fn bounded_native_turn_id(stream: &TurnStream) -> Result<String, RemoteError> {
 /// A started review's handle, when the review also runs on the vendor thread
 /// this session is subscribed to. A review the vendor detached onto another
 /// thread would stream nothing this session hears and stall until the SDK's
-/// idle bound, so it is refused instead.
+/// idle bound, so it is refused instead. Like a refused handle, the refusal
+/// carries the stream's dispatch: the vendor may already be running it.
 fn admissible_review(live: &LiveSession, review: &ReviewStream) -> Result<String, RemoteError> {
     if review.review_thread_id != live.session.ids().native_session_id {
         return Err(argument(format!(
             "External-agent review on session {:?} ran on another vendor thread than the session's; expected a review on the session's own thread.",
             live.session_id
-        )));
+        ))
+        .with_detail("dispatch", map::dispatch_name(review.turn.dispatch())));
     }
     bounded_native_turn_id(&review.turn)
 }

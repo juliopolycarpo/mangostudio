@@ -3552,6 +3552,15 @@ async fn a_review_on_another_thread_is_refused_and_stopped_before_the_hub_sees_i
         "expected a refusal naming the foreign thread | received: {}",
         refused.message
     );
+    assert_eq!(
+        refused
+            .details
+            .as_ref()
+            .and_then(|details| details.get("dispatch")),
+        Some(&json!("accepted")),
+        "expected the refusal to say the vendor accepted the review | received: {:?}",
+        refused.details
+    );
     eventually(
         "the foreign review told to stop",
         || rig.log.cancel_reasons(),

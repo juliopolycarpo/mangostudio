@@ -868,7 +868,14 @@ fn cleanup_required(error: &sdk::Error) -> bool {
     }
 }
 
-fn dispatch_name(dispatch: sdk::Dispatch) -> &'static str {
+/// The wire spelling of a dispatch, as the `dispatch` error detail carries it.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(dispatch_name(sdk::Dispatch::Accepted), "accepted");
+/// ```
+pub(super) fn dispatch_name(dispatch: sdk::Dispatch) -> &'static str {
     match dispatch {
         sdk::Dispatch::NotSubmitted => "not-submitted",
         sdk::Dispatch::Accepted => "accepted",
