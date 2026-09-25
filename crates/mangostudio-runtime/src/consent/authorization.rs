@@ -150,6 +150,10 @@ mod tests {
     /// mid-test and start a second read.
     struct StalledStore {
         started: Arc<AtomicUsize>,
+        /// Signalled when a read starts. A check can give up on its bound before the blocking
+        /// pool has even started the read, so counting reads right after the checks return
+        /// could see none on a loaded machine.
+        first_read: Arc<tokio::sync::Notify>,
         gate: StallGate,
     }
 
@@ -157,17 +161,20 @@ mod tests {
         fn new() -> Self {
             Self {
                 started: Arc::new(AtomicUsize::new(0)),
+                first_read: Arc::new(tokio::sync::Notify::new()),
                 gate: StallGate::new(),
             }
         }
 
         fn authorization(&self) -> ConsentAuthorization {
             let started = Arc::clone(&self.started);
+            let first_read = Arc::clone(&self.first_read);
             let held = self.gate.handle();
             ConsentAuthorization::with_read(
                 RuntimeSlot::Host,
                 Arc::new(move || {
                     started.fetch_add(1, Ordering::SeqCst);
+                    first_read.notify_one();
                     held.wait();
                     consent_preset(mangostudio_runtime_contract::manifest::ManifestProfile::Full)
                 }),
@@ -177,6 +184,13 @@ mod tests {
 
         fn reads(&self) -> usize {
             self.started.load(Ordering::SeqCst)
+        }
+
+        /// Reads started, once at least one has: the stalled read stays held by the gate, so
+        /// no further read can start while this waits.
+        async fn reads_after_the_first(&self) -> usize {
+            let _ = tokio::time::timeout(Duration::from_secs(5), self.first_read.notified()).await;
+            self.reads()
         }
     }
 
@@ -237,7 +251,7 @@ mod tests {
                 admitted.push(name);
             }
         }
-        let reads = store.reads();
+        let reads = store.reads_after_the_first().await;
         assert_eq!(
             (admitted.as_slice(), reads),
             ([].as_slice(), 1),
@@ -278,7 +292,7 @@ mod tests {
         for call in calls {
             call.await.unwrap();
         }
-        let reads = store.reads();
+        let reads = store.reads_after_the_first().await;
         assert_eq!(
             reads, 1,
             "expected 6 guard checks during one stall to start 1 consent read | received {reads}"
