@@ -118,6 +118,12 @@ imagens Docker e instaladores veem os mesmos dois arquivos de antes.
   vem do Visual C++ Redistributable e não do Windows, e o runtime não iniciaria
   numa máquina sem ele. A verificação de staging rejeita qualquer runtime
   Windows que importe DLLs `VCRUNTIME*`/`MSVCP*`.
+- **Perfil de release.** O `[profile.release]` do workspace constrói o runtime com
+  `opt-level = 3`, LTO fat, uma codegen unit e `strip = true`; veja
+  [runtime-metrics.md](runtime-metrics.md) para o custo em tamanho e tempo de
+  build. Ele mantém `panic = "unwind"` de propósito: o isolamento de panics dos
+  handlers captura o unwind, então o crate se recusa a compilar com
+  `panic = "abort"`.
 - **Pins.** Rust vem de `rust-toolchain.toml`; zig é baixado com versão e
   SHA-256 fixos (`ZIG_VERSION`/`ZIG_SHA256`); cargo-zigbuild é instalado em
   versão fixa pelo `taiki-e/install-action`, que verifica o checksum.

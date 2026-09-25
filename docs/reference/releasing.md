@@ -219,6 +219,11 @@ packages, Docker images and installers all see the same two files as before.
   the gap). The Bun hub has no such import either. A `RUSTFLAGS` override
   replaces that setting, so the staging check also rejects any Windows runtime
   importing `VCRUNTIME*`/`MSVCP*` DLLs.
+- **Release profile.** The workspace `[profile.release]` builds the runtime with
+  `opt-level = 3`, fat LTO, one codegen unit, and `strip = true`; see
+  [runtime-metrics.md](runtime-metrics.md) for the size and build-time
+  trade-off. It keeps `panic = "unwind"` on purpose: handler panic isolation
+  catches unwinds, so the crate refuses to compile under `panic = "abort"`.
 - **Toolchain pins.** Rust comes from `rust-toolchain.toml`; zig is downloaded
   at a pinned version and SHA-256 (`ZIG_VERSION`/`ZIG_SHA256` in
   `runtime-build.yml`); cargo-zigbuild is installed at a pinned version by

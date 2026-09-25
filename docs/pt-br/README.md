@@ -441,6 +441,7 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 - [`./reference/cli.md`](./reference/cli.md) — referência da CLI e canais de instalação
 - [`./reference/ci.md`](./reference/ci.md) — gates agregados e checks obrigatórios
 - [`./reference/releasing.md`](./reference/releasing.md) — runbook de release e canais de distribuição
+- [`./reference/runtime-metrics.md`](./reference/runtime-metrics.md) — tamanho, perfil de build e volume de código do runtime Rust
 - [`./reference/testing.md`](./reference/testing.md) — estratégia e guia de testes
 - [`./reference/agent-playbooks.md`](./reference/agent-playbooks.md) — mapas de arquivos por feature
 - [`./reference/labels.md`](./reference/labels.md) — taxonomia de labels de classificação
