@@ -12,8 +12,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdir, readFile, realpath } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { LOCAL_ENVIRONMENT_ID, LOCAL_ENVIRONMENT_NAME } from '@mangostudio/shared/environments';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
@@ -36,8 +36,11 @@ import { processGone } from '../../support/rust-runtime-install-fixture';
 const binary = resolveRustRuntimeBinary();
 const isPosix = process.platform !== 'win32';
 
-/** The TypeScript runtime's CLI, which wrote every runtime home before the Rust one. */
-const TS_RUNTIME_CLI = join(import.meta.dir, '../../../../runtime/src/cli.ts');
+/** A `host` slot as the TypeScript runtime wrote it (`fixtures:home`), committed with the crate. */
+const TS_HOST_SLOT_FIXTURE = join(
+  import.meta.dir,
+  '../../../../../crates/mangostudio-runtime/tests/fixtures/ts-home/runtime/host/runtime.json'
+);
 
 /** A manager wired exactly as production wires Local: the real connector, no `open` override. */
 function localManager(): RuntimeConnectionManager {
@@ -237,21 +240,16 @@ describe('Local over the real Rust runtime', () => {
   it.skipIf(!binary.available)(
     'serves a home the TypeScript runtime wrote without asking for setup again',
     async () => {
-      // The TypeScript runtime's own `setup` writes the slot, exactly as an
-      // install from before the Rust runtime did. `readonly` rather than the
-      // default, so reading it back cannot be mistaken for a fresh home.
-      const written = Bun.spawn({
-        cmd: [process.execPath, TS_RUNTIME_CLI, 'setup', '--slot', 'host', '--profile', 'readonly'],
-        env: { ...process.env, MANGO_HOME: mangoHome },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const [exitCode, stderr] = await Promise.all([
-        written.exited,
-        new Response(written.stderr).text(),
-      ]);
-      expect({ exitCode, stderr: stderr.trim() }).toEqual({ exitCode: 0, stderr: '' });
+      // The host slot the TypeScript runtime's own `fixtures:home` generator
+      // wrote, byte for byte, with only its consent narrowed to `readonly`, so
+      // reading it back cannot be mistaken for a fresh home's full default.
+      const fixture = JSON.parse(await readFile(TS_HOST_SLOT_FIXTURE, 'utf8'));
       const configPath = join(mangoHome, 'runtime', 'host', 'runtime.json');
+      await mkdir(dirname(configPath), { recursive: true });
+      await writeFile(
+        configPath,
+        `${JSON.stringify({ ...fixture, allow: RUNTIME_CONSENT_PRESETS.readonly }, null, 2)}\n`
+      );
       const stored = await readFile(configPath, 'utf8');
       const user = await insertTestUser();
       manager = localManager();
@@ -264,9 +262,7 @@ describe('Local over the real Rust runtime', () => {
       expect(health.allow).toEqual(RUNTIME_CONSENT_PRESETS.readonly);
       expect(client.manifest.features.shell).toBe(false);
       // Connecting neither re-pairs nor rewrites the consent the user gave.
-      expect(JSON.parse(await readFile(configPath, 'utf8')).allow).toEqual(
-        JSON.parse(stored).allow
-      );
+      expect(await readFile(configPath, 'utf8')).toBe(stored);
     },
     30_000
   );

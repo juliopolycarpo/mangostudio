@@ -48,17 +48,6 @@ const IN_PROCESS_SEAM_SPECIFIER = /['"][./]*(?:[^'"]*\/)?connect-in-process-runt
  */
 const RUNTIME_SOURCE_LITERAL = /(['"`])[^'"`\n]*(?<![\w-])runtime\/src\/[^'"`\n]*\1/;
 
-/**
- * Tests that still spawn the TypeScript runtime by its source path. Temporary:
- * the Local cut-over (#1161) drops the bun-source fallback and moves these to
- * the Rust binary, and must empty this list.
- */
-const RUNTIME_SOURCE_PATH_ALLOWED = [
-  'apps/api/tests/integration/services/connect-ssh-runtime.integration.test.ts',
-  'apps/api/tests/integration/services/spawn-runtime-child.integration.test.ts',
-  'apps/api/tests/unit/lib/runtime-paths.test.ts',
-];
-
 /** Lines that are code rather than comments, where a path literal would be used. */
 function codeLines(text: string): string[] {
   return text.split('\n').filter((line) => {
@@ -153,7 +142,9 @@ describe('the hub tests import no TypeScript runtime', () => {
     expect(IN_PROCESS_SEAM_SPECIFIER.test("const ALLOWED = 'apps/api/src/x.ts';")).toBe(false);
   });
 
-  it('finds TypeScript runtime source paths only in the files the Local cut-over migrates', () => {
+  // Local and stdio launch the Rust binary, and there is no Bun fallback left
+  // to point a test at the TypeScript runtime's entry.
+  it('finds no test file that spawns the TypeScript runtime by its source path', () => {
     const referrers = files
       .filter((file) =>
         codeLines(readFileSync(file, 'utf8')).some((line) => RUNTIME_SOURCE_LITERAL.test(line))
@@ -161,7 +152,7 @@ describe('the hub tests import no TypeScript runtime', () => {
       .map((file) => file.slice(REPO_ROOT.length + 1).replaceAll('\\', '/'))
       .sort();
 
-    expect(referrers).toEqual(RUNTIME_SOURCE_PATH_ALLOWED);
+    expect(referrers).toEqual([]);
   });
 
   it('recognises a runtime source path literal and ignores the Rust crate and comments', () => {
