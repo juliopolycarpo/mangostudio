@@ -386,7 +386,10 @@ Linux, com o cache do cargo) e o envia como `local-runtime-linux-x64`. A action 
 `.github/actions/local-runtime` baixa esse artefato — ou compila o binário ela mesma quando
 nenhum artefato é informado —, pede `--version` a ele e exporta `MANGOSTUDIO_RUNTIME_BINARY`
 para o resto do job. Um binário ausente ou quebrado falha esse passo pelo nome, em vez de
-aparecer como falhas de conexão do Local espalhadas.
+aparecer como falhas de conexão do Local espalhadas. O artefato também leva o exemplo
+`fake_cursor_agent`, compilado em uma invocação própria do cargo e exportado como
+`MANGOSTUDIO_FAKE_CURSOR_AGENT`, para que as suítes de qualificação de agentes externos rodem
+nos shards comuns em vez de serem puladas.
 
 - `test.yml` recebe o nome do artefato no input obrigatório `runtime_artifact`, e todo
   shard roda a action antes dos testes. A lane do frontend não precisa dele.

@@ -2,7 +2,9 @@ name: Local runtime binary
 description: >
   Put the cargo-built mangostudio-runtime the hub launches for Local on this
   runner, and export MANGOSTUDIO_RUNTIME_BINARY so every test lane and the dev
-  server use it. With `artifact`, the binary another job of this run built is
+  server use it. The fake_cursor_agent example comes with it and is exported
+  as MANGOSTUDIO_FAKE_CURSOR_AGENT, so the external-agent qualification suites
+  run in the ordinary lanes instead of skipping. With `artifact`, the binary another job of this run built is
   downloaded; without it, it is built here. The binary is asked for its
   version before anything relies on it, so a missing or broken one fails this
   step by name instead of surfacing as scattered Local connect failures.
@@ -42,20 +44,32 @@ runs:
       run: |
         set -euo pipefail
         cargo build -p mangostudio-runtime --locked
+        # Its own invocation, so the runtime binary never gains the SDK's
+        # `testing` feature the stand-in vendor is built with.
+        cargo build -p mangostudio-runtime --example fake_cursor_agent --locked
         mkdir -p "${RUNNER_TEMP}/local-runtime"
-        cp target/debug/mangostudio-runtime "${RUNNER_TEMP}/local-runtime/"
+        cp target/debug/mangostudio-runtime target/debug/examples/fake_cursor_agent \
+          "${RUNNER_TEMP}/local-runtime/"
 
     - name: Verify and export the Local runtime
       shell: bash
       run: |
         set -euo pipefail
         binary="${RUNNER_TEMP}/local-runtime/mangostudio-runtime"
+        fake="${RUNNER_TEMP}/local-runtime/fake_cursor_agent"
         if [ ! -f "$binary" ]; then
           echo "::error::No Local runtime binary at ${binary}; the hub cannot start Local without it."
           exit 1
         fi
+        if [ ! -f "$fake" ]; then
+          echo "::error::No fake_cursor_agent at ${fake}; the external-agent qualification suites need it."
+          exit 1
+        fi
         # upload-artifact does not keep the executable bit.
-        chmod +x "$binary"
+        chmod +x "$binary" "$fake"
         version="$("$binary" --version)"
         echo "Local runtime ${version} at ${binary}"
-        echo "MANGOSTUDIO_RUNTIME_BINARY=${binary}" >> "$GITHUB_ENV"
+        {
+          echo "MANGOSTUDIO_RUNTIME_BINARY=${binary}"
+          echo "MANGOSTUDIO_FAKE_CURSOR_AGENT=${fake}"
+        } >> "$GITHUB_ENV"

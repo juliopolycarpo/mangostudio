@@ -1150,7 +1150,10 @@ the cargo cache) and uploads it as `local-runtime-linux-x64`. The composite acti
 `.github/actions/local-runtime` downloads that artifact — or builds the binary itself when
 no artifact is named — asks it for `--version`, and exports `MANGOSTUDIO_RUNTIME_BINARY`
 for the rest of the job. A missing or broken binary fails that step by name instead of
-surfacing as scattered Local connect failures.
+surfacing as scattered Local connect failures. The artifact also carries the
+`fake_cursor_agent` example, built in its own cargo invocation and exported as
+`MANGOSTUDIO_FAKE_CURSOR_AGENT`, so the external-agent qualification suites run in the
+ordinary shards instead of skipping.
 
 - `test.yml` takes the artifact name as a required `runtime_artifact` input, and every
   shard runs the action before its tests. The frontend lane does not need it.
