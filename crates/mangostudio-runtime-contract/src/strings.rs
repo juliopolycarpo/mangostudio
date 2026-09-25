@@ -56,6 +56,25 @@ pub const RUNTIME_UPDATE_EXIT_CODE: u8 = 75;
 /// Prefix marking a runtime pairing token in a paste or a bug report.
 pub const RUNTIME_PAIRING_TOKEN_PREFIX: &str = "mrt_";
 
+/// How a `serve` runtime tells one environment record reconnecting from a
+/// second record pointing at the same runtime.
+///
+/// A hub announces an opaque binding key under [`binding::CAPABILITY`] in its
+/// `hello.capabilities`. While a live connection holds a key, a connection
+/// with a different key is refused with [`binding::ALREADY_BOUND_CLOSE_CODE`]
+/// instead of superseding it.
+pub mod binding {
+    /// The `hello.capabilities` member the hub's binding key rides under.
+    pub const CAPABILITY: &str = "bindingKey";
+    /// Longest binding key compared, in characters; a longer one is ignored.
+    pub const MAX_LENGTH: usize = 128;
+    /// Close code refusing a connection for a different binding key. Unnamed
+    /// by the protocol, so application-owned; 423 is HTTP's "Locked".
+    pub const ALREADY_BOUND_CLOSE_CODE: u16 = 4423;
+    /// The reason sent with [`ALREADY_BOUND_CLOSE_CODE`].
+    pub const ALREADY_BOUND_REASON: &str = "runtime already bound to another environment";
+}
+
 /// Directory and file names under a runtime-home slot, and the slots
 /// themselves.
 pub mod runtime_home {
@@ -90,8 +109,30 @@ pub(crate) fn errors_document() -> &'static Value {
 mod tests {
     use super::{
         RUNTIME_PAIRING_TOKEN_PREFIX, RUNTIME_SETUP_PENDING_SIGNATURE, RUNTIME_UPDATE_EXIT_CODE,
-        document, github_graphql_documents, runtime_home,
+        binding, document, github_graphql_documents, runtime_home,
     };
+
+    #[test]
+    fn the_already_bound_code_is_an_unnamed_non_fatal_protocol_close_code() {
+        use mango_protocol::close::{
+            MAX_CLOSE_CODE, MIN_CLOSE_CODE, close_code_name, is_fatal_close_code,
+        };
+        let code = binding::ALREADY_BOUND_CLOSE_CODE;
+        assert!(
+            (MIN_CLOSE_CODE..=MAX_CLOSE_CODE).contains(&code),
+            "expected a close code in {MIN_CLOSE_CODE}..={MAX_CLOSE_CODE} | received: {code}"
+        );
+        assert_eq!(
+            close_code_name(code),
+            None,
+            "expected a code the protocol does not name | received: {code} named {:?}",
+            close_code_name(code)
+        );
+        assert!(
+            !is_fatal_close_code(code),
+            "expected a retryable (non-fatal) close code | received: fatal {code}"
+        );
+    }
 
     #[test]
     fn github_documents_are_loaded_from_the_shared_artifact() {
@@ -127,6 +168,31 @@ mod tests {
         assert_eq!(
             RUNTIME_PAIRING_TOKEN_PREFIX,
             document()["pairingTokenPrefix"].as_str().expect("a string")
+        );
+    }
+
+    #[test]
+    fn the_binding_constants_mirror_strings_json() {
+        let binding_document = &document()["binding"];
+        assert_eq!(
+            binding::CAPABILITY,
+            binding_document["capability"].as_str().expect("a string")
+        );
+        assert_eq!(
+            binding::MAX_LENGTH as u64,
+            binding_document["maxLength"].as_u64().expect("a number")
+        );
+        assert_eq!(
+            u64::from(binding::ALREADY_BOUND_CLOSE_CODE),
+            binding_document["alreadyBoundCloseCode"]
+                .as_u64()
+                .expect("a number")
+        );
+        assert_eq!(
+            binding::ALREADY_BOUND_REASON,
+            binding_document["alreadyBoundReason"]
+                .as_str()
+                .expect("a string")
         );
     }
 

@@ -14,8 +14,12 @@
 import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   CONSENT_DENIED_KIND,
+  HUB_BINDING_KEY_CAPABILITY,
+  HUB_BINDING_KEY_MAX_LENGTH,
   HUB_CONTRACT,
   HubIdentitySchema,
+  RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+  RUNTIME_ALREADY_BOUND_REASON,
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_EVENTS,
   RUNTIME_CONTRACT_NAME,
@@ -158,6 +162,12 @@ function stringsDocument(): Record<string, unknown> {
     setupPendingSignature: RUNTIME_SETUP_PENDING_SIGNATURE,
     updateExitCode: RUNTIME_UPDATE_EXIT_CODE,
     pairingTokenPrefix: RUNTIME_PAIRING_TOKEN_PREFIX,
+    binding: {
+      capability: HUB_BINDING_KEY_CAPABILITY,
+      maxLength: HUB_BINDING_KEY_MAX_LENGTH,
+      alreadyBoundCloseCode: RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+      alreadyBoundReason: RUNTIME_ALREADY_BOUND_REASON,
+    },
     githubGraphqlDocuments: [...PINNED_GITHUB_GRAPHQL_DOCUMENTS],
     runtimeHome: {
       slots: [...RUNTIME_SLOTS],
