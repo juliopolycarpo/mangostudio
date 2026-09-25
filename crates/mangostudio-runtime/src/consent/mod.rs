@@ -29,4 +29,6 @@ pub mod invocation;
 pub mod presets;
 pub(crate) mod read;
 pub mod source;
+#[cfg(test)]
+pub(crate) mod stall_gate;
 pub(crate) mod stop_only;

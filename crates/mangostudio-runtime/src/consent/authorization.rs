@@ -139,31 +139,36 @@ mod tests {
 
     use crate::consent::presets::consent_preset;
     use crate::consent::read::ConsentReader;
+    use crate::consent::stall_gate::StallGate;
     use crate::consent::stop_only::STOP_ONLY_METHODS;
     use mangostudio_runtime_contract::catalog::catalog;
 
     const BOUND: Duration = Duration::from_millis(50);
-    const STALL: Duration = Duration::from_millis(600);
 
-    /// A consent store whose every read stalls past [`BOUND`], counting reads started.
+    /// A consent store whose every read stays stuck until the store is dropped, counting reads
+    /// started. Held by a gate rather than a sleep, so a loaded machine cannot end the stall
+    /// mid-test and start a second read.
     struct StalledStore {
         started: Arc<AtomicUsize>,
+        gate: StallGate,
     }
 
     impl StalledStore {
         fn new() -> Self {
             Self {
                 started: Arc::new(AtomicUsize::new(0)),
+                gate: StallGate::new(),
             }
         }
 
         fn authorization(&self) -> ConsentAuthorization {
             let started = Arc::clone(&self.started);
+            let held = self.gate.handle();
             ConsentAuthorization::with_read(
                 RuntimeSlot::Host,
                 Arc::new(move || {
                     started.fetch_add(1, Ordering::SeqCst);
-                    std::thread::sleep(STALL);
+                    held.wait();
                     consent_preset(mangostudio_runtime_contract::manifest::ManifestProfile::Full)
                 }),
                 BOUND,
@@ -188,9 +193,10 @@ mod tests {
             .missing_capabilities("mcp.disconnect", &mcp)
             .await;
         // The watcher polling the same stalled store keeps the chain/session alive.
+        let held = store.gate.handle();
         let watcher = ConsentReader::new("shell")
-            .read(BOUND, || {
-                std::thread::sleep(STALL);
+            .read(BOUND, move || {
+                held.wait();
                 true
             })
             .await;
