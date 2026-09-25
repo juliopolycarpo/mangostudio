@@ -1,13 +1,13 @@
 /**
  * Exercises the stdio transport against a real `mangostudio-runtime` child.
  *
- * A standalone install runs the sibling binary; here the launcher falls back to
- * the workspace entry under Bun, so these tests cover the same spawn, handshake,
- * and teardown path the shipped binary takes.
+ * The launcher resolves the same binary the hub launches for Local — the
+ * `MANGOSTUDIO_RUNTIME_BINARY` override in CI, or this checkout's newest cargo
+ * build — so these tests cover the same spawn, handshake, and teardown path the
+ * shipped binary takes.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,21 +15,22 @@ import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
+import { resolveRustRuntimeBinary, rustRuntimeVersion } from '../../support/rust-runtime-binary';
 
-const RUNTIME_ENTRY = join(import.meta.dir, '../../../../runtime/src/cli.ts');
-const hasRuntimeEntry = existsSync(RUNTIME_ENTRY);
+const binary = resolveRustRuntimeBinary();
+const hasRuntime = binary.available;
 const isWindows = process.platform === 'win32';
 const hasPosixShell = !isWindows;
-const canSpawnRuntime = hasRuntimeEntry && hasPosixShell;
+const canSpawnRuntime = hasRuntime && hasPosixShell;
 
 const SHELL_DEFAULTS = { kind: 'bash', timeoutMs: 10_000, maxOutputBytes: 65_536 } as const;
 
 /**
- * What the child will announce: it inherits this process's environment, so the
- * two resolve the version the same way. The handshake refuses a hub and runtime
- * from different releases, so anything that expects to connect must match it.
+ * What the child will announce, read from the binary itself. The handshake
+ * refuses a hub and runtime from different releases, so anything that expects
+ * to connect must match it.
  */
-const RUNTIME_VERSION = process.env.VERSION || 'dev';
+let RUNTIME_VERSION = '';
 
 /**
  * A child that starts, says nothing, and would outlive the launch that gave up
@@ -44,6 +45,7 @@ let workdir = '';
 
 beforeAll(async () => {
   workdir = await mkdtemp(join(tmpdir(), 'mango-stdio-runtime-'));
+  if (hasRuntime) RUNTIME_VERSION = await rustRuntimeVersion(binary.path);
 });
 
 afterAll(async () => {
@@ -51,12 +53,12 @@ afterAll(async () => {
 });
 
 describe('spawnRuntimeChild', () => {
-  it.skipIf(!hasRuntimeEntry)(
+  it.skipIf(!hasRuntime)(
     'handshakes with a spawned runtime and runs a method',
     async () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        launch: resolveRuntimeLaunchCommand(),
+        launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
         workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
         onClosed: () => undefined,
@@ -88,7 +90,7 @@ describe('spawnRuntimeChild', () => {
     async () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        launch: resolveRuntimeLaunchCommand(),
+        launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
         cwd: workdir,
         workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
@@ -113,7 +115,7 @@ describe('spawnRuntimeChild', () => {
     async () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        launch: resolveRuntimeLaunchCommand(),
+        launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
         workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
         onClosed: () => undefined,
@@ -138,7 +140,7 @@ describe('spawnRuntimeChild', () => {
       let closedCount = 0;
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        launch: resolveRuntimeLaunchCommand(),
+        launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
         workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
         onClosed: () => {
@@ -151,8 +153,13 @@ describe('spawnRuntimeChild', () => {
         command: 'sleep 5',
       });
       // Kill the runtime from inside itself: a crash mid-call, not a shutdown.
+      // The command's parent is the runtime's post-fork guardian, so the
+      // runtime is its grandparent.
       void connection.hub
-        .request('shell.run', { ...SHELL_DEFAULTS, command: 'kill -9 $PPID' })
+        .request('shell.run', {
+          ...SHELL_DEFAULTS,
+          command: 'kill -9 "$(ps -o ppid= -p "$PPID" | tr -d " ")"',
+        })
         .catch(() => undefined);
 
       expect(await rejectionOf(inFlight)).toMatchObject({ code: 'UNAVAILABLE' });
@@ -165,7 +172,7 @@ describe('spawnRuntimeChild', () => {
     30_000
   );
 
-  it.skipIf(!hasRuntimeEntry)(
+  it.skipIf(!hasRuntime)(
     'refuses a runtime left over from a different release',
     async () => {
       // Same protocol, different release: the wire format still parses, so only
@@ -173,7 +180,9 @@ describe('spawnRuntimeChild', () => {
       const error = (await rejectionOf(
         spawnRuntimeChild({
           environmentId: 'devbox',
-          launch: resolveRuntimeLaunchCommand(),
+          launch: resolveRuntimeLaunchCommand(undefined, {
+            MANGOSTUDIO_RUNTIME_BINARY: binary.path,
+          }),
           workspaceBinding: null,
           hubVersion: `${RUNTIME_VERSION}-other`,
           onClosed: () => undefined,
@@ -192,7 +201,7 @@ describe('spawnRuntimeChild', () => {
     30_000
   );
 
-  it.skipIf(!hasRuntimeEntry)(
+  it.skipIf(!hasRuntime)(
     'connects across releases when the launcher does not own the binary',
     async () => {
       // The counterpart to the test above, which pins the default: a runtime on
@@ -200,7 +209,7 @@ describe('spawnRuntimeChild', () => {
       // release equality cannot gate it and the protocol version is what does.
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        launch: resolveRuntimeLaunchCommand(),
+        launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
         workspaceBinding: null,
         hubVersion: `${RUNTIME_VERSION}-other`,
         requireMatchingRelease: false,
@@ -250,7 +259,7 @@ describe('spawnRuntimeChild', () => {
     const missing = join(workdir, 'no-such-runtime');
     const error = await spawnRuntimeChild({
       environmentId: 'devbox',
-      launch: resolveRuntimeLaunchCommand(missing),
+      launch: resolveRuntimeLaunchCommand(missing, {}),
       workspaceBinding: null,
       hubVersion: 'hub-test',
       handshakeTimeoutMs: 5_000,
@@ -266,7 +275,7 @@ describe('spawnRuntimeChild', () => {
     async () => {
       const error = await spawnRuntimeChild({
         environmentId: 'devbox',
-        launch: resolveRuntimeLaunchCommand(),
+        launch: resolveRuntimeLaunchCommand(undefined, { MANGOSTUDIO_RUNTIME_BINARY: binary.path }),
         cwd: join(workdir, 'no-such-directory'),
         workspaceBinding: null,
         hubVersion: RUNTIME_VERSION,
@@ -292,7 +301,7 @@ describe('spawnRuntimeChild', () => {
     const startedAt = performance.now();
     const error = await spawnRuntimeChild({
       environmentId: 'devbox',
-      launch: resolveRuntimeLaunchCommand(missing),
+      launch: resolveRuntimeLaunchCommand(missing, {}),
       workspaceBinding: null,
       hubVersion: 'hub-test',
       onClosed: () => undefined,
@@ -376,7 +385,7 @@ describe('spawnRuntimeChild', () => {
     // Bun rejects `--stdio`, so the child starts and exits without a hello.
     const error = await spawnRuntimeChild({
       environmentId: 'devbox',
-      launch: resolveRuntimeLaunchCommand(process.execPath),
+      launch: resolveRuntimeLaunchCommand(process.execPath, {}),
       workspaceBinding: null,
       hubVersion: 'hub-test',
       handshakeTimeoutMs: 2_000,

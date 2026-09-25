@@ -2995,7 +2995,7 @@ export const messages: Messages = {
         boundElsewhere: 'Bound elsewhere',
       },
       transport: {
-        'in-process': 'In process',
+        'in-process': 'Built in',
         stdio: 'Local process',
         wsl: 'WSL',
         websocket: 'WebSocket',

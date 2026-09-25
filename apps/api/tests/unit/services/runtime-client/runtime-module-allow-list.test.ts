@@ -4,9 +4,10 @@
  * Every contract the two share — method shapes, event topics, error kinds,
  * numeric caps, the helpers both machines run — lives in
  * `@mangostudio/shared`. What is left of the TypeScript runtime package in
- * this workspace is the in-process wiring for Local: constructing a host
- * definition and handing it a port, in one file, which is the seam that
- * disappears when Local becomes a spawned sibling. The workspace's tests reach
+ * this workspace is the in-process wiring Local used before it became a
+ * spawned Rust runtime: constructing a host definition and handing it a port,
+ * in one file that nothing the hub ships reaches any more, and which is
+ * deleted with the TypeScript runtime. The workspace's tests reach
  * it through none at all: fakes are served by `tests/support/fake-runtime-host.ts`
  * and real runtime behaviour comes from the compiled Rust binary.
  *
@@ -89,6 +90,16 @@ describe('the hub imports the runtime module in exactly one place', () => {
       .sort();
 
     expect(importers).toEqual([ALLOWED]);
+  });
+
+  // Local spawns the runtime binary now. The seam stays until it is deleted,
+  // but nothing the hub ships may reach it.
+  it('reaches the in-process seam from no production file', () => {
+    const importers = files
+      .filter((file) => IN_PROCESS_SEAM_SPECIFIER.test(readFileSync(file, 'utf8')))
+      .map((file) => file.slice(REPO_ROOT.length + 1).replaceAll('\\', '/'));
+
+    expect(importers).toEqual([]);
   });
 
   it('still recognises the import shape it is guarding', () => {

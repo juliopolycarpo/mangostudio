@@ -3,7 +3,7 @@
  *
  * Action availability is decided here, not in the browser: a button the hub
  * cannot honour must never render, because dial-in machines are unreachable
- * before pairing and local/in-process installs ship with the hub itself.
+ * before pairing and the Local runtime ships with the hub itself.
  */
 
 import type {

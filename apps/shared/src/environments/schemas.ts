@@ -31,6 +31,15 @@ export const EnvironmentIdSchema = Type.String({
   pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
 });
 
+/**
+ * How the hub reaches an environment's runtime.
+ *
+ * `in-process` is a persisted literal kept for compatibility, not a
+ * description: it names the hub's own Local runtime, which the hub now spawns
+ * as the `mangostudio-runtime` binary over stdio rather than running inside its
+ * own process. Renaming it would need a migration of every stored environment
+ * and a coordinated frontend change for no behavioural gain.
+ */
 export const EnvironmentTransportKindSchema = Type.Union([
   Type.Literal('in-process'),
   Type.Literal('stdio'),

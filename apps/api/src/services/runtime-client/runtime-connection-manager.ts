@@ -20,7 +20,7 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
-import { getVersion } from '../../lib/config';
+import { getVersion, isDevelopmentVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
@@ -39,9 +39,8 @@ import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-pr
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
-import { connectLocalRuntime } from './connect-in-process-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
-import { isAuthorizedEnvironmentWorkspace } from './hub-workspace-authority';
+import type { HubWorkspaceBinding } from './hub-workspace-authority';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
 import {
@@ -83,7 +82,7 @@ export interface ManagedRuntimeConnection {
    * showed up and the process fell back to unproven isolation.
    */
   readonly identityAttested?: boolean;
-  /** May resolve when an out-of-process runtime is gone; in-process is immediate. */
+  /** Resolves once the runtime is released — for a spawned child, once it has exited. */
   close(reason?: RuntimeConnectionCloseReason): void | Promise<void>;
 }
 
@@ -132,11 +131,11 @@ export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
  * also the reason {@link RuntimeConnectionManager.connectInteractive} stops
  * waiting — a WSL provision is not the phase that wakes it, so that connect
  * still waits it out; see {@link connectWslRuntime}. A connector that only
- * spawns a process — `stdio` and `wsl` both do — threads `signal` into
+ * spawns a process — Local, `stdio` and `wsl` all do — threads `signal` into
  * `spawnRuntimeChild`, which terminates the child the moment it fires instead
  * of waiting out its own handshake timeout. A connector that neither watches
- * the signal nor spawns anything — the in-process one — is bounded by the
- * manager instead; see {@link CONNECT_DEADLINE_MS}.
+ * the signal nor spawns anything is bounded by the manager instead; see
+ * {@link CONNECT_DEADLINE_MS}.
  */
 export interface RuntimeConnectContext {
   readonly report: (phase: RuntimeConnectPhase) => void;
@@ -308,32 +307,27 @@ function isDialIn(transportKind: EnvironmentTransportKind | undefined): boolean 
 }
 
 /**
- * How long an attempt may run before the hub stops believing in it.
+ * How long an attempt may run before the hub stops believing in it, per
+ * transport.
  *
- * {@link RuntimeConnectContext} says a connector that only spawns a process "is
- * bounded by its own handshake timeout", and for every out-of-process transport
- * that is true. The in-process path has no spawn and so no such bound: nothing
- * anywhere on it can end an attempt that stops making progress. That matters
- * more than a slow connect, because `getClient` hands the entry's in-flight
- * promise to every later caller — one attempt that never settles is a runtime
- * every subsequent call waits on forever, not one call that fails.
- *
- * Only `in-process` is listed. The remote transports each bound themselves
- * already, at lengths that suit what they are doing — a cold image pull is
- * legitimately minutes — and capping them here would be a guess about
- * behaviour nothing has measured.
+ * `getClient` hands the entry's in-flight promise to every later caller, so one
+ * attempt that never settles is a runtime every subsequent call waits on
+ * forever, not one call that fails (#922). Every connector registered today
+ * bounds itself, so none is listed: the hub's own Local runtime used to run in
+ * this process with no spawn and therefore no bound, but it is now a spawned
+ * child, held to the same handshake timeout as `stdio` (5s, 30s on Windows) —
+ * which a shorter deadline here would cut off on a slow Windows start. The
+ * remote transports bound themselves at lengths that suit what they do; a
+ * cold image pull is legitimately minutes. A connector that cannot bound
+ * itself belongs here.
  */
-const IN_PROCESS_CONNECT_DEADLINE_MS = 10_000;
-
-const CONNECT_DEADLINE_MS: Partial<Record<EnvironmentTransportKind, number>> = {
-  'in-process': IN_PROCESS_CONNECT_DEADLINE_MS,
-};
+const CONNECT_DEADLINE_MS: Partial<Record<EnvironmentTransportKind, number>> = {};
 
 /**
  * Fails an attempt the transport will not fail on its own.
  *
  * The attempt is not cancelled — a connector that ignores its signal cannot be
- * stopped, and the in-process one does. What this bounds is how long the *hub*
+ * stopped. What this bounds is how long the *hub*
  * waits before treating the attempt as failed, which is what lets `connect`'s
  * catch evict the entry and free every caller queued behind it. A connection
  * that arrives afterwards is closed rather than leaked: by then the entry has
@@ -1274,22 +1268,55 @@ async function resolveEnvironment(
   return await environmentRepository.find(userId, environmentId);
 }
 
-interface LocalRuntimeOpenOptions {
+/** Where a launch of the hub's own runtime reports which source chose the binary. */
+const localLaunchLogger = createDiagnosticLogger('runtime-local');
+
+export interface LocalRuntimeOpenOptions {
   readonly onUnavailable: () => void;
-  readonly authorizeWorkspace: (
-    canonicalPath: string,
-    signal: AbortSignal
-  ) => boolean | Promise<boolean>;
+  /**
+   * Who this Local connection speaks for. The runtime asks the hub whether a
+   * workspace is authorized (`hub.workspace.authorize`), and the hub answers
+   * for this binding only — the `local` stand-in owns no chats, so it is
+   * refused everything.
+   */
+  readonly workspaceBinding: HubWorkspaceBinding;
   /** See {@link HubExternalAgentIsolation}; `withdrawn` once a second owner is known. */
   readonly externalAgentIsolation: HubExternalAgentIsolation;
+  /** Aborted when the attempt is released; terminates a child still handshaking. */
+  readonly signal: AbortSignal;
 }
 
+/**
+ * Spawns the hub's own runtime binary over stdio and connects to it.
+ *
+ * There is no fallback: a binary that cannot be found fails the attempt with
+ * {@link RuntimeBinaryNotFoundError}'s fix, rather than quietly serving Local
+ * from some other runtime. A runtime from another release is refused unless
+ * this hub is a development build, which has no release for it to match.
+ */
 async function openLocalRuntime(
   options: LocalRuntimeOpenOptions
 ): Promise<ManagedRuntimeConnection> {
-  const connection = await connectLocalRuntime({
-    authorizeWorkspace: options.authorizeWorkspace,
+  const launch = resolveRuntimeLaunchCommand();
+  localLaunchLogger.info('launch_selected', {
+    environmentId: LOCAL_ENVIRONMENT_ID,
+    source: launch.source,
+    command: launch.command,
+  });
+  const hubVersion = getVersion();
+  const connection = await spawnRuntimeChild({
+    environmentId: LOCAL_ENVIRONMENT_ID,
+    workspaceBinding: options.workspaceBinding,
+    launch,
+    hubVersion,
+    requireMatchingRelease: !isDevelopmentVersion(hubVersion),
     externalAgentIsolation: options.externalAgentIsolation,
+    describeFailure: (failure: RuntimeLaunchFailure) =>
+      failure.spawnErrorCode === 'ENOENT'
+        ? `The Local runtime binary was not found at ${failure.command}. Reinstall MangoStudio so it ships beside the hub, or set MANGOSTUDIO_RUNTIME_BINARY to a runtime binary.`
+        : undefined,
+    onClosed: options.onUnavailable,
+    signal: options.signal,
   });
   return {
     client: new RuntimeClient(connection.hub, options.onUnavailable, LOCAL_ENVIRONMENT_ID),
@@ -1298,29 +1325,19 @@ async function openLocalRuntime(
 }
 
 /**
- * The Local connector's workspace authority: the shared environment policy,
- * for the Local environment only.
+ * The binding a Local connection answers `hub.workspace.authorize` for:
+ * `userId`'s chats on the Local environment, and nothing else.
+ *
+ * @example
+ * localWorkspaceBinding('u1'); // { userId: 'u1', environmentId: 'local' }
  */
-async function isAuthorizedLocalWorkspace(
-  definition: RuntimeEnvironmentDefinition,
-  canonicalPath: string,
-  signal: AbortSignal
-): Promise<boolean> {
-  if (definition.id !== LOCAL_ENVIRONMENT_ID || !definition.userId) return false;
-  return await isAuthorizedEnvironmentWorkspace(
-    { userId: definition.userId, environmentId: definition.id },
-    canonicalPath,
-    signal
-  );
+function localWorkspaceBinding(userId: string): HubWorkspaceBinding {
+  return { userId, environmentId: LOCAL_ENVIRONMENT_ID };
 }
 
 export interface LocalRuntimeConnectorOptions {
+  /** Replaces the spawn of the real binary; for tests. */
   readonly open?: (options: LocalRuntimeOpenOptions) => Promise<ManagedRuntimeConnection>;
-  readonly isWorkspaceAuthorized?: (
-    definition: RuntimeEnvironmentDefinition,
-    canonicalPath: string,
-    signal: AbortSignal
-  ) => boolean | Promise<boolean>;
   /** How long the serial chain waits on one attempt. Overridable for tests. */
   readonly chainDeadlineMs?: number;
 }
@@ -1333,20 +1350,17 @@ export interface LocalRuntimeConnectorOptions {
  * waiting on the previous attempt *forever* is not part of what that buys. An
  * attempt that never settles would otherwise dam every later local connect in
  * the process, including ones for a different user that the wedged one has no
- * claim over. Same length as the manager's {@link CONNECT_DEADLINE_MS} entry on
- * purpose: the hub gives up on the attempt at the same moment the chain does.
- * Both read {@link IN_PROCESS_CONNECT_DEADLINE_MS}, so retuning one retunes the
- * other — the coupling the sentence above describes is enforced by construction
- * rather than by two literals that happen to agree.
+ * claim over. A spawned Local runtime settles on its own within its handshake
+ * timeout, so this is a backstop: it lets the next attempt start beside a slow
+ * one (a Windows start may take most of its 30s budget) instead of queueing.
  *
- * Releasing the chain does not release the attempt's claim. {@link
- * withConnectDeadline} stops the *hub* waiting; it does not cancel the attempt,
- * and the in-process connector ignores its abort signal, so an abandoned open
- * can still complete. Its {@link LocalCredentialClaim} stays reserved until
- * the open itself settles, which is what lets the next attempt see a second
- * owner that has not finished connecting yet.
+ * Releasing the chain does not release the attempt's claim. The chain only
+ * stops *waiting*; the attempt keeps running until its spawn settles, so an
+ * abandoned open can still complete. Its {@link LocalCredentialClaim} stays
+ * reserved until the open itself settles, which is what lets the next attempt
+ * see a second owner that has not finished connecting yet.
  */
-const LOCAL_CHAIN_DEADLINE_MS = IN_PROCESS_CONNECT_DEADLINE_MS;
+const LOCAL_CHAIN_DEADLINE_MS = 10_000;
 
 /** Resolves when `attempt` settles, or when the chain stops waiting for it. */
 function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promise<void> {
@@ -1396,7 +1410,6 @@ export function createLocalRuntimeConnector(
   options: LocalRuntimeConnectorOptions = {}
 ): RuntimeEnvironmentConnector {
   const open = options.open ?? openLocalRuntime;
-  const isWorkspaceAuthorized = options.isWorkspaceAuthorized ?? isAuthorizedLocalWorkspace;
   const chainDeadlineMs = options.chainDeadlineMs ?? LOCAL_CHAIN_DEADLINE_MS;
   let ownerUserId: string | undefined;
   let multipleOwners = false;
@@ -1435,16 +1448,17 @@ export function createLocalRuntimeConnector(
   };
 
   const admit = async (
-    definition: RuntimeEnvironmentDefinition & { readonly userId: string },
+    userId: string,
     onUnavailable: () => void,
+    signal: AbortSignal,
     claim: LocalCredentialClaim
   ) => {
     const requested = claim.withdrawn ? 'withdrawn' : 'single-user';
     const connection = await open({
       onUnavailable,
-      authorizeWorkspace: (canonicalPath, signal) =>
-        isWorkspaceAuthorized(definition, canonicalPath, signal),
+      workspaceBinding: localWorkspaceBinding(userId),
       externalAgentIsolation: requested,
+      signal,
     });
     // Asked for attestation, but a second owner arrived while this open was
     // still running and withdrew the claim: the connection carries an
@@ -1459,7 +1473,7 @@ export function createLocalRuntimeConnector(
     }
     // A failed open never reaches this line, so it cannot bind the home.
     // Every other live claim is this user's, so no other owner can be bound.
-    ownerUserId ??= definition.userId;
+    ownerUserId ??= userId;
     // Read back rather than assumed: the runtime is the side that decides
     // whether it can prove anything about its credential home, and a hub that
     // asked for an attestation it did not get must not act as though it had.
@@ -1479,7 +1493,7 @@ export function createLocalRuntimeConnector(
     };
   };
 
-  return (definition, onUnavailable) => {
+  return (definition, onUnavailable, context) => {
     const attempt = connectSerial.then(async () => {
       if (definition.id !== LOCAL_ENVIRONMENT_ID) {
         throw unavailable('Single-user-host attestation is reserved for the Local environment.');
@@ -1494,9 +1508,9 @@ export function createLocalRuntimeConnector(
       if (userId === 'local') {
         return await open({
           onUnavailable,
-          authorizeWorkspace: (canonicalPath, signal) =>
-            isWorkspaceAuthorized(definition, canonicalPath, signal),
+          workspaceBinding: localWorkspaceBinding(userId),
           externalAgentIsolation: 'withdrawn',
+          signal: context.signal,
         });
       }
       if (hasOtherOwner(userId)) {
@@ -1508,7 +1522,7 @@ export function createLocalRuntimeConnector(
       claims.add(claim);
       try {
         if (multipleOwners) await withdrawAttestation();
-        return await admit({ ...definition, userId }, onUnavailable, claim);
+        return await admit(userId, onUnavailable, context.signal, claim);
       } finally {
         claims.delete(claim);
       }
@@ -1518,7 +1532,7 @@ export function createLocalRuntimeConnector(
   };
 }
 
-/** Where a stdio launch reports which of its four sources chose the binary. */
+/** Where a stdio launch reports which source chose the binary. */
 const stdioLaunchLogger = createDiagnosticLogger('runtime-stdio');
 
 async function connectStdioRuntime(
@@ -1528,10 +1542,10 @@ async function connectStdioRuntime(
 ): Promise<ManagedRuntimeConnection> {
   const config = environmentConfigFor('stdio', definition.config);
   const launch = resolveRuntimeLaunchCommand(config.binaryPath);
+  const hubVersion = getVersion();
   // Which source won is otherwise only inferable from the resolved command
   // itself — a sibling binary and a `binaryPath` override can name the same
-  // path, and the fallback shares its interpreter with an override that
-  // happens to point at Bun.
+  // path, and so can an override and a workspace build.
   stdioLaunchLogger.info('launch_selected', {
     environmentId: definition.id,
     source: launch.source,
@@ -1542,7 +1556,9 @@ async function connectStdioRuntime(
     workspaceBinding: { userId: definition.userId, environmentId: definition.id },
     launch,
     ...(config.cwd ? { cwd: config.cwd } : {}),
-    hubVersion: getVersion(),
+    hubVersion,
+    // A development hub has no release for a cargo build to match.
+    requireMatchingRelease: !isDevelopmentVersion(hubVersion),
     onClosed: onUnavailable,
     signal: context.signal,
   });

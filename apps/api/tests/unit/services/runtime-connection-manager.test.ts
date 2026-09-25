@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, mock, setSystemTime } from 'bun:test';
 import * as realChildProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { type HandlerContext, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import type {
   EnvironmentConnectionState,
   EnvironmentTransportKind,
@@ -20,11 +20,13 @@ import { getVersion } from '../../../src/lib/config';
 import type { EnvironmentStateTransition } from '../../../src/modules/environments/application/record-environment-activity';
 import { createRuntimeAuthoritativeAgentDiscovery } from '../../../src/modules/external-agents/application/external-agent-discovery';
 import { createExternalIdentityIsolationRegistry } from '../../../src/modules/external-agents/application/external-identity-isolation';
+import { createHubWorkspaceAuthorizeHandler } from '../../../src/services/runtime-client/hub-workspace-authority';
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   createLocalRuntimeConnector,
   getRuntimeClient,
+  type LocalRuntimeOpenOptions,
   type ManagedRuntimeConnection,
   type RuntimeConnectContext,
   RuntimeConnectionManager,
@@ -1144,8 +1146,29 @@ describe('RuntimeConnectionManager', () => {
     }
   );
 
+  /**
+   * A Local `open` that answers at once, the way the spawned runtime does: an
+   * attested manifest when the hub claimed `single-user`, none when it
+   * withdrew. Records every call's options so a test can read what the
+   * connector asked for.
+   */
+  function recordingLocalOpen() {
+    const calls: LocalRuntimeOpenOptions[] = [];
+    const open = (options: LocalRuntimeOpenOptions): Promise<ManagedRuntimeConnection> => {
+      calls.push(options);
+      return Promise.resolve(
+        fakeConnection(() => undefined, {
+          ...TEST_MANIFEST,
+          ...attestationFor(options.externalAgentIsolation),
+        })
+      );
+    };
+    return { open, calls };
+  }
+
   it('revokes Local attestation before serving a second MangoStudio user', async () => {
-    const connector = createLocalRuntimeConnector();
+    const opens = recordingLocalOpen();
+    const connector = createLocalRuntimeConnector({ open: opens.open });
     let firstUnavailable = 0;
     let sameOwnerUnavailable = 0;
     await expect(
@@ -1185,15 +1208,26 @@ describe('RuntimeConnectionManager', () => {
     );
 
     try {
-      expect(systemProbe.client.manifest.identityIsolation).toBeUndefined();
-      expect(first.client.manifest.identityIsolation).toMatchObject({
-        method: 'single-user-host',
+      expect(opens.calls.map((call) => call.externalAgentIsolation)).toEqual([
+        'withdrawn',
+        'single-user',
+        'single-user',
+        'withdrawn',
+        'withdrawn',
+      ]);
+      expect({
+        systemProbe: systemProbe.identityAttested,
+        first: first.identityAttested,
+        sameOwner: sameOwner.identityAttested,
+        second: second.identityAttested,
+        firstAfterTransition: firstAfterTransition.identityAttested,
+      }).toEqual({
+        systemProbe: undefined,
+        first: true,
+        sameOwner: true,
+        second: false,
+        firstAfterTransition: false,
       });
-      expect(sameOwner.client.manifest.identityIsolation).toEqual(
-        first.client.manifest.identityIsolation
-      );
-      expect(second.client.manifest.identityIsolation).toBeUndefined();
-      expect(firstAfterTransition.client.manifest.identityIsolation).toBeUndefined();
       expect({ firstUnavailable, sameOwnerUnavailable }).toEqual({
         firstUnavailable: 1,
         sameOwnerUnavailable: 1,
@@ -1204,6 +1238,29 @@ describe('RuntimeConnectionManager', () => {
       await sameOwner.close();
       await first.close();
       await systemProbe.close();
+    }
+  });
+
+  it('binds every Local open to its user on the Local environment', async () => {
+    const opens = recordingLocalOpen();
+    const connector = createLocalRuntimeConnector({ open: opens.open });
+    const attempt = new AbortController();
+    const probe = await connector(localDefinition('local'), () => undefined, connectContext());
+    const owned = await connector(localDefinition('user-1'), () => undefined, {
+      report: () => undefined,
+      signal: attempt.signal,
+    });
+
+    try {
+      expect(opens.calls.map((call) => call.workspaceBinding)).toEqual([
+        { userId: 'local', environmentId: 'local' },
+        { userId: 'user-1', environmentId: 'local' },
+      ]);
+      // The attempt's own signal, so releasing the attempt reaches the spawn.
+      expect(opens.calls[1]?.signal).toBe(attempt.signal);
+    } finally {
+      await owned.close();
+      await probe.close();
     }
   });
 
@@ -1235,20 +1292,8 @@ describe('RuntimeConnectionManager', () => {
         .execute(),
     ]);
 
-    let authorizeWorkspace:
-      | ((canonicalPath: string, signal: AbortSignal) => boolean | Promise<boolean>)
-      | undefined;
-    const connector = createLocalRuntimeConnector({
-      open: (options) => {
-        authorizeWorkspace = options.authorizeWorkspace;
-        return Promise.resolve(
-          fakeConnection(() => undefined, {
-            ...TEST_MANIFEST,
-            ...attestationFor(options.externalAgentIsolation),
-          })
-        );
-      },
-    });
+    const opens = recordingLocalOpen();
+    const connector = createLocalRuntimeConnector({ open: opens.open });
     const connection = await connector(
       localDefinition(owner.id),
       () => undefined,
@@ -1256,18 +1301,25 @@ describe('RuntimeConnectionManager', () => {
     );
 
     try {
-      expect(authorizeWorkspace).toBeDefined();
-      const authorize = authorizeWorkspace as NonNullable<typeof authorizeWorkspace>;
-      const signal = new AbortController().signal;
-      expect(await authorize(ownedWorkdir, signal)).toBe(true);
-      expect(await authorize(otherWorkdir, signal)).toBe(false);
-      expect(await authorize(remoteWorkdir, signal)).toBe(false);
-      expect(await authorize('/workspace/missing', signal)).toBe(false);
+      const binding = opens.calls[0]?.workspaceBinding;
+      if (!binding) {
+        throw new Error(`expected one Local open | received: ${opens.calls.length} open(s)`);
+      }
+      // The handler the spawned runtime's `hub.workspace.authorize` reaches.
+      const authorize = createHubWorkspaceAuthorizeHandler(binding);
+      const ask = async (canonicalPath: string, signal = new AbortController().signal) =>
+        (
+          await authorize({ canonicalPath, purpose: 'external-agent' }, {
+            signal,
+          } as HandlerContext)
+        ).authorized;
+      expect(await ask(ownedWorkdir)).toBe(true);
+      expect(await ask(otherWorkdir)).toBe(false);
+      expect(await ask(remoteWorkdir)).toBe(false);
+      expect(await ask('/workspace/missing')).toBe(false);
       const cancelled = new AbortController();
       cancelled.abort(new Error('authorization cancelled'));
-      await expect(authorize(ownedWorkdir, cancelled.signal)).rejects.toThrow(
-        'authorization cancelled'
-      );
+      await expect(ask(ownedWorkdir, cancelled.signal)).rejects.toThrow('authorization cancelled');
     } finally {
       await connection.close();
     }
@@ -1277,7 +1329,6 @@ describe('RuntimeConnectionManager', () => {
     const claims: Array<'single-user' | 'withdrawn'> = [];
     let attempts = 0;
     const connector = createLocalRuntimeConnector({
-      isWorkspaceAuthorized: () => true,
       open: (options) => {
         claims.push(options.externalAgentIsolation);
         attempts += 1;
@@ -1372,7 +1423,6 @@ describe('RuntimeConnectionManager', () => {
     let releaseStuck: ((connection: ManagedRuntimeConnection) => void) | undefined;
     const connector = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
-      isWorkspaceAuthorized: () => true,
       open: () => {
         openCalls += 1;
         if (openCalls > 1) return Promise.resolve(fakeConnection(() => undefined));
@@ -1450,7 +1500,6 @@ describe('RuntimeConnectionManager', () => {
     const opens = scriptedLocalOpen();
     const connector = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
-      isWorkspaceAuthorized: () => true,
       open: opens.open,
     });
 
@@ -1487,7 +1536,6 @@ describe('RuntimeConnectionManager', () => {
     const opens = scriptedLocalOpen();
     const connector = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
-      isWorkspaceAuthorized: () => true,
       open: opens.open,
     });
 
@@ -1513,7 +1561,6 @@ describe('RuntimeConnectionManager', () => {
     const opens = scriptedLocalOpen();
     const connector = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
-      isWorkspaceAuthorized: () => true,
       open: opens.open,
     });
 
@@ -1546,7 +1593,6 @@ describe('RuntimeConnectionManager', () => {
     const opens = scriptedLocalOpen();
     const connector = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
-      isWorkspaceAuthorized: () => true,
       open: opens.open,
     });
 
@@ -1575,7 +1621,6 @@ describe('RuntimeConnectionManager', () => {
     const opens = scriptedLocalOpen();
     const connector = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
-      isWorkspaceAuthorized: () => true,
       open: opens.open,
     });
 
@@ -1601,7 +1646,6 @@ describe('RuntimeConnectionManager', () => {
     const opens = scriptedLocalOpen();
     const local = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
-      isWorkspaceAuthorized: () => true,
       open: opens.open,
     });
     // The connector's own outcomes, which the manager hides once it has

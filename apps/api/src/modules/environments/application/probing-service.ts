@@ -169,7 +169,7 @@ export interface ProbeOptions {
 /**
  * The hub's own machine, for callers that have no user session to speak of —
  * the CLI, and the settings defaults derived at first boot. `local` resolves to
- * the in-process runtime whatever user id is attached to it.
+ * the hub's own Local runtime whatever user id is attached to it.
  */
 export const LOCAL_PROBE_SCOPE: ProbeScope = {
   userId: 'local',
