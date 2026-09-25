@@ -4,34 +4,32 @@
  *
  * `MANGOSTUDIO_RUNTIME_BINARY` names the exact binary CI just built, the same
  * variable `resolveRuntimeLaunchCommand` reads in production. Outside CI this
- * falls back to the workspace's own `target/debug/mangostudio-runtime`, so
- * `cargo build -p mangostudio-runtime` followed by the workspace's own test
- * command exercises the same suite locally. An explicit env var pointing at a
+ * falls back to the workspace's newest cargo build, resolved exactly as
+ * production resolves it, so `cargo build -p mangostudio-runtime` followed by
+ * the workspace's own test command exercises the same suite locally. An explicit env var pointing at a
  * binary that does not exist is a broken CI job, not a reason to skip
  * quietly — only the fallback path is missing-tolerant.
  *
- * The fallback's own tolerance is deliberate, including in CI: the ordinary
- * `bun run test` lane (`.github/workflows/test.yml`) runs every apps/api
- * test, including the `rust-*` qualification and compat files, without ever
- * building Rust or setting this override — that lane has no Rust binary and
- * is not supposed to. Only `cargo-shim.yml`'s dedicated `real-binary-qualification`
- * job builds the binary and must set the override; that job's own workflow
- * definition is asserted in `ci-gate.unit.test.ts`, which is where "this job
- * forgot to wire it" actually gets caught — not here, where the check cannot
- * tell that job apart from every other CI lane that never needed a Rust
- * binary in the first place.
+ * The fallback's own tolerance is for a developer who has not run cargo yet.
+ * CI never relies on it: every lane that starts a hub — the `bun run test`
+ * shards (`.github/workflows/test.yml`), the browser smoke, and
+ * `cargo-shim.yml`'s `real-binary-qualification` job — sets the override to a
+ * binary it built or downloaded (`.github/actions/local-runtime`), because the
+ * hub launches Local as this binary and there is no runtime to fall back to.
  */
 
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { newestRuntimeBuild, workspaceRuntimeBinaryCandidates } from '../../src/lib/runtime-paths';
 
-const FALLBACK_DEBUG_BINARY = join(
-  import.meta.dir,
-  '../../../../target/debug',
-  process.platform === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime'
-);
+/**
+ * The workspace builds production would launch in a source checkout, so a
+ * test and the hub it drives pick the same binary: the newest of
+ * `target/debug` and `target/release`, debug on a tie.
+ */
+const WORKSPACE_BUILDS = workspaceRuntimeBinaryCandidates();
 
 export interface RustRuntimeBinary {
   readonly path: string;
@@ -57,7 +55,10 @@ export function resolveRustRuntimeBinary(): RustRuntimeBinary {
     }
     return { path: configured, available: true };
   }
-  return { path: FALLBACK_DEBUG_BINARY, available: existsSync(FALLBACK_DEBUG_BINARY) };
+  const built = newestRuntimeBuild(WORKSPACE_BUILDS);
+  return built
+    ? { path: built, available: true }
+    : { path: WORKSPACE_BUILDS[0] as string, available: false };
 }
 
 /**

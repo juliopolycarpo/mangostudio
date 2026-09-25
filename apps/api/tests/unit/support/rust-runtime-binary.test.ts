@@ -25,6 +25,6 @@ describe('skipWithoutRustBinary', () => {
     const message = String(warn.mock.calls[0]?.[0]);
     expect(message).toContain('missing-suite');
     expect(message).toContain('/nowhere/mangostudio-runtime');
-    expect(message).toContain('cargo build -p mangostudio-runtime');
+    expect(message).toContain('cargo build -p mangostudio-runtime --locked');
   });
 });

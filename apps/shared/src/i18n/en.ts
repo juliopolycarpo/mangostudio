@@ -2645,10 +2645,11 @@ export const messages: Messages = {
       },
       runtime: {
         title: 'Runtime binary',
-        source: 'Runs from the source checkout through Bun',
-        missing: 'not found beside the hub',
+        notBuilt:
+          'Not built in this source checkout. Run "cargo build -p mangostudio-runtime --locked" so Local can start.',
+        missing: 'not found; Local cannot start',
         versionMismatch:
-          'The runtime binary reports a different version than the hub. Stdio environments will refuse to pair until both match.',
+          'The runtime binary reports a different version than the hub. Local and stdio environments will refuse to connect until both match.',
       },
       hostSlot: {
         title: 'Host consent',
@@ -2983,6 +2984,12 @@ export const messages: Messages = {
       offlineCache: 'Offline cache',
       offlineCacheHint:
         'The release could not be reached, so this started from a runtime the hub verified earlier.',
+      local: {
+        reason: {
+          'binary-missing':
+            'The Local runtime binary was not found. In a source checkout, run "cargo build -p mangostudio-runtime --locked"; for an installed hub, reinstall MangoStudio or set MANGOSTUDIO_RUNTIME_BINARY.',
+        },
+      },
       boundElsewhereHint:
         'Another environment record, on this hub or another one, is connected to this runtime. It takes one hub connection at a time, so this record tries again at most once a minute, without disturbing that connection. Disconnect or remove the other record to use this one.',
       status: {
@@ -2995,7 +3002,7 @@ export const messages: Messages = {
         boundElsewhere: 'Bound elsewhere',
       },
       transport: {
-        'in-process': 'In process',
+        'in-process': 'Hub-launched',
         stdio: 'Local process',
         wsl: 'WSL',
         websocket: 'WebSocket',

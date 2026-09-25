@@ -77,9 +77,9 @@ fica em memória; sessões não sobrevivem a um reinício do hub.
 
 ## Quem pode abrir uma
 
-A mesma capacidade de `shell.run`: `allow.shell` no runtime. No runtime **Local** — o processo e
-a conta de SO do próprio hub — um terminal exige adicionalmente a atestação `single-user-host`
-que o caminho de agentes externos já calcula. Um segundo usuário do MangoStudio no mesmo hub
+A mesma capacidade de `shell.run`: `allow.shell` no runtime. No runtime **Local** — um processo
+filho do hub na própria conta de SO do hub — um terminal exige adicionalmente que a conexão
+Local esteja atestada: a reivindicação de dono único que o caminho de agentes externos já aplica. Um segundo usuário do MangoStudio no mesmo hub
 fecha todo terminal Local e recusa novos com `TERMINAL_NOT_ISOLATED`.
 
 O ambiente do shell é o do próprio runtime com variáveis com cara de segredo removidas exatamente

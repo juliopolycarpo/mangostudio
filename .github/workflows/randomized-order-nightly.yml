@@ -122,6 +122,11 @@ jobs:
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
 
+      # The api lanes spawn Local as the Rust runtime; a nightly run builds it
+      # itself rather than depending on another workflow's artifact.
+      - if: matrix.workspace == 'api'
+        uses: ./.github/actions/local-runtime
+
       # The lane script's own flags plus randomization, invoked directly rather
       # than through `bun run test`: this is a diagnostic, not the merge gate,
       # and it must not write JUnit reports or coverage that anything else

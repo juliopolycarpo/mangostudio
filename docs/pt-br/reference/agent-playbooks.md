@@ -286,7 +286,10 @@ O build produz dois binários por plataforma: `mangostudio`, compilado com Bun a
 de `apps/api`, e o host de execução `mangostudio-runtime`, o binário cargo de
 `crates/mangostudio-runtime` (construído por alvo pelo `runtime-build.yml`, ou para o
 alvo do host via `cargo build`; veja `docs/reference/releasing.md`). Os dois reportam a
-mesma versão de release e são distribuídos juntos em todos os canais.
+mesma versão de release e são distribuídos juntos em todos os canais. O Local é esse mesmo
+binário, iniciado pelo hub via stdio (`openLocalRuntime` em `runtime-connection-manager.ts`);
+um checkout do código-fonte inicia o build mais recente de `target/debug` ou
+`target/release`, e `bun run dev` o compila antes. Não há fallback para TypeScript.
 
 ## CLI E Ciclo De Vida Do Servidor
 

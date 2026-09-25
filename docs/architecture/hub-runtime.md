@@ -5,9 +5,11 @@ hub: it owns identity, chats, policy, and durable state. `apps/runtime` is an ex
 host behind a versioned protocol: it owns filesystem and shell effects plus disposable
 execution caches.
 
-The Local runtime runs inside the API process, and even there a call crosses a real port
-pair and the same session, handlers and error mapping a runtime on another machine is reached
-through. This keeps transport placement out of tool executors.
+The Local runtime is the cargo-built `mangostudio-runtime` binary, which the hub spawns on
+its own machine and speaks to over stdio — the same session, handlers and error mapping a
+runtime on another machine is reached through. This keeps transport placement out of tool
+executors. There is no fallback runtime: a Local binary that cannot be found fails the
+connect with the command that builds it (see [Local runtime](#local-runtime)).
 
 ## Ownership
 
@@ -43,8 +45,11 @@ The runtime must not import API modules or persist product state. The hub must n
 the runtime client for execution that belongs to the runtime.
 
 **The hub does not import `@mangostudio/runtime` either.** One file does —
-`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`, which builds the Local
-host and hands it a port — and a test walks `apps/api/src` to keep it that way. Everything
+`apps/api/src/services/runtime-client/connect-in-process-runtime.ts`, which builds a
+TypeScript runtime host and hands it a port — and a test walks `apps/api/src` to keep it that
+way. Nothing the hub ships reaches that file any more (a second test pins it): Local spawns
+the Rust binary, and only tests still build an in-process TypeScript runtime. The file and
+`apps/runtime` are deleted once those tests are ported. Everything
 else the two ends share is a contract in `@mangostudio/shared`, which is what lets the
 runtime be replaced by a process that is not a TypeScript module at all. Code that is not a
 contract but that *both machines genuinely run* — the library engine, the service
@@ -236,15 +241,15 @@ the hub is the fix.
 
 ## Transports
 
-| Transport                 | Status  | Direction        | Framing                                                                                                                                                                                                                                                                                                                         |
-| ------------------------- | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Embedded in-process ports | Current | —                | [In-process](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/in-process.md): a real port pair. Production clones and schema-checks each frame; development and tests round-trip it through the byte codec (`validateInProcessFrames`), so a value a byte transport could not carry fails here first. |
-| Local runtime process     | Current | Hub spawns       | [Spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md) over [stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md): NDJSON on the child's own pipes.                                                                                                |
-| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.                                                                                                                                                                                                                                          |
-| Paired WebSocket          | Current | Runtime dials in | [WebSocket](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/websocket.md): chunked binary messages under `mango.v1`, to `/api/runtime`, authenticated by a pairing token.                                                                                                                            |
-| Direct URL                | Current | Hub dials out    | The same WebSocket transport; the runtime listens and the hub presents a serve token.                                                                                                                                                                                                                                           |
-| SSH                       | Current | Hub spawns       | A launcher over stdio: the SDK's hardened `ssh` preset, with the runtime on the far end of its pipe.                                                                                                                                                                                                                            |
-| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.                                                                                                                                                                                                                                     |
+| Transport                 | Status  | Direction        | Framing                                                                                                                                                                                                                                                                                                       |
+| ------------------------- | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Embedded in-process ports | Tests   | —                | [In-process](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/in-process.md): a real port pair, round-tripped through the byte codec (`validateInProcessFrames`). No longer a production transport: only tests that reach into a TypeScript runtime's module state still build one. |
+| Local runtime process     | Current | Hub spawns       | [Spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md) over [stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md): NDJSON on the child's own pipes. Used by Local and by `stdio` environments.                                   |
+| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.                                                                                                                                                                                                                        |
+| Paired WebSocket          | Current | Runtime dials in | [WebSocket](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/websocket.md): chunked binary messages under `mango.v1`, to `/api/runtime`, authenticated by a pairing token.                                                                                                          |
+| Direct URL                | Current | Hub dials out    | The same WebSocket transport; the runtime listens and the hub presents a serve token.                                                                                                                                                                                                                         |
+| SSH                       | Current | Hub spawns       | A launcher over stdio: the SDK's hardened `ssh` preset, with the runtime on the far end of its pipe.                                                                                                                                                                                                          |
+| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.                                                                                                                                                                                                                   |
 
 Which one to reach for:
 
@@ -462,8 +467,9 @@ A readonly machine is therefore a perfectly good propagation *source*: it is sca
 copies compete to be the winner, and only writing to it is refused. The wizard says so while
 the user is still choosing, rather than letting them reach an apply that would be denied.
 
-Local (in-process) is not exempt: it reads the `host` slot like any other runtime, so
-narrowing that slot gives a read-only Local.
+Local is not exempt: its binary sits beside the hub or in a source checkout's `target/`,
+outside every slot's install layout, so it resolves to the `host` slot like any other
+runtime there, and narrowing that slot gives a read-only Local.
 
 ### Library backups across machines
 
@@ -578,8 +584,8 @@ routes the stdout console methods to stderr. The hub keeps a bounded tail of the
 stderr and folds it into the message a failed connect reports.
 
 An environment with `transportKind: 'stdio'` carries `{ binaryPath?, cwd? }`. `binaryPath`
-defaults to the sibling binary resolved from the hub's own executable — a source checkout runs
-the workspace entry under Bun instead — and exists as an override for development. argv is
+defaults to the same binary Local launches (see [Local runtime](#local-runtime)) and exists as
+an override for development; `MANGOSTUDIO_RUNTIME_BINARY` outranks it. argv is
 assembled from discrete arguments, never a command string to interpolate, and the child's
 environment is sanitized like any other spawned process so connector keys and the auth secret
 do not reach it.
@@ -623,12 +629,52 @@ are still signalled by parentage while the leader is alive. A hard kill of the r
 still leave them.
 
 The hub and the runtime ship from one release. The handshake refuses a wire major it does not
-share, and for stdio `requireMatchingRelease` also refuses a runtime whose release version
-differs from the hub's — the wire version only moves when the frame format does, so it cannot
-catch a binary an older install left behind. `mango doctor` reports whether the sibling
-binary is present and whether its version matches. It reports a warning rather than a
-failure: a hub without it still serves chats through the embedded Local runtime, it just
-cannot start stdio environments.
+share, and for Local and stdio `requireMatchingRelease` also refuses a runtime whose release
+version differs from the hub's — the wire version only moves when the frame format does, so it
+cannot catch a binary an older install left behind. A development hub (`VERSION` unset, which
+reports `dev`) has no release for a cargo build to match, so it skips that comparison; the
+wire version still gates. `mango doctor` reports the binary Local would launch: a missing one
+is a failure with its fix, because the hub has no other runtime to serve Local with; a version
+drift is a warning, and is not reported against a development hub.
+
+### Local runtime
+
+The Local environment (`id: 'local'`) is the hub's own runtime, spawned by `openLocalRuntime`
+in `runtime-connection-manager.ts` through `spawnRuntimeChild`, exactly like a `stdio`
+environment. `resolveRuntimeLaunchCommand` (`apps/api/src/lib/runtime-paths.ts`) picks the
+binary, most specific first:
+
+1. `MANGOSTUDIO_RUNTIME_BINARY`, read in `apps/api/src/lib/config.ts`.
+2. For a `stdio` environment only, its own `binaryPath`.
+3. The sibling `mangostudio-runtime` beside a standalone hub executable.
+4. In a source checkout, the most recently built of `target/debug/mangostudio-runtime` and
+   `target/release/mangostudio-runtime` under the repository root (a tie goes to `debug`).
+5. Otherwise `RuntimeBinaryNotFoundError`, which names every path it searched and
+   `cargo build -p mangostudio-runtime`.
+
+There is no TypeScript fallback for Local or stdio: a missing binary is a visible failure,
+never a quietly different runtime. `bun run dev` builds the binary before starting the hub.
+
+What the in-process host used to get through its constructor now travels on the wire:
+
+- **Consent** — the binary resolves its own slot, which is `host` both beside the hub and in
+  `target/`, and reads that slot's consent like any other runtime.
+- **Identity isolation** — the single-owner claim logic in `createLocalRuntimeConnector` is
+  unchanged: one MangoStudio user owns the OS credential home, a second owner withdraws every
+  attestation, and the `local` stand-in is never attested. The hub still announces
+  `externalAgentIsolation` in its `hello`; the runtime computes its own attestation from its
+  home (method `os-account`, where the in-process TypeScript host reported
+  `single-user-host`), and a hub `withdrawn` claim strips it from the manifest and from every
+  `runtime.health`.
+- **Workspace authorization** — the child asks the hub through `hub.workspace.authorize`,
+  answered for the binding `{ userId, environmentId: 'local' }`, instead of calling a callback.
+- **Teardown** — closing the connection ends the child's stdin and resolves once the process
+  has exited, so MCP sessions, terminals and vendor processes it held are gone by then.
+
+The persisted transport literal stays `in-process` for compatibility: stored environments,
+the shared schemas and the frontend all carry it, and renaming it would need a migration for
+no behavioural gain. It names the hub's own Local runtime, not where that runtime runs; the UI
+labels it "Hub-launched".
 
 ## WSL Transport
 

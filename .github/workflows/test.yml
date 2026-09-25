@@ -2,6 +2,14 @@ name: Test
 
 on:
   workflow_call:
+    inputs:
+      runtime_artifact:
+        description: >
+          Artifact holding the mangostudio-runtime binary the hub launches for
+          Local (built once by local-runtime.yml). Every api test that reaches
+          Local spawns it, so the shards cannot run without it.
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -171,6 +179,13 @@ jobs:
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
+
+      # Local is the Rust runtime the hub spawns, so every shard needs the
+      # binary. Built once for the run by local-runtime.yml rather than here:
+      # eight cargo builds of one binary would cost more than the shards.
+      - uses: ./.github/actions/local-runtime
+        with:
+          artifact: ${{ inputs.runtime_artifact }}
 
       # This shard's slice of every sharded lane; each takes `--shard`
       # directly. The frontend lane is not among them — its LCOV cannot be

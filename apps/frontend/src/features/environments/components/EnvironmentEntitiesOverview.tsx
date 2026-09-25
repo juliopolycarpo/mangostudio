@@ -241,6 +241,15 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
           </p>
         ) : null}
 
+        {environment.status.localFailureReason ? (
+          <p
+            className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant"
+            data-testid="local-failure-reason"
+          >
+            {labels.local.reason[environment.status.localFailureReason]}
+          </p>
+        ) : null}
+
         <CapabilityChips environment={environment} />
 
         <ToolchainSummaryLine environment={environment} />

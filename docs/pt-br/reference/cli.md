@@ -136,6 +136,15 @@ ambiente permitidas, a passagem de bastão na instalação, linger no Linux),
 de saída, a seção **Doctor** e configuração, consulte a
 [versão completa em inglês](../../reference/cli.md).
 
+O hub inicia o Local como o binário `mangostudio-runtime`. `mangostudio doctor` reporta o
+binário que o Local executaria — `MANGOSTUDIO_RUNTIME_BINARY`, o binário ao lado de um hub
+standalone ou o build cargo mais recente de um checkout do código-fonte — e marca a linha
+como falha quando ele está ausente, já que o Local não inicia sem ele: reinstale o
+MangoStudio (ou defina `MANGOSTUDIO_RUNTIME_BINARY`) ou, em um checkout, execute
+`cargo build -p mangostudio-runtime`. Uma versão diferente da do hub é só um aviso — o
+handshake recusa a divergência, então reinstale em vez de misturar releases — e não é
+reportada contra um hub de desenvolvimento, que não tem release para comparar.
+
 O segundo binário, `mangostudio-runtime`, tem os próprios comandos —
 `connect`, `serve`, `setup`, `install`, `service`, `health`, `doctor` e `audit`.
 `install` copia o binário que você baixou para dentro do slot

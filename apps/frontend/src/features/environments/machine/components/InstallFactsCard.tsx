@@ -39,20 +39,19 @@ export function InstallFactsCard({ status }: InstallFactsCardProps) {
 
   const runtimeValue =
     runtimeBinary.path === null
-      ? m.runtime.source
+      ? m.runtime.notBuilt
       : runtimeBinary.error
         ? `${runtimeBinary.path} — ${runtimeBinary.error}`
         : runtimeBinary.present
           ? `${runtimeBinary.path}${runtimeBinary.version ? ` (${runtimeBinary.version})` : ''}`
           : `${runtimeBinary.path} — ${m.runtime.missing}`;
+  // Local has no other runtime, so a binary that is not there is a failure.
   const runtimeSeverity =
-    runtimeBinary.path === null
-      ? undefined
-      : runtimeBinary.error || !runtimeBinary.present
-        ? 'fail'
-        : runtimeBinary.versionMatches === false
-          ? 'warn'
-          : undefined;
+    runtimeBinary.path === null || runtimeBinary.error || !runtimeBinary.present
+      ? 'fail'
+      : runtimeBinary.versionMatches === false
+        ? 'warn'
+        : undefined;
 
   return (
     <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-install-card">

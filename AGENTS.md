@@ -66,7 +66,10 @@ Useful docs:
   never resolves it.
 - `apps/api` must not import `@mangostudio/runtime`. The only exception is
   `apps/api/src/services/runtime-client/connect-in-process-runtime.ts`, and a test enforces it;
-  everything the two ends share is a contract in `@mangostudio/shared`.
+  everything the two ends share is a contract in `@mangostudio/shared`. No production file may
+  import that seam either: Local is the cargo-built `mangostudio-runtime` the hub spawns, so
+  API tests that reach Local need it built (`cargo build -p mangostudio-runtime`) or named by
+  `MANGOSTUDIO_RUNTIME_BINARY`.
 - Cross-workspace imports must use package names, never relative paths.
 - Do not edit `apps/frontend/src/routeTree.gen.ts`; it is generated.
 

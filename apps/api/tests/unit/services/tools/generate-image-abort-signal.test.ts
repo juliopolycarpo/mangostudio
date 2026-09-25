@@ -76,12 +76,19 @@ class AbortObservingImageProvider implements AIProvider {
  *
  * // Usage: await waitFor(() => fake.callCount >= 1, 'the first provider call');
  */
+/**
+ * Long enough for a turn's first call to wait out the Local runtime's spawn and
+ * handshake — a child process, not an in-process host — on a loaded runner.
+ */
+const WAIT_FOR_DEADLINE_MS = 4_000;
+
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
-  for (let attempt = 0; attempt < 500; attempt += 1) {
+  const deadline = Date.now() + WAIT_FOR_DEADLINE_MS;
+  while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
-  throw new Error(`Timed out waiting for ${label}`);
+  throw new Error(`Timed out after ${WAIT_FOR_DEADLINE_MS}ms waiting for ${label}`);
 }
 
 let previousProvider: AIProvider | null = null;
@@ -267,5 +274,5 @@ describe('executeSubagentTools — abort signal threading', () => {
     // the forward this is `undefined` and the request outlives the turn.
     expect(observed).toBeInstanceOf(AbortSignal);
     expect(observed).toBe(controller.signal);
-  }, 5000);
+  }, 10_000);
 });

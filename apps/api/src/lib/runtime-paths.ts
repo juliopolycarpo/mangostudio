@@ -2,7 +2,7 @@
  * Runtime path helpers for development and standalone executable modes.
  */
 
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { getRuntimeBinaryOverride } from './config';
 
@@ -63,16 +63,91 @@ export function getSourceFrontendDir(): string {
   return join(getRuntimeBaseDir(), 'apps', 'frontend', 'dist');
 }
 
-/** Filename of the runtime binary that ships beside the hub executable. */
+/** Filename of the runtime binary, beside a standalone hub or in a cargo build. */
 const RUNTIME_BINARY_NAME =
   process.platform === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
 
 /**
+ * The repository root of a source checkout: this file is `apps/api/src/lib`.
+ * Anchored on the module rather than the working directory, because the hub is
+ * started from the root by `bun run dev` and from `apps/api` by its tests.
+ */
+const SOURCE_CHECKOUT_ROOT = join(import.meta.dir, '..', '..', '..', '..');
+
+/** The cargo profiles a source checkout may have built, in tie-break order. */
+const WORKSPACE_BUILD_PROFILES = ['debug', 'release'] as const;
+
+/** The command that builds the runtime a source checkout launches. */
+export const RUNTIME_BUILD_COMMAND = 'cargo build -p mangostudio-runtime --locked';
+
+/**
  * Path of the runtime binary that ships beside the hub executable, or null in a
- * source checkout where no binary is built.
+ * source checkout, where the runtime comes from a cargo build instead.
  */
 export function getRuntimeBinaryPath(): string | null {
   return isStandaloneExecutable() ? join(getRuntimeBaseDir(), RUNTIME_BINARY_NAME) : null;
+}
+
+/**
+ * The cargo builds a source checkout may launch, `target/debug` first.
+ *
+ * @example
+ * workspaceRuntimeBinaryCandidates('/repo');
+ * // → ['/repo/target/debug/mangostudio-runtime', '/repo/target/release/mangostudio-runtime']
+ */
+export function workspaceRuntimeBinaryCandidates(
+  root: string = SOURCE_CHECKOUT_ROOT
+): readonly string[] {
+  return WORKSPACE_BUILD_PROFILES.map((profile) =>
+    join(root, 'target', profile, RUNTIME_BINARY_NAME)
+  );
+}
+
+/** Modification time of a regular file, or null when there is no file to run. */
+function builtAtMs(path: string): number | null {
+  try {
+    const stat = statSync(path);
+    return stat.isFile() ? stat.mtimeMs : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The most recently built of `candidates`, or null when none exists.
+ *
+ * Newest wins because it is the build a developer just made: someone who ran
+ * `cargo build --release` after a debug build means the release one, and the
+ * reverse holds too. A tie keeps the candidates' order, so `debug` wins it.
+ *
+ * @example
+ * newestRuntimeBuild(workspaceRuntimeBinaryCandidates()); // '/repo/target/debug/…' or null
+ */
+export function newestRuntimeBuild(candidates: readonly string[]): string | null {
+  let newest: { readonly path: string; readonly mtimeMs: number } | null = null;
+  for (const path of candidates) {
+    const mtimeMs = builtAtMs(path);
+    if (mtimeMs === null) continue;
+    if (newest === null || mtimeMs > newest.mtimeMs) newest = { path, mtimeMs };
+  }
+  return newest?.path ?? null;
+}
+
+/**
+ * No runtime binary could be found for the hub to launch. Raised instead of
+ * launching anything else: there is no fallback runtime, so a missing binary
+ * has to be visible and name its fix.
+ */
+export class RuntimeBinaryNotFoundError extends Error {
+  override readonly name = 'RuntimeBinaryNotFoundError';
+
+  constructor(readonly searched: readonly string[]) {
+    super(
+      `No mangostudio-runtime binary was found; searched ${searched.join(', ')}. ` +
+        `Run "${RUNTIME_BUILD_COMMAND}" from the repository root, or set ` +
+        'MANGOSTUDIO_RUNTIME_BINARY to a runtime binary.'
+    );
+  }
 }
 
 export interface RuntimeLaunchCommand {
@@ -81,36 +156,48 @@ export interface RuntimeLaunchCommand {
 }
 
 /**
- * Which of the four sources {@link resolveRuntimeLaunchCommand} tried actually
- * chose the command, most specific first: `env` — `MANGOSTUDIO_RUNTIME_BINARY`;
- * `config` — the environment's own `binaryPath`; `sibling` — the binary shipped
- * beside a standalone hub install; `bun-source` — the TS runtime entry run
- * through the current Bun, for a source checkout with no binary built. This is
- * for logs and diagnostics, not the wire — it never leaves the hub process.
+ * Which source {@link resolveRuntimeLaunchCommand} used, most specific first:
+ * `env` — `MANGOSTUDIO_RUNTIME_BINARY`; `config` — a stdio environment's own
+ * `binaryPath`; `sibling` — the binary shipped beside a standalone hub;
+ * `workspace-build` — the newest cargo build in a source checkout. This is for
+ * logs and diagnostics, not the wire — it never leaves the hub process.
  */
-export type RuntimeLaunchSource = 'env' | 'config' | 'sibling' | 'bun-source';
+export type RuntimeLaunchSource = 'env' | 'config' | 'sibling' | 'workspace-build';
 
 /**
  * A resolved launch command plus which source picked it. `sshLaunch` and
  * `wslLaunchCommand` build a plain {@link RuntimeLaunchCommand} of their
- * own — the four sources here only describe how a local stdio launch is
+ * own — the sources here only describe how a runtime on this machine is
  * resolved, and neither of those is one of them.
  */
 export interface ResolvedRuntimeLaunch extends RuntimeLaunchCommand {
   readonly source: RuntimeLaunchSource;
 }
 
+export interface ResolveRuntimeLaunchOptions {
+  /** Where a source checkout's cargo builds live; defaults to this checkout's root. */
+  readonly workspaceRoot?: string;
+}
+
 /**
- * argv prefix for a runtime child process, in priority order: an explicit
+ * The runtime binary the hub runs on its own machine — Local, and a stdio
+ * environment with no `binaryPath` — in priority order: an explicit
  * `MANGOSTUDIO_RUNTIME_BINARY` override, the per-environment `binaryPath`, the
- * sibling binary next to a standalone install, and finally the workspace
- * entry run through the current Bun for a source checkout. Every element is a
- * discrete argument — the transport never accepts a command string to
- * interpolate.
+ * sibling binary next to a standalone install, and in a source checkout the
+ * newest of `target/debug` and `target/release`. Every element is a discrete
+ * argument — the transport never accepts a command string to interpolate.
+ *
+ * Throws {@link RuntimeBinaryNotFoundError} when a source checkout has no build.
+ * A sibling path is returned without checking it exists: the spawn reports a
+ * missing one with the reinstall advice a standalone install needs.
+ *
+ * @example
+ * const launch = resolveRuntimeLaunchCommand(); // { command: '…/mangostudio-runtime', args: [], source: 'sibling' }
  */
 export function resolveRuntimeLaunchCommand(
   binaryPath?: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  options: ResolveRuntimeLaunchOptions = {}
 ): ResolvedRuntimeLaunch {
   const envOverride = getRuntimeBinaryOverride(env);
   if (envOverride) return { command: envOverride, args: [], source: 'env' };
@@ -121,9 +208,26 @@ export function resolveRuntimeLaunchCommand(
   const sibling = getRuntimeBinaryPath();
   if (sibling) return { command: sibling, args: [], source: 'sibling' };
 
-  return {
-    command: process.execPath,
-    args: [join(import.meta.dir, '../../../runtime/src/cli.ts')],
-    source: 'bun-source',
-  };
+  const candidates = workspaceRuntimeBinaryCandidates(options.workspaceRoot);
+  const built = newestRuntimeBuild(candidates);
+  if (built) return { command: built, args: [], source: 'workspace-build' };
+
+  throw new RuntimeBinaryNotFoundError(candidates);
+}
+
+/**
+ * The binary {@link resolveRuntimeLaunchCommand} would launch for Local, or
+ * null when a source checkout has none built. For diagnostics that report the
+ * binary rather than launch it.
+ *
+ * @example
+ * const path = locateLocalRuntimeBinary(); // '/repo/target/debug/mangostudio-runtime' or null
+ */
+export function locateLocalRuntimeBinary(env: NodeJS.ProcessEnv = process.env): string | null {
+  try {
+    return resolveRuntimeLaunchCommand(undefined, env).command;
+  } catch (error) {
+    if (error instanceof RuntimeBinaryNotFoundError) return null;
+    throw error;
+  }
 }

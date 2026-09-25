@@ -2,6 +2,7 @@ import {
   createTurboDevCommand,
   DEV_WORKSPACES,
   getDevCwd,
+  planLocalRuntimeBuild,
   selectDevWorkspaces,
   selectTurboDevUi,
 } from './lib/dev';
@@ -61,6 +62,20 @@ if (runnableWorkspaces.length === 0) {
 }
 
 header('Dev');
+
+// Local is the Rust runtime the hub spawns, so it is built before the hub
+// starts rather than discovered missing on the first request.
+const runtimeBuild = planLocalRuntimeBuild(process.env, Bun.which('cargo') !== null);
+if (runtimeBuild.kind === 'missing-cargo') fatal(runtimeBuild.message);
+if (runtimeBuild.kind === 'skip') {
+  info(`Skipping the Local runtime build: ${runtimeBuild.reason}.`);
+} else {
+  info(`Building the Local runtime: ${runtimeBuild.command.join(' ')}`);
+  const built = await runCommand('runtime', [...runtimeBuild.command], { cwd: getDevCwd() });
+  if (built.exitCode !== 0) {
+    fatal(`\`${runtimeBuild.command.join(' ')}\` exited ${built.exitCode}; Local cannot start.`);
+  }
+}
 
 info(`Starting dev task(s): ${runnableWorkspaces.join(', ')}`);
 

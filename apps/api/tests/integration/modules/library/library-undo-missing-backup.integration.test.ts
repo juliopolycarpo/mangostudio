@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { rejectionOf } from '@mangostudio/protocol/testing';
 import { createBackupStoreDeps } from '@mangostudio/shared/library/machine';
 import { undoLibraryPropagation } from '../../../../src/modules/library/application/propagation-apply';
 import {
@@ -43,18 +44,20 @@ describe('library.undo against the real runtime', () => {
 
       // The error class does not cross the frame, so the 404 has to survive on
       // the kind the payload carries rather than on the message text.
-      await expect(
-        undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', {
-          pathEnv: () => ({ platform: 'linux', homeDir: '/tmp', env: {} }),
-          backup: createBackupStoreDeps({
-            backupRoot: () => root,
-            retentionCount: () => 10,
-            retentionBytes: () => 1024 * 1024,
-          }),
-          resetCaches: () => undefined,
-          runtimeUndo: (params) => client.library.undo(params, { timeoutMs: 5_000 }),
-        })
-      ).rejects.toMatchObject({ status: 404 });
+      expect(
+        await rejectionOf(
+          undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', {
+            pathEnv: () => ({ platform: 'linux', homeDir: '/tmp', env: {} }),
+            backup: createBackupStoreDeps({
+              backupRoot: () => root,
+              retentionCount: () => 10,
+              retentionBytes: () => 1024 * 1024,
+            }),
+            resetCaches: () => undefined,
+            runtimeUndo: (params) => client.library.undo(params, { timeoutMs: 5_000 }),
+          })
+        )
+      ).toMatchObject({ status: 404 });
     },
     30_000
   );

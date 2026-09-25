@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resetConfig } from '../../../src/lib/config';
@@ -7,6 +15,8 @@ import {
   getRuntimeBaseDir,
   getSourceFrontendDir,
   isStandaloneExecutable,
+  locateLocalRuntimeBinary,
+  RuntimeBinaryNotFoundError,
   resolveRuntimeLaunchCommand,
 } from '../../../src/lib/runtime-paths';
 
@@ -88,9 +98,22 @@ describe('runtime paths', () => {
   describe('resolveRuntimeLaunchCommand', () => {
     const RUNTIME_BINARY_NAME =
       process.platform === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
-    // apps/api/tests/unit/lib -> apps, then the workspace entry the Bun
-    // fallback runs. Mirrors the integration test's own RUNTIME_ENTRY.
-    const RUNTIME_ENTRY = join(import.meta.dir, '../../../../runtime/src/cli.ts');
+
+    /** Writes the named cargo builds under `root`, dated in epoch seconds; returns their paths. */
+    function writeWorkspaceBuilds(
+      root: string,
+      builtAt: { readonly debug?: number; readonly release?: number }
+    ): string[] {
+      return (['debug', 'release'] as const).flatMap((profile) => {
+        const at = builtAt[profile];
+        if (at === undefined) return [];
+        const path = join(root, 'target', profile, RUNTIME_BINARY_NAME);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, 'binary');
+        utimesSync(path, at, at);
+        return [path];
+      });
+    }
 
     it('prefers MANGOSTUDIO_RUNTIME_BINARY over a configured binaryPath', () => {
       setExecPath('/usr/bin/bun');
@@ -123,16 +146,67 @@ describe('runtime paths', () => {
       });
     });
 
-    it('falls back to the Bun/TS entry when nothing else names a binary', () => {
+    it('launches the newest workspace build in a source checkout', () => {
       setExecPath('/usr/bin/bun');
+      const [debug, release] = writeWorkspaceBuilds(tempDir, { debug: 1_000, release: 2_000 });
 
-      const launch = resolveRuntimeLaunchCommand(undefined, {});
-
-      expect(launch).toEqual({
-        command: process.execPath,
-        args: [RUNTIME_ENTRY],
-        source: 'bun-source',
+      expect(resolveRuntimeLaunchCommand(undefined, {}, { workspaceRoot: tempDir })).toEqual({
+        command: release,
+        args: [],
+        source: 'workspace-build',
       });
+
+      utimesSync(debug as string, 3_000, 3_000);
+      expect(resolveRuntimeLaunchCommand(undefined, {}, { workspaceRoot: tempDir }).command).toBe(
+        debug
+      );
+    });
+
+    it('prefers the debug build when both were built at the same moment', () => {
+      setExecPath('/usr/bin/bun');
+      const [debug] = writeWorkspaceBuilds(tempDir, { debug: 1_000, release: 1_000 });
+
+      expect(resolveRuntimeLaunchCommand(undefined, {}, { workspaceRoot: tempDir }).command).toBe(
+        debug
+      );
+    });
+
+    it('uses whichever single profile a source checkout has built', () => {
+      setExecPath('/usr/bin/bun');
+      const [release] = writeWorkspaceBuilds(tempDir, { release: 1_000 });
+
+      expect(resolveRuntimeLaunchCommand(undefined, {}, { workspaceRoot: tempDir }).command).toBe(
+        release
+      );
+    });
+
+    // There is no TypeScript runtime to fall back to: a checkout with nothing
+    // built has to say what to build, not launch something else.
+    it('refuses to launch anything when a source checkout has no build', () => {
+      setExecPath('/usr/bin/bun');
+      mkdirSync(join(tempDir, 'target', 'debug', RUNTIME_BINARY_NAME), { recursive: true });
+
+      let thrown: unknown;
+      try {
+        resolveRuntimeLaunchCommand(undefined, {}, { workspaceRoot: tempDir });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(RuntimeBinaryNotFoundError);
+      const message = (thrown as Error).message;
+      expect(message).toContain('cargo build -p mangostudio-runtime --locked');
+      expect(message).toContain(join(tempDir, 'target', 'debug', RUNTIME_BINARY_NAME));
+      expect(message).toContain(join(tempDir, 'target', 'release', RUNTIME_BINARY_NAME));
+      expect(message).toContain('MANGOSTUDIO_RUNTIME_BINARY');
+    });
+
+    it('locates the Local binary for diagnostics, or null when none is built', () => {
+      setExecPath(join(tempDir, 'dist', 'mangostudio'));
+      expect(locateLocalRuntimeBinary({})).toBe(join(tempDir, 'dist', RUNTIME_BINARY_NAME));
+      expect(locateLocalRuntimeBinary({ MANGOSTUDIO_RUNTIME_BINARY: '/env/runtime' })).toBe(
+        '/env/runtime'
+      );
     });
   });
 });

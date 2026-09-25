@@ -71,8 +71,9 @@ case-insensitive filesystem, is therefore stored in the form the authorization l
 Workdirs stored before this rule keep their lexical form until the user selects them again; the
 hub cannot canonicalize them itself because the path belongs to the runtime's filesystem.
 
-The in-process Local runtime reaches that policy through the callback it is built with. A spawned
-Rust runtime (stdio, WSL, SSH, container, HTTP or dial-in) asks back over its own hub session. A
+Every Rust runtime — Local, which the hub spawns as the `mangostudio-runtime` binary, and stdio,
+WSL, SSH, container, HTTP or dial-in — asks back over its own hub session; Local's session is bound
+to `{ userId, environmentId: 'local' }`. A
 spawned TypeScript runtime does not ask yet and still refuses every workspace. It
 sends `hub.workspace.authorize` from the hub-served `mangostudio.hub` contract
 (`apps/shared/src/runtime-contract/hub-contract.ts`, emitted as `generated/hub-catalog.json`) with
@@ -398,13 +399,14 @@ absence is default-deny, and there is no configuration flag that fabricates a pr
 The proof has two halves, in two places, because neither side can supply the other's.
 
 The **runtime** attests what it can establish about itself, in
-`apps/runtime/src/services/external-agents/isolation.ts`:
+`crates/mangostudio-runtime/src/external_agents/isolation.rs` (a port of
+`apps/runtime/src/services/external-agents/isolation.ts`):
 
-| Method             | What it means                                                          | Who makes it                                                 |
-| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `single-user-host` | The hub process serves exactly one MangoStudio user on this OS account | The in-process connector, and a paired machine for its owner |
-| `os-account`       | This process has its own uid and its own credential home               | ssh, wsl, and a hub-launched stdio runtime                   |
-| `container`        | A container whose credential home is genuinely its own                 | Container environments                                       |
+| Method             | What it means                                                          | Who makes it                                      |
+| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| `single-user-host` | The hub process serves exactly one MangoStudio user on this OS account | A paired machine for its owner                    |
+| `os-account`       | This process has its own uid and its own credential home               | Local, ssh, wsl, and a hub-launched stdio runtime |
+| `container`        | A container whose credential home is genuinely its own                 | Container environments                            |
 
 `container` is a *check*, not a label. Containerization alone proves nothing: a
 `-v ~/.claude:/root/.claude` bind mount puts the host's vendor logins inside a container whose uid
@@ -417,9 +419,13 @@ home's identity, never its contents and never a path that would leak a username.
 hub can notice that the identity behind a session changed.
 
 Every attestation is derived by the process making it, from its own credential home — including
-the in-process one, which the hub used to construct and inject. It no longer does: a runtime that
-is a separate process could not receive an injected attestation, and the fingerprint is of a home
-only that process can read.
+Local's. Local used to run inside the hub and report `single-user-host`; it is now a spawned Rust
+runtime that reports `os-account` for the same home. What made Local's claim single-user is still
+the hub's: `createLocalRuntimeConnector` binds the OS credential home to one MangoStudio user,
+announces `externalAgentIsolation: "withdrawn"` once a second owner appears (closing every
+attested Local connection first), and never attests the `local` stand-in. The runtime reads that
+claim from the hub's `hello` and omits its attestation from `runtime.health`, and the hub strips it
+from the manifest.
 
 The **hub** supplies the half a runtime cannot. From inside, a dedicated per-user SSH account and a
 shared service account four people's keys land in are indistinguishable — same uid, same `$HOME`,

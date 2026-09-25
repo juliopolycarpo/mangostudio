@@ -1118,7 +1118,7 @@ function isBackupMissingResponse(error: unknown): error is RemoteError {
 /**
  * The winning bytes, from wherever they are.
  *
- * Local reads go straight to the filesystem the hub shares with its in-process
+ * Local reads go straight to the filesystem the hub shares with its Local
  * runtime — that is what every existing apply did, and routing it through the
  * protocol would change nothing except what can break. A remote winner is read
  * over the connection, contained by the location root on that machine.

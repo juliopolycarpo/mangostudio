@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { rejectionOf } from '@mangostudio/protocol/testing';
 import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
+import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import {
   executeGlob,
   GLOB_DEFAULT_MAX_RESULTS,
@@ -90,7 +92,10 @@ describe('normalizeGlobToolSettings', () => {
 });
 
 describe('executeGlob', () => {
-  it('drops matches that a traversing pattern pulls outside the workdir', async () => {
+  // Local's runtime resolves the pattern's literal base before it walks
+  // anything, so a base that climbs out of a restricted workdir is refused as a
+  // whole rather than walked and filtered afterwards.
+  it('refuses a pattern whose base climbs outside a restricted workdir', async () => {
     const base = mkdtempSync(join(tmpdir(), 'glob-escape-'));
     try {
       const root = join(base, 'root');
@@ -100,13 +105,17 @@ describe('executeGlob', () => {
       await seedFile(join(root, 'inside.txt'), 'ok');
       await seedFile(join(outside, 'secret.txt'), 'SECRET');
 
-      const result = await executeGlob({ pattern: '../outside/*.txt' }, {
+      const attempt = executeGlob({ pattern: '../outside/*.txt' }, {
         ...makeContext(),
         workdir: root,
         workdirPolicy: { root, restricted: true },
       } as ToolContext);
 
-      expect(result.matches).toEqual([]);
+      const refusal = await rejectionOf(attempt);
+      expect(refusal).toBeInstanceOf(PathAccessError);
+      expect(refusal).toMatchObject({
+        message: expect.stringContaining(`"${outside}" resolves outside the paths`),
+      });
     } finally {
       rmSync(base, { recursive: true, force: true });
     }

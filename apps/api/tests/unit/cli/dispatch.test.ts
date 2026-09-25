@@ -166,3 +166,47 @@ describe('dispatch upgrade/update', () => {
     }
   });
 });
+
+describe('dispatch releases runtime connections', () => {
+  test('releases them after a command, and before an operator error exits', async () => {
+    const order: string[] = [];
+    const exitSpy = spyOn(process, 'exit').mockImplementation((() => {
+      order.push('exit');
+    }) as never);
+    const stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const stdoutSpy = spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const release = () => {
+      order.push('release');
+      return Promise.resolve();
+    };
+
+    try {
+      await dispatch(['version'], release);
+      await dispatch(['service'], release);
+      expect(order).toEqual(['release', 'release', 'exit']);
+    } finally {
+      exitSpy.mockRestore();
+      stderrSpy.mockRestore();
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  // A foreground or re-exec'd server keeps running after its command returns
+  // and closes its own connections on shutdown.
+  test('leaves them to a server command, which still owns them', async () => {
+    const exitSpy = spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
+    let released = 0;
+
+    try {
+      await dispatch(['serve', '--bogus'], () => {
+        released += 1;
+        return Promise.resolve();
+      });
+      expect(released).toBe(0);
+    } finally {
+      exitSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+});

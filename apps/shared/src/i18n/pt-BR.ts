@@ -2646,10 +2646,11 @@ export const messages = {
       },
       runtime: {
         title: 'Binário do runtime',
-        source: 'Executa a partir do checkout do código-fonte via Bun',
-        missing: 'não encontrado ao lado do hub',
+        notBuilt:
+          'Não compilado neste checkout do código-fonte. Execute "cargo build -p mangostudio-runtime --locked" para que o Local possa iniciar.',
+        missing: 'não encontrado; o Local não pode iniciar',
         versionMismatch:
-          'O binário do runtime informa uma versão diferente da do hub. Ambientes stdio recusarão o pareamento até que as duas coincidam.',
+          'O binário do runtime informa uma versão diferente da do hub. O Local e os ambientes stdio recusarão a conexão até que as duas coincidam.',
       },
       hostSlot: {
         title: 'Consentimento do host',
@@ -2982,6 +2983,12 @@ export const messages = {
       offlineCache: 'Cache offline',
       offlineCacheHint:
         'Não foi possível alcançar a release, então isto iniciou com um runtime que o hub já havia verificado.',
+      local: {
+        reason: {
+          'binary-missing':
+            'O binário do runtime Local não foi encontrado. Em um checkout do código-fonte, execute "cargo build -p mangostudio-runtime --locked"; em um hub instalado, reinstale o MangoStudio ou defina MANGOSTUDIO_RUNTIME_BINARY.',
+        },
+      },
       boundElsewhereHint:
         'Outro registro de ambiente, neste hub ou em outro, está conectado a este runtime. Ele aceita uma conexão de hub por vez, então este registro tenta de novo no máximo uma vez por minuto, sem atrapalhar aquela conexão. Desconecte ou remova o outro registro para usar este.',
       status: {
@@ -2994,7 +3001,7 @@ export const messages = {
         boundElsewhere: 'Vinculado a outro',
       },
       transport: {
-        'in-process': 'No processo',
+        'in-process': 'Iniciado pelo hub',
         stdio: 'Processo local',
         wsl: 'WSL',
         websocket: 'WebSocket',

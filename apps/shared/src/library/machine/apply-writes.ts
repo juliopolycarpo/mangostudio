@@ -359,9 +359,9 @@ async function rollback(
  * The counterpart of `remove-writes.ts:assertPreviewedPath`, and load-bearing
  * for the same reason: `destinationRoot` is where the review step told the user
  * these bytes were going, while the root actually written under is resolved
- * here, from this host's own `PathEnv`. Those two agree for the in-process
- * Local runtime and are allowed to disagree the moment they are different
- * machines — at which point writing anyway lands bytes in a place nobody
+ * here, from this host's own `PathEnv`. Those two agree for the Local runtime,
+ * which runs on the hub's machine with the hub's environment, and are allowed
+ * to disagree the moment they are different machines — at which point writing anyway lands bytes in a place nobody
  * consented to, silently.
  *
  * The root is compared rather than the resource path because that is what the

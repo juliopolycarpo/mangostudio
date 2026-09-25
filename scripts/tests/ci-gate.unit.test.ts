@@ -300,14 +300,15 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
   test('the real-binary-qualification job builds and points at the binary its own suite requires', () => {
     // apps/api/tests/support/rust-runtime-binary.ts's fallback stays quiet
-    // when MANGOSTUDIO_RUNTIME_BINARY is unset (the ordinary test.yml lane
-    // never sets it and never builds Rust, on purpose) -- so the one place
-    // that can catch this job forgetting to build the binary or wire the
-    // override is this static check on the job definition itself, not a
-    // runtime check inside the suite that cannot tell "an unrelated lane"
-    // from "this job, misconfigured" apart.
+    // when MANGOSTUDIO_RUNTIME_BINARY is unset and nothing is built -- so the
+    // one place that can catch this job forgetting to build the binary or
+    // wire the override is this static check on the job definition itself,
+    // not a runtime check inside the suite that cannot tell "a checkout with
+    // no build" from "this job, misconfigured" apart. The fallback resolves
+    // the binary through production's own resolver, which owns the `.exe`.
     const qualificationBlock = extractJobBlock(workflow, 'real-binary-qualification');
     const binarySupport = readText('apps/api/tests/support/rust-runtime-binary.ts');
+    const runtimePaths = readText('apps/api/src/lib/runtime-paths.ts');
 
     expect(qualificationBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
     expect(qualificationBlock).toContain(`runs-on: ${EXPR} matrix.os }}`);
@@ -316,7 +317,8 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       `MANGOSTUDIO_RUNTIME_BINARY: ${EXPR} github.workspace }}/${EXPR} matrix.runtime-binary }}`
     );
     expect(qualificationBlock).toContain('runtime-binary: target/debug/mangostudio-runtime.exe');
-    expect(binarySupport).toContain("process.platform === 'win32' ? 'mangostudio-runtime.exe'");
+    expect(binarySupport).toContain('workspaceRuntimeBinaryCandidates()');
+    expect(runtimePaths).toContain("process.platform === 'win32' ? 'mangostudio-runtime.exe'");
     // The stand-in vendor, built on its own so the runtime binary never gains
     // the SDK's `testing` feature, and pointed at so its absence fails loudly.
     expect(qualificationBlock).toContain(
@@ -385,8 +387,20 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       'apps/api/tests/support/rust-serve-runtime.ts',
       'apps/api/tests/support/fixtures/rust-filesystem-search-recorded.ts',
       'apps/api/tests/unit/services/tools/support/target-home.ts',
+      'apps/api/tests/support/fake-runtime-host.ts',
+      'apps/api/tests/support/fake-runtime-websocket-server.ts',
     ]) {
       expect(onBlock).toContain(`"${input}"`);
+      expect(matcher.test(input), `changes regex misses ${input}`).toBe(true);
+    }
+    // The MCP fixtures, including the stdio relay pair, are matched as a tree:
+    // the relay's host half and its spawned half change together.
+    expect(onBlock).toContain('"apps/api/tests/support/fixtures/mcp/**"');
+    for (const input of [
+      'apps/api/tests/support/fixtures/mcp/mcp-relay-host.ts',
+      'apps/api/tests/support/fixtures/mcp/mcp-stdio-relay.ts',
+      'apps/api/tests/support/fixtures/mcp/qualification-mcp-server.ts',
+    ]) {
       expect(matcher.test(input), `changes regex misses ${input}`).toBe(true);
     }
     expect(workflow).not.toContain('rust-typescript-runtimes');

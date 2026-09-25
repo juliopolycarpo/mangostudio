@@ -672,6 +672,8 @@ The CI browser-smoke job runs on `ubuntu-24.04` because Playwright 1.60 cannot i
 
 `playwright.config.ts` at the repo root starts both servers via `webServer` before running tests. In CI it enforces `workers: 1` and uploads traces/screenshots on failure.
 
+The web server is `bun run dev --api`, which runs `cargo build -p mangostudio-runtime --locked` before the hub starts, because the hub launches Local as that binary. CI downloads the binary built once for the run instead, and `MANGOSTUDIO_RUNTIME_BINARY` makes `bun run dev` skip its own build (see [CI runtime binary](#ci-runtime-binary)).
+
 Test scenarios (`tests/browser-smoke/auth-flow.spec.ts`):
 
 1. `/login` page renders
@@ -725,6 +727,17 @@ smoke active.
 bun run --filter @mangostudio/api test:unit
 bun run --filter @mangostudio/api test:integration
 ```
+
+> **Local needs the runtime binary.** The hub launches Local as the Rust
+> `mangostudio-runtime`, so every API test that reaches Local spawns it. Build it
+> first with `cargo build -p mangostudio-runtime`, or point
+> `MANGOSTUDIO_RUNTIME_BINARY` at one; without either, those tests fail with
+> `RuntimeBinaryNotFoundError` and the build command — there is no TypeScript
+> fallback. `tests/integration/services/local-rust-runtime.integration.test.ts`
+> qualifies Local itself through the real connector: the `host` slot, the
+> single-owner attestation, terminal revocation, reaping on disconnect, and a home
+> the TypeScript runtime wrote. No API test imports the TypeScript runtime or
+> spawns it by path; `runtime-module-allow-list.test.ts` fails the lane if one does.
 
 > **Run API tests from the workspace.** `apps/api/bunfig.toml` declares the test
 > preload, and Bun resolves `bunfig.toml` relative to the current directory. Running
@@ -1115,12 +1128,11 @@ installed by that workspace's preload only, so this is an api-lane instrument.
 The CI test lanes set the flag (`.github/workflows/test.yml`); unset, nothing is
 installed and nothing is paid for.
 
-> **Local is in-process.** There is no runtime child process for the `local`
-> environment — `createLocalRuntimeConnector` builds a runtime host definition
-> inside the hub and connects it through an in-process port pair. A test suite
-> that connects Local per test does spin one host per test, and each host probes
-> `git --version` synchronously. Connect once per file instead; the checkpoint
-> suites are the worked example.
+> **Local is a child process.** `createLocalRuntimeConnector` spawns the
+> `mangostudio-runtime` binary for every connection, so a test suite that connects
+> Local per test spawns and handshakes one runtime per test. Connect once per file
+> instead (`tests/support/fixtures/local-runtime-user.ts`); the checkpoint suites
+> are the worked example. Closing the connection waits for the child to exit.
 
 > **`pgrep -f` matches its own command line.** A wait loop shaped like
 > `until ! pgrep -f "bun run test"; do sleep 1; done` never terminates when it
@@ -1130,16 +1142,36 @@ installed and nothing is paid for.
 > and poll `kill -0 "$pid"` instead, or run the command in the foreground and
 > skip the wait loop entirely.
 
+## CI Runtime Binary
+
+Every lane that starts a hub needs the `mangostudio-runtime` binary Local launches.
+`.github/workflows/local-runtime.yml` builds it once per CI run (a Linux debug build, with
+the cargo cache) and uploads it as `local-runtime-linux-x64`. The composite action
+`.github/actions/local-runtime` downloads that artifact — or builds the binary itself when
+no artifact is named — asks it for `--version`, and exports `MANGOSTUDIO_RUNTIME_BINARY`
+for the rest of the job. A missing or broken binary fails that step by name instead of
+surfacing as scattered Local connect failures. The artifact also carries the
+`fake_cursor_agent` example, built in its own cargo invocation and exported as
+`MANGOSTUDIO_FAKE_CURSOR_AGENT`, so the external-agent qualification suites run in the
+ordinary shards instead of skipping.
+
+- `test.yml` takes the artifact name as a required `runtime_artifact` input, and every
+  shard runs the action before its tests. The frontend lane does not need it.
+- `browser-smoke.yml` takes the same input; a manual dispatch has none and builds in-job.
+- `randomized-order-nightly.yml` builds it in its api lanes.
+- `cargo-shim.yml`'s `real-binary-qualification` builds its own and also runs
+  `local-rust-runtime.integration.test.ts` on Linux, macOS and Windows.
+
 ## CI Artifact Retention
 
 CI artifacts fall into four retention classes; keep new uploads aligned with them:
 
-| Class               | Examples                                                                | Policy                                                 |
-| ------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ |
-| Job-to-job handoff  | `test-shard-<n>` (shard → merge), `qa-test-metrics` (test → qa-metrics) | 1 day — consumed within the same run                   |
-| Failure diagnostics | `test-shard-<n>-log`, merged coverage, Playwright traces and report     | 7–14 days, uploaded only `if: failure()`               |
-| Release assets      | staged binaries and packages in the release pipeline                    | 30 days                                                |
-| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs                        | 90 days — exact-SHA baselines for future PR QA reports |
+| Class               | Examples                                                                                                                           | Policy                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Job-to-job handoff  | `test-shard-<n>` (shard → merge), `qa-test-metrics` (test → qa-metrics), `local-runtime-linux-x64` (build → shards, browser smoke) | 1 day — consumed within the same run                   |
+| Failure diagnostics | `test-shard-<n>-log`, merged coverage, Playwright traces and report                                                                | 7–14 days, uploaded only `if: failure()`               |
+| Release assets      | staged binaries and packages in the release pipeline                                                                               | 30 days                                                |
+| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs                                                                                   | 90 days — exact-SHA baselines for future PR QA reports |
 
 Green runs summarize their outcome in the step summary (`$GITHUB_STEP_SUMMARY`)
 instead of uploading success-only artifacts. The browser-smoke workflow keeps a

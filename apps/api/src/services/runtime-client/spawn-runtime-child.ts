@@ -24,6 +24,7 @@ import {
   spawnPort,
 } from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/shared/process';
+import type { HubExternalAgentIsolation } from '@mangostudio/shared/runtime-contract';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 import { resolveHandshakeTimeoutMs } from './handshake-budget';
@@ -90,6 +91,12 @@ export interface SpawnRuntimeChildOptions {
    * binary someone else owns, and the protocol version still does.
    */
   readonly requireMatchingRelease?: boolean;
+  /**
+   * What this hub announces about who reaches the child's machine; see
+   * `OpenHubSessionOptions.externalAgentIsolation`. Only the hub's own Local
+   * runtime states one — `withdrawn` once a second MangoStudio user is known.
+   */
+  readonly externalAgentIsolation?: HubExternalAgentIsolation;
   /**
    * Replaces the explanation a failed launch reports. A launcher that runs
    * through a wrapper knows things this file cannot — that `ssh` says
@@ -166,6 +173,9 @@ export async function spawnRuntimeChild(
         // a binary from another release is a stale install rather than a peer to
         // negotiate with.
         requireMatchingRelease: options.requireMatchingRelease ?? true,
+        ...(options.externalAgentIsolation
+          ? { externalAgentIsolation: options.externalAgentIsolation }
+          : {}),
       }),
       signal
     );
@@ -362,8 +372,8 @@ function cancelledError(command: string): RemoteError {
 
 /**
  * Races `promise` against `signal`, rejecting with {@link SpawnCancelled} the
- * moment it aborts — the same idiom `isAuthorizedLocalWorkspace`
- * (`runtime-connection-manager.ts`) uses: a `Promise.withResolvers` sentinel
+ * moment it aborts — the same idiom `isAuthorizedEnvironmentWorkspace`
+ * (`hub-workspace-authority.ts`) uses: a `Promise.withResolvers` sentinel
  * wired to the abort event, raced rather than substituted for the original.
  * Whichever side loses is not awaited again once the race settles, so its
  * eventual settlement is caught here instead of surfacing as unhandled — a
