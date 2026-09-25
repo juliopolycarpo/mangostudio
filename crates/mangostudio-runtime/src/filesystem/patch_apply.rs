@@ -328,16 +328,18 @@ fn commit_revalidated_with_hook(
         else {
             continue;
         };
-        if let Err(error) = io::move_no_overwrite(&policy, resolved_path, destination) {
-            record_uncertain_move_paths(&mut changed_paths, resolved_path, destination, &error);
-            return Err(commit_error(&changed_paths, error));
-        }
+        // The move returns the destination hash it verified, so the
+        // destination is not read a second time.
+        let hash = match io::move_no_overwrite(&policy, resolved_path, destination) {
+            Ok(hash) => hash,
+            Err(error) => {
+                record_uncertain_move_paths(&mut changed_paths, resolved_path, destination, &error);
+                return Err(commit_error(&changed_paths, error));
+            }
+        };
         changed_paths.push(resolved_path.clone());
         changed_paths.push(destination.clone());
-        match io::hash_file(&policy, destination) {
-            Ok(hash) => move_hashes[index] = Some(hash),
-            Err(error) => return Err(commit_error(&changed_paths, error)),
-        }
+        move_hashes[index] = Some(hash);
     }
     for operation in planned {
         let PlannedOperation::Delete { resolved_path, .. } = operation else {
