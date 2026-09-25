@@ -1515,4 +1515,53 @@ mod tests {
         assert_eq!(error.code, codes::DENIED);
         assert!(!path.exists());
     }
+
+    /// A patch move proves the destination holds the bytes it just
+    /// revalidated (or wrote), so the destination is fresh for the next patch
+    /// and the vacated source is not, as the TypeScript runtime's rekey did.
+    #[tokio::test]
+    async fn a_patch_move_leaves_the_destination_fresh_and_the_source_forgotten() {
+        for hunks in [
+            json!([]),
+            json!([{"lines":[{"type":"delete","content":"before","ending":"\n"},{"type":"add","content":"after","ending":"\n"}]}]),
+        ] {
+            let (home, service) = fixture();
+            let source = home.join("source.txt");
+            let destination = home.join("moved").join("destination.txt");
+            fs::write(&source, "before\n").unwrap();
+            mark_read(&service, &source);
+            apply(
+                Arc::clone(&service),
+                params(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "operations":[{"type":"update","inputPath":"source.txt","resolvedPath":source,
+                        "moveTo":"moved/destination.txt","resolvedMoveTo":destination,"hunks":hunks}]
+                })),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            let current = fs::read_to_string(&destination).unwrap();
+            let follow_up = apply(
+                Arc::clone(&service),
+                params(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "operations":[{"type":"update","inputPath":"moved/destination.txt","resolvedPath":destination,
+                        "hunks":[{"lines":[{"type":"delete","content":current.trim_end(),"ending":"\n"},{"type":"add","content":"edited","ending":"\n"}]}]}]
+                })),
+                CancellationToken::new(),
+            )
+            .await;
+            assert!(
+                follow_up.is_ok(),
+                "expected the moved destination editable without a re-read (hunks {hunks}) | received: {follow_up:?}"
+            );
+            assert_eq!(fs::read_to_string(&destination).unwrap(), "edited\n");
+            let source_entry = lock(&service.state.ledger).complete_entry("chat", &source);
+            assert!(
+                source_entry.is_err(),
+                "expected no freshness left for the vacated source | received: {source_entry:?}"
+            );
+        }
+    }
 }

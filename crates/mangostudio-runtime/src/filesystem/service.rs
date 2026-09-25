@@ -2445,4 +2445,139 @@ mod tests {
             "expected the link target outside the root untouched"
         );
     }
+
+    fn move_params(from: &Path, to: &Path, capture_snapshot: bool) -> MoveParams {
+        decode(json!({
+            "chatId":"chat", "captureSnapshot":capture_snapshot,
+            "inputFrom":"source", "inputTo":"destination",
+            "resolvedFrom":from, "resolvedTo":to
+        }))
+    }
+
+    fn error_kind(result: &Result<Value, RemoteError>) -> Option<Value> {
+        result
+            .as_ref()
+            .err()
+            .and_then(|error| error.details.as_ref())
+            .map(|details| details["kind"].clone())
+    }
+
+    /// A move proves the destination holds exactly the bytes the source read
+    /// observed, so the chat may overwrite the destination without re-reading
+    /// it, as the TypeScript runtime's `rekeyFile` allowed.
+    #[tokio::test]
+    async fn a_move_carries_the_source_read_to_the_destination() {
+        for capture_snapshot in [false, true] {
+            let (home, service) = fixture();
+            let source = home.join("source");
+            let destination = home.join("nested").join("destination");
+            seed_and_read(&service, &source, b"observed\n").await;
+
+            Arc::clone(&service)
+                .move_file(
+                    move_params(&source, &destination, capture_snapshot),
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            let written = Arc::clone(&service)
+                .write(
+                    write_params(&destination, "updated\n"),
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+
+            assert!(
+                written
+                    .as_ref()
+                    .is_ok_and(|value| value["result"]["created"] == json!(false)),
+                "expected an overwrite of the moved destination without a re-read \
+                 (captureSnapshot {capture_snapshot}) | received: {written:?}"
+            );
+            assert_eq!(std::fs::read(&destination).unwrap(), b"updated\n");
+            let source_write = Arc::clone(&service)
+                .write(
+                    write_params(&source, "recreated\n"),
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            assert!(
+                source_write.is_ok(),
+                "expected the vacated source to be a fresh create | received: {source_write:?}"
+            );
+        }
+    }
+
+    /// Carrying freshness never invents it: an unread source leaves the
+    /// destination unread, and a partial source read stays partial.
+    #[tokio::test]
+    async fn a_move_never_marks_unread_content_fresh() {
+        let (home, service) = fixture();
+        let unread = home.join("unread");
+        let unread_to = home.join("unread-moved");
+        std::fs::write(&unread, b"never read\n").unwrap();
+        Arc::clone(&service)
+            .move_file(
+                move_params(&unread, &unread_to, false),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let refused = Arc::clone(&service)
+            .write(
+                write_params(&unread_to, "oops\n"),
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        assert_eq!(
+            error_kind(&refused),
+            Some(json!("file_not_read")),
+            "expected an unread moved file to stay unread | received: {refused:?}"
+        );
+
+        let partial = home.join("partial");
+        let partial_to = home.join("partial-moved");
+        std::fs::write(&partial, b"one\ntwo\n").unwrap();
+        let mut params = read_params(&partial);
+        params.max_lines = Some(1.0);
+        Arc::clone(&service)
+            .read(
+                params,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        Arc::clone(&service)
+            .move_file(
+                move_params(&partial, &partial_to, false),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let refused = Arc::clone(&service)
+            .write(
+                write_params(&partial_to, "oops\n"),
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        assert_eq!(
+            error_kind(&refused),
+            Some(json!("partial_read")),
+            "expected a partially read moved file to stay partial | received: {refused:?}"
+        );
+        assert_eq!(std::fs::read(&unread_to).unwrap(), b"never read\n");
+        assert_eq!(std::fs::read(&partial_to).unwrap(), b"one\ntwo\n");
+    }
 }
