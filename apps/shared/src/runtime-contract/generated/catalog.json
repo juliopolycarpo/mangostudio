@@ -10259,6 +10259,93 @@
       "capabilities": []
     },
     {
+      "name": "runtime.discover",
+      "description": "The methods and feature groups this runtime build implements, independent of consent. Unlike rpc.discover, which returns the whole contract, this is proof of implementation.",
+      "params": {
+        "type": "object",
+        "properties": {}
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "schema",
+          "fingerprint",
+          "features",
+          "methods"
+        ],
+        "properties": {
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "features": {
+            "type": "object",
+            "required": [
+              "git",
+              "probing",
+              "mcp",
+              "library",
+              "checkpoints",
+              "fsRead",
+              "fsWrite",
+              "shell",
+              "update",
+              "externalAgents",
+              "terminal"
+            ],
+            "properties": {
+              "git": {
+                "type": "boolean"
+              },
+              "probing": {
+                "type": "boolean"
+              },
+              "mcp": {
+                "type": "boolean"
+              },
+              "library": {
+                "type": "boolean"
+              },
+              "checkpoints": {
+                "type": "boolean"
+              },
+              "fsRead": {
+                "type": "boolean"
+              },
+              "fsWrite": {
+                "type": "boolean"
+              },
+              "shell": {
+                "type": "boolean"
+              },
+              "update": {
+                "type": "boolean"
+              },
+              "externalAgents": {
+                "type": "boolean"
+              },
+              "terminal": {
+                "type": "boolean"
+              }
+            }
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        }
+      },
+      "capabilities": []
+    },
+    {
       "name": "runtime.update.begin",
       "params": {
         "type": "object",
@@ -12032,6 +12119,75 @@
           },
           "externalAgents": {
             "type": "boolean"
+          }
+        }
+      },
+      "implementation": {
+        "type": "object",
+        "required": [
+          "schema",
+          "fingerprint",
+          "features"
+        ],
+        "properties": {
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "features": {
+            "type": "object",
+            "required": [
+              "git",
+              "probing",
+              "mcp",
+              "library",
+              "checkpoints",
+              "fsRead",
+              "fsWrite",
+              "shell",
+              "update",
+              "externalAgents",
+              "terminal"
+            ],
+            "properties": {
+              "git": {
+                "type": "boolean"
+              },
+              "probing": {
+                "type": "boolean"
+              },
+              "mcp": {
+                "type": "boolean"
+              },
+              "library": {
+                "type": "boolean"
+              },
+              "checkpoints": {
+                "type": "boolean"
+              },
+              "fsRead": {
+                "type": "boolean"
+              },
+              "fsWrite": {
+                "type": "boolean"
+              },
+              "shell": {
+                "type": "boolean"
+              },
+              "update": {
+                "type": "boolean"
+              },
+              "externalAgents": {
+                "type": "boolean"
+              },
+              "terminal": {
+                "type": "boolean"
+              }
+            }
           }
         }
       }

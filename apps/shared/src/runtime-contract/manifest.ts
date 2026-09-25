@@ -16,6 +16,7 @@ import {
 } from '../external-agents/schemas';
 import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '../library/hash';
 import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
+import { RuntimeImplementationSchema } from './implementation';
 
 export const RuntimeShellKindSchema = Type.Union([
   Type.Literal('bash'),
@@ -172,6 +173,17 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * distinction must handle its absence rather than assume a refusal.
    */
   allow: Type.Optional(RuntimeCapabilityAllowSchema),
+  /**
+   * Which feature groups this *build* implements, independent of consent and
+   * machine availability — the ceiling `features` is intersected with.
+   *
+   * Absent means **unknown**: an older peer (including the TypeScript runtime)
+   * folds implementation into `features`, so a hub must use the handshake
+   * `features` as the ceiling and cannot tell a build gap from a refusal. See
+   * `implementation.ts` for how this relates to `rpc.discover` and
+   * `runtime.discover`.
+   */
+  implementation: Type.Optional(RuntimeImplementationSchema),
 });
 export type RuntimeCapabilityManifest = Static<typeof RuntimeCapabilityManifestSchema>;
 

@@ -13,6 +13,7 @@ export * from './errors';
 export * from './events';
 export * from './hub-binding';
 export * from './hub-contract';
+export * from './implementation';
 export * from './limits';
 export * from './manifest';
 export * from './methods';

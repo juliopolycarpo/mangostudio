@@ -70,12 +70,12 @@ describe('RUNTIME_CONTRACT', () => {
     ).toThrow(/not a valid name/);
   });
 
-  it('requires capabilities except for health and terminal cleanup', () => {
+  it('requires capabilities except for health, discovery and terminal cleanup', () => {
     const ungoverned = Object.entries(RUNTIME_CONTRACT.definition.methods)
       .filter(([, entry]) => (entry.capabilities ?? []).length === 0)
       .map(([method]) => method);
 
-    expect(ungoverned).toEqual(['terminal.close', 'runtime.health']);
+    expect(ungoverned).toEqual(['terminal.close', 'runtime.health', 'runtime.discover']);
   });
 
   it('validates the external-agent parameters it reuses a schema for', () => {
