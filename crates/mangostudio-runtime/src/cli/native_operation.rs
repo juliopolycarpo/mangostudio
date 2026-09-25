@@ -270,8 +270,10 @@ fn read_audit_error(slot: RuntimeSlot, home: &Path) -> Option<String> {
 /// sink's last write failure. Mirrors the operator-actionable part of
 /// `health.ts`'s `diagnoseRuntimeHealth`: the config error, consent, a
 /// config that records another version than this binary, and an audit
-/// log that stopped landing. The version finding names no fix: this
-/// crate's `setup` does not record a version the way `setup.ts` did.
+/// log that stopped landing. The version finding names no fix: unlike
+/// `setup.ts`, this crate's `setup` command does not rewrite `version`.
+/// Only the launch that records consent on a first answer does
+/// (`consent::invocation`), so no command an operator runs resyncs it.
 ///
 /// Usage: `health_findings(&report, None)` for a slot whose audit writes land.
 fn health_findings(report: &Value, audit_error: Option<&str>) -> Vec<Value> {
