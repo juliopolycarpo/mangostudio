@@ -8,6 +8,7 @@ use std::time::Duration;
 use mango_protocol::close::close_codes;
 use mango_protocol::session::{Session, SessionOptions};
 use mango_protocol::transports::spawn::{SpawnOptions, sanitized_env, spawn_port};
+use mango_protocol::{PROTOCOL_VERSION, ProtocolVersion};
 
 mod support;
 
@@ -56,6 +57,45 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
 
     // Release cleanly: the hub side closes, the child exits 0 (see the
     // stdio consent tests in `tests/cli.rs` for the refusal path).
+    session
+        .close(close_codes::RELEASED, Some("test done"))
+        .await;
+    let _ = driver.await;
+}
+
+/// A hub one wire minor behind still drives the runtime: the handshake runs
+/// at the hub's minor, and the runtime answers at it. Wire 1.2 only added a
+/// rule the responder follows, so nothing the runtime sends changes shape.
+#[tokio::test]
+async fn a_hub_on_an_older_wire_minor_negotiates_down_and_is_served() {
+    let home = scratch_home("older-minor");
+    let env = sanitized_env([(
+        "MANGO_HOME".to_string(),
+        home.to_string_lossy().into_owned(),
+    )]);
+    let options = SpawnOptions::new([binary_path(), "stdio".to_string()]).with_env(env);
+    let (port, _launched) = spawn_port(options).expect("the argv names a real binary");
+    let older = ProtocolVersion::new(PROTOCOL_VERSION.major, PROTOCOL_VERSION.minor - 1);
+    let options = SessionOptions::new(support::peer("hub")).with_protocol(older);
+    let (session, driver) = Session::spawn(port, options);
+
+    let remote = tokio::time::timeout(Duration::from_secs(10), session.ready())
+        .await
+        .expect("the child must say hello within the timeout")
+        .expect("the handshake succeeds");
+    assert_eq!(
+        remote.protocol, PROTOCOL_VERSION,
+        "expected the runtime to announce this crate's wire version"
+    );
+    assert_eq!(
+        remote.effective_minor, older.minor,
+        "expected the session to run at the hub's lower minor"
+    );
+    session
+        .request("runtime.health", serde_json::json!({}))
+        .await
+        .expect("the runtime answers a hub on the older minor");
+
     session
         .close(close_codes::RELEASED, Some("test done"))
         .await;
