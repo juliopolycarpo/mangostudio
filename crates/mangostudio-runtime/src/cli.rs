@@ -33,7 +33,21 @@ use crate::transport::connect::RandomJitter;
 #[path = "cli/native_operation.rs"]
 mod native_operation;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The release this binary reports: `--version`, the handshake's peer
+/// version, and every health payload.
+///
+/// `scripts/build.ts` stamps the distribution's release version in at compile
+/// time through `MANGOSTUDIO_RELEASE_VERSION`, because a canary or dry-run
+/// build carries a version (`0.0.0-dryrun`, `<x>-canary.<sha>`) the committed
+/// manifest never does, and the hub refuses a sibling runtime whose release
+/// differs from its own. A plain `cargo build` falls back to the manifest
+/// version, which `bun run check:versions` keeps in lockstep with the app.
+/// This is a compile-time stamp, not host configuration: nothing reads it
+/// from the process environment at run time.
+const VERSION: &str = match option_env!("MANGOSTUDIO_RELEASE_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 const USAGE: &str = "mangostudio-runtime {VERSION}\n\
 \n\
