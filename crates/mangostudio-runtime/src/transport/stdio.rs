@@ -19,9 +19,7 @@ use crate::runtime_home::{
     resolve_runtime_slot_for_current_exe, resolve_runtime_source_for_current_exe,
 };
 use crate::supervisor::{ShutdownSignals, join_owned};
-use crate::transport::{
-    build_host_with_restart, hello_capabilities, identify_hub, runtime_peer, start_session,
-};
+use crate::transport::{build_host_with_restart, hello_capabilities, runtime_peer, start_session};
 
 /// Shorter than [`mango_protocol::session::DEFAULT_HANDSHAKE_TIMEOUT`]: a
 /// launcher that reached this process over a pipe it just opened is either
@@ -77,19 +75,6 @@ pub(crate) async fn run_with_signals(
         slot.as_str(),
     );
 
-    // stdio has no `ready()` await of its own to hang the hub identity on,
-    // so a task waits for it; it ends on its own once the handshake
-    // settles either way, and is aborted below if the session ends first.
-    let hub_identity = tokio::spawn({
-        let session = session.clone();
-        let audit = host.audit.clone();
-        async move {
-            if session.ready().await.is_ok() {
-                identify_hub(&session, audit.as_ref());
-            }
-        }
-    });
-
     // A signal races the driver to completion: a peer that closes on its
     // own first must not wait for a signal that may never come, and a
     // signal that arrives first releases the session cooperatively (a
@@ -109,7 +94,6 @@ pub(crate) async fn run_with_signals(
             (result.expect("the session driver must run to completion, never be aborted or panic"), false, false)
         }
     };
-    hub_identity.abort();
     // Either way the session is over: the children it started begin their bounded release now,
     // concurrently with the install wait below, and `cli.rs` awaits it before exiting.
     crate::release::Release::process().begin();

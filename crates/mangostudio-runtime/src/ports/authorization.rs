@@ -196,6 +196,11 @@ impl Guard for AuthorizationGuard {
     ) -> Pin<Box<dyn Future<Output = Result<(), RemoteError>> + Send + 'a>> {
         Box::pin(async move {
             let started = self.clock.now();
+            // First, before anything this call can record: the session's
+            // driver may dispatch a hub's first call before the transport
+            // task awaiting the handshake ever runs, so the hub is named
+            // from the call itself rather than from that task.
+            self.audit.identify_hub(&context.remote().capabilities);
             let call_id = context.id();
             // Checked, and claimed, before the authorization check itself —
             // mirroring `consent-gate.ts`'s own ordering (exclusivity first,

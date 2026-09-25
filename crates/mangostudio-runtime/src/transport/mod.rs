@@ -124,11 +124,6 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 /// takes a fresh `RuntimeHostDefinition` per call for the same reason.
 pub(crate) struct SessionHost {
     pub registry: Registry,
-    /// The concrete audit sink `registry` records through, kept so the
-    /// transport can name the hub on it once the handshake completes; see
-    /// [`identify_hub`]. `None` when the slot's `audit.enabled` is off and
-    /// `registry` records through [`crate::ports::audit::NoopAudit`].
-    pub audit: Option<Arc<crate::audit::FileAudit>>,
     pub authorization: Arc<dyn Authorization>,
     pub update: crate::update::UpdateBinding,
 }
@@ -187,15 +182,13 @@ pub(crate) fn build_host_with_restart(
     runtime_version: &str,
     supervised: bool,
 ) -> SessionHost {
-    let file_audit = slot_audit_enabled(slot, mango_home).then(|| {
+    let audit: Arc<dyn Audit> = if slot_audit_enabled(slot, mango_home) {
         Arc::new(crate::audit::FileAudit::new(
             slot_audit_log_path(slot, mango_home),
             Arc::new(SystemWallClock),
         ))
-    });
-    let audit: Arc<dyn Audit> = match &file_audit {
-        Some(file_audit) => Arc::clone(file_audit) as Arc<dyn Audit>,
-        None => Arc::new(crate::ports::audit::NoopAudit),
+    } else {
+        Arc::new(crate::ports::audit::NoopAudit)
     };
     let update =
         crate::update::UpdateBinding::new_with_restart(slot, mango_home.to_path_buf(), supervised);
@@ -246,27 +239,8 @@ pub(crate) fn build_host_with_restart(
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
-        audit: file_audit,
         authorization,
         update,
-    }
-}
-
-/// Names the hub on `audit` from the `hello.capabilities` of `session`'s
-/// peer, once its handshake has completed. Mirrors `session.ts`'s
-/// `setHub(hubIdentityOf(remote.capabilities))` on `session.ready`: a hub
-/// that announces no valid `capabilities.hub` leaves every line reading
-/// `"unidentified hub"`. Called by each transport right after its own
-/// `session.ready()` settles successfully; a session still handshaking
-/// changes nothing.
-pub(crate) fn identify_hub(session: &Session, audit: Option<&Arc<crate::audit::FileAudit>>) {
-    let Some(audit) = audit else {
-        return;
-    };
-    if let Ok(remote) = session.remote() {
-        audit.set_hub(crate::audit::HubIdentity::from_capabilities(
-            &remote.capabilities,
-        ));
     }
 }
 
@@ -432,7 +406,7 @@ mod tests {
 
     use super::{
         RUNTIME_HEARTBEAT_TOPIC, RUNTIME_PEER_NAME, RUNTIME_PEER_ROLE, build_host, heartbeat_loop,
-        runtime_contract, runtime_peer,
+        runtime_contract, runtime_peer, start_session,
     };
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::scratch_path;
@@ -584,6 +558,61 @@ mod tests {
             Some(&serde_json::json!({ &catalog.name: &catalog.version }))
         );
         assert_eq!(capabilities["enforcesPathPolicy"], true);
+    }
+
+    /// A call the hub makes the instant its handshake completes is recorded
+    /// under the hub its `hello` named, with nothing but the session between
+    /// them: no transport step has to win a race against the driver's
+    /// dispatch of that first call before the line is written.
+    #[tokio::test]
+    async fn the_first_call_after_hello_is_audited_under_the_hubs_identity() {
+        let home = crate::test_support::scratch_dir("transport-hub-identity");
+        let slot_dir = home.join("runtime").join("host");
+        std::fs::create_dir_all(&slot_dir).expect("the slot directory is created");
+        std::fs::write(
+            slot_dir.join("runtime.json"),
+            br#"{"schemaVersion":1,"slot":"host","audit":{"enabled":true}}"#,
+        )
+        .expect("the slot config is written");
+        let host = build_host(RuntimeSlot::Host, &home, "9.9.9");
+        let (runtime_end, hub_end) = port_pair();
+        let (_runtime, runtime_driver) = start_session(
+            runtime_end,
+            SessionOptions::new(runtime_peer("9.9.9")),
+            host.registry,
+            host.authorization,
+            host.update,
+            RuntimeSlot::Host.as_str(),
+        );
+        let capabilities = serde_json::json!({ "hub": { "user": "bob", "host": "desk" } });
+        let (hub, hub_driver) = Session::spawn(
+            hub_end,
+            SessionOptions::new(peer("hub"))
+                .with_capabilities(capabilities.as_object().expect("an object").clone()),
+        );
+        hub.ready().await.expect("the handshake completes");
+        hub.request("runtime.health", serde_json::json!({}))
+            .await
+            .expect("runtime.health answers");
+
+        let path = crate::runtime_home::slot_audit_log_path(RuntimeSlot::Host, &home);
+        let contents = std::fs::read_to_string(&path).unwrap_or_default();
+        let hub_label = contents.lines().last().map_or_else(
+            || "no audit line".to_string(),
+            |line| {
+                let line: serde_json::Value =
+                    serde_json::from_str(line).expect("an audit line is JSON");
+                line["hub"].as_str().unwrap_or_default().to_string()
+            },
+        );
+        hub.close(mango_protocol::close::close_codes::RELEASED, None)
+            .await;
+        let _ = hub_driver.await;
+        let _ = runtime_driver.await;
+        assert!(
+            hub_label == "bob@desk",
+            "expected audit hub: bob@desk | received: {hub_label}"
+        );
     }
 
     #[test]
