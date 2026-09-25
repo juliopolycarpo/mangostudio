@@ -884,7 +884,10 @@ export class RuntimeConnectionManager {
     environmentId: string
   ): Promise<RuntimeDiscoverResult | undefined> {
     const client = await this.getExistingClient(userId, environmentId);
-    return await this.#discoveryCache.resolve(runtimeDiscoveryKey(userId, environmentId), client);
+    return await this.#discoveryCache.resolve(runtimeDiscoveryKey(userId, environmentId), client, {
+      userId,
+      environmentId,
+    });
   }
 
   disconnect(userId: string, environmentId: string): void {

@@ -306,6 +306,9 @@ export function createRuntimeLifecycleService(
     try {
       return await manager.discoverImplementation(userId, environmentId);
     } catch {
+      // Reported once per failed connection by the discovery cache, which
+      // re-throws the cached failure on every later read; logging here would
+      // repeat it on each panel load.
       return undefined;
     }
   };

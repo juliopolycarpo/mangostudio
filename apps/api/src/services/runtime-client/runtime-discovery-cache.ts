@@ -17,6 +17,9 @@ import {
   type RuntimeCapabilityManifest,
   type RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
+import { createDiagnosticLogger, type DiagnosticLogger } from '../../lib/logger';
+
+const logger = createDiagnosticLogger('runtime-discovery');
 
 /**
  * How long one `runtime.discover` may take. The protocol SDK has no default
@@ -34,6 +37,14 @@ export interface RuntimeDiscoverySource {
 export interface RuntimeDiscoveryCacheOptions {
   /** Defaults to {@link RUNTIME_DISCOVER_TIMEOUT_MS}; overridable for tests. */
   readonly timeoutMs?: number;
+  /** Where a failed fetch is reported; defaults to this module's diagnostic logger. */
+  readonly logger?: DiagnosticLogger;
+}
+
+/** Who a cached surface belongs to, for the failure diagnostic. */
+export interface RuntimeDiscoverySubject {
+  readonly userId: string;
+  readonly environmentId: string;
 }
 
 interface CachedDiscovery {
@@ -58,9 +69,11 @@ interface CachedDiscovery {
 export class RuntimeDiscoveryCache {
   readonly #entries = new Map<string, CachedDiscovery>();
   readonly #timeoutMs: number;
+  readonly #logger: DiagnosticLogger;
 
   constructor(options: RuntimeDiscoveryCacheOptions = {}) {
     this.#timeoutMs = options.timeoutMs ?? RUNTIME_DISCOVER_TIMEOUT_MS;
+    this.#logger = options.logger ?? logger;
   }
 
   /**
@@ -107,7 +120,8 @@ export class RuntimeDiscoveryCache {
    */
   async resolve(
     key: string,
-    source: RuntimeDiscoverySource
+    source: RuntimeDiscoverySource,
+    subject?: RuntimeDiscoverySubject
   ): Promise<RuntimeDiscoverResult | undefined> {
     const fingerprint = fingerprintOf(source.manifest);
     if (fingerprint === undefined) return undefined;
@@ -123,9 +137,20 @@ export class RuntimeDiscoveryCache {
     this.#entries.set(key, entry);
     // A failure stays cached as this connection's rejected `discovery`: a
     // runtime that cannot answer is asked once per connection, not on every
-    // read. A reconnect or `forget` asks again.
-    entry.settled = await discovery;
-    return entry.settled;
+    // read. A reconnect or `forget` asks again. Only this first await sees
+    // the failure here, so it is reported once per failed connection, while
+    // every later read re-throws the cached rejection silently.
+    try {
+      entry.settled = await discovery;
+      return entry.settled;
+    } catch (error) {
+      this.#logger.warn('runtime_discover_failed', {
+        ...(subject ?? { key }),
+        fingerprint,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 }
 

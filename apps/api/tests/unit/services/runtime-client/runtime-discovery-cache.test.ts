@@ -3,6 +3,7 @@ import type {
   RuntimeCapabilityManifest,
   RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
+import type { DiagnosticLogger } from '../../../../src/lib/logger';
 import {
   RUNTIME_DISCOVER_TIMEOUT_MS,
   RuntimeDiscoveryCache,
@@ -85,6 +86,24 @@ class StalledDiscoverySource implements RuntimeDiscoverySource {
 
   fail(error: Error): void {
     this.#pending.reject(error);
+  }
+}
+
+/** A diagnostic logger that keeps the warnings it was given. */
+class RecordingLogger implements DiagnosticLogger {
+  readonly warnings: { event: string; metadata: unknown }[] = [];
+  readonly ignored: string[] = [];
+  debug(event: string): void {
+    this.ignored.push(event);
+  }
+  info(event: string): void {
+    this.ignored.push(event);
+  }
+  error(event: string): void {
+    this.ignored.push(event);
+  }
+  warn(event: string, metadata?: unknown): void {
+    this.warnings.push({ event, metadata });
   }
 }
 
@@ -174,6 +193,29 @@ describe('RuntimeDiscoveryCache', () => {
     const reconnected = new FakeDiscoverySource(BUILD_A);
     cache.observe(KEY, reconnected.manifest);
     expect((await cache.resolve(KEY, reconnected))?.fingerprint).toBe(BUILD_A);
+  });
+
+  it('logs a failure once per failed connection, however often it is read', async () => {
+    const logger = new RecordingLogger();
+    const cache = new RuntimeDiscoveryCache({ logger });
+    const broken = new FakeDiscoverySource(BUILD_A, BUILD_B);
+    const subject = { userId: 'user-1', environmentId: 'env-1' };
+
+    await expect(cache.resolve(KEY, broken, subject)).rejects.toThrow();
+    await expect(cache.resolve(KEY, broken, subject)).rejects.toThrow();
+    await expect(cache.resolve(KEY, broken, subject)).rejects.toThrow();
+
+    expect(logger.warnings).toEqual([
+      {
+        event: 'runtime_discover_failed',
+        metadata: {
+          userId: 'user-1',
+          environmentId: 'env-1',
+          fingerprint: BUILD_A,
+          error: `runtime.discover answered implementation fingerprint "${BUILD_B}"; expected the fingerprint announced in hello: "${BUILD_A}".`,
+        },
+      },
+    ]);
   });
 
   it('bounds every runtime.discover with the configured timeout', async () => {
