@@ -748,3 +748,88 @@ fn doctor_consent_pending_fix_round_trips_to_a_passing_doctor() {
         "expected doctor exit 0 with an ok Consent after the fix | received: {code:?} {consent}"
     );
 }
+
+/// A `--stdio` launch the consent gate refuses exits non-zero with the
+/// setup-pending signature on stderr and not one byte on stdout: a hub
+/// decoding stdout as frames must see nothing to decode.
+#[test]
+fn a_refused_stdio_launch_keeps_stdout_byte_empty() {
+    let home = scratch_mango_home("stdio-refused-stdout");
+    let host = home.join("runtime").join("host");
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(
+        host.join("runtime.json"),
+        br#"{"schemaVersion":1,"slot":"host","setup":{"state":"pending","at":"2024-01-01T00:00:00.000Z","by":"install"}}"#,
+    )
+    .unwrap();
+    let output = Command::new(binary_path())
+        .arg("--stdio")
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.code() == Some(1)
+            && stderr.contains("runtime setup is pending on this machine"),
+        "expected exit 1 with the setup-pending signature | received: {:?} {stderr:?}",
+        output.status.code()
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "expected zero stdout bytes | received: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+/// Garbage on stdin gets the runtime's own hello, then a PROTOCOL_ERROR
+/// close naming the refusal, exit 1, and the same reason on stderr.
+#[test]
+fn garbage_on_stdio_closes_with_protocol_error_and_exits_one() {
+    use std::io::Write as _;
+
+    let home = scratch_mango_home("stdio-garbage");
+    let mut child = Command::new(binary_path())
+        .arg("--stdio")
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    // Held open until the child exits, so the close comes from the garbage,
+    // not from end of input.
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"this is not json\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    drop(stdin);
+
+    let frames: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("every stdout line is a frame"))
+        .collect();
+    let types: Vec<&str> = frames
+        .iter()
+        .map(|frame| frame["type"].as_str().unwrap_or("?"))
+        .collect();
+    assert!(
+        types == ["hello", "close"],
+        "expected frames: [hello, close] | received: {types:?}"
+    );
+    let close = &frames[1];
+    assert!(
+        close["code"] == 4400
+            && close["reason"]
+                .as_str()
+                .is_some_and(|r| r.contains("invalid-json")),
+        "expected close 4400 (PROTOCOL_ERROR) naming invalid-json | received: {close}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.code() == Some(1)
+            && stderr.contains("session closed with 4400: invalid-json"),
+        "expected exit 1 with the close reason on stderr | received: {:?} {stderr:?}",
+        output.status.code()
+    );
+}
