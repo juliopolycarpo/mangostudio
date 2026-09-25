@@ -40,6 +40,32 @@ const RUNTIME_SPECIFIER = new RegExp(
 /** The in-process seam's module, as a test would import it. */
 const IN_PROCESS_SEAM_SPECIFIER = /['"][./]*(?:[^'"]*\/)?connect-in-process-runtime['"]/;
 
+/**
+ * A quoted string naming a file in the TypeScript runtime's source tree, the
+ * way a test spawns it by path (`join(dir, '../../../../runtime/src/cli.ts')`).
+ * `mangostudio-runtime/src/` (the Rust crate) is not a match.
+ */
+const RUNTIME_SOURCE_LITERAL = /(['"`])[^'"`\n]*(?<![\w-])runtime\/src\/[^'"`\n]*\1/;
+
+/**
+ * Tests that still spawn the TypeScript runtime by its source path. Temporary:
+ * the Local cut-over (#1161) drops the bun-source fallback and moves these to
+ * the Rust binary, and must empty this list.
+ */
+const RUNTIME_SOURCE_PATH_ALLOWED = [
+  'apps/api/tests/integration/services/connect-ssh-runtime.integration.test.ts',
+  'apps/api/tests/integration/services/spawn-runtime-child.integration.test.ts',
+  'apps/api/tests/unit/lib/runtime-paths.test.ts',
+];
+
+/** Lines that are code rather than comments, where a path literal would be used. */
+function codeLines(text: string): string[] {
+  return text.split('\n').filter((line) => {
+    const trimmed = line.trimStart();
+    return !(trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*'));
+  });
+}
+
 function sourceFilesUnder(directory: string): string[] {
   return readdirSync(directory, { recursive: true, encoding: 'utf8' })
     .filter((entry) => entry.endsWith('.ts') || entry.endsWith('.tsx'))
@@ -114,5 +140,23 @@ describe('the hub tests import no TypeScript runtime', () => {
       )
     ).toBe(true);
     expect(IN_PROCESS_SEAM_SPECIFIER.test("const ALLOWED = 'apps/api/src/x.ts';")).toBe(false);
+  });
+
+  it('finds TypeScript runtime source paths only in the files the Local cut-over migrates', () => {
+    const referrers = files
+      .filter((file) =>
+        codeLines(readFileSync(file, 'utf8')).some((line) => RUNTIME_SOURCE_LITERAL.test(line))
+      )
+      .map((file) => file.slice(REPO_ROOT.length + 1).replaceAll('\\', '/'))
+      .sort();
+
+    expect(referrers).toEqual(RUNTIME_SOURCE_PATH_ALLOWED);
+  });
+
+  it('recognises a runtime source path literal and ignores the Rust crate and comments', () => {
+    const tree = ['runtime', 'src'].join('/');
+    expect(RUNTIME_SOURCE_LITERAL.test(`join(dir, '../../../../${tree}/cli.ts')`)).toBe(true);
+    expect(RUNTIME_SOURCE_LITERAL.test(`'crates/mangostudio-${tree}/health.rs'`)).toBe(false);
+    expect(codeLines(` * \`apps/${tree}/services/snapshot.ts\` capture`)).toEqual([]);
   });
 });
