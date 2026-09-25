@@ -40,7 +40,9 @@ mod windows_job;
 /// A PTY `close` resolves only after that sweep, so tests bound `close` by this plus slack.
 #[cfg(all(unix, test))]
 pub(crate) const TERMINAL_SESSION_CLEANUP_BOUND: std::time::Duration =
-    std::time::Duration::from_secs(unix_guardian::TERMINAL_SESSION_CLEANUP_SECONDS.unsigned_abs());
+    std::time::Duration::from_secs(
+        unix_guardian::TERMINAL_SESSION_CLEANUP_SECONDS.unsigned_abs() as u64,
+    );
 
 /// PTY child with the same guardian or Job ownership as a bounded process.
 pub(crate) enum PtyChild {

@@ -37,7 +37,11 @@ const RELEASE: u8 = b'G';
 const FINALIZE: u8 = b'F';
 const STATUS_BYTES: usize = std::mem::size_of::<libc::c_int>();
 const READY_BYTES: usize = STATUS_BYTES + 1;
-pub(super) const TERMINAL_SESSION_CLEANUP_SECONDS: libc::time_t = 10;
+/// Seconds the guardian may spend sweeping a terminal session. Typed `i32`, not
+/// `libc::time_t`: musl's `time_t` is deprecated in `libc` because it is moving
+/// to 64 bits (rust-lang/libc#1848), so this widens into whatever `tv_sec` is
+/// on each target instead of naming that alias.
+pub(super) const TERMINAL_SESSION_CLEANUP_SECONDS: i32 = 10;
 
 pub(crate) struct GuardianChild {
     pid: libc::pid_t,
@@ -1202,7 +1206,9 @@ unsafe fn kill_session_members(session: libc::pid_t) -> bool {
     if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } < 0 {
         return false;
     }
-    let deadline = now.tv_sec.saturating_add(TERMINAL_SESSION_CLEANUP_SECONDS);
+    let deadline = now
+        .tv_sec
+        .saturating_add(TERMINAL_SESSION_CLEANUP_SECONDS.into());
     loop {
         if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) } < 0
             || now.tv_sec >= deadline
