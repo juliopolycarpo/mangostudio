@@ -42,7 +42,11 @@ import {
   fixedConsent,
   TEST_RUNTIME_MANIFEST,
 } from '../../support/runtime-fixture';
-import { resolveRustRuntimeBinary, rustRuntimeVersion } from '../../support/rust-runtime-binary';
+import {
+  resolveRustRuntimeBinary,
+  rustRuntimeVersion,
+  skipWithoutRustBinary,
+} from '../../support/rust-runtime-binary';
 import { startRustServe } from '../../support/rust-serve-runtime';
 
 const binary = resolveRustRuntimeBinary();
@@ -70,7 +74,7 @@ afterEach(async () => {
 });
 
 describe('Direct URL http runtime', () => {
-  it.skipIf(!binary.available)(
+  it.skipIf(skipWithoutRustBinary(binary, 'connect-http-runtime'))(
     'connects through the secret-store token and round-trips a request',
     async () => {
       await insertTestUser(TEST_USER);
@@ -199,7 +203,7 @@ describe('Direct URL http runtime', () => {
     unsubscribe();
   }, 20_000);
 
-  it.skipIf(!binary.available)(
+  it.skipIf(skipWithoutRustBinary(binary, 'connect-http-runtime'))(
     'refuses the old token after rotation',
     async () => {
       await insertTestUser(TEST_USER);
@@ -269,7 +273,7 @@ describe('Direct URL http runtime', () => {
     });
   }, 20_000);
 
-  it.skipIf(!binary.available)(
+  it.skipIf(skipWithoutRustBinary(binary, 'connect-http-runtime'))(
     'reports a credential serve refuses as UNAVAILABLE, naming its close code',
     async () => {
       await insertTestUser(TEST_USER);
@@ -301,6 +305,39 @@ describe('Direct URL http runtime', () => {
     },
     20_000
   );
+
+  it('reports a credential refused after the upgrade as UNAVAILABLE, naming its close code', async () => {
+    // The hub half of the case above, served by the fake host so the ordinary
+    // lane covers the 4401 mapping where no Rust binary is built.
+    await insertTestUser(TEST_USER);
+    const store = new InMemorySecretStore();
+    setRuntimeTokenStoreForTests(store);
+    const serve = serveFakeRuntimeOverWebSocket(
+      new FakeRuntimeDefinition({
+        runtimeVersion: 'http-refusal',
+        manifest: TEST_RUNTIME_MANIFEST,
+        consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'remote'),
+        handlers: {},
+      }),
+      { token: 'the-only-token', refuse: 'after-upgrade' }
+    );
+    handles.push(serve);
+    await persistRuntimeToken(TEST_USER.id, 'refused-box', 'wrong-token', store);
+
+    const error = await rejectionOf(
+      connectHttpRuntime(
+        { id: 'refused-box', userId: TEST_USER.id, config: { baseUrl: serve.baseUrl } },
+        () => undefined
+      )
+    );
+
+    expect(error).toBeInstanceOf(RemoteError);
+    expect(error).toMatchObject({
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
+      message: 'The session closed before the handshake completed (4401: credential refused).',
+      details: { closeCode: 4401 },
+    });
+  }, 20_000);
 
   it('persists a rotated token without rewriting the row config', async () => {
     await insertTestUser(TEST_USER);

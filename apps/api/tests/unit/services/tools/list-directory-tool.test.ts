@@ -12,12 +12,20 @@ import {
 } from '../../../../src/services/tools/builtin/list-directory';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { targetHomeRuntime, withTargetHome } from './support/target-home';
+import {
+  skipWithoutRustBinary,
+  targetHomeRuntime,
+  withFakeTargetHome,
+  withTargetHome,
+} from './support/target-home';
 import {
   ABSENT_STRING_ARGUMENTS,
   REJECTED_STRING_ARGUMENTS,
   useToolRegistry,
 } from './support/tool-registry-harness';
+
+/** The home a fake runtime announces; nothing reads it. */
+const FAKE_TARGET_HOME = '/target/home';
 
 let tempDir: string;
 
@@ -168,7 +176,7 @@ describe('executeListDirectory', () => {
     expect(result.entries.some((e) => e.name === 'allowed.txt')).toBe(true);
   });
 
-  it.skipIf(!targetHomeRuntime.available)(
+  it.skipIf(skipWithoutRustBinary(targetHomeRuntime, 'list-directory-tool'))(
     'expands ~ to the home directory the runtime reports',
     async () => {
       mkdirSync(join(tempDir, 'home-sub'));
@@ -179,6 +187,23 @@ describe('executeListDirectory', () => {
       expect(result.entries.some((e) => e.name === 'home-sub')).toBe(true);
     }
   );
+
+  it('expands ~ against the home directory the runtime announced', async () => {
+    let sentPath = '';
+    const result = await withFakeTargetHome(
+      FAKE_TARGET_HOME,
+      {
+        'fs.list-directory': (params: { readonly resolvedPath: string }) => {
+          sentPath = params.resolvedPath;
+          return { path: params.resolvedPath, entries: [{ name: 'home-sub', type: 'directory' }] };
+        },
+      },
+      () => executeListDirectory({ path: '~/' }, makeContext())
+    );
+
+    expect(sentPath.replace(/\/$/, '')).toBe(FAKE_TARGET_HOME);
+    expect(result.entries.some((e) => e.name === 'home-sub')).toBe(true);
+  });
 
   it('ignores disabled allowed paths', async () => {
     let threw = false;

@@ -18,11 +18,23 @@ import type { Port } from '@mangostudio/protocol';
 import { connectWebSocket } from '@mangostudio/protocol/ws';
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import type { HubExternalAgentIsolation } from '@mangostudio/shared/runtime-contract';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
+  type HubSession,
   openHubSession,
   type ProtocolHubSession,
 } from '../../../src/services/runtime-client/hub-session';
-import { resolveRustRuntimeBinary, rustRuntimeVersion } from '../../support/rust-runtime-binary';
+import { connectFakeRuntime } from '../../support/fake-runtime-host';
+import {
+  FakeRuntimeDefinition,
+  fixedConsent,
+  TEST_RUNTIME_MANIFEST,
+} from '../../support/runtime-fixture';
+import {
+  resolveRustRuntimeBinary,
+  rustRuntimeVersion,
+  skipWithoutRustBinary,
+} from '../../support/rust-runtime-binary';
 import { startRustServe } from '../../support/rust-serve-runtime';
 
 const binary = resolveRustRuntimeBinary();
@@ -77,7 +89,7 @@ function attestationOf(session: ProtocolHubSession): ExternalIdentityIsolation {
 }
 
 describe('the hub isolation claim on the wire', () => {
-  it.skipIf(!binary.available)(
+  it.skipIf(skipWithoutRustBinary(binary, 'hub-isolation-claim'))(
     'leaves the runtime attesting when the hub makes no claim',
     async () => {
       const session = await connect(await startServe());
@@ -89,7 +101,7 @@ describe('the hub isolation claim on the wire', () => {
     30_000
   );
 
-  it.skipIf(!binary.available)(
+  it.skipIf(skipWithoutRustBinary(binary, 'hub-isolation-claim'))(
     'leaves the runtime attesting when the hub claims a single user',
     async () => {
       const session = await connect(await startServe(), 'single-user');
@@ -101,7 +113,7 @@ describe('the hub isolation claim on the wire', () => {
     30_000
   );
 
-  it.skipIf(!binary.available)(
+  it.skipIf(skipWithoutRustBinary(binary, 'hub-isolation-claim'))(
     'stops the runtime attesting once the hub withdraws the claim',
     async () => {
       const url = await startServe();
@@ -124,4 +136,44 @@ describe('the hub isolation claim on the wire', () => {
     },
     30_000
   );
+});
+
+/**
+ * The hub half alone: what `applyHubIsolationClaim` does to the manifest a
+ * runtime announced. Served by the fake host so the ordinary lane covers it
+ * where no Rust binary is built; the runtime's own refusal after the
+ * handshake is the binary-backed case above.
+ */
+describe('the hub withholds a refused attestation from the announced manifest', () => {
+  const ATTESTATION: ExternalIdentityIsolation = {
+    method: 'os-account',
+    credentialHomeFingerprint: 'sha256:isolation-claim-test',
+  };
+
+  async function connectFake(claim?: HubExternalAgentIsolation): Promise<HubSession> {
+    const definition = new FakeRuntimeDefinition({
+      runtimeVersion: 'isolation-claim-test',
+      manifest: { ...TEST_RUNTIME_MANIFEST, identityIsolation: ATTESTATION },
+      consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      handlers: {},
+    });
+    const connection = await connectFakeRuntime(definition, {
+      hubVersion: 'hub-isolation-test',
+      ...(claim ? { externalAgentIsolation: claim } : {}),
+    });
+    cleanups.push(() => connection.close());
+    return connection.hub;
+  }
+
+  it('keeps the attestation when the hub makes no claim', async () => {
+    expect((await connectFake()).manifest.identityIsolation).toEqual(ATTESTATION);
+  });
+
+  it('keeps the attestation when the hub claims a single user', async () => {
+    expect((await connectFake('single-user')).manifest.identityIsolation).toEqual(ATTESTATION);
+  });
+
+  it('withholds the attestation once the hub withdraws the claim', async () => {
+    expect((await connectFake('withdrawn')).manifest.identityIsolation).toBeUndefined();
+  });
 });

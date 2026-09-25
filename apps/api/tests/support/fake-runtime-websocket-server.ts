@@ -28,12 +28,27 @@ export interface FakeRuntimeWebSocketServer {
 
 interface SocketData {
   handle?: WebSocketPortHandle;
+  /** The upgrade carried a wrong token and is refused once open. */
+  refused?: boolean;
+}
+
+/** The close code and reason `serve` uses for a credential it refuses after the upgrade. */
+const CREDENTIAL_REFUSED = { code: 4401, reason: 'credential refused' } as const;
+
+export interface FakeRuntimeWebSocketServerOptions {
+  readonly token: string;
+  /**
+   * How a wrong token is refused: `before-upgrade` (default) answers an empty
+   * 401 so the socket never opens; `after-upgrade` completes the upgrade and
+   * closes with 4401, which is what the Rust `serve` does.
+   */
+  readonly refuse?: 'before-upgrade' | 'after-upgrade';
 }
 
 /**
  * Listens on an ephemeral loopback port and serves `definition` to a hub that
- * presents `Bearer <token>`; any other upgrade is refused with an empty 401
- * before it opens, as `serve` refuses it.
+ * presents `Bearer <token>`; any other upgrade is refused either with an empty
+ * 401 before it opens or with a 4401 close after it, per `options.refuse`.
  *
  * @example
  * const server = serveFakeRuntimeOverWebSocket(definition, { token: 'secret' });
@@ -42,7 +57,7 @@ interface SocketData {
  */
 export function serveFakeRuntimeOverWebSocket(
   definition: FakeRuntimeDefinition,
-  options: { readonly token: string }
+  options: FakeRuntimeWebSocketServerOptions
 ): FakeRuntimeWebSocketServer {
   let active: Session | undefined;
 
@@ -50,12 +65,13 @@ export function serveFakeRuntimeOverWebSocket(
     hostname: '127.0.0.1',
     port: 0,
     fetch(request, self) {
-      if (request.headers.get('authorization') !== `Bearer ${options.token}`) {
+      const refused = request.headers.get('authorization') !== `Bearer ${options.token}`;
+      if (refused && options.refuse !== 'after-upgrade') {
         return new Response(null, { status: 401 });
       }
       const offered = request.headers.get('sec-websocket-protocol') ?? '';
       const upgraded = self.upgrade(request, {
-        data: {},
+        data: { refused },
         ...(offered.split(',').some((value) => value.trim() === WEBSOCKET_SUBPROTOCOL)
           ? { headers: { 'Sec-WebSocket-Protocol': WEBSOCKET_SUBPROTOCOL } }
           : {}),
@@ -66,6 +82,10 @@ export function serveFakeRuntimeOverWebSocket(
       maxPayloadLength: DEFAULT_MAX_MESSAGE_BYTES,
       idleTimeout: 0,
       open(socket) {
+        if (socket.data.refused) {
+          socket.close(CREDENTIAL_REFUSED.code, CREDENTIAL_REFUSED.reason);
+          return;
+        }
         const handle = createWebSocketPort({
           send: (bytes) => outcomeOfBunSend(socket.send(bytes)),
           close: (code, reason) => socket.close(code, reason),

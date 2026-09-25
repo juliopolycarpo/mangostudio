@@ -20,8 +20,17 @@ import {
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { targetHomeRuntime, withTargetHome } from './support/target-home';
+import {
+  skipWithoutRustBinary,
+  targetHomeRuntime,
+  withFakeTargetHome,
+  withTargetHome,
+} from './support/target-home';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
+
+/** The home a fake runtime announces; nothing reads it. */
+const FAKE_TARGET_HOME = '/target/home';
+const FAKE_SHA256 = '0'.repeat(64);
 
 let tempDir: string;
 
@@ -502,7 +511,7 @@ describe('executeReadFile', () => {
     ).rejects.toThrow(/it is a binary file/);
   });
 
-  it.skipIf(!targetHomeRuntime.available)(
+  it.skipIf(skipWithoutRustBinary(targetHomeRuntime, 'read-file-tool'))(
     'expands ~ to the home directory the runtime reports',
     async () => {
       const filePath = join(tempDir, 'home-test.txt');
@@ -514,6 +523,33 @@ describe('executeReadFile', () => {
       expect(result.content).toBe(numbered(1, 'home content'));
     }
   );
+
+  it('expands ~ against the home directory the runtime announced', async () => {
+    let sentPath = '';
+    const result = await withFakeTargetHome(
+      FAKE_TARGET_HOME,
+      {
+        'fs.read-file': (params: { readonly resolvedPath: string }) => {
+          sentPath = params.resolvedPath;
+          // Line numbering is the runtime's; the fake answers as one would.
+          return {
+            content: numbered(1, 'home content'),
+            path: params.resolvedPath,
+            size: 12,
+            sha256: FAKE_SHA256,
+            totalLines: 1,
+            startLine: 1,
+            endLine: 1,
+            truncated: false,
+          };
+        },
+      },
+      () => executeReadFile({ path: '~/home-test.txt' }, makeContext())
+    );
+
+    expect(sentPath).toBe(`${FAKE_TARGET_HOME}/home-test.txt`);
+    expect(result.content).toBe(numbered(1, 'home content'));
+  });
 
   it('throws when file does not exist', async () => {
     const filePath = join(tempDir, 'missing.txt');
