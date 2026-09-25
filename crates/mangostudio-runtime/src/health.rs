@@ -271,7 +271,7 @@ pub(crate) async fn build_capability_manifest(
     // Said outright, never left to the hub's "absent means v2" default: that
     // default is pinned to the domain that shipped before this field, not to
     // whatever this binary hashes with.
-    manifest.directory_hash_domain = Some(crate::library::hash::DIRECTORY_HASH_DOMAIN_VERSION);
+    manifest.directory_hash_domain = Some(crate::library::DIRECTORY_HASH_DOMAIN_VERSION);
     // Sent before the peer's hello, so a hub withdrawal cannot shape it; the
     // hub strips a withdrawn attestation on its side (`applyHubIsolationClaim`).
     manifest.identity_isolation =
