@@ -69,7 +69,7 @@ describe.skipIf(!binary.available)('Rust filesystem search matches the TypeScrip
     if (!isWindows) return result;
     return {
       ...result,
-      matches: result.matches.filter((match) => match.file !== STAR_FILE),
+      matches: result.matches.filter((match) => match.file.replace(/^\.\//, '') !== STAR_FILE),
       filesScanned: result.filesScanned - (recorded.scansStarFile ? 1 : 0),
     };
   }

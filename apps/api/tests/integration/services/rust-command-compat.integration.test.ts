@@ -102,7 +102,15 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
       "printf '\\357\\273\\277text'",
       "[Console]::Out.Write([char]0xFEFF + 'text')",
       4096,
-      { exitCode: 0, signal: null, stdout: 'text', stderr: '', truncated: false },
+      // Windows PowerShell writes U+FEFF through a console code page that
+      // cannot carry it, so both runtimes answered '?text' on the Windows leg.
+      {
+        exitCode: 0,
+        signal: null,
+        stdout: process.platform === 'win32' ? '?text' : 'text',
+        stderr: '',
+        truncated: false,
+      },
     ],
   ] as const)(
     'preserves shell output, exit and byte cap: %s',
@@ -130,8 +138,11 @@ describe.skipIf(!binary.available)('Rust command parity', () => {
     };
     expect(semanticShell(await rust.shell.run(params))).toEqual(
       recordedShell(params.command, {
-        exitCode: null,
-        signal: 'SIGKILL',
+        // A job-object termination on Windows reports exit code 1 and no
+        // signal; POSIX reports the SIGKILL that ended the process group.
+        ...(process.platform === 'win32'
+          ? { exitCode: 1, signal: null }
+          : { exitCode: null, signal: 'SIGKILL' }),
         stdout: '',
         stderr: '',
         truncated: true,
