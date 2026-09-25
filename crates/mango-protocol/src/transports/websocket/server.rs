@@ -438,9 +438,21 @@ pub fn bearer_token(authorization: &str) -> Option<&str> {
 }
 
 /// How long a refused socket is given to answer this side's `close` before it
-/// is dropped anyway. Bounds [`close_with`]'s drain, so a dialler that never
-/// answers holds a refusal up by this much at most.
-const REFUSAL_DRAIN_GRACE: Duration = Duration::from_secs(2);
+/// is dropped anyway. Bounds the drain after every refusal
+/// [`accept_websocket`] sends, so a dialler that never answers holds a refusal
+/// up by this much at most.
+///
+/// Public so an acceptor that refuses a socket after the upgrade, outside
+/// [`accept_websocket`], drains it for the same bound.
+///
+/// # Example
+///
+/// ```
+/// use mango_protocol::transports::websocket::server::REFUSAL_DRAIN_GRACE;
+///
+/// assert_eq!(REFUSAL_DRAIN_GRACE.as_secs(), 2);
+/// ```
+pub const REFUSAL_DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// Closes a socket the upgrade produced but the session will not use, with a
 /// code the dialler can read.
