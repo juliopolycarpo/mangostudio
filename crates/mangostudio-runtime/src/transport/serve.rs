@@ -473,7 +473,20 @@ async fn handle_connection(
     // happens next (becoming active, losing the admission race, a healthy
     // multi-hour session) must not keep holding this slot.
     drop(permit);
+    serve_upgraded(port, binding_header, state, context).await;
+}
 
+/// Runs one upgraded connection from its binding check to release: admits
+/// it, waits for the generation it supersedes to finish its own cleanup,
+/// and only then builds and serves this generation's session. Generic over
+/// the port so the admission and supersession sequence can run over an
+/// in-memory pair.
+async fn serve_upgraded<P: Port>(
+    port: P,
+    binding_header: BindingHeader,
+    state: Arc<ServeState>,
+    context: Arc<ConnectionContext>,
+) {
     // Every refusal from here to admission goes out as a close frame over
     // the upgraded socket before this side's `hello` — the same shape
     // `accept_websocket` gives a refused credential. A malformed binding
@@ -736,6 +749,140 @@ mod tests {
     use mango_protocol::session::{Session, SessionOptions, SessionState};
 
     use super::{ActiveGeneration, Admission, AdmittedGeneration, ServeState};
+
+    /// A named fake for the connection log: every line, in order.
+    #[derive(Clone, Default)]
+    struct RecordingLog(Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl RecordingLog {
+        fn sink(&self) -> Box<dyn Fn(&str) + Send + Sync> {
+            let lines = Arc::clone(&self.0);
+            Box::new(move |line: &str| lines.lock().unwrap().push(line.to_owned()))
+        }
+
+        fn lines(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+
+        fn mentions(&self, needle: &str) -> bool {
+            self.lines().iter().any(|line| line.contains(needle))
+        }
+    }
+
+    fn active_generation(state: &ServeState) -> Option<u64> {
+        state
+            .inner
+            .lock()
+            .expect("ServeState mutex poisoned")
+            .active
+            .as_ref()
+            .map(|active| active.generation)
+    }
+
+    /// A superseding connection must not say `hello` until the generation it
+    /// replaced has finished its own cleanup: the two sessions would
+    /// otherwise share the runtime's MCP servers, terminals and update
+    /// claims for a moment. The superseded generation here is a published
+    /// entry whose cleanup signal the test holds; the newcomer's hello may
+    /// reach the hub only once the test lets go of it.
+    #[tokio::test]
+    async fn a_second_hello_waits_for_the_superseded_connections_cleanup() {
+        use std::time::{Duration, Instant};
+
+        use mango_protocol::frame::Frame;
+        use mango_protocol::port::{Inbound, Port, PortRx};
+
+        let state = Arc::new(ServeState::new());
+        let Admission::Admitted {
+            generation: superseded,
+            ..
+        } = state.try_admit(None)
+        else {
+            panic!("expected an empty runtime to admit the first generation");
+        };
+        let (cleanup_finished, cleanup) = oneshot::channel::<()>();
+        assert!(state.publish(
+            superseded,
+            ActiveGeneration {
+                generation: superseded,
+                binding: None,
+                session: None,
+                released: Some(cleanup),
+            },
+        ));
+
+        let home = crate::test_support::scratch_dir("serve-held-cleanup");
+        let log = RecordingLog::default();
+        let context = Arc::new(super::ConnectionContext {
+            token: "unused".into(),
+            slot: crate::runtime_home::RuntimeSlot::Host,
+            mango_home: home.to_path_buf(),
+            runtime_version: "0.0.0".into(),
+            log: log.sink(),
+        });
+        let (hub_port, runtime_port) = port_pair();
+        let (hub_tx, mut hub_rx) = hub_port.split();
+        let connection = tokio::spawn(super::serve_upgraded(
+            runtime_port,
+            crate::transport::upgrade_head::BindingHeader::Absent,
+            Arc::clone(&state),
+            context,
+        ));
+
+        // Gate: the newcomer has claimed the next generation. Nothing awaits
+        // between that claim and the wait on the superseded cleanup.
+        let real_deadline = Instant::now() + Duration::from_secs(30);
+        while active_generation(&state) != Some(superseded + 1) {
+            assert!(
+                Instant::now() < real_deadline,
+                "expected the newcomer to claim generation {} | received: {:?}",
+                superseded + 1,
+                active_generation(&state)
+            );
+            tokio::task::yield_now().await;
+        }
+        // A newcomer that did not wait would say hello well inside this
+        // real-time window; one that waits cannot say it at all.
+        let window = Instant::now() + Duration::from_millis(250);
+        while Instant::now() < window {
+            if let Ok(inbound) = tokio::time::timeout(Duration::ZERO, hub_rx.recv()).await {
+                let received = format!("{inbound:?}");
+                panic!(
+                    "expected nothing from the newcomer while the superseded cleanup is held | \
+                     received: {}",
+                    received.get(..80).unwrap_or(&received)
+                );
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !log.mentions("superseded"),
+            "expected no supersession logged before the cleanup finished | received: {:?}",
+            log.lines()
+        );
+
+        drop(cleanup_finished);
+        let first = tokio::time::timeout(Duration::from_secs(30), hub_rx.recv())
+            .await
+            .expect("expected the newcomer's hello once the superseded cleanup finished");
+        let received = format!("{first:?}");
+        assert!(
+            matches!(first, Some(Inbound::Frame(Frame::Hello(_)))),
+            "expected the newcomer's first frame to be hello | received: {}",
+            received.get(..80).unwrap_or(&received)
+        );
+        assert!(
+            log.mentions("superseded the previous one"),
+            "expected the supersession logged | received: {:?}",
+            log.lines()
+        );
+
+        drop((hub_tx, hub_rx));
+        tokio::time::timeout(Duration::from_secs(30), connection)
+            .await
+            .expect("expected the newcomer to end once its hub went away")
+            .expect("the connection task must not panic");
+    }
 
     /// The property `serve`'s single `Mutex` exists for: however many
     /// connections race to admit at the exact instant shutdown begins, none
