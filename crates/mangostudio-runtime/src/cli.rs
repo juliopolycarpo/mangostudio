@@ -1214,8 +1214,12 @@ fn parse_listen_address(value: &str) -> Option<SocketAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Invocation, TokenSource, parse, parse_listen_address, parse_token_source, run};
+    use super::{
+        InstallArgs, Invocation, ServiceAction, ServiceMode, TokenSource, parse,
+        parse_listen_address, parse_token_source, run,
+    };
     use crate::config::MapEnv;
+    use crate::runtime_home::RuntimeSlot;
     use crate::test_support::{ScratchDir, scratch_path};
 
     /// A scratch `MANGO_HOME` per test, so `run`'s own disk-touching paths
@@ -1275,6 +1279,108 @@ mod tests {
             parse(&["audit".into(), "--denied".into()]),
             Invocation::Audit(_)
         ));
+    }
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    /// The reason `args` is refused as an invalid value, or a panic naming
+    /// what was parsed instead.
+    fn invalid_reason(args: &[&str]) -> String {
+        match parse(&argv(args)) {
+            Invocation::Invalid(reason) => reason,
+            Invocation::Unknown(argument) => {
+                panic!("expected {args:?} to be Invalid | received: Unknown({argument:?})")
+            }
+            _ => panic!("expected {args:?} to be Invalid | received: a parsed invocation"),
+        }
+    }
+
+    #[test]
+    fn a_bare_hub_flag_is_refused() {
+        let reason = invalid_reason(&["connect", "--hub"]);
+        assert!(
+            reason == "--hub needs a value.",
+            "expected: --hub needs a value. | received: {reason:?}"
+        );
+    }
+
+    #[test]
+    fn an_invalid_slot_names_the_value() {
+        for args in [
+            &["setup", "--slot", "ssh"][..],
+            &["install", "--slot", "ssh"][..],
+            &["audit", "--slot", "ssh"][..],
+        ] {
+            let reason = invalid_reason(args);
+            assert!(
+                reason.starts_with("--slot takes host, wsl, or remote")
+                    && reason.contains("\"ssh\""),
+                "expected {args:?} to name \"ssh\" | received: {reason:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn service_install_parses_an_explicit_mode() {
+        for (value, expected) in [
+            ("connect", ServiceMode::Connect),
+            ("serve", ServiceMode::Serve),
+        ] {
+            let parsed = parse(&argv(&["service", "install", "--mode", value]));
+            assert!(
+                matches!(
+                    &parsed,
+                    Invocation::Service(args)
+                        if args.action == ServiceAction::Install && args.mode == Some(expected)
+                ),
+                "expected service install with mode {expected:?} | received another invocation"
+            );
+        }
+        let reason = invalid_reason(&["service", "install", "--mode", "both"]);
+        assert!(
+            reason == "--mode takes connect or serve, not \"both\".",
+            "expected the unknown mode named | received: {reason:?}"
+        );
+    }
+
+    #[test]
+    fn install_defaults_to_the_remote_slot_and_takes_host_with_json() {
+        assert!(
+            matches!(
+                parse(&argv(&["install"])),
+                Invocation::Install(InstallArgs {
+                    slot: RuntimeSlot::Remote,
+                    json: false
+                })
+            ),
+            "expected install to default to the remote slot without json | received another invocation"
+        );
+        assert!(
+            matches!(
+                parse(&argv(&["install", "--slot", "host", "--json"])),
+                Invocation::Install(InstallArgs {
+                    slot: RuntimeSlot::Host,
+                    json: true
+                })
+            ),
+            "expected install --slot host --json | received another invocation"
+        );
+        let reason = invalid_reason(&["install", "--slot"]);
+        assert!(
+            reason == "--slot needs host, wsl, or remote.",
+            "expected a bare --slot refused | received: {reason:?}"
+        );
+    }
+
+    #[test]
+    fn an_invalid_profile_names_the_value_and_the_choices() {
+        let reason = invalid_reason(&["setup", "--profile", "everything"]);
+        assert!(
+            reason == "--profile takes full, readonly, or none, not \"everything\".",
+            "expected the profile choices and value | received: {reason:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]

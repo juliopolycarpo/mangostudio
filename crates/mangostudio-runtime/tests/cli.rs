@@ -421,6 +421,31 @@ fn an_empty_explicit_token_source_refuses_without_writing_credentials() {
     );
 }
 
+/// A bad `--profile` value says what was wrong with it on stderr, not
+/// that the flag is unknown.
+#[test]
+fn setup_with_an_invalid_profile_says_which_values_it_takes() {
+    let home = scratch_mango_home("setup-invalid-profile");
+    let output = Command::new(binary_path())
+        .args(["setup", "--profile", "everything"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        output.status.code() == Some(1)
+            && stderr.contains("--profile takes full, readonly, or none, not \"everything\".")
+            && !stderr.contains("unrecognised argument"),
+        "expected exit 1 naming the profile choices | received: {:?} {stderr:?}",
+        output.status.code()
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "expected empty stdout | received: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
 /// `setup --profile` writes a real answer non-interactively and exits `0`.
 #[test]
 fn setup_writes_a_profile_and_exits_zero() {
