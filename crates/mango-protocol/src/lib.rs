@@ -83,6 +83,17 @@ pub use version::{Negotiation, PROTOCOL_VERSION, ProtocolVersion, negotiate};
 pub const PROTOCOL_MAJOR: u16 = 1;
 /// Highest wire minor version this crate speaks. Mirrors [`PROTOCOL_VERSION`].
 pub const PROTOCOL_MINOR: u16 = 2;
+/// The wire minor from which a responder writes every frame a handler asked
+/// for ahead of that request's answer (spec §6.2). A feature minor, not the
+/// current one: it stays `2` when later minors ship.
+///
+/// ```
+/// use mango_protocol::ORDERED_ANSWER_MINOR;
+///
+/// let effective_minor = 2;
+/// assert!(effective_minor >= ORDERED_ANSWER_MINOR);
+/// ```
+pub const ORDERED_ANSWER_MINOR: u16 = 2;
 
 #[cfg(test)]
 mod tests {
