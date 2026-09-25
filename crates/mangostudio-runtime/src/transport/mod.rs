@@ -123,6 +123,10 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 /// takes a fresh `RuntimeHostDefinition` per call for the same reason.
 pub(crate) struct SessionHost {
     pub registry: Registry,
+    /// The concrete audit sink `registry` records through, kept so the
+    /// transport can name the hub on it once the handshake completes; see
+    /// [`identify_hub`].
+    pub audit: Arc<crate::audit::FileAudit>,
     pub authorization: Arc<dyn Authorization>,
     pub update: crate::update::UpdateBinding,
 }
@@ -150,10 +154,11 @@ pub(crate) fn build_host_with_restart(
     runtime_version: &str,
     supervised: bool,
 ) -> SessionHost {
-    let audit: Arc<dyn Audit> = Arc::new(crate::audit::FileAudit::new(
+    let file_audit = Arc::new(crate::audit::FileAudit::new(
         slot_audit_log_path(slot, mango_home),
         Arc::new(SystemWallClock),
     ));
+    let audit: Arc<dyn Audit> = Arc::clone(&file_audit) as Arc<dyn Audit>;
     let update =
         crate::update::UpdateBinding::new_with_restart(slot, mango_home.to_path_buf(), supervised);
     let exclusivity = update.exclusivity();
@@ -203,8 +208,24 @@ pub(crate) fn build_host_with_restart(
     let authorization: Arc<dyn Authorization> = Arc::new(ConsentAuthorization::new(source));
     SessionHost {
         registry,
+        audit: file_audit,
         authorization,
         update,
+    }
+}
+
+/// Names the hub on `audit` from the `hello.capabilities` of `session`'s
+/// peer, once its handshake has completed. Mirrors `session.ts`'s
+/// `setHub(hubIdentityOf(remote.capabilities))` on `session.ready`: a hub
+/// that announces no valid `capabilities.hub` leaves every line reading
+/// `"unidentified hub"`. Called by each transport right after its own
+/// `session.ready()` settles successfully; a session still handshaking
+/// changes nothing.
+pub(crate) fn identify_hub(session: &Session, audit: &crate::audit::FileAudit) {
+    if let Ok(remote) = session.remote() {
+        audit.set_hub(crate::audit::HubIdentity::from_capabilities(
+            &remote.capabilities,
+        ));
     }
 }
 

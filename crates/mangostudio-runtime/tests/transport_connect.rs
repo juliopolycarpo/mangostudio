@@ -257,3 +257,100 @@ async fn cancellation_stops_the_loop_and_releases_the_session() {
         "a clean cancellation is not a failure to reconnect from: {messages:?}"
     );
 }
+
+/// Polls `slot`'s audit log until it holds a line, then returns the last
+/// line's `hub` field.
+async fn last_audited_hub(slot: RuntimeSlot, home: &std::path::Path) -> String {
+    let path = mangostudio_runtime::runtime_home::slot_audit_log_path(slot, home);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let contents = std::fs::read_to_string(&path).unwrap_or_default();
+            if let Some(line) = contents.lines().last() {
+                let line: serde_json::Value = serde_json::from_str(line).unwrap();
+                return line["hub"].as_str().unwrap_or_default().to_string();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "expected an audit line in {} | received: none",
+            path.display()
+        )
+    })
+}
+
+/// Accepts one connection announcing `capabilities`, makes one
+/// `runtime.health` call, and returns the hub field of the audit line that
+/// call wrote.
+async fn audited_hub_after_a_hello_with(capabilities: serde_json::Value) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (slot, home) = create_definition_slot();
+    let cancel = CancellationToken::new();
+    let cancel_for_run = cancel.clone();
+    let home_for_run = home.to_path_buf();
+    let run_handle = tokio::spawn(async move {
+        run(
+            ConnectConfig {
+                hub_url: format!("ws://{addr}/"),
+                token: "irrelevant-token".to_string(),
+                slot,
+                mango_home: home_for_run,
+                runtime_version: "0.0.0".to_string(),
+            },
+            cancel_for_run,
+            &FixedJitter(0.0),
+            CollectingLog::new().sink(),
+        )
+        .await
+    });
+
+    let (stream, _addr) = listener.accept().await.unwrap();
+    let port = accept_websocket(
+        stream,
+        AcceptOptions::from(WebSocketOptions::default()),
+        |_upgrade| Ok(()),
+    )
+    .await
+    .unwrap();
+    let options = SessionOptions::new(support::peer("hub"))
+        .with_capabilities(capabilities.as_object().unwrap().clone());
+    let (session, _driver) = Session::spawn(port, options);
+    session.ready().await.expect("the handshake completes");
+    let _ = session
+        .request("runtime.health", serde_json::json!({}))
+        .await;
+    let hub = last_audited_hub(slot, &home).await;
+
+    cancel.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(5), run_handle).await;
+    hub
+}
+
+/// The hub's `hello.capabilities.hub` names every audit line written after
+/// the handshake, as `session.ts` did through `setHub`.
+#[tokio::test]
+async fn a_hub_hello_identity_names_the_next_audit_line() {
+    let hub = audited_hub_after_a_hello_with(
+        serde_json::json!({ "hub": { "user": "bob", "host": "desk" } }),
+    )
+    .await;
+    assert!(
+        hub == "bob@desk",
+        "expected audit hub: bob@desk | received: {hub}"
+    );
+}
+
+/// A hub identity that fails `HubIdentitySchema` is not trusted.
+#[tokio::test]
+async fn an_invalid_hub_hello_identity_leaves_the_audit_line_unidentified() {
+    let hub =
+        audited_hub_after_a_hello_with(serde_json::json!({ "hub": { "user": "bob", "host": "" } }))
+            .await;
+    assert!(
+        hub == "unidentified hub",
+        "expected audit hub: unidentified hub | received: {hub}"
+    );
+}

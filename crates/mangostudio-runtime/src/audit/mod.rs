@@ -82,7 +82,46 @@ pub struct HubIdentity {
     pub host: String,
 }
 
+/// `HubIdentitySchema`'s `maxLength` on both fields, counted the way
+/// TypeBox counts a string's length: in UTF-16 code units.
+const HUB_IDENTITY_FIELD_MAX: usize = 255;
+
 impl HubIdentity {
+    /// The hub's identity from its `hello.capabilities`, validated rather
+    /// than trusted: `capabilities.hub` must be exactly `{ host, user }`,
+    /// both non-empty strings of at most 255 characters, as the shared
+    /// `HubIdentitySchema` requires. Anything else is `None`, so an audit
+    /// line never names a host taken from an unvalidated field. Mirrors
+    /// `session.ts`'s `hubIdentityOf`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mangostudio_runtime::audit::HubIdentity;
+    ///
+    /// let capabilities = serde_json::json!({ "hub": { "user": "bob", "host": "desk" } });
+    /// let hub = HubIdentity::from_capabilities(capabilities.as_object().unwrap()).unwrap();
+    /// assert_eq!((hub.user.as_str(), hub.host.as_str()), ("bob", "desk"));
+    /// ```
+    #[must_use]
+    pub fn from_capabilities(capabilities: &Map<String, Value>) -> Option<Self> {
+        let hub = capabilities.get("hub")?.as_object()?;
+        if hub.len() != 2 {
+            return None;
+        }
+        let field = |name: &str| -> Option<String> {
+            let value = hub.get(name)?.as_str()?;
+            let length = value.encode_utf16().count();
+            (1..=HUB_IDENTITY_FIELD_MAX)
+                .contains(&length)
+                .then(|| value.to_string())
+        };
+        Some(Self {
+            user: field("user")?,
+            host: field("host")?,
+        })
+    }
+
     fn label(&self) -> String {
         format!("{}@{}", self.user, self.host)
     }
@@ -434,7 +473,7 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     use super::{FileAudit, HubIdentity};
     use crate::ports::audit::{Audit, AuditEntry, Outcome, lock};
@@ -636,6 +675,35 @@ mod tests {
         let lines = read_lines(&dir.join("audit.log"));
         assert_eq!(lines[0]["hub"], "unidentified hub");
         assert_eq!(lines[1]["hub"], "ada@hub.example");
+    }
+
+    #[test]
+    fn hub_identity_is_read_only_from_a_schema_valid_capabilities_hub() {
+        let long = "x".repeat(256);
+        let cases = [
+            (
+                json!({ "hub": { "user": "bob", "host": "desk" } }),
+                Some("bob@desk"),
+            ),
+            (json!({}), None),
+            (json!({ "hub": "bob@desk" }), None),
+            (json!({ "hub": { "user": "bob" } }), None),
+            (json!({ "hub": { "user": "", "host": "desk" } }), None),
+            (json!({ "hub": { "user": "bob", "host": 7 } }), None),
+            (json!({ "hub": { "user": "bob", "host": long } }), None),
+            (
+                json!({ "hub": { "user": "bob", "host": "desk", "extra": "x" } }),
+                None,
+            ),
+        ];
+        for (capabilities, expected) in cases {
+            let received = HubIdentity::from_capabilities(capabilities.as_object().unwrap())
+                .map(|hub| hub.label());
+            assert!(
+                received.as_deref() == expected,
+                "capabilities {capabilities} expected: {expected:?} | received: {received:?}"
+            );
+        }
     }
 
     #[tokio::test]

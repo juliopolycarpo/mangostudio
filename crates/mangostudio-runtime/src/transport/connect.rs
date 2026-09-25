@@ -312,6 +312,7 @@ async fn run_one_connection(
             }
         }
         Ok(_) => {
+            crate::transport::identify_hub(&session, &host.audit);
             let heartbeat_cancel = CancellationToken::new();
             let heartbeat_log = log.clone();
             let heartbeat = tokio::spawn(heartbeat_loop(

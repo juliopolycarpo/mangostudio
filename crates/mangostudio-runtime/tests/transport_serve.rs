@@ -618,3 +618,61 @@ async fn get_health_answers_status_and_version_over_the_same_listener() {
     cancel.cancel();
     server.await.unwrap().unwrap();
 }
+
+/// The hub's `hello.capabilities.hub` names every audit line written after
+/// the handshake, as `session.ts` did through `setHub`.
+#[tokio::test]
+async fn a_hub_hello_identity_names_the_next_audit_line() {
+    let (addr, listener) = bind_ephemeral().await;
+    let cancel = CancellationToken::new();
+    let home = scratch_home("hub-identity");
+    let server = tokio::spawn(run(
+        listener,
+        TOKEN.to_string(),
+        RuntimeSlot::Remote,
+        home.to_path_buf(),
+        "0.0.0".to_string(),
+        cancel.clone(),
+        |_message| {},
+    ));
+
+    let options = WebSocketConnectOptions::default().with_bearer(TOKEN);
+    let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
+    let port = connect_websocket(&format!("ws://{addr}/"), &options, &deadline)
+        .await
+        .expect("the dial reaches the listener");
+    let capabilities = serde_json::json!({ "hub": { "user": "bob", "host": "desk" } });
+    let options = SessionOptions::new(support::peer("hub"))
+        .with_capabilities(capabilities.as_object().unwrap().clone());
+    let (session, _driver) = Session::spawn(port, options);
+    session.ready().await.expect("the handshake completes");
+    let _ = session
+        .request("runtime.health", serde_json::json!({}))
+        .await;
+
+    let path = mangostudio_runtime::runtime_home::slot_audit_log_path(RuntimeSlot::Remote, &home);
+    let hub = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let contents = std::fs::read_to_string(&path).unwrap_or_default();
+            if let Some(line) = contents.lines().last() {
+                let line: serde_json::Value = serde_json::from_str(line).unwrap();
+                return line["hub"].as_str().unwrap_or_default().to_string();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "expected an audit line in {} | received: none",
+            path.display()
+        )
+    });
+    assert!(
+        hub == "bob@desk",
+        "expected audit hub: bob@desk | received: {hub}"
+    );
+
+    cancel.cancel();
+    server.await.unwrap().unwrap();
+}
