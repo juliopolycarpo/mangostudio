@@ -295,9 +295,9 @@ async fn settled() {
 /// ```
 /// use mango_protocol::testing::CONFORMANCE_CASES;
 ///
-/// assert_eq!(CONFORMANCE_CASES.len(), 23);
+/// assert_eq!(CONFORMANCE_CASES.len(), 24);
 /// ```
-pub const CONFORMANCE_CASES: [&str; 23] = [
+pub const CONFORMANCE_CASES: [&str; 24] = [
     "completes the handshake in both directions and exposes the peers",
     "negotiates the effective minor downward",
     "refuses a different major with 4426 on both sides",
@@ -310,6 +310,7 @@ pub const CONFORMANCE_CASES: [&str; 23] = [
     "refuses rpc.discover below the minor that defines it",
     "delivers an event stream and its end marker in order",
     "numbers events per topic when no stream id is given",
+    "delivers the events a handler emits before its response",
     "refuses one stream key past the local ceiling",
     "answers a protocol ping with a pong in both directions",
     "cancels an in-flight request and reports it as cancelled",
@@ -630,6 +631,73 @@ async fn numbers_events_per_topic_when_no_stream_id_is_given<F: Fixture>(fixture
     pair.close().await;
 }
 
+/// How many events `test.announce` emits before it returns. Past what the
+/// receiving session handles in one wake: a burst that small lands with the
+/// response in one batch and hides a reorder, since the receiver delivers the
+/// whole batch before the requester runs.
+const ANNOUNCED_EVENTS: u64 = 256;
+
+/// Emits [`ANNOUNCED_EVENTS`] events on `test.announce`, then returns their
+/// count, with nothing awaited in between — so the response and the events
+/// are ready to send in the same instant.
+async fn announce(_params: Value, context: CallContext) -> Result<Value, RemoteError> {
+    for line in 0..ANNOUNCED_EVENTS {
+        context.session().emit(EventInput {
+            topic: "test.announce".into(),
+            payload: json!({ "line": line }),
+            stream_id: None,
+            end: false,
+        })?;
+    }
+    Ok(json!({ "emitted": ANNOUNCED_EVENTS }))
+}
+
+/// The next event already delivered to `events`, without waiting for one.
+/// Unconstrained, so the runtime's cooperative budget cannot turn an event
+/// that is already queued into a `Pending`.
+fn already_delivered(events: &mut crate::session::EventStream) -> Option<crate::frame::Event> {
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    let next = std::pin::pin!(tokio::task::unconstrained(events.recv()));
+    match next.poll(&mut context) {
+        std::task::Poll::Ready(event) => event,
+        std::task::Poll::Pending => None,
+    }
+}
+
+async fn delivers_the_events_a_handler_emits_before_its_response<F: Fixture>(fixture: &F) {
+    let mut pair = fixture
+        .connect(
+            conformance_options(conformance_a()),
+            conformance_options(conformance_b()).handle("test.announce", announce),
+        )
+        .await;
+    pair.a().ready().await.expect("a is ready");
+    pair.b().ready().await.expect("b is ready");
+    let mut events = pair.a().events();
+
+    let result = pair
+        .a()
+        .request("test.announce", json!({}))
+        .await
+        .expect("test.announce answers");
+    assert_eq!(result, json!({ "emitted": ANNOUNCED_EVENTS }));
+    // No round trip after the answer: §6.2 puts every event the handler
+    // emitted before it returned ahead of the answer, so all of them are
+    // already in by the time the request settles.
+    let mut received = Vec::new();
+    while let Some(event) = already_delivered(&mut events) {
+        received.push(event.seq);
+    }
+    let expected: Vec<u64> = (0..ANNOUNCED_EVENTS).collect();
+    assert_eq!(
+        received,
+        expected,
+        "expected every announced event before the response; received {} of {ANNOUNCED_EVENTS}",
+        received.len()
+    );
+    pair.close().await;
+}
+
 async fn refuses_one_stream_key_past_the_local_ceiling<F: Fixture>(fixture: &F) {
     let mut pair = fixture
         .connect(
@@ -940,54 +1008,58 @@ pub async fn run_conformance_suite<F: Fixture>(fixture: &F) {
         11,
         numbers_events_per_topic_when_no_stream_id_is_given(fixture)
     );
-    case!(12, refuses_one_stream_key_past_the_local_ceiling(fixture));
     case!(
-        13,
+        12,
+        delivers_the_events_a_handler_emits_before_its_response(fixture)
+    );
+    case!(13, refuses_one_stream_key_past_the_local_ceiling(fixture));
+    case!(
+        14,
         answers_a_protocol_ping_with_a_pong_in_both_directions(fixture)
     );
     case!(
-        14,
+        15,
         cancels_an_in_flight_request_and_reports_it_as_cancelled(fixture)
     );
     case!(
-        15,
+        16,
         times_out_a_request_locally_and_ignores_the_late_answer(fixture)
     );
     case!(
-        16,
+        17,
         fails_in_flight_requests_with_unavailable_when_the_connection_drops(fixture)
     );
-    case!(17, propagates_a_close_reason_code_to_the_peer(fixture));
+    case!(18, propagates_a_close_reason_code_to_the_peer(fixture));
     case!(
-        18,
+        19,
         refuses_a_result_past_the_frame_limit_without_ending_the_session(fixture)
     );
     case!(
-        19,
+        20,
         honours_the_lower_announced_frame_limit_when_sending(fixture)
     );
 
     if fixture.chunked() {
         case!(
-            20,
+            21,
             keeps_two_concurrent_oversized_results_from_interleaving(fixture)
         );
     }
     if fixture.supports_raw() {
         case!(
-            21,
+            22,
             closes_with_4426_when_the_peer_sends_a_hello_it_cannot_read(fixture)
         );
-        case!(22, ignores_unknown_envelope_members(fixture));
+        case!(23, ignores_unknown_envelope_members(fixture));
     }
 
-    let mut expected: Vec<&'static str> = CONFORMANCE_CASES[..20].to_vec();
+    let mut expected: Vec<&'static str> = CONFORMANCE_CASES[..21].to_vec();
     if fixture.chunked() {
-        expected.push(CONFORMANCE_CASES[20]);
+        expected.push(CONFORMANCE_CASES[21]);
     }
     if fixture.supports_raw() {
-        expected.push(CONFORMANCE_CASES[21]);
         expected.push(CONFORMANCE_CASES[22]);
+        expected.push(CONFORMANCE_CASES[23]);
     }
     assert_eq!(
         ran, expected,

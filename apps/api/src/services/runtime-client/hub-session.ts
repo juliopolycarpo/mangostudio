@@ -214,6 +214,8 @@ export interface HubSession {
   /** The validated manifest after applying the hub claim. */
   readonly manifest: RuntimeCapabilityManifest;
   readonly runtimeVersion: string;
+  /** The wire minor both ends negotiated in `hello` (spec §5.2). */
+  readonly effectiveMinor: number;
   request<K extends RuntimeMethod>(
     method: K,
     params: RuntimeMethodMap[K]['params'],
@@ -336,6 +338,7 @@ export async function openHubSession(
     session,
     manifest,
     runtimeVersion: remote.peer.version,
+    effectiveMinor: remote.effectiveMinor,
     ...(options.externalAgentIsolation
       ? { externalAgentIsolation: options.externalAgentIsolation }
       : {}),

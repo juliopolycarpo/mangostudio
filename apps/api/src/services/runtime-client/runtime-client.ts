@@ -657,6 +657,17 @@ export class RuntimeClient {
   }
 
   /**
+   * The wire minor this connection negotiated. A behaviour a minor added is
+   * only there to rely on when this is at least that minor.
+   *
+   * @example
+   * const ordered = client.effectiveMinor >= ORDERED_ANSWER_MINOR; // spec §6.2
+   */
+  get effectiveMinor(): number {
+    return this.hub.effectiveMinor;
+  }
+
+  /**
    * Whether this peer says it re-checks the paths this hub names against the
    * policy the call carried. False for any runtime that predates the
    * declaration — the hub cannot read enforcement into silence.

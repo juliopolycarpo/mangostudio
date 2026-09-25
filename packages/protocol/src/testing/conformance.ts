@@ -299,6 +299,35 @@ export function itBehavesLikeAMangoTransport(fixture: ConformanceFixture): void 
     });
   });
 
+  it('delivers the events a handler emits before its response', async () => {
+    // Past what a receiver handles in one wake: a burst that small lands with
+    // the answer in one batch and hides a reorder, since the receiver delivers
+    // the whole batch before the requester runs.
+    const emitted = 256;
+    const announce: RequestHandler = (_params, context) => {
+      for (let line = 0; line < emitted; line += 1) {
+        context.session.emit({ topic: 'test.announce', payload: { line } });
+      }
+      return { emitted };
+    };
+    await withPair(
+      async ({ a }) => {
+        const received: number[] = [];
+        const detach = a.onEvent((event) => {
+          if (event.topic === 'test.announce') received.push(event.seq);
+        });
+        // No round trip after the answer: §6.2 puts every event the handler
+        // emitted before it returned ahead of the answer, so they are all in
+        // by the time the request settles.
+        expect(await a.request('test.announce', {})).toEqual({ emitted });
+        detach();
+        expect(received).toEqual(Array.from({ length: emitted }, (_, seq) => seq));
+      },
+      {},
+      { handlers: { ...CONFORMANCE_HANDLERS, 'test.announce': announce } }
+    );
+  });
+
   it('refuses one stream key past the local ceiling', async () => {
     await withPair(
       async ({ a, b }) => {

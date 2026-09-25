@@ -12,6 +12,7 @@
  * cannot be told, which the connection failure already reports.
  */
 
+import { ORDERED_ANSWER_MINOR } from '@mangostudio/protocol';
 import type { InstallRunStatus, ToolchainSelection } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
@@ -24,7 +25,17 @@ import type { RuntimeClient } from '../../../services/runtime-client/runtime-cli
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { toolchainParams } from '../application/toolchain-service';
 
+// Re-exported so the relay's tests name the protocol's own feature minor.
+export { ORDERED_ANSWER_MINOR };
+
 type InstallOutputStream = RuntimeInstallOutputEvent['stream'];
+
+/**
+ * How long the relay keeps listening past the answer of a peer below
+ * {@link ORDERED_ANSWER_MINOR}. The lines the answer overtook were already
+ * written by then, so they trail it by one transport hop, not by more work.
+ */
+export const UNORDERED_OUTPUT_GRACE_MS = 250;
 
 export interface InstallLogLine {
   readonly stream: InstallOutputStream;
@@ -71,6 +82,8 @@ export interface InstallRunnerDeps {
    */
   readonly logPathFor: (runId: string, environmentId: string) => string;
   readonly now: () => number;
+  /** Listening past the answer on a peer below {@link ORDERED_ANSWER_MINOR}. */
+  readonly unorderedOutputGraceMs: number;
 }
 
 /**
@@ -88,7 +101,21 @@ const defaultDeps: InstallRunnerDeps = {
   resolveClient: (userId, environmentId) => getRuntimeClient(userId, environmentId),
   logPathFor: defaultLogPath,
   now: Date.now,
+  unorderedOutputGraceMs: UNORDERED_OUTPUT_GRACE_MS,
 };
+
+/**
+ * Resolves after `ms` when the peer negotiated a minor below
+ * {@link ORDERED_ANSWER_MINOR}, at once otherwise: the window in which output
+ * the answer overtook can still arrive.
+ *
+ * @example
+ * await awaitUnorderedOutput(client.effectiveMinor, 250);
+ */
+function awaitUnorderedOutput(effectiveMinor: number, ms: number): Promise<void> {
+  if (effectiveMinor >= ORDERED_ANSWER_MINOR || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function terminalFor(result: RuntimeInstallRunResult): Exclude<InstallRunStatus, 'running'> {
   return result.status;
@@ -177,8 +204,9 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
         // claim otherwise. `failed` is the honest reading of "we lost track".
         return failure('failed');
       } finally {
-        unsubscribe();
         options.signal?.removeEventListener('abort', cancel);
+        await awaitUnorderedOutput(client.effectiveMinor, deps.unorderedOutputGraceMs);
+        unsubscribe();
       }
     },
   };
