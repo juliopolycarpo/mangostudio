@@ -14,18 +14,6 @@ export type WingetOwnership = 'owned' | 'not-owned' | 'unknown';
 /** The only Node package MangoStudio ever asks winget about. */
 export const NODE_LTS_WINGET_PACKAGE_ID = 'OpenJS.NodeJS.LTS';
 
-/** `winget list` argv for a package id, disabling every prompt a host adapter cannot answer. */
-export function WINGET_LIST_ARGV(packageId: string): string[] {
-  return [
-    'list',
-    '--id',
-    packageId,
-    '--exact',
-    '--accept-source-agreements',
-    '--disable-interactivity',
-  ];
-}
-
 /**
  * `winget list --id <id> --exact` reports "no packages found matching the
  * input criteria" with exit code `0x8A150014` — the one exit code this parser

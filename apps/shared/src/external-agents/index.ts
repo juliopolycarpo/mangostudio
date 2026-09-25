@@ -223,7 +223,6 @@ export {
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
   EXTERNAL_VENDOR_ID_MAX_LENGTH,
   type ExternalTextLimit,
-  sanitizeVendorText,
   schemaMaxLengthFor,
   usableVendorId,
   vendorSelection,

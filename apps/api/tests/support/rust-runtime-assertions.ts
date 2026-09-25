@@ -24,8 +24,6 @@ import { rejectionOf } from '@mangostudio/protocol/testing';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import {
   createBackupStoreDeps,
-  executeLibraryUndo,
-  executePropagationWrites,
   hashResourceAt,
   LibraryCache,
   listBackupSets,
@@ -510,8 +508,10 @@ export async function assertRustRuntimeLibraryMethods(
 }
 
 /**
- * The write lane and both directions of backup compatibility, against the
- * `qualified` skill {@link assertRustRuntimeLibraryMethods} left in place.
+ * The write lane, and the hub's own backup store reading what the runtime
+ * wrote, against the `qualified` skill {@link assertRustRuntimeLibraryMethods}
+ * left in place. Sets the deleted TypeScript runtime wrote are replayed by
+ * `crates/mangostudio-runtime/src/library/mutation/ts_backup_compat_tests.rs`.
  */
 async function assertRustRuntimeLibraryWrites(
   client: RuntimeClient,
@@ -520,7 +520,6 @@ async function assertRustRuntimeLibraryWrites(
 ): Promise<void> {
   const skills = pathEnv.env.SKILLS_DIR ?? '';
   const backupRoot = join(directory, 'library-backups');
-  const tsEnv = { platform: process.platform, homeDir: homedir(), env: { ...pathEnv.env } };
   const tsStore = createBackupStoreDeps({ backupRoot });
   const source = join(skills, 'qualified');
   const hash = await hashResourceAt(source, 'directory');
@@ -553,7 +552,7 @@ async function assertRustRuntimeLibraryWrites(
     environmentId: 'rust-qualification',
   });
 
-  // Rust removes the original; TypeScript restores it from the Rust set.
+  // Rust removes the original and restores it from its own set.
   const removed = await client.library.remove({
     backupRoot,
     pathEnv,
@@ -574,39 +573,10 @@ async function assertRustRuntimeLibraryWrites(
   expect((await client.library.backups({ backupRoot })).sets).toEqual(
     await listBackupSets(tsStore)
   );
-  const restored = await executeLibraryUndo({ backupRoot, backupId: removalSet, pathEnv: tsEnv });
+  const restored = await client.library.undo({ backupRoot, backupId: removalSet, pathEnv });
   expect(restored.restored.map((entry) => entry.locationId)).toEqual(['mango-skills']);
   expect(await hashResourceAt(source, 'directory')).toBe(hash);
 
-  // TypeScript writes a set; Rust lists it and undoes it.
-  const tsSet = '2026-09-23T10-15-44.087Z-00000000000000fe';
-  const tsWrite = await executePropagationWrites({
-    backupRoot,
-    pathEnv: tsEnv,
-    backupId: tsSet,
-    operations: [
-      {
-        resourceKey: 'skill:from-ts',
-        locationId: 'mango-skills',
-        slug: 'from-ts',
-        operation: 'create',
-        kind: 'directory',
-        expectedContentHash: hash,
-        destinationRoot: skills,
-        files: [{ relativePath: 'SKILL.md', contents: new Uint8Array(body) }],
-      },
-    ],
-  });
-  expect(tsWrite.failed).toEqual([]);
-  const listed = await client.library.backups({ backupRoot });
-  expect(listed.sets.find((set) => set.backupId === tsSet)).toMatchObject({
-    operation: 'propagation',
-    resourceKeys: ['skill:from-ts'],
-    manifestReadable: true,
-  });
-  const undone = await client.library.undo({ backupRoot, backupId: tsSet, pathEnv });
-  expect(undone.removed.map((entry) => entry.locationId)).toEqual(['mango-skills']);
-  await expect(readFile(join(skills, 'from-ts', 'SKILL.md'))).rejects.toThrow();
   expect((await client.library.undo({ backupRoot, backupId: applySet, pathEnv })).removed).toEqual([
     { locationId: 'mango-skills', destinationPath: join(skills, 'copied') },
   ]);
@@ -615,8 +585,9 @@ async function assertRustRuntimeLibraryWrites(
     client.library.undo({ backupRoot, backupId: 'never-written', pathEnv })
   );
   expect((missing as RemoteError).details?.kind).toBe('library_backup_missing');
-  expect(
-    await client.library.gc({ backupRoot, purgeBackupIds: [applySet, removalSet, tsSet] })
-  ).toEqual({ purged: [applySet, removalSet, tsSet], pruned: [] });
+  expect(await client.library.gc({ backupRoot, purgeBackupIds: [applySet, removalSet] })).toEqual({
+    purged: [applySet, removalSet],
+    pruned: [],
+  });
   expect(await client.library.backups({ backupRoot })).toEqual({ sets: [] });
 }

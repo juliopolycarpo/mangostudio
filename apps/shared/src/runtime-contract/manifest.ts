@@ -9,7 +9,6 @@
  */
 
 import Type, { type Static } from 'typebox';
-import Value from 'typebox/value';
 import {
   ExternalAgentTargetIdSchema,
   ExternalIdentityIsolationSchema,
@@ -244,24 +243,6 @@ export const HubExternalAgentIsolationSchema = Type.Union([
   Type.Literal('withdrawn'),
 ]);
 export type HubExternalAgentIsolation = Static<typeof HubExternalAgentIsolationSchema>;
-
-/**
- * The hub's isolation claim from its `hello.capabilities`, or undefined when it
- * made none.
- *
- * Validated rather than trusted: `capabilities` is an open object, and a
- * spelling this build does not recognise is a claim it cannot act on — which
- * is not the same as a withdrawal, and must not be read as one.
- *
- * @example
- * hubExternalAgentIsolationOf({ externalAgentIsolation: 'withdrawn' }); // 'withdrawn'
- */
-export function hubExternalAgentIsolationOf(
-  capabilities: Readonly<Record<string, unknown>>
-): HubExternalAgentIsolation | undefined {
-  const claim = capabilities.externalAgentIsolation;
-  return Value.Check(HubExternalAgentIsolationSchema, claim) ? claim : undefined;
-}
 
 /**
  * Who is speaking for the hub on this connection. Additive-optional: older

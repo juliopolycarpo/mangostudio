@@ -11,9 +11,10 @@
  * The binary runs with a scratch `HOME`/`USERPROFILE` and every location
  * override scrubbed from its environment, so the Hub's `backupPolicyFor`
  * roots the store at the scratch home and no real agent home is ever read or
- * written. Backup compatibility is proven in both directions here too: a
- * Rust-written set is read, listed and undone by the TypeScript engine, and a
- * TypeScript-written set is listed and undone by the Rust runtime.
+ * written. A Rust-written set is also read and listed by the hub's own
+ * TypeScript backup store. Sets the deleted TypeScript runtime wrote are
+ * replayed through the Rust store by
+ * `crates/mangostudio-runtime/src/library/mutation/ts_backup_compat_tests.rs`.
  *
  * | Pure-TS assertion | Covered here by |
  * | --- | --- |
@@ -36,9 +37,6 @@ import type {
 } from '@mangostudio/shared/library';
 import {
   createBackupStoreDeps,
-  executeLibraryUndo,
-  executePropagationWrites,
-  hashResourceAt,
   listBackupSets,
   readBackupManifest,
 } from '@mangostudio/shared/library/machine';
@@ -318,8 +316,7 @@ describe('Real Rust runtime library qualification through the Hub', () => {
       expect(missing).toBeInstanceOf(LibraryRequestError);
       expect((missing as LibraryRequestError).status).toBe(404);
 
-      // Removal through the Hub, restored by the TypeScript engine from the
-      // Rust-written set.
+      // Removal through the Hub, restored through the same undo route.
       const removalRequest: RemovalPreviewRequest = {
         resourceKeys: ['skill:gh'],
         locationIds: ['cursor-skills'],
@@ -344,50 +341,15 @@ describe('Real Rust runtime library qualification through the Hub', () => {
       expect(removed.removed.map((entry) => entry.locationId)).toEqual(['cursor-skills']);
       const removalSet = removed.backups[0]?.backupId ?? '';
       expect(existsSync(skillPath(box, '.cursor'))).toBe(false);
-      const restored = await executeLibraryUndo({
-        backupRoot: box.backupRoot,
-        backupId: removalSet,
-        pathEnv: { platform: process.platform, homeDir: box.home, env: {} },
-      });
-      expect(restored.restored.map((entry) => entry.locationId)).toEqual(['cursor-skills']);
-      expect(readSkill(box, '.cursor')).toContain('stale');
-
-      // TypeScript-written set in the same store, listed and undone by Rust.
-      const tsSet = '2026-09-23T10-15-44.087Z-00000000000000ff';
-      const tsWrite = await executePropagationWrites({
-        backupRoot: box.backupRoot,
-        pathEnv: { platform: process.platform, homeDir: box.home, env: {} },
-        backupId: tsSet,
-        environmentId: ENVIRONMENT_ID,
-        operations: [
-          {
-            resourceKey: 'skill:gh',
-            locationId: 'agents-skills',
-            slug: 'gh',
-            operation: 'create',
-            kind: 'directory',
-            expectedContentHash: await hashResourceAt(skillPath(box, '.claude'), 'directory'),
-            destinationRoot: join(box.home, '.agents', 'skills'),
-            sourceDir: skillPath(box, '.claude'),
-          },
-        ],
-      });
-      expect(tsWrite.failed).toEqual([]);
-      const listedByRust = await describeBackupUsage(TEST_USER.id);
-      expect(
-        listedByRust.sets.find(
-          (set) => set.environmentId === ENVIRONMENT_ID && set.backupId === tsSet
-        )
-      ).toMatchObject({ availability: 'available', operation: 'propagation' });
-      const rustUndo = await undoLibraryPropagation(
-        tsSet,
+      const restored = await undoLibraryPropagation(
+        removalSet,
         { environmentId: ENVIRONMENT_ID },
         TEST_USER.id
       );
-      expect(rustUndo.removed.map((entry) => entry.locationId)).toEqual(['agents-skills']);
-      expect(existsSync(skillPath(box, '.agents'))).toBe(false);
+      expect(restored.restored.map((entry) => entry.locationId)).toEqual(['cursor-skills']);
+      expect(readSkill(box, '.cursor')).toContain('stale');
 
-      for (const backupId of [applySet, removalSet, tsSet]) {
+      for (const backupId of [applySet, removalSet]) {
         await purgeEnvironmentBackup(TEST_USER.id, ENVIRONMENT_ID, backupId);
       }
       const purged = await describeBackupUsage(TEST_USER.id);

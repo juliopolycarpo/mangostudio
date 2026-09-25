@@ -1,17 +1,10 @@
 export {
-  createPropagationWriteEngineDeps,
-  type ExecutePropagationWritesParams,
-  executePropagationWrites,
-  type PropagationWriteEngineDeps,
-} from './apply-writes';
-export {
   assertBackupId,
   type BackupEntry,
   type BackupManifest,
   type BackupStoreDeps,
   backupExistingResource,
   type CreateBackupStoreDepsOptions,
-  collectBackupGarbage,
   createBackupId,
   createBackupStoreDeps,
   discardBackupSet,
@@ -47,7 +40,6 @@ export {
   type ReadLibraryInstance,
   type ReadLibraryInstancesOptions,
   type ReadLocationInstancesResult,
-  readLibraryTree,
   readLocationInstances,
   readResourceFile,
 } from './instance-reader';
@@ -58,35 +50,7 @@ export {
   type LibraryWriteFailure,
   resolveContainedResourcePath,
 } from './path-safety';
-export {
-  LibraryReadDeniedError,
-  type LibraryReadParams,
-  type LibraryReadResult,
-  libraryContentPath,
-  libraryLocationRoot,
-  MAX_LIBRARY_CONTENT_BYTES,
-  readLibraryContent,
-} from './read';
-export {
-  createRemovalWriteEngineDeps,
-  type ExecuteRemovalWritesParams,
-  executeRemovalWrites,
-  type RemovalWriteEngineDeps,
-} from './remove-writes';
-export {
-  type CreateResourceWriterDepsOptions,
-  createResourceWriterDeps,
-  type DirectoryResourceWriteInput,
-  type FileResourceWriteInput,
-  type ResolvedDestination,
-  type ResourceWriteResult,
-  type ResourceWriterDeps,
-  type ResourceWriterFs,
-  requireWritableLocation,
-  resolveResourceDestination,
-  writeDirectoryResource,
-  writeFileResource,
-} from './resource-writer';
+export { libraryContentPath, MAX_LIBRARY_CONTENT_BYTES } from './read';
 export { readSettingsSources } from './settings-sources';
 export {
   findStagedRemovalLeftovers,
@@ -97,11 +61,3 @@ export {
   stageResourceRemoval,
   type TreeRemovalFs,
 } from './tree-removal';
-export {
-  createLibraryUndoEngineDeps,
-  type ExecuteLibraryUndoParams,
-  executeLibraryUndo,
-  LibraryBackupMissingError,
-  type LibraryUndoEngineDeps,
-} from './undo-writes';
-export { serializeRuntimeLibraryWrite } from './write-queue';
