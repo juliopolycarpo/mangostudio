@@ -137,7 +137,7 @@ export interface ConnectMcpClientOptions {
   requestElicitation?: (request: McpElicitationRequest) => Promise<McpElicitationResult>;
 }
 
-export interface WrapMcpClientOptions
+interface WrapMcpClientOptions
   extends Pick<
     ConnectMcpClientOptions,
     'onSessionClosed' | 'onToolListChanged' | 'requestElicitation'
