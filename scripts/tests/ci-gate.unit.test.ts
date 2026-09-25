@@ -355,8 +355,13 @@ describe('release-dry-run.yml always-reporting gate', () => {
     const linuxBlock = extractJobBlock(workflow, 'dry-run-linux');
     const windowsBlock = extractJobBlock(workflow, 'dry-run-windows');
     const cargoBlock = extractJobBlock(workflow, 'dry-run-cargo');
+    const runtimeBlock = extractJobBlock(workflow, 'runtime');
 
-    expect(parseNeedsList(linuxBlock)).toEqual(['changes']);
+    // The cargo runtimes both dry-run archives ship come from the runtime lane,
+    // which is relevant exactly when the Linux lane is.
+    expect(parseNeedsList(runtimeBlock)).toEqual(['changes']);
+    expect(runtimeBlock).toContain("if: needs.changes.outputs.release == 'true'");
+    expect(parseNeedsList(linuxBlock)).toEqual(['changes', 'runtime']);
     expect(linuxBlock).toContain("if: needs.changes.outputs.release == 'true'");
     // Also needs `changes` directly (not just transitively through
     // dry-run-linux) so its own `if:` can read `needs.changes.outputs`.
@@ -377,7 +382,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', needs.changes.outputs.release == 'false' && 'runtime' || '') }}`
     );
   });
 });

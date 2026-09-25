@@ -384,6 +384,27 @@ describe('release workflow binary gate', () => {
     );
   });
 
+  test('the packaging job stages cargo runtimes built per target, never Bun-compiled ones', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+    const build = extractJobBlock(workflow, 'build');
+    const runtime = readText('.github/workflows/runtime-build.yml');
+
+    expect(extractJobBlock(workflow, 'runtime')).toContain(
+      'uses: ./.github/workflows/runtime-build.yml'
+    );
+    expect(build).toMatch(/\n {4}needs: \[runtime\]\n/);
+    expect(build).toContain('pattern: runtime-$' + '{{ inputs.source_sha }}-*');
+    expect(build).toContain('bun run build --binary --runtime-dir .mango/runtime-prebuilt');
+
+    // Every release target is in the default matrix, each leg builds exactly
+    // one, and zig is fetched only against a pinned checksum.
+    for (const target of ALL_BINARY_TARGETS) expect(runtime).toContain(`"${target.arch}"`);
+    expect(runtime).toContain('bun --no-install ./scripts/build-runtime.ts --platform "$PLATFORM"');
+    expect(runtime).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
+    expect(runtime).toContain('sha256sum --check --strict');
+    expect(runtime).toContain('tool: cargo-zigbuild@0.23.4');
+  });
+
   test('archive upload payloads skip artifact re-compression', () => {
     const uploads = workflowFiles().flatMap((path) =>
       uploadArtifactSteps(readText(path)).map((step) => ({
@@ -607,6 +628,11 @@ describe('release workflow binary gate', () => {
     expect('Cargo.toml').toMatch(pattern);
     expect('Cargo.lock').toMatch(pattern);
     expect('Dockerfile').toMatch(pattern);
+    // The runtime that ships beside the hub is the cargo crate, built by its own workflow.
+    expect('crates/mangostudio-runtime/src/cli.rs').toMatch(pattern);
+    expect('.github/workflows/runtime-build.yml').toMatch(pattern);
+    expect('scripts/build-runtime.ts').toMatch(pattern);
+    expect('rust-toolchain.toml').toMatch(pattern);
 
     // …while unrelated app code does not.
     expect('apps/api/src/app.ts').not.toMatch(pattern);
