@@ -1013,6 +1013,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_sidecar_error_names_how_many_records_the_buffer_dropped() {
+        let dir = scratch_dir("dropped-count");
+        let path = dir.join("audit.log");
+        std::fs::create_dir(&path).unwrap();
+        let audit = FileAudit::new(
+            path.clone(),
+            Arc::new(FixedWallClock::new(SystemTime::now())),
+        );
+
+        // MAX_BUFFERED_RECORDS (1_024) plus three: three oldest are dropped.
+        for index in 0..1_027u32 {
+            audit
+                .record(entry(&format!("runtime.health.{index}"), Outcome::Ok))
+                .await;
+        }
+
+        let message = std::fs::read_to_string(dir.join("audit.log.error")).unwrap();
+        assert!(
+            message.contains("(3 record(s) dropped)"),
+            "expected sidecar containing: (3 record(s) dropped) | received: {message:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn append_line_creates_a_missing_parent_directory() {
         // The regression this guards: TypeScript's `writeBatch` does
         // `mkdir(dirname(path), { recursive: true })` before every write.
