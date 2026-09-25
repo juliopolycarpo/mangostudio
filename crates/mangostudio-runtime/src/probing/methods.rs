@@ -1069,6 +1069,54 @@ mod tests {
         );
     }
 
+    /// Cursor installed only as `agent`, after Grok's `agent` on `PATH`: the
+    /// report and the launch must both name Cursor's own `agent`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cursor_installed_as_agent_after_groks_agent_is_reported_and_launched() {
+        let grok = scratch_dir("agent-clis-grok-bin");
+        let cursor = scratch_dir("agent-clis-cursor-bin");
+        fake_binary_on_path(&grok, "agent", "grok 1.0.30 (04b7ffed98c6) [stable]");
+        fake_binary_on_path(&cursor, "agent", "2026.09.10-fd3934a");
+        let mut env = params_with_path(&cursor);
+        env.insert(
+            "PATH".to_string(),
+            format!("{}:{}", grok.to_string_lossy(), cursor.to_string_lossy()),
+        );
+        let params = ProbeAgentClisParams {
+            budget: None,
+            path_env: Some(PathEnvOverride {
+                env: Some(env.clone()),
+            }),
+            target_ids: Some(vec![AgentTargetId::Cursor]),
+            installable: None,
+            self_: self_params("9.9.9"),
+        };
+        let result = handle_probe_agent_clis(params, CancellationToken::new())
+            .await
+            .unwrap();
+        let reported = result["statuses"][0]["effective"]["rawPath"]
+            .as_str()
+            .map(std::path::PathBuf::from);
+        let launched = resolve_agent_executable_in(
+            AgentTargetId::Cursor,
+            host::build_runtime_path_env(Some(&env)),
+            &CancellationToken::new(),
+        )
+        .await;
+        let expected = cursor.join("agent");
+        assert_eq!(
+            reported.as_deref(),
+            Some(expected.as_path()),
+            "expected Cursor's effective installation: {expected:?} | received: {reported:?}"
+        );
+        assert_eq!(
+            launched.as_deref(),
+            Some(expected.as_path()),
+            "expected Cursor to launch {expected:?}, not Grok's agent | received: {launched:?}"
+        );
+    }
+
     fn installation(path: &str, version: Option<&str>, effective: bool) -> RuntimeInstallation {
         RuntimeInstallation {
             path: path.to_owned(),

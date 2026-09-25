@@ -312,6 +312,7 @@ mod tests {
             keep_unparsed_version: false,
             well_known_dirs: |_| Vec::new(),
             include_bare_binary_names: false,
+            shared_binary_names: &[],
         }
     }
 
