@@ -2930,6 +2930,9 @@ enum Script {
     /// harness's coalesced updates, one per interval, each carrying the full
     /// output tail, then the command's completion and the turn's.
     StreamingCommand { updates: usize },
+    /// Streams one text delta, then goes quiet until the SDK's idle deadline
+    /// ends the turn as `Cancelled { reason: Timeout }`.
+    IdleTimeout,
     /// Offers native review. A turn streams one text delta and completes. A
     /// review streams one finding under the thread named here (the session's
     /// own when `None`) and the vendor handle `review_turn`, then completes
@@ -3063,6 +3066,11 @@ impl Session for ScriptedSession {
                     let _ = stream_one_command(&sink, updates).await;
                 });
                 String::from("command-turn")
+            }
+            Script::IdleTimeout => {
+                sink.emit(text("before the silence")).await?;
+                sink.cancel(CancelReason::Timeout).await?;
+                String::from("idle-turn")
             }
             Script::Reviewing { .. } => {
                 sink.emit(text("turn text")).await?;
@@ -3565,6 +3573,59 @@ async fn a_long_streaming_command_stays_inside_the_persisted_budget() {
         "expected an hour of command output inside the persisted budget | received {bytes} bytes"
     );
     rig.idle("one", "the command turn").await;
+    rig.close("one").await;
+}
+
+/// The SDK ends a silent turn as a timeout cancellation. The hub must hear
+/// why, as the TypeScript supervisor's idle-timeout error told it, rather
+/// than a bare `cancelled` it renders as the agent stopping on its own.
+#[tokio::test]
+async fn an_idle_timeout_ends_the_turn_with_its_own_error_not_a_bare_cancel() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::Scripted(Script::IdleTimeout),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.supervisor
+        .turn(
+            rig.turn_params("one", "m1", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let mut kinds = Vec::new();
+    let terminal = loop {
+        let event = rig.next_event("the idle turn's terminal").await;
+        let kind = event["event"]["type"].as_str().unwrap_or("?").to_owned();
+        kinds.push(kind.clone());
+        if kind == "error" || kind == "completed" {
+            break event;
+        }
+    };
+    assert_eq!(
+        kinds,
+        ["commands_available", "text_delta", "error"],
+        "expected the text, then the idle-timeout error | received {kinds:?}"
+    );
+    let error = &terminal["event"]["error"];
+    assert_eq!(
+        (&error["code"], &error["message"]),
+        (
+            &json!("adapter-stream"),
+            &json!("External-agent turn exceeded its idle timeout.")
+        ),
+        "expected the TypeScript supervisor's idle-timeout error | received {error}"
+    );
+    let mut events = rig.events.lock().await;
+    let late = tokio::time::timeout(Duration::from_millis(200), events.recv()).await;
+    assert!(
+        late.is_err(),
+        "expected nothing after the error | received {:?}",
+        late.ok().flatten().map(|event| event.payload)
+    );
+    drop(events);
+    rig.idle("one", "the idle turn").await;
     rig.close("one").await;
 }
 

@@ -664,6 +664,26 @@ impl Relay {
     }
 
     async fn event(&mut self, event: &mango_external_agents::AgentEvent) {
+        // The SDK ends a silent turn, or one whose approval lapsed, as a
+        // timeout cancellation. A bare `cancelled` reads to the hub as the
+        // agent stopping on its own, so the turn ends with the runtime's own
+        // error, as the TypeScript supervisor's idle deadline did, and the
+        // `completed` behind it is dropped. Every other reason stays a cancel.
+        if let mango_external_agents::EventKind::Cancelled {
+            reason: CancelReason::Timeout,
+        } = &event.kind
+        {
+            if !self.failed {
+                self.failed = true;
+                let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_ms(SystemTime::now()));
+                self.error(
+                    at,
+                    "adapter-stream",
+                    "External-agent turn exceeded its idle timeout.",
+                );
+            }
+            return;
+        }
         let live = Arc::clone(&self.live);
         let mapped = map_events::map_event(live.target, event);
         if let Some(pending) = mapped.opened {
