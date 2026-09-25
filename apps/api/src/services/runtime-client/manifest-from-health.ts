@@ -22,8 +22,10 @@
  */
 
 import {
+  acceptedRuntimeImplementation,
   effectiveTools,
   type RuntimeCapabilityManifest,
+  type RuntimeImplementation,
   type RuntimeShellKind,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
@@ -35,6 +37,8 @@ export function capabilityManifestFromHealth(
   handshake?: RuntimeCapabilityManifest
 ): RuntimeCapabilityManifest {
   const allow = report.allow;
+  // Judged once: a descriptor this build cannot interpret is not announced.
+  const implementation = acceptedRuntimeImplementation(handshake?.implementation);
   const shells = allow.shell
     ? report.shells.filter((shell): shell is RuntimeShellKind => SHELL_KINDS.has(shell))
     : [];
@@ -73,8 +77,11 @@ export function capabilityManifestFromHealth(
     ...(report.gh ? { gh: report.gh } : {}),
     // Same rule as `gh`: absent stays absent, so "too old to say" is never
     // rewritten as "said no".
-    ...terminalOf(report, handshake),
-    features: applyImplementationCeiling(allowedFeatures, implementationCeiling(handshake)),
+    ...terminalOf(report, implementation),
+    features: applyImplementationCeiling(
+      allowedFeatures,
+      implementationCeiling(handshake, implementation)
+    ),
     ...(report.externalAgents?.targets.length
       ? { externalAgents: [...report.externalAgents.targets] }
       : {}),
@@ -93,7 +100,7 @@ export function capabilityManifestFromHealth(
     ...(handshake?.terminalCloseAfterRevocation === undefined
       ? {}
       : { terminalCloseAfterRevocation: handshake.terminalCloseAfterRevocation }),
-    ...(handshake?.implementation ? { implementation: handshake.implementation } : {}),
+    ...(implementation ? { implementation } : {}),
     profile: report.profile,
     allow,
   };
@@ -105,10 +112,10 @@ export function capabilityManifestFromHealth(
  */
 function terminalOf(
   report: RuntimeHealthReport,
-  handshake?: RuntimeCapabilityManifest
+  implementation: RuntimeImplementation | undefined
 ): Pick<RuntimeCapabilityManifest, 'terminal'> {
   if (report.terminal === undefined) return {};
-  const implemented = handshake?.implementation?.features.terminal ?? true;
+  const implemented = implementation?.features.terminal ?? true;
   return { terminal: report.terminal && implemented };
 }
 
@@ -123,13 +130,13 @@ function terminalOf(
  * than an implemented group, so it is always the handshake's own answer.
  *
  * @example
- * implementationCeiling(hello)?.shell // hello.implementation.features.shell when announced
+ * implementationCeiling(hello, accepted)?.shell // accepted.features.shell when announced
  */
 function implementationCeiling(
-  handshake?: RuntimeCapabilityManifest
+  handshake: RuntimeCapabilityManifest | undefined,
+  implementation: RuntimeImplementation | undefined
 ): RuntimeCapabilityManifest['features'] | undefined {
   if (!handshake) return undefined;
-  const implementation = handshake.implementation;
   if (!implementation) return handshake.features;
   const implemented = implementation.features;
   return {

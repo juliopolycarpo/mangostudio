@@ -254,6 +254,45 @@ describe('capabilityManifestFromHealth', () => {
     });
   });
 
+  it('treats an implementation at another schema version as not announced', () => {
+    const noneReport: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'none',
+      allow: RUNTIME_CONSENT_PRESETS.none,
+    };
+    const hello = capabilityManifestFromHealth(noneReport);
+    const handshake = {
+      ...hello,
+      implementation: {
+        schema: 2,
+        fingerprint: 'a'.repeat(64),
+        features: {
+          git: true,
+          probing: true,
+          mcp: true,
+          library: true,
+          checkpoints: true,
+          fsRead: true,
+          fsWrite: true,
+          shell: true,
+          update: true,
+          externalAgents: true,
+          terminal: true,
+        },
+      },
+    };
+
+    const granted = capabilityManifestFromHealth(
+      { ...baseReport, profile: 'custom', allow: { ...RUNTIME_CONSENT_PRESETS.none, shell: true } },
+      handshake
+    );
+
+    expect({ shell: granted.features.shell, implementation: granted.implementation }).toEqual({
+      shell: false,
+      implementation: undefined,
+    });
+  });
+
   describe('a peer that does not announce its implementation', () => {
     it('keeps a handshake consent refusal closed until the peer reconnects', () => {
       const noneReport: RuntimeHealthReport = {

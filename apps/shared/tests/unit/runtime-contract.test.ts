@@ -2,11 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import { defineContract } from '@mangostudio/protocol';
 import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '@mangostudio/shared/library';
 import {
+  acceptedRuntimeImplementation,
   effectiveTools,
   narrowRuntimeErrorCode,
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_NAME,
   RUNTIME_CONTRACT_VERSION,
+  RUNTIME_IMPLEMENTATION_SCHEMA_VERSION,
   RUNTIME_TOOL_GROUPS,
   RuntimeCapabilityManifestSchema,
 } from '@mangostudio/shared/runtime-contract';
@@ -283,5 +285,35 @@ describe('effectiveTools', () => {
     expect([...RUNTIME_TOOL_GROUPS].sort() as string[]).toEqual(
       ['checkpoints', 'fsRead', 'fsWrite', 'git', 'library', 'mcp', 'probing', 'shell'].sort()
     );
+  });
+});
+
+describe('acceptedRuntimeImplementation', () => {
+  const implementation = {
+    schema: RUNTIME_IMPLEMENTATION_SCHEMA_VERSION,
+    fingerprint: 'd'.repeat(64),
+    features: {
+      git: false,
+      probing: false,
+      mcp: false,
+      library: false,
+      checkpoints: false,
+      fsRead: false,
+      fsWrite: false,
+      shell: true,
+      update: false,
+      externalAgents: false,
+      terminal: false,
+    },
+  };
+
+  it('accepts a well-formed descriptor at this schema version', () => {
+    expect(acceptedRuntimeImplementation(implementation)).toEqual(implementation);
+  });
+
+  it('refuses another schema version and a malformed descriptor', () => {
+    expect(acceptedRuntimeImplementation({ ...implementation, schema: 2 })).toBeUndefined();
+    expect(acceptedRuntimeImplementation({ ...implementation, features: {} })).toBeUndefined();
+    expect(acceptedRuntimeImplementation(undefined)).toBeUndefined();
   });
 });

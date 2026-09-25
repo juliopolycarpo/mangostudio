@@ -21,6 +21,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+import Value from 'typebox/value';
 
 /**
  * Version of the implementation descriptor itself — the `features` key set and
@@ -89,3 +90,20 @@ export const RuntimeDiscoverResultSchema = Type.Object({
   methods: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
 });
 export type RuntimeDiscoverResult = Static<typeof RuntimeDiscoverResultSchema>;
+
+/**
+ * The implementation descriptor a hub may act on, or undefined.
+ *
+ * Accepts only a well-formed descriptor at exactly this build's
+ * {@link RUNTIME_IMPLEMENTATION_SCHEMA_VERSION}. A newer schema may change what
+ * the keys or the fingerprint mean, and a malformed one says nothing, so both
+ * read as "not announced": the hub falls back to the fail-closed handshake
+ * ceiling instead of trusting a shape it cannot interpret.
+ *
+ * @example
+ * acceptedRuntimeImplementation(hello.implementation)?.features.shell;
+ */
+export function acceptedRuntimeImplementation(value: unknown): RuntimeImplementation | undefined {
+  if (!Value.Check(RuntimeImplementationSchema, value)) return undefined;
+  return value.schema === RUNTIME_IMPLEMENTATION_SCHEMA_VERSION ? value : undefined;
+}

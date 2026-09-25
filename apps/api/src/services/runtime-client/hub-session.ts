@@ -24,6 +24,7 @@ import {
 } from '@mangostudio/protocol';
 import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
 import {
+  acceptedRuntimeImplementation,
   type HubExternalAgentIsolation,
   type HubIdentity,
   RUNTIME_CONTRACT,
@@ -33,6 +34,7 @@ import {
   RUNTIME_TERMINAL_OUTPUT_TOPIC,
   type RuntimeCapabilityManifest,
   RuntimeCapabilityManifestSchema,
+  RuntimeImplementationSchema,
   type RuntimeMethod,
   type RuntimeMethodMap,
   RuntimeTerminalOutputEventSchema,
@@ -536,13 +538,25 @@ function manifestOf(
   capabilities: Readonly<Record<string, unknown>>,
   claimed?: HubExternalAgentIsolation
 ): RuntimeCapabilityManifest | undefined {
-  if (!Value.Check(RuntimeCapabilityManifestSchema, capabilities)) return undefined;
   // `contracts` rides in the same open object and is not part of the manifest.
   // Leaving it in would make every `refreshManifest` comparison see a change
   // that never happened and publish an invalidation for nothing.
-  const { contracts: _announced, ...manifest } = capabilities as RuntimeCapabilityManifest & {
-    readonly contracts?: unknown;
-  };
+  // `implementation` is judged on its own: a descriptor this build cannot
+  // interpret (a newer schema, a renamed key) must cost the hub that
+  // descriptor, never the connection.
+  const { contracts: _announced, implementation, ...rest } = capabilities;
+  if (!Value.Check(RuntimeCapabilityManifestSchema, rest)) return undefined;
+  const accepted = acceptedRuntimeImplementation(implementation);
+  if (implementation !== undefined && !accepted) {
+    logger.warn('runtime_implementation_ignored', {
+      reason: Value.Check(RuntimeImplementationSchema, implementation)
+        ? 'unsupported-schema'
+        : 'malformed',
+    });
+  }
+  const manifest: RuntimeCapabilityManifest = accepted
+    ? { ...rest, implementation: accepted }
+    : rest;
   return applyHubIsolationClaim(manifest, claimed);
 }
 
