@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use base64::Engine as _;
 use mango_external_agents::normalize;
@@ -43,6 +43,7 @@ use super::wire::{
     RespondParams, StartReviewParams, StartReviewResult, SteerParams, SteerRejection, SteerResult,
     TurnParams, TurnResult,
 };
+use crate::ports::wall_clock::epoch_millis;
 
 /// The topic every turn event travels on.
 pub(crate) const EVENT_TOPIC: &str = "external-agent.event";
@@ -463,7 +464,7 @@ impl Supervisor {
                         past_deadline = true;
                         if !relay.failed {
                             relay.fail(
-                                epoch_ms(SystemTime::now()),
+                                epoch_millis(SystemTime::now()),
                                 "adapter-stream",
                                 "External-agent turn exceeded its hard timeout.",
                                 CancelReason::Timeout,
@@ -658,7 +659,7 @@ impl Relay {
         if self.failed || self.shown_commands.as_ref() == Some(&commands) {
             return;
         }
-        let at = epoch_ms(SystemTime::now());
+        let at = epoch_millis(SystemTime::now());
         self.shown_commands = Some(commands.clone());
         self.publish(at, Event::CommandsAvailable { commands });
     }
@@ -675,7 +676,7 @@ impl Relay {
         {
             if !self.failed {
                 self.failed = true;
-                let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_ms(SystemTime::now()));
+                let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_millis(SystemTime::now()));
                 self.error(
                     at,
                     "adapter-stream",
@@ -695,7 +696,7 @@ impl Relay {
             .closed
             .as_ref()
             .is_some_and(|request_id| lock(&live.turns.interactions).remove(request_id).is_none());
-        let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_ms(SystemTime::now()));
+        let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_millis(SystemTime::now()));
         if let Some((response, reason)) = mapped.unrenderable {
             // A form the product cannot show is declined by name, so the
             // vendor is not left waiting on nobody. A required question cannot
@@ -747,7 +748,7 @@ impl Relay {
 
     fn overflow(&mut self, message: &str) {
         self.failed = true;
-        self.error(epoch_ms(SystemTime::now()), "adapter-stream", message);
+        self.error(epoch_millis(SystemTime::now()), "adapter-stream", message);
         let stopping = Arc::clone(&self.live);
         self.tasks.spawn(async move {
             let _ = stopping.session.cancel(CancelReason::Timeout).await;
@@ -985,12 +986,6 @@ fn sdk_attachments(attachments: &[Attachment]) -> Result<Vec<SdkAttachment>, Rem
             })
         })
         .collect()
-}
-
-fn epoch_ms(at: SystemTime) -> u64 {
-    at.duration_since(UNIX_EPOCH).map_or(0, |elapsed| {
-        u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-    })
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

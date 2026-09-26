@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::{CallContext, EventInput, Session};
@@ -25,7 +25,7 @@ use crate::consent::source::ConsentSource;
 use crate::ports::audit::{Audit, AuditEntry, Outcome};
 use crate::ports::authorization::consent_denial;
 use crate::ports::exclusivity::EffectClaim;
-use crate::ports::wall_clock::{SystemWallClock, WallClock};
+use crate::ports::wall_clock::{SystemWallClock, WallClock, epoch_millis};
 use crate::probing::detection::path_env::PathEnv;
 use crate::registry::Registry;
 use crate::subprocess::{
@@ -299,7 +299,7 @@ impl Service {
             })?;
         let control = Arc::clone(lease.control());
         let run_id = plan.run_id.clone();
-        let started = epoch_ms(self.ports.clock.now());
+        let started = epoch_millis(self.ports.clock.now());
         let (delivered, mut received) = oneshot::channel();
         tokio::spawn(Arc::clone(self).own(
             plan,
@@ -349,7 +349,7 @@ impl Service {
         };
         let outcome = self.execute(&plan, lease.control(), &mut stream).await;
         stream.end();
-        let finished = epoch_ms(self.ports.clock.now());
+        let finished = epoch_millis(self.ports.clock.now());
         if delivered.send(outcome.to_wire(started, finished)).is_err() {
             self.record_unobserved(&plan.run_id, outcome, started, finished)
                 .await;
@@ -555,7 +555,7 @@ impl Service {
             truncated: false,
             launched: true,
         };
-        outcome.to_wire(started, epoch_ms(self.ports.clock.now()))
+        outcome.to_wire(started, epoch_millis(self.ports.clock.now()))
     }
 }
 
@@ -781,12 +781,6 @@ fn js_number(value: f64) -> String {
         return format!("{}", value as i128);
     }
     format!("{value}")
-}
-
-fn epoch_ms(at: SystemTime) -> u64 {
-    at.duration_since(UNIX_EPOCH).map_or(0, |elapsed| {
-        u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-    })
 }
 
 fn argument(value: &str, expected: &str) -> RemoteError {

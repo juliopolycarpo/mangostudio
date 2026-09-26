@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
 use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
 use mango_external_agents::{
@@ -53,6 +53,7 @@ use super::wire::{
     RefreshAccountUsageResult, ResumeMode, TargetId,
 };
 use crate::consent::read::{ConsentRead, ConsentReader};
+use crate::ports::wall_clock::epoch_millis;
 use crate::probing::detection::path_env::PathEnv;
 
 /// How many sessions may be live or opening at once, as in the TS host.
@@ -601,7 +602,7 @@ impl Supervisor {
                 target,
                 &found.discovery,
                 found.account.as_ref(),
-                epoch_ms(SystemTime::now()),
+                epoch_millis(SystemTime::now()),
             ))
         };
         self.bounded(work, deadline, cancel, &host_cancel, || {
@@ -1410,12 +1411,6 @@ fn sdk_resume_mode(mode: ResumeMode) -> SdkResumeMode {
 
 fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
-}
-
-fn epoch_ms(at: SystemTime) -> u64 {
-    at.duration_since(UNIX_EPOCH).map_or(0, |elapsed| {
-        u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-    })
 }
 
 /// A scratch leaf name that is a pure function of the session id, holds no

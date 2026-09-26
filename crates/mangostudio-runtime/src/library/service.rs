@@ -28,6 +28,7 @@ use super::workers::run_library_blocking;
 use crate::blocking::run_blocking;
 use crate::consent::source::ConsentSource;
 use crate::ports::authorization::consent_denial;
+use crate::ports::wall_clock::epoch_millis;
 use crate::probing::detection::path_env::PathEnv;
 use crate::probing::host::{RealLocationFsProbe, build_runtime_path_env};
 use crate::probing::locations::{LOCATION_DEFINITIONS, describe_location};
@@ -142,7 +143,7 @@ impl LibraryService {
                 cache: Arc::clone(CACHE.get_or_init(|| Arc::new(LibraryCache::default()))),
                 fs,
                 platform: crate::health::node_platform().to_string(),
-                now_ms: Arc::new(epoch_ms),
+                now_ms: Arc::new(|| epoch_millis(std::time::SystemTime::now())),
                 warn: Arc::new(|message: &str| eprintln!("{message}")),
             },
         }
@@ -270,14 +271,6 @@ impl LibraryService {
             )
         })
     }
-}
-
-fn epoch_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 /// Registers all ten `library.*` methods: the five reads here and the
