@@ -17,6 +17,7 @@ describe('security workflows', () => {
   test('CodeQL uses explicit advanced setup for the repository languages', () => {
     const workflow = readText('.github/workflows/codeql.yml');
     const languageExpression = '$' + '{{ matrix.language }}';
+    expect(workflow).toContain(`languages: ${languageExpression}`);
 
     expect(workflow).toContain('pull_request:\n    branches: [main, feat/rust-runtime]');
     expect(workflow).toContain('push:\n    branches: [main]');
@@ -29,7 +30,9 @@ describe('security workflows', () => {
     expect(workflow).toContain('language: rust');
     expect(workflow).toContain('build-mode: none');
     expect(workflow).toContain('queries: security-extended');
-    expect(workflow).toContain(`category: "/language:${languageExpression}"`);
+    expect(workflow).toContain('category: "/language:javascript-typescript"');
+    expect(workflow).toContain('category: "/language:rust"');
+    expect(workflow).toContain('os: windows-latest');
     expect(workflow).not.toContain('autobuild');
     expect(workflow).not.toContain('setup-mango');
     expectWorkflowHasPinnedAction(workflow, 'github/codeql-action/init');
@@ -56,6 +59,7 @@ describe('security workflows', () => {
       expect(doc).toContain('.github/workflows/dependency-review.yml');
       expect(doc).toContain('security-extended');
       expect(doc).toContain('Code scanning results / CodeQL');
+      expect(doc).toContain('Rust');
       expect(doc).toContain('Dependency Review');
     }
   });
