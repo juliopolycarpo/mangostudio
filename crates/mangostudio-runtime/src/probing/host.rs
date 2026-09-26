@@ -704,7 +704,14 @@ mod tests {
     /// hidden `=X:` entries. A child built from the inherited environment must still start.
     #[tokio::test]
     async fn a_child_starts_from_an_inherited_environment_with_a_hidden_drive_entry() {
-        let mut inherited = build_runtime_path_env(None).env;
+        // Only what the child needs, copied from this host: the composed host
+        // environment already carries both `Path` and the canonical `PATH` on
+        // Windows, which composing it a second time would hand the spawner twice.
+        let host = build_runtime_path_env(None).env;
+        let mut inherited: HashMap<String, String> = ["PATH", "SystemRoot", "ComSpec"]
+            .into_iter()
+            .filter_map(|key| Some((key.to_string(), host.get(key)?.clone())))
+            .collect();
         inherited.insert("=C:".to_string(), "C:\\".to_string());
         let env = compose_runtime_path_env(inherited, String::new(), "win32", None);
         #[cfg(windows)]
