@@ -381,15 +381,6 @@ export async function openHubSession(
 }
 
 /**
- * `client.request` cast to its declared result type without checking it — the
- * SDK validates a server's own result only when `serve` opts into it, and
- * never validates what a client receives. This is that missing check, on the
- * one path every hub-side caller's answer travels.
- *
- * The rejected result never appears in the thrown error: only the method name
- * and the JSON pointer to the first mismatch do.
- */
-/**
  * Runs one request and re-raises a failure *this hub* produced — its own
  * deadline, or its own connection closing — as {@link RuntimeRequestNoReplyError}.
  *
@@ -432,6 +423,15 @@ async function requestTaggingNoReply<T>(
   }
 }
 
+/**
+ * `client.request` cast to its declared result type without checking it — the
+ * SDK validates a server's own result only when `serve` opts into it, and
+ * never validates what a client receives. This is that missing check, on the
+ * one path every hub-side caller's answer travels.
+ *
+ * The rejected result never appears in the thrown error: only the method name
+ * and the JSON pointer to the first mismatch do.
+ */
 async function requestValidated<K extends RuntimeMethod>(
   client: ReturnType<typeof RUNTIME_CONTRACT.client>,
   method: K,
