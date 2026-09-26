@@ -368,6 +368,39 @@ it shows:
   clock: a liveness-keyed budget (#1055) needs a pre-`hello` progress signal from the runtime,
   which is a protocol change, not a hub change.
 
+### Hosted runners
+
+A one-off manual smoke run on a measurement branch ran `scripts/bench/runtime-handshake.ts`
+against the release-shaped runtime each binary leg staged, on GitHub's hosted runners. Run
+[36219246581](https://github.com/juliopolycarpo/mangostudio/actions/runs/36219246581), source
+`46558e95` (release profile with fat LTO), 2026-09-26, Bun 1.4.2, milliseconds as min / median /
+p95 / max:
+
+| Runner        | CPU                                         | Cache      | Runs | spawn (ms)                    | spawn → hello (ms)                | start → first request (ms)        |
+| ------------- | ------------------------------------------- | ---------- | ---: | ----------------------------- | --------------------------------- | --------------------------------- |
+| darwin-arm64  | Apple M1 (Virtual) x3                       | same file  |   20 | 0.7 / 0.8 / 1.9 / 6.4         | 598.7 / 667.5 / 777.7 / 795.8     | 601.3 / 671.8 / 779.2 / 798.4     |
+| darwin-arm64  | Apple M1 (Virtual) x3                       | fresh copy |   10 | 0.8 / 0.9 / 8.3 / 8.3         | 615.9 / 626.3 / 702 / 702         | 618.2 / 629.1 / 712.4 / 712.4     |
+| darwin-x64    | Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz x4 | same file  |   20 | 2.1 / 2.4 / 3.7 / 17          | 1209.4 / 1387.1 / 1838.6 / 1994.6 | 1213.2 / 1391.4 / 1844.1 / 1999.9 |
+| darwin-x64    | Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz x4 | fresh copy |   10 | 1.4 / 1.6 / 11.8 / 11.8       | 1218.6 / 1287 / 1548.9 / 1548.9   | 1222.6 / 1294.3 / 1553.2 / 1553.2 |
+| linux-arm64   | unknown x4                                  | same file  |   20 | 0.6 / 0.7 / 0.8 / 8.7         | 70.5 / 73.4 / 75.9 / 76.5         | 73.5 / 75.3 / 78.7 / 81.1         |
+| linux-arm64   | unknown x4                                  | fresh copy |   10 | 0.7 / 0.7 / 9 / 9             | 69.9 / 73.5 / 74.8 / 74.8         | 74.7 / 75.5 / 80.9 / 80.9         |
+| linux-x64     | AMD EPYC 7763 64-Core Processor x4          | same file  |   20 | 0.6 / 0.7 / 1 / 10.2          | 75.2 / 79.9 / 83.5 / 83.5         | 80 / 82 / 86.2 / 87.3             |
+| linux-x64     | AMD EPYC 7763 64-Core Processor x4          | fresh copy |   10 | 0.6 / 0.7 / 11.2 / 11.2       | 73.8 / 80.6 / 82.9 / 82.9         | 81.5 / 82.8 / 86.8 / 86.8         |
+| windows-arm64 | Cobalt 100 x4                               | same file  |   20 | 3 / 3.2 / 3.6 / 17.7          | 142.9 / 159.3 / 431 / 2064.1      | 151.5 / 168 / 439.6 / 3218.2      |
+| windows-arm64 | Cobalt 100 x4                               | fresh copy |   10 | 162.9 / 251.6 / 488.7 / 488.7 | 144 / 157.1 / 171.6 / 171.6       | 332.8 / 412.3 / 652.7 / 652.7     |
+| windows-x64   | AMD EPYC 7763 64-Core Processor x4          | same file  |   20 | 2.6 / 2.9 / 3.9 / 19.3        | 137 / 163.8 / 2127.6 / 2299.1     | 144.7 / 171.8 / 4151.4 / 4361.5   |
+| windows-x64   | AMD EPYC 7763 64-Core Processor x4          | fresh copy |   10 | 115.2 / 121.9 / 145.3 / 145.3 | 135.9 / 153.5 / 165.6 / 165.6     | 268.4 / 280.9 / 304.2 / 304.2     |
+
+- **Every runner fits its budget.** The slowest warm handshake is macOS x64 (1.39s median, 2.0s
+  max) against the 5s non-Windows budget; Windows tops out at 2.3s (a first run) against 30s.
+- **macOS spends ~0.6–1.3s before `hello`, Linux ~80ms.** The spawn itself is under 3ms on both,
+  so the time is the runtime building its capability manifest (shell, Git and `gh` probes)
+  before it greets. It is inside budget; making those probes lazy is the lever if it ever
+  matters.
+- **Windows' first executions of a binary are the outliers** (2.1s to `hello`, 4.4s to the first
+  answer on `windows-x64`), then 140–230ms warm. On a hosted runner the fresh-copy cost is
+  ~0.12–0.25s in the spawn, far below the ~1.8s measured on a desktop with a full antivirus scan.
+
 Re-measure on the machine in question before changing a number here, and record the result
 the same way:
 
