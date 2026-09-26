@@ -64,7 +64,12 @@ export async function dispatch(
   try {
     await route(command, rest);
   } catch (error) {
-    await release();
+    // The command's own failure is the one the operator must see; a release
+    // that also fails is reported beside it, never in its place.
+    await release().catch((releaseError: unknown) => {
+      const detail = releaseError instanceof Error ? releaseError.message : String(releaseError);
+      writeError(`Could not release runtime connections: ${detail}`);
+    });
     if (isOperatorError(error)) {
       writeError(error.message);
       process.exit(1);
