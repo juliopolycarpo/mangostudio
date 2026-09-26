@@ -9,6 +9,7 @@ import {
   API_DIR,
   classifyChangedPaths,
   discoverQualificationTests,
+  OPT_IN_TESTS,
   QUALIFICATION_PATHS,
   RUST_BINARY_RESOLVER,
   RUST_WORKSPACE_PATHS,
@@ -23,7 +24,7 @@ import { extractOnBlock } from './support/workflow-blocks';
 
 const workflow = readText('.github/workflows/cargo-shim.yml');
 const discovered = discoverQualificationTests(ROOT_DIR);
-const selected = new Set([...discovered.unit, ...discovered.integration]);
+const selected = new Set([...discovered.unit, ...discovered.integration, ...OPT_IN_TESTS]);
 
 function apiTestFiles(dir = join(ROOT_DIR, API_DIR, 'tests')): string[] {
   const files: string[] = [];
@@ -45,6 +46,29 @@ describe('cargo-shim.yml push filter', () => {
       (match) => match[1]
     );
     expect(pushPaths).toEqual([...QUALIFICATION_PATHS]);
+  });
+
+  test('every glob is an exact path or a directory tree, so GitHub and Bun.Glob agree', () => {
+    // The push filter is matched by GitHub, the PR diff by Bun.Glob. Their
+    // syntaxes differ on `*`, braces, character classes, and `!`; restricting
+    // the manifest to these two shapes keeps both matchers on the same answer.
+    for (const glob of QUALIFICATION_PATHS) {
+      const body = glob.endsWith('/**') ? glob.slice(0, -3) : glob;
+      expect(body, `unsupported glob shape: ${glob}`).not.toMatch(/[*?[\]{}!]/);
+    }
+  });
+
+  test.each([
+    ['crates/**', 'crates/a/b/c.rs', true],
+    ['crates/**', 'crates', false],
+    ['crates/**', 'cratesx/a.rs', false],
+    ['apps/api/**', 'apps/api/package.json', true],
+    ['apps/api/**', 'apps/api-docs/x.md', false],
+    ['Cargo.toml', 'Cargo.toml', true],
+    ['Cargo.toml', 'crates/x/Cargo.toml', false],
+    ['.cargo/config.toml', '.cargo/config.toml', true],
+  ] as const)('%s matches %s: %p', (glob, path, expected) => {
+    expect(new Bun.Glob(glob).match(path)).toBe(expected);
   });
 
   test('every Rust workspace path also triggers qualification', () => {
@@ -126,6 +150,16 @@ describe('discoverQualificationTests', () => {
     ];
     for (const file of floor) expect(discovered.integration, `lost ${file}`).toContain(file);
     for (const file of unitFloor) expect(discovered.unit, `lost ${file}`).toContain(file);
+  });
+
+  test('opt-in files exist, would be discovered, and are left out', () => {
+    const unfiltered = discoverQualificationTests(ROOT_DIR, []);
+    const all = [...unfiltered.unit, ...unfiltered.integration];
+    for (const file of OPT_IN_TESTS) {
+      expect(all, `OPT_IN_TESTS entry is stale: ${file}`).toContain(file);
+      expect(discovered.integration).not.toContain(file);
+      expect(discovered.unit).not.toContain(file);
+    }
   });
 
   test('unit files run on one isolated worker, integration files do not', () => {

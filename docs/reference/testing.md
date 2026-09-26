@@ -1160,7 +1160,8 @@ ordinary shards instead of skipping.
 - `randomized-order-nightly.yml` builds it in its api lanes.
 - `cargo-shim.yml`'s `real-binary-qualification` builds its own and runs every api test file
   that imports `tests/support/rust-runtime-binary.ts`, directly or through another support
-  module, on Linux, macOS and Windows. `scripts/lib/rust-lanes.ts` discovers those files and
+  module, on Linux, macOS and Windows, except the opt-in live smoke named in `OPT_IN_TESTS`.
+  `scripts/lib/rust-lanes.ts` discovers those files and
   owns the paths that make the lane relevant, so a new Rust-backed test needs no workflow
   edit; `scripts/tests/rust-lanes.unit.test.ts` fails if one would be missed.
 

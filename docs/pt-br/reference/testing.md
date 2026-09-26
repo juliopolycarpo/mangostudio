@@ -398,7 +398,8 @@ nos shards comuns em vez de serem puladas.
 - `randomized-order-nightly.yml` o compila nas lanes da api.
 - `real-binary-qualification` do `cargo-shim.yml` compila o próprio e roda, no Linux, no
   macOS e no Windows, todo arquivo de teste da api que importa
-  `tests/support/rust-runtime-binary.ts`, direta ou indiretamente por outro módulo de suporte.
+  `tests/support/rust-runtime-binary.ts`, direta ou indiretamente por outro módulo de suporte,
+  exceto o smoke ao vivo opcional listado em `OPT_IN_TESTS`.
   `scripts/lib/rust-lanes.ts` descobre esses arquivos e define os caminhos que tornam a lane
   relevante, então um novo teste com Rust não exige editar o workflow;
   `scripts/tests/rust-lanes.unit.test.ts` falha se algum ficar de fora.

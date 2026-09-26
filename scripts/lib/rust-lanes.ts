@@ -5,8 +5,8 @@
 // steps, and `scripts/tests/rust-lanes.unit.test.ts` all read from here, so
 // no second hand-maintained list can drift from it.
 //
-// Dependency-free (Node built-ins only): the `changes` and qualification jobs
-// run it without `bun install`.
+// Dependency-free (Bun and Node built-ins only): the `changes` and
+// qualification jobs run it without `bun install`.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -65,6 +65,17 @@ export const API_DIR = 'apps/api';
  * spawns or dials the real `mangostudio-runtime` binary.
  */
 export const RUST_BINARY_RESOLVER = 'apps/api/tests/support/rust-runtime-binary.ts';
+
+/**
+ * Rust-backed test files discovery must leave out, each opt-in by design and
+ * never meant for CI. Paths are relative to `apps/api`; the unit test fails
+ * if an entry stops existing or stops being discovered, so this cannot rot.
+ */
+export const OPT_IN_TESTS = [
+  // Reaches real, signed-in vendor accounts; runs only when
+  // MANGOSTUDIO_LIVE_AGENT_SMOKE names the targets to try.
+  'tests/integration/services/rust-runtime-external-agents-live-smoke.integration.test.ts',
+] as const;
 
 export interface LaneRelevance {
   /** The Rust workspace lanes must run. */
@@ -177,13 +188,17 @@ function toPosix(path: string): string {
 /**
  * Finds every Rust-backed test file under `<root>/apps/api/tests`: a
  * `*.test.ts` whose relative-import closure reaches
- * {@link RUST_BINARY_RESOLVER}. Paths are relative to `apps/api`, sorted,
- * split into the unit and integration suites.
+ * {@link RUST_BINARY_RESOLVER}, minus `excluded` ({@link OPT_IN_TESTS} by
+ * default). Paths are relative to `apps/api`, sorted, split into the unit and
+ * integration suites.
  *
  * @example
  * const { unit, integration } = discoverQualificationTests(process.cwd());
  */
-export function discoverQualificationTests(root: string): QualificationSuites {
+export function discoverQualificationTests(
+  root: string,
+  excluded: readonly string[] = OPT_IN_TESTS
+): QualificationSuites {
   const apiDir = join(root, API_DIR);
   const resolver = join(root, RUST_BINARY_RESOLVER);
   const memo = new Map<string, boolean>();
@@ -193,6 +208,7 @@ export function discoverQualificationTests(root: string): QualificationSuites {
   for (const file of tests) {
     if (!reachesResolver(file, resolver, memo, new Set())) continue;
     const path = toPosix(relative(apiDir, file));
+    if (excluded.includes(path)) continue;
     (path.startsWith('tests/unit/') ? unit : integration).push(path);
   }
   return { unit: unit.sort(), integration: integration.sort() };
