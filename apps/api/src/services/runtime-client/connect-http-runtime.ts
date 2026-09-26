@@ -133,22 +133,44 @@ export function runtimeUpgradeHeaders(
   };
 }
 
-/** Dials the runtime under a deadline and exchanges hellos over what comes back. */
-async function openRuntimeSession(
+/** The dial, the handshake and the clock {@link openRuntimeSession} runs on; injectable for tests. */
+export interface RuntimeSessionOpeners {
+  readonly dial: typeof connectWebSocket;
+  readonly handshake: typeof openHubSession;
+  /** Milliseconds on a monotonic clock. */
+  readonly now: () => number;
+}
+
+const defaultOpeners: RuntimeSessionOpeners = {
+  dial: connectWebSocket,
+  handshake: openHubSession,
+  now: () => performance.now(),
+};
+
+/**
+ * Dials the runtime and exchanges hellos over what comes back, both under one
+ * budget: the hello gets only what the dial left of it, so a slow dial cannot
+ * stretch the attempt to twice `resolveRemoteHandshakeTimeoutMs('http')`.
+ *
+ * @example
+ * const hub = await openRuntimeSession(wsUrl, token, { userId, environmentId }, signal);
+ */
+export async function openRuntimeSession(
   wsUrl: string,
   token: string,
   workspaceBinding: HubWorkspaceBinding,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  openers: RuntimeSessionOpeners = defaultOpeners
 ): Promise<ProtocolHubSession> {
-  // One budget for the dial and the hello after it; see `resolveRemoteHandshakeTimeoutMs`.
   const timeoutMs = resolveRemoteHandshakeTimeoutMs('http');
+  const startedAt = openers.now();
   const deadline = dialDeadline(
     timeoutMs,
     `The runtime did not accept a WebSocket at ${wsUrl} within ${timeoutMs}ms.`
   );
   let port: Port;
   try {
-    port = await connectWebSocket(wsUrl, {
+    port = await openers.dial(wsUrl, {
       headers: runtimeUpgradeHeaders(token, workspaceBinding),
       // `connectWebSocket` closes the half-open socket on either abort.
       signal: signal ? AbortSignal.any([deadline.signal, signal]) : deadline.signal,
@@ -156,9 +178,12 @@ async function openRuntimeSession(
   } finally {
     deadline.clear();
   }
-  return await openHubSession(port, {
+  // Floored at 1ms: a dial that opened on the deadline's last tick still
+  // arms a hello timer that fires, never a zero or negative one.
+  const remainingMs = Math.max(1, Math.ceil(timeoutMs - (openers.now() - startedAt)));
+  return await openers.handshake(port, {
     hubVersion: getVersion(),
-    handshakeTimeoutMs: timeoutMs,
+    handshakeTimeoutMs: remainingMs,
     requireMatchingRelease: false,
     workspaceBinding,
     ...(signal ? { signal } : {}),
