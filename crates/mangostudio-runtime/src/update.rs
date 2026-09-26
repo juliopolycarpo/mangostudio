@@ -44,7 +44,63 @@ pub(crate) struct UpdateBinding {
     service: Arc<UpdateService>,
     owner: String,
     supervised: bool,
+    answer: AnswerWatch,
+}
+
+/// Fires the restart only once a supervised commit's answer has been written.
+///
+/// The commit handler arms it with its request id; the connection's port
+/// reports each response it has sent, and the one carrying that id fires the
+/// restart. Firing from the handler itself, or on a timer after it, races the
+/// session: the audit record and the driver still run between the handler
+/// and the response being queued, and a close that lands first tears the
+/// session down without the answer the hub is waiting for. A session that
+/// ends with the watch still armed fires it too: the commit landed, and no
+/// answer can reach the hub any more.
+///
+/// Usage: `watch.arm("7")` in the handler, `watch.answered("7")` from the
+/// port after the `res` for request `7` was sent.
+#[derive(Clone)]
+pub(crate) struct AnswerWatch {
+    armed: Arc<Mutex<Option<String>>>,
     restart: CancellationToken,
+}
+
+impl AnswerWatch {
+    fn new(restart: CancellationToken) -> Self {
+        Self {
+            armed: Arc::new(Mutex::new(None)),
+            restart,
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Option<String>> {
+        self.armed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Waits for the answer to `request_id` before firing the restart.
+    fn arm(&self, request_id: &str) {
+        *self.lock() = Some(request_id.to_owned());
+    }
+
+    /// The port sent the answer to `request_id`; fires if it was the commit's.
+    pub(crate) fn answered(&self, request_id: &str) {
+        let mut armed = self.lock();
+        if armed.as_deref() == Some(request_id) {
+            armed.take();
+            drop(armed);
+            self.restart.cancel();
+        }
+    }
+
+    /// The session ended; a commit still waiting on its answer restarts now.
+    pub(crate) fn session_ended(&self) {
+        if self.lock().take().is_some() {
+            self.restart.cancel();
+        }
+    }
 }
 
 impl UpdateBinding {
@@ -70,8 +126,13 @@ impl UpdateBinding {
                 NEXT_OWNER.fetch_add(1, Ordering::Relaxed)
             ),
             supervised,
-            restart,
+            answer: AnswerWatch::new(restart),
         }
+    }
+
+    /// The watch the connection's port reports sent answers to.
+    pub fn answer_watch(&self) -> AnswerWatch {
+        self.answer.clone()
     }
 
     pub async fn close(self) {
@@ -151,28 +212,25 @@ pub(crate) fn register(
     let service = Arc::clone(&binding.service);
     let owner = binding.owner.clone();
     let supervised = binding.supervised;
-    let restart = binding.restart.clone();
+    let answer = binding.answer.clone();
     registry.implement(
         "runtime.update.commit",
         move |params: CommitParams, context| {
             let service = Arc::clone(&service);
             let owner = owner.clone();
             let claim = EffectClaim::new(Arc::clone(&exclusivity), context.id());
-            let restart = restart.clone();
-            let handle = Handle::current();
+            let answer = answer.clone();
+            let request_id = context.id().to_owned();
             async move {
-                run_blocking(move || {
+                let result = run_blocking(move || {
                     let _claim = claim;
-                    let result = service.commit(&owner, params, supervised);
-                    if result.is_ok() && supervised {
-                        handle.spawn(async move {
-                            tokio::time::sleep(Duration::from_millis(50)).await;
-                            restart.cancel();
-                        });
-                    }
-                    result
+                    service.commit(&owner, params, supervised)
                 })
-                .await
+                .await;
+                if result.is_ok() && supervised {
+                    answer.arm(&request_id);
+                }
+                result
             }
         },
     )
@@ -603,6 +661,39 @@ mod tests {
             .unwrap()
             .persist();
         (hub, runtime)
+    }
+
+    #[test]
+    fn an_answer_watch_fires_only_for_its_own_answer_or_a_session_that_ended() {
+        let restart = CancellationToken::new();
+        let watch = AnswerWatch::new(restart.clone());
+        watch.answered("7");
+        assert!(!restart.is_cancelled(), "expected no restart before arming");
+        watch.arm("7");
+        watch.answered("6");
+        assert!(
+            !restart.is_cancelled(),
+            "expected another request's answer to leave the restart waiting"
+        );
+        watch.answered("7");
+        assert!(
+            restart.is_cancelled(),
+            "expected the commit's answer to fire it"
+        );
+
+        let restart = CancellationToken::new();
+        let watch = AnswerWatch::new(restart.clone());
+        watch.session_ended();
+        assert!(
+            !restart.is_cancelled(),
+            "expected an idle session end to restart nothing"
+        );
+        watch.arm("9");
+        watch.session_ended();
+        assert!(
+            restart.is_cancelled(),
+            "expected a session that ended before the answer to restart anyway"
+        );
     }
 
     fn scratch(name: &str) -> PathBuf {
