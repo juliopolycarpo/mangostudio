@@ -1,5 +1,5 @@
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
+import { dirname, parse, resolve, sep } from 'node:path';
 import { PathAccessError } from '../runtime-contract/service-errors';
 import { resolveWorkspacePath } from './path';
 
@@ -18,23 +18,6 @@ export function isPathPrefix(root: string, candidate: string): boolean {
     return true;
   }
   return candidate.startsWith(`${root}${sep}`);
-}
-
-/**
- * Separator-safe prefix comparison for unresolved configured paths. Windows
- * lexical paths use its normal case-folding rules; resolved paths must use
- * {@link isPathPrefix} so case-sensitive directory identities stay distinct.
- * // Usage: isLexicalPathPrefix('C:\\work', 'c:\\work\\src') === true
- */
-export function isLexicalPathPrefix(root: string, candidate: string): boolean {
-  if (process.platform === 'win32') {
-    const remainder = relative(root, candidate);
-    return (
-      remainder === '' ||
-      (remainder !== '..' && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder))
-    );
-  }
-  return isPathPrefix(root, candidate);
 }
 
 interface PathParts {

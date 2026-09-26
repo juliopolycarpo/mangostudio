@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   isInside,
-  isLexicalPathPrefix,
   isPathPrefix,
   resolvePathForContainment,
 } from '../../../src/workspaces/path-containment';
@@ -39,17 +38,6 @@ describe('isPathPrefix', () => {
     expect(isPathPrefix('\\\\?\\C:\\Workspace', '\\\\?\\C:\\Workspace\\nested')).toBe(true);
     expect(isPathPrefix('C:\\Workspace', 'C:\\Workspace-copy')).toBe(false);
   });
-
-  it.skipIf(process.platform !== 'win32')(
-    'folds unresolved Windows paths without weakening resolved identity',
-    () => {
-      expect(isLexicalPathPrefix('C:\\Workspace', 'c:\\workspace\\nested')).toBe(true);
-      expect(isLexicalPathPrefix('C:\\Workspace', 'c:\\workspace-copy')).toBe(false);
-      expect(isLexicalPathPrefix('\\\\?\\C:\\Workspace', '\\\\?\\c:\\workspace\\nested')).toBe(
-        true
-      );
-    }
-  );
 });
 
 describe('isInside', () => {
