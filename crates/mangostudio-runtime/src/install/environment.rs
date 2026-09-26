@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::commands::environment::allowlisted_entry;
+
 /// Host keys an installer legitimately needs on every platform.
 const INSTALL_ENV_KEYS: [&str; 20] = [
     "PATH",
@@ -74,7 +76,8 @@ pub(crate) fn install_environment(
     recipe: &BTreeMap<String, String>,
     platform: &str,
 ) -> BTreeMap<String, String> {
-    let win32: &[&str] = if platform == "win32" {
+    let windows = platform == "win32";
+    let win32: &[&str] = if windows {
         &WIN32_INSTALL_ENV_KEYS
     } else {
         &[]
@@ -85,13 +88,24 @@ pub(crate) fn install_environment(
         .map_or("PATH", String::as_str);
     let mut env = BTreeMap::new();
     for key in INSTALL_ENV_KEYS.iter().chain(win32) {
-        let lookup = if *key == "PATH" { path_key } else { key };
-        if let Some(value) = source.get(lookup) {
-            env.insert((*key).to_owned(), value.clone());
+        if *key == "PATH" {
+            if let Some(value) = source.get(path_key) {
+                env.insert("PATH".to_owned(), value.clone());
+            }
+            continue;
+        }
+        // Windows spells some of these its own way (`windir`, not `WINDIR`),
+        // and a Windows child environment may not carry two spellings of one
+        // name, so each is copied under the name the host uses.
+        if let Some((name, value)) = allowlisted_entry(source, key, windows) {
+            env.insert(name.clone(), value.clone());
         }
     }
     for key in RECIPE_ENV_KEYS {
         if let Some(value) = recipe.get(key) {
+            if windows {
+                env.retain(|name, _| !name.eq_ignore_ascii_case(key));
+            }
             env.insert(key.to_owned(), value.clone());
         }
     }
@@ -202,6 +216,72 @@ mod tests {
             install_environment(&source, &BTreeMap::new(), "linux"),
             map(&[("PATH", "C:\\bin")]),
             "expected only PATH forwarded off win32"
+        );
+    }
+
+    /// Regression: the win32 allowlist was matched by exact name, so Windows'
+    /// own `windir` spelling never matched `WINDIR` and the installer ran
+    /// without it. Each variable is copied once, under the host's spelling.
+    #[test]
+    fn win32_keys_match_the_hosts_own_spelling_once() {
+        let source = map(&[
+            ("PATH", "C:\\bin"),
+            ("windir", "C:\\Windows"),
+            ("Http_Proxy", "http://proxy.test"),
+            ("Nvm_Dir", "C:\\nvm-host"),
+        ]);
+        let recipe = map(&[("NVM_DIR", "C:\\nvm-recipe")]);
+
+        let env = install_environment(&source, &recipe, "win32");
+
+        assert_eq!(
+            env,
+            map(&[
+                ("PATH", "C:\\bin"),
+                ("windir", "C:\\Windows"),
+                ("Http_Proxy", "http://proxy.test"),
+                ("NVM_DIR", "C:\\nvm-recipe"),
+            ]),
+            "expected each variable forwarded once: windir and the proxy under the host's \
+             spelling, the recipe's NVM_DIR replacing the host's Nvm_Dir"
+        );
+        assert_eq!(
+            install_environment(&source, &BTreeMap::new(), "linux"),
+            map(&[("PATH", "C:\\bin")]),
+            "expected exact-name matching off win32"
+        );
+    }
+
+    /// Regression on the real host, through the chain `install.run` builds its
+    /// environment with: Windows defines `windir` in lowercase, so the exact
+    /// `WINDIR` allowlist entry dropped it from every installer.
+    #[cfg(windows)]
+    #[test]
+    fn the_real_windows_host_forwards_windir_to_an_installer() {
+        use crate::commands::toolchain::{NativeToolchainFs, build};
+
+        let host = crate::probing::host::build_runtime_path_env(None);
+        let source = build(&host, None, &NativeToolchainFs);
+        let env = install_environment(&source, &BTreeMap::new(), &host.platform);
+
+        let spelled = |env: &BTreeMap<String, String>| -> Vec<String> {
+            env.keys()
+                .filter(|name| name.eq_ignore_ascii_case("WINDIR"))
+                .cloned()
+                .collect()
+        };
+        assert_eq!(
+            spelled(&env),
+            spelled(&source),
+            "expected the host's windir forwarded once, under its own spelling | received \
+             installer keys {:?}",
+            env.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            spelled(&source).len(),
+            1,
+            "expected a Windows host to define windir once | received host keys {:?}",
+            source.keys().collect::<Vec<_>>()
         );
     }
 

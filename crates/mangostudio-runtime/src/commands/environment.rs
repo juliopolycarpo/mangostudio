@@ -134,21 +134,37 @@ fn selected_with_case(
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
     for key in COMMON.iter().chain(extra) {
-        let found = source.get_key_value(*key).or_else(|| {
-            fold_case
-                .then(|| {
-                    source
-                        .iter()
-                        .find(|(name, _)| name.eq_ignore_ascii_case(key))
-                })
-                .flatten()
-        });
-        if let Some((name, value)) = found {
+        if let Some((name, value)) = allowlisted_entry(source, key, fold_case) {
             env.insert(name.clone(), value.clone());
         }
     }
     env.insert("LC_ALL".into(), "C".into());
     env
+}
+
+/// The entry of `source` an allowlisted `key` names, under the name `source`
+/// spells it: the exact name first and, with `fold_case` (Windows, where
+/// variable names are case-insensitive), a case-insensitive match as the
+/// fallback. Callers insert the returned name, so two allowlist spellings of
+/// one variable (`SystemRoot`, `SYSTEMROOT`) still yield a single entry.
+///
+/// Usage: with `source = {"windir": "C:\\Windows"}`,
+/// `allowlisted_entry(&source, "WINDIR", true)` is `Some(("windir", "C:\\Windows"))`
+/// and `allowlisted_entry(&source, "WINDIR", false)` is `None`.
+pub(crate) fn allowlisted_entry<'a>(
+    source: &'a BTreeMap<String, String>,
+    key: &str,
+    fold_case: bool,
+) -> Option<(&'a String, &'a String)> {
+    source.get_key_value(key).or_else(|| {
+        fold_case
+            .then(|| {
+                source
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(key))
+            })
+            .flatten()
+    })
 }
 
 #[cfg(test)]
@@ -178,6 +194,32 @@ mod tests {
         let overridden = shell(&source, &policy);
         assert!(!overridden.contains_key("API_KEY"));
         assert_eq!(overridden["DATABASE_URL"], source["DATABASE_URL"]);
+    }
+
+    #[test]
+    fn allowlisted_entry_prefers_the_exact_name_and_folds_case_only_when_asked() {
+        let source = BTreeMap::from([
+            ("windir".to_string(), "C:\\Windows".to_string()),
+            ("HTTP_PROXY".to_string(), "http://upper".to_string()),
+            ("http_proxy".to_string(), "http://lower".to_string()),
+        ]);
+        let found = |key, fold| {
+            allowlisted_entry(&source, key, fold)
+                .map(|(name, value)| (name.as_str(), value.as_str()))
+        };
+        assert_eq!(
+            [
+                found("WINDIR", true),
+                found("WINDIR", false),
+                found("http_proxy", true),
+            ],
+            [
+                Some(("windir", "C:\\Windows")),
+                None,
+                Some(("http_proxy", "http://lower")),
+            ],
+            "expected a folded match only with fold_case, and an exact name winning"
+        );
     }
 
     #[test]
