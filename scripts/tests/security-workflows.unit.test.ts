@@ -33,6 +33,8 @@ describe('security workflows', () => {
     expect(workflow).toContain('category: "/language:javascript-typescript"');
     expect(workflow).toContain('category: "/language:rust"');
     expect(workflow).toContain('os: windows-latest');
+    expect(workflow).toContain('label: rust, windows');
+    expect(workflow).toContain('category: "/language:rust/windows"');
     expect(workflow).not.toContain('autobuild');
     expect(workflow).not.toContain('setup-mango');
     expectWorkflowHasPinnedAction(workflow, 'github/codeql-action/init');
