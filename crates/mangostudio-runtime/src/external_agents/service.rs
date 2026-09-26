@@ -111,9 +111,9 @@ async fn call(
 
 fn decode<T: DeserializeOwned>(method: &str, params: Value) -> Result<T, RemoteError> {
     serde_json::from_value(params).map_err(|error| {
-        tool_argument(            format!(
-                "Runtime method {method:?} received an invalid external-agent payload: {error}; expected its declared object shape."
-            ))
+        tool_argument(format!(
+            "Runtime method {method:?} received an invalid external-agent payload: {error}; expected its declared object shape."
+        ))
     })
 }
 
