@@ -44,3 +44,21 @@ all = "warn"
 # than silently pinning a stale minor.
 mango-protocol = { path = "crates/mango-protocol", version = "0.2.0" }
 mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.2.0" }
+
+# The shipped `mangostudio-runtime` is the only release artifact this
+# workspace builds (the published launcher is built by `cargo install`, which
+# never reads this root profile). Measured on linux-x64 (see
+# docs/reference/runtime-metrics.md): fat LTO with one codegen unit is about a
+# quarter smaller than cargo's default release profile, and thin LTO lands
+# between the two for roughly two thirds of fat's build time.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+# Never "abort": handler panic isolation (`crates/mangostudio-runtime/src/panic.rs`)
+# recovers a panic by catching its unwind. The runtime refuses to compile with
+# an aborting panic strategy, `crates/mangostudio-runtime/tests/panic_isolation.rs`
+# (`the_release_profile_unwinds`) requires this exact setting, and
+# `scripts/tests/protocol-lanes.unit.test.ts` rejects an abort in any manifest.
+panic = "unwind"
