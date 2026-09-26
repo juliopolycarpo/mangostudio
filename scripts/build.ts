@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { basename, isAbsolute, join } from 'node:path';
 
 import { binaryCompileDefines, createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import {
@@ -28,14 +28,24 @@ import {
   runCommand,
   warn,
 } from './lib/runner';
-
-/** Runtime binary entrypoint; the hub embeds the same host for Local. */
-const RUNTIME_ENTRY = join(ROOT_DIR, 'apps/runtime/src/cli.ts');
+import {
+  cargoRuntimeOutputPath,
+  hostPlatformId,
+  RUNTIME_RELEASE_VERSION_ENV,
+  type RuntimeSource,
+  resolveRuntimeSource,
+  verifyRuntimeBinary,
+} from './lib/runtime-build';
 
 interface BinaryBuildOptions {
   buildType: 'production' | 'development';
   dryRun: boolean;
   onlyPlatform?: string;
+  /**
+   * Directory of prebuilt cargo runtimes (`<dir>/<platform-id>/mangostudio-runtime[.exe]`).
+   * Without it only the host's own target can be built, with `cargo build`.
+   */
+  runtimeDir?: string;
   /** Discard the cached channel runtimes first, forcing a real download. */
   refreshRuntimes: boolean;
   version: string;
@@ -58,12 +68,13 @@ Default:
 Workspace flags:
   --frontend   Build the frontend workspace
   --api        Build the API workspace
-  --runtime    Build the runtime library workspace
   --all        Build every build-capable workspace
 
 Binary flags:
   --binary            Build standalone binaries into .mango/out
   --platform <id>     Limit binary output to one target (example: linux-x64)
+  --runtime-dir <dir> Stage prebuilt cargo runtimes from <dir>/<platform-id>/ (env: RUNTIME_DIR);
+                      without it, only the host target's runtime is built (cargo build)
   --production        Use production binary settings (default)
   --development       Use development binary settings
   --dry-run           Preview the build without writing artifacts
@@ -137,9 +148,10 @@ function withFrontendDistAside(
 }
 
 /**
- * Compiles one entrypoint for one Bun target. The build stamp is applied to
- * both binaries so the hub and the runtime it spawns report the same release —
- * the protocol handshake refuses a mismatch.
+ * Compiles the hub entrypoint for one Bun target. The build stamp carries the
+ * release version; the cargo runtime beside it is stamped with the same one
+ * (`MANGOSTUDIO_RELEASE_VERSION`), because the protocol handshake refuses a
+ * mismatch.
  */
 async function compileBinary(
   entry: string,
@@ -189,6 +201,54 @@ async function compileBinary(
   return true;
 }
 
+/**
+ * Copies one target's cargo runtime beside its hub and checks it is what the
+ * target needs: the right executable format and CPU from its header, the glibc
+ * floor for a prebuilt gnu runtime, and — when this machine can run it — the
+ * release version. A host `cargo build` links the host's glibc, so its floor
+ * is reported rather than enforced: such a binary is for local use only.
+ */
+async function stageRuntime(
+  target: BinaryTarget,
+  source: RuntimeSource,
+  runtimePath: string,
+  version: string
+): Promise<boolean> {
+  const from =
+    source.kind === 'prebuilt'
+      ? source.path
+      : cargoRuntimeOutputPath(process.env.CARGO_TARGET_DIR ?? join(ROOT_DIR, 'target'), target);
+  copyFileSync(from, runtimePath);
+  if (process.platform !== 'win32') chmodSync(runtimePath, 0o755);
+
+  const verification = await verifyRuntimeBinary({
+    path: runtimePath,
+    target,
+    version,
+    hostPlatform: hostPlatformId(),
+    enforceGlibcFloor: source.kind === 'prebuilt',
+  });
+  if (verification.problems.length > 0) {
+    console.error(`❌ Runtime for ${target.arch} (from ${from}) failed verification:`);
+    for (const problem of verification.problems) console.error(`   ${problem}`);
+    return false;
+  }
+  const found = verification.header;
+  if (source.kind === 'cargo' && found?.maxGlibc) {
+    warn(
+      `   ${target.arch} runtime was linked against this host's glibc (needs GLIBC_${found.maxGlibc}); ` +
+        'release builds use `bun run build:runtime --zig` for the distribution floor.'
+    );
+  }
+  const reported = verification.reportedVersion
+    ? `--version ${verification.reportedVersion}`
+    : 'not runnable on this host';
+  console.log(
+    `✅ Staged ${basename(runtimePath)} for ${target.arch} (${found?.format} ${found?.arch}, ${reported}) from ${from}`
+  );
+  return true;
+}
+
 async function buildStandaloneTarget(
   target: BinaryTarget,
   options: BinaryBuildOptions,
@@ -198,6 +258,7 @@ async function buildStandaloneTarget(
     buildInfo: BuildStamp;
     outDir: string;
     crossRuntimeChannel: string | null;
+    runtimeSource: RuntimeSource;
   }
 ): Promise<boolean> {
   const platformOutDir = join(context.outDir, target.arch);
@@ -212,7 +273,11 @@ async function buildStandaloneTarget(
   if (options.dryRun) {
     console.log(`   (dry run) Would compile for ${target.target}`);
     console.log(`✅ Successfully built ${target.name} for ${target.arch} (dry run)`);
-    console.log(`✅ Successfully built ${runtimeName} for ${target.arch} (dry run)`);
+    console.log(
+      context.runtimeSource.kind === 'prebuilt'
+        ? `✅ Would stage ${runtimeName} for ${target.arch} from ${context.runtimeSource.path} (dry run)`
+        : `✅ Would stage ${runtimeName} for ${target.arch} from \`${context.runtimeSource.command.join(' ')}\` (dry run)`
+    );
     return true;
   }
 
@@ -241,7 +306,7 @@ async function buildStandaloneTarget(
         ...context,
         crossRuntimePath,
       }),
-      compileBinary(RUNTIME_ENTRY, target, runtimePath, options, { ...context, crossRuntimePath }),
+      stageRuntime(target, context.runtimeSource, runtimePath, options.version),
     ]);
     if (compiled.some((succeeded) => !succeeded)) {
       return false;
@@ -525,6 +590,51 @@ async function reportCrossRuntimeDrift(channel: string | null): Promise<void> {
   console.warn('     the Bun actually inside it.');
 }
 
+/**
+ * Where each target's runtime comes from, or a fatal error listing every
+ * target that has none — see `resolveRuntimeSource` for the rules.
+ */
+function resolveRuntimeSources(
+  targets: readonly BinaryTarget[],
+  runtimeDir: string | undefined
+): Map<BinaryTarget['arch'], RuntimeSource> {
+  const hostPlatform = hostPlatformId();
+  const sources = new Map<BinaryTarget['arch'], RuntimeSource>();
+  const failures: string[] = [];
+  for (const target of targets) {
+    try {
+      sources.set(target.arch, resolveRuntimeSource({ target, runtimeDir, hostPlatform }));
+    } catch (caught) {
+      failures.push(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+  if (failures.length > 0) fatal(failures.join('\n'));
+  if (runtimeDir) console.log(`🦀 Staging prebuilt runtimes from ${runtimeDir}`);
+  return sources;
+}
+
+/** Runs the host target's `cargo build`, stamped with the release version. */
+async function buildHostRuntimes(
+  sources: ReadonlyMap<BinaryTarget['arch'], RuntimeSource>,
+  options: BinaryBuildOptions
+): Promise<void> {
+  for (const [platform, source] of sources) {
+    if (source.kind !== 'cargo') continue;
+    if (options.dryRun) {
+      console.log(`   (dry run) Would run ${source.command.join(' ')} for ${platform}`);
+      continue;
+    }
+    console.log(`🦀 Building the ${platform} runtime with cargo`);
+    const result = await runCommand(`runtime:${platform}`, [...source.command], {
+      cwd: ROOT_DIR,
+      env: { [RUNTIME_RELEASE_VERSION_ENV]: options.version },
+    });
+    if (result.exitCode !== 0) {
+      fatal(`cargo exited ${result.exitCode} building the ${platform} runtime.`);
+    }
+  }
+}
+
 async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void> {
   header('Build (binary)');
 
@@ -534,6 +644,10 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
       `No platforms match filter: ${options.onlyPlatform}. Available platforms: ${ALL_BINARY_TARGETS.map((target) => target.arch).join(', ')}`
     );
   }
+
+  // Resolved before anything is built: a target with no runtime to ship
+  // fails in seconds, not after the frontend and every hub have compiled.
+  const runtimeSources = resolveRuntimeSources(targets, options.runtimeDir);
 
   const buildTime = new Date().toISOString();
   const buildInfo = await resolveBuildStamp(buildTime, options.buildType);
@@ -604,6 +718,8 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
     );
   }
 
+  await buildHostRuntimes(runtimeSources, options);
+
   console.log(`🎯 Building executables for ${targets.length} platform(s)`);
 
   const results = await Promise.all(
@@ -614,6 +730,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
         buildInfo,
         outDir,
         crossRuntimeChannel,
+        runtimeSource: runtimeSources.get(target.arch) as RuntimeSource,
       })
     )
   );
@@ -642,7 +759,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
 
 const { workspaces, flags, values, positional, usedDefaultSelection } = parseArgs({
   booleanFlags: ['--binary', '--production', '--development', '--dry-run', '--refresh-runtimes'],
-  valueFlags: ['--platform'],
+  valueFlags: ['--platform', '--runtime-dir'],
 });
 
 if (flags['--help']) {
@@ -663,10 +780,14 @@ if (isProductionBuild && isDevelopmentBuild) {
 
 if (
   !isBinaryBuild &&
-  (isProductionBuild || isDevelopmentBuild || refreshRuntimes || values['--platform'])
+  (isProductionBuild ||
+    isDevelopmentBuild ||
+    refreshRuntimes ||
+    values['--platform'] ||
+    values['--runtime-dir'])
 ) {
   fatal(
-    '`--platform`, `--production`, `--development`, and `--refresh-runtimes` require `--binary`.'
+    '`--platform`, `--runtime-dir`, `--production`, `--development`, and `--refresh-runtimes` require `--binary`.'
   );
 }
 
@@ -682,6 +803,7 @@ if (isBinaryBuild) {
     buildType: isDevelopmentBuild ? 'development' : 'production',
     dryRun: flags['--dry-run'] ?? process.env.DRY_RUN === '1',
     onlyPlatform: values['--platform'] ?? process.env.ONLY_PLATFORM,
+    runtimeDir: resolveRuntimeDir(values['--runtime-dir'] ?? process.env.RUNTIME_DIR),
     refreshRuntimes,
     version,
   });
@@ -701,9 +823,7 @@ if (skippedWorkspaces.length > 0) {
 }
 
 if (buildTargets.length === 0) {
-  fatal(
-    'No build-capable workspace selected. Use `--frontend`, `--api`, `--runtime`, or `--binary`.'
-  );
+  fatal('No build-capable workspace selected. Use `--frontend`, `--api`, or `--binary`.');
 }
 
 header('Build');
@@ -721,6 +841,12 @@ if (result.exitCode === 0 && buildTargets.includes('frontend')) {
 }
 
 process.exit(result.exitCode);
+
+function resolveRuntimeDir(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return isAbsolute(trimmed) ? trimmed : join(ROOT_DIR, trimmed);
+}
 
 function formatDirtyState(state: BuildStamp['gitDirty']): string {
   if (state === true) {

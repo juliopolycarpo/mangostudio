@@ -399,6 +399,33 @@ export function getRuntimeHomeMangoDir(env: NodeJS.ProcessEnv = process.env): st
   return override && override.length > 0 ? override : getHomeMangoDir();
 }
 
+/**
+ * Explicit override for the runtime binary Local and stdio launches spawn.
+ *
+ * Takes priority over every other source `resolveRuntimeLaunchCommand` tries —
+ * a stdio environment's `binaryPath`, the sibling binary next to a standalone
+ * install, and a source checkout's newest cargo build — because naming a
+ * specific build is what someone reaches for when none of those is the binary
+ * they mean to run.
+ */
+// Usage: getRuntimeBinaryOverride() // → "/opt/mangostudio/mangostudio-runtime"
+export function getRuntimeBinaryOverride(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const override = env.MANGOSTUDIO_RUNTIME_BINARY?.trim();
+  return override && override.length > 0 ? override : undefined;
+}
+
+/**
+ * Cargo's build output directory (`CARGO_TARGET_DIR`), when the developer
+ * moved it. A source checkout's hub looks for its runtime build there instead
+ * of `<checkout>/target`, the same place `cargo build` and `build:runtime`
+ * write to.
+ */
+// Usage: getCargoTargetDir() // → "/tmp/shared-target"
+export function getCargoTargetDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const dir = env.CARGO_TARGET_DIR?.trim();
+  return dir && dir.length > 0 ? dir : undefined;
+}
+
 /** What a build reports when no release stamped a version into it. */
 const DEVELOPMENT_VERSION = 'dev';
 

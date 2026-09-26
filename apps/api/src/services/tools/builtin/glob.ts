@@ -45,7 +45,7 @@ export interface GlobToolSettings extends PathValidationSettings {
 const definition = {
   name: GLOB_TOOL_NAME,
   description:
-    'Finds files and directories whose paths match a glob pattern (e.g. "**/*.ts", "src/**/!(*.test).ts"). ' +
+    'Finds files and directories whose paths match a glob pattern (e.g. "**/*.ts", "src/**/*.{ts,tsx}"). ' +
     'Use this when the user asks to locate files by name or extension, or to enumerate paths matching a shape. ' +
     'Each match is relative to the chat working directory rather than to cwd — absolute when it lies outside, ' +
     'when no working directory is bound, or when absolute is true — so it can be passed straight to another tool.',

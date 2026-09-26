@@ -18,8 +18,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SshEnvironmentConfig } from '@mangostudio/shared/environments';
 import { connectSshRuntime } from '../../../src/services/runtime-client/connect-ssh-runtime';
+import { resolveRustRuntimeBinary } from '../../support/rust-runtime-binary';
 
-const RUNTIME_ENTRY = join(import.meta.dir, '../../../../runtime/src/cli.ts');
+/** The compiled runtime the wrapper execs: CI's override, or this checkout's newest build. */
+const binary = resolveRustRuntimeBinary();
 const SHELL_DEFAULTS = { kind: 'bash', timeoutMs: 10_000, maxOutputBytes: 65_536 } as const;
 
 const hasSshClient = Bun.which('ssh') !== null;
@@ -28,7 +30,7 @@ const hasSshClient = Bun.which('ssh') !== null;
  * already be trusted. Probing with anything laxer would let the suite run under
  * conditions the launcher itself refuses.
  */
-const canReachLocalhost = hasSshClient && (await probeLocalhost());
+const canReachLocalhost = hasSshClient && binary.available && (await probeLocalhost());
 
 let workdir = '';
 let runtimePath = '';
@@ -53,21 +55,22 @@ async function probeLocalhost(): Promise<boolean> {
   return (await child.exited) === 0;
 }
 
+/** A shell script that execs the compiled runtime with whatever arguments it got. */
+function runtimeWrapper(): string {
+  return `#!/bin/sh\nexec '${binary.path.replaceAll("'", "'\\''")}' "$@"\n`;
+}
+
 function sshConfig(overrides: Partial<SshEnvironmentConfig> = {}): SshEnvironmentConfig {
   return { host: 'localhost', remoteRuntimePath: runtimePath, ...overrides };
 }
 
 beforeAll(async () => {
   workdir = await mkdtemp(join(tmpdir(), 'mango-ssh-runtime-'));
-  // A source checkout has no compiled runtime to place on a host, so the
-  // "installed runtime" is a wrapper that runs the workspace entry. Both paths
-  // are absolute on purpose: a non-interactive ssh session gets a minimal PATH
-  // and need not have `bun` on it.
+  // The "installed runtime" is a wrapper that execs the compiled binary, so
+  // the test can name the path the launcher receives. The path is absolute on
+  // purpose: a non-interactive ssh session gets a minimal PATH.
   runtimePath = join(workdir, 'mangostudio-runtime');
-  await writeFile(
-    runtimePath,
-    `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' '${RUNTIME_ENTRY.replaceAll("'", "'\\''")}' "$@"\n`
-  );
+  await writeFile(runtimePath, runtimeWrapper());
   await chmod(runtimePath, 0o755);
 });
 
@@ -80,7 +83,7 @@ describe('connectSshRuntime over a real sshd', () => {
     'handshakes with a runtime on the far side of the ssh pipe',
     async () => {
       const connection = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig() },
+        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
         () => undefined
       );
 
@@ -98,7 +101,7 @@ describe('connectSshRuntime over a real sshd', () => {
     'runs a shell command on the target rather than on the hub',
     async () => {
       const connection = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig() },
+        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
         () => undefined
       );
 
@@ -122,7 +125,7 @@ describe('connectSshRuntime over a real sshd', () => {
       // says, which is not this process's. Release equality is deliberately not
       // a gate for a machine the hub does not install onto.
       const connection = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig() },
+        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
         () => undefined
       );
 
@@ -141,14 +144,11 @@ describe('connectSshRuntime over a real sshd', () => {
       // The remote command is joined and handed to a login shell, so an
       // unquoted path would arrive as two words and start nothing.
       const spaced = join(workdir, 'mango studio runtime');
-      await writeFile(
-        spaced,
-        `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' '${RUNTIME_ENTRY.replaceAll("'", "'\\''")}' "$@"\n`
-      );
+      await writeFile(spaced, runtimeWrapper());
       await chmod(spaced, 0o755);
 
       const connection = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig({ remoteRuntimePath: spaced }) },
+        { userId: 'test-user', id: 'ssh-box', config: sshConfig({ remoteRuntimePath: spaced }) },
         () => undefined
       );
 
@@ -167,6 +167,7 @@ describe('connectSshRuntime over a real sshd', () => {
       const marker = join(workdir, 'injected');
       const error = await connectSshRuntime(
         {
+          userId: 'test-user',
           id: 'ssh-box',
           config: sshConfig({ remoteRuntimePath: `/bin/true; touch ${marker}` }),
         },
@@ -183,7 +184,11 @@ describe('connectSshRuntime over a real sshd', () => {
     'says a runtime is missing rather than that the connection failed',
     async () => {
       const error = await connectSshRuntime(
-        { id: 'ssh-box', config: sshConfig({ remoteRuntimePath: join(workdir, 'absent') }) },
+        {
+          userId: 'test-user',
+          id: 'ssh-box',
+          config: sshConfig({ remoteRuntimePath: join(workdir, 'absent') }),
+        },
         () => undefined
       ).catch((caught) => caught);
 
@@ -198,7 +203,7 @@ describe('connectSshRuntime over a real sshd', () => {
     'classifies a host that does not resolve without needing one to exist',
     async () => {
       const error = await connectSshRuntime(
-        { id: 'ssh-box', config: { host: 'mangostudio-ssh-target.invalid' } },
+        { userId: 'test-user', id: 'ssh-box', config: { host: 'mangostudio-ssh-target.invalid' } },
         () => undefined
       ).catch((caught) => caught);
 

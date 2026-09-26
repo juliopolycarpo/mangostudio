@@ -8,6 +8,10 @@ name: Cargo Shim
 #
 # Pull requests always start the workflow so the Gate check reports even when
 # the Rust lanes are irrelevant. Pushes to main keep a path filter.
+#
+# Which paths make which lane relevant, and which api tests the real-binary
+# lane runs, live in one manifest: scripts/lib/rust-lanes.ts. The push filter
+# below, the `changes` job, and the qualification steps all derive from it.
 
 on:
   pull_request:
@@ -15,13 +19,33 @@ on:
   push:
     branches: [main]
     paths:
+      # Generated from scripts/lib/rust-lanes.ts QUALIFICATION_PATHS; the
+      # rust-lanes unit test fails if the two differ.
       - "crates/**"
+      - "apps/shared/src/runtime-contract/**"
+      - "apps/shared/src/runtime-home/**"
+      - "apps/shared/src/external-agents/**"
+      - "apps/shared/src/schema-helpers.ts"
+      - "apps/shared/src/environments/toolchain-schemas.ts"
+      - "apps/shared/src/library/**"
+      - "apps/shared/src/markdown/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
       - "rustfmt.toml"
       - "rust-toolchain.toml"
+      - ".cargo/config.toml"
       - ".github/workflows/cargo-shim.yml"
+      - ".github/actions/setup-zigbuild/**"
+      - "apps/api/**"
+      - "apps/shared/**"
+      - "package.json"
+      - "bun.lock"
+      - ".bun-version"
+      - "patches/**"
+      - "packages/protocol/**"
+      - "scripts/lib/rust-lanes.ts"
+      - "scripts/ci/rust-lanes.ts"
   workflow_dispatch:
 
 permissions:
@@ -38,36 +62,39 @@ jobs:
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
+      qualification: ${{ steps.changed.outputs.qualification }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
       - id: changed
-        name: Check Rust workspace paths
+        name: Classify changed paths
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # RUST_WORKSPACE_PATHS decides the Rust workspace lanes and
+        # QUALIFICATION_PATHS (a superset: the whole hub and shared tree)
+        # decides real-binary-qualification; both in scripts/lib/rust-lanes.ts.
+        # The script refuses an empty diff instead of skipping every lane.
+        # Dependency-free script; runs without `bun install`.
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "qualification=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
-            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip the Rust lanes" >&2
-            exit 1
-          fi
-
-          relevant='^(crates/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|\.github/workflows/cargo-shim\.yml$)'
-          if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "rust=false" >> "$GITHUB_OUTPUT"
-          fi
+          bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/lanes"
+          cat "$RUNNER_TEMP/lanes" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/lanes"
 
   workspace:
     name: Workspace (${{ matrix.os }})
@@ -92,7 +119,29 @@ jobs:
 
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
+      # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
       - run: cargo test --workspace --all-targets --all-features --locked
+
+      # `--all-targets` above excludes doctests by definition, and the doc
+      # comments across this workspace (`mangostudio-runtime`,
+      # `mangostudio-runtime-contract`) carry runnable examples of their
+      # own. `protocol-ci.yml` runs both of these for the protocol crate,
+      # but only when its own path filter fires, so a runtime-only PR needs
+      # its own copy of the gate. Ubuntu-only: this checks the doc
+      # comments compile and run, not a platform-specific behaviour.
+      - name: Run doctests
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --doc --workspace --all-features --locked
+
+      - name: Build API docs (deny warnings)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo doc --no-deps --workspace --all-features --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
 
       - run: cargo build --workspace --locked
 
@@ -124,6 +173,31 @@ jobs:
 
       - run: cargo test -p mangostudio --all-targets --locked
 
+  musl-clippy:
+    # The shipped Alpine runtimes compile against musl's libc bindings, whose
+    # types differ from glibc's (c_int ioctl requests, a deprecated time_t),
+    # and no other lane compiles for musl. Clippy through cargo-zigbuild gives
+    # the C dependencies a musl toolchain and fails on any musl-only warning.
+    name: Runtime clippy (musl)
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+
+      - uses: ./.github/actions/setup-zigbuild
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - run: cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target x86_64-unknown-linux-musl -- -D warnings
+
+      - run: cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target aarch64-unknown-linux-musl -- -D warnings
+
   fuzz-workspace:
     name: Fuzz workspace metadata
     needs: [changes]
@@ -137,11 +211,139 @@ jobs:
 
       - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --no-deps --format-version 1
 
+  runtime-home-fixture-freshness:
+    # `tests/fixtures/rust-home` is committed output, not built at test time:
+    # `generate_rust_fixture.rs`'s own `#[ignore]`d regenerator writes it and
+    # the hub's slot probe test
+    # (`apps/api/tests/unit/cli/runtime-slot-probe-rust-home.test.ts`) reads
+    # it. Nothing else regenerates it, so if the Rust write shape ever
+    # changes, both keep passing against a stale fixture. This job is the
+    # only place the regenerator actually runs. It stages the fixture
+    # directory before diffing the index against `HEAD`, not a plain
+    # `git diff --exit-code` against the worktree: staging is what makes a
+    # brand-new file the regenerator starts emitting show up as a failure
+    # too, not only a changed byte in a file that already existed.
+    #
+    # `tests/fixtures/ts-home` and `tests/fixtures/ts-library` are frozen.
+    # They record what the TypeScript runtime wrote and answered before it was
+    # deleted, and `ts_compat.rs` / `src/library/ts_compat_tests.rs` replay
+    # them so a Rust runtime keeps reading homes and backup sets that runtime
+    # left on operators' machines. Their generators went with it, so there is
+    # nothing to regenerate; instead the job pins each directory's git tree,
+    # and a change to either has to update the pin here on purpose.
+    name: Runtime-home fixture freshness
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - run: cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored
+
+      - name: Fail if regenerating changed the committed rust-home fixture
+        run: |
+          git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home
+          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home
+
+      - name: Fail if a frozen TypeScript-runtime fixture changed
+        env:
+          TS_HOME_TREE: 814a421cef442f2dd6c24b13a70fcea00e45576b
+          TS_LIBRARY_TREE: 5ecbf15d46a87ac2c2e8c24dc9d14a47a76b209e
+        run: |
+          status=0
+          for pinned in "ts-home:$TS_HOME_TREE" "ts-library:$TS_LIBRARY_TREE"; do
+            name="${pinned%%:*}"
+            expected="${pinned#*:}"
+            actual="$(git rev-parse "HEAD:crates/mangostudio-runtime/tests/fixtures/$name")"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::frozen fixture $name changed: expected tree $expected | received $actual" >&2
+              status=1
+            fi
+          done
+          exit "$status"
+
+  real-binary-qualification:
+    # Proves the hub's own real code actually talks to the real compiled
+    # mangostudio-runtime binary over its three transports (stdio, direct-URL
+    # serve, paired connect), on every OS. Runs every api test file that
+    # reaches tests/support/rust-runtime-binary.ts, discovered by
+    # scripts/lib/rust-lanes.ts, rather than the whole apps/api suite.
+    name: Real-binary qualification (${{ matrix.os }})
+    needs: [changes]
+    if: needs.changes.outputs.qualification == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            runtime-binary: target/debug/mangostudio-runtime
+            fake-cursor-agent: target/debug/examples/fake_cursor_agent
+          - os: macos-latest
+            runtime-binary: target/debug/mangostudio-runtime
+            fake-cursor-agent: target/debug/examples/fake_cursor_agent
+          - os: windows-latest
+            runtime-binary: target/debug/mangostudio-runtime.exe
+            fake-cursor-agent: target/debug/examples/fake_cursor_agent.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - run: cargo build -p mangostudio-runtime --locked
+
+      # A separate invocation on purpose: the stand-in vendor needs the SDK's
+      # `testing` feature, and building it with the runtime binary would
+      # unify that feature into the binary under qualification.
+      - run: cargo build -p mangostudio-runtime --example fake_cursor_agent --locked
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - name: Qualify the real binary over stdio, serve, and connect
+        env:
+          MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/${{ matrix.runtime-binary }}
+          MANGOSTUDIO_FAKE_CURSOR_AGENT: ${{ github.workspace }}/${{ matrix.fake-cursor-agent }}
+          MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
+        run: bun ./scripts/ci/rust-lanes.ts qualify --suite integration
+
+      # The Rust-backed unit files (the `~` cases of the file tools, which
+      # spawn the binary as Local) keep the unit lane's one isolated worker.
+      - name: Qualify ~ expansion against the real binary
+        env:
+          MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/${{ matrix.runtime-binary }}
+          MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
+        run: bun ./scripts/ci/rust-lanes.ts qualify --suite unit
+
   gate:
-    # Stable required check ("Cargo Shim / Gate"): all Rust lanes may skip only
-    # after the changes job proves the pull request has no Rust workspace diff.
+    # Stable required check ("Cargo Shim / Gate"): each Rust lane may skip only
+    # after the changes job proves its relevance predicate false for this run.
     name: Gate
-    needs: [changes, workspace, launcher-msrv, fuzz-workspace]
+    needs: [
+      changes,
+      workspace,
+      launcher-msrv,
+      musl-clippy,
+      fuzz-workspace,
+      runtime-home-fixture-freshness,
+      real-binary-qualification,
+    ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -159,6 +361,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace' || '' }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

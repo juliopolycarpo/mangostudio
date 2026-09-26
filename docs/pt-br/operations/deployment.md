@@ -43,10 +43,16 @@ estão documentados em
 ## Build De Produção
 
 ```bash
-bun run build --binary
+bun run build --binary --platform linux-x64                  # a plataforma desta máquina
+bun run build --binary --runtime-dir .mango/runtime-prebuilt # as 8, com runtimes pré-construídos
 ```
 
-Isso compila a API em binários sob `.mango/out/<platform>/` com o frontend embarcado no executável.
+Isso compila o hub (com o frontend embarcado) em `.mango/out/<platform>/mangostudio` e coloca o
+`mangostudio-runtime` construído com cargo ao lado. Sem `--runtime-dir`, só a plataforma do
+próprio host pode ser construída, porque só o runtime dela é compilado localmente com
+`cargo build`. Qualquer outra plataforma precisa de um runtime pré-construído em
+`<dir>/<platform>/mangostudio-runtime[.exe]` (`bun run build:runtime` ou o artefato do CI); veja
+[releasing.md](../reference/releasing.md#como-o-binário-do-runtime-é-construído).
 
 ## Alvos De Plataforma
 
@@ -65,12 +71,39 @@ Isso compila a API em binários sob `.mango/out/<platform>/` com o frontend emba
 
 ```
 .mango/out/linux-x64/
-  ├── mangostudio       # Binário compilado (frontend embarcado)
-  ├── run.sh            # Script auxiliar de inicialização
-  └── README.md         # Notas da plataforma
+  ├── mangostudio          # Hub compilado com Bun (frontend embarcado)
+  ├── mangostudio-runtime  # Runtime construído com cargo; iniciado como Local
+  ├── run.sh               # Script auxiliar de inicialização
+  └── README.md            # Notas da plataforma
 ```
 
 O binário serve a SPA do frontend embarcada. Rotas da API são servidas sob `/api/`, e rotas SPA fazem fallback para `index.html`.
+
+Os dois binários são uma unidade: o hub inicia o `mangostudio-runtime` ao lado do próprio
+executável, e o handshake do protocolo recusa um runtime de outra versão. Mantenha os dois
+juntos ao copiar um build e atualize ambos de uma vez.
+
+## Requisitos Do Binário Do Runtime
+
+O runtime é um binário Rust nativo, sem interpretador nem runtime compartilhado para instalar:
+
+- **Linux glibc** (`linux-x64`, `linux-arm64`): glibc 2.17 ou mais novo, o mesmo piso do hub.
+- **Linux musl** (`*-musl`): linkado estaticamente; roda no Alpine sem pacotes extras.
+- **Windows**: o runtime C do MSVC é linkado estaticamente, então o Visual C++ Redistributable
+  não é necessário.
+- **macOS**: um binário por arquitetura (`darwin-x64`, `darwin-arm64`).
+
+`mangostudio-runtime --version` imprime só a versão da release; `mangostudio doctor` e o
+provisionamento WSL/SSH a comparam com a do hub. Todo asset da release, inclusive os binários
+crus do runtime, está no `SHA256SUMS`, e o `SHA256SUMS` tem uma attestation de proveniência de
+build:
+
+```bash
+gh attestation verify SHA256SUMS --repo juliopolycarpo/mangostudio
+```
+
+Veja [releasing.md](../reference/releasing.md#como-o-binário-do-runtime-é-construído) para
+como cada alvo é construído e verificado.
 
 ## Configuração
 

@@ -7,6 +7,7 @@ import {
 } from '../library';
 import { ProfileIdSchema } from '../profiles';
 import { RuntimeErrorCodeSchema } from '../runtime-contract/errors';
+import { RuntimeDiscoverResultSchema } from '../runtime-contract/implementation';
 import { RuntimeCapabilityManifestSchema } from '../runtime-contract/manifest';
 import { RuntimeCapabilityAllowSchema, RuntimeHealthReportSchema } from '../runtime-home/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
@@ -30,6 +31,15 @@ export const EnvironmentIdSchema = Type.String({
   pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
 });
 
+/**
+ * How the hub reaches an environment's runtime.
+ *
+ * `in-process` is a persisted literal kept for compatibility, not a
+ * description: it names the hub's own Local runtime, which the hub now spawns
+ * as the `mangostudio-runtime` binary over stdio rather than running inside its
+ * own process. Renaming it would need a migration of every stored environment
+ * and a coordinated frontend change for no behavioural gain.
+ */
 export const EnvironmentTransportKindSchema = Type.Union([
   Type.Literal('in-process'),
   Type.Literal('stdio'),
@@ -242,6 +252,18 @@ export const SshFailureReasonSchema = Type.Union([
 ]);
 
 /**
+ * Why the hub could not start its own Local runtime.
+ *
+ * Local is the `mangostudio-runtime` binary the hub spawns, with no fallback,
+ * so a missing binary is the one Local failure with a fix the card can name:
+ * build it in a source checkout, reinstall beside a standalone hub.
+ */
+export const LocalFailureReasonSchema = Type.Union([
+  /** No binary where the hub looked, or the one it chose could not be found. */
+  Type.Literal('binary-missing'),
+]);
+
+/**
  * A distribution `wsl.exe -l -v` reported. `state` is passed through as the
  * Windows shell printed it: that column is localized, so mapping it to an enum
  * would either lie on a non-English host or drop the information entirely.
@@ -437,6 +459,8 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
     sshFailureReason: Type.Optional(SshFailureReasonSchema),
     /** The same, for a container launch. See {@link ContainerFailureReasonSchema}. */
     containerFailureReason: Type.Optional(ContainerFailureReasonSchema),
+    /** The same, for the hub's own Local runtime. See {@link LocalFailureReasonSchema}. */
+    localFailureReason: Type.Optional(LocalFailureReasonSchema),
     /**
      * Set while a container image is being fetched, before anything can start
      * inside it. A cold pull of a large image runs for minutes, and `connecting`
@@ -461,6 +485,14 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
      * silently stops noticing it has been offline for weeks.
      */
     offlineRuntimeCache: Type.Optional(Type.Boolean()),
+    /**
+     * Set when the runtime refused this environment because a live connection
+     * for another environment record — on this hub or another — already holds
+     * it. A `serve` runtime takes one hub connection at a time; two records
+     * pointing at it would otherwise take each other offline. The hub retries
+     * only slowly and never disturbs the connection that holds it.
+     */
+    boundElsewhere: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false }
 );
@@ -567,6 +599,7 @@ export type ContainerEngine = Static<typeof ContainerEngineSchema>;
 export type ContainerMount = Static<typeof ContainerMountSchema>;
 export type ContainerEnvironmentConfig = Static<typeof ContainerEnvironmentConfigSchema>;
 export type ContainerFailureReason = Static<typeof ContainerFailureReasonSchema>;
+export type LocalFailureReason = Static<typeof LocalFailureReasonSchema>;
 export type ContainerEngineStatus = Static<typeof ContainerEngineStatusSchema>;
 export type ContainerDetection = Static<typeof ContainerDetectionSchema>;
 export type WslDistribution = Static<typeof WslDistributionSchema>;
@@ -1172,6 +1205,14 @@ export const RuntimeLifecycleViewSchema = Type.Object({
   directoryHashDomain: Type.Optional(
     Type.Integer({ minimum: 1, maximum: MAX_DIRECTORY_HASH_DOMAIN_VERSION })
   ),
+  /**
+   * What the connected runtime's build implements, method by method
+   * (`runtime.discover`), cached by the hub per build fingerprint. Absent while
+   * disconnected, for a peer that announced no implementation (older runtimes),
+   * and when the peer could not be asked — never inferred from `rpc.discover`,
+   * which lists the whole contract.
+   */
+  implementation: Type.Optional(RuntimeDiscoverResultSchema),
 });
 export type RuntimeLifecycleView = Static<typeof RuntimeLifecycleViewSchema>;
 

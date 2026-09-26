@@ -182,6 +182,73 @@ carries only the main binary silently loses out-of-process environments.
 `scripts/release/archive-assets.ts` assembles the full set; `scripts/lib/release-assets.ts`
 defines the naming contract and is covered by unit tests.
 
+### How the runtime binary is built
+
+The hub is Bun-compiled; `mangostudio-runtime` is the cargo binary from
+`crates/mangostudio-runtime`. `distribution-build.yml` calls
+`.github/workflows/runtime-build.yml`, which builds each of the eight targets on
+a runner that can link it and uploads it as `runtime-<source-sha>-<platform-id>`.
+The packaging job downloads them into `.mango/runtime-prebuilt/` and runs
+`bun run build --binary --runtime-dir .mango/runtime-prebuilt`, which compiles
+only the hubs and copies each runtime beside its hub. Nothing downstream of
+`.mango/out/<platform>/` changed: archives, raw assets, `SHA256SUMS`, npm
+packages, Docker images and installers all see the same two files as before.
+
+| Platforms                            | Runner           | Rust target / toolchain                                             |
+| ------------------------------------ | ---------------- | ------------------------------------------------------------------- |
+| `linux-x64`, `linux-arm64`           | `ubuntu-latest`  | `<arch>-unknown-linux-gnu.2.17` via cargo-zigbuild (glibc floor)    |
+| `linux-x64-musl`, `linux-arm64-musl` | `ubuntu-latest`  | `<arch>-unknown-linux-musl` via cargo-zigbuild (static)             |
+| `darwin-x64`, `darwin-arm64`         | `macos-latest`   | `x86_64-apple-darwin` / `aarch64-apple-darwin`, Xcode               |
+| `windows-x64`, `windows-arm64`       | `windows-latest` | `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`, MSVC (+ LLVM) |
+
+- **glibc floor: 2.17.** The Bun-compiled hub already requires `GLIBC_2.17` (its
+  highest versioned symbol on both architectures), so linking the runtime at the
+  same floor adds no requirement to the pair. `GLIBC_FLOOR` in
+  `scripts/lib/runtime-build.ts` is the one place that names it; cargo-zigbuild
+  applies it through the `.2.17` target suffix.
+- **C and assembly dependencies.** `ring` (TLS, C + assembly) and
+  `rquickjs-sys` (QuickJS, C) are compiled per target; `aws-lc` is not in the
+  graph. zig is their C toolchain on Linux. `windows-arm64` is cross-compiled on
+  the x64 Windows image, which carries the ARM64 MSVC libraries and the clang
+  that `ring` needs for aarch64 Windows; a native `windows-11-arm` runner is the
+  fallback if that image ever drops them.
+- **Static CRT on Windows.** `.cargo/config.toml` links the MSVC C runtime
+  statically (`+crt-static`). A dynamic CRT imports `VCRUNTIME140.dll`, which
+  comes from the Visual C++ Redistributable rather than Windows, so the runtime
+  would fail to start on a machine without it (CI images have it, which hides
+  the gap). The Bun hub has no such import either. A `RUSTFLAGS` override
+  replaces that setting, so the staging check also rejects any Windows runtime
+  importing `VCRUNTIME*`/`MSVCP*` DLLs.
+- **Release profile.** The workspace `[profile.release]` builds the runtime with
+  `opt-level = 3`, fat LTO, one codegen unit, and `strip = true`; see
+  [runtime-metrics.md](runtime-metrics.md) for the size and build-time
+  trade-off. It keeps `panic = "unwind"` on purpose: handler panic isolation
+  catches unwinds, so the crate refuses to compile under `panic = "abort"`.
+- **Toolchain pins.** Rust comes from `rust-toolchain.toml`; zig is downloaded
+  at a pinned version and SHA-256 (`ZIG_VERSION`/`ZIG_SHA256` in
+  `runtime-build.yml`); cargo-zigbuild is installed at a pinned version by
+  `taiki-e/install-action`, which verifies its own checksum.
+- **Version.** Every runtime is stamped with the release version through
+  `MANGOSTUDIO_RELEASE_VERSION` at compile time (canary and dry-run versions
+  differ from the committed manifest), and prints it bare from `--version`, the
+  line the hub's doctor and WSL/SSH provisioning compare verbatim.
+- **Checks.** `scripts/build-runtime.ts` and the `--runtime-dir` staging both
+  read each binary's header (`scripts/lib/executable-header.ts`): ELF, Mach-O,
+  or PE; x64 or arm64; the glibc loader for gnu, no interpreter for musl; no
+  `GLIBC_` symbol above the floor; and no Visual C++ Redistributable DLL in a PE's
+  import or delay-import table. A runtime this machine can execute must also
+  answer `--version` with the release version.
+
+Locally, `bun run build --binary --platform <host>` runs
+`cargo build --release --locked -p mangostudio-runtime --target <triple>` for the
+host's own target (linked against the host's glibc, so not a distribution
+artifact). Any other target needs a prebuilt runtime:
+`--runtime-dir <dir>` (or `RUNTIME_DIR`) must hold
+`<dir>/<platform-id>/mangostudio-runtime[.exe]`, for example from
+`bun run build:runtime --platform linux-arm64 --zig --out <dir>` with zig and
+cargo-zigbuild on `PATH`. A missing file is an error naming it; the build never
+substitutes another runtime.
+
 ### What each channel publishes
 
 A stable release publishes everything, and so does a pre-release tag — the
@@ -309,6 +376,8 @@ lockstep:
 - `crates/mangostudio-launcher/Cargo.toml` and the launcher's `mangostudio`
   entry in the root `Cargo.lock` (the release publishes with `--locked`, so
   both must move together without changing the protocol version)
+- `crates/mangostudio-runtime/Cargo.toml` and its `Cargo.lock` entry (the
+  fallback version a plain `cargo build` of the runtime reports)
 
 `bun run check:versions` enforces this; it also runs as part of `bun run check`.
 Pass `--expect <version>` to additionally require the committed version to match
@@ -628,7 +697,7 @@ summary, listed here in workflow order:
 | Job               | What it does                                                                                                                                                                                                                                                                                                                                                                                      |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `prepare`         | Resolves the release version and source SHA, verifies versions are in lockstep with the tag and that `CHANGELOG.md` carries the release section (`check:versions --expect`), and requires the tagged commit to be a green ancestor of `origin/main` (the `Gate` job of `ci.yml`'s main-push run for that commit) unless dispatch sets `allow_unverified_source=true`.                             |
-| `build`           | Cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                                                                                                                                                                                 |
+| `build`           | Builds the cargo runtime per target (`runtime-build.yml`), cross-compiles every hub binary and stages the runtimes beside them (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                                                                                       |
 | `verify-build`    | Smoke-tests the freshly built linux-x64 archive (`smoke-binary.sh`) before any channel publishes, so a broken binary fails the release early. Gates `github-release`, `docker`, and `npm-publish`.                                                                                                                                                                                                |
 | `github-release`  | Creates the GitHub Release with its assets in one call (`publish_release`); a re-run against an already-published release verifies its assets instead of re-uploading them, since immutable releases cannot be clobbered.                                                                                                                                                                         |
 | `docker`          | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                                                                                                                                                                                 |

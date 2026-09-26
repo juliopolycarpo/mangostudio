@@ -136,12 +136,32 @@ ambiente permitidas, a passagem de bastão na instalação, linger no Linux),
 de saída, a seção **Doctor** e configuração, consulte a
 [versão completa em inglês](../../reference/cli.md).
 
+O hub inicia o Local como o binário `mangostudio-runtime`. `mangostudio doctor` reporta o
+binário que o Local executaria — `MANGOSTUDIO_RUNTIME_BINARY`, o binário ao lado de um hub
+standalone ou o build cargo mais recente de um checkout do código-fonte — e marca a linha
+como falha quando ele está ausente, já que o Local não inicia sem ele: reinstale o
+MangoStudio (ou defina `MANGOSTUDIO_RUNTIME_BINARY`) ou, em um checkout, execute
+`cargo build -p mangostudio-runtime`. Uma versão diferente da do hub é só um aviso — o
+handshake recusa a divergência, então reinstale em vez de misturar releases — e não é
+reportada contra um hub de desenvolvimento, que não tem release para comparar.
+
 O segundo binário, `mangostudio-runtime`, tem os próprios comandos —
 `connect`, `serve`, `setup`, `install`, `service`, `health`, `doctor` e `audit`.
 `install` copia o binário que você baixou para dentro do slot
-(`~/.mango/runtime/<slot>/`) e publica o ponteiro `current`, que é o pré-requisito
-de `service install`: no Windows esse ponteiro é uma junção de diretório, então
-não exige elevação nem o Modo de Desenvolvedor. A credencial guardada é restrita
+(`~/.mango/runtime/<slot>/`) e publica o lançador usado por `service install`.
+No Unix, é o ponteiro `current`; no Windows, é o arquivo estável
+`mangostudio-runtime.cmd`, que aponta para um executável de versão imutável e
+dispensa elevação, Modo de Desenvolvedor e privilégio para links simbólicos.
+A Tarefa Agendada `MangoStudio Runtime` reinicia o lançador após o código de
+saída `75`. Um `connect` ou `serve` iniciado à mão a partir do slot também sai
+com o código `75` depois de uma atualização ao vivo pelo hub, e nada o reinicia:
+execute o mesmo comando de novo para usar a nova versão, ou instale o serviço
+para que a atualização o reinicie sozinha. `service stop` e `restart` aguardam a
+instalação ativa terminar, com limite total de 30 segundos; `service stop --force`
+pula essa espera. No Windows, a parada encerra também qualquer runtime que tenha
+sobrado do slot desta home, e encerra o runtime imediatamente: diferente do
+systemd e do launchd, uma etapa de instalação em andamento é interrompida junto.
+A credencial guardada é restrita
 ao seu usuário — por modo `0600` no POSIX e por ACL (`icacls`) no Windows, onde
 `chmod` só altera o atributo somente-leitura. Detalhes na
 [versão em inglês](../../reference/cli.md#mangostudio-runtime).

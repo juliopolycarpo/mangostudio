@@ -41,8 +41,25 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  runtime:
+    # Manual rebuild only: the cargo runtimes every leg below stages, built
+    # the way distribution builds them (zig-linked at the glibc floor, musl
+    # static, static MSVC CRT). A leg's own host build would link the runner's
+    # glibc and could not produce the musl runtimes the Alpine legs need.
+    name: Runtime
+    if: ${{ inputs.rebuild }}
+    uses: ./.github/workflows/runtime-build.yml
+    with:
+      version: ${{ inputs.version || '' }}
+      source_sha: ${{ inputs.source_sha || github.sha }}
+      artifact_prefix: smoke-rebuild-runtime
+
   binary:
     name: Binary ${{ matrix.platform }}
+    needs: [runtime]
+    # Runs when the runtime job succeeded (rebuild) or was skipped (the
+    # default, consuming distribution artifacts); never after it failed.
+    if: ${{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -83,6 +100,13 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      - name: Download cargo runtime (manual rebuild)
+        if: ${{ inputs.rebuild }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: smoke-rebuild-runtime-${{ matrix.platform }}
+          path: .mango/runtime-prebuilt
+
       - name: Download prebuilt target
         if: ${{ !inputs.rebuild }}
         uses: ./.github/actions/download-distribution
@@ -96,6 +120,8 @@ jobs:
       - name: Run binary smoke test
         run: bun --no-install run scripts/test-build.ts
         env:
+          # Read by the rebuild's `build:binary`; inert when SKIP_BUILD=1.
+          RUNTIME_DIR: .mango/runtime-prebuilt
           PLATFORM: ${{ matrix.platform }}
           API_PORT: "13001"
           DISTRIBUTION_CHANNEL: ${{ inputs.channel }}
@@ -105,6 +131,8 @@ jobs:
 
   docker:
     name: Docker ${{ matrix.variant }} ${{ matrix.docker_arch }}
+    needs: [runtime]
+    if: ${{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     strategy:
@@ -151,6 +179,13 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      - name: Download cargo runtime (manual rebuild)
+        if: ${{ inputs.rebuild }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: smoke-rebuild-runtime-${{ matrix.binary_platform }}
+          path: .mango/runtime-prebuilt
+
       - name: Download prebuilt Docker target
         if: ${{ !inputs.rebuild }}
         uses: ./.github/actions/download-distribution
@@ -165,7 +200,7 @@ jobs:
         if: ${{ inputs.rebuild }}
         env:
           BINARY_PLATFORM: ${{ matrix.binary_platform }}
-        run: bun run build:binary --platform "$BINARY_PLATFORM"
+        run: bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
 
       - name: Stage Docker context
         env:

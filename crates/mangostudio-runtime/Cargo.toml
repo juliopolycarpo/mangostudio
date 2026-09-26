@@ -1,0 +1,185 @@
+[package]
+name = "mangostudio-runtime"
+# Lockstep with the root `package.json` and `crates/mangostudio-launcher`, not
+# with `[workspace.package].version` (the protocol version): this binary ships
+# beside the hub in every distribution channel, and
+# `scripts/lib/release-version.ts`'s `APP_VERSIONED_CRATES` version-locks it to
+# the app release (via `bun run check:versions`, bumped by
+# `bumpLockstepVersions` on release — this manifest's version is never
+# hand-maintained). Distribution builds stamp the exact release version in at
+# compile time (`MANGOSTUDIO_RELEASE_VERSION`, see `src/cli.rs`); this version
+# is what a plain `cargo build` reports, never the protocol version.
+version = "0.1.1"
+authors.workspace = true
+categories = ["command-line-utilities", "network-programming", "filesystem", "os"]
+edition.workspace = true
+keywords = ["mangostudio", "runtime", "dispatcher", "runtime-home", "json-schema"]
+license.workspace = true
+# Not published: it depends on `mangostudio-runtime-contract`, which is
+# itself `publish = false`.
+publish = false
+repository.workspace = true
+rust-version.workspace = true
+description = "MangoStudio runtime host: the typed contract served over mango-protocol with fail-closed ports and panic isolation, plus the runtime-home layout, its cross-language lock protocol and atomic owner-only state writes"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mangostudio-runtime"
+path = "src/main.rs"
+
+[dependencies]
+# The SDK's process and launcher ports are `async_trait` traits; already in the graph through
+# `mango-external-agents` at this version.
+async-trait = { version = "0.1.92", default-features = false }
+# `serve`'s token bootstrap (`generate_serve_token`, mirroring `runtime-home.ts`'s
+# `bootstrapServeToken`): base64url-encodes the 32 bytes `getrandom` (below)
+# draws from the operating system's CSPRNG. Already in the dependency graph
+# via the launcher's own chain, at this exact version, so a direct dependency
+# on it adds no new version for `cargo deny`'s duplicate check to catch.
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+# Types the SDK's HTTP client trait is written against, plus SSE parsing for
+# both HTTP transports; all already in the graph through `rmcp`.
+bytes = "1"
+# Object-bound filesystem access for restricted path-policy operations. Version
+# 4.0.3 supports this workspace's Rust 1.97 MSRV on Linux, macOS, and Windows.
+cap-fs-ext = { version = "4.0.3", default-features = false, features = ["std"] }
+cap-std = { version = "4.0.3", default-features = false }
+# CLI audit --since accepts RFC 3339 instants and relative durations. Chrono is
+# already present at this version in the workspace lockfile.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# The CSPRNG behind `generate_serve_token` (see the `base64` comment above).
+# Already in the workspace graph at this exact version (ring 0.17's RNG shim
+# pins 0.2, rand 0.10 pins 0.4; this crate is the uncontested consumer of 0.3,
+# alongside jsonschema's `ahash` — see `deny.toml`), so this adds no new
+# version for `cargo deny`'s duplicate check to catch either.
+getrandom = { version = "0.3", default-features = false }
+# `fs.glob` uses its brace, character-class, and recursive-wildcard parser,
+# while this crate owns traversal, dotfile rules, ordering, and path policy.
+globset = { version = "0.4.19", default-features = false }
+http = "1"
+# `library.scan` sorts a directory resource's files with the TypeScript
+# host's `String.prototype.localeCompare` (ICU root collation) before
+# hashing their whitespace digests and before `library.read-tree` returns
+# them; that order is wire-visible, so it needs a real collator rather than a
+# byte comparison. Wrapped by `crate::library::collation`.
+icu_collator = "2.3"
+# This crate's own contact point with `jsonschema`, matching both
+# `mango-protocol`'s and `mangostudio-runtime-contract`'s compile options
+# exactly (draft 2020-12, offline, format assertions on): the result-check
+# gate has to run the same validator the peer contract crate embeds, with an
+# instance-path pointer neither of those crates exposes publicly.
+jsonschema = { version = "0.56", default-features = false }
+# External-agent hosting (`external_agents/`): the SDK's harness and session traits
+# plus the three product targets. Stdio only: every harness speaks line-framed
+# stdio through this crate's own launcher, so neither `websocket` nor the SDK's
+# `launcher-tokio` spawner is compiled in. Exact pins while the adoption is
+# qualified; a bump is a deliberate `build(runtime)` change.
+mango-agent-acp = "=0.3.0"
+mango-agent-claude = "=0.3.0"
+mango-agent-codex = "=0.3.0"
+mango-external-agents = { version = "=0.3.0", default-features = false, features = ["stdio"] }
+# The `tokio` feature is what brings in `Contract`/`ContractHandlers`/`Guard`/
+# `Session` — this crate's whole reason to exist is serving a contract over a
+# session, so it is a normal dependency, not optional.
+# `websocket`: the `serve`/`connect` transports dial and accept over it.
+# `tokio` alone (the dispatcher's own dependency) has no socket of its own.
+mango-protocol = { workspace = true, features = ["tokio", "websocket"] }
+mangostudio-runtime-contract.workspace = true
+# Already pulled in transitively by `jsonschema`'s own `pattern` keyword
+# support, so a direct dependency costs nothing new in the dependency graph
+# (`cargo deny`'s `multiple-versions = "deny"` would catch it otherwise).
+# This crate uses it for version and output parsing in `probing` and
+# `commands`, and for the audit log's credential-shape redaction, which needs
+# the same fixed set of patterns `apps/runtime/src/audit-log.ts` masks with.
+regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
+# MCP over HTTP (`mcp/http.rs`, `mcp/sse.rs`). `rustls-no-provider` rather than
+# reqwest's default `rustls`, which enables `aws-lc-rs`: the client is handed a
+# preconfigured `ring` config with the webpki root store, the same TLS policy
+# `mango-protocol`'s WebSocket dialler uses.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"] }
+# MCP SDK access stays inside `mcp/`; the host owns the session and wire
+# mapping. Pin this version while the 2026-07-28 client API is integrated.
+# No `transport-child-process`: stdio servers are launched by the shared
+# guardian/Job supervisor and the SDK only receives their pipes
+# (`transport-async-rw`).
+# `transport-streamable-http-client` without the SDK's own reqwest backend:
+# `mcp/http.rs` implements the SDK's HTTP client trait so it owns status
+# handling (the legacy SSE fallback needs the initialize POST's status) and
+# the TLS provider.
+rmcp = { version = "=3.4.0", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"] }
+# `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
+# code units, named captures, and an engine interrupt hook for its hard deadline.
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+sha2 = "0.11"
+sse-stream = "0.2"
+# A normal dependency, not a dev one: `main.rs` builds its own multi-thread
+# runtime for `stdio`/`serve`/`connect` (never `#[tokio::main]` — the
+# consent/setup/token/lock work those subcommands do first is synchronous by
+# design, see `cli.rs`, so the runtime is only built once that is done).
+# `net` and `signal` are this crate's own additions over what `mango-protocol`
+# needs for itself; `macros` is test-only (`#[tokio::test]`) but cheap enough
+# not to split into a separate dev-dependency entry. `process`, `fs`, and
+# `io-util` back `crate::subprocess`'s bounded child runner: `process` owns the
+# non-Windows child, while Windows turns its explicit pipe handles into
+# `tokio::fs::File` endpoints. See `crate::blocking`'s module docs for the pool
+# it shares the executor threads with.
+tokio = { version = "1.53", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+# `CancellationToken`: the cooperative shutdown signal `serve`'s accept loop
+# and `connect`'s dial loop both watch. Same version `mango-protocol` itself
+# pins, so `cargo deny`'s duplicate-version check has nothing new to catch.
+# `rt` adds `TaskTracker`, which the external-agent supervisor uses to await every
+# task it spawns before its shutdown returns.
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+# `library.scan` validates `toml-agent`/`toml-settings` instances and reads a
+# Codex subagent's `name`/`description`, mirroring `smol-toml`'s parse in
+# `apps/shared/src/library/machine/instance-reader.ts`.
+toml = { version = "1.1", default-features = false, features = ["std", "parse", "serde"] }
+# The event parser the `toml` crate itself builds on (same version, already
+# locked): `src/library/smol_toml.rs` walks its events to judge each bare
+# scalar the way `smol-toml` does before the `toml` crate parses the document.
+toml_parser = { version = "1.1", default-features = false, features = ["std"] }
+webpki-roots = "1"
+
+[dev-dependencies]
+# Only this crate's own tests use the spawn launcher, standing in for a hub
+# that execs this very binary and speaks to it over stdio — proving the real
+# `stdio` subcommand keeps stdout protocol-only end to end, not just in an
+# in-process duplex. The runtime binary itself never spawns anything.
+# `FakeLauncher`/`FakeHarness` for the external-agent host's own tests.
+# `FakeAcpAgent` is what `examples/fake_cursor_agent.rs` pipes its stdio
+# through for the compiled-runtime qualification suite.
+mango-agent-acp = { version = "=0.3.0", features = ["testing"] }
+mango-external-agents = { version = "=0.3.0", default-features = false, features = ["stdio", "testing"] }
+mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
+tokio = { version = "1.53", features = ["io-std", "test-util"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+# `signal`: `kill(pid, 0)` for lock-holder liveness, mirroring `process.kill(pid, 0)` on the
+# TypeScript side. `hostname`: `gethostname()` for the lock body's `host` field. `fs`:
+# `access(2)` for `workspace.validate`'s read+execute directory check.
+nix = { version = "0.31", default-features = false, features = ["signal", "hostname", "user", "fs"] }
+# Restricted same-filesystem moves use renameat2/renameatx_np with NOREPLACE
+# through verified directory handles; cap-std only exposes replacing rename.
+# This exact version is already present transitively through cap-std.
+rustix = { version = "1.1", default-features = false, features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+# Win32_Foundation: HANDLE, BOOL, CloseHandle, LocalFree, STILL_ACTIVE.
+# Win32_Globalization: case-insensitive, non-lossy filesystem path comparison.
+# Win32_Security(_Authorization): the owner-only DACL rewrite.
+# Win32_Storage_FileSystem: the FILE_GENERIC_* / DELETE access mask.
+# Wdk_Storage_FileSystem and Win32_System_IO: handle-relative no-replace rename.
+# Win32_System_SystemInformation: GetComputerNameExW, for the lock body's `host` field, and
+# GetSystemWindowsDirectoryW, which locates cmd.exe/powershell.exe for an inheriting child.
+# Win32_System_JobObjects/Pipes/Threading: Windows child-tree containment uses a kill-on-close
+# Job atomically attached through CreateProcessW's attribute list, with explicit pipe inheritance.
+# Threading also provides OpenProcess/OpenProcessToken/GetExitCodeProcess for lock-holder liveness
+# and the owner-only module's own SID lookup.
+windows-sys = { version = "0.61", features = ["Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Globalization", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_SystemInformation", "Win32_System_Threading"] }

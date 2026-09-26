@@ -109,6 +109,16 @@ stream-text-turn.ts (orquestrador)
   └─ persiste o turno → produz eventos SSE
 ```
 
+### Execução Hub/Runtime
+
+Todo runtime, inclusive o Local, é o `mangostudio-runtime` construído com cargo a partir de
+`crates/mangostudio-runtime`. O hub inicia o Local na própria máquina via stdio: o binário
+irmão ao lado de um hub standalone ou, num checkout do código-fonte, o build mais recente de
+`target/debug` ou `target/release`, que o `bun run dev` compila antes. `MANGOSTUDIO_RUNTIME_BINARY`
+sobrepõe os dois, e um binário ausente faz a conexão falhar indicando `cargo build -p
+mangostudio-runtime` em vez de recorrer a outro runtime. Veja
+[`hub-runtime.md`](../../architecture/hub-runtime.md).
+
 ### Invalidação Em Tempo Real
 
 `/api/ws` é uma ponte somente de invalidação entre o bus no processo, limitado
@@ -245,4 +255,6 @@ Colunas usam `camelCase`; tabelas usam `snake_case`. Aliases tipados do Kysely s
 
 ## Build Standalone
 
-`bun run build --binary` compila a API em binários específicos por plataforma via `bun build --compile`. Os assets do frontend são embarcados no executável. Há suporte a 8 plataformas (linux/windows/darwin × x64/arm64 + glibc/musl). O banco de dados usa `~/.mango/database.sqlite` por padrão.
+`bun run build --binary` compila a API em binários específicos por plataforma via `bun build --compile`, com o frontend embarcado, e coloca o `mangostudio-runtime` construído com cargo ao lado de cada um. A distribuição gera as 8 plataformas (linux/windows/darwin × x64/arm64 + glibc/musl) a partir de runtimes por alvo (`--runtime-dir`); um build local cobre a plataforma do host (`--platform <host>`) — veja [releasing.md](../reference/releasing.md#como-o-binário-do-runtime-é-construído). O banco de dados usa `~/.mango/database.sqlite` por padrão.
+
+Cada runtime é um binário nativo construído com LTO fat e `panic = "unwind"` (o isolamento de panics dos handlers depende disso): alvos Linux gnu linkam no piso glibc 2.17, alvos musl são estáticos, o Windows linka o runtime C do MSVC estaticamente, e todo binário informa a versão da release gravada nele. Os assets da release, inclusive os binários do runtime, estão num `SHA256SUMS` com attestation; [runtime-metrics.md](../reference/runtime-metrics.md) registra os tamanhos.

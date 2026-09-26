@@ -81,7 +81,7 @@ describe('resolveContainerRuntimeBinary in a source checkout', () => {
     );
 
     await expect(attempt).rejects.toBeInstanceOf(ContainerRuntimeSourceError);
-    await expect(attempt).rejects.toThrow(/--target=bun-linux-arm64/);
+    await expect(attempt).rejects.toThrow(/build:runtime --platform linux-arm64 --dev/);
   });
 });
 

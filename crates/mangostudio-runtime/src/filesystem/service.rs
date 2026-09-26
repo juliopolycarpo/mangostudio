@@ -1,0 +1,2900 @@
+//! Filesystem handlers, sharing process-wide freshness and mutation locks.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use base64::Engine;
+use mango_protocol::session::CallContext;
+use mango_protocol::{
+    Frame,
+    error::{RemoteError, codes},
+    frame::Response,
+};
+use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
+
+use super::capability;
+use super::freshness::{
+    ALL_LINES_VALID, ContentDigest, Ledger, ObservedLineRange, PathLocks, ReadObservation,
+};
+use super::io::{self, check_cancel, path_error};
+use super::params::*;
+use super::policy::{CompiledPolicy, PathPolicy};
+use super::snapshot::SNAPSHOT_MAX_BYTES;
+use super::text;
+use crate::blocking::run_blocking;
+use crate::consent::source::ConsentSource;
+use crate::ports::audit::lock;
+use crate::ports::authorization::consent_denial;
+use crate::registry::Registry;
+
+pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
+pub(super) const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
+/// Most `fs.edit-file` matches counted for an ambiguity report; past it the
+/// report says "more than" instead of scanning the rest of the file.
+pub(super) const EDIT_OCCURRENCE_COUNT_LIMIT: usize = 1_000;
+
+#[derive(Default)]
+pub(super) struct State {
+    pub(super) ledger: Mutex<Ledger>,
+    pub(super) locks: PathLocks,
+}
+
+pub(super) struct Service {
+    pub(super) state: Arc<State>,
+    pub(super) consent: ConsentSource,
+    pub(super) move_io: Arc<dyn MoveIo>,
+    pub(super) write_io: Arc<dyn WriteIo>,
+}
+
+pub(super) trait MoveIo: Send + Sync {
+    /// Moves without replacing and returns the destination's verified hash.
+    fn move_no_overwrite(
+        &self,
+        policy: &CompiledPolicy,
+        from: &Path,
+        to: &Path,
+    ) -> Result<String, RemoteError>;
+}
+
+pub(super) struct NativeMoveIo;
+
+impl MoveIo for NativeMoveIo {
+    fn move_no_overwrite(
+        &self,
+        policy: &CompiledPolicy,
+        from: &Path,
+        to: &Path,
+    ) -> Result<String, RemoteError> {
+        io::move_no_overwrite(policy, from, to)
+    }
+}
+
+pub(super) trait WriteIo: Send + Sync {
+    fn write_atomic(
+        &self,
+        policy: &CompiledPolicy,
+        path: &Path,
+        bytes: &[u8],
+    ) -> Result<f64, RemoteError> {
+        io::write_atomic(policy, path, bytes, false)
+    }
+
+    fn write_atomic_if_unchanged(
+        &self,
+        policy: &CompiledPolicy,
+        path: &Path,
+        expected: &[u8],
+        bytes: &[u8],
+    ) -> Result<f64, RemoteError>;
+}
+
+pub(super) struct NativeWriteIo;
+
+impl WriteIo for NativeWriteIo {
+    fn write_atomic_if_unchanged(
+        &self,
+        policy: &CompiledPolicy,
+        path: &Path,
+        expected: &[u8],
+        bytes: &[u8],
+    ) -> Result<f64, RemoteError> {
+        io::write_atomic_if_unchanged(policy, path, expected, bytes)
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct ResponseBudget {
+    id: String,
+    limit_bytes: usize,
+}
+
+impl ResponseBudget {
+    pub(super) fn from_context(context: &CallContext) -> Self {
+        Self {
+            id: context.id().to_owned(),
+            limit_bytes: context.session().send_limit_bytes(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn unbounded() -> Self {
+        Self {
+            id: "test-response".to_owned(),
+            limit_bytes: usize::MAX,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn limited(limit_bytes: usize) -> Self {
+        Self {
+            id: "test-response".to_owned(),
+            limit_bytes,
+        }
+    }
+
+    fn preflight_mutation(&self, result: Value) -> Result<Value, RemoteError> {
+        preflight_response(result, &self.id, self.limit_bytes, "mutation")
+    }
+
+    fn preflight_read(&self, result: Value) -> Result<Value, RemoteError> {
+        preflight_response(result, &self.id, self.limit_bytes, "read")
+    }
+
+    pub(super) fn preflight_snapshot(&self, result: Value) -> Result<Value, RemoteError> {
+        preflight_response(result, &self.id, self.limit_bytes, "snapshot")
+    }
+}
+
+impl Service {
+    fn authorize(&self, method: &str, capture_snapshot: bool) -> Result<(), RemoteError> {
+        let allow = self.consent.refresh();
+        let capabilities = mangostudio_runtime_contract::catalog::capabilities_of(method)
+            .expect("filesystem handler belongs to the catalog");
+        let mut required: Vec<&str> = capabilities.iter().map(String::as_str).collect();
+        if capture_snapshot {
+            for capability in ["fsRead", "checkpoints"] {
+                if !required.contains(&capability) {
+                    required.push(capability);
+                }
+            }
+        }
+        let missing: Vec<String> = required
+            .into_iter()
+            .filter(|capability| !allow.is_granted(capability))
+            .map(str::to_owned)
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        Err(consent_denial(
+            method,
+            &missing,
+            self.consent.slot().as_str(),
+        ))
+    }
+
+    /// Re-authorizes and binds a mutation's paths to one policy compilation.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let policy = service.compile_mutation_policy("fs.apply-patch", mutation, paths, cancel)?;
+    /// io::write_atomic(&policy, path, bytes, false)?;
+    /// ```
+    pub(super) fn compile_mutation_policy(
+        &self,
+        method: &str,
+        mutation: &Mutation,
+        paths: &[&Path],
+        cancel: &CancellationToken,
+    ) -> Result<CompiledPolicy, RemoteError> {
+        self.compile_policy(
+            method,
+            &mutation.path_policy,
+            paths,
+            mutation.capture_snapshot,
+            cancel,
+        )
+    }
+
+    pub(super) fn compile_policy(
+        &self,
+        method: &str,
+        policy: &Option<PathPolicy>,
+        paths: &[&Path],
+        capture_snapshot: bool,
+        cancel: &CancellationToken,
+    ) -> Result<CompiledPolicy, RemoteError> {
+        check_cancel(cancel)?;
+        self.authorize(method, capture_snapshot)?;
+        let compiled = policy.clone().unwrap_or_default().compile()?;
+        for path in paths {
+            compiled.check(path)?;
+        }
+        Ok(compiled)
+    }
+
+    async fn read(
+        self: Arc<Self>,
+        params: ReadParams,
+        response: ResponseBudget,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
+            self.read_sync(params, &response, &cancel)
+        })
+        .await
+    }
+
+    fn read_sync(
+        &self,
+        params: ReadParams,
+        response: &ResponseBudget,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let policy = self.compile_policy(
+            "fs.read-file",
+            &params.path_policy,
+            &[&params.resolved_path],
+            false,
+            cancel,
+        )?;
+        let view = params.view.as_deref().unwrap_or("text");
+        let byte_view = view != "text";
+        let max = if byte_view {
+            BYTE_VIEW_MAX_BYTES
+        } else {
+            READ_MAX_BYTES
+        };
+        let observed = io::read(&policy, &params.resolved_path, max, cancel).map_err(|error| {
+            if byte_view && error.details.as_ref().is_some_and(|details| details.get("limitBytes").is_some()) {
+                return path_error(format!("Cannot read \"{}\" as {view}: a byte view is limited to {BYTE_VIEW_MAX_BYTES} bytes because the whole result reaches the model, and it is not windowed. A text file can be read with view \"text\", which windows by line.", params.input_path))
+                    .with_detail("limitBytes", BYTE_VIEW_MAX_BYTES);
+            }
+            error
+        })?;
+        if byte_view {
+            let content = if view == "hex" {
+                io::hex(&observed.bytes)
+            } else {
+                base64::engine::general_purpose::STANDARD.encode(&observed.bytes)
+            };
+            let digest = ContentDigest::of(&observed.bytes);
+            let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":digest.sha256,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
+            let result = response.preflight_read(result)?;
+            lock(&self.state.ledger).record_read_digest(
+                &params.chat_id,
+                &params.resolved_path,
+                &digest,
+                observed.mtime_ms,
+                ReadObservation::ByteView,
+            );
+            return Ok(result);
+        }
+        if text::looks_binary(&observed.bytes) {
+            return Err(path_error(format!(
+                "\"{}\" appears to be a binary file and cannot be read as text. Read it with view \"hex\" or \"base64\" instead (up to {BYTE_VIEW_MAX_BYTES} bytes).",
+                params.input_path
+            )));
+        }
+        let start = positive_integer(params.start_line.unwrap_or(1.0), "startLine")?;
+        let maximum = positive_integer(params.max_lines.unwrap_or(2000.0), "maxLines")?;
+        let total = text::total_lines(&observed.bytes);
+        if start > total.max(1) {
+            return Err(path_error(format!(
+                "startLine {start} is past the end of \"{}\" ({total} lines).",
+                params.input_path
+            )));
+        }
+        let window = if total == 0 {
+            text::Window {
+                content: String::new(),
+                end_line: 0,
+                truncated: false,
+            }
+        } else {
+            text::format_window(&observed.bytes, start, maximum)
+        };
+        let digest = ContentDigest::of(&observed.bytes);
+        let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":digest.sha256,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
+        let result = response.preflight_read(result)?;
+        lock(&self.state.ledger).record_read_digest(
+            &params.chat_id,
+            &params.resolved_path,
+            &digest,
+            observed.mtime_ms,
+            ReadObservation::Window(ObservedLineRange {
+                start_line: start as u64,
+                end_line: window.end_line as u64,
+                total_lines: total as u64,
+            }),
+        );
+        Ok(result)
+    }
+
+    async fn write(
+        self: Arc<Self>,
+        params: WriteParams,
+        exclusive: bool,
+        response: ResponseBudget,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
+            let method = if exclusive {
+                "fs.create-file"
+            } else {
+                "fs.write-file"
+            };
+            let policy = self.compile_mutation_policy(
+                method,
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let exists = io::path_is_file(&policy, &params.resolved_path).map_err(|error| {
+                if exclusive {
+                    return blocked_create_parent(&params, error);
+                }
+                error
+            })?;
+            let observed = if exists && !exclusive {
+                Some(
+                    self.read_fresh(
+                        &policy,
+                        &params.mutation.chat_id,
+                        &params.resolved_path,
+                        &cancel,
+                    )
+                    .map_err(|error| {
+                        io::explain_unread(&policy, &params.resolved_path, "overwrite", error)
+                    })?,
+                )
+            } else {
+                None
+            };
+            if params.mutation.capture_snapshot {
+                snapshot_limit(
+                    &params.resolved_path,
+                    observed.as_ref().map_or(0, |value| value.bytes.len() as u64),
+                )?;
+            }
+            let written = ContentDigest::of(params.content.as_bytes());
+            let expected_hash = &written.sha256;
+            let mut result =
+                json!({"path":params.input_path,"bytesWritten":params.content.len(),"sha256":expected_hash});
+            if !exclusive {
+                result["created"] = json!(!exists);
+            }
+            let result = mutation_result(
+                result,
+                &params.mutation,
+                &params.resolved_path,
+                if exists { "edit" } else { "create" },
+                observed.as_ref().map(|observed| observed.bytes.as_slice()),
+                expected_hash,
+                None,
+            );
+            let result = response.preflight_mutation(result)?;
+            let policy = self.compile_mutation_policy(
+                method,
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let mtime = if exclusive || !exists {
+                io::create_new(&policy, &params.resolved_path, params.content.as_bytes()).map_err(
+                    |error| {
+                        if error.details.as_ref().is_some_and(|details| {
+                            details.get("alreadyExists").and_then(Value::as_bool) == Some(true)
+                        }) {
+                            return occupied_path(&policy, &params, exclusive);
+                        }
+                        if exclusive {
+                            return blocked_create_parent(&params, error);
+                        }
+                        error
+                    },
+                )?
+            } else {
+                self.write_io.write_atomic_if_unchanged(
+                    &policy,
+                    &params.resolved_path,
+                    &observed
+                        .as_ref()
+                        .expect("existing overwrite retained its observed state")
+                        .bytes,
+                    params.content.as_bytes(),
+                )?
+            };
+            lock(&self.state.ledger).record_read_digest(
+                &params.mutation.chat_id,
+                &params.resolved_path,
+                &written,
+                mtime,
+                ReadObservation::WholeFile,
+            );
+            Ok(result)
+        })
+        .await
+    }
+
+    pub(super) fn read_fresh(
+        &self,
+        policy: &CompiledPolicy,
+        chat: &str,
+        path: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<io::Observed, RemoteError> {
+        let entry = lock(&self.state.ledger).complete_entry(chat, path)?;
+        let observed = io::read(policy, path, entry.size as usize, cancel).map_err(|error| {
+            if error.code == codes::CANCELLED {
+                return error;
+            }
+            super::freshness::stale_file_error(path)
+        })?;
+        let digest = ContentDigest::of(&observed.bytes);
+        lock(&self.state.ledger).assert_digest(chat, path, &digest)?;
+        Ok(observed)
+    }
+
+    fn assert_current(
+        &self,
+        policy: &CompiledPolicy,
+        chat: &str,
+        path: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<(), RemoteError> {
+        lock(&self.state.ledger).complete_entry(chat, path)?;
+        if let Ok((size, mtime)) = io::current_metadata(policy, path)
+            && lock(&self.state.ledger).matches_metadata(chat, path, size, mtime)?
+        {
+            return Ok(());
+        }
+        self.read_fresh(policy, chat, path, cancel).map(|_| ())
+    }
+
+    async fn edit(
+        self: Arc<Self>,
+        params: EditParams,
+        response: ResponseBudget,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        if params.old_string.is_empty() {
+            return Err(argument(
+                "oldString must not be empty. Use create_file for a new file, or provide existing text to replace.",
+            ));
+        }
+        if params.old_string == params.new_string {
+            return Err(argument("oldString and newString must be different."));
+        }
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
+            let policy = self.compile_mutation_policy(
+                "fs.edit-file",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let observed = self
+                .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
+                .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
+            let replace_all = params.replace_all.unwrap_or(false);
+            let count = edit_match_count(&observed.bytes, params.old_string.as_bytes(), replace_all);
+            if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
+            if count > 1 && !replace_all { return Err(ambiguous_edit_error(count)); }
+            let replacement_count = if replace_all { count } else { 1 };
+            let projected_bytes = if params.new_string.len() >= params.old_string.len() {
+                params.new_string.len().checked_sub(params.old_string.len())
+                    .and_then(|growth| growth.checked_mul(replacement_count))
+                    .and_then(|growth| observed.bytes.len().checked_add(growth))
+            } else {
+                params.old_string.len().checked_sub(params.new_string.len())
+                    .and_then(|shrinkage| shrinkage.checked_mul(replacement_count))
+                    .and_then(|shrinkage| observed.bytes.len().checked_sub(shrinkage))
+            };
+            let Some(projected_bytes) = projected_bytes.filter(|size| *size <= READ_MAX_BYTES) else {
+                let received = projected_bytes.map_or_else(|| "an overflowing byte length".to_owned(), |size| format!("{size} bytes"));
+                return Err(argument(format!("Cannot edit \"{}\": the replacement would produce {received}; expected at most {READ_MAX_BYTES} bytes so the result remains readable by fs.read-file.", params.input_path)));
+            };
+            let (updated, replaced, first) = text::replace_matches(&observed.bytes, params.old_string.as_bytes(), params.new_string.as_bytes(), replace_all);
+            debug_assert_eq!(updated.len(), projected_bytes);
+            debug_assert_eq!(replaced, replacement_count);
+            if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
+            let written = ContentDigest::of(&updated);
+            let expected_hash = &written.sha256;
+            let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),expected_hash,None);
+            let result = response.preflight_mutation(result)?;
+            let policy = self.compile_mutation_policy(
+                "fs.edit-file",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let mtime = self.write_io.write_atomic_if_unchanged(
+                &policy,
+                &params.resolved_path,
+                &observed.bytes,
+                &updated,
+            )?;
+            let changed_lines = params.old_string.bytes().filter(|byte| *byte == b'\n').count() != params.new_string.bytes().filter(|byte| *byte == b'\n').count();
+            let through = if changed_lines { (first - 1) as u64 } else { ALL_LINES_VALID };
+            lock(&self.state.ledger).record_edit_digest(&params.mutation.chat_id, &params.resolved_path, &written, mtime, through);
+            Ok(result)
+        }).await
+    }
+
+    async fn replace_range(
+        self: Arc<Self>,
+        params: RangeParams,
+        response: ResponseBudget,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
+            let policy = self.compile_mutation_policy(
+                "fs.replace-range",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let observed = self
+                .read_fresh(&policy, &params.mutation.chat_id, &params.resolved_path, &cancel)
+                .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
+            lock(&self.state.ledger).assert_line_numbers(&params.mutation.chat_id, &params.resolved_path, params.end_line as u64)?;
+            let total = text::total_lines(&observed.bytes);
+            let (start, end) = validated_range(&params, total)?;
+            let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
+            if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
+            let written = ContentDigest::of(&updated);
+            let expected_hash = &written.sha256;
+            let replaced = end-start+1;
+            let result = mutation_result(json!({"path":params.input_path,"replacedLines":replaced,"newTotalLines":text::total_lines(&updated),"sha256":expected_hash}),&params.mutation,&params.resolved_path,"edit",Some(&observed.bytes),expected_hash,None);
+            let result = response.preflight_mutation(result)?;
+            let policy = self.compile_mutation_policy(
+                "fs.replace-range",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            let mtime = self.write_io.write_atomic_if_unchanged(
+                &policy,
+                &params.resolved_path,
+                &observed.bytes,
+                &updated,
+            )?;
+            let through = if text::total_lines(params.content.as_bytes()) == replaced {ALL_LINES_VALID} else {(start-1) as u64};
+            lock(&self.state.ledger).record_edit_digest(&params.mutation.chat_id, &params.resolved_path, &written, mtime, through);
+            Ok(result)
+        }).await
+    }
+
+    async fn delete(
+        self: Arc<Self>,
+        params: DeleteParams,
+        response: ResponseBudget,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        let paths = vec![params.resolved_path.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
+            let policy = self.compile_mutation_policy(
+                "fs.delete-file",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            io::assert_regular(&policy, &params.resolved_path, "delete")?;
+            let before = if params.mutation.capture_snapshot {
+                Some(
+                    self.read_fresh(
+                        &policy,
+                        &params.mutation.chat_id,
+                        &params.resolved_path,
+                        &cancel,
+                    )
+                    .map_err(|error| {
+                        io::explain_unread(&policy, &params.resolved_path, "delete", error)
+                    })?,
+                )
+            } else {
+                self.assert_current(
+                    &policy,
+                    &params.mutation.chat_id,
+                    &params.resolved_path,
+                    &cancel,
+                )
+                .map_err(|error| {
+                    io::explain_unread(&policy, &params.resolved_path, "delete", error)
+                })?;
+                None
+            };
+            let result = mutation_result(
+                json!({"path":params.input_path,"deleted":true}),
+                &params.mutation,
+                &params.resolved_path,
+                "delete",
+                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                "absent",
+                None,
+            );
+            let result = response.preflight_mutation(result)?;
+            let policy = self.compile_mutation_policy(
+                "fs.delete-file",
+                &params.mutation,
+                &[&params.resolved_path],
+                &cancel,
+            )?;
+            io::delete_file(&policy, &params.resolved_path).map_err(|error| {
+                if error.details.as_ref().is_some_and(|details| {
+                    details.get("notFound").and_then(Value::as_bool) == Some(true)
+                }) {
+                    return super::freshness::stale_file_error(&params.resolved_path);
+                }
+                error
+            })?;
+            lock(&self.state.ledger).forget(&params.mutation.chat_id, &params.resolved_path);
+            Ok(result)
+        })
+        .await
+    }
+
+    async fn move_file(
+        self: Arc<Self>,
+        params: MoveParams,
+        response: ResponseBudget,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        if params.resolved_from == params.resolved_to {
+            return Err(path_error(
+                "Source and destination must be different paths.",
+            ));
+        }
+        let paths = vec![params.resolved_from.clone(), params.resolved_to.clone()];
+        let locks = self.state.locks.clone();
+        run_locked(locks, paths, cancel.clone(), move || {
+            let policy = self.compile_mutation_policy(
+                "fs.move-file",
+                &params.mutation,
+                &[&params.resolved_from, &params.resolved_to],
+                &cancel,
+            )?;
+            let metadata = io::assert_regular(&policy, &params.resolved_from, "move")?;
+            let before = if params.mutation.capture_snapshot {
+                snapshot_limit(&params.resolved_from, metadata.len)?;
+                Some(io::read(
+                    &policy,
+                    &params.resolved_from,
+                    SNAPSHOT_MAX_BYTES,
+                    &cancel,
+                )?)
+            } else {
+                None
+            };
+            let expected_hash = before.as_ref().map_or_else(
+                || io::hash_file(&policy, &params.resolved_from),
+                |observed| Ok(io::sha256_hex(&observed.bytes)),
+            )?;
+            let result = mutation_result(
+                json!({"from":params.input_from,"to":params.input_to,"moved":true}),
+                &params.mutation,
+                &params.resolved_from,
+                "move",
+                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                &expected_hash,
+                Some(&params.resolved_to),
+            );
+            response.preflight_mutation(result)?;
+            let policy = self.compile_mutation_policy(
+                "fs.move-file",
+                &params.mutation,
+                &[&params.resolved_from, &params.resolved_to],
+                &cancel,
+            )?;
+            let committed_hash = self.move_io.move_no_overwrite(
+                &policy,
+                &params.resolved_from,
+                &params.resolved_to,
+            )?;
+            let mut ledger = lock(&self.state.ledger);
+            if committed_hash == expected_hash {
+                ledger.rekey(
+                    &params.mutation.chat_id,
+                    &params.resolved_from,
+                    &params.resolved_to,
+                );
+            } else {
+                ledger.forget(&params.mutation.chat_id, &params.resolved_from);
+                ledger.forget(&params.mutation.chat_id, &params.resolved_to);
+            }
+            drop(ledger);
+            Ok(mutation_result(
+                json!({"from":params.input_from,"to":params.input_to,"moved":true}),
+                &params.mutation,
+                &params.resolved_from,
+                "move",
+                before.as_ref().map(|observed| observed.bytes.as_slice()),
+                &committed_hash,
+                Some(&params.resolved_to),
+            ))
+        })
+        .await
+    }
+
+    async fn list(
+        self: Arc<Self>,
+        params: ListParams,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        run_blocking(move || {
+            let policy = self.compile_policy(
+                "fs.list-directory",
+                &params.path_policy,
+                &[&params.resolved_path],
+                false,
+                &cancel,
+            )?;
+            let list_error = |error: std::io::Error| {
+                path_error(format!("Cannot list \"{}\": {error}", params.input_path))
+            };
+            let entries = if policy.is_unrestricted() {
+                list_unrestricted(&params.resolved_path, &cancel, &list_error)?
+            } else {
+                list_bound(&policy, &params.resolved_path, &cancel, &list_error)?
+            };
+            Ok(json!({"path":params.input_path,"entries":entries}))
+        })
+        .await
+    }
+}
+
+fn list_unrestricted(
+    path: &Path,
+    cancel: &CancellationToken,
+    list_error: &impl Fn(std::io::Error) -> RemoteError,
+) -> Result<Vec<Value>, RemoteError> {
+    std::fs::read_dir(path)
+        .map_err(list_error)?
+        .map(|entry| {
+            check_cancel(cancel)?;
+            let entry = entry.map_err(list_error)?;
+            let is_dir = entry.file_type().map_err(list_error)?.is_dir();
+            Ok(entry_json(&entry.file_name(), is_dir))
+        })
+        .collect()
+}
+
+fn list_bound(
+    policy: &CompiledPolicy,
+    path: &Path,
+    cancel: &CancellationToken,
+    list_error: &impl Fn(std::io::Error) -> RemoteError,
+) -> Result<Vec<Value>, RemoteError> {
+    let directory = capability::open_directory(policy, path).map_err(|error| {
+        list_error(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            error.message,
+        ))
+    })?;
+    directory.with_dir(|dir| {
+        dir.entries()
+            .map_err(list_error)?
+            .map(|entry| {
+                check_cancel(cancel)?;
+                let entry = entry.map_err(list_error)?;
+                let is_dir = entry.file_type().map_err(list_error)?.is_dir();
+                Ok(entry_json(&entry.file_name(), is_dir))
+            })
+            .collect()
+    })
+}
+
+/// Builds one `fs.list-directory` entry.
+fn entry_json(name: &std::ffi::OsStr, is_dir: bool) -> Value {
+    let kind = if is_dir { "directory" } else { "file" };
+    json!({"name":name.to_string_lossy(),"type":kind})
+}
+
+fn occupied_path(policy: &CompiledPolicy, params: &WriteParams, create: bool) -> RemoteError {
+    if !create {
+        if let Some(refusal) = io::symlink_write_refusal(policy, &params.resolved_path) {
+            return refusal;
+        }
+        if io::assert_regular(policy, &params.resolved_path, "write").is_ok() {
+            return io::explain_unread(
+                policy,
+                &params.resolved_path,
+                "overwrite",
+                super::freshness::file_not_read_error(&params.resolved_path),
+            );
+        }
+        return path_error(format!(
+            "Cannot write \"{}\": the path exists and is not a regular file.",
+            params.resolved_path.display()
+        ));
+    }
+    io::create_conflict_error(policy, &params.resolved_path, &params.input_path)
+}
+
+/// Counts `fs.edit-file` matches: every match for `replaceAll`, which
+/// replaces them all anyway, otherwise one past the reporting bound so an
+/// ambiguity report never scans further than it can print.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(edit_match_count(b"x x x", b"x", false), 3);
+/// ```
+fn edit_match_count(source: &[u8], needle: &[u8], replace_all: bool) -> usize {
+    let limit = if replace_all {
+        usize::MAX
+    } else {
+        EDIT_OCCURRENCE_COUNT_LIMIT + 1
+    };
+    text::count_matches_up_to(source, needle, limit)
+}
+
+/// Reports an ambiguous `fs.edit-file` match with the TypeScript runtime's
+/// exact count, or the counting bound once `count` passes it.
+///
+/// # Example
+///
+/// ```ignore
+/// assert!(ambiguous_edit_error(3).message.starts_with("Found 3 occurrences."));
+/// ```
+fn ambiguous_edit_error(count: usize) -> RemoteError {
+    let found = if count > EDIT_OCCURRENCE_COUNT_LIMIT {
+        format!("more than {EDIT_OCCURRENCE_COUNT_LIMIT}")
+    } else {
+        count.to_string()
+    };
+    argument(format!(
+        "Found {found} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."
+    ))
+}
+
+/// Words a create blocked by a non-directory parent as the TypeScript
+/// runtime's `fs.create-file` did; any other error passes through.
+fn blocked_create_parent(params: &WriteParams, error: RemoteError) -> RemoteError {
+    let Some(blocker) = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("notDirectoryParent"))
+        .and_then(Value::as_str)
+    else {
+        return error;
+    };
+    path_error(format!(
+        "Cannot create \"{}\": \"{blocker}\" is not a directory.",
+        params.input_path
+    ))
+}
+
+pub(super) fn argument(message: impl Into<String>) -> RemoteError {
+    RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
+}
+
+pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> {
+    const MAX: u64 = SNAPSHOT_MAX_BYTES as u64;
+    if size <= MAX {
+        return Ok(());
+    }
+    Err(RemoteError::new(
+        codes::INTERNAL,
+        format!(
+            "Cannot checkpoint \"{}\": it is {size} bytes, past the {MAX}-byte snapshot limit.",
+            path.display()
+        ),
+    )
+    .with_detail("kind", "snapshot_too_large")
+    .with_detail("resolvedPath", path.to_string_lossy().as_ref())
+    .with_detail("sizeBytes", size))
+}
+
+fn lock_error(_: super::freshness::PathLockError) -> RemoteError {
+    RemoteError::new(codes::CANCELLED, "Filesystem operation cancelled")
+}
+
+/// Acquires the path locks for `paths`, then runs `work` on the blocking pool
+/// while its worker owns the guards.
+///
+/// Cancellation while waiting for a lock reports the standard cancelled
+/// error. The guards stay held until `work` returns even if the awaiting task
+/// is dropped.
+///
+/// # Example
+///
+/// ```ignore
+/// let locks = self.state.locks.clone();
+/// run_locked(locks, vec![path], cancel.clone(), move || {
+///     self.read_sync(params, &response, &cancel)
+/// })
+/// .await
+/// ```
+pub(super) async fn run_locked<T, F>(
+    locks: PathLocks,
+    paths: Vec<PathBuf>,
+    cancel: CancellationToken,
+    work: F,
+) -> Result<T, RemoteError>
+where
+    F: FnOnce() -> Result<T, RemoteError> + Send + 'static,
+    T: Send + 'static,
+{
+    locks
+        .with_blocking_locks(paths, &cancel, work)
+        .await
+        .map_err(lock_error)?
+}
+
+/// Validates an `fs.replace-range` pair against the file's line count with the
+/// TypeScript runtime's single range message, which also covers a zero or
+/// fractional line.
+///
+/// # Example
+///
+/// ```ignore
+/// let (start, end) = validated_range(&params, text::total_lines(&bytes))?;
+/// ```
+fn validated_range(params: &RangeParams, total: usize) -> Result<(usize, usize), RemoteError> {
+    let (start, end) = (params.start_line, params.end_line);
+    let whole = |value: f64| value.fract() == 0.0;
+    if whole(start) && whole(end) && start >= 1.0 && start <= end && end <= total as f64 {
+        return Ok((start as usize, end as usize));
+    }
+    Err(argument(format!(
+        "Invalid line range {}-{} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",
+        js_number(start),
+        js_number(end),
+        params.input_path
+    )))
+}
+
+/// Formats a wire number the way JavaScript prints it in a template literal,
+/// so an echoed argument reads the same as the TypeScript runtime's message.
+fn js_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    value.to_string()
+}
+
+fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
+    if value < 1.0 || value.fract() != 0.0 || value > ALL_LINES_VALID as f64 {
+        return Err(argument(format!(
+            "Invalid {name} {value}. Expected a positive safe integer."
+        )));
+    }
+    Ok(value as usize)
+}
+
+/// Refuses a result whose response frame would exceed the negotiated limit,
+/// returning the result unchanged when it fits.
+///
+/// # Example
+///
+/// ```ignore
+/// let result = preflight_response(result, "request-id", limit_bytes, "read")?;
+/// ```
+pub(super) fn preflight_response(
+    result: Value,
+    response_id: &str,
+    response_limit_bytes: usize,
+    subject: &str,
+) -> Result<Value, RemoteError> {
+    let frame = Frame::Res(Response {
+        id: response_id.to_owned(),
+        result,
+    });
+    let size = serialized_len(&frame);
+    if size <= response_limit_bytes {
+        let Frame::Res(Response { result, .. }) = frame else {
+            unreachable!("the frame was built as a response");
+        };
+        return Ok(result);
+    }
+    let guidance = if subject == "read" {
+        "Read a smaller text window or choose a more compact view."
+    } else {
+        "Split the operation into smaller calls or disable snapshot capture."
+    };
+    Err(RemoteError::new(
+        codes::FRAME_TOO_LARGE,
+        format!(
+            "Cannot return {subject} response: it is {size} bytes, but the negotiated frame limit is {response_limit_bytes} bytes. {guidance}"
+        ),
+    )
+    .with_detail("kind", "snapshot_too_large")
+    .with_detail("sizeBytes", size)
+    .with_detail("limitBytes", response_limit_bytes))
+}
+
+/// Counts the bytes `serde_json::to_vec` would produce without buffering them.
+fn serialized_len(frame: &Frame) -> usize {
+    struct ByteCount(usize);
+
+    impl std::io::Write for ByteCount {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut count = ByteCount(0);
+    serde_json::to_writer(&mut count, frame)
+        .expect("a filesystem mutation response always serializes");
+    count.0
+}
+
+pub(super) fn mutation_result(
+    result: Value,
+    params: &Mutation,
+    path: &Path,
+    op: &str,
+    before: Option<&[u8]>,
+    hash: &str,
+    moved_to: Option<&Path>,
+) -> Value {
+    if !params.capture_snapshot {
+        return json!({"result":result,"mutations":[]});
+    }
+    let snapshot = snapshot_record(path, op, before, hash, moved_to);
+    json!({"result":result,"mutations":[snapshot]})
+}
+
+/// Builds one `mutations[]` checkpoint record for a captured mutation.
+///
+/// # Example
+///
+/// ```ignore
+/// let record = snapshot_record(path, "delete", Some(&before), "absent", None);
+/// ```
+pub(super) fn snapshot_record(
+    path: &Path,
+    op: &str,
+    before: Option<&[u8]>,
+    after_hash: &str,
+    moved_to: Option<&Path>,
+) -> Value {
+    let mut snapshot =
+        json!({"path":path,"op":op,"before":before_json(before),"afterHash":after_hash});
+    if let Some(to) = moved_to {
+        snapshot["movedTo"] = json!(to);
+    }
+    snapshot
+}
+
+/// Describes a checkpoint's prior state: absent, or its full bytes and hash.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(before_json(None), json!({"exists": false}));
+/// ```
+pub(super) fn before_json(before: Option<&[u8]>) -> Value {
+    before.map_or_else(
+        || json!({"exists":false}),
+        |bytes| {
+            json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":io::sha256_hex(bytes)})
+        },
+    )
+}
+
+pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
+    static STATE: OnceLock<Arc<State>> = OnceLock::new();
+    let service = Arc::new(Service {
+        state: Arc::clone(STATE.get_or_init(|| Arc::new(State::default()))),
+        consent,
+        move_io: Arc::new(NativeMoveIo),
+        write_io: Arc::new(NativeWriteIo),
+    });
+    let registry = super::snapshot::register(registry, Arc::clone(&service));
+    let read = Arc::clone(&service);
+    let write = Arc::clone(&service);
+    let create = Arc::clone(&service);
+    let edit = Arc::clone(&service);
+    let range = Arc::clone(&service);
+    let delete = Arc::clone(&service);
+    let move_file = Arc::clone(&service);
+    let list = Arc::clone(&service);
+    let glob = Arc::clone(&service);
+    let grep = Arc::clone(&service);
+    registry
+        .implement("fs.read-file", move |params, ctx: CallContext| {
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&read).read(params, response, ctx.cancel().clone())
+        })
+        .implement("fs.write-file", move |params, ctx: CallContext| {
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&write).write(params, false, response, ctx.cancel().clone())
+        })
+        .implement("fs.create-file", move |params, ctx: CallContext| {
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&create).write(params, true, response, ctx.cancel().clone())
+        })
+        .implement("fs.edit-file", move |params, ctx: CallContext| {
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&edit).edit(params, response, ctx.cancel().clone())
+        })
+        .implement("fs.replace-range", move |params, ctx: CallContext| {
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&range).replace_range(params, response, ctx.cancel().clone())
+        })
+        .implement("fs.delete-file", move |params, ctx: CallContext| {
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&delete).delete(params, response, ctx.cancel().clone())
+        })
+        .implement("fs.move-file", move |params, ctx: CallContext| {
+            let response = ResponseBudget::from_context(&ctx);
+            Arc::clone(&move_file).move_file(params, response, ctx.cancel().clone())
+        })
+        .implement("fs.list-directory", move |params, ctx: CallContext| {
+            Arc::clone(&list).list(params, ctx.cancel().clone())
+        })
+        .implement(
+            "fs.glob",
+            move |params: super::search::GlobParams, ctx: CallContext| {
+                let service = Arc::clone(&glob);
+                let cancel = ctx.cancel().clone();
+                run_blocking(move || {
+                    check_cancel(&cancel)?;
+                    service.authorize("fs.glob", false)?;
+                    super::search::glob(params, &cancel)
+                })
+            },
+        )
+        .implement(
+            "fs.grep",
+            move |params: super::search::GrepParams, ctx: CallContext| {
+                let service = Arc::clone(&grep);
+                let cancel = ctx.cancel().clone();
+                run_blocking(move || {
+                    check_cancel(&cancel)?;
+                    service.authorize("fs.grep", false)?;
+                    super::search::grep(params, &cancel)
+                })
+            },
+        )
+        .implement("fs.apply-patch", move |params, ctx: CallContext| {
+            let response_id = ctx.id().to_string();
+            let response_limit_bytes = ctx.session().send_limit_bytes();
+            super::patch_apply::apply(
+                Arc::clone(&service),
+                params,
+                ctx.cancel().clone(),
+                response_id,
+                response_limit_bytes,
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime_home::RuntimeSlot;
+    use crate::test_support::{ScratchDir, scratch_dir};
+
+    fn fixture() -> (ScratchDir, Arc<Service>) {
+        fixture_with_io(Arc::new(NativeMoveIo), Arc::new(NativeWriteIo))
+    }
+
+    fn fixture_with_move_io(move_io: Arc<dyn MoveIo>) -> (ScratchDir, Arc<Service>) {
+        fixture_with_io(move_io, Arc::new(NativeWriteIo))
+    }
+
+    fn fixture_with_write_io(write_io: Arc<dyn WriteIo>) -> (ScratchDir, Arc<Service>) {
+        fixture_with_io(Arc::new(NativeMoveIo), write_io)
+    }
+
+    fn fixture_with_io(
+        move_io: Arc<dyn MoveIo>,
+        write_io: Arc<dyn WriteIo>,
+    ) -> (ScratchDir, Arc<Service>) {
+        let home = scratch_dir("filesystem-service");
+        let service = Arc::new(Service {
+            state: Arc::new(State::default()),
+            consent: ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
+            move_io,
+            write_io,
+        });
+        (home, service)
+    }
+
+    struct ReplacingMoveIo {
+        replacement: Vec<u8>,
+    }
+
+    impl MoveIo for ReplacingMoveIo {
+        fn move_no_overwrite(
+            &self,
+            policy: &CompiledPolicy,
+            from: &Path,
+            to: &Path,
+        ) -> Result<String, RemoteError> {
+            std::fs::write(from, &self.replacement).map_err(io::io_error)?;
+            io::move_no_overwrite(policy, from, to)
+        }
+    }
+
+    struct ReplacingWriteIo {
+        replacement: Vec<u8>,
+    }
+
+    impl WriteIo for ReplacingWriteIo {
+        fn write_atomic_if_unchanged(
+            &self,
+            policy: &CompiledPolicy,
+            path: &Path,
+            expected: &[u8],
+            bytes: &[u8],
+        ) -> Result<f64, RemoteError> {
+            std::fs::write(path, &self.replacement).map_err(io::io_error)?;
+            io::write_atomic_if_unchanged(policy, path, expected, bytes)
+        }
+    }
+
+    fn decode<T: serde::de::DeserializeOwned>(value: Value) -> T {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn read_params(path: &Path) -> ReadParams {
+        decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path}))
+    }
+
+    fn write_params(path: &Path, content: &str) -> WriteParams {
+        decode(
+            json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"content":content,"captureSnapshot":true}),
+        )
+    }
+
+    fn constrained_response() -> ResponseBudget {
+        ResponseBudget {
+            id: "response".to_owned(),
+            limit_bytes: 4096,
+        }
+    }
+
+    async fn seed_and_read(service: &Arc<Service>, path: &Path, content: &[u8]) {
+        std::fs::write(path, content).unwrap();
+        Arc::clone(service)
+            .read(
+                read_params(path),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+    }
+
+    fn assert_snapshot_frame_error(error: RemoteError) {
+        assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+        assert_eq!(error.details.unwrap()["kind"], "snapshot_too_large");
+    }
+
+    fn assert_schema(method: &str, result: &Value) {
+        let schema = &mangostudio_runtime_contract::catalog::method(method)
+            .unwrap()
+            .result;
+        assert!(
+            crate::result_check::compile_result_schema(schema).is_valid(result),
+            "{method}: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_locked_runs_work_under_the_lock_and_releases_it() {
+        let locks = PathLocks::default();
+        let path = PathBuf::from("/workspace/run-locked");
+        let observed = locks.clone();
+        let value = run_locked(
+            locks.clone(),
+            vec![path],
+            CancellationToken::new(),
+            move || Ok(observed.active_paths()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(value, 1, "work must run while its path lock is held");
+        assert_eq!(locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn run_locked_reports_cancellation_before_work_runs() {
+        let locks = PathLocks::default();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let error = run_locked(
+            locks,
+            vec![PathBuf::from("/workspace/cancelled")],
+            cancel,
+            || -> Result<(), RemoteError> { panic!("work must not run after cancellation") },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
+        assert_eq!(error.message, "Filesystem operation cancelled");
+    }
+
+    #[test]
+    fn serialized_len_counts_the_bytes_to_vec_would_produce() {
+        let frame = Frame::Res(Response {
+            id: "request-\u{e9}".to_owned(),
+            result: json!({"content":"line \"one\"\n\u{1f600}","size":12,"nested":[1.5,null,true]}),
+        });
+        assert_eq!(
+            serialized_len(&frame),
+            serde_json::to_vec(&frame).unwrap().len()
+        );
+    }
+
+    #[test]
+    fn preflight_response_returns_a_fitting_result_unchanged() {
+        let result = json!({"path":"file","deleted":true});
+        assert_eq!(
+            preflight_response(result.clone(), "id", usize::MAX, "mutation").unwrap(),
+            result
+        );
+        let error = preflight_response(result, "id", 8, "mutation").unwrap_err();
+        assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+    }
+
+    #[test]
+    fn before_json_records_absence_or_prior_bytes() {
+        assert_eq!(before_json(None), json!({"exists":false}));
+        assert_eq!(
+            before_json(Some(b"abc")),
+            json!({
+                "exists": true,
+                "contentBase64": "YWJj",
+                "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            })
+        );
+    }
+
+    #[test]
+    fn snapshot_record_adds_moved_to_only_for_moves() {
+        let edit = snapshot_record(Path::new("/a"), "edit", None, "after", None);
+        assert_eq!(
+            edit,
+            json!({"path":"/a","op":"edit","before":{"exists":false},"afterHash":"after"})
+        );
+        let moved = snapshot_record(
+            Path::new("/a"),
+            "move",
+            None,
+            "after",
+            Some(Path::new("/b")),
+        );
+        assert_eq!(moved["movedTo"], "/b");
+    }
+
+    #[test]
+    fn entry_json_names_directories_and_files() {
+        assert_eq!(
+            entry_json(std::ffi::OsStr::new("src"), true),
+            json!({"name":"src","type":"directory"})
+        );
+        assert_eq!(
+            entry_json(std::ffi::OsStr::new("main.rs"), false),
+            json!({"name":"main.rs","type":"file"})
+        );
+    }
+
+    #[tokio::test]
+    async fn basic_file_cycle_returns_catalog_valid_results_and_snapshots() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        let cancel = CancellationToken::new();
+        let created = Arc::clone(&service)
+            .write(
+                write_params(&path, "one\ntwo\n"),
+                true,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap();
+        assert_schema("fs.create-file", &created);
+        assert_eq!(created["mutations"][0]["before"], json!({"exists":false}));
+        let read = Arc::clone(&service)
+            .read(
+                read_params(&path),
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap();
+        assert_schema("fs.read-file", &read);
+        assert_eq!(read["content"], "     1\tone\n     2\ttwo");
+        let edited=Arc::clone(&service).edit(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"oldString":"one","newString":"first","captureSnapshot":true})),ResponseBudget::unbounded(),cancel.clone()).await.unwrap();
+        assert_schema("fs.edit-file", &edited);
+        assert_eq!(edited["result"]["firstChangedLine"], 1);
+        let replaced=Arc::clone(&service).replace_range(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"startLine":2,"endLine":2,"content":"second","captureSnapshot":true})),ResponseBudget::unbounded(),cancel.clone()).await.unwrap();
+        assert_schema("fs.replace-range", &replaced);
+        assert_eq!(std::fs::read(&path).unwrap(), b"first\nsecond\n");
+        let written = Arc::clone(&service)
+            .write(
+                write_params(&path, "whole"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap();
+        assert_schema("fs.write-file", &written);
+        assert_eq!(written["result"]["created"], false);
+        let listed = Arc::clone(&service)
+            .list(
+                decode(json!({"inputPath":".","resolvedPath":home.to_path_buf()})),
+                cancel.clone(),
+            )
+            .await
+            .unwrap();
+        assert_schema("fs.list-directory", &listed);
+        assert_eq!(listed["entries"], json!([{"name":"file","type":"file"}]));
+        let to = home.join("moved");
+        let moved=Arc::clone(&service).move_file(decode(json!({"chatId":"chat","captureSnapshot":true,"inputFrom":"file","inputTo":"moved","resolvedFrom":path,"resolvedTo":to})),ResponseBudget::unbounded(),cancel.clone()).await.unwrap();
+        assert_schema("fs.move-file", &moved);
+        let deleted=Arc::clone(&service).delete(decode(json!({"chatId":"chat","captureSnapshot":true,"inputPath":"moved","resolvedPath":to})),ResponseBudget::unbounded(),cancel).await.unwrap();
+        assert_schema("fs.delete-file", &deleted);
+        assert!(!to.exists());
+        assert_eq!(deleted["mutations"][0]["afterHash"], "absent");
+        assert_eq!(service.state.locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn edit_refuses_an_expansion_larger_than_the_read_limit_before_replacing() {
+        let (home, service) = fixture();
+        let path = home.join("large-edit");
+        let source = "a".repeat(1_000_000);
+        seed_and_read(&service, &path, source.as_bytes()).await;
+
+        let error = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId": "chat", "captureSnapshot": false,
+                    "inputPath": "large-edit", "resolvedPath": path,
+                    "oldString": "a", "newString": "01234567890", "replaceAll": true
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        assert!(error.message.contains("would produce 11000000 bytes"));
+        assert_eq!(std::fs::read(&path).unwrap(), source.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn oversized_snapshot_responses_refuse_every_mutation_before_commit() {
+        let (home, service) = fixture();
+        let original = format!("{}needle", "a".repeat(4096));
+
+        let write_path = home.join("write");
+        seed_and_read(&service, &write_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .write(
+                write_params(&write_path, "replacement"),
+                false,
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&write_path).unwrap(), original);
+
+        let edit_path = home.join("edit");
+        seed_and_read(&service, &edit_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"edit", "resolvedPath":edit_path,
+                    "oldString":"needle", "newString":"thread"
+                })),
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&edit_path).unwrap(), original);
+
+        let range_path = home.join("range");
+        seed_and_read(&service, &range_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .replace_range(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"range", "resolvedPath":range_path,
+                    "startLine":1, "endLine":1, "content":"replacement"
+                })),
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&range_path).unwrap(), original);
+
+        let delete_path = home.join("delete");
+        seed_and_read(&service, &delete_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .delete(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"delete", "resolvedPath":delete_path
+                })),
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&delete_path).unwrap(), original);
+
+        let move_path = home.join("move");
+        let move_to = home.join("moved");
+        seed_and_read(&service, &move_path, original.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"move", "inputTo":"moved",
+                    "resolvedFrom":move_path, "resolvedTo":move_to
+                })),
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_snapshot_frame_error(error);
+        assert_eq!(std::fs::read_to_string(&move_path).unwrap(), original);
+        assert!(!move_to.exists());
+    }
+
+    #[tokio::test]
+    async fn oversized_snapshot_free_mutation_response_refuses_before_commit() {
+        let (home, service) = fixture();
+        let path = home.join("write");
+        let input_path = format!("display/{}", "a".repeat(4_000));
+
+        let error = Arc::clone(&service)
+            .write(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputPath":input_path, "resolvedPath":path, "content":"new"
+                })),
+                true,
+                constrained_response(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_snapshot_frame_error(error);
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn oversized_read_responses_do_not_grant_freshness() {
+        let (home, service) = fixture();
+        for (name, view, content) in [
+            ("text", None, "a\n".repeat(2_000).into_bytes()),
+            ("bytes", Some("base64"), vec![b'a'; 4_096]),
+        ] {
+            let path = home.join(name);
+            std::fs::write(&path, &content).unwrap();
+            let mut params = read_params(&path);
+            params.input_path = name.to_owned();
+            params.view = view.map(str::to_owned);
+
+            let error = Arc::clone(&service)
+                .read(params, constrained_response(), CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+
+            let mut write = write_params(&path, "replacement");
+            write.input_path = name.to_owned();
+            let error = Arc::clone(&service)
+                .write(
+                    write,
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.details.unwrap()["kind"], "file_not_read");
+            assert_eq!(std::fs::read(&path).unwrap(), content);
+        }
+        assert!(lock(&service.state.ledger).is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_waits_for_the_path_lock_before_recording_freshness() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::write(&path, b"old\n").unwrap();
+        let held = service
+            .state
+            .locks
+            .acquire(vec![path.clone()], &CancellationToken::new())
+            .await
+            .unwrap();
+        let pending_service = Arc::clone(&service);
+        let pending_path = path.clone();
+        let pending = tokio::spawn(async move {
+            pending_service
+                .read(
+                    read_params(&pending_path),
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!pending.is_finished());
+
+        std::fs::write(&path, b"new\n").unwrap();
+        drop(held);
+        let result = pending.await.unwrap().unwrap();
+        assert_eq!(result["content"], "     1\tnew");
+
+        Arc::clone(&service)
+            .write(
+                write_params(&path, "replacement"),
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+    }
+
+    #[tokio::test]
+    async fn move_snapshot_uses_the_committed_destination_hash() {
+        let replacement = b"external\n".to_vec();
+        let (home, service) = fixture_with_move_io(Arc::new(ReplacingMoveIo {
+            replacement: replacement.clone(),
+        }));
+        let source = home.join("source");
+        let destination = home.join("destination");
+        seed_and_read(&service, &source, b"original\n").await;
+
+        let result = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        let committed_hash = io::sha256_hex(&replacement);
+        assert_eq!(std::fs::read(&destination).unwrap(), replacement);
+        assert_eq!(result["mutations"][0]["afterHash"], committed_hash);
+        assert!(lock(&service.state.ledger).is_empty());
+    }
+
+    #[tokio::test]
+    async fn partial_reads_and_external_changes_refuse_overwrite() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::write(&path, b"one\ntwo\n").unwrap();
+        let cancel = CancellationToken::new();
+        let unread = Arc::clone(&service)
+            .write(
+                write_params(&path, "oops"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(unread.details.unwrap()["kind"], "file_not_read");
+        let mut params = read_params(&path);
+        params.max_lines = Some(1.0);
+        Arc::clone(&service)
+            .read(params, ResponseBudget::unbounded(), cancel.clone())
+            .await
+            .unwrap();
+        let partial = Arc::clone(&service)
+            .write(
+                write_params(&path, "oops"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(partial.details.unwrap()["kind"], "partial_read");
+        Arc::clone(&service)
+            .read(
+                read_params(&path),
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap();
+        std::fs::write(&path, b"external").unwrap();
+        let stale = Arc::clone(&service)
+            .write(
+                write_params(&path, "oops"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(stale.details.unwrap()["kind"], "stale_file");
+        assert_eq!(std::fs::read(&path).unwrap(), b"external");
+    }
+
+    #[tokio::test]
+    async fn standalone_writes_refuse_post_read_external_changes() {
+        let replacement = b"external\n".to_vec();
+        let (home, service) = fixture_with_write_io(Arc::new(ReplacingWriteIo {
+            replacement: replacement.clone(),
+        }));
+        let cancel = CancellationToken::new();
+
+        let write_path = home.join("write");
+        seed_and_read(&service, &write_path, b"before\n").await;
+        let error = Arc::clone(&service)
+            .write(
+                write_params(&write_path, "replacement\n"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "file_changed");
+        assert_eq!(std::fs::read(&write_path).unwrap(), replacement);
+
+        let edit_path = home.join("edit");
+        seed_and_read(&service, &edit_path, b"before\n").await;
+        let error = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputPath":"edit", "resolvedPath":edit_path,
+                    "oldString":"before", "newString":"replacement"
+                })),
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "file_changed");
+        assert_eq!(std::fs::read(&edit_path).unwrap(), replacement);
+
+        let range_path = home.join("range");
+        seed_and_read(&service, &range_path, b"before\n").await;
+        let error = Arc::clone(&service)
+            .replace_range(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputPath":"range", "resolvedPath":range_path,
+                    "startLine":1, "endLine":1, "content":"replacement"
+                })),
+                ResponseBudget::unbounded(),
+                cancel,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "file_changed");
+        assert_eq!(std::fs::read(&range_path).unwrap(), replacement);
+    }
+
+    #[tokio::test]
+    async fn byte_view_allows_overwrite_but_never_invents_line_numbers() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::write(&path, b"\0abc").unwrap();
+        let cancel = CancellationToken::new();
+        let binary = Arc::clone(&service)
+            .read(
+                read_params(&path),
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(binary.details.unwrap()["kind"], "path_access");
+        let mut params = read_params(&path);
+        params.view = Some("hex".into());
+        let read = Arc::clone(&service)
+            .read(params, ResponseBudget::unbounded(), cancel.clone())
+            .await
+            .unwrap();
+        assert_eq!(read["content"], "00616263");
+        let error=Arc::clone(&service).replace_range(decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"startLine":1,"endLine":1,"content":"text","captureSnapshot":false})),ResponseBudget::unbounded(),cancel.clone()).await.unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "unobserved_line_numbers");
+        Arc::clone(&service)
+            .write(
+                write_params(&path, "text"),
+                false,
+                ResponseBudget::unbounded(),
+                cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"text");
+    }
+
+    #[tokio::test]
+    async fn cancellation_and_policy_refuse_before_creation() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let error = Arc::clone(&service)
+            .write(
+                write_params(&path, "oops"),
+                true,
+                ResponseBudget::unbounded(),
+                cancel,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, codes::CANCELLED);
+        let mut params = write_params(&path, "oops");
+        params.mutation.path_policy = Some(PathPolicy {
+            allowed_roots: vec![home.join("other")],
+            ..PathPolicy::default()
+        });
+        let error = Arc::clone(&service)
+            .write(
+                params,
+                true,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.details.unwrap()["kind"], "path_access");
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn occupied_create_and_missing_list_report_path_access_errors() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::write(&path, "existing").unwrap();
+        let error = Arc::clone(&service)
+            .write(
+                write_params(&path, "oops"),
+                true,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.details.as_ref().and_then(|d| d.get("kind")),
+            Some(&json!("path_access"))
+        );
+        assert_eq!(
+            error.message,
+            "\"file\" already exists. Read it with read_file, then use edit_file for an exact text change, replace_range for a line change, or write_file to replace all content."
+        );
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "existing");
+        let error = Arc::clone(&service)
+            .list(
+                decode(json!({"inputPath":"missing","resolvedPath":home.join("missing")})),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.details.as_ref().and_then(|d| d.get("kind")),
+            Some(&json!("path_access"))
+        );
+        assert!(error.message.starts_with("Cannot list \"missing\": "));
+
+        let error = service
+            .list(
+                decode(json!({
+                    "inputPath":"missing",
+                    "resolvedPath":home.join("missing"),
+                    "pathPolicy":{
+                        "allowedRoots":[home.to_path_buf()],
+                        "deniedRoots":[],
+                        "containmentRoot":null
+                    }
+                })),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error
+                .details
+                .as_ref()
+                .and_then(|details| details.get("kind")),
+            Some(&json!("path_access"))
+        );
+        assert!(error.message.starts_with("Cannot list \"missing\": "));
+    }
+
+    #[tokio::test]
+    async fn oversized_byte_view_names_its_bound_and_does_not_grant_freshness() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len((BYTE_VIEW_MAX_BYTES + 1) as u64)
+            .unwrap();
+        let mut params = read_params(&path);
+        params.view = Some("base64".into());
+        let error = Arc::clone(&service)
+            .read(
+                params,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            format!(
+                "Cannot read \"file\" as base64: a byte view is limited to {BYTE_VIEW_MAX_BYTES} bytes because the whole result reaches the model, and it is not windowed. A text file can be read with view \"text\", which windows by line."
+            )
+        );
+        assert_eq!(error.details.unwrap()["limitBytes"], BYTE_VIEW_MAX_BYTES);
+        assert!(lock(&service.state.ledger).is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_without_snapshot_returns_no_mutations_and_forgets_freshness() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        let cancel = CancellationToken::new();
+        Arc::clone(&service)
+            .write(
+                write_params(&path, "delete me"),
+                true,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await
+            .unwrap();
+        let result = Arc::clone(&service).delete(decode(json!({"chatId":"chat","captureSnapshot":false,"inputPath":"file","resolvedPath":path})), ResponseBudget::unbounded(), cancel).await.unwrap();
+        assert_schema("fs.delete-file", &result);
+        assert_eq!(result["mutations"], json!([]));
+        assert!(!path.exists());
+        assert!(lock(&service.state.ledger).is_empty());
+    }
+
+    #[test]
+    fn registration_covers_the_basic_methods_and_numeric_bounds_refuse_bad_values() {
+        let home = scratch_dir("filesystem-registration");
+        let registry = register(
+            Registry::new(),
+            ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()),
+        );
+        assert_eq!(registry.implemented_methods().len(), 14);
+        assert!(positive_integer(0.0, "startLine").is_err());
+        assert!(positive_integer(1.5, "startLine").is_err());
+        assert_eq!(positive_integer(2.0, "startLine").unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn queued_write_rechecks_consent_after_acquiring_its_path_lock() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        let cancel = CancellationToken::new();
+        service.authorize("fs.create-file", false).unwrap();
+        let guard = service
+            .state
+            .locks
+            .acquire(vec![path.clone()], &cancel)
+            .await
+            .unwrap();
+        let pending = Arc::clone(&service).write(
+            write_params(&path, "refused"),
+            true,
+            ResponseBudget::unbounded(),
+            cancel,
+        );
+        tokio::pin!(pending);
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(
+                pending.as_mut().poll(cx).is_pending()
+            ))
+            .await
+        );
+        crate::runtime_home::write_runtime_slot_config(
+            RuntimeSlot::Host,
+            &home,
+            &[("allow", Some(json!({"fsWrite":false})))],
+        )
+        .unwrap();
+        drop(guard);
+        let error = pending.await.unwrap_err();
+        assert_eq!(error.code, codes::DENIED);
+        assert!(!path.exists());
+        assert_eq!(service.state.locks.active_paths(), 0);
+    }
+
+    #[tokio::test]
+    async fn move_snapshot_requires_read_and_checkpoint_consent() {
+        let (home, service) = fixture();
+        let source = home.join("source");
+        let destination = home.join("destination");
+        std::fs::write(&source, b"private").unwrap();
+        crate::runtime_home::write_runtime_slot_config(
+            RuntimeSlot::Host,
+            &home,
+            &[(
+                "allow",
+                Some(json!({"fsWrite":true,"fsRead":false,"checkpoints":false})),
+            )],
+        )
+        .unwrap();
+
+        let error = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, codes::DENIED);
+        assert_eq!(
+            error.details.unwrap()["missing"],
+            json!(["fsRead", "checkpoints"])
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), b"private");
+        assert!(!destination.exists());
+
+        let moved = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved["mutations"], json!([]));
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"private");
+    }
+
+    /// Asserts a pre-cancelled mutation refused as CANCELLED and left every
+    /// fixture byte, the chat's freshness entry and the lock table as they
+    /// were, so no method can start work after its caller gave up.
+    fn assert_refused_before_work(
+        method: &str,
+        service: &Service,
+        result: Result<Value, RemoteError>,
+        untouched: &[(&Path, &[u8])],
+        ledger_entries: usize,
+    ) {
+        let error = result.expect_err("a pre-cancelled call must be refused");
+        assert_eq!(
+            error.code,
+            codes::CANCELLED,
+            "expected {method} refused as {} | received: {error:?}",
+            codes::CANCELLED
+        );
+        for (path, bytes) in untouched {
+            let found = std::fs::read(path).ok();
+            assert_eq!(
+                found.as_deref(),
+                Some(*bytes),
+                "expected {method} to leave {} untouched | received: {found:?}",
+                path.display()
+            );
+        }
+        let entries = lock(&service.state.ledger).len();
+        let active = service.state.locks.active_paths();
+        assert_eq!(
+            (entries, active),
+            (ledger_entries, 0),
+            "expected {method} to leave (ledger entries, active locks) = ({ledger_entries}, 0) | \
+             received: ({entries}, {active})"
+        );
+    }
+
+    fn cancelled() -> CancellationToken {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        cancel
+    }
+
+    #[tokio::test]
+    async fn edit_refuses_a_pre_cancelled_call_before_work() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"before\n").await;
+        let result = Arc::clone(&service)
+            .edit(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"file", "resolvedPath":path,
+                    "oldString":"before", "newString":"after"
+                })),
+                ResponseBudget::unbounded(),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work("fs.edit-file", &service, result, &[(&path, b"before\n")], 1);
+    }
+
+    #[tokio::test]
+    async fn replace_range_refuses_a_pre_cancelled_call_before_work() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"before\n").await;
+        let result = Arc::clone(&service)
+            .replace_range(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":true,
+                    "inputPath":"file", "resolvedPath":path,
+                    "startLine":1, "endLine":1, "content":"after\n"
+                })),
+                ResponseBudget::unbounded(),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work(
+            "fs.replace-range",
+            &service,
+            result,
+            &[(&path, b"before\n")],
+            1,
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_refuses_a_pre_cancelled_call_before_work() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"keep me\n").await;
+        let result = Arc::clone(&service)
+            .delete(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputPath":"file", "resolvedPath":path
+                })),
+                ResponseBudget::unbounded(),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work(
+            "fs.delete-file",
+            &service,
+            result,
+            &[(&path, b"keep me\n")],
+            1,
+        );
+    }
+
+    #[tokio::test]
+    async fn move_refuses_a_pre_cancelled_call_before_work() {
+        let (home, service) = fixture();
+        let source = home.join("source");
+        let destination = home.join("destination");
+        seed_and_read(&service, &source, b"moving\n").await;
+        let result = Arc::clone(&service)
+            .move_file(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":false,
+                    "inputFrom":"source", "inputTo":"destination",
+                    "resolvedFrom":source, "resolvedTo":destination
+                })),
+                ResponseBudget::unbounded(),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work(
+            "fs.move-file",
+            &service,
+            result,
+            &[(&source, b"moving\n")],
+            1,
+        );
+        assert!(
+            !destination.exists(),
+            "expected no move destination after a pre-cancelled move | received: {} present",
+            destination.display()
+        );
+    }
+
+    #[tokio::test]
+    async fn list_directory_refuses_a_pre_cancelled_call_before_listing() {
+        let (home, service) = fixture();
+        std::fs::write(home.join("entry"), b"").unwrap();
+        let result = Arc::clone(&service)
+            .list(
+                decode(json!({"inputPath":".","resolvedPath":home.to_path_buf()})),
+                cancelled(),
+            )
+            .await;
+        assert_refused_before_work("fs.list-directory", &service, result, &[], 0);
+    }
+
+    /// Once a write has begun its I/O, a cancel that arrives cannot abandon it
+    /// half-done: the call finishes, reports every byte, and the file holds
+    /// the whole new content. The fake cancels from inside the write itself,
+    /// which is unambiguously after the last cancellation point.
+    #[tokio::test]
+    async fn a_write_already_under_way_when_cancelled_finishes_and_reports_all_bytes() {
+        struct CancellingWriteIo {
+            cancel: CancellationToken,
+        }
+
+        impl WriteIo for CancellingWriteIo {
+            fn write_atomic_if_unchanged(
+                &self,
+                policy: &CompiledPolicy,
+                path: &Path,
+                expected: &[u8],
+                bytes: &[u8],
+            ) -> Result<f64, RemoteError> {
+                self.cancel.cancel();
+                io::write_atomic_if_unchanged(policy, path, expected, bytes)
+            }
+        }
+
+        let cancel = CancellationToken::new();
+        let (home, service) = fixture_with_write_io(Arc::new(CancellingWriteIo {
+            cancel: cancel.clone(),
+        }));
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"before\n").await;
+        let content = "x".repeat(1024 * 1024);
+        let result = Arc::clone(&service)
+            .write(
+                write_params(&path, &content),
+                false,
+                ResponseBudget::unbounded(),
+                cancel.clone(),
+            )
+            .await;
+        let written = result
+            .as_ref()
+            .map(|value| value["result"]["bytesWritten"].clone());
+        assert_eq!(
+            written.as_ref().ok(),
+            Some(&json!(content.len())),
+            "expected the started write to report {} bytes | received: {:?}",
+            content.len(),
+            result.as_ref().map_err(|error| error.message.clone())
+        );
+        let on_disk = std::fs::read(&path).unwrap();
+        assert!(
+            cancel.is_cancelled() && on_disk == content.as_bytes(),
+            "expected (cancelled, full content on disk) = (true, {} bytes) | received: ({}, {} bytes)",
+            content.len(),
+            cancel.is_cancelled(),
+            on_disk.len()
+        );
+    }
+
+    /// An unchanged size and mtime is taken as current without re-reading
+    /// the bytes. The file's content is swapped for same-length bytes and its
+    /// mtime put back: a snapshot delete, which must read, refuses it as
+    /// stale, while a snapshot-free delete trusts the metadata and proceeds —
+    /// proof the fast path skipped the read.
+    #[tokio::test]
+    async fn the_size_and_mtime_fast_path_skips_the_content_read() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"original").await;
+        let recorded = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, b"replaced").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(recorded)
+            .unwrap();
+        let delete = |capture: bool| {
+            Arc::clone(&service).delete(
+                decode(json!({
+                    "chatId":"chat", "captureSnapshot":capture,
+                    "inputPath":"file", "resolvedPath":path
+                })),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+        };
+
+        let reading = delete(true).await.map_err(|error| error.details);
+        assert_eq!(
+            reading
+                .as_ref()
+                .err()
+                .and_then(|details| details.as_ref().map(|d| d["kind"].clone())),
+            Some(json!("stale_file")),
+            "expected the reading delete to see the swapped bytes as stale_file | received: {reading:?}"
+        );
+        let fast = delete(false).await;
+        assert!(
+            fast.is_ok() && !path.exists(),
+            "expected the metadata fast path to delete without reading | received: {:?}, exists {}",
+            fast.map_err(|error| error.message),
+            path.exists()
+        );
+    }
+
+    /// Every path-taking method refuses a symlink that leaves the policy's
+    /// containment root, one case per method so a new method that skips the
+    /// check is visible here; the link's target is never touched.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn every_method_refuses_a_symlink_that_escapes_the_containment_root() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let workspace = home.join("workspace");
+        let outside = home.join("outside");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let secret = outside.join("secret.txt");
+        std::fs::write(&secret, b"outside\n").unwrap();
+        let link = workspace.join("link.txt");
+        symlink(&secret, &link).unwrap();
+        let dir_link = workspace.join("linked-dir");
+        symlink(&outside, &dir_link).unwrap();
+        // Freshness is already satisfied, so any refusal is containment's.
+        lock(&service.state.ledger).record_read(
+            "chat",
+            &link,
+            b"outside\n",
+            f64::NAN,
+            ReadObservation::WholeFile,
+        );
+        let policy = json!({"allowedRoots":[],"deniedRoots":[],"containmentRoot":workspace});
+        let mutation = |extra: Value| {
+            let mut params = json!({
+                "chatId":"chat", "captureSnapshot":false, "pathPolicy":policy,
+                "inputPath":"link.txt", "resolvedPath":link
+            });
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            params
+        };
+        let unbounded = ResponseBudget::unbounded;
+        let token = CancellationToken::new;
+        let results: Vec<(&str, Result<Value, RemoteError>)> = vec![
+            (
+                "fs.write-file",
+                Arc::clone(&service)
+                    .write(
+                        decode(mutation(json!({"content":"pwned\n"}))),
+                        false,
+                        unbounded(),
+                        token(),
+                    )
+                    .await,
+            ),
+            (
+                "fs.edit-file",
+                Arc::clone(&service)
+                    .edit(
+                        decode(mutation(json!({"oldString":"outside","newString":"pwned"}))),
+                        unbounded(),
+                        token(),
+                    )
+                    .await,
+            ),
+            (
+                "fs.replace-range",
+                Arc::clone(&service)
+                    .replace_range(
+                        decode(mutation(
+                            json!({"startLine":1,"endLine":1,"content":"pwned\n"}),
+                        )),
+                        unbounded(),
+                        token(),
+                    )
+                    .await,
+            ),
+            (
+                "fs.delete-file",
+                Arc::clone(&service)
+                    .delete(decode(mutation(json!({}))), unbounded(), token())
+                    .await,
+            ),
+            (
+                "fs.list-directory",
+                Arc::clone(&service)
+                    .list(
+                        decode(json!({
+                            "inputPath":"linked-dir", "resolvedPath":dir_link, "pathPolicy":policy
+                        })),
+                        token(),
+                    )
+                    .await,
+            ),
+        ];
+        for (method, result) in results {
+            let kind = result
+                .as_ref()
+                .err()
+                .and_then(|error| error.details.as_ref())
+                .map(|details| details["kind"].clone());
+            assert_eq!(
+                kind,
+                Some(json!("path_access")),
+                "expected {method} through an escaping link refused as path_access | received: {result:?}"
+            );
+        }
+        assert_eq!(
+            std::fs::read(&secret).unwrap(),
+            b"outside\n",
+            "expected the link target outside the root untouched"
+        );
+    }
+
+    fn move_params(from: &Path, to: &Path, capture_snapshot: bool) -> MoveParams {
+        decode(json!({
+            "chatId":"chat", "captureSnapshot":capture_snapshot,
+            "inputFrom":"source", "inputTo":"destination",
+            "resolvedFrom":from, "resolvedTo":to
+        }))
+    }
+
+    fn error_kind(result: &Result<Value, RemoteError>) -> Option<Value> {
+        result
+            .as_ref()
+            .err()
+            .and_then(|error| error.details.as_ref())
+            .map(|details| details["kind"].clone())
+    }
+
+    /// A move proves the destination holds exactly the bytes the source read
+    /// observed, so the chat may overwrite the destination without re-reading
+    /// it, as the TypeScript runtime's `rekeyFile` allowed.
+    #[tokio::test]
+    async fn a_move_carries_the_source_read_to_the_destination() {
+        for capture_snapshot in [false, true] {
+            let (home, service) = fixture();
+            let source = home.join("source");
+            let destination = home.join("nested").join("destination");
+            seed_and_read(&service, &source, b"observed\n").await;
+
+            Arc::clone(&service)
+                .move_file(
+                    move_params(&source, &destination, capture_snapshot),
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            let written = Arc::clone(&service)
+                .write(
+                    write_params(&destination, "updated\n"),
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+
+            assert!(
+                written
+                    .as_ref()
+                    .is_ok_and(|value| value["result"]["created"] == json!(false)),
+                "expected an overwrite of the moved destination without a re-read \
+                 (captureSnapshot {capture_snapshot}) | received: {written:?}"
+            );
+            assert_eq!(std::fs::read(&destination).unwrap(), b"updated\n");
+            let source_write = Arc::clone(&service)
+                .write(
+                    write_params(&source, "recreated\n"),
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            assert!(
+                source_write.is_ok(),
+                "expected the vacated source to be a fresh create | received: {source_write:?}"
+            );
+        }
+    }
+
+    /// Carrying freshness never invents it: an unread source leaves the
+    /// destination unread, and a partial source read stays partial.
+    #[tokio::test]
+    async fn a_move_never_marks_unread_content_fresh() {
+        let (home, service) = fixture();
+        let unread = home.join("unread");
+        let unread_to = home.join("unread-moved");
+        std::fs::write(&unread, b"never read\n").unwrap();
+        Arc::clone(&service)
+            .move_file(
+                move_params(&unread, &unread_to, false),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let refused = Arc::clone(&service)
+            .write(
+                write_params(&unread_to, "oops\n"),
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        assert_eq!(
+            error_kind(&refused),
+            Some(json!("file_not_read")),
+            "expected an unread moved file to stay unread | received: {refused:?}"
+        );
+
+        let partial = home.join("partial");
+        let partial_to = home.join("partial-moved");
+        std::fs::write(&partial, b"one\ntwo\n").unwrap();
+        let mut params = read_params(&partial);
+        params.max_lines = Some(1.0);
+        Arc::clone(&service)
+            .read(
+                params,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        Arc::clone(&service)
+            .move_file(
+                move_params(&partial, &partial_to, false),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let refused = Arc::clone(&service)
+            .write(
+                write_params(&partial_to, "oops\n"),
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        assert_eq!(
+            error_kind(&refused),
+            Some(json!("partial_read")),
+            "expected a partially read moved file to stay partial | received: {refused:?}"
+        );
+        assert_eq!(std::fs::read(&unread_to).unwrap(), b"never read\n");
+        assert_eq!(std::fs::read(&partial_to).unwrap(), b"one\ntwo\n");
+    }
+
+    fn edit_params(path: &Path, old: &str, new: &str) -> EditParams {
+        decode(json!({
+            "chatId":"chat", "captureSnapshot":false, "inputPath":"file",
+            "resolvedPath":path, "oldString":old, "newString":new
+        }))
+    }
+
+    /// The TypeScript runtime reported the exact match count, so the model
+    /// knows how much context a unique match needs.
+    #[tokio::test]
+    async fn an_ambiguous_edit_reports_the_exact_occurrence_count() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"x\nx\nx\n").await;
+        let error = Arc::clone(&service)
+            .edit(
+                edit_params(&path, "x", "y"),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Found 3 occurrences. Provide a longer oldString with more surrounding context to \
+             make it unique, or set replaceAll: true."
+        );
+        assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        assert_eq!(std::fs::read(&path).unwrap(), b"x\nx\nx\n");
+    }
+
+    /// Counting stops at the reporting bound, so an enormous match set costs
+    /// a bounded scan and still tells the model its oldString is ambiguous.
+    #[tokio::test]
+    async fn an_ambiguous_edit_past_the_count_bound_reports_the_bound() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        let content = "x".repeat(EDIT_OCCURRENCE_COUNT_LIMIT + 5);
+        seed_and_read(&service, &path, content.as_bytes()).await;
+        let error = Arc::clone(&service)
+            .edit(
+                edit_params(&path, "x", "y"),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            format!(
+                "Found more than {EDIT_OCCURRENCE_COUNT_LIMIT} occurrences. Provide a longer \
+                 oldString with more surrounding context to make it unique, or set replaceAll: true."
+            )
+        );
+    }
+    #[test]
+    fn edit_match_count_stops_one_past_the_bound_unless_replacing_all() {
+        let source = "x".repeat(EDIT_OCCURRENCE_COUNT_LIMIT + 5);
+        assert_eq!(
+            edit_match_count(source.as_bytes(), b"x", false),
+            EDIT_OCCURRENCE_COUNT_LIMIT + 1,
+            "expected an ambiguity count to stop one past the bound"
+        );
+        assert_eq!(
+            edit_match_count(source.as_bytes(), b"x", true),
+            EDIT_OCCURRENCE_COUNT_LIMIT + 5,
+            "expected replaceAll to count every match it replaces"
+        );
+        assert_eq!(edit_match_count(b"x\nx\nx\n", b"x", false), 3);
+    }
+
+    /// The TypeScript runtime rejected every out-of-range pair, including a
+    /// zero or fractional start, with one range message naming the file's size.
+    #[tokio::test]
+    async fn replace_range_reports_every_invalid_range_like_typescript() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        seed_and_read(&service, &path, b"one\ntwo\nthree").await;
+        for (start, end, shown) in [
+            (json!(0), json!(1), "0-1"),
+            (json!(2), json!(1), "2-1"),
+            (json!(1), json!(4), "1-4"),
+            (json!(1.5), json!(2), "1.5-2"),
+        ] {
+            let error = Arc::clone(&service)
+                .replace_range(
+                    decode(json!({
+                        "chatId":"chat", "captureSnapshot":false, "inputPath":"file",
+                        "resolvedPath":path, "startLine":start, "endLine":end, "content":"x"
+                    })),
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.message,
+                format!(
+                    "Invalid line range {shown} for \"file\" (3 lines). Expected 1 <= startLine \
+                     <= endLine <= 3."
+                )
+            );
+            assert_eq!(error.details.unwrap()["kind"], "tool_argument");
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"one\ntwo\nthree");
+    }
+
+    fn create_params(path: &Path, policy: Option<&Value>) -> WriteParams {
+        let mut params = json!({
+            "chatId":"chat", "captureSnapshot":false, "inputPath":"child.txt",
+            "resolvedPath":path, "content":"nope"
+        });
+        if let Some(policy) = policy {
+            params["pathPolicy"] = policy.clone();
+        }
+        decode(params)
+    }
+
+    /// A regular file where a parent directory belongs is named as the
+    /// blocker, as TypeScript did for a direct parent, instead of surfacing a
+    /// raw OS error; a deeper path names the same blocking file.
+    #[tokio::test]
+    async fn create_under_a_regular_file_parent_names_the_blocker() {
+        let (home, service) = fixture();
+        let parent = home.join("not-a-directory");
+        std::fs::write(&parent, b"x").unwrap();
+        let unrestricted = json!(null);
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for (policy, path) in [
+            (&unrestricted, parent.join("child.txt")),
+            (&restricted, parent.join("child.txt")),
+            (&unrestricted, parent.join("deeper").join("child.txt")),
+            (&restricted, parent.join("deeper").join("child.txt")),
+        ] {
+            let result = Arc::clone(&service)
+                .write(
+                    create_params(&path, policy.is_object().then_some(policy)),
+                    true,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot create \"child.txt\": \"{}\" is not a directory.",
+                parent.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+        }
+        assert_eq!(std::fs::read(&parent).unwrap(), b"x");
+    }
+
+    /// TypeScript refused to write through any symbolic link, even one whose
+    /// target stays inside the root, naming the link's target.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_refuses_an_in_root_symlink_and_names_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let target = home.join("target.txt");
+        let link = home.join("link.txt");
+        std::fs::write(&target, b"original").unwrap();
+        symlink(&target, &link).unwrap();
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for policy in [None, Some(&restricted)] {
+            let mut read = read_params(&link);
+            read.path_policy = policy.map(|value| decode(value.clone()));
+            Arc::clone(&service)
+                .read(read, ResponseBudget::unbounded(), CancellationToken::new())
+                .await
+                .unwrap();
+            let mut params = write_params(&link, "via link");
+            params.mutation.path_policy = policy.map(|value| decode(value.clone()));
+            let result = Arc::clone(&service)
+                .write(
+                    params,
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot write \"{}\": it is a symbolic link to \"{}\". Write to the link target instead.",
+                link.display(),
+                target.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy:?} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+            assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+            assert_eq!(std::fs::read(&target).unwrap(), b"original");
+        }
+    }
+
+    /// A link out of the containment root is refused by containment before
+    /// the symlink rule is reached, with the TypeScript policy message.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_refuses_an_escaping_symlink_as_outside_the_policy() {
+        use std::os::unix::fs::symlink;
+
+        let (home, service) = fixture();
+        let workspace = home.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let secret = home.join("secret.txt");
+        std::fs::write(&secret, b"outside").unwrap();
+        let link = workspace.join("link.txt");
+        symlink(&secret, &link).unwrap();
+        lock(&service.state.ledger).record_read(
+            "chat",
+            &link,
+            b"outside",
+            f64::NAN,
+            ReadObservation::WholeFile,
+        );
+        let mut params = write_params(&link, "pwned");
+        params.mutation.path_policy = Some(decode(
+            json!({"allowedRoots":[],"deniedRoots":[],"containmentRoot":workspace}),
+        ));
+        let result = Arc::clone(&service)
+            .write(
+                params,
+                false,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await;
+        let expected = format!(
+            "Path \"{}\" resolves outside the paths this chat may access on this environment.",
+            link.display()
+        );
+        assert_eq!(
+            result
+                .as_ref()
+                .map_err(|error| error.message.as_str())
+                .err(),
+            Some(expected.as_str()),
+            "received: {result:?}"
+        );
+        assert_eq!(error_kind(&result), Some(json!("path_access")));
+        assert_eq!(std::fs::read(&secret).unwrap(), b"outside");
+    }
+
+    /// A read-only destination is reported as not writable, the phrase the
+    /// TypeScript runtime used, rather than as a changed path.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_over_a_read_only_file_reports_it_not_writable() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        if nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let (home, service) = fixture();
+        let path = home.join("readonly.txt");
+        seed_and_read(&service, &path, b"protected").await;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let restricted = json!({"allowedRoots":[home.to_path_buf()],"deniedRoots":[]});
+        for policy in [None, Some(&restricted)] {
+            let mut params = write_params(&path, "replacement");
+            params.mutation.path_policy = policy.map(|value| decode(value.clone()));
+            let result = Arc::clone(&service)
+                .write(
+                    params,
+                    false,
+                    ResponseBudget::unbounded(),
+                    CancellationToken::new(),
+                )
+                .await;
+            let expected = format!(
+                "Cannot write \"{}\": the file is not writable.",
+                path.display()
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .map_err(|error| error.message.as_str())
+                    .err(),
+                Some(expected.as_str()),
+                "policy {policy:?} | received: {result:?}"
+            );
+            assert_eq!(error_kind(&result), Some(json!("path_access")));
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"protected");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+}

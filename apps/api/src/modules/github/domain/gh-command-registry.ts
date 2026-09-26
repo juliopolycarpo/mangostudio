@@ -40,7 +40,7 @@
  *      literal unions mapping to fixed argv fragments, so `filter=mine` picks
  *      `--author=@me` from this file rather than reaching `gh` verbatim.
  *
- * The runtime keeps its own subcommand allowlist (`apps/runtime/src/services/gh.ts`)
+ * The runtime keeps its own subcommand allowlist (`crates/mangostudio-runtime/src/commands/gh_policy.rs`)
  * and is the actual trust boundary. This registry stays inside it by
  * construction: every spec's prefix is one of the subcommands that boundary
  * accepts, so a spec that drifted out of the allowlist fails at the runtime

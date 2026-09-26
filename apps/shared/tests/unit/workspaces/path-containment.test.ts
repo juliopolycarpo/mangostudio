@@ -3,11 +3,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  assertInsideWorkdir,
   isInside,
   isPathPrefix,
   resolvePathForContainment,
-  WorkdirContainmentError,
 } from '../../../src/workspaces/path-containment';
 
 let rootDir: string;
@@ -32,6 +30,13 @@ describe('isPathPrefix', () => {
     expect(isPathPrefix('/tmp/project', '/tmp/project')).toBe(true);
     expect(isPathPrefix('/tmp/project', '/tmp/project/src')).toBe(true);
     expect(isPathPrefix('/tmp/project', '/tmp/project-extra')).toBe(false);
+  });
+
+  it.skipIf(process.platform !== 'win32')('keeps resolved Windows component case exact', () => {
+    expect(isPathPrefix('C:\\Workspace', 'C:\\Workspace\\nested')).toBe(true);
+    expect(isPathPrefix('C:\\Workspace', 'c:\\workspace\\nested')).toBe(false);
+    expect(isPathPrefix('\\\\?\\C:\\Workspace', '\\\\?\\C:\\Workspace\\nested')).toBe(true);
+    expect(isPathPrefix('C:\\Workspace', 'C:\\Workspace-copy')).toBe(false);
   });
 });
 
@@ -87,11 +92,5 @@ describe('isInside', () => {
     expect(resolvePathForContainment(planned)).toBe(planned);
     expect(isInside(rootDir, planned)).toBe(true);
     expect(isInside(rootDir, join(outsideDir, 'new.txt'))).toBe(false);
-  });
-});
-
-describe('assertInsideWorkdir', () => {
-  it('throws a descriptive error for outside paths', () => {
-    expect(() => assertInsideWorkdir(rootDir, outsideDir)).toThrow(WorkdirContainmentError);
   });
 });

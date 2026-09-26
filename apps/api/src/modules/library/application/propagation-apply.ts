@@ -36,12 +36,6 @@ import {
 } from '@mangostudio/shared/library';
 import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import {
-  executeLibraryUndo,
-  executePropagationWrites,
-  LibraryBackupMissingError,
-  type PropagationWriteEngineDeps,
-} from '@mangostudio/shared/library/machine';
-import {
   LIBRARY_BACKUP_MISSING_KIND,
   type RuntimeLibraryApplyParams,
   type RuntimeLibraryUndoParams,
@@ -55,13 +49,8 @@ import { summarizeAppliedResources } from '../domain/applied-resource-summary';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { backupPolicyFor } from '../infrastructure/backup-roots';
 import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
-import { hashResourceAt, readResourceFile } from '../infrastructure/instance-reader';
-import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
-import {
-  type ResourceWriteResult,
-  writeDirectoryResource,
-  writeFileResource,
-} from '../infrastructure/resource-writer';
+import { readResourceFile } from '../infrastructure/instance-reader';
+import { createLibraryPathEnv, libraryWritePathEnv } from '../infrastructure/location-probe';
 import { defaultAdapterRegistry } from './adapters/registry';
 import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
 import { serializeLibraryWrite } from './apply-queue';
@@ -76,13 +65,13 @@ const LIBRARY_WRITE_TIMEOUT_MS = 60_000;
 export interface PropagationApplyDeps {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
   /**
-   * Path layout of one machine.
+   * Path layout of one machine, as the hub sees it.
    *
-   * Only the in-process engine consults it — over the protocol the runtime
-   * resolves its own layout and is sent nothing but the MangoStudio directory
-   * overrides. The parameter exists so a test can stand up two machines with
-   * two homes; production answers with the hub's own env for every id, because
-   * the hub cannot know another machine's.
+   * The runtime resolves its own layout over the protocol; the hub only derives
+   * the MangoStudio directory overrides it sends with every batch
+   * (`libraryWritePathEnv`) from this layout. The parameter exists so a test can
+   * stand up two machines with two homes; production answers with the hub's own
+   * env for every id, because the hub cannot know another machine's.
    */
   pathEnv(environmentId: string): PathEnv;
   readSourceFile(path: string): Promise<Uint8Array>;
@@ -101,25 +90,10 @@ export interface PropagationApplyDeps {
     environmentId: string,
     input: { readonly locationId: string; readonly path: string }
   ): Promise<readonly PreparedPropagationFile[]>;
-  writeDirectory(input: DirectoryWrite): Promise<ResourceWriteResult>;
-  writeFile(input: FileWrite): Promise<ResourceWriteResult>;
-  hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   adapt(input: AdaptInput, strategy: AdapterStrategy): Promise<AdaptResult>;
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<unknown>;
   backup: BackupStoreDeps;
-  /**
-   * Which process performs the writes. `runtime` — the default — sends them
-   * over the protocol; `in-process` runs the engine here against the injected
-   * fs seams, which is what the parity suites exercise.
-   *
-   * Stated rather than inferred. This used to be decided by sniffing the
-   * options bag for anything test-shaped, so a caller overriding `backup` to
-   * point at a different backup root — the shape `describeBackupUsage` already
-   * accepts — silently stopped using the runtime, and a suite could look like
-   * it covered the RPC path while never touching it.
-   */
-  writeEngine: 'runtime' | 'in-process';
-  /** Stands in for the RuntimeClient on the `runtime` engine; tests inject transport failures. */
+  /** Stands in for the RuntimeClient; tests inject transport failures and runtime faults. */
   runtimeApply?: (params: RuntimeLibraryApplyParams) => Promise<PropagationApply>;
   /**
    * Which machine the writes land on. Every destination is Local until the
@@ -147,39 +121,15 @@ export interface PropagationApplyDeps {
   resetCaches(rows: Iterable<{ readonly environmentId: string }>): void;
 }
 
-interface DirectoryWrite {
-  readonly locationId: string;
-  readonly slug: string;
-  readonly sourceDir: string;
-  readonly env: PathEnv;
-  readonly backupId: string;
-}
-
-interface FileWrite {
-  readonly locationId: string;
-  readonly slug: string;
-  readonly contents: string | Uint8Array;
-  readonly env: PathEnv;
-  readonly backupId: string;
-}
-
 function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApplyDeps {
   return {
     preview: overrides.preview ?? previewLibraryPropagation,
     pathEnv: overrides.pathEnv ?? (() => createLibraryPathEnv()),
     readSourceFile: overrides.readSourceFile ?? readResourceFile,
     readRemoteSource: overrides.readRemoteSource ?? readRemoteLibrarySource,
-    writeDirectory:
-      overrides.writeDirectory ??
-      ((input) => writeDirectoryResource({ ...input, locationId: input.locationId })),
-    writeFile:
-      overrides.writeFile ??
-      ((input) => writeFileResource({ ...input, locationId: input.locationId })),
-    hashAt: overrides.hashAt ?? hashResourceAt,
     adapt: overrides.adapt ?? ((input, strategy) => defaultAdapterRegistry.adapt(input, strategy)),
     acknowledge: overrides.acknowledge ?? acknowledgeDivergence,
     backup: overrides.backup ?? defaultBackupStoreDeps,
-    writeEngine: overrides.writeEngine ?? 'runtime',
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     recordBackup: overrides.recordBackup ?? recordWrittenBackup,
     resetCaches: overrides.resetCaches ?? resetLibraryCachesForEnvironments,
@@ -197,7 +147,7 @@ async function readRemoteLibrarySource(
     {
       path: input.path,
       locationId: input.locationId,
-      pathEnv: { env: configuredLibraryEnv() },
+      pathEnv: libraryWritePathEnv(undefined, environmentId),
     },
     { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
   );
@@ -425,26 +375,6 @@ function runWriteEngine(
   env: PathEnv,
   deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
-  if (deps.writeEngine === 'in-process') {
-    const engineDeps: PropagationWriteEngineDeps = {
-      writeDirectory: deps.writeDirectory,
-      writeFile: deps.writeFile,
-      hashAt: deps.hashAt,
-      backup: deps.backup,
-    };
-    return executePropagationWrites(
-      {
-        backupRoot: deps.backup.backupDir(),
-        retentionCount: deps.backup.retentionCount(),
-        retentionBytes: deps.backup.retentionBytes(),
-        pathEnv: env,
-        environmentId: deps.environmentId,
-        operations: prepared,
-      },
-      engineDeps
-    );
-  }
-
   if (deps.runtimeApply) {
     return deps.runtimeApply(toRuntimeApplyParams(prepared, env, deps, backupEnvelopeFrom(deps)));
   }
@@ -540,7 +470,7 @@ function toRuntimeApplyParams(
   return {
     ...envelope,
     environmentId: deps.environmentId,
-    pathEnv: writePathEnvParams(env),
+    pathEnv: libraryWritePathEnv(env.workspaceRoot, deps.environmentId),
     operations: prepared.map(({ contents: _bytes, files, ...operation }) => ({
       ...operation,
       ...(operation.kind === 'file' && { contentRef: operation.expectedContentHash }),
@@ -564,20 +494,6 @@ function toRuntimeApplyParams(
  */
 function treeFileKey(contentHash: string, relativePath: string): string {
   return `${contentHash}:${relativePath}`;
-}
-
-/**
- * Only the MangoStudio directories travel, exactly as `pathEnvParams` in
- * `environment-library-service.ts` sends them: they are hub configuration
- * rather than a fact about the host, and the runtime already merges its own
- * `process.env` underneath. Forwarding the hub's whole environment would put
- * its secrets in every write frame for no added resolution.
- */
-function writePathEnvParams(env: PathEnv): RuntimeLibraryApplyParams['pathEnv'] {
-  return {
-    env: configuredLibraryEnv(),
-    ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
-  };
 }
 
 function narrowAppliedOperation(
@@ -1086,13 +1002,10 @@ async function prepareOperation(
 }
 
 export interface PropagationUndoDeps {
-  hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   /** Layout of the machine holding the set; see `PropagationApplyDeps.pathEnv`. */
   pathEnv(environmentId: string): PathEnv;
   backup: BackupStoreDeps;
-  /** Which process performs the restore; see `PropagationApplyDeps.writeEngine`. */
-  writeEngine: 'runtime' | 'in-process';
-  /** Stands in for the RuntimeClient on the `runtime` engine. */
+  /** Stands in for the RuntimeClient. */
   runtimeUndo?: (params: RuntimeLibraryUndoParams) => Promise<LibraryUndoResult>;
   /**
    * Which machine holds the backup set. Restoring reads the manifest where the
@@ -1116,7 +1029,8 @@ export interface PropagationUndoDeps {
  * state hash exists to prevent.
  *
  * `userId` selects the Local runtime connection for the production RPC path.
- * Injected backup/hash/runtimeUndo overrides keep unit tests in-process.
+ * Injected overrides such as `backup` or `runtimeUndo` let tests stub the store
+ * or the runtime's answer; every production undo goes over the protocol.
  */
 export function undoLibraryPropagation(
   backupId: string,
@@ -1132,10 +1046,8 @@ async function runUndo(
   userId: string | undefined
 ): Promise<PropagationUndo> {
   const deps: PropagationUndoDeps = {
-    hashAt: overrides.hashAt ?? hashResourceAt,
     pathEnv: overrides.pathEnv ?? (() => createLibraryPathEnv()),
     backup: overrides.backup ?? defaultBackupStoreDeps,
-    writeEngine: overrides.writeEngine ?? 'runtime',
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     resetCaches: overrides.resetCaches ?? resetLibraryCachesForEnvironments,
     ...(overrides.runtimeUndo && { runtimeUndo: overrides.runtimeUndo }),
@@ -1151,21 +1063,12 @@ async function runUndo(
   });
 
   try {
-    if (deps.writeEngine === 'in-process') {
-      return named(
-        await executeLibraryUndo(
-          { backupRoot: deps.backup.backupDir(), backupId, pathEnv: env },
-          { hashAt: deps.hashAt, backup: deps.backup }
-        )
-      );
-    }
-
     if (deps.runtimeUndo) {
       return named(
         await deps.runtimeUndo({
           backupRoot: deps.backup.backupDir(),
           backupId,
-          pathEnv: writePathEnvParams(env),
+          pathEnv: libraryWritePathEnv(env.workspaceRoot, deps.environmentId),
         })
       );
     }
@@ -1184,13 +1087,13 @@ async function runUndo(
     const params = {
       backupRoot: policy.backupRoot,
       backupId,
-      pathEnv: writePathEnvParams(env),
+      pathEnv: libraryWritePathEnv(env.workspaceRoot, deps.environmentId),
     };
     return named(await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }));
   } catch (error) {
-    // Two shapes, one condition: the in-process engine throws the class, and
-    // the RPC path flattens it to code INTERNAL carrying the kind in `details`.
-    if (error instanceof LibraryBackupMissingError || isBackupMissingResponse(error)) {
+    // The RPC path flattens the engine's missing-set error to code INTERNAL
+    // carrying the kind in `details`.
+    if (isBackupMissingResponse(error)) {
       throw new LibraryRequestError(404, error.message);
     }
     throw error;
@@ -1215,7 +1118,7 @@ function isBackupMissingResponse(error: unknown): error is RemoteError {
 /**
  * The winning bytes, from wherever they are.
  *
- * Local reads go straight to the filesystem the hub shares with its in-process
+ * Local reads go straight to the filesystem the hub shares with its Local
  * runtime — that is what every existing apply did, and routing it through the
  * protocol would change nothing except what can break. A remote winner is read
  * over the connection, contained by the location root on that machine.

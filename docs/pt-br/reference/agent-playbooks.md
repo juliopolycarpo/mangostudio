@@ -278,7 +278,18 @@ Abra estes arquivos primeiro:
 - `.mango/config.toml.example`
 - `.mango/.env.example`
 - `scripts/build.ts`
+- `scripts/build-runtime.ts`, `scripts/lib/runtime-build.ts` (runtime cargo por alvo)
+- `.github/workflows/runtime-build.yml` (builds do runtime por alvo para a distribuição)
 - `scripts/test-build.ts` (binary smoke)
+
+O build produz dois binários por plataforma: `mangostudio`, compilado com Bun a partir
+de `apps/api`, e o host de execução `mangostudio-runtime`, o binário cargo de
+`crates/mangostudio-runtime` (construído por alvo pelo `runtime-build.yml`, ou para o
+alvo do host via `cargo build`; veja `docs/reference/releasing.md`). Os dois reportam a
+mesma versão de release e são distribuídos juntos em todos os canais. O Local é esse mesmo
+binário, iniciado pelo hub via stdio (`openLocalRuntime` em `runtime-connection-manager.ts`);
+um checkout do código-fonte inicia o build mais recente de `target/debug` ou
+`target/release`, e `bun run dev` o compila antes. Não há fallback para TypeScript.
 
 ## CLI E Ciclo De Vida Do Servidor
 
@@ -305,8 +316,9 @@ duas ações mutantes — vive em um módulo só, compartilhado pela CLI e pela 
 - `apps/api/src/modules/machine/application/` (definição da unidade e allowlist de
   ambiente, checagens do doctor, o serviço)
 - `apps/api/src/modules/machine/http/machine-routes.ts`
-- `apps/runtime/src/services/user-service-manager.ts` (a abstração de supervisor
-  usada pelos dois binários: systemd, launchd e Tarefa Agendada)
+- `apps/shared/src/machine/user-service.ts` (`@mangostudio/shared/machine/service`: a abstração
+  de supervisor do hub — systemd, launchd e Tarefa Agendada) e
+  `crates/mangostudio-runtime/src/cli/user_service.rs` (as mesmas três para o runtime)
 - `apps/shared/src/machine/schemas.ts` (fonte única de verdade dos formatos)
 
 ## Changelog E Release

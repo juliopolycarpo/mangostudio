@@ -10,13 +10,7 @@
 
 import type { WorkspaceName } from './config';
 
-export type TestLaneId =
-  | 'root'
-  | 'api-unit'
-  | 'api-integration'
-  | 'shared'
-  | 'runtime'
-  | 'frontend';
+export type TestLaneId = 'root' | 'api-unit' | 'api-integration' | 'shared' | 'frontend';
 
 /**
  * Total-coverage floors, in percent, enforced by
@@ -175,15 +169,6 @@ export const TEST_LANES: readonly TestLane[] = [
     coverageScript: 'test:coverage',
   },
   {
-    id: 'runtime',
-    workspace: 'runtime',
-    sharded: true,
-    junitPath: `${JUNIT_DIR}/runtime.xml`,
-    timingsPath: `${TIMINGS_DIR}/runtime.json`,
-    manifest: 'apps/runtime/package.json',
-    coverageScript: 'test:coverage',
-  },
-  {
     id: 'frontend',
     workspace: 'frontend',
     sharded: false,
@@ -215,7 +200,6 @@ export const TEST_LANES: readonly TestLane[] = [
 export const SHARDED_LCOV_PATHS: Readonly<Record<string, string>> = {
   api: '.mango/artifacts/coverage/api/lcov.info',
   shared: '.mango/artifacts/coverage/shared/lcov.info',
-  runtime: '.mango/artifacts/coverage/runtime/lcov.info',
   frontend: '.mango/artifacts/coverage/frontend/lcov.info',
 };
 

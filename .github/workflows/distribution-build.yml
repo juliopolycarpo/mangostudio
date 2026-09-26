@@ -46,8 +46,19 @@ permissions:
   contents: read
 
 jobs:
+  runtime:
+    # The cargo runtime for every target, built on the OS family that can link
+    # it; the packaging job below stages these bytes beside each Bun-compiled hub.
+    name: Runtime
+    uses: ./.github/workflows/runtime-build.yml
+    with:
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      artifact_prefix: runtime-${{ inputs.source_sha }}
+
   build:
     name: Build immutable distribution
+    needs: [runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -81,10 +92,20 @@ jobs:
             exit 1
           fi
 
+      - name: Download cargo runtimes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: runtime-${{ inputs.source_sha }}-*
+          merge-multiple: true
+          path: .mango/runtime-prebuilt
+
       - name: Build standalone binaries once
         env:
           VERSION: ${{ inputs.version }}
-        run: bun run build --binary
+        # Every target's runtime is staged from the runtime job's output and
+        # checked against its target from the header; nothing is compiled here
+        # except the hub.
+        run: bun run build --binary --runtime-dir .mango/runtime-prebuilt
 
       - name: Assemble npm distribution
         env:

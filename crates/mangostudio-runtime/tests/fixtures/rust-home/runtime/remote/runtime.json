@@ -1,0 +1,5 @@
+{
+  "hubUrl": "wss://hub.rust-fixture.test/api/runtime",
+  "schemaVersion": 1,
+  "slot": "remote"
+}

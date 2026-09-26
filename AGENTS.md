@@ -39,14 +39,34 @@ Useful docs:
 - Shared contracts are schema-first: the TypeBox schema in `apps/shared/src/<module>/schemas.ts` is the single source of truth, and public types are derived with `Static<>`. Never hand-write a duplicate interface for a shape that already has a schema. `apps/shared/src/contracts/index.ts` is a compatibility barrel only — import from the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`) in new code.
 - API error responses must use `ApiErrorResponse` from `@mangostudio/shared/errors` or `SSEErrorEvent` from `@mangostudio/shared/streaming`. `ProblemDetails` (RFC 9457) is a third wire shape, but not a third thing to build: it is rendered from an `ApiErrorResponse` by the negotiation boundary in `apps/api/src/plugins/error-negotiation.ts` when the caller asks for `application/problem+json`. Never construct or return one from a route.
 - The Mango Protocol (`spec/`, `packages/protocol/`, `crates/mango-protocol/`, `docs/protocol/`, `scripts/protocol/`) is one wire contract on its own `protocol-v*` release line. Any change under those paths follows `packages/protocol/AGENTS.md` and runs `bun run protocol:check && bun run protocol:test` — the repository gate runs only its TypeScript half.
-- Add hub environment parsing only in `apps/api/src/lib/config.ts`, and runtime-host
-  environment parsing only in `apps/runtime/src/config.ts`.
+- One parsing point per host for *configuration* — the environment variables that select a mode,
+  a token, or a path the host trusts — never scattered: hub configuration parsing lives only in
+  `apps/api/src/lib/config.ts`; the Rust runtime host's, only in
+  `crates/mangostudio-runtime/src/config.rs`. Each host owns its own single parser — a second host
+  cannot route its configuration through another host's module.
+  Machine probing is a separate, legitimate carve-out: a detector describing what is actually on
+  this machine (`PATH`, `$HOME`, an already-collected environment snapshot) reads the process
+  environment directly, at the site that needs it, because that value is never configuration —
+  nothing selects or validates it ahead of time, and scattering the probing sites is the point (a
+  `PATH` walk lives with the walk it bounds). In the Rust host this is
+  `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks,
+  `crates/mangostudio-runtime/src/runtime_home.rs`'s `home_dir()` for slot resolution,
+  `crates/mangostudio-runtime/src/probing/host.rs`'s environment snapshot for detection, and
+  `crates/mangostudio-runtime/src/subprocess/unix_guardian.rs`'s `vars_os()` snapshot that copies
+  inherited environment entries for exact child execution before fork (it does not select or parse
+  host configuration). `crates/mangostudio-runtime/tests/config_boundary.rs` greps its own source
+  tree for `env::var`/`var_os`/`vars`/`vars_os`/`home_dir` calls outside `config.rs` and pins each one's exact call text
+  (literal argument included) and occurrence count — not just which file it is in, since a file
+  already on the list can otherwise grow a fourth call, or swap an allowed call's literal for a
+  different one, without the test noticing. A change that adds a fifth site, or a third read in
+  an already-listed file, fails the test, not a review comment.
 - Shared code must remain framework-agnostic. Shared code that reaches a Node builtin gets its
   own export subpath (`@mangostudio/shared/library/host`, `/process/host`) so the browser bundle
   never resolves it.
-- `apps/api` must not import `@mangostudio/runtime`. The only exception is
-  `apps/api/src/services/runtime-client/connect-in-process-runtime.ts`, and a test enforces it;
-  everything the two ends share is a contract in `@mangostudio/shared`.
+- `apps/api` never imports a runtime in-process; `runtime-module-allow-list.test.ts` enforces it,
+  and everything the two ends share is a contract in `@mangostudio/shared`. Local is the
+  cargo-built `mangostudio-runtime` the hub spawns, so API tests that reach Local need it built
+  (`cargo build -p mangostudio-runtime`) or named by `MANGOSTUDIO_RUNTIME_BINARY`.
 - Cross-workspace imports must use package names, never relative paths.
 - Do not edit `apps/frontend/src/routeTree.gen.ts`; it is generated.
 
@@ -60,9 +80,12 @@ Useful docs:
   the published `mangostudio` launcher declares its lower MSRV explicitly. The launcher keeps the
   application version, while `[workspace.package].version` remains the protocol version.
 - Check Rust changes with `cargo fmt --all -- --check`,
-  `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, and
-  `cargo test --workspace --all-targets --all-features --locked`. Protocol changes still run the
-  separate protocol gates listed in `packages/protocol/AGENTS.md`.
+  `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,
+  `cargo test --workspace --all-targets --all-features --locked`,
+  `cargo test --doc --workspace --all-features --locked` (`--all-targets` above excludes
+  doctests by definition), and
+  `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked`. Protocol changes still
+  run the separate protocol gates listed in `packages/protocol/AGENTS.md`.
 
 ## Naming Shortcuts
 

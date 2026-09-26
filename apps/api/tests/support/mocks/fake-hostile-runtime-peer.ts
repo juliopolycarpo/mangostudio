@@ -1,13 +1,13 @@
 /**
  * A runtime peer that speaks the raw protocol `Session` directly, with none of
- * `@mangostudio/runtime`'s own guardrails.
+ * a runtime host's own guardrails.
  *
- * `connectTestRuntime` (`../runtime-fixture.ts`) builds a real host through
- * `@mangostudio/runtime`, and that host checks a handler's result against the
- * contract before it ever reaches the wire (`apps/runtime/src/result-check.ts`,
- * on by default outside `production`). It cannot produce the malformed frame a
- * hub-trust-boundary test needs — the runtime side would refuse it first, and
- * the test would end up proving the wrong thing rejected the wrong way. This
+ * `connectTestRuntime` (`../runtime-fixture.ts`) serves its handlers through
+ * `RUNTIME_CONTRACT.serve` with `validateResults` on (`../fake-runtime-host.ts`),
+ * the same check a real runtime runs before a result reaches the wire. It
+ * cannot produce the malformed frame a hub-trust-boundary test needs — the
+ * runtime side would refuse it first, and the test would end up proving the
+ * wrong thing rejected the wrong way. This
  * peer answers however the test tells it to, so what rejects a bad result or a
  * bad event is provably the hub, not a cooperative peer's own guard.
  *

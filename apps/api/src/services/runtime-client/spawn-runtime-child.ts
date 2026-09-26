@@ -17,17 +17,29 @@
 
 import { statSync } from 'node:fs';
 import { RESERVED_ERROR_CODES, RemoteError, type SessionClosure } from '@mangostudio/protocol';
-import { type SpawnedPeer, spawnPort } from '@mangostudio/protocol/spawn';
+import {
+  type LaunchedPeer,
+  type SpawnedPeer,
+  type SpawnOptions,
+  spawnPort,
+} from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/shared/process';
+import type { HubExternalAgentIsolation } from '@mangostudio/shared/runtime-contract';
+import { raceAgainstAbort } from '../../lib/abort-race';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 import { resolveHandshakeTimeoutMs } from './handshake-budget';
 import { type HubSession, openHubSession, type ProtocolHubSession } from './hub-session';
+import type { HubWorkspaceBinding } from './hub-workspace-authority';
 
-/** Grace between end of stdin and SIGTERM when a runtime does not unwind on its own. */
-const TERMINATE_GRACE_MS = 2_000;
+/** A failed handshake keeps the established short stop budget. */
+const STARTUP_TERMINATE_GRACE_MS = 2_000;
+/** Lets an active installer settle after a successful handshake. */
+const ACTIVE_TERMINATE_GRACE_MS = 27_000;
 /** Further wait after SIGTERM before the launcher escalates to SIGKILL. */
 const KILL_GRACE_MS = 2_000;
+/** Final exit observation after force, completing the 30-second stop cap. */
+const EXIT_GRACE_MS = 1_000;
 const MAX_STDERR_BYTES = 16_384;
 const STDERR_EXCERPT_MAX_CHARS = 2_000;
 /** How long a failed launch waits for the child's exit status before reporting. */
@@ -62,6 +74,8 @@ export interface SpawnRuntimeChildOptions {
   readonly launch: RuntimeLaunchCommand;
   readonly cwd?: string;
   readonly hubVersion: string;
+  /** Who this connection speaks for; see `OpenHubSessionOptions.workspaceBinding`. */
+  readonly workspaceBinding: HubWorkspaceBinding | null;
   /**
    * How long the child has to say hello. Omit it for a child on the hub's own
    * machine and it follows the host — see {@link resolveHandshakeTimeoutMs},
@@ -79,6 +93,12 @@ export interface SpawnRuntimeChildOptions {
    */
   readonly requireMatchingRelease?: boolean;
   /**
+   * What this hub announces about who reaches the child's machine; see
+   * `OpenHubSessionOptions.externalAgentIsolation`. Only the hub's own Local
+   * runtime states one — `withdrawn` once a second MangoStudio user is known.
+   */
+  readonly externalAgentIsolation?: HubExternalAgentIsolation;
+  /**
    * Replaces the explanation a failed launch reports. A launcher that runs
    * through a wrapper knows things this file cannot — that `ssh` says
    * everything through exit 255, say — so it reads the same bounded stderr and
@@ -88,6 +108,24 @@ export interface SpawnRuntimeChildOptions {
   readonly describeFailure?: (failure: RuntimeLaunchFailure) => string | undefined;
   /** Fires once when the child or its pipes die after a successful handshake. */
   readonly onClosed: () => void;
+  /**
+   * Aborted when the caller gives up before the handshake completes — a
+   * disconnect, a newer attempt superseding this one, or shutdown. Without
+   * this, a cancelled attempt still ran its spawn and handshake to completion
+   * and was only discarded afterwards; with it, the child is terminated the
+   * moment the signal fires instead of being left running for the full
+   * handshake timeout.
+   */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Replaces the real launcher. Injected so a test can drive a handshake by
+ * hand — an in-process port pair, held open until the test releases it —
+ * instead of spawning a process and racing its actual timing.
+ */
+export interface SpawnRuntimeChildDeps {
+  readonly spawnPort?: (options: SpawnOptions) => LaunchedPeer;
 }
 
 /**
@@ -103,10 +141,14 @@ export interface SpawnRuntimeChildOptions {
  * await connection.hub.request('runtime.health', {});
  */
 export async function spawnRuntimeChild(
-  options: SpawnRuntimeChildOptions
+  options: SpawnRuntimeChildOptions,
+  deps: SpawnRuntimeChildDeps = {}
 ): Promise<SpawnedRuntimeConnection> {
-  const { launch } = options;
-  const peer = spawnPort({
+  const { launch, signal } = options;
+  if (signal?.aborted) throw cancelledError(launch.command);
+
+  const spawn = deps.spawnPort ?? spawnPort;
+  const peer = spawn({
     argv: [launch.command, ...launch.args, '--stdio'],
     ...(options.cwd ? { cwd: options.cwd } : {}),
     // The hub's own denylist rather than the SDK's allowlist: this child is a
@@ -116,21 +158,36 @@ export async function spawnRuntimeChild(
     // two about those — it also catches values that carry one in a URL.
     env: sanitizeShellEnv({}, process.env),
     stderrTailBytes: MAX_STDERR_BYTES,
-    terminateGraceMs: TERMINATE_GRACE_MS,
+    terminateGraceMs: STARTUP_TERMINATE_GRACE_MS,
     killGraceMs: KILL_GRACE_MS,
+    exitGraceMs: EXIT_GRACE_MS,
   });
 
   let hub: ProtocolHubSession;
   try {
-    hub = await openHubSession(peer.port, {
+    const handshake = openHubSession(peer.port, {
       hubVersion: options.hubVersion,
+      workspaceBinding: options.workspaceBinding,
       handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
       // Defaults to on: the runtime ships inside the hub's own distribution, so
       // a binary from another release is a stale install rather than a peer to
       // negotiate with.
       requireMatchingRelease: options.requireMatchingRelease ?? true,
+      ...(options.externalAgentIsolation
+        ? { externalAgentIsolation: options.externalAgentIsolation }
+        : {}),
     });
+    hub = await (signal
+      ? raceAgainstAbort(handshake, signal, () => new SpawnCancelled())
+      : handshake);
   } catch (error) {
+    if (error instanceof SpawnCancelled) {
+      // Reject only once the child is actually being torn down, not merely
+      // requested to be — a caller that gave up must not see this settle
+      // before the process it named is on its way out.
+      await peer.terminate();
+      throw cancelledError(launch.command);
+    }
     // No compensating terminate: `openHubSession` closes the port on the way
     // out, and the launcher terminates the child whenever its port closes —
     // including when the port closed on its own and took the session with it.
@@ -140,6 +197,8 @@ export async function spawnRuntimeChild(
       options.describeFailure?.(failure) ?? describeLaunchFailure(failure, options.cwd)
     );
   }
+
+  peer.setTerminateGraceMs(ACTIVE_TERMINATE_GRACE_MS);
 
   let released = false;
   let exited: Promise<void> = Promise.resolve();
@@ -293,6 +352,23 @@ function describeSessionClosure(closure: SessionClosure): string {
 function asRemoteFailure(error: unknown, message: string): RemoteError {
   const typed = error instanceof RemoteError ? error : null;
   return new RemoteError(typed?.code ?? RESERVED_ERROR_CODES.UNAVAILABLE, message, typed?.details);
+}
+
+/**
+ * Marks the rejection `raceAgainstAbort` raises when the launch signal fires, so
+ * the catch in `spawnRuntimeChild` can tell "the signal fired" from "the
+ * handshake itself failed" without inspecting `signal.aborted` — which a
+ * handshake failure landing in the same tick as an unrelated abort could also
+ * satisfy. Never escapes this module.
+ */
+class SpawnCancelled extends Error {}
+
+/** What a cancelled launch rejects with, once its child is being torn down. */
+function cancelledError(command: string): RemoteError {
+  return new RemoteError(
+    RESERVED_ERROR_CODES.CANCELLED,
+    `The connection to ${command} was cancelled before it finished handshaking.`
+  );
 }
 
 function excerpt(stderr: string): string {

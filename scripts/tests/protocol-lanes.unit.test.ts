@@ -251,13 +251,42 @@ describe('the protocol tree at the repository root', () => {
     expect(readText('rust-toolchain.toml')).not.toContain(`channel = "${pinned}"`);
   });
 
+  test('no workspace member opts the release profile into panic = "abort"', () => {
+    // `mangostudio-runtime::panic::catch_panics` is a redaction control that
+    // silently becomes a no-op the moment any crate's release profile sets
+    // `panic = "abort"` — `catch_unwind` cannot catch an abort. Nothing sets
+    // it today; this pins that fact instead of relying on it staying true by
+    // absence of a reason to add one. Checks every workspace member's own
+    // manifest, not just the root: `[profile.*]` overrides in a *member*
+    // manifest are ignored by Cargo (profiles are workspace-wide, resolved
+    // from the root only), but a member Cargo.toml can still declare one
+    // that would be a false sense of safety if any tooling ever inspected
+    // per-crate manifests instead of the resolved workspace profile.
+    const manifestPaths = [
+      'Cargo.toml',
+      'crates/mango-protocol/Cargo.toml',
+      'crates/mangostudio-launcher/Cargo.toml',
+      'crates/mangostudio-runtime/Cargo.toml',
+      'crates/mangostudio-runtime-contract/Cargo.toml',
+    ];
+    for (const manifestPath of manifestPaths) {
+      expect(readText(manifestPath)).not.toMatch(/panic\s*=\s*"abort"/);
+    }
+  });
+
   test('the cargo workspace owns the launcher and excludes only the fuzz workspace', () => {
     // A package nested under a workspace root that is neither a member nor
     // excluded makes cargo refuse to build it outright.
+    //
+    // Every crate under `crates/` must be listed here individually: this
+    // test only proves each named member is present, so a new crate added
+    // to the workspace without a matching line here would still pass —
+    // add it the same commit the crate lands in.
     const manifest = readText('Cargo.toml');
-    expect(manifest).toContain(
-      'members = ["crates/mango-protocol", "crates/mangostudio-launcher"]'
-    );
+    expect(manifest).toContain('"crates/mango-protocol"');
+    expect(manifest).toContain('"crates/mangostudio-launcher"');
+    expect(manifest).toContain('"crates/mangostudio-runtime"');
+    expect(manifest).toContain('"crates/mangostudio-runtime-contract"');
     expect(manifest).toContain('exclude = ["crates/mango-protocol/fuzz"]');
     expect(manifest).not.toContain('packages/cargo-shim');
   });
@@ -295,12 +324,7 @@ describe('the protocol tree at the repository root', () => {
     // A registry range here would resolve the published tarball instead of the
     // sibling directory, so a wire change would not reach its consumers until
     // it was released.
-    for (const file of [
-      'package.json',
-      'apps/api/package.json',
-      'apps/runtime/package.json',
-      'apps/shared/package.json',
-    ]) {
+    for (const file of ['package.json', 'apps/api/package.json', 'apps/shared/package.json']) {
       expect(readText(file), file).toContain('"@mangostudio/protocol": "workspace:*"');
     }
   });

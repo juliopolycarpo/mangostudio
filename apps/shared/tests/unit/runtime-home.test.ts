@@ -12,7 +12,6 @@ import {
   RuntimeSlotConfigSchema,
   resolveRuntimeSlotConfig,
   runtimeBinaryName,
-  runtimeSlotAuditLogPath,
   runtimeSlotConfigPath,
   runtimeSlotCurrentBinaryPath,
   runtimeSlotDir,
@@ -28,9 +27,6 @@ describe('runtime home paths', () => {
     expect(runtimeSlotDir('wsl', POSIX_HOME)).toBe('/home/j/.mango/runtime/wsl');
     expect(runtimeSlotConfigPath('remote', POSIX_HOME)).toBe(
       '/home/j/.mango/runtime/remote/runtime.json'
-    );
-    expect(runtimeSlotAuditLogPath('remote', POSIX_HOME)).toBe(
-      '/home/j/.mango/runtime/remote/audit.log'
     );
     expect(runtimeSlotVersionBinaryPath('remote', '0.1.1', POSIX_HOME)).toBe(
       '/home/j/.mango/runtime/remote/0.1.1/mangostudio-runtime'
@@ -296,6 +292,15 @@ describe('RuntimeHealthReportSchema', () => {
     expect(
       Value.Check(RuntimeHealthReportSchema, { ...baseReport, audit: { enabled: true } })
     ).toBe(true);
+  });
+
+  it('accepts native Windows release identities and rejects unknown assets', () => {
+    for (const platformId of ['windows-x64', 'windows-arm64']) {
+      expect(Value.Check(RuntimeHealthReportSchema, { ...baseReport, platformId })).toBe(true);
+    }
+    expect(
+      Value.Check(RuntimeHealthReportSchema, { ...baseReport, platformId: 'windows-x86' })
+    ).toBe(false);
   });
 
   it('accepts optional external-agent diagnostics while keeping an old report valid', () => {

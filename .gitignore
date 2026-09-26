@@ -22,6 +22,12 @@ test-results/
 .DS_Store
 *.log
 
+# ─── A committed audit-log fixture the runtime-home freshness gate diffs ─── #
+# `*.log` above would otherwise hide this file from git entirely, so the
+# regenerator's own output could drift from what is committed with no gate
+# ever noticing.
+!crates/mangostudio-runtime/tests/fixtures/**/audit.log
+
 # ─── run-tests-watchdog.ts output, when a CI lane is reproduced locally ─── #
 # The preserved attempt log no longer ends in `.log`, so `*.log` misses it, and
 # the meta file is written into whatever workspace the lane ran from.
@@ -44,6 +50,8 @@ uploads/
 .env.local
 .env.*.local
 config.toml
+# Cargo build configuration, not a secret: static MSVC CRT for Windows builds.
+!/.cargo/config.toml
 
 # ─── Mango local config/runtime — keep only examples ─── #
 .mango/*

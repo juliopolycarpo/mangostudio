@@ -51,10 +51,6 @@ export const RUNTIME_SLOTS = RuntimeSlotSchema.anyOf.map(
   (member) => member.const
 ) as readonly RuntimeSlot[];
 
-export function isRuntimeSlot(value: string): value is RuntimeSlot {
-  return (RUNTIME_SLOTS as readonly string[]).includes(value);
-}
-
 /** Where the bytes in this slot came from, which is what disambiguates `host`. */
 export const RuntimeInstallSourceSchema = Type.Union([
   /** A release put it beside the hub executable. */
@@ -73,6 +69,13 @@ export const RuntimePlatformIdSchema = Type.Union([
   Type.Literal('darwin-x64'),
   Type.Literal('darwin-arm64'),
 ]);
+/** Release binary identity reported by a running runtime, including native Windows. */
+export const RuntimeHealthPlatformIdSchema = Type.Union([
+  RuntimePlatformIdSchema,
+  Type.Literal('windows-x64'),
+  Type.Literal('windows-arm64'),
+]);
+export type RuntimeHealthPlatformId = Static<typeof RuntimeHealthPlatformIdSchema>;
 export type RuntimeInstallSource = Static<typeof RuntimeInstallSourceSchema>;
 
 /**
@@ -484,7 +487,7 @@ export const RuntimeHealthReportSchema = Type.Object({
   platform: Type.String({ maxLength: 32 }),
   arch: Type.String({ maxLength: 32 }),
   /** Exact release asset identity, including the Linux libc variant. */
-  platformId: Type.Optional(RuntimePlatformIdSchema),
+  platformId: Type.Optional(RuntimeHealthPlatformIdSchema),
   homeDir: Type.String({ maxLength: 4_096 }),
   /** Shells present on this machine, in the protocol's own vocabulary. */
   shells: Type.Array(Type.String({ maxLength: 32 })),

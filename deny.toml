@@ -21,6 +21,7 @@ version = 2
 allow = [
   "MIT",
   "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception", # winx (cap-primitives' Windows handle utilities)
   "ISC",
   "BSD-3-Clause",
   "Unicode-3.0", # unicode-ident (proc-macro2's tokenizer)
@@ -56,6 +57,12 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 
 skip = [
+  # cap-primitives uses fs-set-times for portable handle-relative timestamp updates;
+  # fs-set-times still pins io-lifetimes 2 while cap-std and io-extras use 3. Both
+  # versions come from the same capability-filesystem stack and are not selectable
+  # by this workspace.
+  { crate = "io-lifetimes@2.0.4", reason = "fs-set-times 0.20 (via cap-primitives 4) has not moved to io-lifetimes 3" },
+
   # ring 0.17 pins an old windows-sys for its Windows RNG shim; our own Windows bindings (the
   # named-pipe security descriptor) and tokio's (mio/socket2) are on 0.61. Bumping ring's pin
   # isn't ours to do, and rustls' `ring` feature is the one already chosen over `aws-lc-rs` (see
@@ -87,6 +94,10 @@ skip = [
   # Dropping tokio-tungstenite's default-TLS feature would remove this, but that is a transport
   # code change, not a supply-chain one — left as a follow-up, not done here.
   { crate = "webpki-roots@0.26.11", reason = "tokio-tungstenite's own default TLS connector, unused — we build ours explicitly, see the rustls dependency comment" },
+
+  # reqwest (the runtime's MCP HTTP client) always enables hyper-util's `client-proxy`, which
+  # still pins base64 0.22 for proxy basic-auth; everything else in the graph is on 0.23.
+  { crate = "base64@0.22.1", reason = "hyper-util 0.1's client-proxy (always enabled by reqwest 0.13) has not moved to base64 0.23" },
 ]
 
 # sources: only crates.io. No git dependencies anywhere in this graph, and none are expected —

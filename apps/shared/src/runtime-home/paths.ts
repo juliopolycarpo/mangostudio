@@ -111,14 +111,6 @@ export function runtimeSlotConfigPath(slot: RuntimeSlot, options: RuntimeHomeOpt
   return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_CONFIG_FILE_NAME);
 }
 
-export function runtimeSlotCredentialsPath(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
-  return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_CREDENTIALS_FILE_NAME);
-}
-
-export function runtimeSlotAuditLogPath(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
-  return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_AUDIT_LOG_FILE_NAME);
-}
-
 /** The link a launcher points at, which survives every upgrade. */
 export function runtimeSlotCurrentDir(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
   return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_CURRENT_LINK_NAME);

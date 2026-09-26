@@ -8,16 +8,19 @@ por exceção.
 
 ## Onde cada coisa roda
 
-| Responsabilidade                                                  | Dono                     |
-| ----------------------------------------------------------------- | ------------------------ |
-| O PTY, o processo do shell, seu ambiente e seu ciclo de vida      | Runtime (`apps/runtime`) |
-| Quem pode abrir uma sessão, o registro, limites, expiração ociosa | Hub (`apps/api`)         |
-| Retransmitir bytes ao navegador e controle de fluxo por socket    | Hub (`apps/api`)         |
-| Formato da sessão, enquadramento do socket, limites               | Shared (`apps/shared`)   |
-| Renderização, teclas, redimensionamento, confirmações             | Frontend (xterm.js)      |
+| Responsabilidade                                                  | Dono                                   |
+| ----------------------------------------------------------------- | -------------------------------------- |
+| O PTY, o processo do shell, seu ambiente e seu ciclo de vida      | Runtime (`crates/mangostudio-runtime`) |
+| Quem pode abrir uma sessão, o registro, limites, expiração ociosa | Hub (`apps/api`)                       |
+| Retransmitir bytes ao navegador e controle de fluxo por socket    | Hub (`apps/api`)                       |
+| Formato da sessão, enquadramento do socket, limites               | Shared (`apps/shared`)                 |
+| Renderização, teclas, redimensionamento, confirmações             | Frontend (xterm.js)                    |
 
-O runtime inicia o shell com `Bun.spawn({ terminal })`, inline a cada spawn, para que o shell
-seja líder de sessão e controle seus próprios jobs. Não há addon nativo para distribuir. O runtime
+O runtime abre o PTY por conta própria (`crates/mangostudio-runtime/src/terminal/pty.rs`): no
+Unix o shell é líder de sessão com o PTY como terminal de controle, e por isso controla seus
+próprios jobs; no Windows ele roda sob ConPTY. Nos dois casos ele fica no mesmo guardião ou Job
+com encerramento no fechamento que qualquer processo supervisionado. Não há addon nativo para
+distribuir. O runtime
 guarda os últimos 256 KiB de saída de cada sessão para que um visualizador que volte veja onde
 estava.
 
@@ -42,8 +45,7 @@ apenas para invalidações. Os frames são binários com um byte de tipo como pr
 ## Controle de fluxo
 
 As opções de socket que toda rota WebSocket do hub compartilha fecham a conexão com 64 KiB de
-backpressure em vez de desacelerá-la, e `Bun.Terminal` não consegue parar de ler o PTY. Por isso
-o controle de fluxo é explícito e vive em três lugares:
+backpressure em vez de desacelerá-la. Por isso o controle de fluxo é explícito e vive em três lugares:
 
 - **Navegador.** Depois que o xterm.js interpreta um bloco, o cliente confirma os bytes. As
   confirmações são agrupadas, não enviadas por frame.
@@ -77,9 +79,9 @@ fica em memória; sessões não sobrevivem a um reinício do hub.
 
 ## Quem pode abrir uma
 
-A mesma capacidade de `shell.run`: `allow.shell` no runtime. No runtime **Local** — o processo e
-a conta de SO do próprio hub — um terminal exige adicionalmente a atestação `single-user-host`
-que o caminho de agentes externos já calcula. Um segundo usuário do MangoStudio no mesmo hub
+A mesma capacidade de `shell.run`: `allow.shell` no runtime. No runtime **Local** — um processo
+filho do hub na própria conta de SO do hub — um terminal exige adicionalmente que a conexão
+Local esteja atestada: a reivindicação de dono único que o caminho de agentes externos já aplica. Um segundo usuário do MangoStudio no mesmo hub
 fecha todo terminal Local e recusa novos com `TERMINAL_NOT_ISOLATED`.
 
 O ambiente do shell é o do próprio runtime com variáveis com cara de segredo removidas exatamente
@@ -116,10 +118,8 @@ shell na imagem; o painel diz isso.
 
 ## Windows
 
-Sessões em um runtime Windows usam ConPTY pelo Bun com PowerShell (`pwsh` preferido,
-`powershell.exe` como alternativa). Redimensionar funciona. Lacunas conhecidas herdadas do
-suporte a ConPTY do Bun: sem `SIGWINCH` nos filhos, a saída é recodificada e `close()` pode
-bloquear em builds do Windows anteriores ao 11 24H2 enquanto um filho ainda roda — o runtime mata
-a árvore de processos primeiro. Este repositório não tem uma lane de testes unitários no Windows,
-então o ramo PowerShell é entregue por leitura de código; o caminho POSIX é coberto por testes
-com PTY real.
+Sessões em um runtime Windows usam ConPTY (`crates/mangostudio-runtime/src/subprocess/windows_job.rs`)
+com PowerShell (`pwsh` preferido, `powershell.exe` como alternativa), iniciadas dentro do mesmo
+Job com encerramento no fechamento de um filho limitado. Redimensionar funciona. Os testes de
+terminal com shell real do runtime são só Unix (`#[cfg(unix)]`), então o ramo ConPTY não tem teste
+próprio; o caminho POSIX é coberto por testes com PTY real.

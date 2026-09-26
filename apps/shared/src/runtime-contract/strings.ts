@@ -39,3 +39,36 @@ export const RUNTIME_UPDATE_EXIT_CODE = 75;
  * nothing.
  */
 export const RUNTIME_PAIRING_TOKEN_PREFIX = 'mrt_';
+
+/**
+ * The WebSocket upgrade request header a hub sends its binding key in, beside
+ * the bearer token.
+ *
+ * A binding key names the environment record a connection speaks for, opaque
+ * to the runtime. A `serve` runtime holds one hub connection at a time; the
+ * key is what lets it tell the same record reconnecting (which supersedes the
+ * old socket) from a second record pointing at the same runtime (which is
+ * refused while the first is live). It rides on the upgrade rather than in
+ * `hello` so the runtime decides before either side's `hello`, exactly where
+ * it already checks the credential.
+ */
+export const HUB_BINDING_KEY_HEADER = 'x-mangostudio-hub-binding';
+
+/**
+ * Exact length of a binding key: a SHA-256 digest in lowercase hex. A runtime
+ * refuses any other value in {@link HUB_BINDING_KEY_HEADER}.
+ */
+export const HUB_BINDING_KEY_LENGTH = 64;
+
+/**
+ * The close code a runtime refuses a hub connection with when a live
+ * connection for a different binding key already holds it.
+ *
+ * Application-owned, in the protocol's unnamed `4000–4999` range: 423 is
+ * HTTP's "Locked". Not in the protocol's fatal set — the hub retries it, only
+ * slowly, because the incumbent may go away.
+ */
+export const RUNTIME_ALREADY_BOUND_CLOSE_CODE = 4423;
+
+/** The close reason sent with {@link RUNTIME_ALREADY_BOUND_CLOSE_CODE}. */
+export const RUNTIME_ALREADY_BOUND_REASON = 'runtime already bound to another environment';

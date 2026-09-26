@@ -8,18 +8,23 @@ import {
   ContainerFailureReasonSchema,
   LOCAL_ENVIRONMENT_ID,
   LOCAL_ENVIRONMENT_NAME,
+  type LocalFailureReason,
+  LocalFailureReasonSchema,
   SshFailureReasonSchema,
 } from '@mangostudio/shared/environments';
 import {
   type HubExternalAgentIsolation,
   narrowRuntimeErrorCode,
+  RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+  type RuntimeCapabilityManifest,
+  type RuntimeDiscoverResult,
   type RuntimeErrorCode,
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
-import { getDb } from '../../db/database';
-import { getVersion } from '../../lib/config';
-import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
+import { getVersion, isDevelopmentVersion } from '../../lib/config';
+import { createDiagnosticLogger } from '../../lib/logger';
+import { RuntimeBinaryNotFoundError, resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
   type EnvironmentStateTransitionRecorder,
   recordEnvironmentStateTransition,
@@ -36,10 +41,15 @@ import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-pr
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
-import { connectLocalRuntime } from './connect-in-process-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
+import { type HubWorkspaceBinding, STAND_IN_USER_ID } from './hub-workspace-authority';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
+import {
+  type RuntimeDiscoveryCache,
+  runtimeDiscoveryCache,
+  runtimeDiscoveryKey,
+} from './runtime-discovery-cache';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
 
 /** Last `runtime.health` retained across disconnect the way the manifest is. */
@@ -74,7 +84,7 @@ export interface ManagedRuntimeConnection {
    * showed up and the process fell back to unproven isolation.
    */
   readonly identityAttested?: boolean;
-  /** May resolve when an out-of-process runtime is gone; in-process is immediate. */
+  /** Resolves once the runtime is released — for a spawned child, once it has exited. */
   close(reason?: RuntimeConnectionCloseReason): void | Promise<void>;
 }
 
@@ -122,11 +132,13 @@ export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
  * them: an image pull and a WSL provision both move gigabytes. Only the pull is
  * also the reason {@link RuntimeConnectionManager.connectInteractive} stops
  * waiting — a WSL provision is not the phase that wakes it, so that connect
- * still waits it out; see {@link connectWslRuntime}. A connector that only
- * spawns a process can ignore `signal` entirely; the spawn is bounded by its
- * own handshake timeout. A connector that neither watches the signal nor
- * spawns anything — the in-process one — is bounded by the manager instead;
- * see {@link CONNECT_DEADLINE_MS}.
+ * still waits it out; see {@link connectWslRuntime}. Every connector that
+ * spawns a process — Local, `stdio`, `wsl`, `ssh` and `container` — threads
+ * `signal` into `spawnRuntimeChild`, which terminates the child the moment it
+ * fires instead of waiting out its own handshake timeout; `http` threads it
+ * into its WebSocket dial and handshake, which close the socket the same way.
+ * A connector that neither watches the signal nor spawns anything is bounded
+ * by the manager instead; see {@link CONNECT_DEADLINE_MS}.
  */
 export interface RuntimeConnectContext {
   readonly report: (phase: RuntimeConnectPhase) => void;
@@ -161,6 +173,8 @@ export interface RuntimeConnectionManagerOptions {
    * `Date.now()` and not timers, so the real 10s would be waited out for real.
    */
   readonly connectDeadlinesMs?: Partial<Record<EnvironmentTransportKind, number>>;
+  /** Told of every new connection's manifest, so a changed build drops its cached surface. */
+  readonly discoveryCache?: RuntimeDiscoveryCache;
 }
 
 /**
@@ -195,6 +209,8 @@ interface RuntimeConnectionEntry {
   /** Known once a definition resolved; decides whether a backoff applies. */
   transportKind?: EnvironmentTransportKind;
   connection?: ManagedRuntimeConnection;
+  /** Immutable build ceiling and handshake-only facts for the live connection. */
+  announcedManifest?: RuntimeCapabilityManifest;
   connecting?: Promise<RuntimeClient>;
   /** Consecutive failures since the last connection that proved itself. */
   failureCount: number;
@@ -243,6 +259,26 @@ const RECONNECT_MAX_DELAY_MS = 30_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
 /**
+ * How long a record a runtime refused as bound elsewhere waits before a lazy
+ * caller may try it again. Deliberately slower than the crash backoff: the
+ * refusal is not a fault that goes away on its own in seconds, and every retry
+ * is a dial the holder's runtime has to answer.
+ */
+const BOUND_ELSEWHERE_RETRY_MS = 60_000;
+
+/**
+ * True when the runtime closed the handshake with the already-bound code.
+ *
+ * @example
+ * isBoundElsewhere(new RemoteError('UNAVAILABLE', 'closed', { closeCode: 4423 })); // true
+ */
+export function isBoundElsewhere(error: unknown): error is RemoteError {
+  return (
+    error instanceof RemoteError && error.details?.closeCode === RUNTIME_ALREADY_BOUND_CLOSE_CODE
+  );
+}
+
+/**
  * How long a connection must survive to count as healthy. A runtime that dies
  * moments after every handshake would otherwise clear the failure count on each
  * attempt and never reach the cap, respawning for as long as callers keep
@@ -274,32 +310,27 @@ function isDialIn(transportKind: EnvironmentTransportKind | undefined): boolean 
 }
 
 /**
- * How long an attempt may run before the hub stops believing in it.
+ * How long an attempt may run before the hub stops believing in it, per
+ * transport.
  *
- * {@link RuntimeConnectContext} says a connector that only spawns a process "is
- * bounded by its own handshake timeout", and for every out-of-process transport
- * that is true. The in-process path has no spawn and so no such bound: nothing
- * anywhere on it can end an attempt that stops making progress. That matters
- * more than a slow connect, because `getClient` hands the entry's in-flight
- * promise to every later caller — one attempt that never settles is a runtime
- * every subsequent call waits on forever, not one call that fails.
- *
- * Only `in-process` is listed. The remote transports each bound themselves
- * already, at lengths that suit what they are doing — a cold image pull is
- * legitimately minutes — and capping them here would be a guess about
- * behaviour nothing has measured.
+ * `getClient` hands the entry's in-flight promise to every later caller, so one
+ * attempt that never settles is a runtime every subsequent call waits on
+ * forever, not one call that fails (#922). Every connector registered today
+ * bounds itself, so none is listed: the hub's own Local runtime used to run in
+ * this process with no spawn and therefore no bound, but it is now a spawned
+ * child, held to the same handshake timeout as `stdio` (5s, 30s on Windows) —
+ * which a shorter deadline here would cut off on a slow Windows start. The
+ * remote transports bound themselves at lengths that suit what they do; a
+ * cold image pull is legitimately minutes. A connector that cannot bound
+ * itself belongs here.
  */
-const IN_PROCESS_CONNECT_DEADLINE_MS = 10_000;
-
-const CONNECT_DEADLINE_MS: Partial<Record<EnvironmentTransportKind, number>> = {
-  'in-process': IN_PROCESS_CONNECT_DEADLINE_MS,
-};
+const CONNECT_DEADLINE_MS: Partial<Record<EnvironmentTransportKind, number>> = {};
 
 /**
  * Fails an attempt the transport will not fail on its own.
  *
  * The attempt is not cancelled — a connector that ignores its signal cannot be
- * stopped, and the in-process one does. What this bounds is how long the *hub*
+ * stopped. What this bounds is how long the *hub*
  * waits before treating the attempt as failed, which is what lets `connect`'s
  * catch evict the entry and free every caller queued behind it. A connection
  * that arrives afterwards is closed rather than leaked: by then the entry has
@@ -341,9 +372,8 @@ function withConnectDeadline(
   });
 }
 
-function connectionKey(userId: string, environmentId: string): string {
-  return `${userId}:${environmentId}`;
-}
+/** A connection's map key: the same `(user, environment)` scope the discovery cache keys by. */
+const connectionKey = runtimeDiscoveryKey;
 
 /**
  * The states worth remembering. `connecting` is a step on the way to one of
@@ -426,24 +456,30 @@ function statusErrorCode(error: unknown): RuntimeErrorCode {
 /**
  * The transport-specific half of a failure, when the connector could name one.
  *
- * ssh and container launches both produce one, for the same reason: their
+ * ssh and container launches produce one for the same reason: their
  * clients report several unrelated causes — an unverified host key, a refused
  * credential, a daemon nobody started, an image that does not exist — through
  * one exit status that `errorCode` cannot distinguish, and each needs a
- * different fix. Validated rather than trusted: the values come back through an
- * untyped details bag.
+ * different fix. Local names a missing binary, whose fix is a build or a
+ * reinstall rather than a retry. Validated rather than trusted: the values come
+ * back through an untyped details bag.
  */
 function failureDetail(
   error: unknown
-): Pick<EnvironmentConnectionStatus, 'sshFailureReason' | 'containerFailureReason'> {
+): Pick<
+  EnvironmentConnectionStatus,
+  'sshFailureReason' | 'containerFailureReason' | 'localFailureReason'
+> {
   const details = error instanceof RemoteError ? error.details : undefined;
   const ssh = details?.sshFailureReason;
   const container = details?.containerFailureReason;
+  const local = details?.localFailureReason;
   return {
     ...(Value.Check(SshFailureReasonSchema, ssh) ? { sshFailureReason: ssh } : {}),
     ...(Value.Check(ContainerFailureReasonSchema, container)
       ? { containerFailureReason: container }
       : {}),
+    ...(Value.Check(LocalFailureReasonSchema, local) ? { localFailureReason: local } : {}),
   };
 }
 
@@ -453,6 +489,7 @@ export class RuntimeConnectionManager {
   readonly #publishHook: (userId: string) => void;
   readonly #recordTransition: EnvironmentStateTransitionRecorder;
   readonly #resolveEnvironment: RuntimeEnvironmentResolver;
+  readonly #discoveryCache: RuntimeDiscoveryCache;
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
   #terminalsRevoked: TerminalsRevokedObserver | undefined;
@@ -463,6 +500,7 @@ export class RuntimeConnectionManager {
     this.#publishHook = options.publish ?? (() => undefined);
     this.#recordTransition = options.recordTransition ?? recordEnvironmentStateTransition;
     this.#resolveEnvironment = options.resolveEnvironment;
+    this.#discoveryCache = options.discoveryCache ?? runtimeDiscoveryCache;
   }
 
   /**
@@ -553,6 +591,28 @@ export class RuntimeConnectionManager {
   }
 
   /**
+   * The live connection, or the one already being opened — never a new
+   * attempt. Rejects `UNAVAILABLE` when there is neither.
+   *
+   * For a background waiter that must not own reconnecting: every
+   * non-forced `connect` counts toward the backoff latch, so a loop that
+   * called {@link getClient} on its own would latch the environment for
+   * every other caller, and churn a dial-in environment's status forever.
+   * Reconnects stay with the user's Connect and the next ordinary caller.
+   *
+   * @example
+   * const client = await manager.getExistingClient(userId, environmentId);
+   */
+  async getExistingClient(userId: string, environmentId: string): Promise<RuntimeClient> {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (entry?.connection) return entry.connection.client;
+    if (entry?.connecting) return await entry.connecting;
+    throw unavailable(
+      `Environment "${environmentId}" has no live connection; expected one opened by a user or another caller.`
+    );
+  }
+
+  /**
    * Opens a connection, or returns the live one. `force` marks the deliberate
    * connect actions — a user pressing Connect, or a route acting on their
    * behalf — which clear a backoff instead of being held by it.
@@ -622,6 +682,11 @@ export class RuntimeConnectionManager {
           throw unavailable('Runtime connection was closed.');
         }
         entry.connection = connection;
+        entry.announcedManifest = connection.client.manifest;
+        this.#discoveryCache.observe(
+          runtimeDiscoveryKey(userId, environmentId),
+          connection.client.manifest
+        );
         entry.connectedAtMs = Date.now();
         entry.manifestReadAtMs = entry.connectedAtMs;
         // The failure count is not cleared here: a handshake only shows the
@@ -642,6 +707,9 @@ export class RuntimeConnectionManager {
         return connection.client;
       })
       .catch((error: unknown) => {
+        if (isBoundElsewhere(error)) {
+          throw this.#markBoundElsewhere(entry, userId, revision, environmentId, error);
+        }
         if (entry.revision === revision) {
           const errorCode = statusErrorCode(error);
           const dialIn = isDialIn(entry.transportKind);
@@ -786,6 +854,11 @@ export class RuntimeConnectionManager {
     }
 
     entry.connection = connection;
+    entry.announcedManifest = connection.client.manifest;
+    this.#discoveryCache.observe(
+      runtimeDiscoveryKey(userId, environmentId),
+      connection.client.manifest
+    );
     entry.connectedAtMs = Date.now();
     entry.manifestReadAtMs = entry.connectedAtMs;
     entry.failureCount = 0;
@@ -799,7 +872,28 @@ export class RuntimeConnectionManager {
     return connection.client;
   }
 
+  /**
+   * The detailed implementation surface of the environment's live runtime
+   * (`runtime.discover`), read through the fingerprint-keyed cache this
+   * manager invalidates. `undefined` for a peer that announced none; rejects
+   * like {@link getExistingClient} when nothing is connected.
+   *
+   * @example
+   * const surface = await manager.discoverImplementation(userId, environmentId);
+   */
+  async discoverImplementation(
+    userId: string,
+    environmentId: string
+  ): Promise<RuntimeDiscoverResult | undefined> {
+    const client = await this.getExistingClient(userId, environmentId);
+    return await this.#discoveryCache.resolve(runtimeDiscoveryKey(userId, environmentId), client, {
+      userId,
+      environmentId,
+    });
+  }
+
   disconnect(userId: string, environmentId: string): void {
+    this.#discoveryCache.forget(runtimeDiscoveryKey(userId, environmentId));
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry) return;
 
@@ -900,6 +994,7 @@ export class RuntimeConnectionManager {
    * show the previous host.
    */
   clearHealth(userId: string, environmentId: string): void {
+    this.#discoveryCache.forget(runtimeDiscoveryKey(userId, environmentId));
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry) return;
     const hadPeer =
@@ -972,6 +1067,42 @@ export class RuntimeConnectionManager {
     // terms: tools resolve `~` and relative input through the connection's
     // manifest, and the runtime re-checks the result against its own filesystem.
     return await connector(definition, onUnavailable, context);
+  }
+
+  /**
+   * Records a runtime that refused this record because another record's live
+   * connection holds it, and returns the rejection to throw.
+   *
+   * Not a failure toward the latch: nothing is wrong with this record, and the
+   * holder may go away at any time. So the failure count is left alone and the
+   * next lazy attempt waits {@link BOUND_ELSEWHERE_RETRY_MS} — slow enough that
+   * two records pointing at one runtime cannot flap, and harmless because the
+   * runtime refuses before it disturbs the holder.
+   */
+  #markBoundElsewhere(
+    entry: RuntimeConnectionEntry,
+    userId: string,
+    revision: number,
+    environmentId: string,
+    error: RemoteError
+  ): RemoteError {
+    if (entry.revision === revision) {
+      entry.connection = undefined;
+      entry.retryAfterMs = Date.now() + BOUND_ELSEWHERE_RETRY_MS;
+      entry.status = {
+        state: 'error',
+        errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,
+        boundElsewhere: true,
+        ...this.#cachedPeer(entry),
+      };
+      this.#publish(userId);
+    }
+    const retrySeconds = BOUND_ELSEWHERE_RETRY_MS / 1_000;
+    return new RemoteError(
+      RESERVED_ERROR_CODES.UNAVAILABLE,
+      `Environment "${environmentId}" was refused: its runtime is already bound to another environment record (close code ${RUNTIME_ALREADY_BOUND_CLOSE_CODE}); expected no live connection from another record. Retrying in ${retrySeconds}s; disconnect or remove the other record to use this one. (${error.message})`,
+      { ...error.details, environmentId }
+    );
   }
 
   /**
@@ -1054,7 +1185,9 @@ export class RuntimeConnectionManager {
     }
     entry.health = health;
     entry.healthReadAtMs = entry.manifestReadAtMs;
-    client.replaceManifest(capabilityManifestFromHealth(health, client.manifest));
+    client.replaceManifest(
+      capabilityManifestFromHealth(health, entry.announcedManifest ?? client.manifest)
+    );
     const manifest = client.manifest;
     const changed = !Value.Equal(entry.status.manifest, manifest);
     // A peer that withdrew this consent has already closed its vendor sessions,
@@ -1143,68 +1276,109 @@ async function resolveEnvironment(
   return await environmentRepository.find(userId, environmentId);
 }
 
-interface LocalRuntimeOpenOptions {
+/** Where a launch of the hub's own runtime reports which source chose the binary. */
+const localLaunchLogger = createDiagnosticLogger('runtime-local');
+
+export interface LocalRuntimeOpenOptions {
   readonly onUnavailable: () => void;
-  readonly authorizeWorkspace: (
-    canonicalPath: string,
-    signal: AbortSignal
-  ) => boolean | Promise<boolean>;
+  /**
+   * Who this Local connection speaks for. The runtime asks the hub whether a
+   * workspace is authorized (`hub.workspace.authorize`), and the hub answers
+   * for this binding only — the `local` stand-in owns no chats, so it is
+   * refused everything.
+   */
+  readonly workspaceBinding: HubWorkspaceBinding;
   /** See {@link HubExternalAgentIsolation}; `withdrawn` once a second owner is known. */
   readonly externalAgentIsolation: HubExternalAgentIsolation;
+  /** Aborted when the attempt is released; terminates a child still handshaking. */
+  readonly signal: AbortSignal;
 }
 
+/**
+ * Spawns the hub's own runtime binary over stdio and connects to it.
+ *
+ * There is no fallback: a binary that cannot be found fails the attempt with
+ * {@link RuntimeBinaryNotFoundError}'s fix, rather than quietly serving Local
+ * from some other runtime. A runtime from another release is refused unless
+ * this hub is a development build, which has no release for it to match.
+ */
 async function openLocalRuntime(
   options: LocalRuntimeOpenOptions
 ): Promise<ManagedRuntimeConnection> {
-  const connection = await connectLocalRuntime({
-    authorizeWorkspace: options.authorizeWorkspace,
-    externalAgentIsolation: options.externalAgentIsolation,
+  let launch: ReturnType<typeof resolveRuntimeLaunchCommand>;
+  try {
+    launch = resolveRuntimeLaunchCommand();
+  } catch (error) {
+    throw localLaunchFailure(error, error instanceof RuntimeBinaryNotFoundError);
+  }
+  localLaunchLogger.info('launch_selected', {
+    environmentId: LOCAL_ENVIRONMENT_ID,
+    source: launch.source,
+    command: launch.command,
   });
+  const hubVersion = getVersion();
+  let binaryMissing = false;
+  let connection: Awaited<ReturnType<typeof spawnRuntimeChild>>;
+  try {
+    connection = await spawnRuntimeChild({
+      environmentId: LOCAL_ENVIRONMENT_ID,
+      workspaceBinding: options.workspaceBinding,
+      launch,
+      hubVersion,
+      requireMatchingRelease: !isDevelopmentVersion(hubVersion),
+      externalAgentIsolation: options.externalAgentIsolation,
+      describeFailure: (failure: RuntimeLaunchFailure) => {
+        if (failure.spawnErrorCode !== 'ENOENT') return undefined;
+        binaryMissing = true;
+        return `The Local runtime binary was not found at ${failure.command}. Reinstall MangoStudio so it ships beside the hub, or set MANGOSTUDIO_RUNTIME_BINARY to a runtime binary.`;
+      },
+      onClosed: options.onUnavailable,
+      signal: options.signal,
+    });
+  } catch (error) {
+    throw localLaunchFailure(error, binaryMissing);
+  }
   return {
     client: new RuntimeClient(connection.hub, options.onUnavailable, LOCAL_ENVIRONMENT_ID),
     close: () => connection.close(),
   };
 }
 
-async function isAuthorizedLocalWorkspace(
-  definition: RuntimeEnvironmentDefinition,
-  canonicalPath: string,
-  signal: AbortSignal
-): Promise<boolean> {
-  if (definition.id !== LOCAL_ENVIRONMENT_ID || !definition.userId) return false;
-  signal.throwIfAborted();
-  const query = getDb()
-    .selectFrom('chats')
-    .select('id')
-    .where('userId', '=', definition.userId)
-    .where('environmentId', '=', definition.id)
-    .where('workdir', '=', canonicalPath)
-    .limit(1)
-    .executeTakeFirst();
-  const aborted = Promise.withResolvers<never>();
-  const abort = () =>
-    aborted.reject(
-      signal.reason instanceof Error
-        ? signal.reason
-        : new Error('Local workspace authorization was cancelled.')
-    );
-  signal.addEventListener('abort', abort, { once: true });
-  try {
-    const chat = await Promise.race([query, aborted.promise]);
-    signal.throwIfAborted();
-    return chat !== undefined;
-  } finally {
-    signal.removeEventListener('abort', abort);
-  }
+/**
+ * A failed Local launch as the connection manager reports it: `UNAVAILABLE`
+ * unless the launch produced a more specific code, with
+ * `localFailureReason: 'binary-missing'` when no binary was there to run, so
+ * the card names the build or reinstall instead of a generic outage.
+ *
+ * @example
+ * localLaunchFailure(new RuntimeBinaryNotFoundError(['/repo/target/debug/mangostudio-runtime']), true);
+ * // → RemoteError UNAVAILABLE, details: { localFailureReason: 'binary-missing' }
+ */
+export function localLaunchFailure(error: unknown, binaryMissing: boolean): RemoteError {
+  const typed = error instanceof RemoteError ? error : null;
+  if (!binaryMissing && typed) return typed;
+  const code = typed ? narrowRuntimeErrorCode(typed.code) : RESERVED_ERROR_CODES.UNAVAILABLE;
+  const message = error instanceof Error ? error.message : String(error);
+  return new RemoteError(code, message, {
+    ...typed?.details,
+    ...(binaryMissing ? { localFailureReason: 'binary-missing' satisfies LocalFailureReason } : {}),
+  });
+}
+
+/**
+ * The binding a Local connection answers `hub.workspace.authorize` for:
+ * `userId`'s chats on the Local environment, and nothing else.
+ *
+ * @example
+ * localWorkspaceBinding('u1'); // { userId: 'u1', environmentId: 'local' }
+ */
+function localWorkspaceBinding(userId: string): HubWorkspaceBinding {
+  return { userId, environmentId: LOCAL_ENVIRONMENT_ID };
 }
 
 export interface LocalRuntimeConnectorOptions {
+  /** Replaces the spawn of the real binary; for tests. */
   readonly open?: (options: LocalRuntimeOpenOptions) => Promise<ManagedRuntimeConnection>;
-  readonly isWorkspaceAuthorized?: (
-    definition: RuntimeEnvironmentDefinition,
-    canonicalPath: string,
-    signal: AbortSignal
-  ) => boolean | Promise<boolean>;
   /** How long the serial chain waits on one attempt. Overridable for tests. */
   readonly chainDeadlineMs?: number;
 }
@@ -1217,22 +1391,17 @@ export interface LocalRuntimeConnectorOptions {
  * waiting on the previous attempt *forever* is not part of what that buys. An
  * attempt that never settles would otherwise dam every later local connect in
  * the process, including ones for a different user that the wedged one has no
- * claim over. Same length as the manager's {@link CONNECT_DEADLINE_MS} entry on
- * purpose: the hub gives up on the attempt at the same moment the chain does.
- * Both read {@link IN_PROCESS_CONNECT_DEADLINE_MS}, so retuning one retunes the
- * other — the coupling the sentence above describes is enforced by construction
- * rather than by two literals that happen to agree.
+ * claim over. A spawned Local runtime settles on its own within its handshake
+ * timeout, so this is a backstop: it lets the next attempt start beside a slow
+ * one (a Windows start may take most of its 30s budget) instead of queueing.
  *
- * Note what this trades away. {@link withConnectDeadline} stops the *hub*
- * waiting; it does not cancel the attempt, and the in-process connector ignores
- * its abort signal. So a wedged attempt is still live when the chain releases,
- * and if it later completes it runs `ownerUserId ??= …` and `active.add(…)`
- * alongside the attempt that took its place — the one window in which two users
- * can both observe the owner binding as empty and `multipleOwners` never be
- * set. Damming every user behind one wedged connect was judged the worse
- * failure; closing this properly needs a cancellable in-process connect.
+ * Releasing the chain does not release the attempt's claim. The chain only
+ * stops *waiting*; the attempt keeps running until its spawn settles, so an
+ * abandoned open can still complete. Its {@link LocalCredentialClaim} stays
+ * reserved until the open itself settles, which is what lets the next attempt
+ * see a second owner that has not finished connecting yet.
  */
-const LOCAL_CHAIN_DEADLINE_MS = IN_PROCESS_CONNECT_DEADLINE_MS;
+const LOCAL_CHAIN_DEADLINE_MS = 10_000;
 
 /** Resolves when `attempt` settles, or when the chain stops waiting for it. */
 function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promise<void> {
@@ -1249,115 +1418,190 @@ function advanceChainAfter(attempt: Promise<unknown>, deadlineMs: number): Promi
 }
 
 /**
+ * One Local open's hold on the OS credential home, reserved before the open
+ * starts and released only when that open settles.
+ *
+ * Scoped to one attempt rather than to its user, so an older attempt that
+ * settles late releases its own claim and never a newer one by the same user.
+ * `withdrawn` is set, never cleared, once a second owner is known; an open that
+ * completes under a withdrawn claim is closed rather than admitted.
+ */
+interface LocalCredentialClaim {
+  readonly userId: string;
+  withdrawn: boolean;
+}
+
+/**
  * Binds the hub process's OS credential home to one MangoStudio user.
  *
  * Separate Local runtime sessions still share the same OS account. The
  * first authenticated owner may be attested while it is the only owner the
- * process has served. If a second owner appears, every attested connection is
- * closed before that owner connects and this connector permanently falls back
- * to unproven isolation. Local filesystem and shell access keep working for
- * both users, but neither can launch a vendor process through shared credentials.
+ * process has served. If a second owner appears — bound, or still opening —
+ * every attested connection is closed, every pending claim is withdrawn before
+ * that owner connects, and this connector permanently falls back to unproven
+ * isolation. Local filesystem and shell access keep working for both users,
+ * but neither can launch a vendor process through shared credentials.
+ *
+ * @example
+ * const connector = createLocalRuntimeConnector();
+ * const connection = await connector(localDefinition, onUnavailable, context);
+ * if (connection.identityAttested) { ... }
  */
 export function createLocalRuntimeConnector(
   options: LocalRuntimeConnectorOptions = {}
 ): RuntimeEnvironmentConnector {
   const open = options.open ?? openLocalRuntime;
-  const isWorkspaceAuthorized = options.isWorkspaceAuthorized ?? isAuthorizedLocalWorkspace;
   const chainDeadlineMs = options.chainDeadlineMs ?? LOCAL_CHAIN_DEADLINE_MS;
   let ownerUserId: string | undefined;
   let multipleOwners = false;
   let connectSerial: Promise<void> = Promise.resolve();
+  const claims = new Set<LocalCredentialClaim>();
   const active = new Set<{
     readonly connection: ManagedRuntimeConnection;
     readonly identityAttested: boolean;
     readonly onUnavailable: () => void;
   }>();
 
-  return (definition, onUnavailable) => {
+  const hasOtherOwner = (userId: string): boolean =>
+    (ownerUserId !== undefined && ownerUserId !== userId) ||
+    [...claims].some((claim) => claim.userId !== userId);
+
+  const withdrawAttestation = async (): Promise<void> => {
+    for (const claim of claims) {
+      claim.withdrawn = true;
+    }
+    const attested = [...active].filter((entry) => entry.identityAttested);
+    const closed = await Promise.allSettled(
+      attested.map(async (entry) => {
+        try {
+          await entry.connection.close('released');
+        } finally {
+          entry.onUnavailable();
+        }
+      })
+    );
+    if (closed.some((result) => result.status === 'rejected')) {
+      throw unavailable('Could not revoke Local single-user-host attestation.');
+    }
+    for (const entry of attested) {
+      active.delete(entry);
+    }
+  };
+
+  const admit = async (
+    userId: string,
+    onUnavailable: () => void,
+    signal: AbortSignal,
+    claim: LocalCredentialClaim
+  ) => {
+    const requested = claim.withdrawn ? 'withdrawn' : 'single-user';
+    const connection = await open({
+      onUnavailable,
+      workspaceBinding: localWorkspaceBinding(userId),
+      externalAgentIsolation: requested,
+      signal,
+    });
+    // Asked for attestation, but a second owner arrived while this open was
+    // still running and withdrew the claim: the connection carries an
+    // attestation that claim no longer grants.
+    // Closing it is part of this attempt: the close is awaited before the
+    // rejection, and a close that fails surfaces its own error instead.
+    if (requested === 'single-user' && claim.withdrawn) {
+      await connection.close('released');
+      throw unavailable(
+        `Local single-user-host attestation was withdrawn while it was connecting: user "${userId}" is no longer the only MangoStudio user of this hub's OS account; expected exactly one.`
+      );
+    }
+    // A failed open never reaches this line, so it cannot bind the home.
+    // Every other live claim is this user's, so no other owner can be bound.
+    ownerUserId ??= userId;
+    // Read back rather than assumed: the runtime is the side that decides
+    // whether it can prove anything about its credential home, and a hub that
+    // asked for an attestation it did not get must not act as though it had.
+    const entry = {
+      connection,
+      identityAttested: connection.client.manifest.identityIsolation !== undefined,
+      onUnavailable,
+    };
+    active.add(entry);
+    return {
+      client: connection.client,
+      identityAttested: entry.identityAttested,
+      async close(reason?: RuntimeConnectionCloseReason) {
+        active.delete(entry);
+        await connection.close(reason);
+      },
+    };
+  };
+
+  return (definition, onUnavailable, context) => {
     const attempt = connectSerial.then(async () => {
       if (definition.id !== LOCAL_ENVIRONMENT_ID) {
         throw unavailable('Single-user-host attestation is reserved for the Local environment.');
       }
-      if (!definition.userId) {
+      const userId = definition.userId;
+      if (!userId) {
         throw unavailable('The Local runtime requires a bound MangoStudio user.');
       }
       // CLI/setup probes use this documented stand-in when no authenticated user
       // exists. They may inspect Local, but they neither consume nor establish
       // the one real-user binding and therefore receive no identity attestation.
-      if (definition.userId === 'local') {
+      if (userId === STAND_IN_USER_ID) {
         return await open({
           onUnavailable,
-          authorizeWorkspace: (canonicalPath, signal) =>
-            isWorkspaceAuthorized(definition, canonicalPath, signal),
+          workspaceBinding: localWorkspaceBinding(userId),
           externalAgentIsolation: 'withdrawn',
+          signal: context.signal,
         });
       }
-      if (ownerUserId !== undefined && ownerUserId !== definition.userId) {
+      if (hasOtherOwner(userId)) {
         multipleOwners = true;
       }
-      if (multipleOwners) {
-        const attested = [...active].filter((entry) => entry.identityAttested);
-        const closed = await Promise.allSettled(
-          attested.map(async (entry) => {
-            try {
-              await entry.connection.close('released');
-            } finally {
-              entry.onUnavailable();
-            }
-          })
-        );
-        if (closed.some((result) => result.status === 'rejected')) {
-          throw unavailable('Could not revoke Local single-user-host attestation.');
-        }
-        for (const entry of attested) {
-          active.delete(entry);
-        }
+      // Reserved before any await, so an attempt that starts while this one is
+      // still revoking or opening sees it as an owner.
+      const claim: LocalCredentialClaim = { userId, withdrawn: multipleOwners };
+      claims.add(claim);
+      try {
+        if (multipleOwners) await withdrawAttestation();
+        return await admit(userId, onUnavailable, context.signal, claim);
+      } finally {
+        claims.delete(claim);
       }
-
-      const connection = await open({
-        onUnavailable,
-        authorizeWorkspace: (canonicalPath, signal) =>
-          isWorkspaceAuthorized(definition, canonicalPath, signal),
-        externalAgentIsolation: multipleOwners ? 'withdrawn' : 'single-user',
-      });
-      // Do not let a failed first handshake reserve the OS credential home.
-      // Serialization above makes this the only successful claimant that can
-      // observe the binding as empty.
-      ownerUserId ??= definition.userId;
-      // Read back rather than assumed: the runtime is the side that decides
-      // whether it can prove anything about its credential home, and a hub that
-      // asked for an attestation it did not get must not act as though it had.
-      const entry = {
-        connection,
-        identityAttested: connection.client.manifest.identityIsolation !== undefined,
-        onUnavailable,
-      };
-      active.add(entry);
-      return {
-        client: connection.client,
-        identityAttested: entry.identityAttested,
-        async close(reason) {
-          active.delete(entry);
-          await connection.close(reason);
-        },
-      };
     });
     connectSerial = advanceChainAfter(attempt, chainDeadlineMs);
     return attempt;
   };
 }
 
+/** Where a stdio launch reports which source chose the binary. */
+const stdioLaunchLogger = createDiagnosticLogger('runtime-stdio');
+
 async function connectStdioRuntime(
   definition: RuntimeEnvironmentDefinition,
-  onUnavailable: () => void
+  onUnavailable: () => void,
+  context: RuntimeConnectContext
 ): Promise<ManagedRuntimeConnection> {
   const config = environmentConfigFor('stdio', definition.config);
+  const launch = resolveRuntimeLaunchCommand(config.binaryPath);
+  const hubVersion = getVersion();
+  // Which source won is otherwise only inferable from the resolved command
+  // itself — a sibling binary and a `binaryPath` override can name the same
+  // path, and so can an override and a workspace build.
+  stdioLaunchLogger.info('launch_selected', {
+    environmentId: definition.id,
+    source: launch.source,
+    command: launch.command,
+  });
   const connection = await spawnRuntimeChild({
     environmentId: definition.id,
-    launch: resolveRuntimeLaunchCommand(config.binaryPath),
+    workspaceBinding: { userId: definition.userId, environmentId: definition.id },
+    launch,
     ...(config.cwd ? { cwd: config.cwd } : {}),
-    hubVersion: getVersion(),
+    hubVersion,
+    // A development hub has no release for a cargo build to match.
+    requireMatchingRelease: !isDevelopmentVersion(hubVersion),
     onClosed: onUnavailable,
+    signal: context.signal,
   });
   return {
     // Both signals are wired on purpose and `#markUnavailable` is idempotent, so
@@ -1403,6 +1647,7 @@ export async function connectWslRuntime(
   const wslExecutable = resolveWslExecutable();
   const connection = await spawnRuntimeChild({
     environmentId: definition.id,
+    workspaceBinding: { userId: definition.userId, environmentId: definition.id },
     launch: wslLaunchCommand(distro, wslExecutable.path),
     hubVersion: getVersion(),
     describeFailure: (failure: RuntimeLaunchFailure) =>
@@ -1410,6 +1655,10 @@ export async function connectWslRuntime(
         ? `WSL could not be started at "${wslExecutable.path}". Install WSL, or set MANGO_WSL_EXE to the wsl.exe path if it is installed somewhere else.`
         : undefined,
     onClosed: onUnavailable,
+    // The provision above already watches `signal`; without it here too, a
+    // cancel that lands after the distribution is ready would still run the
+    // runtime spawn and handshake to completion before being discarded.
+    signal: context?.signal,
   });
   return {
     client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
@@ -1455,6 +1704,19 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
 /** Releases every runtime connection this process opened. Used by shutdown. */
 export async function closeAllRuntimeConnections(): Promise<void> {
   await managerInstance?.closeAll();
+}
+
+/**
+ * The live or connecting client for an environment, without opening one.
+ *
+ * @example
+ * const client = await getExistingRuntimeClient(userId, environmentId);
+ */
+export function getExistingRuntimeClient(
+  userId: string,
+  environmentId: string
+): Promise<RuntimeClient> {
+  return getRuntimeConnectionManager().getExistingClient(userId, environmentId);
 }
 
 export function getRuntimeClient(

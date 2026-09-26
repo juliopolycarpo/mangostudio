@@ -31,6 +31,7 @@ import type {
   ExternalAgentEventEnvelope,
   ExternalAgentSteerResult,
   ExternalAgentTargetId,
+  ExternalAgentTurnParams,
   ExternalReviewTarget,
   ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
@@ -38,7 +39,11 @@ import type { Kysely } from 'kysely';
 import { getDb } from '../../../db/database';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
-import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
+import {
+  getExistingRuntimeClient,
+  getRuntimeClient,
+  type RuntimeClient,
+} from '../../../services/runtime-client';
 import { generateId } from '../../../utils/id';
 import {
   resolveToolchainParams,
@@ -101,6 +106,39 @@ interface ExternalSessionBinding {
 
 export interface EnsureExternalSessionInput extends ExternalSessionBinding {
   readonly configuration: ExternalAgentConfiguration;
+  /**
+   * Open only on a connection that already exists or is already being opened.
+   * A turn waiting to resubmit sets it, so its retries never become connect
+   * attempts of their own.
+   */
+  readonly existingConnectionOnly?: boolean;
+}
+
+/** How a reap was asked for. */
+export interface ReapOptions {
+  readonly keepContinuation?: boolean;
+  /**
+   * The user took the environment away — disconnected, disabled, repointed,
+   * rotated its token or removed it. Unlike a dropped socket, that ends a turn
+   * still waiting to resubmit: reconnecting would undo what the user just did.
+   */
+  readonly explicit?: boolean;
+}
+
+/** What a turn submits, before the session adds its own id. */
+export interface ExternalTurnInput {
+  readonly clientMessageId: string;
+  readonly input: string;
+  readonly configuration: ExternalAgentConfiguration;
+  readonly attachments?: readonly ExternalAgentAttachment[];
+}
+
+/** Who a submission loop that currently holds no live session belongs to. */
+export interface ExternalChatHoldScope {
+  readonly chatId: string;
+  readonly userId: string;
+  readonly environmentId: string;
+  readonly targetId: ExternalAgentTargetId;
 }
 
 /** What arrives on the session's event topic, already ordered and deduplicated. */
@@ -129,12 +167,17 @@ export interface ExternalSessionHandle {
   subscribe(consumer: ExternalSessionConsumer): () => void;
   beginTurn(nativeTurnId: string): void;
   endTurn(nativeTurnId: string): void;
-  startTurn(input: {
-    readonly clientMessageId: string;
-    readonly input: string;
-    readonly configuration: ExternalAgentConfiguration;
-    readonly attachments?: readonly ExternalAgentAttachment[];
-  }): Promise<string>;
+  /** False once the session was torn down — its connection dropped, or it was reaped. */
+  isLive(): boolean;
+  /**
+   * The exact params a turn is submitted with. Built once per attempt and kept:
+   * the runtime answers a repeated `clientMessageId` from its receipt only when
+   * the params are identical, so a resend must never rebuild them.
+   */
+  turnParams(input: ExternalTurnInput): ExternalAgentTurnParams;
+  /** Submits exactly `params`; resolves with the vendor's turn id. */
+  sendTurn(params: ExternalAgentTurnParams): Promise<string>;
+  startTurn(input: ExternalTurnInput): Promise<string>;
   respond(input: {
     readonly nativeTurnId: string;
     readonly requestId: string;
@@ -175,7 +218,7 @@ export interface ExternalSessionManager {
   reapChat(
     chatId: string,
     reason: ExternalTurnTerminalReason,
-    options?: { readonly keepContinuation?: boolean }
+    options?: ReapOptions
   ): Promise<void>;
   /**
    * Reaps every session matching a scope. Used by consent, environment and user
@@ -193,14 +236,29 @@ export interface ExternalSessionManager {
       readonly targetId?: ExternalAgentTargetId;
     },
     reason: ExternalTurnTerminalReason,
-    options?: { readonly keepContinuation?: boolean }
+    options?: ReapOptions
   ): Promise<void>;
   reapAll(reason: ExternalTurnTerminalReason): Promise<void>;
+  /**
+   * Registers a turn that is still submitting, so every reap that would have
+   * reached its session reaches it too — including while it has no session,
+   * waiting to reconnect. A dropped connection (`runtime-disconnected`) is not
+   * reported here: whether that ends the turn is the submission's decision.
+   */
+  holdChat(
+    scope: ExternalChatHoldScope,
+    onReap: (reason: ExternalTurnTerminalReason) => void
+  ): () => void;
   liveSessionCount(): number;
 }
 
 export interface ExternalSessionManagerOptions {
   readonly resolveRuntimeClient?: (userId: string, environmentId: string) => Promise<RuntimeClient>;
+  /** The live or connecting client only; never a new connect. */
+  readonly resolveExistingRuntimeClient?: (
+    userId: string,
+    environmentId: string
+  ) => Promise<RuntimeClient>;
   readonly resolveToolchain?: (
     userId: string,
     environmentId: string
@@ -246,6 +304,8 @@ export function createExternalSessionManager(
   options: ExternalSessionManagerOptions = {}
 ): ExternalSessionManager {
   const resolveRuntimeClient = options.resolveRuntimeClient ?? getRuntimeClient;
+  const resolveExistingRuntimeClient =
+    options.resolveExistingRuntimeClient ?? getExistingRuntimeClient;
   const resolveToolchain =
     options.resolveToolchain ??
     ((userId: string, environmentId: string) => toolchainService.resolve(userId, environmentId));
@@ -256,6 +316,25 @@ export function createExternalSessionManager(
   const callTimeoutMs = options.callTimeoutMs ?? CALL_TIMEOUT_MS;
 
   const sessions = new Map<string, SessionRecord>();
+  const holds = new Map<
+    string,
+    Set<{
+      readonly scope: ExternalChatHoldScope;
+      readonly onReap: (reason: ExternalTurnTerminalReason) => void;
+    }>
+  >();
+  let shuttingDown: ExternalTurnTerminalReason | undefined;
+
+  function notifyHolds(
+    chatId: string,
+    reason: ExternalTurnTerminalReason,
+    explicit: boolean
+  ): void {
+    // A socket that dropped on its own is the submission's to judge; one the
+    // user took away is not.
+    if (reason === 'runtime-disconnected' && !explicit) return;
+    for (const hold of [...(holds.get(chatId) ?? [])]) hold.onReap(reason);
+  }
   /**
    * The single-flight. It is an optimization over the primary key, not a
    * substitute for it: it collapses one hub's concurrent sends into one open,
@@ -275,6 +354,19 @@ export function createExternalSessionManager(
   const reapGenerations = new Map<string, number>();
 
   function handleFor(record: SessionRecord): ExternalSessionHandle {
+    const turnParams = (input: ExternalTurnInput): ExternalAgentTurnParams => ({
+      sessionId: record.sessionId,
+      clientMessageId: input.clientMessageId,
+      input: input.input,
+      configuration: input.configuration,
+      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+    });
+    const sendTurn = async (params: ExternalAgentTurnParams): Promise<string> => {
+      const result = await record.client.externalAgents.turn(params, {
+        timeoutMs: callTimeoutMs,
+      });
+      return result.nativeTurnId;
+    };
     return {
       sessionId: record.sessionId,
       nativeSessionId: record.open.nativeSessionId,
@@ -289,24 +381,19 @@ export function createExternalSessionManager(
           if (record.consumer === consumer) record.consumer = undefined;
         };
       },
+      isLive() {
+        return !record.closing && sessions.get(record.binding.chatId) === record;
+      },
+      turnParams,
+      sendTurn,
       beginTurn(nativeTurnId) {
         record.sequencer.beginTurn(nativeTurnId);
       },
       endTurn(nativeTurnId) {
         record.sequencer.endTurn(nativeTurnId);
       },
-      async startTurn(input) {
-        const result = await record.client.externalAgents.turn(
-          {
-            sessionId: record.sessionId,
-            clientMessageId: input.clientMessageId,
-            input: input.input,
-            configuration: input.configuration,
-            ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-          },
-          { timeoutMs: callTimeoutMs }
-        );
-        return result.nativeTurnId;
+      startTurn(input) {
+        return sendTurn(turnParams(input));
       },
       async respond(input) {
         await record.client.externalAgents.respond(
@@ -384,10 +471,12 @@ export function createExternalSessionManager(
   async function reap(
     chatId: string,
     reason: ExternalTurnTerminalReason,
-    keepContinuation: boolean
+    keepContinuation: boolean,
+    explicit = false
   ): Promise<void> {
     reapGenerations.set(chatId, (reapGenerations.get(chatId) ?? 0) + 1);
     const record = teardown(chatId, reason);
+    notifyHolds(chatId, reason, explicit);
     if (!keepContinuation) {
       // The lease goes with the pointer it protects. Keeping it would leave the
       // vendor session unadoptable by anyone until it expired, on behalf of a
@@ -421,7 +510,9 @@ export function createExternalSessionManager(
       await releaseAdoptionLease(input.chatId, db);
     }
 
-    const client = await resolveRuntimeClient(input.userId, input.environmentId);
+    const client = await (input.existingConnectionOnly
+      ? resolveExistingRuntimeClient
+      : resolveRuntimeClient)(input.userId, input.environmentId);
     const toolchain = await resolveToolchainParams(client.manifest, () =>
       resolveToolchain(input.userId, input.environmentId)
     );
@@ -519,6 +610,7 @@ export function createExternalSessionManager(
   }
 
   async function ensureSession(input: EnsureExternalSessionInput): Promise<ExternalSessionHandle> {
+    if (shuttingDown) throw new ExternalSessionReapedError(input.chatId);
     const live = sessions.get(input.chatId);
     if (live && !live.closing) {
       if (sameBinding(live.binding, input)) return handleFor(live);
@@ -551,11 +643,18 @@ export function createExternalSessionManager(
     },
 
     reapChat(chatId, reason, reapOptions) {
-      return reap(chatId, reason, reapOptions?.keepContinuation === true);
+      return reap(
+        chatId,
+        reason,
+        reapOptions?.keepContinuation === true,
+        reapOptions?.explicit === true
+      );
     },
 
     async reapScope(scope, reason, reapOptions) {
-      const inScope = (binding: ExternalSessionBinding): boolean =>
+      const inScope = (
+        binding: Pick<ExternalSessionBinding, 'userId' | 'environmentId' | 'targetId'>
+      ): boolean =>
         (!scope.userId || binding.userId === scope.userId) &&
         (!scope.environmentId || binding.environmentId === scope.environmentId) &&
         (!scope.targetId || binding.targetId === scope.targetId);
@@ -572,20 +671,48 @@ export function createExternalSessionManager(
       for (const [chatId, inflight] of opening) {
         if (inScope(inflight.binding)) chatIds.add(chatId);
       }
+      // A turn between attempts may hold no session at all, and a revocation
+      // it never hears about would let it reconnect and submit anyway.
+      for (const [chatId, chatHolds] of holds) {
+        if ([...chatHolds].some((hold) => inScope(hold.scope))) chatIds.add(chatId);
+      }
 
       await Promise.all(
-        [...chatIds].map((chatId) => reap(chatId, reason, reapOptions?.keepContinuation === true))
+        [...chatIds].map((chatId) =>
+          reap(
+            chatId,
+            reason,
+            reapOptions?.keepContinuation === true,
+            reapOptions?.explicit === true
+          )
+        )
       );
     },
 
+    holdChat(scope, onReap) {
+      const entry = { scope, onReap };
+      const chatHolds = holds.get(scope.chatId) ?? new Set();
+      chatHolds.add(entry);
+      holds.set(scope.chatId, chatHolds);
+      return () => {
+        chatHolds.delete(entry);
+        if (chatHolds.size === 0 && holds.get(scope.chatId) === chatHolds) {
+          holds.delete(scope.chatId);
+        }
+      };
+    },
+
     async reapAll(reason) {
+      shuttingDown = reason;
       // Concurrently: each close can spend the full call timeout on a runtime
       // that stopped answering, and serializing them would add that to shutdown
       // once per chat while later vendor processes have not been asked to stop.
       await Promise.all(
         // Shutdown keeps continuation: the vendor conversation is still the one
         // this chat resumes when the hub comes back.
-        [...sessions.keys()].map((chatId) => reap(chatId, reason, true))
+        [...new Set([...sessions.keys(), ...holds.keys()])].map((chatId) =>
+          reap(chatId, reason, true)
+        )
       );
     },
 

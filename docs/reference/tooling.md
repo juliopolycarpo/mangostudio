@@ -314,3 +314,97 @@ tracks it as [oven-sh/bun#33212](https://github.com/oven-sh/bun/issues/33212),
 with an unmerged PR at
 [#33213](https://github.com/oven-sh/bun/pull/33213) — check whether that landed
 before re-probing the option parser.
+
+## Runtime startup budgets
+
+The hub keeps three clocks on a runtime and they are not interchangeable. **Provisioning** —
+an image pull, a release download, a WSL install — runs under its own timeouts and finishes
+before a child is started. The **handshake** budget bounds one thing: from the launcher
+returning a process (or a socket dial starting) to the runtime's `hello`. **Liveness** after
+that is the protocol's ping/pong. The handshake numbers live in
+`apps/api/src/services/runtime-client/handshake-budget.ts`:
+
+| Transport             | Linux / macOS hub | Windows hub | Why                                                              |
+| --------------------- | ----------------: | ----------: | ---------------------------------------------------------------- |
+| Local, `stdio`, `wsl` |                5s |         30s | A spawn on this machine; Windows cold starts measured up to ~10s |
+| `ssh`, `container`    |               20s |         30s | A wrapper spawn plus a key exchange or a container start         |
+| `http`                |               15s |         30s | A WebSocket dial plus `hello`; one number bounds both            |
+
+A remote budget is its flat number floored at the local one, so no transport that does more
+than a local spawn gets less time than one. A WSL first provision executes the new binary with
+`--version` before it returns, so that first run is paid under provisioning, not here. A
+connect released while its child is still handshaking terminates the child at once.
+
+### What a start costs
+
+`scripts/bench/runtime-handshake.ts` spawns the runtime over stdio the way the hub does and
+times each phase. 30 runs each, fresh `MANGO_HOME` per run, one machine (Intel Xeon
+E5-2699 v3, 2.30 GHz; Windows 11 Pro 26200 with 36 logical CPUs and 64 GiB, and its WSL2
+Linux 6.18 guest with 28 CPUs and 27 GiB), Bun 1.4.2, 2026-09-25. Linux ran this branch's
+cargo builds; Windows ran the CI `windows-x64` release artifact of the same base
+(`0.1.1-pr.1077.g4be9c25`, 38.4 MiB). Milliseconds, as min / median / p95 / max:
+
+| Build, cache                        | spawn                     | spawn → `hello`        | start → first request     |
+| ----------------------------------- | ------------------------- | ---------------------- | ------------------------- |
+| Linux release, same file            | 0.9 / 1.3 / 2.9 / 19      | 264 / 330 / 368 / 372  | 413 / 485 / 555 / 564     |
+| Linux release, fresh copy per run   | 0.9 / 1.2 / 2.4 / 18      | 218 / 265 / 439 / 681  | 323 / 389 / 606 / 803     |
+| Linux debug (481 MiB), same file    | 0.8 / 1.2 / 4.4 / 18      | 439 / 492 / 857 / 1122 | 549 / 602 / 1076 / 1232   |
+| Windows release, same file          | 6.2 / 6.8 / 12 / 31       | 305 / 323 / 473 / 482  | 325 / 346 / 501 / 509     |
+| Windows release, fresh copy per run | 1712 / 1774 / 1956 / 2104 | 311 / 347 / 416 / 425  | 2041 / 2135 / 2397 / 2494 |
+
+"Fresh copy" runs a byte-identical copy at a new path each time, the closest a script gets to
+the first execution of a just-installed binary; neither mode empties the OS page cache. What
+it shows:
+
+- **On Windows the first-execution cost lands in the spawn, not the handshake.** Starting a
+  never-seen file costs ~1.8s inside the launcher's synchronous spawn call (the antivirus and
+  loader's first look). The hub's handshake clock starts after that call returns, so what the
+  budget bounds stayed at ~0.35s. The CI smoke's `elapsedMs` (6288ms on `windows-x64`)
+  includes the spawn; the hub's budget does not.
+- **`hello` is most of a start.** The runtime builds its capability manifest — shells, Git,
+  `gh`, feature flags — before it greets, and that is ~0.3s on both systems here.
+- **The child says nothing before it answers.** No run wrote a stderr byte before its first
+  response, and the wire has no frame ahead of `hello`. That is why the budget stays a wall
+  clock: a liveness-keyed budget (#1055) needs a pre-`hello` progress signal from the runtime,
+  which is a protocol change, not a hub change.
+
+### Hosted runners
+
+A one-off manual smoke run on a measurement branch ran `scripts/bench/runtime-handshake.ts`
+against the release-shaped runtime each binary leg staged, on GitHub's hosted runners. Run
+[36219246581](https://github.com/juliopolycarpo/mangostudio/actions/runs/36219246581), source
+`46558e95` (release profile with fat LTO), 2026-09-26, Bun 1.4.2, milliseconds as min / median /
+p95 / max:
+
+| Runner        | CPU                                         | Cache      | Runs | spawn (ms)                    | spawn → hello (ms)                | start → first request (ms)        |
+| ------------- | ------------------------------------------- | ---------- | ---: | ----------------------------- | --------------------------------- | --------------------------------- |
+| darwin-arm64  | Apple M1 (Virtual) x3                       | same file  |   20 | 0.7 / 0.8 / 1.9 / 6.4         | 598.7 / 667.5 / 777.7 / 795.8     | 601.3 / 671.8 / 779.2 / 798.4     |
+| darwin-arm64  | Apple M1 (Virtual) x3                       | fresh copy |   10 | 0.8 / 0.9 / 8.3 / 8.3         | 615.9 / 626.3 / 702 / 702         | 618.2 / 629.1 / 712.4 / 712.4     |
+| darwin-x64    | Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz x4 | same file  |   20 | 2.1 / 2.4 / 3.7 / 17          | 1209.4 / 1387.1 / 1838.6 / 1994.6 | 1213.2 / 1391.4 / 1844.1 / 1999.9 |
+| darwin-x64    | Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz x4 | fresh copy |   10 | 1.4 / 1.6 / 11.8 / 11.8       | 1218.6 / 1287 / 1548.9 / 1548.9   | 1222.6 / 1294.3 / 1553.2 / 1553.2 |
+| linux-arm64   | unknown x4                                  | same file  |   20 | 0.6 / 0.7 / 0.8 / 8.7         | 70.5 / 73.4 / 75.9 / 76.5         | 73.5 / 75.3 / 78.7 / 81.1         |
+| linux-arm64   | unknown x4                                  | fresh copy |   10 | 0.7 / 0.7 / 9 / 9             | 69.9 / 73.5 / 74.8 / 74.8         | 74.7 / 75.5 / 80.9 / 80.9         |
+| linux-x64     | AMD EPYC 7763 64-Core Processor x4          | same file  |   20 | 0.6 / 0.7 / 1 / 10.2          | 75.2 / 79.9 / 83.5 / 83.5         | 80 / 82 / 86.2 / 87.3             |
+| linux-x64     | AMD EPYC 7763 64-Core Processor x4          | fresh copy |   10 | 0.6 / 0.7 / 11.2 / 11.2       | 73.8 / 80.6 / 82.9 / 82.9         | 81.5 / 82.8 / 86.8 / 86.8         |
+| windows-arm64 | Cobalt 100 x4                               | same file  |   20 | 3 / 3.2 / 3.6 / 17.7          | 142.9 / 159.3 / 431 / 2064.1      | 151.5 / 168 / 439.6 / 3218.2      |
+| windows-arm64 | Cobalt 100 x4                               | fresh copy |   10 | 162.9 / 251.6 / 488.7 / 488.7 | 144 / 157.1 / 171.6 / 171.6       | 332.8 / 412.3 / 652.7 / 652.7     |
+| windows-x64   | AMD EPYC 7763 64-Core Processor x4          | same file  |   20 | 2.6 / 2.9 / 3.9 / 19.3        | 137 / 163.8 / 2127.6 / 2299.1     | 144.7 / 171.8 / 4151.4 / 4361.5   |
+| windows-x64   | AMD EPYC 7763 64-Core Processor x4          | fresh copy |   10 | 115.2 / 121.9 / 145.3 / 145.3 | 135.9 / 153.5 / 165.6 / 165.6     | 268.4 / 280.9 / 304.2 / 304.2     |
+
+- **Every runner fits its budget.** The slowest warm handshake is macOS x64 (1.39s median, 2.0s
+  max) against the 5s non-Windows budget; Windows tops out at 2.3s (a first run) against 30s.
+- **macOS spends ~0.6–1.4s before `hello` (Intel ~1.4s median), Linux ~80ms.** The spawn itself is under 3ms on both,
+  so the time is the runtime building its capability manifest (shell, Git and `gh` probes)
+  before it greets. It is inside budget; making those probes lazy is the lever if it ever
+  matters.
+- **Windows' first executions of a binary are the outliers** (2.1s to `hello`, 4.4s to the first
+  answer on `windows-x64`), then 140–230ms warm. On a hosted runner the fresh-copy cost is
+  ~0.12–0.25s in the spawn, far below the ~1.8s measured on a desktop with a full antivirus scan.
+
+Re-measure on the machine in question before changing a number here, and record the result
+the same way:
+
+```bash
+bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --runs 30
+bun run scripts/bench/runtime-handshake.ts <binary> --runs 30 --fresh-copy --build release-ci
+```

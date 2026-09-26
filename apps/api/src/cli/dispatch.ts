@@ -3,6 +3,7 @@
  * turns an operator-facing error into a clean stderr message + non-zero exit.
  */
 
+import { closeAllRuntimeConnections } from '../services/runtime-client/runtime-connection-manager';
 import {
   parseDoctorArgs,
   parseEnvArgs,
@@ -34,12 +35,41 @@ import { isOperatorError } from './errors';
 import { writeError } from './output';
 import { printHelp, printUnknown } from './usage';
 
-/** Route the first user arg to a command handler. // Usage: await dispatch(['serve', '3000']) */
-export async function dispatch(args: string[]): Promise<void> {
+/**
+ * Commands that leave a server running after they return. The server owns the
+ * runtime connections it opens and closes them itself on shutdown
+ * (`start-server.ts`); releasing them when the command returns would take
+ * Local away from a hub that is still serving.
+ */
+const SERVER_COMMANDS: ReadonlySet<string> = new Set(['serve', '__serve']);
+
+/**
+ * Route the first user arg to a command handler.
+ *
+ * Every other command releases the runtime connections it opened before the
+ * process is left to exit. Local is a spawned `mangostudio-runtime` child, and
+ * a live pipe to it keeps the event loop — and so the CLI — alive forever.
+ * The release happens before an operator error exits, too, so the child is
+ * asked to unwind rather than orphaned.
+ *
+ * // Usage: await dispatch(['serve', '3000'])
+ */
+export async function dispatch(
+  args: string[],
+  releaseRuntimes: () => Promise<void> = closeAllRuntimeConnections
+): Promise<void> {
   const [command, ...rest] = args;
+  const release = () =>
+    command !== undefined && SERVER_COMMANDS.has(command) ? Promise.resolve() : releaseRuntimes();
   try {
     await route(command, rest);
   } catch (error) {
+    // The command's own failure is the one the operator must see; a release
+    // that also fails is reported beside it, never in its place.
+    await release().catch((releaseError: unknown) => {
+      const detail = releaseError instanceof Error ? releaseError.message : String(releaseError);
+      writeError(`Could not release runtime connections: ${detail}`);
+    });
     if (isOperatorError(error)) {
       writeError(error.message);
       process.exit(1);
@@ -47,6 +77,7 @@ export async function dispatch(args: string[]): Promise<void> {
     }
     throw error;
   }
+  await release();
 }
 
 async function route(command: string | undefined, rest: string[]): Promise<void> {

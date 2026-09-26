@@ -12,7 +12,14 @@ describe('summarizeGhSubcommand', () => {
     expect(summarizeGhSubcommand(['--version'])).toEqual(['--version']);
   });
 
-  it('drops a non-string entry rather than stringifying it', () => {
-    expect(summarizeGhSubcommand([42, 'pr'])).toEqual(['pr']);
+  it.each([
+    ['unpublished project notes', 'private operand'],
+    ['pr', 'unpublished project notes'],
+    [42, 'pr', 'create'],
+    ['pr', null, 'create'],
+    ['--version', 'private operand'],
+    ['auth'],
+  ])('omits an unrecognized or malformed operation: %j', (...args) => {
+    expect(summarizeGhSubcommand(args)).toEqual([]);
   });
 });

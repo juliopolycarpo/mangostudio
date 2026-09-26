@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeSlotConfig } from '@mangostudio/shared/runtime-home';
 import {
+  VERSION_SCRIPT,
+  wslLaunchCommand,
+} from '../../../../src/modules/environments/domain/wsl-runtime-release';
+import {
   createWslProvisioner,
   type DistroCommandResult,
   WslProvisioningError,
@@ -329,6 +333,41 @@ describe('WslProvisioner', () => {
     await expect(provisioner.ensure('Ubuntu')).rejects.not.toThrow(/Canary keeps only/);
   });
 
+  // #1053: the handshake budget assumes the first execution of a runtime
+  // binary is paid during provisioning. On a first provision — or after a hub
+  // upgrade — neither early return runs `--version`, so the post-install check
+  // is the only execution before `connectWslRuntime` spawns it. It has to run
+  // the same file the launch will.
+  for (const [label, installed] of [
+    ['a fresh distribution', undefined],
+    ['a distribution left on an older release', '1.2.2'],
+  ] as const) {
+    it(`executes the new binary before it returns on ${label}`, async () => {
+      const { provisioner, calls } = harness({
+        installed,
+        ...(installed ? { config: provisionedConfig(installed, ARCHIVE) } : {}),
+      });
+
+      await provisioner.ensure('Ubuntu');
+
+      const push = calls.findIndex((call) => call.script.includes('cat > '));
+      const firstRun = calls.findIndex(
+        (call, index) => index > push && call.script === VERSION_SCRIPT
+      );
+      expect(
+        push >= 0 && firstRun > push,
+        `expected a ${VERSION_SCRIPT} call after the push | received calls: ${calls.map((call) => call.script.slice(0, 40)).join(' / ')}`
+      ).toBe(true);
+      // The check and the launch run the same path through the `current` link.
+      const launched = wslLaunchCommand('Ubuntu', 'wsl.exe').args.join(' ');
+      const binary = /exec (\S+) --version/.exec(VERSION_SCRIPT)?.[1] ?? '';
+      expect(
+        launched.includes(binary.replaceAll('"', '')),
+        `expected the launch to exec ${binary} | received: ${launched}`
+      ).toBe(true);
+    });
+  }
+
   it('records what it installed and what the distribution may do', async () => {
     const { provisioner, calls, config } = harness();
 
@@ -602,7 +641,7 @@ describe('WslProvisioner', () => {
     const { provisioner, requested } = harness({ version: 'dev', localBuild: null });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
-      /source checkout.*bun build apps\/runtime\/src\/cli\.ts --compile --target=bun-linux-x64 --outfile \/repo\/\.mango\/out\/linux-x64\/mangostudio-runtime/s
+      /source checkout.*bun run build:runtime --platform linux-x64 --dev --zig --rustup --out \/repo\/\.mango\/out`/s
     );
     // A release URL or a cache path would be a dead end here; neither is offered.
     expect(requested).toEqual([]);
@@ -621,7 +660,7 @@ describe('WslProvisioner', () => {
     });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
-      /reports version 0\.1\.1 rather than dev\. .*without a version stamp/s
+      /reports version 0\.1\.1 rather than dev\. .*has to report version dev; build one with `bun run build:runtime --platform linux-x64 --dev/s
     );
   });
 

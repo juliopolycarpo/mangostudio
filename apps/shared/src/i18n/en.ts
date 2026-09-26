@@ -994,7 +994,7 @@ export const messages: Messages = {
         editFile: 'Allows the AI to replace exact text in files read in this chat.',
         replaceRange: 'Allows the AI to replace line ranges in files read in this chat.',
         applyPatch:
-          'Allows the AI to apply context-anchored changes across multiple text files at once.',
+          'Allows the AI to apply context-anchored changes across multiple text files at once. Target files must remain exclusively writable by Mango while it runs.',
         createFile: 'Allows the AI to create new text files without overwriting existing paths.',
         deleteFile: 'Allows the AI to delete regular files it has read in this chat.',
         moveFile:
@@ -2018,6 +2018,7 @@ export const messages: Messages = {
     disconnected: 'Disconnected from the terminal.',
     notFound: 'This terminal session no longer exists.',
     refused: 'This terminal session cannot be opened from here.',
+    openFailed: 'Could not open a terminal. Try again.',
     exited: 'Process exited with code {code}.',
     exitedBySignal: 'Process ended by {signal}.',
     exitedConsentRevoked: 'Terminal closed because shell access was revoked.',
@@ -2644,10 +2645,11 @@ export const messages: Messages = {
       },
       runtime: {
         title: 'Runtime binary',
-        source: 'Runs from the source checkout through Bun',
-        missing: 'not found beside the hub',
+        notBuilt:
+          'Not built in this source checkout. Run "cargo build -p mangostudio-runtime --locked" so Local can start.',
+        missing: 'not found; Local cannot start',
         versionMismatch:
-          'The runtime binary reports a different version than the hub. Stdio environments will refuse to pair until both match.',
+          'The runtime binary reports a different version than the hub. Local and stdio environments will refuse to connect until both match.',
       },
       hostSlot: {
         title: 'Host consent',
@@ -2982,6 +2984,14 @@ export const messages: Messages = {
       offlineCache: 'Offline cache',
       offlineCacheHint:
         'The release could not be reached, so this started from a runtime the hub verified earlier.',
+      local: {
+        reason: {
+          'binary-missing':
+            'The Local runtime binary was not found. In a source checkout, run "cargo build -p mangostudio-runtime --locked"; for an installed hub, reinstall MangoStudio or set MANGOSTUDIO_RUNTIME_BINARY.',
+        },
+      },
+      boundElsewhereHint:
+        'Another environment record, on this hub or another one, is connected to this runtime. It takes one hub connection at a time, so this record tries again at most once a minute, without disturbing that connection. Disconnect or remove the other record to use this one.',
       status: {
         connected: 'Connected',
         connecting: 'Connecting',
@@ -2989,9 +2999,10 @@ export const messages: Messages = {
         error: 'Connection failed',
         updating: 'Updating',
         pulling: 'Pulling image',
+        boundElsewhere: 'Bound elsewhere',
       },
       transport: {
-        'in-process': 'In process',
+        'in-process': 'Hub-launched',
         stdio: 'Local process',
         wsl: 'WSL',
         websocket: 'WebSocket',
@@ -3063,6 +3074,7 @@ export const messages: Messages = {
         version: 'v{version}',
         slot: 'slot {slot}',
         digest: '{digest}…',
+        implementation: '{count} methods · build {fingerprint}',
         actions: {
           install: 'Install runtime',
           reinstall: 'Reinstall',
@@ -3922,6 +3934,8 @@ export const messages: Messages = {
         'vendor-error': 'The agent reported a failure.',
         'runtime-disconnected': 'The connection to that machine dropped mid-turn.',
         'hub-restarted': 'MangoStudio restarted while this turn was running.',
+        'acceptance-unknown':
+          'MangoStudio could not confirm whether the agent received this turn. Send again to retry.',
         'sequence-gap': "Part of the agent's stream was lost, so this record is incomplete.",
         'limit-exceeded': 'This turn passed its size budget and was stopped.',
         'consent-revoked': "The machine's owner withdrew permission for external agents.",

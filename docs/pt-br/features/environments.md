@@ -8,13 +8,13 @@ próprios instaladores. A superfície fica em **Ambientes** e descreve a máquin
 
 ## Onde cada coisa roda
 
-| Responsabilidade                                                      | Dono                     |
-| --------------------------------------------------------------------- | ------------------------ |
-| Detectar toolchains, gerenciadores de versão e CLIs de agentes        | Runtime (`apps/runtime`) |
-| Montar o ambiente com que um processo inicia (`spawn-env.ts`)         | Runtime (`apps/runtime`) |
-| Guardar e validar a seleção de toolchain por ambiente                 | Hub (`apps/api`)         |
-| Receitas, guardas, auditoria, findings de pré-requisito e o checklist | Hub (`apps/api`)         |
-| Renderizar cards, o seletor e o checklist                             | Frontend                 |
+| Responsabilidade                                                       | Dono                                   |
+| ---------------------------------------------------------------------- | -------------------------------------- |
+| Detectar toolchains, gerenciadores de versão e CLIs de agentes         | Runtime (`crates/mangostudio-runtime`) |
+| Montar o ambiente com que um processo inicia (`commands/toolchain.rs`) | Runtime (`crates/mangostudio-runtime`) |
+| Guardar e validar a seleção de toolchain por ambiente                  | Hub (`apps/api`)                       |
+| Receitas, guardas, auditoria, findings de pré-requisito e o checklist  | Hub (`apps/api`)                       |
+| Renderizar cards, o seletor e o checklist                              | Frontend                               |
 
 ## Checklist de configuração
 
@@ -47,7 +47,7 @@ transação.
   automático** quando uma está fixada; a linha efetiva diz com o que os processos rodam.
 
 O hub resolve a seleção e a envia em todo método de spawn — `shell.run`, `install.run`,
-`terminal.open` e `external-agent.open`. O `spawn-env.ts` do runtime monta o ambiente base uma
+`terminal.open` e `external-agent.open`. O `commands/toolchain.rs` do runtime monta o ambiente base uma
 vez por spawn: no máximo um diretório por runtime vai para o início do `PATH`, mais `NVM_DIR`,
 `FNM_DIR` ou `BUN_INSTALL` quando o diretório veio daquele gerenciador e a variável ainda não
 estava definida. Cada consumidor aplica sua própria política de segredos por cima.

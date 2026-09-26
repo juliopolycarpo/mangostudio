@@ -83,6 +83,8 @@ O job de browser-smoke em CI roda em `ubuntu-24.04` porque o Playwright 1.60 ain
 
 `playwright.config.ts` na raiz do repositório inicia ambos os servidores via `webServer` antes de rodar os testes. Em CI, força `workers: 1` e faz upload de traces e screenshots em caso de falha.
 
+O servidor web é `bun run dev --api`, que executa `cargo build -p mangostudio-runtime --locked` antes de o hub iniciar, porque o hub inicia o Local como esse binário. O CI baixa o binário compilado uma vez por run, e `MANGOSTUDIO_RUNTIME_BINARY` faz o `bun run dev` pular o próprio build (veja [Binário do runtime no CI](#binário-do-runtime-no-ci)).
+
 Cenários em `tests/browser-smoke/auth-flow.spec.ts`:
 
 1. A página `/login` renderiza
@@ -136,6 +138,24 @@ ativo.
 bun run --filter @mangostudio/api test:unit
 bun run --filter @mangostudio/api test:integration
 ```
+
+> **O Local precisa do binário do runtime.** O hub inicia o Local como o
+> `mangostudio-runtime` em Rust, então todo teste da API que alcança o Local o inicia.
+> Compile-o antes com `cargo build -p mangostudio-runtime` ou aponte
+> `MANGOSTUDIO_RUNTIME_BINARY` para um binário; sem nenhum dos dois, esses testes falham
+> com `RuntimeBinaryNotFoundError` e o comando de build — não há fallback para
+> TypeScript. `tests/integration/services/local-rust-runtime.integration.test.ts`
+> qualifica o próprio Local pelo conector real: o slot `host`, a atestação de dono
+> único, a revogação de terminais, o encerramento do processo filho ao desconectar e um
+> home escrito pelo runtime TypeScript. Nenhum teste da API importa o runtime TypeScript
+> nem o inicia pelo caminho; `runtime-module-allow-list.test.ts` falha a lane se algum o
+> fizer.
+>
+> **O Local é um processo filho.** `createLocalRuntimeConnector` inicia o binário
+> `mangostudio-runtime` a cada conexão, então uma suíte que conecta o Local por teste
+> inicia e faz o handshake de um runtime por teste. Conecte uma vez por arquivo
+> (`tests/support/fixtures/local-runtime-user.ts`); as suítes de checkpoint são o exemplo.
+> Fechar a conexão aguarda o processo filho encerrar.
 
 O suporte da API vive em `apps/api/tests/support/`:
 
@@ -358,16 +378,42 @@ monta um cliente de terceiro cujo teardown é adiado.
 O relatório de QA e o step summary do job Test começam por esses headlines
 quando a suíte falhou, e apontam para cá.
 
+## Binário Do Runtime No CI
+
+Toda lane que inicia um hub precisa do binário `mangostudio-runtime` que o Local executa.
+`.github/workflows/local-runtime.yml` o compila uma vez por run de CI (um build debug para
+Linux, com o cache do cargo) e o envia como `local-runtime-linux-x64`. A action composta
+`.github/actions/local-runtime` baixa esse artefato — ou compila o binário ela mesma quando
+nenhum artefato é informado —, pede `--version` a ele e exporta `MANGOSTUDIO_RUNTIME_BINARY`
+para o resto do job. Um binário ausente ou quebrado falha esse passo pelo nome, em vez de
+aparecer como falhas de conexão do Local espalhadas. O artefato também leva o exemplo
+`fake_cursor_agent`, compilado em uma invocação própria do cargo e exportado como
+`MANGOSTUDIO_FAKE_CURSOR_AGENT`, para que as suítes de qualificação de agentes externos rodem
+nos shards comuns em vez de serem puladas.
+
+- `test.yml` recebe o nome do artefato no input obrigatório `runtime_artifact`, e todo
+  shard roda a action antes dos testes. A lane do frontend não precisa dele.
+- `browser-smoke.yml` recebe o mesmo input; um dispatch manual não tem artefato e compila
+  no próprio job.
+- `randomized-order-nightly.yml` o compila nas lanes da api.
+- `real-binary-qualification` do `cargo-shim.yml` compila o próprio e roda, no Linux, no
+  macOS e no Windows, todo arquivo de teste da api que importa
+  `tests/support/rust-runtime-binary.ts`, direta ou indiretamente por outro módulo de suporte,
+  exceto o smoke ao vivo opcional listado em `OPT_IN_TESTS`.
+  `scripts/lib/rust-lanes.ts` descobre esses arquivos e define os caminhos que tornam a lane
+  relevante, então um novo teste com Rust não exige editar o workflow;
+  `scripts/tests/rust-lanes.unit.test.ts` falha se algum ficar de fora.
+
 ## Retenção De Artefatos No CI
 
 Os artefatos de CI se dividem em quatro classes de retenção; mantenha novos uploads alinhados a elas:
 
-| Classe                    | Exemplos                                                        | Política                                                               |
-| ------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Handoff entre jobs        | fragmento `qa-test-metrics` (test → qa-metrics)                 | 1 dia — consumido dentro do mesmo run                                  |
-| Diagnóstico de falha      | saída bruta de cobertura, traces e relatório HTML do Playwright | 7–14 dias, enviados apenas com `if: failure()`                         |
-| Assets de release         | binários e pacotes preparados no pipeline de release            | 30 dias                                                                |
-| Baselines de push na main | envelopes `qa-metrics` de runs verdes de CI na `main`           | 90 dias — baselines por SHA exato para relatórios de QA de PRs futuros |
+| Classe                    | Exemplos                                                                                                   | Política                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Handoff entre jobs        | fragmento `qa-test-metrics` (test → qa-metrics), `local-runtime-linux-x64` (build → shards, browser smoke) | 1 dia — consumido dentro do mesmo run                                  |
+| Diagnóstico de falha      | saída bruta de cobertura, traces e relatório HTML do Playwright                                            | 7–14 dias, enviados apenas com `if: failure()`                         |
+| Assets de release         | binários e pacotes preparados no pipeline de release                                                       | 30 dias                                                                |
+| Baselines de push na main | envelopes `qa-metrics` de runs verdes de CI na `main`                                                      | 90 dias — baselines por SHA exato para relatórios de QA de PRs futuros |
 
 Runs verdes resumem seu resultado no step summary (`$GITHUB_STEP_SUMMARY`) em vez
 de enviar artefatos que só existem em caso de sucesso. O workflow de browser-smoke

@@ -63,8 +63,8 @@ describe('buildSetupCommand', () => {
   });
 
   // Regression: the CLI's `setup --yes` refuses to run without a --profile
-  // (apps/runtime/src/setup.ts), and `--profile custom` is rejected outright
-  // (apps/runtime/src/cli.ts) — the custom branch used to omit --profile
+  // and `--profile custom` is rejected outright
+  // (crates/mangostudio-runtime/src/cli.rs) — the custom branch used to omit --profile
   // entirely, so every custom consent submission failed on a fresh remote.
   it('sends custom profiles through --profile none plus an explicit --allow set', () => {
     const allow = { ...RUNTIME_CONSENT_PRESETS.none, shell: true, fsWrite: false };

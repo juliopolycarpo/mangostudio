@@ -1,6 +1,6 @@
 # Architecture Overview
 
-MangoStudio follows a modular DDD-inspired architecture across four workspaces. This document explains the design decisions, layer responsibilities, and data flow.
+MangoStudio follows a modular DDD-inspired architecture across three workspaces. This document explains the design decisions, layer responsibilities, and data flow.
 
 ## Workspace Map
 
@@ -8,14 +8,13 @@ MangoStudio follows a modular DDD-inspired architecture across four workspaces. 
 | --------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `apps/api`      | Backend API hub                           | Elysia, Better Auth, Kysely + SQLite                                                               |
 | `apps/frontend` | Browser SPA                               | React 19, TanStack Router/Query, Tailwind CSS v4, `Bun.build()` bundle                             |
-| `apps/runtime`  | Host-machine execution runtime            | TypeScript, Bun, shared runtime protocol                                                           |
 | `apps/shared`   | Contracts, and the code both machines run | TypeScript types, TypeBox schemas, i18n dictionaries; host-only code behind its own export subpath |
 
 ### Published alongside the application
 
 The repository also hosts the **Mango Protocol** — the wire contract the hub and the runtime
 speak — on its own version line and its own `protocol-v*` release train. It is not one of the
-four application workspaces and does not follow their lifecycle.
+three application workspaces and does not follow their lifecycle.
 
 | Path                           | Ships as                                  | Stack                                          |
 | ------------------------------ | ----------------------------------------- | ---------------------------------------------- |
@@ -137,6 +136,13 @@ Filesystem tools, shell commands, freshness tracking, and checkpoint effects exe
 the versioned runtime protocol. The API remains the hub for workdir policy, orchestration,
 and durable checkpoint state. See [`hub-runtime.md`](./hub-runtime.md) for the ownership
 table, protocol lifecycle, and transport roadmap.
+
+Every runtime, Local included, is the cargo-built `mangostudio-runtime` from
+`crates/mangostudio-runtime`. The hub spawns Local on its own machine over stdio: the sibling
+binary beside a standalone hub, or in a source checkout the newest `target/debug` or
+`target/release` build, which `bun run dev` builds first. `MANGOSTUDIO_RUNTIME_BINARY`
+overrides both, and a missing binary fails the connect with `cargo build -p
+mangostudio-runtime` rather than falling back to anything.
 
 ### Realtime Invalidation
 
@@ -299,4 +305,6 @@ Columns use `camelCase`, tables use `snake_case`. Kysely type aliases: `<Entity>
 
 ## Standalone Build
 
-`bun run build --binary` compiles the API into platform-specific binaries via `bun build --compile`. Frontend assets are embedded as sidecar files. Supports 8 platforms (linux/windows/darwin × x64/arm64 + glibc/musl). Database defaults to `~/.mango/database.sqlite`.
+`bun run build --binary` compiles the API into platform-specific binaries via `bun build --compile`, with the frontend embedded, and stages the cargo-built `mangostudio-runtime` beside each. Distribution builds all 8 platforms (linux/windows/darwin × x64/arm64 + glibc/musl) from per-target runtimes (`--runtime-dir`); a local build covers the host's own platform (`--platform <host>`) — see [releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built). Database defaults to `~/.mango/database.sqlite`.
+
+Each runtime is a native binary built with fat LTO and `panic = "unwind"` (handler panic isolation depends on it): gnu Linux targets link at the glibc 2.17 floor, musl targets are static, Windows links the MSVC C runtime statically, and every binary reports the release version it was stamped with. Release assets, runtime binaries included, are listed in an attested `SHA256SUMS`; [runtime-metrics.md](../reference/runtime-metrics.md) records their sizes.

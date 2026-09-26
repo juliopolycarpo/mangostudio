@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { evaluateGate, parseAllowedSkips, parseNeeds } from '../ci/evaluate-gate';
+import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
 import {
   expectedGateNeeds,
@@ -28,7 +29,6 @@ const INTEGRATION_PR_WORKFLOWS = [
   '.github/workflows/dependency-review.yml',
   '.github/workflows/protocol-ci.yml',
   '.github/workflows/release-dry-run.yml',
-  '.github/workflows/vendor-drift.yml',
 ] as const;
 
 // GitHub expression opener, assembled out of band so the literal `${{` never
@@ -209,6 +209,21 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(onBlock).toContain('- "Cargo.lock"');
   });
 
+  test('the changes job classifies the diff through the rust-lanes manifest', () => {
+    const changesBlock = extractJobBlock(workflow, 'changes');
+
+    expect(changesBlock).toContain(`rust: ${EXPR} steps.changed.outputs.rust }}`);
+    expect(changesBlock).toContain(`qualification: ${EXPR} steps.changed.outputs.qualification }}`);
+    expect(changesBlock).toContain(
+      'bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/lanes"'
+    );
+    // No second, hand-maintained path list may creep back into the job.
+    expect(changesBlock).not.toContain('relevant=');
+    expect(changesBlock).not.toContain('grep -Eq');
+    // The TypeScript runtime is gone; nothing may still filter on its tree.
+    expect(workflow).not.toContain('apps/runtime/');
+  });
+
   test('the workspace and launcher MSRV lanes run only when the changes job saw a Rust path', () => {
     const workspaceBlock = extractJobBlock(workflow, 'workspace');
     const msrvBlock = extractJobBlock(workflow, 'launcher-msrv');
@@ -226,13 +241,110 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(msrvBlock).toContain('cargo test -p mangostudio --all-targets --locked');
   });
 
+  test('the musl clippy lane fails on musl-only warnings for both shipped musl targets', () => {
+    const muslBlock = extractJobBlock(workflow, 'musl-clippy');
+
+    expect(parseNeedsList(muslBlock)).toEqual(['changes']);
+    expect(muslBlock).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(muslBlock).toContain('uses: ./.github/actions/setup-zigbuild');
+    for (const triple of ['x86_64-unknown-linux-musl', 'aarch64-unknown-linux-musl']) {
+      expect(muslBlock).toContain(
+        `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target ${triple} -- -D warnings`
+      );
+    }
+  });
+
+  test('the fixture freshness lane regenerates rust-home and pins the frozen TypeScript fixtures', () => {
+    const freshnessBlock = extractJobBlock(workflow, 'runtime-home-fixture-freshness');
+
+    // Regenerate, then stage before diffing against `HEAD` — a plain
+    // `git diff --exit-code` against the worktree would miss a brand-new
+    // file the regenerator started emitting.
+    expect(freshnessBlock).toContain(
+      'cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored'
+    );
+    expect(freshnessBlock).toContain(
+      'git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home'
+    );
+    expect(freshnessBlock).toContain(
+      'git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home'
+    );
+    // ts-home and ts-library lost their generators with the TypeScript
+    // runtime; each is pinned to its committed git tree instead.
+    expect(freshnessBlock).toContain('"ts-home:$TS_HOME_TREE" "ts-library:$TS_LIBRARY_TREE"');
+    expect(freshnessBlock).toContain(
+      'git rev-parse "HEAD:crates/mangostudio-runtime/tests/fixtures/$name"'
+    );
+    for (const [name, variable] of [
+      ['ts-home', 'TS_HOME_TREE'],
+      ['ts-library', 'TS_LIBRARY_TREE'],
+    ] as const) {
+      const pinned = new RegExp(`${variable}: ([0-9a-f]{40})`).exec(freshnessBlock)?.[1];
+      const committed = Bun.spawnSync(
+        ['git', 'rev-parse', `HEAD:crates/mangostudio-runtime/tests/fixtures/${name}`],
+        { cwd: ROOT_DIR }
+      )
+        .stdout.toString()
+        .trim();
+      expect(pinned, `${variable} pin`).toBe(committed);
+    }
+    expect(freshnessBlock).not.toContain('bun run');
+  });
+
   test('gate needs every mandatory job and accepts the Rust skip only when irrelevant', () => {
     const gateBlock = extractJobBlock(workflow, 'gate');
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv fuzz-workspace' || '' }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
     );
+  });
+
+  test('the real-binary-qualification job builds and points at the binary its own suite requires', () => {
+    // apps/api/tests/support/rust-runtime-binary.ts's fallback stays quiet
+    // when MANGOSTUDIO_RUNTIME_BINARY is unset and nothing is built -- so the
+    // one place that can catch this job forgetting to build the binary or
+    // wire the override is this static check on the job definition itself,
+    // not a runtime check inside the suite that cannot tell "a checkout with
+    // no build" from "this job, misconfigured" apart. The fallback resolves
+    // the binary through production's own resolver, which owns the `.exe`.
+    const qualificationBlock = extractJobBlock(workflow, 'real-binary-qualification');
+    const binarySupport = readText('apps/api/tests/support/rust-runtime-binary.ts');
+    const runtimePaths = readText('apps/api/src/lib/runtime-paths.ts');
+
+    expect(qualificationBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(qualificationBlock).toContain(`runs-on: ${EXPR} matrix.os }}`);
+    expect(qualificationBlock).toContain('cargo build -p mangostudio-runtime --locked');
+    expect(qualificationBlock).toContain(
+      `MANGOSTUDIO_RUNTIME_BINARY: ${EXPR} github.workspace }}/${EXPR} matrix.runtime-binary }}`
+    );
+    expect(qualificationBlock).toContain('runtime-binary: target/debug/mangostudio-runtime.exe');
+    expect(binarySupport).toContain('workspaceRuntimeBinaryCandidates()');
+    expect(runtimePaths).toContain("process.platform === 'win32' ? 'mangostudio-runtime.exe'");
+    // The stand-in vendor, built on its own so the runtime binary never gains
+    // the SDK's `testing` feature, and pointed at so its absence fails loudly.
+    expect(qualificationBlock).toContain(
+      'cargo build -p mangostudio-runtime --example fake_cursor_agent --locked'
+    );
+    expect(qualificationBlock.indexOf('--example fake_cursor_agent')).toBeGreaterThan(
+      qualificationBlock.indexOf('cargo build -p mangostudio-runtime --locked')
+    );
+    expect(qualificationBlock).toContain(
+      `MANGOSTUDIO_FAKE_CURSOR_AGENT: ${EXPR} github.workspace }}/${EXPR} matrix.fake-cursor-agent }}`
+    );
+    expect(qualificationBlock).toContain(
+      'fake-cursor-agent: target/debug/examples/fake_cursor_agent.exe'
+    );
+    // The files come from scripts/lib/rust-lanes.ts discovery, never from
+    // a list in the job; scripts/tests/rust-lanes.unit.test.ts owns what it finds.
+    expect(qualificationBlock).toContain("if: needs.changes.outputs.qualification == 'true'");
+    expect(qualificationBlock).toContain(
+      'run: bun ./scripts/ci/rust-lanes.ts qualify --suite integration'
+    );
+    expect(qualificationBlock).toContain(
+      'run: bun ./scripts/ci/rust-lanes.ts qualify --suite unit'
+    );
+    expect(qualificationBlock).not.toMatch(/\.test\.ts/);
   });
 });
 
@@ -252,8 +364,13 @@ describe('release-dry-run.yml always-reporting gate', () => {
     const linuxBlock = extractJobBlock(workflow, 'dry-run-linux');
     const windowsBlock = extractJobBlock(workflow, 'dry-run-windows');
     const cargoBlock = extractJobBlock(workflow, 'dry-run-cargo');
+    const runtimeBlock = extractJobBlock(workflow, 'runtime');
 
-    expect(parseNeedsList(linuxBlock)).toEqual(['changes']);
+    // The cargo runtimes both dry-run archives ship come from the runtime lane,
+    // which is relevant exactly when the Linux lane is.
+    expect(parseNeedsList(runtimeBlock)).toEqual(['changes']);
+    expect(runtimeBlock).toContain("if: needs.changes.outputs.release == 'true'");
+    expect(parseNeedsList(linuxBlock)).toEqual(['changes', 'runtime']);
     expect(linuxBlock).toContain("if: needs.changes.outputs.release == 'true'");
     // Also needs `changes` directly (not just transitively through
     // dry-run-linux) so its own `if:` can read `needs.changes.outputs`.
@@ -274,7 +391,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', needs.changes.outputs.release == 'false' && 'runtime' || '') }}`
     );
   });
 });

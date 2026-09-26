@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'bun:test';
-import { negotiate, PROTOCOL_MAJOR, PROTOCOL_MINOR, PROTOCOL_VERSION } from '../src/version';
+import {
+  negotiate,
+  ORDERED_ANSWER_MINOR,
+  PROTOCOL_MAJOR,
+  PROTOCOL_MINOR,
+  PROTOCOL_VERSION,
+} from '../src/version';
 
 describe('protocol version constants', () => {
-  it('announces wire 1.1', () => {
+  it('announces wire 1.2', () => {
     expect(PROTOCOL_MAJOR).toBe(1);
-    expect(PROTOCOL_MINOR).toBe(1);
-    expect(PROTOCOL_VERSION).toEqual({ major: 1, minor: 1 });
+    expect(PROTOCOL_MINOR).toBe(2);
+    expect(PROTOCOL_VERSION).toEqual({ major: 1, minor: 2 });
+  });
+
+  it('keeps the answer-ordering feature minor at 2 whatever the current minor', () => {
+    expect(ORDERED_ANSWER_MINOR).toBe(2);
   });
 });
 

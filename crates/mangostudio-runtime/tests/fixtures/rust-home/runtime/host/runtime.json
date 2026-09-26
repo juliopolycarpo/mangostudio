@@ -1,0 +1,27 @@
+{
+  "source": "provisioned",
+  "version": "0.2.0-rust-fixture",
+  "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "allow": {
+    "fsRead": true,
+    "fsWrite": true,
+    "shell": true,
+    "git": true,
+    "probing": true,
+    "mcp": true,
+    "library": true,
+    "checkpoints": true,
+    "update": true,
+    "externalAgents": true
+  },
+  "setup": {
+    "state": "configured",
+    "at": "2026-01-03T00:00:00.000Z",
+    "by": "install"
+  },
+  "audit": {
+    "enabled": false
+  },
+  "schemaVersion": 1,
+  "slot": "host"
+}

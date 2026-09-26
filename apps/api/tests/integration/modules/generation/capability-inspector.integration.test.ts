@@ -12,12 +12,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLocalRuntimeHost } from '@mangostudio/runtime';
 import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ChatCapabilitiesResponseSchema } from '@mangostudio/shared/capabilities';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import {
+  profileForAllow,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
@@ -50,14 +51,19 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
-import { connectInProcessRuntime } from '../../../../src/services/runtime-client/connect-in-process-runtime';
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,
   setRuntimeConnectionManagerForTests,
 } from '../../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
+import { connectFakeRuntime } from '../../../support/fake-runtime-host';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
+import {
+  FakeRuntimeDefinition,
+  fixedConsent,
+  TEST_RUNTIME_MANIFEST,
+} from '../../../support/runtime-fixture';
 
 const MODEL_ID = 'capability-e2e-model';
 const SECRET_ENV_VALUE = 'super-secret-env-value';
@@ -168,8 +174,45 @@ async function allowAllToolsForDefaultAgent(): Promise<void> {
 }
 
 /**
- * Runs `body` against a Local runtime that announces `allow` as its consent —
- * what `mangostudio-runtime setup --slot host` on this machine would produce.
+ * The manifest a runtime announces under `allow`: every consented capability
+ * is an effective feature, and `allow` travels beside it. The inspector reads
+ * only this surface, so no real runtime is needed behind it.
+ */
+function manifestGranting(allow: RuntimeCapabilityAllow): RuntimeCapabilityManifest {
+  return {
+    ...TEST_RUNTIME_MANIFEST,
+    git: { available: allow.git },
+    features: {
+      tools:
+        allow.fsRead ||
+        allow.fsWrite ||
+        allow.shell ||
+        allow.git ||
+        allow.mcp ||
+        allow.probing ||
+        allow.library ||
+        allow.checkpoints,
+      git: allow.git,
+      probing: allow.probing,
+      mcp: allow.mcp,
+      library: allow.library,
+      checkpoints: allow.checkpoints,
+      fsRead: allow.fsRead,
+      fsWrite: allow.fsWrite,
+      shell: allow.shell,
+      update: allow.update,
+      externalAgents: allow.externalAgents === true,
+    },
+    profile: profileForAllow(allow),
+    allow,
+  };
+}
+
+/**
+ * Runs `body` against a Local environment whose runtime announces `allow` as
+ * its consent — what `mangostudio-runtime setup --slot host` on this machine
+ * would produce — and refuses, through the fake host's consent gate, any
+ * method that consent does not cover.
  */
 async function withRuntimeConsent<T>(
   allow: RuntimeCapabilityAllow,
@@ -187,8 +230,13 @@ async function withRuntimeConsent<T>(
       }),
     connectors: {
       'in-process': async (_definition, onUnavailable) => {
-        const definition = createLocalRuntimeHost({ runtimeVersion: 'test', allow });
-        const connection = await connectInProcessRuntime(definition, { hubVersion: 'test' });
+        const definition = new FakeRuntimeDefinition({
+          runtimeVersion: 'test',
+          manifest: manifestGranting(allow),
+          consent: fixedConsent(allow, 'host'),
+          handlers: {},
+        });
+        const connection = await connectFakeRuntime(definition, { hubVersion: 'test' });
         return {
           client: new RuntimeClient(connection.hub, onUnavailable),
           close: () => connection.close(),

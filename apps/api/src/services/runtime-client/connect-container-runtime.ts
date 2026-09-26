@@ -46,29 +46,17 @@ import {
   type ContainerEngineService,
   containerEngineService,
 } from '../../modules/environments/infrastructure/container-engine';
+import { resolveRemoteHandshakeTimeoutMs } from './handshake-budget';
 import { RuntimeClient } from './runtime-client';
 import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
-
-/**
- * Twenty seconds, flat on every platform: the engine has to create the
- * container, start an init, and run a binary off a bind mount before the first
- * frame. The image is already on disk by this point — the pull is its own
- * step — so this budgets a start, not a download.
- *
- * Flat includes the platform where this is no longer the larger number. On a
- * Windows hub `resolveHandshakeTimeoutMs` gives a plain local child 30s, so
- * this sits under it — deliberately, because what dominates here is the engine
- * rather than the `docker.exe` spawn a platform branch would be tuning. If a
- * healthy container is ever measured losing to this on a Windows hub, the fix
- * is a platform floor on this budget, not a bigger flat number.
- */
-const HANDSHAKE_TIMEOUT_MS = 20_000;
 
 const logger = createDiagnosticLogger('runtime-container');
 
 /** Minimal definition shape — kept local to avoid a cycle with the manager. */
 export interface ContainerRuntimeDefinition {
   readonly id: string;
+  /** The owner; `hub.workspace.authorize` answers for this user only. */
+  readonly userId: string;
   readonly config: unknown;
 }
 
@@ -93,9 +81,10 @@ export interface ContainerConnectContext {
   readonly report?: ContainerConnectProgress;
   /**
    * Aborted when the attempt is released. The image pull and the matching
-   * runtime download can both outlive the click that started them; spawn is
-   * still bounded by its handshake timeout, so this is rechecked before it
-   * rather than threaded into it.
+   * runtime download can both outlive the click that started them, so it is
+   * rechecked between them; it is also threaded into the spawn, so a cancel
+   * during the handshake terminates the engine client instead of waiting out
+   * the handshake budget.
    */
   readonly signal?: AbortSignal;
 }
@@ -162,9 +151,10 @@ export async function connectContainerRuntime(
   try {
     connection = await deps.spawn({
       environmentId: definition.id,
+      workspaceBinding: { userId: definition.userId, environmentId: definition.id },
       launch,
       hubVersion: getVersion(),
-      handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+      handshakeTimeoutMs: resolveRemoteHandshakeTimeoutMs('container'),
       describeFailure: (failure: RuntimeLaunchFailure) => {
         failureReason = classifyContainerFailure({
           stderr: failure.stderr,
@@ -184,6 +174,7 @@ export async function connectContainerRuntime(
             });
       },
       onClosed: onUnavailable,
+      ...(context.signal ? { signal: context.signal } : {}),
     });
   } catch (error) {
     // The engine may have created the container before the handshake failed,

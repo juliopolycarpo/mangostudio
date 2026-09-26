@@ -352,6 +352,32 @@ async fn a_dialler_that_does_not_offer_the_subprotocol_is_closed_with_4400() {
     assert_eq!(code, Some(close_codes::PROTOCOL_ERROR));
 }
 
+/// `with_subprotocol_optional` is the one way to let a dialler like the one
+/// above through instead of refusing it — for an acceptor serving a peer
+/// built before `mango.v1` was mandatory (`serve.ts`'s own documented
+/// compatibility case).
+#[tokio::test]
+async fn with_subprotocol_optional_admits_a_dialler_that_offered_none() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port");
+    let address = listener.local_addr().expect("a bound address");
+    let dialling = tokio::spawn(async move {
+        tokio_tungstenite::connect_async(format!("ws://{address}/conformance")).await
+    });
+
+    let (socket, _peer) = listener.accept().await.expect("a dialler arrives");
+    let options = AcceptOptions::from(WebSocketOptions::default()).with_subprotocol_optional();
+    accept_websocket(socket, options, |_upgrade| Ok(()))
+        .await
+        .expect("subprotocol_optional must admit a peer that offered none at all");
+
+    dialling
+        .await
+        .expect("the dial task runs")
+        .expect("the upgrade itself succeeds");
+}
+
 #[tokio::test]
 async fn an_acceptor_that_selects_nothing_refuses_the_dial() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("a port");
@@ -567,4 +593,161 @@ async fn a_dialler_without_an_origin_is_not_treated_as_a_browser() {
         .await
         .expect("a dialler that sent no Origin is judged on its credential alone");
     let _ = dialling.await.expect("the dial task runs");
+}
+
+/// The acceptor's side of a refused socket, held back from writing its
+/// `close` frame until the dialler's first frame is sitting unread in the
+/// kernel's receive buffer.
+///
+/// That is the order a real hub produces — it sends `hello` the moment the
+/// upgrade completes, while the acceptor is still judging the credential —
+/// but on loopback the acceptor usually wins the race, so without this gate
+/// the case would pass by timing rather than by the fix.
+struct CloseAfterPeerSpoke {
+    inner: TcpStream,
+    peer_spoke: bool,
+}
+
+/// The first byte of an unfragmented, unmasked `close` frame: FIN plus
+/// opcode 0x8. The 101 response starts with `H`, so this singles out the
+/// refusal's close frame among the acceptor's writes.
+const UNMASKED_CLOSE_FRAME_HEAD: u8 = 0x88;
+
+impl tokio::io::AsyncRead for CloseAfterPeerSpoke {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl tokio::io::AsyncWrite for CloseAfterPeerSpoke {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        use std::task::Poll;
+        if buf.first() == Some(&UNMASKED_CLOSE_FRAME_HEAD) && !self.peer_spoke {
+            let mut probe = [0u8; 1];
+            let mut probe = tokio::io::ReadBuf::new(&mut probe);
+            match self.inner.poll_peek(cx, &mut probe) {
+                Poll::Ready(Ok(read)) if read > 0 => self.peer_spoke = true,
+                Poll::Ready(Ok(_)) => {}
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// A refused socket must end with the acceptor's `close` frame delivered and
+/// the TCP connection finished with a FIN, even though the dialler already
+/// wrote its first frame. Dropping the socket with those bytes unread makes
+/// the kernel answer with an RST instead: Windows then discards the `close`
+/// frame outright (the dialler reads `4000` with no reason, never `4401`),
+/// and Linux and macOS surface the reset on the dialler's next read.
+#[tokio::test]
+async fn a_refused_dialler_that_already_spoke_still_reads_the_close_code() {
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::http::{HeaderValue, header};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("a port");
+    let address = listener.local_addr().expect("a bound address");
+    let accepting = tokio::spawn(async move {
+        let (socket, _from) = listener.accept().await.expect("a dialler arrives");
+        let gated = CloseAfterPeerSpoke {
+            inner: socket,
+            peer_spoke: false,
+        };
+        accept_websocket(
+            gated,
+            WebSocketOptions::default(),
+            |upgrade| match upgrade.bearer() {
+                Some(TOKEN) => Ok(()),
+                _ => Err(close_codes::UNAUTHORIZED),
+            },
+        )
+        .await
+        .map(|_port| ())
+    });
+
+    let mut request = format!("ws://{address}/conformance")
+        .into_client_request()
+        .expect("a request");
+    let headers = request.headers_mut();
+    headers.insert(
+        header::SEC_WEBSOCKET_PROTOCOL,
+        HeaderValue::from_static(mango_protocol::transports::websocket::WEBSOCKET_SUBPROTOCOL),
+    );
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer wrong"),
+    );
+    let (mut dialled, _response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("the upgrade completes before the credential is judged");
+    // What a hub does the moment the upgrade completes.
+    dialled
+        .send(Message::text(r#"{"type":"hello"}"#))
+        .await
+        .expect("the dialler's first frame is written");
+
+    let mut code = None;
+    let mut ending = None;
+    let reading = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match dialled.next().await {
+                Some(Ok(Message::Close(frame))) => {
+                    code = frame.map(|frame| u16::from(frame.code));
+                }
+                Some(Ok(_)) => {}
+                Some(Err(error)) => {
+                    ending = Some(error.to_string());
+                    return;
+                }
+                None => return,
+            }
+        }
+    })
+    .await;
+    assert!(reading.is_ok(), "the refused socket never ended");
+
+    let refusal = accepting.await.expect("the acceptor task runs");
+    assert!(
+        matches!(
+            refusal,
+            Err(AcceptError::Unauthorized {
+                code: close_codes::UNAUTHORIZED
+            })
+        ),
+        "expected refusal: Unauthorized {{ code: 4401 }} | received: {refusal:?}"
+    );
+    assert_eq!(
+        code,
+        Some(close_codes::UNAUTHORIZED),
+        "expected close code: 4401 | received: {code:?} (the close frame was lost to a reset)"
+    );
+    assert_eq!(
+        ending, None,
+        "expected the refused socket to end with a FIN | received: {ending:?} after the close frame"
+    );
 }

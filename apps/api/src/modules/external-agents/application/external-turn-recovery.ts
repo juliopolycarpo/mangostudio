@@ -22,7 +22,11 @@
 import type { ExternalTurnTerminalReason } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnPart, MessagePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
-import type { Database } from '../../../db/types';
+import type { Database, ExternalTurnAttemptSelect } from '../../../db/types';
+import {
+  listAttemptsForMessage,
+  sealAttemptsForMessage,
+} from '../infrastructure/external-turn-attempt-repository';
 
 export interface ReconcileExternalTurnsInput {
   readonly reason: ExternalTurnTerminalReason;
@@ -64,8 +68,9 @@ export async function reconcileExternalTurns(
     // finished and renders as still running. Clear the flag, keep the reason
     // the turn actually ended for.
     if (turnPart.status !== 'terminal') {
+      const attempts = await listAttemptsForMessage(row.id, db);
       turnPart.status = 'terminal';
-      turnPart.terminalReason = input.reason;
+      turnPart.terminalReason = reasonFromAttempts(input.reason, attempts);
       turnPart.updatedAt = at;
     }
     sealPendingApprovals(parts, at);
@@ -77,9 +82,67 @@ export async function reconcileExternalTurns(
       .where('isGenerating', '=', 1)
       .executeTakeFirst();
     if (result.numUpdatedRows > 0n) reconciled += 1;
+    await sealAttemptsForMessage(row.id, turnPart.terminalReason ?? input.reason, at, db);
   }
 
   return reconciled;
+}
+
+/**
+ * Seals every submission receipt still open whose turn is no longer
+ * generating — a hub that died between finalizing a turn and sealing its
+ * receipts leaves exactly these, and the message sweep above never visits
+ * them because their message is already done. Boot only, for the reason
+ * {@link reconcileExternalTurns} gives. Returns the number of turns touched.
+ *
+ * @example
+ * await sealOrphanedExternalTurnAttempts(getDb());
+ */
+export async function sealOrphanedExternalTurnAttempts(
+  db: Kysely<Database>,
+  now: () => number = Date.now
+): Promise<number> {
+  const rows = await db
+    .selectFrom('external_turn_attempts')
+    .leftJoin('messages', 'messages.id', 'external_turn_attempts.messageId')
+    .select(['external_turn_attempts.messageId as messageId', 'messages.parts as parts'])
+    .where('external_turn_attempts.state', 'in', [
+      'acceptance-unknown',
+      'not-submitted',
+      'accepted',
+    ])
+    .where((eb) => eb.or([eb('messages.id', 'is', null), eb('messages.isGenerating', '=', 0)]))
+    .distinct()
+    .execute();
+  const at = now();
+  for (const row of rows) {
+    const recorded = parseParts(row.parts).find(isExternalTurnPart)?.terminalReason;
+    await sealAttemptsForMessage(row.messageId, recorded ?? 'hub-restarted', at, db);
+  }
+  return rows.length;
+}
+
+/**
+ * What a restart may honestly say about a turn, given its submission receipts.
+ *
+ * Only the boot pass consults them: an explicit reason (the user's own cancel)
+ * already says why the turn ended. At boot, a turn whose latest attempt was
+ * still `acceptance-unknown` (or already `unresolved`) was sent and never confirmed — calling that
+ * `hub-restarted` would imply the vendor had it. An accepted turn did run, and
+ * one only ever `not-submitted` never reached the vendor; both are what
+ * `hub-restarted` means, and neither is resubmitted.
+ */
+function reasonFromAttempts(
+  reason: ExternalTurnTerminalReason,
+  attempts: readonly ExternalTurnAttemptSelect[]
+): ExternalTurnTerminalReason {
+  if (reason !== 'hub-restarted') return reason;
+  const latest = attempts.at(-1);
+  // `unresolved` too: the submission already concluded the acceptance was
+  // unknowable, and the hub died before the turn could say so.
+  return latest?.state === 'acceptance-unknown' || latest?.state === 'unresolved'
+    ? 'acceptance-unknown'
+    : reason;
 }
 
 function isExternalTurnPart(part: MessagePart): part is ExternalTurnPart {

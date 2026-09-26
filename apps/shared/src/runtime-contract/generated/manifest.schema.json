@@ -293,6 +293,75 @@
           "type": "boolean"
         }
       }
+    },
+    "implementation": {
+      "type": "object",
+      "required": [
+        "schema",
+        "fingerprint",
+        "features"
+      ],
+      "properties": {
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "features": {
+          "type": "object",
+          "required": [
+            "git",
+            "probing",
+            "mcp",
+            "library",
+            "checkpoints",
+            "fsRead",
+            "fsWrite",
+            "shell",
+            "update",
+            "externalAgents",
+            "terminal"
+          ],
+          "properties": {
+            "git": {
+              "type": "boolean"
+            },
+            "probing": {
+              "type": "boolean"
+            },
+            "mcp": {
+              "type": "boolean"
+            },
+            "library": {
+              "type": "boolean"
+            },
+            "checkpoints": {
+              "type": "boolean"
+            },
+            "fsRead": {
+              "type": "boolean"
+            },
+            "fsWrite": {
+              "type": "boolean"
+            },
+            "shell": {
+              "type": "boolean"
+            },
+            "update": {
+              "type": "boolean"
+            },
+            "externalAgents": {
+              "type": "boolean"
+            },
+            "terminal": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
     }
   }
 }

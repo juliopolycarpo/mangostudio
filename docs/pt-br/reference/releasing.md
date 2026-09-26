@@ -85,6 +85,65 @@ localmente em `mangostudio upgrade` (`--local`, `--use`, `--prune`,
 `--uninstall`); o dry-run compara `mangostudio __installer sh` com o arquivo do
 repositório para que os dois não divirjam.
 
+### Como o binário do runtime é construído
+
+O hub é compilado com Bun; `mangostudio-runtime` é o binário cargo de
+`crates/mangostudio-runtime`. `distribution-build.yml` chama
+`.github/workflows/runtime-build.yml`, que constrói cada um dos oito alvos num
+runner capaz de linká-lo e o envia como artefato
+`runtime-<source-sha>-<platform-id>`. O job de empacotamento baixa esses
+artefatos em `.mango/runtime-prebuilt/` e roda
+`bun run build --binary --runtime-dir .mango/runtime-prebuilt`, que compila
+apenas os hubs e copia cada runtime ao lado do seu hub. Nada depois de
+`.mango/out/<platform>/` mudou: arquivos, assets crus, `SHA256SUMS`, pacotes npm,
+imagens Docker e instaladores veem os mesmos dois arquivos de antes.
+
+| Plataformas                          | Runner           | Alvo Rust / toolchain                                           |
+| ------------------------------------ | ---------------- | --------------------------------------------------------------- |
+| `linux-x64`, `linux-arm64`           | `ubuntu-latest`  | `<arch>-unknown-linux-gnu.2.17` via cargo-zigbuild (piso glibc) |
+| `linux-x64-musl`, `linux-arm64-musl` | `ubuntu-latest`  | `<arch>-unknown-linux-musl` via cargo-zigbuild (estático)       |
+| `darwin-x64`, `darwin-arm64`         | `macos-latest`   | `x86_64-apple-darwin` / `aarch64-apple-darwin`, Xcode           |
+| `windows-x64`, `windows-arm64`       | `windows-latest` | `x86_64-pc-windows-msvc` / `aarch64-pc-windows-msvc`, MSVC      |
+
+- **Piso de glibc: 2.17.** O hub compilado com Bun já exige `GLIBC_2.17` (seu
+  símbolo versionado mais alto nas duas arquiteturas), então linkar o runtime no
+  mesmo piso não acrescenta requisito ao par. `GLIBC_FLOOR` em
+  `scripts/lib/runtime-build.ts` é o único lugar que o nomeia.
+- **Dependências C e assembly.** `ring` e `rquickjs-sys` são compilados por
+  alvo; `aws-lc` não está no grafo. No Linux o zig é o toolchain C deles;
+  `windows-arm64` é compilado de forma cruzada na imagem Windows x64, que traz as
+  bibliotecas MSVC ARM64 e o clang de que o `ring` precisa.
+- **CRT estático no Windows.** `.cargo/config.toml` linka o runtime C do MSVC
+  estaticamente (`+crt-static`). Um CRT dinâmico importa `VCRUNTIME140.dll`, que
+  vem do Visual C++ Redistributable e não do Windows, e o runtime não iniciaria
+  numa máquina sem ele. A verificação de staging rejeita qualquer runtime
+  Windows que importe DLLs `VCRUNTIME*`/`MSVCP*`.
+- **Perfil de release.** O `[profile.release]` do workspace constrói o runtime com
+  `opt-level = 3`, LTO fat, uma codegen unit e `strip = true`; veja
+  [runtime-metrics.md](runtime-metrics.md) para o custo em tamanho e tempo de
+  build. Ele mantém `panic = "unwind"` de propósito: o isolamento de panics dos
+  handlers captura o unwind, então o crate se recusa a compilar com
+  `panic = "abort"`.
+- **Pins.** Rust vem de `rust-toolchain.toml`; zig é baixado com versão e
+  SHA-256 fixos (`ZIG_VERSION`/`ZIG_SHA256`); cargo-zigbuild é instalado em
+  versão fixa pelo `taiki-e/install-action`, que verifica o checksum.
+- **Versão.** Cada runtime recebe a versão da release em tempo de compilação via
+  `MANGOSTUDIO_RELEASE_VERSION` e a imprime sozinha em `--version`, a linha que o
+  doctor do hub e o provisionamento WSL/SSH comparam literalmente.
+- **Verificações.** `scripts/build-runtime.ts` e o staging com `--runtime-dir`
+  leem o cabeçalho de cada binário (`scripts/lib/executable-header.ts`): formato,
+  CPU, loader glibc ou binário estático, e nenhum símbolo `GLIBC_` acima do piso.
+  Um runtime executável na máquina também precisa responder `--version` com a
+  versão da release.
+
+Localmente, `bun run build --binary --platform <host>` roda
+`cargo build --release --locked -p mangostudio-runtime --target <triple>` para o
+alvo do próprio host. Qualquer outro alvo precisa de um runtime pré-construído em
+`--runtime-dir <dir>` (ou `RUNTIME_DIR`), no layout
+`<dir>/<platform-id>/mangostudio-runtime[.exe]` — por exemplo, de
+`bun run build:runtime --platform linux-arm64 --zig --out <dir>`. Um arquivo
+ausente é um erro que o nomeia; o build nunca usa outro runtime no lugar.
+
 ## Fonte da versão
 
 Existe **uma** versão de release. A `version` do `package.json` raiz é canônica;

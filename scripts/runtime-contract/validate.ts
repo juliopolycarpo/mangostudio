@@ -20,7 +20,8 @@
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
 import { ARTIFACT_DIR, CATALOG_SCHEMA_URL } from './artifacts';
 
-const CATALOG_ARTIFACT = `${ARTIFACT_DIR}/catalog.json`;
+/** Every catalog the emitter writes: the runtime's contract and the hub's. */
+const CATALOG_ARTIFACTS = [`${ARTIFACT_DIR}/catalog.json`, `${ARTIFACT_DIR}/hub-catalog.json`];
 
 /**
  * Compiles the catalog schema with its cross-file `$ref` resolved.
@@ -47,27 +48,26 @@ async function compileCatalogValidator(): Promise<ValidateFunction> {
 }
 
 /**
- * Throws when the rendered catalog does not satisfy the published schema,
- * naming the member that failed.
+ * Throws when a rendered catalog — the runtime's or the hub's — does not
+ * satisfy the published schema, naming the file and the member that failed.
  *
  * @example
  * await assertCatalogValid(renderArtifacts());
  */
 export async function assertCatalogValid(artifacts: ReadonlyMap<string, string>): Promise<void> {
-  const rendered = artifacts.get(CATALOG_ARTIFACT);
-  if (rendered === undefined) {
-    throw new Error(
-      `No catalog to validate; expected "${CATALOG_ARTIFACT}" among ${[...artifacts.keys()].join(', ')}.`
-    );
-  }
-
   const validate = await compileCatalogValidator();
-  if (validate(JSON.parse(rendered))) return;
+  for (const path of CATALOG_ARTIFACTS) {
+    const rendered = artifacts.get(path);
+    if (rendered === undefined) {
+      throw new Error(
+        `No catalog to validate; expected "${path}" among ${[...artifacts.keys()].join(', ')}.`
+      );
+    }
+    if (validate(JSON.parse(rendered))) continue;
 
-  const failures = (validate.errors ?? [])
-    .map((entry) => `  - ${entry.instancePath || '/'}: ${entry.message}`)
-    .join('\n');
-  throw new Error(
-    `The runtime catalog does not validate against ${CATALOG_SCHEMA_URL}:\n${failures}`
-  );
+    const failures = (validate.errors ?? [])
+      .map((entry) => `  - ${entry.instancePath || '/'}: ${entry.message}`)
+      .join('\n');
+    throw new Error(`${path} does not validate against ${CATALOG_SCHEMA_URL}:\n${failures}`);
+  }
 }

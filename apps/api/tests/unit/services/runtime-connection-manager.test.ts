@@ -1,32 +1,41 @@
 import { afterEach, describe, expect, it, mock, setSystemTime } from 'bun:test';
 import * as realChildProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { type HandlerContext, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import type {
   EnvironmentConnectionState,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+import {
+  RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+  type RuntimeCapabilityManifest,
+  type RuntimeDiscoverResult,
+} from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
+import { RuntimeBinaryNotFoundError } from '../../../src/lib/runtime-paths';
 import type { EnvironmentStateTransition } from '../../../src/modules/environments/application/record-environment-activity';
 import { createRuntimeAuthoritativeAgentDiscovery } from '../../../src/modules/external-agents/application/external-agent-discovery';
 import { createExternalIdentityIsolationRegistry } from '../../../src/modules/external-agents/application/external-identity-isolation';
+import { createHubWorkspaceAuthorizeHandler } from '../../../src/services/runtime-client/hub-workspace-authority';
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   createLocalRuntimeConnector,
   getRuntimeClient,
+  type LocalRuntimeOpenOptions,
+  localLaunchFailure,
   type ManagedRuntimeConnection,
   type RuntimeConnectContext,
   RuntimeConnectionManager,
   type RuntimeEnvironmentConnector,
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { connectTestRuntime } from '../../support/runtime-fixture';
 
@@ -101,6 +110,76 @@ function fakeConnection(
   return {
     client: { manifest } as RuntimeClient,
     close: onClose,
+  };
+}
+
+/** A connection to a build that announces `fingerprint` and serves `runtime.discover`. */
+class DiscoveringConnection implements ManagedRuntimeConnection {
+  discoverCalls = 0;
+  readonly client: RuntimeClient;
+  readonly close = () => undefined;
+
+  constructor(fingerprint: string) {
+    const implementation = {
+      schema: 1,
+      fingerprint,
+      features: {
+        git: true,
+        probing: false,
+        mcp: false,
+        library: false,
+        checkpoints: true,
+        fsRead: false,
+        fsWrite: false,
+        shell: false,
+        update: false,
+        externalAgents: false,
+        terminal: false,
+      },
+    };
+    const discover = (): Promise<RuntimeDiscoverResult> => {
+      this.discoverCalls += 1;
+      return Promise.resolve({
+        ...implementation,
+        methods: ['runtime.discover', 'runtime.health'],
+      });
+    };
+    this.client = {
+      manifest: { ...TEST_MANIFEST, implementation },
+      discoverImplementation: discover,
+    } as unknown as RuntimeClient;
+  }
+}
+
+/**
+ * A connector whose first call stalls indefinitely (released only by the
+ * test, via the returned `release`) and whose every later call resolves
+ * immediately with `fresh` — the shape a "does a stale attempt lose to a
+ * newer one" test needs: attempt A must still be pending when attempt B is
+ * made, and only the test controls when A's handshake finally answers.
+ */
+function stalledThenFreshConnector(fresh: ManagedRuntimeConnection): {
+  connector: RuntimeEnvironmentConnector;
+  signals: AbortSignal[];
+  release: (connection: ManagedRuntimeConnection) => void;
+} {
+  const signals: AbortSignal[] = [];
+  let release: (connection: ManagedRuntimeConnection) => void = () => undefined;
+  let attempts = 0;
+  const connector: RuntimeEnvironmentConnector = (_definition, _onUnavailable, context) => {
+    attempts += 1;
+    signals.push(context.signal);
+    if (attempts === 1) {
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    return Promise.resolve(fresh);
+  };
+  return {
+    connector,
+    signals,
+    release: (connection) => release(connection),
   };
 }
 
@@ -225,6 +304,65 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getStatus('user-1', 'devbox').offlineRuntimeCache).toBeUndefined();
   });
 
+  describe('runtime.discover cache', () => {
+    /** A manager whose every connect hands out the next of `builds`. */
+    function managerOver(builds: readonly DiscoveringConnection[]) {
+      let next = 0;
+      let drop: (() => void) | undefined;
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: {
+          stdio: (_definition, onUnavailable) => {
+            drop = onUnavailable;
+            return Promise.resolve(builds[next++] as DiscoveringConnection);
+          },
+        },
+        discoveryCache: new RuntimeDiscoveryCache(),
+      });
+      const reconnectAfterDrop = async () => {
+        drop?.();
+        await manager.connect('user-1', 'devbox', { force: true });
+      };
+      return { manager, reconnectAfterDrop };
+    }
+
+    it('drops the cached surface when a reconnect announces another build', async () => {
+      const builds = [
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('b'.repeat(64)),
+      ];
+      const { manager, reconnectAfterDrop } = managerOver(builds);
+
+      await manager.connect('user-1', 'devbox');
+      await manager.discoverImplementation('user-1', 'devbox');
+      await reconnectAfterDrop();
+      const sameBuild = await manager.discoverImplementation('user-1', 'devbox');
+      await reconnectAfterDrop();
+      const otherBuild = await manager.discoverImplementation('user-1', 'devbox');
+
+      expect(builds.map((build) => build.discoverCalls)).toEqual([1, 0, 1]);
+      expect(sameBuild?.fingerprint).toBe('a'.repeat(64));
+      expect(otherBuild?.fingerprint).toBe('b'.repeat(64));
+    });
+
+    it('forgets the cached surface when the environment is disconnected deliberately', async () => {
+      const builds = [
+        new DiscoveringConnection('a'.repeat(64)),
+        new DiscoveringConnection('a'.repeat(64)),
+      ];
+      const { manager } = managerOver(builds);
+
+      await manager.connect('user-1', 'devbox');
+      await manager.discoverImplementation('user-1', 'devbox');
+      manager.disconnect('user-1', 'devbox');
+      await manager.connect('user-1', 'devbox', { force: true });
+      await manager.discoverImplementation('user-1', 'devbox');
+
+      expect(builds.map((build) => build.discoverCalls)).toEqual([1, 1]);
+    });
+  });
+
   // #792: the pull is bounded at half an hour, which no proxy or browser holds
   // an idle request through. The attempt keeps running; the request does not.
   describe('connectInteractive', () => {
@@ -331,6 +469,47 @@ describe('RuntimeConnectionManager', () => {
     expect(await manager.getClient('user-1', 'devbox')).toBe(secondClient);
   });
 
+  it('discards a superseded attempt that resolves after its signal was aborted', async () => {
+    // Disconnecting attempt A aborts its context signal, but the connector
+    // below never actually honors that signal — it stays pending and later
+    // resolves for real, exactly as a connector that ignores cancellation
+    // would. Attempt A's handshake is held open by the test — a genuinely
+    // deferred connector, not a timing race — so it can be released only
+    // after attempt B has already published, proving the late arrival is
+    // discarded on its own merits (superseded), not merely assumed to lose
+    // a race it never actually ran.
+    const closedStale: string[] = [];
+    const staleConnection = fakeConnection(() => {
+      closedStale.push('closed');
+    });
+    const fresh = fakeConnection(() => undefined);
+    const { connector, signals, release } = stalledThenFreshConnector(fresh);
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: connector },
+    });
+
+    // Attempt A starts, then the caller gives up on it before it handshakes —
+    // a disconnect, or a second `connect()` call from real code.
+    const staleAttempt = manager.connect('user-1', 'devbox');
+    await Promise.resolve();
+    await Promise.resolve();
+    manager.disconnect('user-1', 'devbox');
+    expect(signals[0]?.aborted).toBe(true);
+
+    // Attempt B starts fresh and completes normally.
+    const freshClient = await manager.connect('user-1', 'devbox', { force: true });
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+
+    // A's handshake finally answers, after B has already published.
+    release(staleConnection);
+    await expect(staleAttempt).rejects.toThrow('Runtime connection was closed.');
+
+    expect(closedStale).toEqual(['closed']);
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    expect(await manager.getClient('user-1', 'devbox')).toBe(freshClient);
+  });
+
   it('maps connector failures to UNAVAILABLE without caching a rejection', async () => {
     let attempts = 0;
     const connector: RuntimeEnvironmentConnector = () => {
@@ -375,6 +554,45 @@ describe('RuntimeConnectionManager', () => {
       state: 'error',
       errorCode: 'UNAVAILABLE',
       sshFailureReason: 'runtime-missing',
+    });
+  });
+
+  it('reports a missing Local binary as its own reason on the card', async () => {
+    const missing = localLaunchFailure(
+      new RuntimeBinaryNotFoundError(['/repo/target/debug/mangostudio-runtime']),
+      true
+    );
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(localDefinition('user-1')),
+      connectors: { 'in-process': () => Promise.reject(missing) },
+    });
+
+    await manager.connect('user-1', 'local').catch(() => undefined);
+
+    expect(missing.message).toContain('cargo build -p mangostudio-runtime --locked');
+    expect(manager.getStatus('user-1', 'local')).toEqual({
+      state: 'error',
+      errorCode: 'UNAVAILABLE',
+      localFailureReason: 'binary-missing',
+    });
+  });
+
+  it('keeps a Local failure that is not a missing binary as it was', () => {
+    const mismatch = new RemoteError(RESERVED_ERROR_CODES.PROTOCOL_MISMATCH, 'old release', {
+      runtimeVersion: '0.0.1',
+    });
+    const handshake = new Error('the runtime did not complete its handshake');
+
+    expect(localLaunchFailure(mismatch, false)).toBe(mismatch);
+    expect(localLaunchFailure(handshake, false)).toMatchObject({
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
+      message: 'the runtime did not complete its handshake',
+      details: {},
+    });
+    // A missing binary keeps the code and details the launch produced.
+    expect(localLaunchFailure(mismatch, true)).toMatchObject({
+      code: RESERVED_ERROR_CODES.PROTOCOL_MISMATCH,
+      details: { runtimeVersion: '0.0.1', localFailureReason: 'binary-missing' },
     });
   });
 
@@ -492,6 +710,88 @@ describe('RuntimeConnectionManager', () => {
 
     expect(attempts).toBe(1);
     expect(manager.getStatus('user-1', 'devbox').errorCode).toBe('PROTOCOL_MISMATCH');
+  });
+
+  describe('a runtime already bound to another environment record', () => {
+    /** Refuses every dial the way `openHubSession` does when `serve` closes 4423. */
+    function boundElsewhereConnector(counter: { attempts: number }): RuntimeEnvironmentConnector {
+      return () => {
+        counter.attempts += 1;
+        return Promise.reject(
+          new RemoteError(
+            RESERVED_ERROR_CODES.UNAVAILABLE,
+            'The session closed before the handshake completed (4423).',
+            { closeCode: RUNTIME_ALREADY_BOUND_CLOSE_CODE }
+          )
+        );
+      };
+    }
+
+    it('reports bound elsewhere and holds lazy retries for the slow window, not the fast backoff', async () => {
+      const counter = { attempts: 0 };
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () =>
+          Promise.resolve(definition('http', { baseUrl: 'http://127.0.0.1:7777' })),
+        connectors: { http: boundElsewhereConnector(counter) },
+      });
+
+      const refusal = await manager.getClient('user-1', 'devbox').catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(RemoteError);
+      expect((refusal as RemoteError).code).toBe(RESERVED_ERROR_CODES.UNAVAILABLE);
+      expect((refusal as RemoteError).message).toContain('already bound to another environment');
+      expect(manager.getStatus('user-1', 'devbox')).toEqual({
+        state: 'error',
+        errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,
+        boundElsewhere: true,
+      });
+
+      // Far past the fast backoff's first step (1s), and still held.
+      advanceSeconds(59);
+      const held = await manager.getClient('user-1', 'devbox').catch((error: unknown) => error);
+      expect((held as Error).message).toContain('next connection attempt is allowed in');
+      expect(counter.attempts).toBe(1);
+    });
+
+    it('never latches: after the slow window it tries again, however often it was refused', async () => {
+      const counter = { attempts: 0 };
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () =>
+          Promise.resolve(definition('http', { baseUrl: 'http://127.0.0.1:7777' })),
+        connectors: { http: boundElsewhereConnector(counter) },
+      });
+
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        await manager.getClient('user-1', 'devbox').catch(() => undefined);
+        advanceSeconds(61);
+      }
+      expect(counter.attempts).toBe(8);
+      expect(manager.getStatus('user-1', 'devbox').boundElsewhere).toBe(true);
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('error');
+    });
+
+    it('drops the bound-elsewhere status once the record connects', async () => {
+      let refuse = true;
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () =>
+          Promise.resolve(definition('http', { baseUrl: 'http://127.0.0.1:7777' })),
+        connectors: {
+          http: () =>
+            refuse
+              ? Promise.reject(
+                  new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'closed', {
+                    closeCode: RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+                  })
+                )
+              : Promise.resolve(fakeConnection(() => undefined)),
+        },
+      });
+
+      await manager.getClient('user-1', 'devbox').catch(() => undefined);
+      refuse = false;
+      await manager.connect('user-1', 'devbox', { force: true });
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+      expect(manager.getStatus('user-1', 'devbox').boundElsewhere).toBeUndefined();
+    });
   });
 
   it('reports a runtime that dies as disconnected and reconnects after the backoff', async () => {
@@ -887,8 +1187,29 @@ describe('RuntimeConnectionManager', () => {
     }
   );
 
+  /**
+   * A Local `open` that answers at once, the way the spawned runtime does: an
+   * attested manifest when the hub claimed `single-user`, none when it
+   * withdrew. Records every call's options so a test can read what the
+   * connector asked for.
+   */
+  function recordingLocalOpen() {
+    const calls: LocalRuntimeOpenOptions[] = [];
+    const open = (options: LocalRuntimeOpenOptions): Promise<ManagedRuntimeConnection> => {
+      calls.push(options);
+      return Promise.resolve(
+        fakeConnection(() => undefined, {
+          ...TEST_MANIFEST,
+          ...attestationFor(options.externalAgentIsolation),
+        })
+      );
+    };
+    return { open, calls };
+  }
+
   it('revokes Local attestation before serving a second MangoStudio user', async () => {
-    const connector = createLocalRuntimeConnector();
+    const opens = recordingLocalOpen();
+    const connector = createLocalRuntimeConnector({ open: opens.open });
     let firstUnavailable = 0;
     let sameOwnerUnavailable = 0;
     await expect(
@@ -928,15 +1249,26 @@ describe('RuntimeConnectionManager', () => {
     );
 
     try {
-      expect(systemProbe.client.manifest.identityIsolation).toBeUndefined();
-      expect(first.client.manifest.identityIsolation).toMatchObject({
-        method: 'single-user-host',
+      expect(opens.calls.map((call) => call.externalAgentIsolation)).toEqual([
+        'withdrawn',
+        'single-user',
+        'single-user',
+        'withdrawn',
+        'withdrawn',
+      ]);
+      expect({
+        systemProbe: systemProbe.identityAttested,
+        first: first.identityAttested,
+        sameOwner: sameOwner.identityAttested,
+        second: second.identityAttested,
+        firstAfterTransition: firstAfterTransition.identityAttested,
+      }).toEqual({
+        systemProbe: undefined,
+        first: true,
+        sameOwner: true,
+        second: false,
+        firstAfterTransition: false,
       });
-      expect(sameOwner.client.manifest.identityIsolation).toEqual(
-        first.client.manifest.identityIsolation
-      );
-      expect(second.client.manifest.identityIsolation).toBeUndefined();
-      expect(firstAfterTransition.client.manifest.identityIsolation).toBeUndefined();
       expect({ firstUnavailable, sameOwnerUnavailable }).toEqual({
         firstUnavailable: 1,
         sameOwnerUnavailable: 1,
@@ -947,6 +1279,29 @@ describe('RuntimeConnectionManager', () => {
       await sameOwner.close();
       await first.close();
       await systemProbe.close();
+    }
+  });
+
+  it('binds every Local open to its user on the Local environment', async () => {
+    const opens = recordingLocalOpen();
+    const connector = createLocalRuntimeConnector({ open: opens.open });
+    const attempt = new AbortController();
+    const probe = await connector(localDefinition('local'), () => undefined, connectContext());
+    const owned = await connector(localDefinition('user-1'), () => undefined, {
+      report: () => undefined,
+      signal: attempt.signal,
+    });
+
+    try {
+      expect(opens.calls.map((call) => call.workspaceBinding)).toEqual([
+        { userId: 'local', environmentId: 'local' },
+        { userId: 'user-1', environmentId: 'local' },
+      ]);
+      // The attempt's own signal, so releasing the attempt reaches the spawn.
+      expect(opens.calls[1]?.signal).toBe(attempt.signal);
+    } finally {
+      await owned.close();
+      await probe.close();
     }
   });
 
@@ -978,20 +1333,8 @@ describe('RuntimeConnectionManager', () => {
         .execute(),
     ]);
 
-    let authorizeWorkspace:
-      | ((canonicalPath: string, signal: AbortSignal) => boolean | Promise<boolean>)
-      | undefined;
-    const connector = createLocalRuntimeConnector({
-      open: (options) => {
-        authorizeWorkspace = options.authorizeWorkspace;
-        return Promise.resolve(
-          fakeConnection(() => undefined, {
-            ...TEST_MANIFEST,
-            ...attestationFor(options.externalAgentIsolation),
-          })
-        );
-      },
-    });
+    const opens = recordingLocalOpen();
+    const connector = createLocalRuntimeConnector({ open: opens.open });
     const connection = await connector(
       localDefinition(owner.id),
       () => undefined,
@@ -999,18 +1342,25 @@ describe('RuntimeConnectionManager', () => {
     );
 
     try {
-      expect(authorizeWorkspace).toBeDefined();
-      const authorize = authorizeWorkspace as NonNullable<typeof authorizeWorkspace>;
-      const signal = new AbortController().signal;
-      expect(await authorize(ownedWorkdir, signal)).toBe(true);
-      expect(await authorize(otherWorkdir, signal)).toBe(false);
-      expect(await authorize(remoteWorkdir, signal)).toBe(false);
-      expect(await authorize('/workspace/missing', signal)).toBe(false);
+      const binding = opens.calls[0]?.workspaceBinding;
+      if (!binding) {
+        throw new Error(`expected one Local open | received: ${opens.calls.length} open(s)`);
+      }
+      // The handler the spawned runtime's `hub.workspace.authorize` reaches.
+      const authorize = createHubWorkspaceAuthorizeHandler(binding);
+      const ask = async (canonicalPath: string, signal = new AbortController().signal) =>
+        (
+          await authorize({ canonicalPath, purpose: 'external-agent' }, {
+            signal,
+          } as HandlerContext)
+        ).authorized;
+      expect(await ask(ownedWorkdir)).toBe(true);
+      expect(await ask(otherWorkdir)).toBe(false);
+      expect(await ask(remoteWorkdir)).toBe(false);
+      expect(await ask('/workspace/missing')).toBe(false);
       const cancelled = new AbortController();
       cancelled.abort(new Error('authorization cancelled'));
-      await expect(authorize(ownedWorkdir, cancelled.signal)).rejects.toThrow(
-        'authorization cancelled'
-      );
+      await expect(ask(ownedWorkdir, cancelled.signal)).rejects.toThrow('authorization cancelled');
     } finally {
       await connection.close();
     }
@@ -1020,7 +1370,6 @@ describe('RuntimeConnectionManager', () => {
     const claims: Array<'single-user' | 'withdrawn'> = [];
     let attempts = 0;
     const connector = createLocalRuntimeConnector({
-      isWorkspaceAuthorized: () => true,
       open: (options) => {
         claims.push(options.externalAgentIsolation);
         attempts += 1;
@@ -1115,7 +1464,6 @@ describe('RuntimeConnectionManager', () => {
     let releaseStuck: ((connection: ManagedRuntimeConnection) => void) | undefined;
     const connector = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
-      isWorkspaceAuthorized: () => true,
       open: () => {
         openCalls += 1;
         if (openCalls > 1) return Promise.resolve(fakeConnection(() => undefined));
@@ -1137,6 +1485,270 @@ describe('RuntimeConnectionManager', () => {
       releaseStuck?.(fakeConnection(() => undefined));
       await (await stuck).close();
       await next.close();
+    }
+  });
+
+  /**
+   * A Local `open` whose calls the test settles by hand and in any order — the
+   * shape a pending-claim race needs, because which attempt finishes first is
+   * the whole question. Each call records the isolation claim it was given.
+   */
+  function scriptedLocalOpen() {
+    const calls: Array<{
+      readonly isolation: 'single-user' | 'withdrawn';
+      readonly succeed: (close?: () => void | Promise<void>) => void;
+      readonly succeedWith: (connection: ManagedRuntimeConnection) => void;
+      readonly fail: (error: Error) => void;
+    }> = [];
+    const open = (options: {
+      readonly externalAgentIsolation: 'single-user' | 'withdrawn';
+    }): Promise<ManagedRuntimeConnection> => {
+      const opened = Promise.withResolvers<ManagedRuntimeConnection>();
+      const isolation = options.externalAgentIsolation;
+      calls.push({
+        isolation,
+        succeed: (close = () => undefined) => {
+          opened.resolve(fakeConnection(close, { ...TEST_MANIFEST, ...attestationFor(isolation) }));
+        },
+        succeedWith: (connection) => {
+          opened.resolve(connection);
+        },
+        fail: (error) => {
+          opened.reject(error);
+        },
+      });
+      return opened.promise;
+    };
+    const call = (index: number) => {
+      const found = calls[index];
+      if (!found) {
+        throw new Error(`expected Local open call #${index} | received: ${calls.length} call(s)`);
+      }
+      return found;
+    };
+    return { open, call, claims: () => calls.map((entry) => entry.isolation) };
+  }
+
+  /** Lets the chain deadline lapse so the next attempt starts beside a stuck one. */
+  function outlastChainDeadline(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 30));
+  }
+
+  // #925: before claims were reserved ahead of `open`, a second user arriving
+  // while the first user's open was still pending read the owner binding as
+  // empty, and both users ended up attested against one credential home.
+  it('withholds attestation from a second user while the first Local open is pending', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      open: opens.open,
+    });
+
+    const stuck = connector(localDefinition('user-1'), () => undefined, connectContext());
+    const stuckOutcome = stuck.catch((error: unknown) => error);
+    await outlastChainDeadline();
+    const second = connector(localDefinition('user-2'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(1).succeed();
+    const secondConnection = await second;
+
+    let lateCloseSettled = false;
+    opens.call(0).succeed(async () => {
+      await flushMicrotasks();
+      lateCloseSettled = true;
+    });
+    const late = await stuckOutcome;
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'withdrawn']);
+      expect(secondConnection.identityAttested).toBe(false);
+      expect(late).toMatchObject({
+        code: RESERVED_ERROR_CODES.UNAVAILABLE,
+        message: expect.stringContaining('withdrawn while it was connecting'),
+      });
+      // Awaited, not fired and forgotten: the rejection is the cleanup's end.
+      expect({ lateCloseSettled }).toEqual({ lateCloseSettled: true });
+    } finally {
+      await secondConnection.close();
+    }
+  });
+
+  it('surfaces the close failure of a withdrawn late open instead of the withdrawal', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      open: opens.open,
+    });
+
+    const stuck = connector(localDefinition('user-1'), () => undefined, connectContext());
+    const stuckOutcome = stuck.catch((error: unknown) => error);
+    await outlastChainDeadline();
+    const second = connector(localDefinition('user-2'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(1).succeed();
+    const secondConnection = await second;
+    opens.call(0).succeed(() => Promise.reject(new Error('late close failed')));
+
+    try {
+      // The caller learns the attested connection may still be alive, rather
+      // than a withdrawal message that implies it is gone.
+      expect(await stuckOutcome).toMatchObject({ message: 'late close failed' });
+    } finally {
+      await secondConnection.close();
+    }
+  });
+
+  it('keeps a pending same-user claim when an older attempt for that user fails late', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      open: opens.open,
+    });
+
+    const older = connector(localDefinition('user-1'), () => undefined, connectContext());
+    const olderOutcome = older.catch((error: unknown) => error);
+    await outlastChainDeadline();
+    const newer = connector(localDefinition('user-1'), () => undefined, connectContext());
+    await flushMicrotasks();
+    // The older attempt settling must release only its own generation. Were
+    // claims keyed by user, this would free user-1's newer, still-open claim.
+    opens.call(0).fail(new Error('older handshake failed'));
+    expect(await olderOutcome).toMatchObject({ message: 'older handshake failed' });
+    await outlastChainDeadline();
+    const other = connector(localDefinition('user-2'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(2).succeed();
+    const otherConnection = await other;
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'single-user', 'withdrawn']);
+      expect(otherConnection.identityAttested).toBe(false);
+    } finally {
+      opens.call(1).succeed();
+      await (await newer.catch(() => ({ close: () => undefined }))).close();
+      await otherConnection.close();
+    }
+  });
+
+  it('admits a late same-user success without disturbing the newer attested claim', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      open: opens.open,
+    });
+
+    const older = connector(localDefinition('user-1'), () => undefined, connectContext());
+    await outlastChainDeadline();
+    const newer = connector(localDefinition('user-1'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(1).succeed();
+    const newerConnection = await newer;
+    opens.call(0).succeed();
+    const olderConnection = await older;
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'single-user']);
+      expect({
+        older: olderConnection.identityAttested,
+        newer: newerConnection.identityAttested,
+      }).toEqual({ older: true, newer: true });
+    } finally {
+      await olderConnection.close();
+      await newerConnection.close();
+    }
+  });
+
+  it('releases a pending claim when its open fails after the chain deadline', async () => {
+    const opens = scriptedLocalOpen();
+    const connector = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      open: opens.open,
+    });
+
+    const failed = connector(localDefinition('user-1'), () => undefined, connectContext());
+    const failedOutcome = failed.catch((error: unknown) => error);
+    await outlastChainDeadline();
+    opens.call(0).fail(new Error('handshake failed after the deadline'));
+    expect(await failedOutcome).toMatchObject({ message: 'handshake failed after the deadline' });
+    const next = connector(localDefinition('user-2'), () => undefined, connectContext());
+    await flushMicrotasks();
+    opens.call(1).succeed();
+    const nextConnection = await next;
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'single-user']);
+      expect(nextConnection.identityAttested).toBe(true);
+    } finally {
+      await nextConnection.close();
+    }
+  });
+
+  it('keeps withdrawn Local attestation withdrawn through the manager and a manifest refresh', async () => {
+    const opens = scriptedLocalOpen();
+    const local = createLocalRuntimeConnector({
+      chainDeadlineMs: 25,
+      open: opens.open,
+    });
+    // The connector's own outcomes, which the manager hides once it has
+    // timed an attempt out and moved on.
+    const attempts: Array<Promise<unknown>> = [];
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: (userId) => Promise.resolve(localDefinition(userId)),
+      connectors: {
+        'in-process': (definition, onUnavailable, context) => {
+          const attempt = local(definition, onUnavailable, context);
+          attempts.push(attempt.catch((error: unknown) => error));
+          return attempt;
+        },
+      },
+      connectDeadlinesMs: { 'in-process': 25 },
+    });
+
+    const wedged = manager.getClient('user-1', 'local').catch((error: unknown) => error);
+    expect(await wedged).toMatchObject({ message: expect.stringContaining('timed out') });
+    const second = manager.getClient('user-2', 'local');
+    await flushMicrotasks();
+    // A real hub session, so the claim the connector chose is the one the hub
+    // enforces. The peer repeats an attestation in its hello and on health, as
+    // a Local runtime asked to attest would; the withdrawal must outrank both.
+    const runtime = await connectTestRuntime({
+      manifest: { ...TEST_MANIFEST, identityIsolation: ATTESTED },
+      externalAgentIsolation: opens.call(1).isolation,
+      handlers: {
+        'runtime.health': () => ({
+          ...HEALTH_REPORT,
+          externalAgents: {
+            targets: [],
+            identityIsolation: ATTESTED,
+            liveSessionCount: 0,
+            liveSessions: [],
+          },
+        }),
+      },
+    });
+    opens.call(1).succeedWith({ client: runtime.client, close: () => runtime.close() });
+    await second;
+    let lateCloses = 0;
+    opens.call(0).succeed(() => {
+      lateCloses += 1;
+    });
+    await flushMicrotasks();
+    const refreshed = await manager.refreshManifest('user-2', 'local');
+
+    try {
+      expect(opens.claims()).toEqual(['single-user', 'withdrawn']);
+      expect({
+        user1: manager.isIdentityAttested('user-1', 'local'),
+        user2: manager.isIdentityAttested('user-2', 'local'),
+      }).toEqual({ user1: false, user2: false });
+      expect(refreshed.manifest?.identityIsolation).toBeUndefined();
+      expect(await attempts[0]).toMatchObject({
+        message: expect.stringContaining('withdrawn while it was connecting'),
+      });
+      expect(lateCloses).toBe(1);
+    } finally {
+      manager.disconnect('user-2', 'local');
+      await runtime.close();
     }
   });
 
@@ -1168,8 +1780,11 @@ describe('RuntimeConnectionManager', () => {
     await flushMicrotasks();
 
     expect(probe.calls()).toBe(1);
-    // The handshake said mcp was refused; the health report grants everything.
-    expect(manager.getStatus('user-1', 'devbox').manifest?.features.mcp).toBe(true);
+    // The health report grants everything, but the handshake said this build
+    // does not implement mcp. A refresh cannot upgrade that refusal.
+    expect(manager.getStatus('user-1', 'devbox').manifest?.features.mcp).toBe(false);
+    // This legacy handshake omitted newer optional fields, so the refreshed
+    // manifest still changes when health fills those backward-compatible keys.
     expect(publishes).toBe(1);
   });
 

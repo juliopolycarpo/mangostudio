@@ -3,8 +3,10 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { LazyTerminalView } from './LazyTerminalView';
+import { openFailureMessage } from './open-failure-message';
 import { SessionTabs } from './SessionTabs';
 import {
   terminalKeys,
@@ -36,6 +38,7 @@ export interface TerminalRailPanelProps {
  */
 export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelProps) {
   const { t } = useI18n();
+  const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
@@ -68,9 +71,12 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
     if (!environmentId || unavailable) return;
     openMutation.mutate(
       { environmentId, chatId },
-      { onSuccess: (session) => setActiveId(session.id) }
+      {
+        onSuccess: (session) => setActiveId(session.id),
+        onError: (error) => toast(openFailureMessage(t, error), 'error'),
+      }
     );
-  }, [environmentId, chatId, unavailable]);
+  }, [environmentId, chatId, unavailable, t, toast]);
 
   // The command palette's "New terminal session" row: fires whether or not
   // this panel happened to be mounted yet. Subscribing is deferred until the

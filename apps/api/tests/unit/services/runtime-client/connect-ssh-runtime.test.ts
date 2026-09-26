@@ -14,6 +14,7 @@ describe('connectSshRuntime', () => {
     // — which sends the user to the server's authorized_keys over a path typo.
     const error = await connectSshRuntime(
       {
+        userId: 'test-user',
         id: 'build-01',
         config: { host: 'build-01.internal', identityFile: '/no/such/key' },
       },
@@ -35,6 +36,7 @@ describe('connectSshRuntime', () => {
     try {
       const error = await connectSshRuntime(
         {
+          userId: 'test-user',
           id: 'build-01',
           config: { host: 'ssh-target.invalid', identityFile },
         },
@@ -52,6 +54,7 @@ describe('connectSshRuntime', () => {
   it('still names a missing home-relative identity file', async () => {
     const error = await connectSshRuntime(
       {
+        userId: 'test-user',
         id: 'build-01',
         config: {
           host: 'build-01.internal',
@@ -68,7 +71,7 @@ describe('connectSshRuntime', () => {
 
   it('refuses a config its schema would not accept', async () => {
     const error = await connectSshRuntime(
-      { id: 'build-01', config: { host: '-oProxyCommand=id' } },
+      { userId: 'test-user', id: 'build-01', config: { host: '-oProxyCommand=id' } },
       () => undefined
     ).catch((caught) => caught);
 
@@ -87,6 +90,7 @@ describe('connectSshRuntime', () => {
     try {
       const error = await connectSshRuntime(
         {
+          userId: 'test-user',
           id: 'build-01',
           config: { host: 'ssh-target.invalid', identityFile },
         },
@@ -98,6 +102,25 @@ describe('connectSshRuntime', () => {
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
+  }, 30_000);
+  it('refuses to spawn ssh once the connect has been cancelled', async () => {
+    // The manager aborts the attempt's signal on a disconnect. A launch that
+    // ignored it would still start `ssh`, wait out the key exchange and the
+    // far process start, and only then be discarded (#1052). An already-aborted
+    // signal has to fail before anything is spawned, so no host is contacted.
+    const controller = new AbortController();
+    controller.abort();
+
+    const error = await connectSshRuntime(
+      { userId: 'test-user', id: 'build-01', config: { host: '127.0.0.1', port: 9 } },
+      () => undefined,
+      { signal: controller.signal }
+    ).catch((caught) => caught);
+
+    expect(
+      error.code,
+      `expected code: CANCELLED | received: ${error.code} (${error.message})`
+    ).toBe('CANCELLED');
   }, 30_000);
 });
 
