@@ -67,8 +67,8 @@ export async function reconcileExternalTurns(
     // `isGenerating`; a crash in that window leaves a message that says it
     // finished and renders as still running. Clear the flag, keep the reason
     // the turn actually ended for.
-    const attempts = await listAttemptsForMessage(row.id, db);
     if (turnPart.status !== 'terminal') {
+      const attempts = await listAttemptsForMessage(row.id, db);
       turnPart.status = 'terminal';
       turnPart.terminalReason = reasonFromAttempts(input.reason, attempts);
       turnPart.updatedAt = at;
