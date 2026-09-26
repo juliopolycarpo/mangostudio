@@ -30,11 +30,16 @@ pub(super) fn ps_quote(text: &str) -> String {
 /// Records the task's live runner processes in `$runners` before the task is
 /// stopped: `powershell.exe` processes whose command line carries the task
 /// action's own arguments, which embed this home's encoded runner script.
+///
+/// `$runnersMissed` is set when the task was running but no runner matched,
+/// so nothing identifies the runtime to end; [`verb_script`] then fails after
+/// the stop instead of reporting a success it cannot check.
 fn capture_runners(name: &str) -> String {
     format!(
         "$task = Get-ScheduledTask -TaskPath '\\' -TaskName {name} -ErrorAction SilentlyContinue\n\
          $runnerArguments = if ($null -eq $task) {{ '' }} else {{ [string]@($task.Actions)[0].Arguments }}\n\
-         $runners = @(if ($runnerArguments) {{ Get-CimInstance Win32_Process -Filter \"Name = 'powershell.exe'\" | Where-Object {{ $_.CommandLine -and $_.CommandLine.Contains($runnerArguments) }} }})"
+         $runners = @(if ($runnerArguments) {{ Get-CimInstance Win32_Process -Filter \"Name = 'powershell.exe'\" | Where-Object {{ $_.CommandLine -and $_.CommandLine.Contains($runnerArguments) }} }})\n\
+         $runnersMissed = ($null -ne $task) -and ([string]$task.State -eq 'Running') -and ($runners.Count -eq 0)"
     )
 }
 
@@ -100,7 +105,8 @@ pub(super) fn verb_script(action: ServiceAction, wait: Duration) -> String {
          Stop-ScheduledTask -TaskPath '\\' -TaskName {name} -ErrorAction SilentlyContinue\n\
          while (((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') -and ((Get-Date) -lt $deadline)) {{ Start-Sleep -Milliseconds 200 }}\n\
          if ((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') {{ throw 'Scheduled Task still running after {wait_ms} ms' }}\n\
-         {terminate}",
+         {terminate}\n\
+         if ($runnersMissed) {{ throw 'Scheduled Task was running but no runner process matched its action, so its runtime may still be running' }}",
         capture = capture_runners(&name),
         terminate = terminate_runner_tree(),
     );
@@ -146,7 +152,10 @@ mod tests {
             let deadline = position(&script, "$deadline = (Get-Date).AddMilliseconds(20000)");
             let capture = position(&script, "$runners = @(");
             let stop = position(&script, "Stop-ScheduledTask");
-            let wait = position(&script, ".State -eq 'Running') -and");
+            let wait = position(
+                &script,
+                "while (((Get-ScheduledTask -TaskPath '\\' -TaskName 'MangoStudio Runtime').State",
+            );
             let kill = position(&script, "Stop-Process -Id $id -Force");
             let survivors = position(&script, "still running after the task stopped");
             assert!(
@@ -158,6 +167,35 @@ mod tests {
                 "expected {action:?} order: deadline < capture < stop < wait < kill < survivor \
                  check | received positions {deadline}, {capture}, {stop}, {wait}, {kill}, \
                  {survivors}"
+            );
+        }
+    }
+
+    /// A running task whose runner the capture cannot find must fail the verb
+    /// after the stop, not report success with the runtime possibly alive.
+    #[test]
+    fn a_running_task_with_no_matching_runner_fails_the_verb() {
+        for action in [
+            ServiceAction::Stop,
+            ServiceAction::Restart,
+            ServiceAction::Uninstall,
+        ] {
+            let script = verb_script(action, Duration::from_secs(5));
+            let missed = position(
+                &script,
+                "$runnersMissed = ($null -ne $task) -and ([string]$task.State -eq 'Running') -and ($runners.Count -eq 0)",
+            );
+            let stop = position(&script, "Stop-ScheduledTask");
+            let refusal = position(&script, "if ($runnersMissed) { throw");
+            let after = ["Start-ScheduledTask", "Unregister-ScheduledTask"]
+                .iter()
+                .filter_map(|verb| script.find(verb))
+                .min()
+                .unwrap_or(script.len());
+            assert!(
+                missed < stop && stop < refusal && refusal < after,
+                "expected {action:?} order: record miss < stop < refuse < start/unregister | \
+                 received positions {missed}, {stop}, {refusal}, {after}"
             );
         }
     }
