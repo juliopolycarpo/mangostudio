@@ -9,6 +9,7 @@ import {
   canRunOnHost,
   cargoRuntimeBuildCommand,
   cargoRuntimeOutputPath,
+  cargoTargetDir,
   GLIBC_FLOOR,
   hostPlatformId,
   prebuiltRuntimePath,
@@ -77,6 +78,21 @@ describe('runtime target mapping', () => {
 
   test('glibc floor matches what the Bun hub already requires', () => {
     expect(GLIBC_FLOOR).toBe('2.17');
+  });
+
+  test('reads CARGO_TARGET_DIR from the checkout root, and <root>/target without it', () => {
+    const received = {
+      unset: cargoTargetDir('/repo', {}),
+      blank: cargoTargetDir('/repo', { CARGO_TARGET_DIR: ' ' }),
+      relative: cargoTargetDir('/repo', { CARGO_TARGET_DIR: join('moved', 'target') }),
+      absolute: cargoTargetDir('/repo', { CARGO_TARGET_DIR: '/shared/target' }),
+    };
+    expect(received).toEqual({
+      unset: join('/repo', 'target'),
+      blank: join('/repo', 'target'),
+      relative: join('/repo', 'moved', 'target'),
+      absolute: '/shared/target',
+    });
   });
 
   test('finds cargo output under the unsuffixed triple, with .exe on Windows', () => {

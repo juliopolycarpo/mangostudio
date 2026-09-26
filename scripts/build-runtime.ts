@@ -19,6 +19,7 @@ import { resolveReleaseVersion } from './lib/release-version';
 import {
   cargoRuntimeBuildCommand,
   cargoRuntimeOutputPath,
+  cargoTargetDir,
   hostPlatformId,
   prebuiltRuntimePath,
   RUNTIME_RELEASE_VERSION_ENV,
@@ -65,8 +66,7 @@ async function buildOne(
     fatal(`cargo exited ${result.exitCode} building the ${target.arch} runtime.`);
   }
 
-  const targetDir = process.env.CARGO_TARGET_DIR ?? join(ROOT_DIR, 'target');
-  const built = cargoRuntimeOutputPath(targetDir, target);
+  const built = cargoRuntimeOutputPath(cargoTargetDir(ROOT_DIR), target);
   const staged = prebuiltRuntimePath(context.outDir, target);
   mkdirSync(dirname(staged), { recursive: true });
   copyFileSync(built, staged);

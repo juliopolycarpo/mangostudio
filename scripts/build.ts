@@ -30,6 +30,7 @@ import {
 } from './lib/runner';
 import {
   cargoRuntimeOutputPath,
+  cargoTargetDir,
   hostPlatformId,
   RUNTIME_RELEASE_VERSION_ENV,
   type RuntimeSource,
@@ -217,7 +218,7 @@ async function stageRuntime(
   const from =
     source.kind === 'prebuilt'
       ? source.path
-      : cargoRuntimeOutputPath(process.env.CARGO_TARGET_DIR ?? join(ROOT_DIR, 'target'), target);
+      : cargoRuntimeOutputPath(cargoTargetDir(ROOT_DIR), target);
   copyFileSync(from, runtimePath);
   if (process.platform !== 'win32') chmodSync(runtimePath, 0o755);
 

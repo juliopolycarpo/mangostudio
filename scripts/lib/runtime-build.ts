@@ -5,7 +5,7 @@
 // legs run `scripts/build-runtime.ts` with `bun --no-install`.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 import {
   compareDottedVersions,
@@ -161,6 +161,24 @@ export function cargoRuntimeBuildCommand(
     '--target',
     target,
   ];
+}
+
+/**
+ * The directory `cargo build` run from `rootDir` writes to: `CARGO_TARGET_DIR`
+ * when it is set (a relative one taken from `rootDir`), otherwise
+ * `<rootDir>/target`. The hub resolves a source checkout's build the same way
+ * (`workspaceCargoTargetDir`), so a moved target directory is found by both.
+ *
+ * @example
+ * cargoTargetDir('/repo', { CARGO_TARGET_DIR: 'out' }); // → '/repo/out'
+ */
+export function cargoTargetDir(
+  rootDir: string,
+  env: Readonly<Record<string, string | undefined>> = process.env
+): string {
+  const moved = env.CARGO_TARGET_DIR?.trim();
+  if (!moved) return join(rootDir, 'target');
+  return isAbsolute(moved) ? moved : join(rootDir, moved);
 }
 
 /**
