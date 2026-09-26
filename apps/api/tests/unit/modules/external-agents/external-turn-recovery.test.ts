@@ -181,7 +181,6 @@ describe('external turn recovery', () => {
           sessionId: 'session-1',
           clientMessageId: 'client-1',
           inputFingerprint: 'sha256:0',
-          connectionRevision: 1,
           createdAt: 1,
           updatedAt: 1,
         },

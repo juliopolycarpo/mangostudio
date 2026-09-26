@@ -548,8 +548,6 @@ interface ExternalTurnAttemptsTable {
   /** sha256 of the exact serialized params sent; the params are never stored. */
   inputFingerprint: string;
   state: ExternalTurnAttemptState;
-  /** The runtime connection the attempt was sent on. */
-  connectionRevision: number;
   nativeTurnId: string | null;
   terminalReason: string | null;
   createdAt: number;

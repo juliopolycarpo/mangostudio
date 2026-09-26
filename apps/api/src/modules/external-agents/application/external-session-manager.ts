@@ -167,11 +167,6 @@ export interface ExternalSessionHandle {
   subscribe(consumer: ExternalSessionConsumer): () => void;
   beginTurn(nativeTurnId: string): void;
   endTurn(nativeTurnId: string): void;
-  /**
-   * The runtime connection this session lives on. Two handles with the same
-   * revision talk to the same connection, and so to the same receipts.
-   */
-  readonly connectionRevision: number;
   /** False once the session was torn down — its connection dropped, or it was reaped. */
   isLive(): boolean;
   /**
@@ -294,23 +289,6 @@ interface SessionRecord {
   closing: boolean;
 }
 
-/**
- * A process-local number per runtime connection. Every connection is its own
- * `RuntimeClient`, so the client's identity is the connection's.
- */
-const connectionRevisions = new WeakMap<RuntimeClient, number>();
-let nextConnectionRevision = 0;
-
-function connectionRevisionOf(client: RuntimeClient): number {
-  let revision = connectionRevisions.get(client);
-  if (revision === undefined) {
-    nextConnectionRevision += 1;
-    revision = nextConnectionRevision;
-    connectionRevisions.set(client, revision);
-  }
-  return revision;
-}
-
 function sameBinding(left: ExternalSessionBinding, right: ExternalSessionBinding): boolean {
   return (
     left.userId === right.userId &&
@@ -403,7 +381,6 @@ export function createExternalSessionManager(
           if (record.consumer === consumer) record.consumer = undefined;
         };
       },
-      connectionRevision: connectionRevisionOf(record.client),
       isLive() {
         return !record.closing && sessions.get(record.binding.chatId) === record;
       },

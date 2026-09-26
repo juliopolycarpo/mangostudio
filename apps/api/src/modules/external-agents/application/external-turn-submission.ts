@@ -198,7 +198,6 @@ async function runAttempt(
 ): Promise<AttemptResult> {
   const params = handle.turnParams(input.turn);
   const attemptId = input.newId();
-  const revision = handle.connectionRevision;
   try {
     await insertAttempt(
       {
@@ -210,7 +209,6 @@ async function runAttempt(
         sessionId: params.sessionId,
         clientMessageId: params.clientMessageId,
         inputFingerprint: fingerprintTurnParams(params),
-        connectionRevision: revision,
         createdAt: input.now(),
         updatedAt: input.now(),
       },
