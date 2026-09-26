@@ -52,6 +52,9 @@ export const QUALIFICATION_PATHS = [
   'bun.lock',
   '.bun-version',
   'patches/**',
+  // The hub's runtime client speaks the TypeScript protocol package, so a
+  // protocol-only change still has to meet the real binary.
+  'packages/protocol/**',
   'scripts/lib/rust-lanes.ts',
   'scripts/ci/rust-lanes.ts',
 ] as const;

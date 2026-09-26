@@ -89,6 +89,7 @@ describe('classifyChangedPaths', () => {
     ['apps/api/tests/support/rust-runtime-binary.ts', false, true],
     ['apps/shared/src/i18n/en.ts', false, true],
     ['scripts/lib/rust-lanes.ts', false, true],
+    ['packages/protocol/src/session.ts', false, true],
     ['apps/frontend/src/main.tsx', false, false],
     ['docs/reference/releasing.md', false, false],
   ] as const)('%s -> rust=%p qualification=%p', (path, rust, qualification) => {

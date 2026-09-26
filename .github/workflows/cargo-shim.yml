@@ -43,6 +43,7 @@ on:
       - "bun.lock"
       - ".bun-version"
       - "patches/**"
+      - "packages/protocol/**"
       - "scripts/lib/rust-lanes.ts"
       - "scripts/ci/rust-lanes.ts"
   workflow_dispatch:
