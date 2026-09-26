@@ -1061,11 +1061,24 @@ fn published_write_uncertain_error(path: &Path, cause: std::io::Error) -> Remote
     .with_detail("pathsMayHaveChanged", true)
 }
 
+/// Moves `from` to `to` without replacing an existing destination and returns
+/// the SHA-256 of the published destination.
+///
+/// The hash is the one the move itself verified: the destination is checked to
+/// be the moved object (same identity after a rename, or the verified copy
+/// across devices) holding exactly the bytes captured from the source before
+/// the move, so callers need not read the destination again.
+///
+/// # Example
+///
+/// ```ignore
+/// let committed_hash = move_no_overwrite(&policy, &from, &to)?;
+/// ```
 pub(super) fn move_no_overwrite(
     policy: &CompiledPolicy,
     from: &Path,
     to: &Path,
-) -> Result<(), RemoteError> {
+) -> Result<String, RemoteError> {
     move_no_overwrite_bound_with_hooks(policy, from, to, || {}, || {})
 }
 
@@ -1075,7 +1088,7 @@ fn move_no_overwrite_bound_with_hooks(
     to: &Path,
     before_commit: impl FnOnce(),
     after_commit: impl FnOnce(),
-) -> Result<(), RemoteError> {
+) -> Result<String, RemoteError> {
     let from_parent = capability::verified_parent(policy, from, false)?;
     let to_parent = capability::verified_parent(policy, to, true)?;
     let mut source = inspect_move_source(policy, &from_parent, from)?;
@@ -1083,20 +1096,19 @@ fn move_no_overwrite_bound_with_hooks(
     match rename_no_replace(&from_parent, &to_parent, &source.file) {
         Ok(()) => {
             after_commit();
-            let retained_hash = source
-                .file
-                .rewind()
-                .map_err(io_error)
-                .and_then(|()| hash_open_file(&mut source.file));
-            let verification = match retained_hash {
-                Ok(_) => verify_moved_destination(&to_parent, &source.hash, source.identity),
-                Err(_) => MoveVerification::Uncertain,
-            };
-            match verification {
-                MoveVerification::Matches => Ok(()),
-                MoveVerification::OwnedMismatch => {
-                    rollback_verified_move(&from_parent, &to_parent, &source.file, from, to)
-                }
+            // The renamed object is the retained source itself, so verifying the
+            // destination's identity and bytes against the pre-move capture is
+            // the whole check; hashing the retained descriptor again would read
+            // the same inode a second time.
+            match verify_moved_destination(&to_parent, &source.hash, source.identity) {
+                MoveVerification::Matches => Ok(source.hash),
+                MoveVerification::OwnedMismatch => Err(rollback_verified_move(
+                    &from_parent,
+                    &to_parent,
+                    &source.file,
+                    from,
+                    to,
+                )),
                 MoveVerification::Uncertain => Err(move_partial_error(from, to)),
             }
         }
@@ -1105,6 +1117,7 @@ fn move_no_overwrite_bound_with_hooks(
         {
             let mut hooks = NoopMoveCopyHooks;
             copy_move_no_overwrite(&from_parent, &to_parent, &mut source, from, to, &mut hooks)
+                .map(|()| source.hash)
         }
         Err(capability::ParentOperationError::Io(error))
             if error.kind() == std::io::ErrorKind::AlreadyExists =>
@@ -2034,30 +2047,33 @@ fn verify_moved_destination(
     }
 }
 
+/// Reports a moved object whose bytes changed during verification, moving it
+/// back first where the platform can bind the rename to the retained handle.
+/// The move never counts as successful, so this always yields the error.
 fn rollback_verified_move(
     source: &VerifiedParent,
     destination: &VerifiedParent,
     moved: &File,
     from: &Path,
     to: &Path,
-) -> Result<(), RemoteError> {
+) -> RemoteError {
     #[cfg(not(windows))]
     {
         // POSIX rename binds its source by name, not by `moved`. A concurrent
         // replacement after verification could otherwise be relocated into
         // `from`. Leave both names untouched and report the partial state.
         let _ = (source, destination, moved);
-        Err(move_partial_error(from, to))
+        move_partial_error(from, to)
     }
     #[cfg(windows)]
     match rename_no_replace(destination, source, moved) {
-        Ok(()) => Err(path_error(format!(
+        Ok(()) => path_error(format!(
             "Move from \"{}\" to \"{}\" changed during verification; the verified destination was moved back. Inspect the source before retrying.",
             from.display(),
             to.display()
         ))
-        .with_detail("pathsMayHaveChanged", true)),
-        Err(_) => Err(move_partial_error(from, to)),
+        .with_detail("pathsMayHaveChanged", true),
+        Err(_) => move_partial_error(from, to),
     }
 }
 
@@ -2974,9 +2990,10 @@ mod tests {
         }
         .compile()
         .unwrap();
-        move_no_overwrite(&policy, &from, &to).unwrap();
+        let committed_hash = move_no_overwrite(&policy, &from, &to).unwrap();
         assert!(!from.exists());
         assert_eq!(fs::read(&to).unwrap(), b"cross-device bytes");
+        assert_eq!(committed_hash, sha256_hex(b"cross-device bytes"));
         assert_eq!(
             fs::metadata(&to).unwrap().permissions().mode() & 0o777,
             0o640
@@ -3903,10 +3920,15 @@ mod tests {
         .compile()
         .unwrap();
 
-        move_no_overwrite(&policy, &source, &destination).unwrap();
+        let committed_hash = move_no_overwrite(&policy, &source, &destination).unwrap();
 
         assert!(!source.exists());
         assert_eq!(std::fs::read(&destination).unwrap(), b"content");
+        assert!(
+            committed_hash == sha256_hex(b"content"),
+            "expected the verified destination hash: {} | received: {committed_hash}",
+            sha256_hex(b"content")
+        );
     }
 
     #[test]

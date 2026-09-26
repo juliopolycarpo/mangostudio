@@ -48,13 +48,13 @@ pub(super) struct Service {
 }
 
 pub(super) trait MoveIo: Send + Sync {
+    /// Moves without replacing and returns the destination's verified hash.
     fn move_no_overwrite(
         &self,
         policy: &CompiledPolicy,
         from: &Path,
         to: &Path,
-    ) -> Result<(), RemoteError>;
-    fn hash_file(&self, policy: &CompiledPolicy, path: &Path) -> Result<String, RemoteError>;
+    ) -> Result<String, RemoteError>;
 }
 
 pub(super) struct NativeMoveIo;
@@ -65,12 +65,8 @@ impl MoveIo for NativeMoveIo {
         policy: &CompiledPolicy,
         from: &Path,
         to: &Path,
-    ) -> Result<(), RemoteError> {
+    ) -> Result<String, RemoteError> {
         io::move_no_overwrite(policy, from, to)
-    }
-
-    fn hash_file(&self, policy: &CompiledPolicy, path: &Path) -> Result<String, RemoteError> {
-        io::hash_file(policy, path)
     }
 }
 
@@ -701,21 +697,11 @@ impl Service {
                 &[&params.resolved_from, &params.resolved_to],
                 &cancel,
             )?;
-            self.move_io
-                .move_no_overwrite(&policy, &params.resolved_from, &params.resolved_to)?;
-            let committed_hash = match self.move_io.hash_file(&policy, &params.resolved_to) {
-                Ok(hash) => hash,
-                Err(cause) => {
-                    let mut ledger = lock(&self.state.ledger);
-                    ledger.forget(&params.mutation.chat_id, &params.resolved_from);
-                    ledger.forget(&params.mutation.chat_id, &params.resolved_to);
-                    return Err(committed_move_error(
-                        &params.resolved_from,
-                        &params.resolved_to,
-                        cause,
-                    ));
-                }
-            };
+            let committed_hash = self.move_io.move_no_overwrite(
+                &policy,
+                &params.resolved_from,
+                &params.resolved_to,
+            )?;
             let mut ledger = lock(&self.state.ledger);
             if committed_hash == expected_hash {
                 ledger.rekey(
@@ -945,16 +931,6 @@ where
         .with_blocking_locks(paths, &cancel, work)
         .await
         .map_err(lock_error)?
-}
-
-fn committed_move_error(from: &Path, to: &Path, cause: RemoteError) -> RemoteError {
-    path_error(format!(
-        "Move committed, but the destination hash could not be verified. Inspect \"{}\" and \"{}\" before retrying. Cause: {}",
-        from.display(),
-        to.display(),
-        cause.message
-    ))
-    .with_detail("changedPaths", json!([from, to]))
 }
 
 /// Validates an `fs.replace-range` pair against the file's line count with the
@@ -1244,33 +1220,9 @@ mod tests {
             policy: &CompiledPolicy,
             from: &Path,
             to: &Path,
-        ) -> Result<(), RemoteError> {
+        ) -> Result<String, RemoteError> {
             std::fs::write(from, &self.replacement).map_err(io::io_error)?;
             io::move_no_overwrite(policy, from, to)
-        }
-
-        fn hash_file(&self, policy: &CompiledPolicy, path: &Path) -> Result<String, RemoteError> {
-            io::hash_file(policy, path)
-        }
-    }
-
-    struct FailingHashMoveIo;
-
-    impl MoveIo for FailingHashMoveIo {
-        fn move_no_overwrite(
-            &self,
-            policy: &CompiledPolicy,
-            from: &Path,
-            to: &Path,
-        ) -> Result<(), RemoteError> {
-            io::move_no_overwrite(policy, from, to)
-        }
-
-        fn hash_file(&self, _: &CompiledPolicy, path: &Path) -> Result<String, RemoteError> {
-            Err(path_error(format!(
-                "Cannot hash \"{}\": injected failure.",
-                path.display()
-            )))
         }
     }
 
@@ -1741,36 +1693,6 @@ mod tests {
         let committed_hash = io::sha256_hex(&replacement);
         assert_eq!(std::fs::read(&destination).unwrap(), replacement);
         assert_eq!(result["mutations"][0]["afterHash"], committed_hash);
-        assert!(lock(&service.state.ledger).is_empty());
-    }
-
-    #[tokio::test]
-    async fn failed_post_move_hash_reports_changed_paths_and_forgets_freshness() {
-        let (home, service) = fixture_with_move_io(Arc::new(FailingHashMoveIo));
-        let source = home.join("source");
-        let destination = home.join("destination");
-        seed_and_read(&service, &source, b"original\n").await;
-
-        let error = Arc::clone(&service)
-            .move_file(
-                decode(json!({
-                    "chatId":"chat", "captureSnapshot":true,
-                    "inputFrom":"source", "inputTo":"destination",
-                    "resolvedFrom":source, "resolvedTo":destination
-                })),
-                ResponseBudget::unbounded(),
-                CancellationToken::new(),
-            )
-            .await
-            .unwrap_err();
-
-        assert!(error.message.starts_with("Move committed, but"));
-        assert_eq!(
-            error.details.unwrap()["changedPaths"],
-            json!([source, destination])
-        );
-        assert!(!source.exists());
-        assert_eq!(std::fs::read(&destination).unwrap(), b"original\n");
         assert!(lock(&service.state.ledger).is_empty());
     }
 
