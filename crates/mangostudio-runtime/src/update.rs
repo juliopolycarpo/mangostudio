@@ -111,13 +111,14 @@ impl AnswerWatch {
 
 impl UpdateBinding {
     /// Enables a restart only for a binary reached through a slot's `current`.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn new_with_restart(slot: RuntimeSlot, mango_home: PathBuf, supervised: bool) -> Self {
         Self::sharing_restart(slot, mango_home, supervised, CancellationToken::new())
     }
 
-    /// [`UpdateBinding::new_with_restart`] firing a process-wide `restart`
-    /// token, so a commit over one connection ends the whole process.
+    /// Enables a restart only for a binary reached through a slot's `current`,
+    /// firing a process-wide `restart` token, so a commit over one connection
+    /// ends the whole process.
     pub fn sharing_restart(
         slot: RuntimeSlot,
         mango_home: PathBuf,
