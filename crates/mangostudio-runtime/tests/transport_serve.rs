@@ -23,6 +23,34 @@ use support::scratch::{ScratchDir, scratch_dir};
 
 const TOKEN: &str = "test-serve-token";
 
+/// Bounds a wait so a regression that hangs still ends the run. Never the
+/// thing a test asserts on: every wait below is for an event (a log line, a
+/// close, an EOF), and this is only how long a broken build may take to
+/// show it, generous enough that a loaded Windows runner cannot reach it.
+const HANG_GUARD: Duration = Duration::from_secs(60);
+
+/// Awaits `future` under [`HANG_GUARD`], naming `what` if it hangs.
+async fn until<T>(what: &str, future: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(HANG_GUARD, future)
+        .await
+        .unwrap_or_else(|_| panic!("expected {what} within {HANG_GUARD:?} | received: a hang"))
+}
+
+/// Asserts every idle peer is still open — no EOF, no reset, nothing to
+/// read — so each still holds the pending-handshake permit it took at
+/// accept. `when` names the moment being checked.
+fn assert_idle_peers_still_open(idle_peers: &[tokio::net::TcpStream], when: &str) {
+    for (index, peer) in idle_peers.iter().enumerate() {
+        let mut probe = [0_u8; 1];
+        let state = peer.try_read(&mut probe);
+        assert!(
+            matches!(&state, Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+            "expected idle peer {index} still open, holding its permit, {when} | received: \
+             {state:?}"
+        );
+    }
+}
+
 /// Two well-formed binding keys: 64 lowercase hex characters each.
 const RECORD_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const RECORD_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -56,7 +84,7 @@ async fn dial_bound(
     if let Some(key) = binding_key {
         options = options.with_header(binding::HEADER, key);
     }
-    let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
+    let deadline = ConnectDeadline::default().with_timeout(HANG_GUARD);
     match connect_websocket(&url, &options, &deadline).await {
         Ok(port) => {
             let (session, _driver) =
@@ -132,14 +160,20 @@ async fn a_second_dial_supersedes_the_first() {
     assert_eq!(
         first_closure.code,
         close_codes::SUPERSEDED,
-        "the first session must close as superseded, not merely disconnect"
+        "the first session must close as superseded, not merely disconnect | received code {} \
+         with reason {:?}",
+        first_closure.code,
+        first_closure.reason
     );
     assert_eq!(second.state(), SessionState::Ready);
+    // Already logged: the runtime logs the supersession before it starts the
+    // second session, and the second dial returned only once that session
+    // was ready.
     assert!(
         log.messages()
             .iter()
             .any(|message| message.contains("superseded")),
-        "expected a supersession log line, got {:?}",
+        "expected a supersession log line | received: {:?}",
         log.messages()
     );
 
@@ -173,18 +207,14 @@ fn count_logged(log: &CollectingLog, needle: &str) -> usize {
         .count()
 }
 
-/// Waits (bounded) for the runtime to log `needle` — its own signal that a
+/// Waits for the runtime to log `needle` — its own signal that a
 /// connection task reached that point.
 async fn logged(log: &CollectingLog, needle: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while count_logged(log, needle) == 0 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "expected a log line containing {needle:?} | received: {:?}",
-            log.messages()
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    until(
+        &format!("a log line containing {needle:?}"),
+        log.wait_for(needle),
+    )
+    .await;
 }
 
 /// A live connection bound to one environment record refuses a dial for a
@@ -378,6 +408,7 @@ async fn cancellation_releases_the_active_connection_before_run_returns() {
 
     let cancel = CancellationToken::new();
     let home = scratch_home("shutdown-drains");
+    let log = CollectingLog::new();
     let server = tokio::spawn(run(
         listener,
         TOKEN.to_string(),
@@ -385,20 +416,27 @@ async fn cancellation_releases_the_active_connection_before_run_returns() {
         home.to_path_buf(),
         "0.0.0".to_string(),
         cancel.clone(),
-        |_message| {},
+        log.sink(),
     ));
 
     let session = dial(addr, Some(TOKEN)).await.expect("dial succeeds");
 
     cancel.cancel();
-    // `run` itself must complete: if the active connection were never
-    // released, `owned.join_all_or_abort` would have to wait out its whole
-    // grace period, or `run` would never observe an idle task set at all.
-    tokio::time::timeout(Duration::from_secs(2), server)
+    // `run` itself must complete, and by releasing the connection rather
+    // than outwaiting it: had the active connection never been released,
+    // `owned.join_all_or_abort` would have waited out its whole grace period
+    // and then aborted the task, which `run` logs. So the proof is that log
+    // line's absence once `run` returns, not how long `run` took.
+    until("run to return once cancelled", server)
         .await
-        .expect("run must return promptly once cancelled")
         .unwrap()
         .unwrap();
+    assert_eq!(
+        count_logged(&log, "outlived the shutdown grace"),
+        0,
+        "expected the connection released, not aborted after the grace | received: {:?}",
+        log.messages()
+    );
 
     let closure = session.closed().await;
     assert_eq!(closure.code, close_codes::RELEASED);
@@ -435,14 +473,19 @@ async fn idle_peers_with_a_slot_still_free_do_not_block_an_authorized_dial() {
         idle_peers.push(tokio::net::TcpStream::connect(addr).await.unwrap());
     }
 
-    let session = tokio::time::timeout(Duration::from_secs(5), dial(addr, Some(TOKEN)))
-        .await
-        .expect("an authorized dial must not be blocked out while a slot is free")
-        .expect("the correct token must still be accepted");
+    let session = until(
+        "an authorized dial while a slot is free",
+        dial(addr, Some(TOKEN)),
+    )
+    .await
+    .expect("the correct token must still be accepted");
     assert_eq!(session.remote().unwrap().peer.role, "runtime");
 
-    // Keep the idle sockets alive until here, so they were genuinely still
-    // open (not already reset by the OS) while the dial above ran.
+    // The dial got through *while* the idle peers held their slots, not
+    // after their `UPGRADE_TIMEOUT` freed them: they are all still open. That
+    // ordering, not a speed, is what shows the bound counts mid-upgrade peers
+    // only.
+    assert_idle_peers_still_open(&idle_peers, "after the authorized dial succeeded");
     for peer in &mut idle_peers {
         let _ = peer.write_all(b"").await;
     }
@@ -489,10 +532,10 @@ async fn full_exhaustion_recovers_within_the_upgrade_timeout_not_forever() {
     // as long as the idle peers hold their permits. A real hub's own
     // reconnect loop is exactly this: retry on a cadence. Before the fix,
     // no dial would ever have succeeded here, because nothing ever
-    // recovered the idle peers' permits at all; the bound below (a little
-    // over the real 10s `UPGRADE_TIMEOUT`) is slack for "eventually
-    // recovers", not a timing of the constant itself.
-    let recovered = tokio::time::timeout(Duration::from_secs(20), async {
+    // recovered the idle peers' permits at all. The hang guard is what
+    // "not forever" means here; the idle peers' own end of stream below is
+    // what shows the recovery came from their `UPGRADE_TIMEOUT`.
+    let recovered = until("a dial to succeed once the idle peers time out", async {
         loop {
             if let Ok(session) = dial(addr, Some(TOKEN)).await {
                 return session;
@@ -500,19 +543,33 @@ async fn full_exhaustion_recovers_within_the_upgrade_timeout_not_forever() {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     })
-    .await
-    .expect("a full pending-handshake bound must recover once idle peers time out, not lock out forever");
+    .await;
     assert_eq!(recovered.remote().unwrap().peer.role, "runtime");
+    // Recovery came from the runtime dropping the idle peers at their own
+    // `UPGRADE_TIMEOUT`, which freed their permits: each one reads the end
+    // of its stream.
+    for (index, mut peer) in idle_peers.into_iter().enumerate() {
+        use tokio::io::AsyncReadExt as _;
+        let mut probe = [0_u8; 1];
+        let read = until("an idle peer's end of stream", peer.read(&mut probe)).await;
+        assert!(
+            matches!(&read, Ok(0))
+                || matches!(&read, Err(error) if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+                )),
+            "expected idle peer {index} dropped by the runtime | received: {read:?}"
+        );
+    }
 
-    drop(idle_peers);
     cancel.cancel();
     server.await.unwrap().unwrap();
 }
 
 /// The other half of the same bound: once every pending-handshake slot is
 /// genuinely held, a peer beyond it is refused *before* any task is
-/// spawned — proven by a fast, synchronous close (immediate EOF, no bytes)
-/// rather than the connection lingering for `UPGRADE_TIMEOUT`.
+/// spawned — proven by it being dropped (no bytes) while every idle peer
+/// still holds its slot, rather than lingering for `UPGRADE_TIMEOUT`.
 #[tokio::test]
 async fn a_peer_past_the_pending_handshake_bound_is_dropped_before_spawning() {
     use tokio::io::AsyncReadExt as _;
@@ -536,18 +593,30 @@ async fn a_peer_past_the_pending_handshake_bound_is_dropped_before_spawning() {
         idle_peers.push(tokio::net::TcpStream::connect(addr).await.unwrap());
     }
 
-    // A peer past the bound must be dropped promptly — well under
-    // `UPGRADE_TIMEOUT` — proving the accept loop refused it at admission
-    // rather than accepting it into a task that later times out.
+    // A peer past the bound is dropped at admission, which is an ordering,
+    // not a speed: the accept loop takes the backlog in order, so the four
+    // idle peers each hold a permit before the fifth is accepted, and they
+    // keep it until their own `UPGRADE_TIMEOUT`. So the fifth must end while
+    // every idle peer is still open. Had it been spawned into a task instead,
+    // it could only end at its own `UPGRADE_TIMEOUT`, after the idle peers'
+    // (accepted earlier) had already dropped them. No wall-clock threshold
+    // decides this; the bound below only keeps a broken build from hanging.
     let mut fifth = tokio::net::TcpStream::connect(addr).await.unwrap();
     let mut buffer = [0_u8; 16];
-    let read = tokio::time::timeout(Duration::from_secs(2), fifth.read(&mut buffer))
-        .await
-        .expect("a peer past the bound must be refused quickly, not held for UPGRADE_TIMEOUT");
-    assert_eq!(
-        read.unwrap(),
-        0,
-        "expected an immediate EOF: the stream was dropped before any WebSocket upgrade began"
+    let read = until("the fifth peer to be dropped", fifth.read(&mut buffer)).await;
+    // Dropped without a byte either way: a clean EOF, or a reset where the
+    // platform aborts a connection it never read from.
+    assert!(
+        matches!(&read, Ok(0))
+            || matches!(&read, Err(error) if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+            )),
+        "expected the fifth peer dropped without any bytes (EOF or reset) | received: {read:?}"
+    );
+    assert_idle_peers_still_open(
+        &idle_peers,
+        "when the fifth was dropped, proving the fifth never reached a task",
     );
 
     drop(idle_peers);
@@ -591,21 +660,17 @@ async fn get_health_answers_status_and_version_over_the_same_listener() {
     // that the response was received; how the connection ended afterwards
     // is the server-side fix above, not this test's assertion.
     let mut response = Vec::new();
-    let read_to_end =
-        tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
-            .await
-            .expect("a health check must answer promptly, not hang like an unauthorised upgrade");
-    if let Err(error) = read_to_end {
-        eprintln!(
-            "note: the read ended with {error:?} after {} bytes; asserting on those bytes anyway",
-            response.len()
-        );
-    }
+    let read_to_end = until(
+        "the health response to end",
+        stream.read_to_end(&mut response),
+    )
+    .await;
     let response = String::from_utf8(response).unwrap();
 
     assert!(
         response.starts_with("HTTP/1.1 200 OK"),
-        "expected a 200 status line: {response:?}"
+        "expected a 200 status line | received: {response:?}, with the read ending in \
+         {read_to_end:?}"
     );
     let body_start = response
         .find("\r\n\r\n")
@@ -650,7 +715,7 @@ async fn serve_one_health_call(home: &std::path::Path, capabilities: serde_json:
         |_message| {},
     ));
     let options = WebSocketConnectOptions::default().with_bearer(TOKEN);
-    let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
+    let deadline = ConnectDeadline::default().with_timeout(HANG_GUARD);
     let port = connect_websocket(&format!("ws://{addr}/"), &options, &deadline)
         .await
         .expect("the dial reaches the listener");
