@@ -117,15 +117,36 @@ pub fn gh(source: &BTreeMap<String, String>) -> BTreeMap<String, String> {
 }
 
 fn selected(source: &BTreeMap<String, String>, extra: &[&str]) -> BTreeMap<String, String> {
-    let mut env: BTreeMap<_, _> = COMMON
-        .iter()
-        .chain(extra)
-        .filter_map(|key| {
-            source
-                .get(*key)
-                .map(|value| ((*key).to_owned(), value.clone()))
-        })
-        .collect();
+    selected_with_case(source, extra, cfg!(windows))
+}
+
+/// Copies each allowlisted variable under the name `source` spells it.
+///
+/// Windows names are case-insensitive and keep their own casing, so
+/// `%ProgramData%` arrives as `ProgramData`, never `PROGRAMDATA`. With
+/// `fold_case`, an exact name wins and a case-insensitive one is the fallback;
+/// both resolve to the source's single entry, so `SystemRoot` and `SYSTEMROOT`
+/// never become two variables in the child's environment block.
+fn selected_with_case(
+    source: &BTreeMap<String, String>,
+    extra: &[&str],
+    fold_case: bool,
+) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    for key in COMMON.iter().chain(extra) {
+        let found = source.get_key_value(*key).or_else(|| {
+            fold_case
+                .then(|| {
+                    source
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(key))
+                })
+                .flatten()
+        });
+        if let Some((name, value)) = found {
+            env.insert(name.clone(), value.clone());
+        }
+    }
     env.insert("LC_ALL".into(), "C".into());
     env
 }
@@ -157,6 +178,29 @@ mod tests {
         let overridden = shell(&source, &policy);
         assert!(!overridden.contains_key("API_KEY"));
         assert_eq!(overridden["DATABASE_URL"], source["DATABASE_URL"]);
+    }
+
+    #[test]
+    fn windows_names_are_matched_whatever_their_case() {
+        let source = BTreeMap::from([
+            ("PATH".into(), "C:\\bin".into()),
+            ("Path".into(), "C:\\bin".into()),
+            ("ProgramData".into(), "C:\\ProgramData".into()),
+            ("SystemRoot".into(), "C:\\Windows".into()),
+        ]);
+
+        let folded = selected_with_case(&source, GIT, true);
+
+        assert_eq!(
+            folded.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["LC_ALL", "PATH", "ProgramData", "SystemRoot"],
+            "expected one entry per variable, spelled as the host spells it"
+        );
+        assert_eq!(folded["ProgramData"], "C:\\ProgramData");
+        assert!(
+            !selected_with_case(&source, GIT, false).contains_key("ProgramData"),
+            "expected exact-case matching off Windows"
+        );
     }
 
     #[test]
