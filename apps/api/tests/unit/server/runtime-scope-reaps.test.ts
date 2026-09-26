@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { LogMetadata } from '../../../src/lib/logger';
 import type { EnvironmentWithdrawnListener } from '../../../src/modules/environments/application/environment-service';
 import {
   type RuntimeScopeReapDeps,
@@ -35,12 +36,20 @@ class FakeWithdrawnSignal {
 class RecordingReaper {
   readonly reaps: string[] = [];
   readonly revokes: string[] = [];
+  failure: Error | undefined;
   reapScope(scope: { userId?: string; environmentId?: string }, reason: string): Promise<void> {
     this.reaps.push(`${scope.userId}:${scope.environmentId}:${reason}`);
-    return Promise.resolve();
+    return this.failure ? Promise.reject(this.failure) : Promise.resolve();
   }
   revokeScope(userId: string, environmentId: string): void {
     this.revokes.push(`${userId}:${environmentId}`);
+  }
+}
+
+class RecordingLogger {
+  readonly warnings: { event: string; metadata: LogMetadata | undefined }[] = [];
+  warn(event: string, metadata?: LogMetadata): void {
+    this.warnings.push({ event, metadata });
   }
 }
 
@@ -48,13 +57,15 @@ function wire() {
   const manager = new FakeRevocationSource();
   const withdrawn = new FakeWithdrawnSignal();
   const reaper = new RecordingReaper();
+  const logger = new RecordingLogger();
   const deps: RuntimeScopeReapDeps = {
     manager,
     onEnvironmentWithdrawn: withdrawn.subscribe,
     sessions: reaper,
     terminals: reaper,
+    logger,
   };
-  return { deps, manager, withdrawn, reaper };
+  return { deps, manager, withdrawn, reaper, logger };
 }
 
 describe('subscribeRuntimeScopeReaps', () => {
@@ -79,6 +90,38 @@ describe('subscribeRuntimeScopeReaps', () => {
 
     expect(withdrawn.listeners.size).toBe(1);
     expect(reaper.reaps).toEqual(['u1:local:runtime-disconnected']);
+  });
+
+  it('logs failed reaps with the affected scope and reason', async () => {
+    const { deps, manager, withdrawn, reaper, logger } = wire();
+    reaper.failure = new Error('SQLite is busy');
+    const stop = subscribeRuntimeScopeReaps(deps);
+
+    manager.externalAgents?.('u1', 'devbox');
+    withdrawn.emit('u2', 'local');
+    await Promise.resolve();
+
+    expect(logger.warnings).toEqual([
+      {
+        event: 'reap_failed',
+        metadata: {
+          userId: 'u1',
+          environmentId: 'devbox',
+          reason: 'consent-revoked',
+          error: 'Error: SQLite is busy',
+        },
+      },
+      {
+        event: 'reap_failed',
+        metadata: {
+          userId: 'u2',
+          environmentId: 'local',
+          reason: 'runtime-disconnected',
+          error: 'Error: SQLite is busy',
+        },
+      },
+    ]);
+    stop();
   });
 
   it('clears both manager observers on unsubscribe', () => {

@@ -3,6 +3,7 @@
  * withdrawn terminal capability, or the user's own Disconnect/removal.
  */
 
+import { createDiagnosticLogger, type DiagnosticLogger } from '../lib/logger';
 import type { EnvironmentWithdrawnListener } from '../modules/environments/application/environment-service';
 import type { ExternalSessionManager } from '../modules/external-agents/application/external-session-manager';
 import type { TerminalSessionService } from '../modules/terminals/application/terminal-session-service';
@@ -15,6 +16,7 @@ export interface RuntimeScopeReapDeps {
   >;
   readonly onEnvironmentWithdrawn: (listener: EnvironmentWithdrawnListener) => () => void;
   readonly sessions: Pick<ExternalSessionManager, 'reapScope'>;
+  readonly logger?: Pick<DiagnosticLogger, 'warn'>;
   readonly terminals: Pick<TerminalSessionService, 'revokeScope'>;
 }
 
@@ -29,6 +31,7 @@ export interface RuntimeScopeReapDeps {
  * stop();
  */
 export function subscribeRuntimeScopeReaps(deps: RuntimeScopeReapDeps): () => void {
+  const logger = deps.logger ?? createDiagnosticLogger('runtime-scope-reaps');
   // A peer that withdraws external-agent consent closes its vendor sessions
   // without saying so on the wire, so the hub learns it from the next manifest
   // refresh. Without this the chats it was running would keep a session the
@@ -36,7 +39,14 @@ export function subscribeRuntimeScopeReaps(deps: RuntimeScopeReapDeps): () => vo
   deps.manager.onExternalAgentsRevoked((userId, environmentId) => {
     void deps.sessions
       .reapScope({ userId, environmentId }, 'consent-revoked')
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        logger.warn('reap_failed', {
+          userId,
+          environmentId,
+          reason: 'consent-revoked',
+          error: String(error),
+        });
+      });
   });
   // A turn waiting to resubmit reconnects on its own after a dropped socket;
   // after the user's own Disconnect, disable, repoint or removal it must not.
@@ -46,7 +56,14 @@ export function subscribeRuntimeScopeReaps(deps: RuntimeScopeReapDeps): () => vo
         keepContinuation: true,
         explicit: true,
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        logger.warn('reap_failed', {
+          userId,
+          environmentId,
+          reason: 'runtime-disconnected',
+          error: String(error),
+        });
+      });
   });
   deps.manager.onTerminalsRevoked((userId, environmentId) => {
     deps.terminals.revokeScope(userId, environmentId);
