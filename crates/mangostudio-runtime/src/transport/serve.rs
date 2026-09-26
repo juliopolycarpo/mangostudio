@@ -741,16 +741,6 @@ fn teardown_failure(closure: &SessionClosure) -> Option<String> {
     ))
 }
 
-/// Closes a port nothing ever became a session over — a refused admission,
-/// or one that lost the race before a session was ever built.
-///
-/// Then reads the port until the peer's own close arrives (bounded by
-/// [`REFUSAL_DRAIN_GRACE`], the protocol crate's own bound for the refusals
-/// [`accept_websocket`] sends) instead of dropping it at once: by now the hub
-/// has usually sent its `hello`, and a socket dropped with those bytes still
-/// unread is reset rather than closed on Windows (and on BSD-derived
-/// stacks — see [`drain_request_headers`]), which throws away the close
-/// frame and leaves the hub with no code to act on.
 /// Refuses a dial from a hub bound to another environment record. Refused
 /// before this side's `hello` goes out, so the incumbent is never disturbed
 /// and the refused hub learns only the code and reason. Logged first, as
@@ -767,6 +757,16 @@ async fn refuse_already_bound<P: Port>(port: P, context: &ConnectionContext) {
     .await;
 }
 
+/// Closes a port nothing ever became a session over — a refused admission,
+/// or one that lost the race before a session was ever built.
+///
+/// Then reads the port until the peer's own close arrives (bounded by
+/// [`REFUSAL_DRAIN_GRACE`], the protocol crate's own bound for the refusals
+/// [`accept_websocket`] sends) instead of dropping it at once: by now the hub
+/// has usually sent its `hello`, and a socket dropped with those bytes still
+/// unread is reset rather than closed on Windows (and on BSD-derived
+/// stacks — see [`drain_request_headers`]), which throws away the close
+/// frame and leaves the hub with no code to act on.
 async fn close_port<P: Port>(port: P, code: u16, reason: &str) {
     let (tx, mut rx) = port.split();
     tx.close(code, Some(reason.to_string())).await;
