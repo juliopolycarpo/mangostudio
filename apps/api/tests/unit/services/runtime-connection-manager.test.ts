@@ -794,6 +794,29 @@ describe('RuntimeConnectionManager', () => {
     });
   });
 
+  it('does not report runtime release drift for a development hub', async () => {
+    const previousVersion = process.env.VERSION;
+    process.env.VERSION = 'dev';
+    const probe = healthProbe(TEST_MANIFEST, () => Promise.resolve(HEALTH_REPORT), '0.1.1');
+    const releaseRuntime: RuntimeEnvironmentConnector = () =>
+      Promise.resolve({ client: probe.client, close: () => undefined });
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: releaseRuntime },
+    });
+    try {
+      await manager.connect('user-1', 'devbox');
+      expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+        runtimeVersion: '0.1.1',
+        runtimeVersionDrift: false,
+      });
+    } finally {
+      if (previousVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = previousVersion;
+      await manager.closeAll();
+    }
+  });
+
   it('reports a runtime that dies as disconnected and reconnects after the backoff', async () => {
     let attempts = 0;
     let closeCalls = 0;
@@ -891,55 +914,62 @@ describe('RuntimeConnectionManager', () => {
   });
 
   it('adopts the restarted runtime without backoff and clears version drift', async () => {
-    let attempts = 0;
-    let dropConnection: (() => void) | undefined;
-    const targetVersion = getVersion();
-    const manager = new RuntimeConnectionManager({
-      resolveEnvironment: () => Promise.resolve(definition()),
-      connectors: {
-        stdio: (_definition, onUnavailable) => {
-          attempts += 1;
-          dropConnection = onUnavailable;
-          const probe = healthProbe(
-            TEST_MANIFEST,
-            () => Promise.resolve(HEALTH_REPORT),
-            attempts === 1 ? '0.0.1-old' : targetVersion
-          );
-          return Promise.resolve({ client: probe.client, close: () => undefined });
+    const previousVersion = process.env.VERSION;
+    process.env.VERSION = '0.1.1';
+    try {
+      let attempts = 0;
+      let dropConnection: (() => void) | undefined;
+      const targetVersion = getVersion();
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: {
+          stdio: (_definition, onUnavailable) => {
+            attempts += 1;
+            dropConnection = onUnavailable;
+            const probe = healthProbe(
+              TEST_MANIFEST,
+              () => Promise.resolve(HEALTH_REPORT),
+              attempts === 1 ? '0.0.1-old' : targetVersion
+            );
+            return Promise.resolve({ client: probe.client, close: () => undefined });
+          },
         },
-      },
-    });
+      });
 
-    await manager.getClient('user-1', 'devbox');
-    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
-      runtimeVersion: '0.0.1-old',
-      runtimeVersionDrift: true,
-    });
-    manager.expectUpdateDisconnect('user-1', 'devbox');
-    // Said before the connection drops, so the card never renders the gap as an
-    // outage — this is the one disconnect that is the feature working.
-    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
-      state: 'connected',
-      updating: true,
-    });
-    dropConnection?.();
+      await manager.getClient('user-1', 'devbox');
+      expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+        runtimeVersion: '0.0.1-old',
+        runtimeVersionDrift: true,
+      });
+      manager.expectUpdateDisconnect('user-1', 'devbox');
+      // Said before the connection drops, so the card never renders the gap as an
+      // outage — this is the one disconnect that is the feature working.
+      expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+        state: 'connected',
+        updating: true,
+      });
+      dropConnection?.();
 
-    expect(manager.getStatus('user-1', 'devbox')).toEqual({
-      state: 'disconnected',
-      updating: true,
-      manifest: TEST_MANIFEST,
-      runtimeVersion: '0.0.1-old',
-      runtimeVersionDrift: true,
-    });
-    await manager.getClient('user-1', 'devbox');
-    expect(attempts).toBe(2);
-    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
-      state: 'connected',
-      runtimeVersion: targetVersion,
-      runtimeVersionDrift: false,
-    });
-    // The reconnect is the end of the handoff; nothing should still say updating.
-    expect(manager.getStatus('user-1', 'devbox').updating).toBeUndefined();
+      expect(manager.getStatus('user-1', 'devbox')).toEqual({
+        state: 'disconnected',
+        updating: true,
+        manifest: TEST_MANIFEST,
+        runtimeVersion: '0.0.1-old',
+        runtimeVersionDrift: true,
+      });
+      await manager.getClient('user-1', 'devbox');
+      expect(attempts).toBe(2);
+      expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+        state: 'connected',
+        runtimeVersion: targetVersion,
+        runtimeVersionDrift: false,
+      });
+      // The reconnect is the end of the handoff; nothing should still say updating.
+      expect(manager.getStatus('user-1', 'devbox').updating).toBeUndefined();
+    } finally {
+      if (previousVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = previousVersion;
+    }
   });
 
   it('stops claiming an update when the runtime refuses one', async () => {

@@ -444,7 +444,11 @@ function peerRelease(
   runtimeVersion: string | undefined
 ): Pick<EnvironmentConnectionStatus, 'runtimeVersion' | 'runtimeVersionDrift'> {
   if (!runtimeVersion) return {};
-  return { runtimeVersion, runtimeVersionDrift: runtimeVersion !== getVersion() };
+  const hubVersion = getVersion();
+  return {
+    runtimeVersion,
+    runtimeVersionDrift: !isDevelopmentVersion(hubVersion) && runtimeVersion !== hubVersion,
+  };
 }
 
 function statusErrorCode(error: unknown): RuntimeErrorCode {
