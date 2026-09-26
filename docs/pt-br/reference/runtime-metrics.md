@@ -80,7 +80,8 @@ dependência sem uso, e o `tokio` habilita só as features que o runtime chama.
 
 ## Volume de código da migração para Rust
 
-`git diff -M50% --numstat origin/main...59a59156`, classificado por caminho:
+`git diff -M50% --numstat origin/main...46785f6f` (o topo de `feat/rust-runtime` sobre o qual
+esta linha de base foi registrada), classificado por caminho:
 
 - **docs**: `docs/**` e qualquer `*.md`.
 - **generated**: caminhos sob `generated/`, `Cargo.lock`, `bun.lock`.
@@ -92,18 +93,18 @@ dependência sem uso, e o `tokio` habilita só as features que o runtime chama.
 
 | Tipo           | Linguagem             | Arquivos | Adicionadas | Removidas | Líquido |
 | -------------- | --------------------- | -------: | ----------: | --------: | ------: |
-| production     | TypeScript            |      892 |       6.071 |    40.631 | −34.560 |
-| production     | Rust                  |      180 |      64.404 |        25 | +64.379 |
-| production     | other                 |       39 |         883 |       469 |    +414 |
-| tests          | TypeScript            |      270 |      20.010 |    29.216 |  −9.206 |
-| tests          | Rust (test files)     |       49 |      23.072 |        16 | +23.056 |
-| tests          | Rust (inline modules) |      132 |      33.155 |         0 | +33.155 |
+| production     | TypeScript            |      891 |       5.791 |    40.631 | −34.840 |
+| production     | Rust                  |      182 |      65.338 |        25 | +65.313 |
+| production     | other                 |       39 |         918 |       456 |    +462 |
+| tests          | TypeScript            |      270 |      19.939 |    29.216 |  −9.277 |
+| tests          | Rust (test files)     |       50 |      23.545 |        16 | +23.529 |
+| tests          | Rust (inline modules) |      134 |      34.067 |         0 | +34.067 |
 | tests          | other                 |       20 |       4.401 |       177 |  +4.224 |
-| docs           | Markdown              |       40 |       1.772 |       489 |  +1.283 |
+| docs           | Markdown              |       40 |       1.847 |       494 |  +1.353 |
 | generated      | other                 |        8 |      25.217 |       245 | +24.972 |
-| **production** | todas                 |          |      71.358 |    41.125 | +30.233 |
-| **tests**      | todas                 |          |      80.638 |    29.409 | +51.229 |
-| **docs**       | todas                 |          |       1.772 |       489 |  +1.283 |
+| **production** | todas                 |          |      72.047 |    41.112 | +30.935 |
+| **tests**      | todas                 |          |      81.952 |    29.409 | +52.543 |
+| **docs**       | todas                 |          |       1.847 |       494 |  +1.353 |
 | **generated**  | todas                 |          |      25.217 |       245 | +24.972 |
 
 A linha de módulos inline reconta linhas de arquivos Rust de production, então sua contagem de

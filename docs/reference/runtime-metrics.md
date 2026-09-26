@@ -79,7 +79,8 @@ unused dependency, and `tokio` enables only the features the runtime calls.
 
 ## Code volume of the Rust migration
 
-`git diff -M50% --numstat origin/main...59a59156`, classified by path:
+`git diff -M50% --numstat origin/main...46785f6f` (the `feat/rust-runtime` tip this baseline was
+recorded on), classified by path:
 
 - **docs**: `docs/**` and any `*.md`.
 - **generated**: paths under `generated/`, `Cargo.lock`, `bun.lock`.
@@ -91,18 +92,18 @@ unused dependency, and `tokio` enables only the features the runtime calls.
 
 | Kind           | Language              | Files |  Added | Deleted |     Net |
 | -------------- | --------------------- | ----: | -----: | ------: | ------: |
-| production     | TypeScript            |   892 |  6,071 |  40,631 | −34,560 |
-| production     | Rust                  |   180 | 64,404 |      25 | +64,379 |
-| production     | other                 |    39 |    883 |     469 |    +414 |
-| tests          | TypeScript            |   270 | 20,010 |  29,216 |  −9,206 |
-| tests          | Rust (test files)     |    49 | 23,072 |      16 | +23,056 |
-| tests          | Rust (inline modules) |   132 | 33,155 |       0 | +33,155 |
+| production     | TypeScript            |   891 |  5,791 |  40,631 | −34,840 |
+| production     | Rust                  |   182 | 65,338 |      25 | +65,313 |
+| production     | other                 |    39 |    918 |     456 |    +462 |
+| tests          | TypeScript            |   270 | 19,939 |  29,216 |  −9,277 |
+| tests          | Rust (test files)     |    50 | 23,545 |      16 | +23,529 |
+| tests          | Rust (inline modules) |   134 | 34,067 |       0 | +34,067 |
 | tests          | other                 |    20 |  4,401 |     177 |  +4,224 |
-| docs           | Markdown              |    40 |  1,772 |     489 |  +1,283 |
+| docs           | Markdown              |    40 |  1,847 |     494 |  +1,353 |
 | generated      | other                 |     8 | 25,217 |     245 | +24,972 |
-| **production** | all                   |       | 71,358 |  41,125 | +30,233 |
-| **tests**      | all                   |       | 80,638 |  29,409 | +51,229 |
-| **docs**       | all                   |       |  1,772 |     489 |  +1,283 |
+| **production** | all                   |       | 72,047 |  41,112 | +30,935 |
+| **tests**      | all                   |       | 81,952 |  29,409 | +52,543 |
+| **docs**       | all                   |       |  1,847 |     494 |  +1,353 |
 | **generated**  | all                   |       | 25,217 |     245 | +24,972 |
 
 The inline-module row re-counts lines of production Rust files, so its file count overlaps the
