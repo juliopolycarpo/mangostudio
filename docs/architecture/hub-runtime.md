@@ -648,8 +648,9 @@ binary, most specific first:
 1. `MANGOSTUDIO_RUNTIME_BINARY`, read in `apps/api/src/lib/config.ts`.
 2. For a `stdio` environment only, its own `binaryPath`.
 3. The sibling `mangostudio-runtime` beside a standalone hub executable.
-4. In a source checkout, the most recently built of `target/debug/mangostudio-runtime` and
-   `target/release/mangostudio-runtime` under the repository root (a tie goes to `debug`).
+4. In a source checkout, the most recently built of `debug/mangostudio-runtime` and
+   `release/mangostudio-runtime` under cargo's target directory (a tie goes to `debug`):
+   `CARGO_TARGET_DIR` when it is set, relative to the repository root, otherwise `target/`.
 5. Otherwise `RuntimeBinaryNotFoundError`, which names every path it searched and
    `cargo build -p mangostudio-runtime`.
 

@@ -171,6 +171,29 @@ describe('runtime paths', () => {
       );
     });
 
+    // `cargo build` writes under CARGO_TARGET_DIR when it is set, so a checkout
+    // built that way has nothing under `<checkout>/target` for the hub to find.
+    it('looks for the workspace build where CARGO_TARGET_DIR moved it', () => {
+      setExecPath('/usr/bin/bun');
+      const checkout = join(tempDir, 'checkout');
+      const [absolute] = writeWorkspaceBuilds(join(tempDir, 'shared'), { debug: 1_000 });
+      const [relative] = writeWorkspaceBuilds(join(checkout, 'moved'), { release: 1_000 });
+
+      const fromAbsolute = resolveRuntimeLaunchCommand(
+        undefined,
+        { CARGO_TARGET_DIR: join(tempDir, 'shared', 'target') },
+        { workspaceRoot: checkout }
+      );
+      const fromRelative = resolveRuntimeLaunchCommand(
+        undefined,
+        { CARGO_TARGET_DIR: join('moved', 'target') },
+        { workspaceRoot: checkout }
+      );
+
+      expect(fromAbsolute).toEqual({ command: absolute, args: [], source: 'workspace-build' });
+      expect(fromRelative).toEqual({ command: relative, args: [], source: 'workspace-build' });
+    });
+
     it('uses whichever single profile a source checkout has built', () => {
       setExecPath('/usr/bin/bun');
       const [release] = writeWorkspaceBuilds(tempDir, { release: 1_000 });
