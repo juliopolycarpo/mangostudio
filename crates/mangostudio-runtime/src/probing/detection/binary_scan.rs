@@ -294,8 +294,9 @@ pub fn binary_candidate_names(
                 names.push(candidate_name);
             }
         }
-        if definition.windows_powershell_scripts {
-            names.push(format!("{binary_name}.ps1"));
+        let script_name = format!("{binary_name}.ps1");
+        if definition.windows_powershell_scripts && !names.contains(&script_name) {
+            names.push(script_name);
         }
         names.push((*binary_name).to_string());
     }

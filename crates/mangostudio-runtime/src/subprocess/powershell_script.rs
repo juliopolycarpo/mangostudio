@@ -96,7 +96,8 @@ pub(crate) fn powershell_script_request(
 }
 
 /// A drive-absolute (`C:\...`, `C:/...`) or UNC (`\\server\...`) path, judged by its text so the
-/// rule is the same on every host.
+/// rule is the same on every host. A path that is not valid Unicode is refused as not absolute:
+/// discovery only ever reports Unicode paths, so such a script cannot have come from it.
 fn is_windows_absolute(program: &OsStr) -> bool {
     let Some(text) = program.to_str() else {
         return false;
