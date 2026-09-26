@@ -74,19 +74,40 @@ use crate::subprocess::{ChildBudget, run_bounded_child};
 /// under the exact-cased `PATH` key every detector in this crate's port
 /// reads through [`PathEnv::env_var`].
 ///
-/// Neither [`std::env::vars`] nor [`crate::runtime_home::home_dir`] touch
+/// Neither [`std::env::vars_os`] nor [`crate::runtime_home::home_dir`] touch
 /// the filesystem — both only read this process's own in-memory
 /// environment block — so, unlike every other adapter in this module,
 /// this one needs no [`run_blocking`] wrapper.
 pub(crate) fn build_runtime_path_env(overrides: Option<&HashMap<String, String>>) -> PathEnv {
     compose_runtime_path_env(
-        std::env::vars().collect(),
+        unicode_environment(std::env::vars_os()),
         crate::runtime_home::home_dir()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default(),
         crate::health::node_platform(),
         overrides,
     )
+}
+
+/// This process's environment as text, decoded the way Node's `process.env`
+/// decodes it: a name or value that is not valid Unicode is read lossily
+/// (U+FFFD for each invalid sequence) instead of failing the whole read.
+///
+/// [`std::env::vars`] panics on the first such entry, and `hello` capability
+/// probing reaches this snapshot, so one stray non-UTF-8 variable in the
+/// runtime's environment would stop it from ever saying hello.
+///
+/// Usage: `unicode_environment([("A".into(), "b".into())])` is `{"A": "b"}`.
+fn unicode_environment(
+    vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> HashMap<String, String> {
+    let text = |raw: std::ffi::OsString| {
+        raw.into_string()
+            .unwrap_or_else(|raw| raw.to_string_lossy().into_owned())
+    };
+    vars.into_iter()
+        .map(|(key, value)| (text(key), text(value)))
+        .collect()
 }
 
 /// The pure half of [`build_runtime_path_env`]: `overrides` merged over
@@ -138,7 +159,7 @@ pub(crate) fn compose_runtime_path_env(
 ///
 /// `cmd.exe` records per-drive working directories and its last exit code as
 /// hidden entries (`=C:=C:\work`, `=ExitCode=00000000`), and
-/// [`std::env::vars`] keeps the leading `=` as part of the name. Every runtime
+/// [`std::env::vars_os`] keeps the leading `=` as part of the name. Every runtime
 /// started through the slot's `.cmd` shim, so every Scheduled Task runtime,
 /// inherits them. A child environment is spelled as `name=value` pairs, so
 /// both spawners refuse such a name; skipping the inherited ones keeps them
@@ -156,7 +177,7 @@ fn inheritable_environment_key(key: &str) -> bool {
 /// `host-env.ts`'s `withCanonicalPathKey` and the real bug its own doc
 /// comment describes: Windows names the variable `Path`; every detector in
 /// this crate's port reads the exact key `PATH`, so a caller-supplied
-/// override (or this host's own [`std::env::vars`] on Windows) that only
+/// override (or this host's own [`std::env::vars_os`] on Windows) that only
 /// carries the differently-cased key must not leave `PATH` unset.
 fn with_canonical_path_key(mut env: HashMap<String, String>) -> HashMap<String, String> {
     if env.contains_key("PATH") {
@@ -684,6 +705,50 @@ mod tests {
             keys,
             ["PATH"],
             "expected inherited keys: [\"PATH\"] | received: {keys:?}"
+        );
+    }
+
+    /// `prefix`, then one unit the platform's environment can hold but
+    /// Unicode cannot (a stray byte on Unix, a lone surrogate on Windows),
+    /// then `suffix`.
+    #[cfg(unix)]
+    fn non_unicode(prefix: &str, suffix: &str) -> std::ffi::OsString {
+        use std::os::unix::ffi::OsStringExt as _;
+        std::ffi::OsString::from_vec([prefix.as_bytes(), b"\xff", suffix.as_bytes()].concat())
+    }
+
+    #[cfg(windows)]
+    fn non_unicode(prefix: &str, suffix: &str) -> std::ffi::OsString {
+        use std::os::windows::ffi::OsStringExt as _;
+        let wide: Vec<u16> = prefix
+            .encode_utf16()
+            .chain([0xD800])
+            .chain(suffix.encode_utf16())
+            .collect();
+        std::ffi::OsString::from_wide(&wide)
+    }
+
+    /// Regression: the snapshot used `std::env::vars()`, which panics on a
+    /// non-Unicode entry, so such a variable anywhere in the runtime's
+    /// environment aborted `hello` capability probing.
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn unicode_environment_reads_a_non_utf8_entry_lossily_instead_of_failing() {
+        use std::ffi::OsString;
+
+        let env = unicode_environment([
+            (OsString::from("PATH"), OsString::from("/usr/bin")),
+            (OsString::from("NON_UTF8"), non_unicode("a", "b")),
+            (non_unicode("KEY_", ""), OsString::from("value")),
+        ]);
+        let expected = HashMap::from([
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            ("NON_UTF8".to_string(), "a\u{fffd}b".to_string()),
+            ("KEY_\u{fffd}".to_string(), "value".to_string()),
+        ]);
+        assert_eq!(
+            env, expected,
+            "expected every entry kept, invalid bytes as U+FFFD | received: {env:?}"
         );
     }
 

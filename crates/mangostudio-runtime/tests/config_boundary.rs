@@ -26,7 +26,7 @@ use std::path::Path;
 /// added here *and* to AGENTS.md in the same change, never only here.
 const ALLOWED: &[(&str, &str, usize)] = &[
     ("health.rs", "env::var_os(\"PATH\")", 2),
-    ("probing/host.rs", "env::vars()", 1),
+    ("probing/host.rs", "env::vars_os()", 1),
     ("runtime_home.rs", "env::home_dir()", 1),
     // This snapshots the inherited environment for exact child execution before fork. It does
     // not select or parse runtime configuration; AGENTS.md documents this distinct carve-out.

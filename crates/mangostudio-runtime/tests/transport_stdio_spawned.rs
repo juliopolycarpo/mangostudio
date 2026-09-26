@@ -366,6 +366,60 @@ fn assert_exits_after_hello_on(signal: nix::sys::signal::Signal) {
     );
 }
 
+/// `a`, one unit the platform's environment can hold but Unicode cannot (a
+/// stray byte on Unix, a lone surrogate on Windows), then `b`.
+#[cfg(unix)]
+fn non_unicode_value() -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStringExt as _;
+    std::ffi::OsString::from_vec(b"a\xffb".to_vec())
+}
+
+#[cfg(windows)]
+fn non_unicode_value() -> std::ffi::OsString {
+    use std::os::windows::ffi::OsStringExt as _;
+    std::ffi::OsString::from_wide(&[u16::from(b'a'), 0xD800, u16::from(b'b')])
+}
+
+/// Regression: the runtime's environment snapshot used `std::env::vars()`,
+/// which panics on a non-UTF-8 entry, so one such variable in the child's
+/// environment killed it (exit 101) before it could say `hello`.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_non_utf8_environment_variable_does_not_stop_the_hello() {
+    use std::io::{BufRead as _, Read as _};
+
+    let home = scratch_home("non-utf8-env");
+    let mut child = std::process::Command::new(binary_path())
+        .arg("stdio")
+        .env("MANGO_HOME", &home)
+        .env("MANGO_TEST_NON_UTF8", non_unicode_value())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    let stdin = child.stdin.take().expect("stdin is piped");
+    let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let mut hello = String::new();
+    stdout
+        .read_line(&mut hello)
+        .expect("the child's stdout is readable");
+    // Ends the session: the hub went away before answering.
+    drop(stdin);
+    let status = wait_bounded(&mut child, SIGNALLED_EXIT_BOUND);
+    let mut stderr = String::new();
+    let _ = child
+        .stderr
+        .take()
+        .expect("stderr is piped")
+        .read_to_string(&mut stderr);
+    assert!(
+        hello.contains("\"hello\""),
+        "expected the hello frame despite a non-UTF-8 variable | received stdout {hello:?}, \
+         {status:?}, stderr {stderr:?}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_sigint_after_hello_exits_while_the_hub_keeps_stdin_open() {
