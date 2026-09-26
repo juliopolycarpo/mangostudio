@@ -528,7 +528,11 @@ impl<Tx: PortTx> PortTx for AnswerReportingTx<Tx> {
             _ => None,
         };
         let outcome = self.inner.send(frame).await;
-        if let Some(id) = answered {
+        // Only an answer that reached the transport counts. One that did not
+        // ends the session, and `AnswerWatch::session_ended` fires from there.
+        if outcome == SendOutcome::Sent
+            && let Some(id) = answered
+        {
             self.answers.answered(&id);
         }
         outcome
@@ -696,6 +700,61 @@ mod tests {
             "expected the restart close | received: {closure:?}"
         );
         assert!(restart.is_requested());
+    }
+
+    /// A send half whose transport is already gone, standing in for a hub
+    /// that dropped the connection while the commit answer was in flight.
+    struct ClosedTx;
+
+    impl mango_protocol::port::PortTx for ClosedTx {
+        async fn send(
+            &mut self,
+            _frame: mango_protocol::frame::Frame,
+        ) -> mango_protocol::port::SendOutcome {
+            mango_protocol::port::SendOutcome::Closed
+        }
+
+        async fn close(self, _code: u16, _reason: Option<String>) {}
+    }
+
+    /// An answer the transport never took must not fire the restart: the hub
+    /// did not get it, and the session's end is what fires it instead.
+    #[tokio::test]
+    async fn an_answer_the_transport_refused_does_not_fire_the_restart() {
+        use mango_protocol::port::PortTx as _;
+
+        let restart = super::UpdateRestart::new(true);
+        let home = scratch_path("transport-refused-answer");
+        std::fs::create_dir_all(&*home).unwrap();
+        let update = crate::update::UpdateBinding::sharing_restart(
+            RuntimeSlot::Remote,
+            home.to_path_buf(),
+            true,
+            restart.requested(),
+        );
+        let answers = update.answer_watch();
+        answers.arm_for_test("r-1");
+        let mut tx = super::AnswerReportingTx {
+            inner: ClosedTx,
+            answers: answers.clone(),
+        };
+        let frame = mango_protocol::frame::Frame::Res(mango_protocol::frame::Response {
+            id: "r-1".into(),
+            result: serde_json::Value::Null,
+        });
+        assert_eq!(
+            tx.send(frame).await,
+            mango_protocol::port::SendOutcome::Closed
+        );
+        assert!(
+            !restart.is_requested(),
+            "expected no restart for an answer the transport refused | received: requested"
+        );
+        answers.session_ended();
+        assert!(
+            restart.is_requested(),
+            "expected the ended session to fire the armed restart | received: not requested"
+        );
     }
 
     /// `serve` and `connect` must decide supervision the way `--stdio` does:

@@ -85,6 +85,12 @@ impl AnswerWatch {
         *self.lock() = Some(request_id.to_owned());
     }
 
+    /// Arms the watch the way a supervised commit does, for transport tests.
+    #[cfg(test)]
+    pub(crate) fn arm_for_test(&self, request_id: &str) {
+        self.arm(request_id);
+    }
+
     /// The port sent the answer to `request_id`; fires if it was the commit's.
     pub(crate) fn answered(&self, request_id: &str) {
         let mut armed = self.lock();
