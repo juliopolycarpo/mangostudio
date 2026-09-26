@@ -120,7 +120,7 @@ mediana / p95 / máx:
 
 - **Todos os runners cabem no orçamento.** O handshake mais lento é o macOS x64 (mediana
   1,39s, máximo 2,0s) contra 5s; o Windows chega a 2,3s numa primeira execução, contra 30s.
-- **No macOS o runtime leva ~0,6–1,3s antes do `hello`; no Linux, ~80ms.** O spawn em si fica
+- **No macOS o runtime leva ~0,6–1,4s antes do `hello` (Intel, mediana ~1,4s); no Linux, ~80ms.** O spawn em si fica
   abaixo de 3ms nos dois; o tempo é o runtime montando o manifesto de capacidades (shells, Git,
   `gh`) antes de cumprimentar.
 - **No Windows, as primeiras execuções de um binário são os pontos fora da curva** (2,1s até o

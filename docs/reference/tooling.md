@@ -393,7 +393,7 @@ p95 / max:
 
 - **Every runner fits its budget.** The slowest warm handshake is macOS x64 (1.39s median, 2.0s
   max) against the 5s non-Windows budget; Windows tops out at 2.3s (a first run) against 30s.
-- **macOS spends ~0.6–1.3s before `hello`, Linux ~80ms.** The spawn itself is under 3ms on both,
+- **macOS spends ~0.6–1.4s before `hello` (Intel ~1.4s median), Linux ~80ms.** The spawn itself is under 3ms on both,
   so the time is the runtime building its capability manifest (shell, Git and `gh` probes)
   before it greets. It is inside budget; making those probes lazy is the lever if it ever
   matters.
