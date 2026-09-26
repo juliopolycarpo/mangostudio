@@ -31,6 +31,7 @@
 use mangostudio_runtime_contract::catalog::catalog;
 use mangostudio_runtime_contract::manifest::{RuntimeCapabilityAllow, RuntimeCapabilityFeatures};
 
+use crate::discovery::implemented_features;
 use crate::registry::{Classification, Registry};
 
 /// Whether every method backing `capability`'s feature is implemented.
@@ -132,29 +133,20 @@ pub fn build_features(
     allow: &RuntimeCapabilityAllow,
     git_available: bool,
 ) -> RuntimeCapabilityFeatures {
-    let fs_read = allow.fs_read && capability_ready(registry, "fsRead");
-    let fs_write = allow.fs_write && capability_ready(registry, "fsWrite");
-    let shell = allow.shell && capability_ready(registry, "shell");
-    let git = allow.git && git_available && capability_ready(registry, "git");
-    let probing = allow.probing && capability_ready(registry, "probing");
-    let mcp = allow.mcp && capability_ready(registry, "mcp");
-    let library = allow.library && capability_ready(registry, "library");
-    let checkpoints = allow.checkpoints && capability_ready(registry, "checkpoints");
-    let update = cfg!(any(unix, windows)) && allow.update && capability_ready(registry, "update");
-    let external_agents =
-        allow.external_agents == Some(true) && capability_ready(registry, "externalAgents");
+    // Consent narrows the one implemented set `runtime.discover` also reports.
+    let implemented = implemented_features(registry);
     let mut features = RuntimeCapabilityFeatures {
         tools: false,
-        git,
-        probing,
-        mcp,
-        library,
-        checkpoints,
-        fs_read,
-        fs_write,
-        shell,
-        update,
-        external_agents,
+        git: allow.git && git_available && implemented.git,
+        probing: allow.probing && implemented.probing,
+        mcp: allow.mcp && implemented.mcp,
+        library: allow.library && implemented.library,
+        checkpoints: allow.checkpoints && implemented.checkpoints,
+        fs_read: allow.fs_read && implemented.fs_read,
+        fs_write: allow.fs_write && implemented.fs_write,
+        shell: allow.shell && implemented.shell,
+        update: allow.update && implemented.update,
+        external_agents: allow.external_agents == Some(true) && implemented.external_agents,
         toolchain: true,
     };
     features.tools = effective_tools(&features);
