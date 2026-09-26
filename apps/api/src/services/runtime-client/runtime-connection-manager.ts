@@ -42,7 +42,7 @@ import { publishEnvironmentInvalidation } from '../realtime/environment-invalida
 import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
-import type { HubWorkspaceBinding } from './hub-workspace-authority';
+import { type HubWorkspaceBinding, STAND_IN_USER_ID } from './hub-workspace-authority';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
 import {
@@ -372,9 +372,8 @@ function withConnectDeadline(
   });
 }
 
-function connectionKey(userId: string, environmentId: string): string {
-  return `${userId}:${environmentId}`;
-}
+/** A connection's map key: the same `(user, environment)` scope the discovery cache keys by. */
+const connectionKey = runtimeDiscoveryKey;
 
 /**
  * The states worth remembering. `connecting` is a step on the way to one of
@@ -1510,7 +1509,7 @@ export function createLocalRuntimeConnector(
     if (requested === 'single-user' && claim.withdrawn) {
       await connection.close('released');
       throw unavailable(
-        'Local single-user-host attestation was withdrawn while it was connecting.'
+        `Local single-user-host attestation was withdrawn while it was connecting: user "${userId}" is no longer the only MangoStudio user of this hub's OS account; expected exactly one.`
       );
     }
     // A failed open never reaches this line, so it cannot bind the home.
@@ -1547,7 +1546,7 @@ export function createLocalRuntimeConnector(
       // CLI/setup probes use this documented stand-in when no authenticated user
       // exists. They may inspect Local, but they neither consume nor establish
       // the one real-user binding and therefore receive no identity attestation.
-      if (userId === 'local') {
+      if (userId === STAND_IN_USER_ID) {
         return await open({
           onUnavailable,
           workspaceBinding: localWorkspaceBinding(userId),
