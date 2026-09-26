@@ -573,7 +573,7 @@ pub(super) fn run(
 
 #[cfg(windows)]
 mod windows {
-    use super::scheduled_task::{TASK, ps_quote, verb_script};
+    use super::scheduled_task::{SlotProcesses, TASK, ps_quote, verb_script};
     use super::*;
     use crate::runtime_home::slot_dir;
     use crate::slot_update_lock::SlotUpdateLock;
@@ -864,9 +864,16 @@ mod windows {
                         ),
                     ));
                 }
+                let slot_dir = slot_dir(RuntimeSlot::Remote, home);
+                let slot_dir = slot_dir.to_string_lossy();
+                let shim_path = shim.to_string_lossy();
+                let slot = SlotProcesses {
+                    slot_dir: &slot_dir,
+                    shim: &shim_path,
+                };
                 require(
                     exec,
-                    &verb_script(action, remaining - VERB_MARGIN),
+                    &verb_script(action, remaining - VERB_MARGIN, &slot),
                     remaining,
                     "Scheduled Task service action",
                 )?;
@@ -882,7 +889,14 @@ mod windows {
                 }
                 require(
                     exec,
-                    &verb_script(action, Duration::ZERO),
+                    &verb_script(
+                        action,
+                        Duration::ZERO,
+                        &SlotProcesses {
+                            slot_dir: "",
+                            shim: "",
+                        },
+                    ),
                     remaining,
                     "Start-ScheduledTask",
                 )?;
@@ -1122,6 +1136,69 @@ mod windows_tests {
         assert!(
             ok && alive == "0",
             "expected orphans {output} gone | received: {alive} alive"
+        );
+    }
+
+    /// A runtime started by hand through the shim, with no task run behind
+    /// it: the runner capture finds nothing, so the slot fallback must find
+    /// the shim's `cmd.exe` by its command line and end it with its child.
+    #[test]
+    fn the_slot_fallback_ends_a_shim_run_that_no_task_started() {
+        use std::os::windows::process::CommandExt as _;
+
+        use super::scheduled_task::{SlotProcesses, capture_slot_orphans, terminate_runner_tree};
+        use super::windows::ProcessExec;
+
+        let home = scratch_dir("win-service-slot-orphan");
+        let slot_dir = home.join("runtime").join("remote");
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let shim = slot_dir.join("mangostudio-runtime.cmd");
+        std::fs::write(&shim, "@ping -n 120 127.0.0.1 >nul\r\n").unwrap();
+        let mut orphan = Command::new("cmd.exe")
+            .raw_arg(format!("/d /c \"\"{}\" serve\"", shim.display()))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the hand-started shim runs");
+        let pid = orphan.id();
+        let slot_dir_text = slot_dir.to_string_lossy();
+        let shim_text = shim.to_string_lossy();
+        let slot = SlotProcesses {
+            slot_dir: &slot_dir_text,
+            shim: &shim_text,
+        };
+        // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
+        let script = [
+            "$ErrorActionPreference = 'Stop'".to_owned(),
+            "$runners = @()".to_owned(),
+            "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
+            "$leaf = $null".to_owned(),
+            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid}\"; Start-Sleep -Milliseconds 100 }}"),
+            "if ($null -eq $leaf) { throw 'the hand-started shim never started its child' }".to_owned(),
+            capture_slot_orphans(&slot),
+            format!("if (@($orphans | Where-Object {{ $_.ProcessId -eq {pid} }}).Count -ne 1) {{ throw ('expected the shim cmd.exe {pid} among the orphans | received: ' + (($orphans | ForEach-Object {{ $_.ProcessId }}) -join ',')) }}"),
+            terminate_runner_tree().to_owned(),
+            "[string]$leaf.ProcessId".to_owned(),
+        ]
+        .join("\n");
+        let result = ProcessExec.run(&script, Duration::from_secs(60));
+        let _ = orphan.kill();
+        let _ = orphan.wait();
+        let (ok, leaf) = result.expect("PowerShell runs the fallback");
+        assert!(
+            ok,
+            "expected the hand-started shim tree terminated | received: {leaf}"
+        );
+        let (ok, alive) = ProcessExec
+            .run(
+                &format!("@(Get-Process -Id {pid},{leaf} -ErrorAction SilentlyContinue).Count"),
+                Duration::from_secs(30),
+            )
+            .expect("PowerShell counts the survivors");
+        assert!(
+            ok && alive == "0",
+            "expected the shim {pid} and its child {leaf} gone | received: {alive} alive"
         );
     }
 
