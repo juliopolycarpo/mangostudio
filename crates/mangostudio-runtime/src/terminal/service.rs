@@ -215,11 +215,11 @@ impl Service {
             let flow = Arc::clone(&flow);
             let session = session.clone();
             let id = id.clone();
-            Arc::new(move |bytes: Vec<u8>| {
+            Arc::new(move |bytes: &[u8]| {
                 let mut emit = |frame| publish(&session, &id, frame);
                 flow.lock()
                     .unwrap_or_else(|poison| poison.into_inner())
-                    .on_data(&bytes, &mut emit);
+                    .on_data(bytes, &mut emit);
             })
         };
         let consent_revoked = Arc::new(AtomicBool::new(false));
