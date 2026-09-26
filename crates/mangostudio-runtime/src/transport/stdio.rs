@@ -15,11 +15,11 @@ use mango_protocol::transports::stdio::stdio_port;
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::invocation::stdio_consent;
-use crate::runtime_home::{
-    resolve_runtime_slot_for_current_exe, resolve_runtime_source_for_current_exe,
-};
+use crate::runtime_home::resolve_runtime_slot_for_current_exe;
 use crate::supervisor::{ShutdownSignals, join_owned};
-use crate::transport::{build_host_with_restart, hello_capabilities, runtime_peer, start_session};
+use crate::transport::{
+    UpdateRestart, build_host_with_restart, hello_capabilities, runtime_peer, start_session,
+};
 
 /// Shorter than [`mango_protocol::session::DEFAULT_HANDSHAKE_TIMEOUT`]: a
 /// launcher that reached this process over a pipe it just opened is either
@@ -55,9 +55,9 @@ pub(crate) async fn run_with_signals(
         return Ok(1);
     }
 
-    let supervised = resolve_runtime_source_for_current_exe(mango_home) == "provisioned";
-    let host = build_host_with_restart(slot, mango_home, runtime_version, supervised);
-    let restart = host.update.restart_token();
+    let restart = UpdateRestart::for_current_exe(mango_home);
+    let host = build_host_with_restart(slot, mango_home, runtime_version, &restart);
+    let restart = restart.requested();
     // No request is in flight yet to cancel this against — a fresh token
     // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
     // `hello_capabilities`'s own doc comment.

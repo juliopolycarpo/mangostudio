@@ -387,9 +387,11 @@ An interrupted or mismatched transfer removes the `.incoming` file and never cha
 `current`.
 
 Commit renames the verified file over the versioned binary and atomically swaps `current`.
-The old process keeps serving its old inode until restart. A hub-spawned slot runtime exits
-with a distinct update code and the hub reconnects it; a manually launched `connect` or
-`serve` runtime keeps running and the card asks its owner to restart it. That restart no
+The old process keeps serving its old inode until restart. A runtime running from a slot exits
+with a distinct update code once the commit's answer is sent, whatever its transport: the hub
+relaunches a hub-spawned stdio runtime, and a `connect` or `serve` runtime is relaunched by
+the service that owns it. A `connect` or `serve` runtime started from a binary outside the
+slots keeps running and the card asks its owner to restart it. That restart no
 longer has to be a person: a user-level service manager supervises each binary — the
 runtime through `mangostudio-runtime service` (`crates/mangostudio-runtime/src/cli/user_service.rs`)
 and the hub through `mangostudio service` (`apps/shared/src/machine/user-service.ts`) —

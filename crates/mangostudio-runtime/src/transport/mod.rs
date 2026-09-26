@@ -136,12 +136,89 @@ pub(crate) struct SessionHost {
 /// methods, the two install methods, and the three runtime update methods.
 /// Other groups remain unsupported. Every connection shares the slot's update
 /// exclusivity tracker; its request claims use a connection-specific namespace.
+// Every transport builds through `build_host_with_restart`; the tests keep
+// this unsupervised shorthand.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn build_host(
     slot: RuntimeSlot,
     mango_home: &Path,
     runtime_version: &str,
 ) -> SessionHost {
-    build_host_with_restart(slot, mango_home, runtime_version, false)
+    build_host_with_restart(
+        slot,
+        mango_home,
+        runtime_version,
+        &UpdateRestart::unsupervised(),
+    )
+}
+
+/// Whether a committed runtime update ends this process for its supervisor
+/// to relaunch `current`: true when `executable` sits in one of
+/// `mango_home`'s runtime slots, whatever the transport.
+///
+/// Mirrors the TypeScript runtime's `supervisedUpdateSession`, which every
+/// transport (`--stdio`, `serve`, `connect`) consulted through
+/// `resolveRuntimeSource() === 'provisioned'`. A provisioned binary is the
+/// one a hub, `install`, or a user service launches through the slot's
+/// `current` pointer, and every one of those relaunches on exit code 75:
+/// the hub's stdio spawner, the systemd and launchd units, and the Scheduled
+/// Task runner. A bundled binary has nothing to relaunch it and answers
+/// `restart: "manual"` instead.
+///
+/// Usage: `update_restart_supervised(home, Some(&home.join("runtime/remote/1.0.0/mangostudio-runtime")))`
+/// is `true`; the same call with `/usr/local/bin/mangostudio-runtime` is `false`.
+pub(crate) fn update_restart_supervised(mango_home: &Path, executable: Option<&Path>) -> bool {
+    crate::runtime_home::resolve_runtime_source(mango_home, executable) == "provisioned"
+}
+
+/// One process's answer to "a supervised update committed": every connection
+/// the process builds a host for shares it, so a commit over any of them
+/// ends the whole process, not just its own session.
+///
+/// Usage: `let restart = UpdateRestart::for_current_exe(home);` then pass
+/// `&restart` to [`build_host_with_restart`] per connection and exit with
+/// `RUNTIME_UPDATE_EXIT_CODE` once [`UpdateRestart::is_requested`].
+#[derive(Clone)]
+pub(crate) struct UpdateRestart {
+    supervised: bool,
+    requested: CancellationToken,
+}
+
+impl UpdateRestart {
+    /// Decides supervision for this running executable; see
+    /// [`update_restart_supervised`].
+    pub(crate) fn for_current_exe(mango_home: &Path) -> Self {
+        let executable = std::env::current_exe().ok();
+        Self::new(update_restart_supervised(mango_home, executable.as_deref()))
+    }
+
+    /// A restart request that a commit fires only when `supervised`.
+    pub(crate) fn new(supervised: bool) -> Self {
+        Self {
+            supervised,
+            requested: CancellationToken::new(),
+        }
+    }
+
+    /// A process nothing relaunches: commits answer `restart: "manual"`.
+    pub(crate) fn unsupervised() -> Self {
+        Self::new(false)
+    }
+
+    /// Whether a commit schedules a restart rather than asking for a manual one.
+    pub(crate) fn supervised(&self) -> bool {
+        self.supervised
+    }
+
+    /// Fires once a committed supervised update has had time to send its response.
+    pub(crate) fn requested(&self) -> CancellationToken {
+        self.requested.clone()
+    }
+
+    /// Whether a committed supervised update asked this process to exit.
+    pub(crate) fn is_requested(&self) -> bool {
+        self.requested.is_cancelled()
+    }
 }
 
 /// Whether `slot` records protocol calls to `audit.log`, from its
@@ -175,12 +252,13 @@ fn slot_audit_enabled(slot: RuntimeSlot, mango_home: &Path) -> bool {
         .or_insert(enabled)
 }
 
-/// Builds a stdio host that can exit for a supervisor after a verified commit.
+/// Builds a host whose verified update commit fires `restart` when it is
+/// supervised, so the transport can end the process with exit code 75.
 pub(crate) fn build_host_with_restart(
     slot: RuntimeSlot,
     mango_home: &Path,
     runtime_version: &str,
-    supervised: bool,
+    restart: &UpdateRestart,
 ) -> SessionHost {
     let audit: Arc<dyn Audit> = if slot_audit_enabled(slot, mango_home) {
         Arc::new(crate::audit::FileAudit::new(
@@ -190,8 +268,12 @@ pub(crate) fn build_host_with_restart(
     } else {
         Arc::new(crate::ports::audit::NoopAudit)
     };
-    let update =
-        crate::update::UpdateBinding::new_with_restart(slot, mango_home.to_path_buf(), supervised);
+    let update = crate::update::UpdateBinding::sharing_restart(
+        slot,
+        mango_home.to_path_buf(),
+        restart.supervised(),
+        restart.requested(),
+    );
     let exclusivity = update.exclusivity();
     let registry = Registry::with_ports_and_exclusivity(
         Arc::clone(&audit),
@@ -410,6 +492,51 @@ mod tests {
     };
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::scratch_path;
+
+    /// `serve` and `connect` must decide supervision the way `--stdio` does:
+    /// the TypeScript runtime scheduled the restart in every transport for a
+    /// binary launched from a slot, and a hub waits for it.
+    #[test]
+    fn a_slot_binary_is_supervised_and_a_bundled_one_is_not() {
+        let home = std::path::Path::new("/home/ada/.mango");
+        for slot in ["remote", "host", "wsl"] {
+            let binary = home
+                .join("runtime")
+                .join(slot)
+                .join("0.1.1")
+                .join("mangostudio-runtime");
+            assert!(
+                super::update_restart_supervised(home, Some(&binary)),
+                "expected supervised: true | received: false for {}",
+                binary.display()
+            );
+        }
+        for binary in [
+            Some(std::path::Path::new("/usr/local/bin/mangostudio-runtime")),
+            Some(std::path::Path::new(
+                "/home/ada/.mango-other/runtime/remote/0.1.1/x",
+            )),
+            None,
+        ] {
+            assert!(
+                !super::update_restart_supervised(home, binary),
+                "expected supervised: false | received: true for {binary:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_update_restart_is_requested_only_once_its_token_fires() {
+        let restart = super::UpdateRestart::new(true);
+        assert!(restart.supervised());
+        assert!(!restart.is_requested());
+        restart.requested().cancel();
+        assert!(
+            restart.clone().is_requested(),
+            "expected a clone to observe the shared request | received: not requested"
+        );
+        assert!(!super::UpdateRestart::unsupervised().supervised());
+    }
 
     fn peer(role: &str) -> PeerInfo {
         PeerInfo {

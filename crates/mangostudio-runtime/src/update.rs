@@ -48,8 +48,20 @@ pub(crate) struct UpdateBinding {
 }
 
 impl UpdateBinding {
-    /// Enables a restart only for a stdio binary reached through `current`.
+    /// Enables a restart only for a binary reached through a slot's `current`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new_with_restart(slot: RuntimeSlot, mango_home: PathBuf, supervised: bool) -> Self {
+        Self::sharing_restart(slot, mango_home, supervised, CancellationToken::new())
+    }
+
+    /// [`UpdateBinding::new_with_restart`] firing a process-wide `restart`
+    /// token, so a commit over one connection ends the whole process.
+    pub fn sharing_restart(
+        slot: RuntimeSlot,
+        mango_home: PathBuf,
+        supervised: bool,
+        restart: CancellationToken,
+    ) -> Self {
         Self {
             service: UpdateService::process(slot, mango_home),
             owner: format!(
@@ -58,13 +70,8 @@ impl UpdateBinding {
                 NEXT_OWNER.fetch_add(1, Ordering::Relaxed)
             ),
             supervised,
-            restart: CancellationToken::new(),
+            restart,
         }
-    }
-
-    /// Fires after a committed supervised update has had time to send its response.
-    pub fn restart_token(&self) -> CancellationToken {
-        self.restart.clone()
     }
 
     pub async fn close(self) {
