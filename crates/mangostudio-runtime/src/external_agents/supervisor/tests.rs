@@ -1919,6 +1919,56 @@ async fn a_close_whose_owner_was_dropped_mid_close_still_releases_later_closers(
     );
 }
 
+/// A close whose owner was dropped by hub teardown is a cancellation, not a
+/// vendor cleanup failure: a closer waiting on it must not see `INTERNAL`.
+#[tokio::test]
+async fn a_closer_waiting_on_a_dropped_owner_is_told_cancelled_not_internal() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::CloseStalls,
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let live = match rig.supervisor.slots().get("one") {
+        Some(super::Slot::Live(live)) => Arc::clone(live),
+        _ => panic!("expected session \"one\" live after its open | received: no live slot"),
+    };
+
+    let supervisor = Arc::clone(&rig.supervisor);
+    let owner = tokio::spawn(async move {
+        supervisor
+            .close_session(
+                CloseParams {
+                    session_id: "one".into(),
+                },
+                CloseCause::Requested,
+            )
+            .await
+    });
+    eventually(
+        "the first close to reach the vendor",
+        || rig.log.closes().len(),
+        |closes| *closes == 1,
+    )
+    .await;
+    owner.abort();
+    let _ = owner.await;
+
+    let waited = tokio::time::timeout(
+        Duration::from_secs(2),
+        rig.supervisor.close_live(&live, CloseCause::Shutdown),
+    )
+    .await
+    .expect("expected the later closer to return after the owner was dropped | received: still waiting after 2s");
+    let code = waited.as_ref().map_err(|error| error.code.as_str());
+    assert_eq!(
+        code,
+        Err(codes::CANCELLED),
+        "expected close outcome: Err({}) | received: {waited:?}",
+        codes::CANCELLED
+    );
+}
+
 #[tokio::test]
 async fn an_open_stopped_before_it_launched_never_reaches_the_vendor() {
     let (release, gate) = watch::channel(false);

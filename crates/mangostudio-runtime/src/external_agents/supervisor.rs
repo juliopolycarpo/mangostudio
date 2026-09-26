@@ -276,9 +276,19 @@ pub(crate) struct LiveSession {
     pub(super) session: Box<dyn Session>,
     scratch: PathBuf,
     pub(super) closing: AtomicBool,
-    closed: watch::Sender<Option<Result<(), String>>>,
+    closed: watch::Sender<Option<Result<(), CloseFailure>>>,
     /// Turns, receipts, interactions and the event stream to the hub.
     pub(super) turns: super::turns::TurnState,
+}
+
+/// Why a live session's close did not finish cleanly.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CloseFailure {
+    /// The owning close was dropped before the vendor finished closing — the
+    /// hub went away mid-request. Expected at teardown, not a vendor fault.
+    Interrupted,
+    /// The vendor close or the scratch cleanup failed; the detail says how.
+    Failed(String),
 }
 
 /// Publishes a live session's close outcome and drops its slot when the
@@ -290,7 +300,7 @@ pub(crate) struct LiveSession {
 struct CloseOwner<'a> {
     supervisor: &'a Supervisor,
     live: &'a Arc<LiveSession>,
-    outcome: Option<Result<(), String>>,
+    outcome: Option<Result<(), CloseFailure>>,
 }
 
 impl Drop for CloseOwner<'_> {
@@ -932,11 +942,13 @@ impl Supervisor {
             let mut guard = CloseOwner {
                 supervisor: self,
                 live,
-                outcome: Some(Err(
-                    "the close was interrupted before the vendor finished closing".to_owned(),
-                )),
+                outcome: Some(Err(CloseFailure::Interrupted)),
             };
-            guard.outcome = Some(self.finish_close(live, cause).await);
+            guard.outcome = Some(
+                self.finish_close(live, cause)
+                    .await
+                    .map_err(CloseFailure::Failed),
+            );
         }
         let mut closed = live.closed.subscribe();
         let outcome = loop {
@@ -944,17 +956,29 @@ impl Supervisor {
                 break outcome;
             }
             if closed.changed().await.is_err() {
-                break Err("the session owner ended without a cleanup record".to_owned());
+                break Err(CloseFailure::Failed(
+                    "the session owner ended without a cleanup record".to_owned(),
+                ));
             }
         };
-        outcome.map_err(|detail| {
-            RemoteError::new(
+        outcome.map_err(|failure| match failure {
+            // `CANCELLED`, not `INTERNAL`: the close was abandoned by its
+            // caller, which a closer racing hub teardown should expect.
+            CloseFailure::Interrupted => RemoteError::new(
+                codes::CANCELLED,
+                format!(
+                    "External-agent session {:?} close was interrupted before the vendor finished \
+                     closing.",
+                    live.session_id
+                ),
+            ),
+            CloseFailure::Failed(detail) => RemoteError::new(
                 codes::INTERNAL,
                 format!(
                     "External-agent session {:?} cleanup failed: {detail}",
                     live.session_id
                 ),
-            )
+            ),
         })
     }
 

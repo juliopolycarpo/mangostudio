@@ -32,6 +32,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Semaphore, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use crate::registry::Registry;
 use crate::runtime_home::RuntimeSlot;
 use crate::supervisor::{OwnedTasks, join_owned};
 use crate::transport::upgrade_head::{BindingHeader, RecordingStream};
@@ -150,6 +151,8 @@ pub(crate) async fn run_with_restart(
         runtime_version,
         restart,
         log: Box::new(log),
+        #[cfg(test)]
+        seams: TestSeams::default(),
     });
     let pending_handshakes = Arc::new(Semaphore::new(MAX_PENDING_HANDSHAKES));
     let mut owned = OwnedTasks::new();
@@ -235,6 +238,20 @@ struct ConnectionContext {
     runtime_version: String,
     restart: UpdateRestart,
     log: Box<dyn Fn(&str) + Send + Sync>,
+    #[cfg(test)]
+    seams: TestSeams,
+}
+
+/// Hooks into [`serve_upgraded`] that only tests compile in.
+#[cfg(test)]
+#[derive(Default)]
+struct TestSeams {
+    /// How many times capability probing ran, so a test can prove a refused
+    /// dial never did.
+    capability_probes: std::sync::atomic::AtomicUsize,
+    /// Runs between the already-bound preview and `try_admit`, so a test can
+    /// release the incumbent in exactly that window.
+    after_bound_preview: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 /// One admitted generation: enough for a later caller to supersede it
@@ -361,6 +378,19 @@ impl ServeState {
             generation,
             previous,
         }
+    }
+
+    /// Read-only preview of [`Self::try_admit`]'s `AlreadyBound` outcome:
+    /// true when a live generation holds the runtime for a binding key other
+    /// than `binding`. Only lets a likely-refused dial skip early capability
+    /// probing; it never refuses anything itself. `try_admit` decides, since
+    /// the incumbent can change between the two calls.
+    fn bound_elsewhere(&self, binding: Option<&str>) -> bool {
+        let inner = self.inner.lock().expect("ServeState mutex poisoned");
+        inner
+            .active
+            .as_ref()
+            .is_some_and(|active| active.bound_elsewhere(binding))
     }
 
     /// True when `generation` is still the active one and shutdown has not
@@ -562,23 +592,27 @@ async fn serve_upgraded<P: Port>(
         &context.runtime_version,
         &context.restart,
     );
-    // No request is in flight yet to cancel this against — a fresh token
-    // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
-    // `hello_capabilities`'s own doc comment.
+    // Probed *before* admission when admission looks likely, not after:
+    // this used to run only once the previous connection had already been
+    // superseded, leaving the runtime connectionless for the whole cost of
+    // probing (a `PATH` walk, a `git` probe — measured around 200ms) for no
+    // reason. The previous connection can keep answering calls right up
+    // until this one is actually ready to take its place.
     //
-    // Built *before* admission below, not after: this used to run only
-    // once the previous connection had already been superseded, leaving
-    // the runtime connectionless for the whole cost of building it (a
-    // `PATH` walk, a `git` probe — measured around 200ms) for no reason.
-    // The previous connection can keep answering calls right up until
-    // this one is actually ready to take its place.
-    let capabilities = crate::transport::hello_capabilities(
-        context.slot,
-        &context.mango_home,
-        &host.registry,
-        &CancellationToken::new(),
-    )
-    .await;
+    // Skipped when the runtime looks bound to another record: that dial is
+    // almost always refused, and must not probe for a `hello` it will never
+    // send. The preview only decides whether to probe early; `try_admit`
+    // alone decides admission, since the incumbent may be released between
+    // the two — and then this dial probes once admitted instead.
+    let probed_early = if state.bound_elsewhere(binding.as_deref()) {
+        None
+    } else {
+        Some(probe_capabilities(&context, &host.registry).await)
+    };
+    #[cfg(test)]
+    if let Some(hook) = &context.seams.after_bound_preview {
+        hook();
+    }
 
     let (generation, previous) = match state.try_admit(binding.as_deref()) {
         Admission::Admitted {
@@ -590,24 +624,18 @@ async fn serve_upgraded<P: Port>(
             return;
         }
         Admission::AlreadyBound => {
-            // Refused before this side's `hello` goes out, so the incumbent
-            // is never disturbed and the refused hub learns only the code
-            // and reason. Logged first, as for a malformed header.
-            (context.log)(
-                "Refused a hub connection: this runtime is already bound to another environment.",
-            );
-            close_port(
-                port,
-                binding::ALREADY_BOUND_CLOSE_CODE,
-                binding::ALREADY_BOUND_REASON,
-            )
-            .await;
+            refuse_already_bound(port, &context).await;
             return;
         }
     };
     // Declared before anything that can fail or be cancelled, so the slot
     // this admission claimed is released however this task ends.
     let _admitted = AdmittedGeneration::new(&state, generation);
+    // Still before superseding anything, for the reason given above.
+    let capabilities = match probed_early {
+        Some(capabilities) => capabilities,
+        None => probe_capabilities(&context, &host.registry).await,
+    };
 
     if let Some(previous) = previous {
         release_active(previous, close_codes::SUPERSEDED, "Superseded").await;
@@ -719,6 +747,45 @@ fn teardown_failure(closure: &SessionClosure) -> Option<String> {
          expired (close {}{reason}).",
         closure.unfinished_handlers, closure.code
     ))
+}
+
+/// [`crate::transport::hello_capabilities`] for this connection's `hello`.
+///
+/// No request is in flight yet to cancel this against — a fresh token that
+/// never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
+/// `hello_capabilities`'s own doc comment.
+async fn probe_capabilities(
+    context: &ConnectionContext,
+    registry: &Registry,
+) -> serde_json::Map<String, serde_json::Value> {
+    #[cfg(test)]
+    context
+        .seams
+        .capability_probes
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    crate::transport::hello_capabilities(
+        context.slot,
+        &context.mango_home,
+        registry,
+        &CancellationToken::new(),
+    )
+    .await
+}
+
+/// Refuses a dial from a hub bound to another environment record. Refused
+/// before this side's `hello` goes out, so the incumbent is never disturbed
+/// and the refused hub learns only the code and reason. Logged first, as
+/// for a malformed header.
+async fn refuse_already_bound<P: Port>(port: P, context: &ConnectionContext) {
+    (context.log)(
+        "Refused a hub connection: this runtime is already bound to another environment.",
+    );
+    close_port(
+        port,
+        binding::ALREADY_BOUND_CLOSE_CODE,
+        binding::ALREADY_BOUND_REASON,
+    )
+    .await;
 }
 
 /// Closes a port nothing ever became a session over — a refused admission,
@@ -904,6 +971,7 @@ mod tests {
             runtime_version: "0.0.0".into(),
             restart: crate::transport::UpdateRestart::unsupervised(),
             log: log.sink(),
+            seams: super::TestSeams::default(),
         });
         let (hub_port, runtime_port) = port_pair();
         let (hub_tx, mut hub_rx) = hub_port.split();
@@ -959,6 +1027,146 @@ mod tests {
         assert!(
             log.mentions("superseded the previous one"),
             "expected the supersession logged | received: {:?}",
+            log.lines()
+        );
+
+        drop((hub_tx, hub_rx));
+        tokio::time::timeout(Duration::from_secs(30), connection)
+            .await
+            .expect("expected the newcomer to end once its hub went away")
+            .expect("the connection task must not panic");
+    }
+
+    /// A dial that admission would refuse as already bound is refused
+    /// before capability probing runs: a hub for another environment must
+    /// not make this runtime walk `PATH` or run `git` for nothing.
+    #[tokio::test]
+    async fn an_already_bound_refusal_runs_no_capability_probe() {
+        use std::time::Duration;
+
+        use mango_protocol::port::{Inbound, Port, PortClosure, PortRx};
+
+        let state = Arc::new(ServeState::new());
+        assert!(
+            matches!(state.try_admit(Some("env-a")), Admission::Admitted { .. }),
+            "expected an empty runtime to admit the incumbent"
+        );
+
+        let home = crate::test_support::scratch_dir("serve-bound-no-probe");
+        let log = RecordingLog::default();
+        let context = Arc::new(super::ConnectionContext {
+            token: "unused".into(),
+            slot: crate::runtime_home::RuntimeSlot::Host,
+            mango_home: home.to_path_buf(),
+            runtime_version: "0.0.0".into(),
+            restart: crate::transport::UpdateRestart::unsupervised(),
+            log: log.sink(),
+            seams: super::TestSeams::default(),
+        });
+        let (hub_port, runtime_port) = port_pair();
+        let (_hub_tx, mut hub_rx) = hub_port.split();
+        let connection = tokio::spawn(super::serve_upgraded(
+            runtime_port,
+            crate::transport::upgrade_head::BindingHeader::Key("env-b".into()),
+            Arc::clone(&state),
+            Arc::clone(&context),
+        ));
+
+        let first = tokio::time::timeout(Duration::from_secs(30), hub_rx.recv())
+            .await
+            .expect("expected the refused dial to answer within 30s");
+        let received = format!("{first:?}");
+        assert!(
+            matches!(
+                &first,
+                Some(Inbound::Closed(PortClosure::Closed { code: Some(code), .. }))
+                    if *code == super::binding::ALREADY_BOUND_CLOSE_CODE
+            ),
+            "expected close {} | received: {}",
+            super::binding::ALREADY_BOUND_CLOSE_CODE,
+            received.get(..120).unwrap_or(&received)
+        );
+        drop(hub_rx);
+        tokio::time::timeout(Duration::from_secs(30), connection)
+            .await
+            .expect("expected the refused connection to end")
+            .expect("the connection task must not panic");
+
+        let probes = context.seams.capability_probes.load(Ordering::SeqCst);
+        assert_eq!(
+            probes, 0,
+            "expected capability probes: 0 | received: {probes}"
+        );
+        assert!(
+            log.mentions("already bound"),
+            "expected the refusal logged | received: {:?}",
+            log.lines()
+        );
+    }
+
+    /// The already-bound preview only skips early probing; admission is still
+    /// `try_admit`'s call. An incumbent released between the two must not
+    /// cost the newcomer a spurious 4423: it is admitted, probes once, and
+    /// says `hello`.
+    #[tokio::test]
+    async fn a_dial_whose_incumbent_leaves_after_the_preview_is_admitted() {
+        use std::time::Duration;
+
+        use mango_protocol::frame::Frame;
+        use mango_protocol::port::{Inbound, Port, PortRx};
+
+        let state = Arc::new(ServeState::new());
+        let Admission::Admitted {
+            generation: incumbent,
+            ..
+        } = state.try_admit(Some("env-a"))
+        else {
+            panic!("expected an empty runtime to admit the incumbent");
+        };
+
+        let home = crate::test_support::scratch_dir("serve-bound-then-released");
+        let log = RecordingLog::default();
+        let release_state = Arc::clone(&state);
+        let context = Arc::new(super::ConnectionContext {
+            token: "unused".into(),
+            slot: crate::runtime_home::RuntimeSlot::Host,
+            mango_home: home.to_path_buf(),
+            runtime_version: "0.0.0".into(),
+            restart: crate::transport::UpdateRestart::unsupervised(),
+            log: log.sink(),
+            seams: super::TestSeams {
+                after_bound_preview: Some(Box::new(move || {
+                    release_state.clear_if_current(incumbent);
+                })),
+                ..super::TestSeams::default()
+            },
+        });
+        let (hub_port, runtime_port) = port_pair();
+        let (hub_tx, mut hub_rx) = hub_port.split();
+        let connection = tokio::spawn(super::serve_upgraded(
+            runtime_port,
+            crate::transport::upgrade_head::BindingHeader::Key("env-b".into()),
+            Arc::clone(&state),
+            Arc::clone(&context),
+        ));
+
+        let first = tokio::time::timeout(Duration::from_secs(30), hub_rx.recv())
+            .await
+            .expect("expected the admitted dial to say hello within 30s");
+        let received = format!("{first:?}");
+        assert!(
+            matches!(first, Some(Inbound::Frame(Frame::Hello(_)))),
+            "expected the newcomer's hello, not a refusal | received: {}",
+            received.get(..120).unwrap_or(&received)
+        );
+        let probes = context.seams.capability_probes.load(Ordering::SeqCst);
+        assert_eq!(
+            probes, 1,
+            "expected capability probes: 1 | received: {probes}"
+        );
+        assert!(
+            !log.mentions("already bound"),
+            "expected no already-bound refusal logged | received: {:?}",
             log.lines()
         );
 
