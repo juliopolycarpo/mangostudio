@@ -954,6 +954,11 @@ runtime supports that layout as follows:
   found only there reports `installed-but-not-on-path` and still launches. `agent.ps1` is never
   searched: `agent` is a name other CLIs install too, and a probe runs the script it finds. No
   other vendor searches `.ps1`.
+- **Shared names trust `PATH`.** When several vendors install the same binary name (`agent`),
+  the `PATH` winner is replaced only if its `--version` does not read as this vendor's; a later
+  installation that does read then wins. A different vendor's binary earlier on `PATH` whose
+  version line happens to parse as this vendor's still wins, because a version string is the
+  only identity the probe has. Telling them apart would need a vendor-specific fingerprint.
 - **Launch.** A `.ps1` cannot be started by `CreateProcessW`. The Windows Job spawner
   (`crates/mangostudio-runtime/src/subprocess/powershell_script.rs`) rewrites it to
   `<SystemRoot>\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile
