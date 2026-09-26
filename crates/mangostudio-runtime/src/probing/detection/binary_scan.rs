@@ -1250,7 +1250,16 @@ mod tests {
         assert!(!result.installations[1].effective);
     }
 
-    #[tokio::test]
+    /// Runs on a paused clock so the 20 ms budget is virtual: tokio only
+    /// advances time once every task is idle, so the fast probe always
+    /// resolves before the deadline and only the stalled probe can reach it.
+    /// A real-time budget raced scheduler latency instead — on a loaded CI
+    /// runner the deadline could pass before the fast probe was ever polled.
+    ///
+    /// The outer guard turns a hang into a named failure: remove the probe
+    /// timeout in `probe_one_candidate` and the scan never returns, so the
+    /// guard's own (virtual) timer fires and this test fails on it.
+    #[tokio::test(start_paused = true)]
     async fn returns_partial_results_with_a_timeout_failure_instead_of_hanging() {
         let deps = Arc::new(FakeBinaryScanDeps {
             path_env: linux_env("/fast/bin:/stalled/bin"),
@@ -1262,21 +1271,50 @@ mod tests {
             pending: HashSet::from(["/stalled/bin/node".to_string()]),
             ..Default::default()
         });
-
+        let total_timeout = Duration::from_millis(20);
         let options = BinaryScanOptions {
-            total_timeout_ms: 20,
+            total_timeout_ms: total_timeout.as_millis() as u64,
             ..Default::default()
         };
-        let result = scan_runtime(&node_definition(), deps, options).await;
 
-        assert_eq!(result.installations.len(), 1);
-        assert_eq!(result.installations[0].raw_path, "/fast/bin/node");
-        assert!(
-            result
-                .failures
-                .iter()
-                .any(|failure| failure.code == RuntimeFindingCode::ProbeTimeout
-                    && failure.path == "/stalled/bin/node")
+        let started = TokioInstant::now();
+        let result = tokio::time::timeout(
+            total_timeout * 100,
+            scan_runtime(&node_definition(), deps, options),
+        )
+        .await
+        .unwrap_or_else(|_elapsed| {
+            panic!(
+                "expected the scan to return at its {total_timeout:?} deadline | received: \
+                 still running after {:?}",
+                started.elapsed()
+            )
+        });
+
+        assert_eq!(
+            started.elapsed(),
+            total_timeout,
+            "the scan must end exactly at its total deadline, not earlier or later"
+        );
+        let installed: Vec<&str> = result
+            .installations
+            .iter()
+            .map(|installation| installation.raw_path.as_str())
+            .collect();
+        assert_eq!(
+            installed,
+            vec!["/fast/bin/node"],
+            "the probe that answered before the deadline must be kept as a partial result"
+        );
+        let failures: Vec<(&RuntimeFindingCode, &str)> = result
+            .failures
+            .iter()
+            .map(|failure| (&failure.code, failure.path.as_str()))
+            .collect();
+        assert_eq!(
+            failures,
+            vec![(&RuntimeFindingCode::ProbeTimeout, "/stalled/bin/node")],
+            "the stalled probe must be reported as a timeout failure"
         );
     }
 
