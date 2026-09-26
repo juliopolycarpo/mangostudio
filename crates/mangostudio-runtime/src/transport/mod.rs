@@ -6,19 +6,16 @@
 //! [`crate::registry::Registry`], [`crate::consent`], [`crate::serve::serve`]
 //! — onto one of `mango_protocol`'s transports. See [`crate::supervisor`]
 //! for the ownership and state-transition model all three share, and this
-//! module's own [`runtime_peer`]/`build_host` for what they share
+//! module's own [`runtime_peer`]/`build_host_with_restart` for what they share
 //! literally.
 //!
-//! Implemented method families include `runtime.health`, `workspace.*`,
-//! `probing.*`, `fs.*`, `snapshot.*`, command, terminal, MCP, install, and
-//! `runtime.update.*`. [`crate::registry::Registry`] answers other methods with
-//! `METHOD_UNSUPPORTED`. `hello.capabilities` is wired to this
-//! module's own `hello_capabilities`, which shapes `crate::health`'s
+//! The implemented method families are exactly the ones
+//! `build_host_with_restart` registers; [`crate::registry::Registry`] answers
+//! any other method with `METHOD_UNSUPPORTED`. `hello.capabilities` is wired
+//! to this module's own `hello_capabilities`, which shapes `crate::health`'s
 //! `build_capability_manifest` into the `Map` `hello` carries — without it, a
-//! hub refuses every
-//! connection outright (`manifestOf` in `hub-session.ts` closes with
-//! `PROTOCOL_ERROR` on an empty object), so this is not optional scaffolding
-//! for a later plan the way the rest of this module's method-group gap is.
+//! hub refuses every connection outright (`manifestOf` in `hub-session.ts`
+//! closes with `PROTOCOL_ERROR` on an empty object).
 
 pub mod connect;
 pub mod serve;
@@ -108,12 +105,10 @@ pub fn runtime_peer(runtime_version: &str) -> PeerInfo {
 }
 
 /// One connection's worth of what [`crate::serve::serve`] needs beyond the
-/// session itself: a [`Registry`] implementing `runtime.health`, the
-/// `workspace.*`, `probing.*`, `fs.*`, `snapshot.*`, `terminal.*`, `mcp.*`,
-/// `install.*`, and `runtime.update.*` methods (see [`build_host`]
-/// for the full list; every other machine method group is out of scope, and
-/// the catalog's `rpc.discover` answer plus `METHOD_UNSUPPORTED` cover the
-/// rest) recording through a real, on-disk [`crate::audit::FileAudit`],
+/// session itself: a [`Registry`] implementing every method group this build
+/// registers (see [`build_host_with_restart`], the one list of them; any
+/// other method answers `METHOD_UNSUPPORTED`) recording through a real,
+/// on-disk [`crate::audit::FileAudit`],
 /// and the real [`ConsentAuthorization`] reading `slot`'s `runtime.json`
 /// fresh on every call.
 ///
@@ -130,13 +125,10 @@ pub(crate) struct SessionHost {
 }
 
 /// Builds one [`SessionHost`] for `slot` under `mango_home`, announcing
-/// `runtime_version` from `runtime.health`, and also implementing
-/// `workspace.browse`, `workspace.validate`, `workspace.resolve-contained`,
-/// `probing.runtimes`/`probing.version-managers`/`probing.agent-clis`, the
-/// eleven filesystem methods, three snapshot methods, eight terminal methods, the nine MCP
-/// methods, the two install methods, and the three runtime update methods.
-/// Other groups remain unsupported. Every connection shares the slot's update
-/// exclusivity tracker; its request claims use a connection-specific namespace.
+/// `runtime_version` from `runtime.health`: [`build_host_with_restart`] with
+/// an unsupervised restart, so it registers the same method groups. Every
+/// connection shares the slot's update exclusivity tracker; its request
+/// claims use a connection-specific namespace.
 // Every transport builds through `build_host_with_restart`; the tests keep
 // this unsupervised shorthand.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -258,6 +250,10 @@ fn slot_audit_enabled(slot: RuntimeSlot, mango_home: &Path) -> bool {
 
 /// Builds a host whose verified update commit fires `restart` when it is
 /// supervised, so the transport can end the process with exit code 75.
+///
+/// Its body is the one list of the method groups this build implements; see
+/// `crate::discovery`'s ceiling test for the pin that keeps it and
+/// `features` aligned.
 pub(crate) fn build_host_with_restart(
     slot: RuntimeSlot,
     mango_home: &Path,
