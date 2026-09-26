@@ -652,6 +652,7 @@ export class RuntimeConnectionManager {
     entry.status = { state: 'connecting', ...this.#cachedPeer(entry) };
     this.#publish(userId);
 
+    let closedWhileOpening = false;
     const connecting = this.#resolveEnvironment(userId, environmentId)
       .then((definition) => {
         if (!definition) {
@@ -662,6 +663,7 @@ export class RuntimeConnectionManager {
         const opening = this.#openConnection(
           definition,
           () => {
+            closedWhileOpening = true;
             this.#markUnavailable(key, userId, revision);
           },
           {
@@ -681,7 +683,7 @@ export class RuntimeConnectionManager {
         });
       })
       .then((connection) => {
-        if (entry.revision !== revision) {
+        if (entry.revision !== revision || closedWhileOpening) {
           closeDetached(connection);
           throw unavailable('Runtime connection was closed.');
         }

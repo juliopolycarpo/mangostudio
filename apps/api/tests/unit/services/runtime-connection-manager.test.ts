@@ -794,6 +794,32 @@ describe('RuntimeConnectionManager', () => {
     });
   });
 
+  it('rejects a Local runtime that closes before its connection is published', async () => {
+    let closeCalls = 0;
+    const states: EnvironmentConnectionState[] = [];
+    const connection = fakeConnection(() => closeCalls++);
+    const closeDuringOpen: RuntimeEnvironmentConnector = (_definition, onUnavailable) => {
+      onUnavailable();
+      return Promise.resolve(connection);
+    };
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(localDefinition('user-1')),
+      connectors: { 'in-process': closeDuringOpen },
+      publish: () => states.push(manager.getStatus('user-1', 'local').state),
+    });
+
+    await expect(manager.connect('user-1', 'local')).rejects.toMatchObject({
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
+      message: expect.stringContaining('closed'),
+    });
+    expect(states).not.toContain('connected');
+    expect(manager.getStatus('user-1', 'local').state).toBe('error');
+    await expect(manager.getExistingClient('user-1', 'local')).rejects.toMatchObject({
+      code: RESERVED_ERROR_CODES.UNAVAILABLE,
+    });
+    expect(closeCalls).toBe(1);
+  });
+
   it('does not report runtime release drift for a development hub', async () => {
     const previousVersion = process.env.VERSION;
     process.env.VERSION = 'dev';
