@@ -251,6 +251,11 @@ pub struct ChildOutcome {
     /// `crate::probing::host`'s winget ownership probe is the first
     /// caller that needs to.
     pub exit_code: Option<i32>,
+    /// The POSIX name of the signal that ended the child on its own
+    /// (`SIGSEGV`, …), when one did. Never a signal this function sent: a
+    /// child it killed is [`ChildRunError::TimedOut`] or
+    /// [`ChildRunError::Cancelled`]. Always `None` on Windows.
+    pub signal: Option<&'static str>,
     /// Stdout, capped at [`ChildBudget::max_stdout_bytes`].
     pub stdout: Vec<u8>,
     /// Stderr, capped at [`ChildBudget::max_stderr_bytes`].
@@ -351,7 +356,12 @@ pub async fn run_bounded_child(
         ))),
         _ => Ok(ChildOutcome {
             status_success: terminal.exit.as_ref().is_some_and(|exit| exit.success),
-            exit_code: terminal.exit.and_then(|exit| exit.code),
+            exit_code: terminal.exit.as_ref().and_then(|exit| exit.code),
+            signal: terminal
+                .exit
+                .as_ref()
+                .and_then(|exit| exit.signal.as_ref())
+                .map(|signal| signal.name),
             stdout: terminal.stdout.bytes,
             stderr: terminal.stderr.bytes,
             stdout_truncated: terminal.stdout.truncated,

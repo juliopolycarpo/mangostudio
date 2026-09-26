@@ -77,4 +77,5 @@ mod ts_compat_tests;
 mod types;
 mod workers;
 
+pub(crate) use hash::DIRECTORY_HASH_DOMAIN_VERSION;
 pub(crate) use service::register;

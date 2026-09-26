@@ -4,8 +4,8 @@
 //!
 //! Three hash shapes live here, each in its own domain so no two can
 //! collide: a file's bytes (`mangostudio/library/file\0`), a directory's
-//! length-prefixed manifest (`mangostudio/library/dir/v2\0`, the domain the
-//! capability manifest omits because absence already means v2), and the
+//! length-prefixed manifest (`mangostudio/library/dir/v2\0`, whose version the
+//! capability manifest advertises as `directoryHashDomain`), and the
 //! whitespace-insensitive digest the hub uses to tell a formatting-only
 //! divergence from a real one.
 
@@ -17,6 +17,55 @@ use super::js::{cmp_utf16, strip_js_whitespace, text_decoder_decode, utf16_len};
 const FILE_HASH_DOMAIN: &[u8] = b"mangostudio/library/file\0";
 /// `DIRECTORY_HASH_DOMAIN`. Versioned: v2 is the length-prefixed manifest.
 pub(crate) const DIRECTORY_HASH_DOMAIN: &[u8] = b"mangostudio/library/dir/v2\0";
+
+/// The version the capability manifest advertises as `directoryHashDomain`,
+/// derived from [`DIRECTORY_HASH_DOMAIN`] at compile time so a v3 bump cannot
+/// forget the advertisement (`directoryHashDomainVersion` in
+/// `apps/shared/src/library/hash.ts` makes the same derivation).
+///
+/// Usage: `manifest.directory_hash_domain = Some(DIRECTORY_HASH_DOMAIN_VERSION)`.
+pub(crate) const DIRECTORY_HASH_DOMAIN_VERSION: u32 =
+    directory_hash_domain_version(DIRECTORY_HASH_DOMAIN);
+
+/// The largest version the capability schema accepts
+/// (`MAX_DIRECTORY_HASH_DOMAIN_VERSION` in `apps/shared/src/library/hash.ts`).
+const MAX_DIRECTORY_HASH_DOMAIN_VERSION: u32 = 255;
+
+/// Reads `<n>` out of a domain shaped `.../v<n>\0`; any other shape, or a
+/// version the capability schema cannot carry, fails the build.
+const fn directory_hash_domain_version(domain: &[u8]) -> u32 {
+    assert!(
+        domain.len() >= 4 && domain[domain.len() - 1] == 0,
+        "the directory hash domain must end in /v<n>\\0"
+    );
+    let mut start = domain.len() - 1;
+    while start > 0 && domain[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    assert!(
+        start >= 2 && start < domain.len() - 1,
+        "the directory hash domain must end in /v<n>\\0"
+    );
+    assert!(
+        domain[start - 1] == b'v' && domain[start - 2] == b'/',
+        "the directory hash domain must end in /v<n>\\0"
+    );
+    let mut version: u32 = 0;
+    let mut index = start;
+    while index < domain.len() - 1 {
+        assert!(
+            version <= MAX_DIRECTORY_HASH_DOMAIN_VERSION,
+            "the directory hash domain version exceeds what the capability schema can advertise"
+        );
+        version = version * 10 + (domain[index] - b'0') as u32;
+        index += 1;
+    }
+    assert!(
+        version >= 1 && version <= MAX_DIRECTORY_HASH_DOMAIN_VERSION,
+        "the directory hash domain version must be 1..=255 so the capability schema can advertise it"
+    );
+    version
+}
 const WHITESPACE_HASH_DOMAIN: &[u8] = b"mangostudio/library/whitespace\0";
 
 /// Why a directory cannot be hashed, as `LibraryInvalidReason` spells it.
@@ -150,6 +199,31 @@ pub(crate) fn combine_whitespace_digests(entries: &[(String, String)]) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_advertised_directory_domain_version_is_read_from_the_domain_itself() {
+        assert_eq!(DIRECTORY_HASH_DOMAIN_VERSION, 2);
+        assert_eq!(
+            directory_hash_domain_version(b"mangostudio/library/dir/v3\0"),
+            3
+        );
+        assert_eq!(
+            directory_hash_domain_version(b"mangostudio/library/dir/v255\0"),
+            255
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "must end in /v<n>")]
+    fn a_directory_domain_without_a_version_suffix_is_refused() {
+        let _ = directory_hash_domain_version(b"mangostudio/library/dir\0");
+    }
+
+    #[test]
+    #[should_panic(expected = "1..=255")]
+    fn a_directory_domain_version_the_schema_cannot_carry_is_refused() {
+        let _ = directory_hash_domain_version(b"mangostudio/library/dir/v256\0");
+    }
 
     #[test]
     fn file_and_directory_domains_never_collide_on_a_forged_manifest() {

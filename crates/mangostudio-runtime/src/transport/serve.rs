@@ -473,7 +473,20 @@ async fn handle_connection(
     // happens next (becoming active, losing the admission race, a healthy
     // multi-hour session) must not keep holding this slot.
     drop(permit);
+    serve_upgraded(port, binding_header, state, context).await;
+}
 
+/// Runs one upgraded connection from its binding check to release: admits
+/// it, waits for the generation it supersedes to finish its own cleanup,
+/// and only then builds and serves this generation's session. Generic over
+/// the port so the admission and supersession sequence can run over an
+/// in-memory pair.
+async fn serve_upgraded<P: Port>(
+    port: P,
+    binding_header: BindingHeader,
+    state: Arc<ServeState>,
+    context: Arc<ConnectionContext>,
+) {
     // Every refusal from here to admission goes out as a close frame over
     // the upgraded socket before this side's `hello` — the same shape
     // `accept_websocket` gives a refused credential. A malformed binding
@@ -616,12 +629,44 @@ async fn handle_connection(
         move |message: &str| (heartbeat_context.log)(message),
     ));
 
-    let _closure: SessionClosure = join_owned(driver_handle).await;
+    let closure: SessionClosure = join_owned(driver_handle).await;
     heartbeat_cancel.cancel();
     let _ = join_owned(heartbeat).await;
 
     state.clear_if_current(generation);
+    if let Some(failure) = teardown_failure(&closure) {
+        (context.log)(&failure);
+    }
     (context.log)("Hub connection ended.");
+}
+
+/// Describes a session teardown that did not finish cleanly, with the close
+/// that started it, or `None` for a clean one.
+///
+/// A handler still running when the close grace expired is the teardown
+/// failure a connection can have here: what it holds (a child process, an
+/// exclusivity claim) outlives the hub that asked for it, and the operator
+/// reading this process's stderr is the only party left to tell.
+///
+/// # Example
+///
+/// ```ignore
+/// // A closure whose grace expired with one handler still running:
+/// assert!(teardown_failure(&closure).unwrap().contains("1 handler(s)"));
+/// ```
+fn teardown_failure(closure: &SessionClosure) -> Option<String> {
+    if closure.unfinished_handlers == 0 {
+        return None;
+    }
+    let reason = closure
+        .reason
+        .as_deref()
+        .map_or_else(String::new, |reason| format!(": {reason}"));
+    Some(format!(
+        "Hub connection teardown failed: {} handler(s) were still running when the close grace \
+         expired (close {}{reason}).",
+        closure.unfinished_handlers, closure.code
+    ))
 }
 
 /// Closes a port nothing ever became a session over — a refused admission,
@@ -736,6 +781,197 @@ mod tests {
     use mango_protocol::session::{Session, SessionOptions, SessionState};
 
     use super::{ActiveGeneration, Admission, AdmittedGeneration, ServeState};
+
+    /// A named fake for the connection log: every line, in order.
+    #[derive(Clone, Default)]
+    struct RecordingLog(Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl RecordingLog {
+        fn sink(&self) -> Box<dyn Fn(&str) + Send + Sync> {
+            let lines = Arc::clone(&self.0);
+            Box::new(move |line: &str| lines.lock().unwrap().push(line.to_owned()))
+        }
+
+        fn lines(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+
+        fn mentions(&self, needle: &str) -> bool {
+            self.lines().iter().any(|line| line.contains(needle))
+        }
+    }
+
+    fn active_generation(state: &ServeState) -> Option<u64> {
+        state
+            .inner
+            .lock()
+            .expect("ServeState mutex poisoned")
+            .active
+            .as_ref()
+            .map(|active| active.generation)
+    }
+
+    /// A superseding connection must not say `hello` until the generation it
+    /// replaced has finished its own cleanup: the two sessions would
+    /// otherwise share the runtime's MCP servers, terminals and update
+    /// claims for a moment. The superseded generation here is a published
+    /// entry whose cleanup signal the test holds; the newcomer's hello may
+    /// reach the hub only once the test lets go of it.
+    #[tokio::test]
+    async fn a_second_hello_waits_for_the_superseded_connections_cleanup() {
+        use std::time::{Duration, Instant};
+
+        use mango_protocol::frame::Frame;
+        use mango_protocol::port::{Inbound, Port, PortRx};
+
+        let state = Arc::new(ServeState::new());
+        let Admission::Admitted {
+            generation: superseded,
+            ..
+        } = state.try_admit(None)
+        else {
+            panic!("expected an empty runtime to admit the first generation");
+        };
+        let (cleanup_finished, cleanup) = oneshot::channel::<()>();
+        assert!(state.publish(
+            superseded,
+            ActiveGeneration {
+                generation: superseded,
+                binding: None,
+                session: None,
+                released: Some(cleanup),
+            },
+        ));
+
+        let home = crate::test_support::scratch_dir("serve-held-cleanup");
+        let log = RecordingLog::default();
+        let context = Arc::new(super::ConnectionContext {
+            token: "unused".into(),
+            slot: crate::runtime_home::RuntimeSlot::Host,
+            mango_home: home.to_path_buf(),
+            runtime_version: "0.0.0".into(),
+            log: log.sink(),
+        });
+        let (hub_port, runtime_port) = port_pair();
+        let (hub_tx, mut hub_rx) = hub_port.split();
+        let connection = tokio::spawn(super::serve_upgraded(
+            runtime_port,
+            crate::transport::upgrade_head::BindingHeader::Absent,
+            Arc::clone(&state),
+            context,
+        ));
+
+        // Gate: the newcomer has claimed the next generation. Nothing awaits
+        // between that claim and the wait on the superseded cleanup.
+        let real_deadline = Instant::now() + Duration::from_secs(30);
+        while active_generation(&state) != Some(superseded + 1) {
+            assert!(
+                Instant::now() < real_deadline,
+                "expected the newcomer to claim generation {} | received: {:?}",
+                superseded + 1,
+                active_generation(&state)
+            );
+            tokio::task::yield_now().await;
+        }
+        // A newcomer that did not wait would say hello well inside this
+        // real-time window; one that waits cannot say it at all.
+        let window = Instant::now() + Duration::from_millis(250);
+        while Instant::now() < window {
+            if let Ok(inbound) = tokio::time::timeout(Duration::ZERO, hub_rx.recv()).await {
+                let received = format!("{inbound:?}");
+                panic!(
+                    "expected nothing from the newcomer while the superseded cleanup is held | \
+                     received: {}",
+                    received.get(..80).unwrap_or(&received)
+                );
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !log.mentions("superseded"),
+            "expected no supersession logged before the cleanup finished | received: {:?}",
+            log.lines()
+        );
+
+        drop(cleanup_finished);
+        let first = tokio::time::timeout(Duration::from_secs(30), hub_rx.recv())
+            .await
+            .expect("expected the newcomer's hello once the superseded cleanup finished");
+        let received = format!("{first:?}");
+        assert!(
+            matches!(first, Some(Inbound::Frame(Frame::Hello(_)))),
+            "expected the newcomer's first frame to be hello | received: {}",
+            received.get(..80).unwrap_or(&received)
+        );
+        assert!(
+            log.mentions("superseded the previous one"),
+            "expected the supersession logged | received: {:?}",
+            log.lines()
+        );
+
+        drop((hub_tx, hub_rx));
+        tokio::time::timeout(Duration::from_secs(30), connection)
+            .await
+            .expect("expected the newcomer to end once its hub went away")
+            .expect("the connection task must not panic");
+    }
+
+    /// A handler still running when the close grace expires is a teardown
+    /// failure, and the line names how many and the close that started it.
+    /// A clean close reports nothing.
+    #[tokio::test(start_paused = true)]
+    async fn a_teardown_that_outlives_the_close_grace_is_described_with_its_close() {
+        let (hub_port, runtime_port) = port_pair();
+        let (entered_tx, entered) = oneshot::channel::<()>();
+        let entered_tx = std::sync::Mutex::new(Some(entered_tx));
+        let (hub, _hub_driver) = Session::spawn(hub_port, SessionOptions::new(peer("hub")));
+        let (runtime, _runtime_driver) = Session::spawn(
+            runtime_port,
+            SessionOptions::new(peer("runtime"))
+                .with_handler_grace(std::time::Duration::from_secs(5))
+                .handle("test.parked", move |_params, _context| {
+                    if let Some(entered) = entered_tx.lock().unwrap().take() {
+                        let _ = entered.send(());
+                    }
+                    async { std::future::pending().await }
+                }),
+        );
+        runtime.ready().await.expect("the pair handshakes");
+        let request = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.request("test.parked", serde_json::json!({})).await }
+        });
+        entered.await.expect("the parked handler starts");
+
+        let closure = runtime
+            .close(
+                mango_protocol::close::close_codes::RELEASED,
+                Some("Runtime stopped"),
+            )
+            .await;
+        request.abort();
+
+        let failure = super::teardown_failure(&closure)
+            .expect("expected a teardown failure for a handler past the grace | received: None");
+        assert!(
+            failure.contains("1 handler(s)")
+                && failure.contains(&format!(
+                    "close {}: Runtime stopped",
+                    mango_protocol::close::close_codes::RELEASED
+                )),
+            "expected the handler count and the close in the line | received: {failure}"
+        );
+
+        let (clean, _peer) = live_session().await;
+        let clean_closure = clean
+            .close(mango_protocol::close::close_codes::RELEASED, None)
+            .await;
+        assert_eq!(
+            super::teardown_failure(&clean_closure),
+            None,
+            "expected a clean close to report no teardown failure"
+        );
+    }
 
     /// The property `serve`'s single `Mutex` exists for: however many
     /// connections race to admit at the exact instant shutdown begins, none
