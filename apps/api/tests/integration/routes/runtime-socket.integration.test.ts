@@ -507,20 +507,30 @@ describe('runtime dial-in socket', () => {
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).not.toBe('connected');
   });
 
-  it('reports the release a remote runtime is on, and that it is not the hub', async () => {
-    // Remote transports connect across a release boundary on purpose. Drift
-    // that is allowed and invisible is drift nobody ever fixes, so it has to
-    // reach the card.
-    const hub = await startHub();
-    const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
-    await runtime.ready;
-    await hub.whenAdopted(1);
-    await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
+  it.each([
+    ['0.1.1', true],
+    ['dev', false],
+  ] as const)(
+    'reports remote runtime release drift for hub %s as %s',
+    async (hubVersion, drift) => {
+      const previousVersion = process.env.VERSION;
+      process.env.VERSION = hubVersion;
+      try {
+        const hub = await startHub();
+        const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
+        await runtime.ready;
+        await hub.whenAdopted(1);
+        await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
 
-    const status = hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID);
-    expect(status.runtimeVersion).toBe('runtime-test');
-    expect(status.runtimeVersionDrift).toBe(true);
-  });
+        const status = hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID);
+        expect(status.runtimeVersion).toBe('runtime-test');
+        expect(status.runtimeVersionDrift).toBe(drift);
+      } finally {
+        if (previousVersion === undefined) delete process.env.VERSION;
+        else process.env.VERSION = previousVersion;
+      }
+    }
+  );
 
   it('applies the same root payload cap the realtime socket gets', async () => {
     // One `websocket` option object on the root instance covers both families.
