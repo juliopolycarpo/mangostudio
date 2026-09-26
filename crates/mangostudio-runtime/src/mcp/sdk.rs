@@ -42,6 +42,7 @@ use super::types::{
     CallFailure, McpConfig, McpFailure, McpSecrets, RequestOptions, ServerCapabilities,
     timeout_from,
 };
+use crate::json_size::serialized_len;
 
 /// Upper bound on list pages, so a server that never stops paginating cannot hold a request.
 const MAX_PAGES: usize = 256;
@@ -660,7 +661,7 @@ where
         let (entries, next) = fetch(cursor).await?;
         spent = entries
             .iter()
-            .map(serialized_len)
+            .map(|entry| serialized_len(entry).unwrap_or(usize::MAX))
             .fold(spent, usize::saturating_add);
         if spent > budget {
             return Err(McpFailure::call(
@@ -687,24 +688,6 @@ where
         CallFailure::Other,
         format!("MCP {method} exceeded {MAX_PAGES} pages; expected a final page"),
     ))
-}
-
-/// The compact JSON length of `value`, counted without building the string.
-fn serialized_len(value: &Value) -> usize {
-    struct Counter(usize);
-    impl std::io::Write for Counter {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 = self.0.saturating_add(bytes.len());
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut counter = Counter(0);
-    // Serializing a `Value` into an infallible writer cannot fail.
-    let _ = serde_json::to_writer(&mut counter, value);
-    counter.0
 }
 
 /// Sends one request, racing the caller's cancellation and the request bound against the reply.
@@ -829,18 +812,6 @@ mod tests {
                     .to_owned()
             ),
             "expected an `other` failure naming the byte limit | received {received:?}"
-        );
-    }
-
-    #[test]
-    fn serialized_len_counts_compact_json_bytes() {
-        let value = json!({ "name": "tool-0000" });
-        let expected = serde_json::to_string(&value).unwrap().len();
-        let counted = serialized_len(&value);
-        assert_eq!(
-            (counted, expected),
-            (20, 20),
-            "expected (counted, to_string len) = (20, 20) | received ({counted}, {expected})"
         );
     }
 

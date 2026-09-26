@@ -24,11 +24,12 @@ use super::snapshot::SNAPSHOT_MAX_BYTES;
 use super::text;
 use crate::blocking::run_blocking;
 use crate::consent::source::ConsentSource;
+use crate::json_size::serialized_len;
 use crate::ports::audit::lock;
 use crate::ports::authorization::consent_denial;
 use crate::registry::Registry;
-
 use crate::tool_argument::tool_argument;
+
 pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
 pub(super) const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
 /// Most `fs.edit-file` matches counted for an ambiguity report; past it the
@@ -989,7 +990,7 @@ pub(super) fn preflight_response(
         id: response_id.to_owned(),
         result,
     });
-    let size = serialized_len(&frame);
+    let size = serialized_len(&frame).expect("a filesystem mutation response always serializes");
     if size <= response_limit_bytes {
         let Frame::Res(Response { result, .. }) = frame else {
             unreachable!("the frame was built as a response");
@@ -1010,27 +1011,6 @@ pub(super) fn preflight_response(
     .with_detail("kind", "snapshot_too_large")
     .with_detail("sizeBytes", size)
     .with_detail("limitBytes", response_limit_bytes))
-}
-
-/// Counts the bytes `serde_json::to_vec` would produce without buffering them.
-fn serialized_len(frame: &Frame) -> usize {
-    struct ByteCount(usize);
-
-    impl std::io::Write for ByteCount {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 += bytes.len();
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    let mut count = ByteCount(0);
-    serde_json::to_writer(&mut count, frame)
-        .expect("a filesystem mutation response always serializes");
-    count.0
 }
 
 pub(super) fn mutation_result(
@@ -1320,18 +1300,6 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code, codes::CANCELLED);
         assert_eq!(error.message, "Filesystem operation cancelled");
-    }
-
-    #[test]
-    fn serialized_len_counts_the_bytes_to_vec_would_produce() {
-        let frame = Frame::Res(Response {
-            id: "request-\u{e9}".to_owned(),
-            result: json!({"content":"line \"one\"\n\u{1f600}","size":12,"nested":[1.5,null,true]}),
-        });
-        assert_eq!(
-            serialized_len(&frame),
-            serde_json::to_vec(&frame).unwrap().len()
-        );
     }
 
     #[test]

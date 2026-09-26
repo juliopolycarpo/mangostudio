@@ -43,9 +43,10 @@ use super::wire::{
     RespondParams, StartReviewParams, StartReviewResult, SteerParams, SteerRejection, SteerResult,
     TurnParams, TurnResult,
 };
+use crate::json_size::serialized_len;
 use crate::ports::wall_clock::epoch_millis;
-
 use crate::tool_argument::tool_argument;
+
 /// The topic every turn event travels on.
 pub(crate) const EVENT_TOPIC: &str = "external-agent.event";
 /// `EXTERNAL_TURN_PAYLOAD_MAX_BYTES`: what the hub will persist for one turn.
@@ -185,7 +186,7 @@ impl TurnState {
         let Ok(payload) = serde_json::to_value(&envelope) else {
             return Emitted::Invalid;
         };
-        let bytes = serde_json::to_vec(&payload).map_or(usize::MAX, |bytes| bytes.len());
+        let bytes = serialized_len(&payload).unwrap_or(usize::MAX);
         if bytes > remaining {
             return Emitted::OverBudget;
         }

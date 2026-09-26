@@ -137,6 +137,7 @@ pub mod filesystem;
 pub mod health;
 mod hex;
 mod install;
+mod json_size;
 mod library;
 pub mod manifest;
 pub mod mcp;
