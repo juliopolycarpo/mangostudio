@@ -687,14 +687,8 @@ mod prune_tests {
 mod tests {
     use super::*;
 
-    fn slot() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-slot-publish-{}-{}",
-            std::process::id(),
-            NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    fn slot() -> crate::test_support::ScratchDir {
+        crate::test_support::scratch_dir("mango-slot-publish")
     }
 
     #[test]
@@ -893,14 +887,8 @@ mod windows_tests {
     use super::*;
     use std::os::windows::fs::OpenOptionsExt;
 
-    fn slot() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-windows-slot-{}-{}",
-            std::process::id(),
-            NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    fn slot() -> crate::test_support::ScratchDir {
+        crate::test_support::scratch_dir("mango-windows-slot")
     }
 
     #[test]

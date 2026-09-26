@@ -301,13 +301,8 @@ mod tests {
         .expect("valid fixture")
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-update-transfer-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
+    fn scratch(name: &str) -> crate::test_support::ScratchDir {
+        crate::test_support::scratch_path(&format!("mango-update-transfer-{name}"))
     }
 
     #[test]

@@ -703,14 +703,8 @@ mod tests {
         );
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let home = std::env::temp_dir().join(format!(
-            "mango-update-service-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(&home).unwrap();
-        home
+    fn scratch(name: &str) -> crate::test_support::ScratchDir {
+        crate::test_support::scratch_dir(&format!("mango-update-service-{name}"))
     }
 
     fn begin_params(bytes: &[u8]) -> BeginParams {
@@ -730,8 +724,9 @@ mod tests {
     #[test]
     fn connections_share_slot_exclusivity_without_colliding_request_ids() {
         let home = scratch("shared-gate");
-        let first = UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.clone(), false);
-        let second = UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.clone(), false);
+        let first = UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.to_path_buf(), false);
+        let second =
+            UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.to_path_buf(), false);
         first.exclusivity();
         second.exclusivity();
         assert!(Arc::ptr_eq(&first.service, &second.service));
@@ -800,7 +795,8 @@ mod tests {
     #[tokio::test]
     async fn registered_update_round_trips_over_the_runtime_contract() {
         let home = scratch("wire");
-        let binding = UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.clone(), false);
+        let binding =
+            UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.to_path_buf(), false);
         let (hub, runtime) = serve_update(&binding, Arc::new(GrantsUpdate)).await;
 
         let bytes = b"binary";
@@ -849,7 +845,7 @@ mod tests {
     #[test]
     fn commits_verified_bytes_without_touching_pairing() {
         let home = scratch("commit");
-        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let service = UpdateService::new(RuntimeSlot::Remote, home.to_path_buf());
         let slot = slot_dir(RuntimeSlot::Remote, &home);
         std::fs::create_dir_all(&slot).unwrap();
         std::fs::write(slot.join("credentials.json"), b"pairing bytes").unwrap();
@@ -892,7 +888,7 @@ mod tests {
     #[test]
     fn wrong_digest_and_reordered_chunk_preserve_current_and_release_lock() {
         let home = scratch("bad");
-        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let service = UpdateService::new(RuntimeSlot::Remote, home.to_path_buf());
         let slot = slot_dir(RuntimeSlot::Remote, &home);
         std::fs::create_dir_all(&slot).unwrap();
         let mut params = begin_params(b"binary");
@@ -939,7 +935,7 @@ mod tests {
     #[test]
     fn config_publication_failure_restores_the_previous_current_pointer() {
         let home = scratch("config-rollback");
-        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let service = UpdateService::new(RuntimeSlot::Remote, home.to_path_buf());
         let slot = slot_dir(RuntimeSlot::Remote, &home);
         std::fs::create_dir_all(&slot).unwrap();
         let old_source = slot.join("old-source");
@@ -990,7 +986,7 @@ mod tests {
     #[test]
     fn beginning_a_new_transfer_sweeps_abandoned_stages() {
         let home = scratch("sweep-stages");
-        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let service = UpdateService::new(RuntimeSlot::Remote, home.to_path_buf());
         let slot = slot_dir(RuntimeSlot::Remote, &home);
         std::fs::create_dir_all(&slot).unwrap();
         let abandoned = slot.join(".mangostudio-runtime.incoming-abandoned");
@@ -1015,7 +1011,8 @@ mod tests {
     #[test]
     fn supervised_commit_schedules_restart_and_keeps_other_calls_closed() {
         let home = scratch("supervised");
-        let binding = UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.clone(), true);
+        let binding =
+            UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.to_path_buf(), true);
         let begun = binding
             .service
             .begin(&binding.owner, begin_params(b"binary"))
@@ -1052,7 +1049,7 @@ mod tests {
     #[test]
     fn windows_update_publishes_immutable_binary_and_preserves_pairing() {
         let home = scratch("windows-publish");
-        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let service = UpdateService::new(RuntimeSlot::Remote, home.to_path_buf());
         let slot = slot_dir(RuntimeSlot::Remote, &home);
         std::fs::create_dir_all(&slot).unwrap();
         std::fs::write(slot.join("credentials.json"), b"pairing bytes").unwrap();
@@ -1153,7 +1150,8 @@ mod tests {
     #[tokio::test]
     async fn source_sha_is_recorded_cleared_and_refused_before_staging() {
         let home = scratch("source-sha");
-        let binding = UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.clone(), false);
+        let binding =
+            UpdateBinding::new_with_restart(RuntimeSlot::Remote, home.to_path_buf(), false);
         let (hub, runtime) = serve_update(&binding, Arc::new(GrantsUpdate)).await;
 
         let steps: [(&str, Option<Value>, Value); 4] = [
@@ -1248,9 +1246,9 @@ mod tests {
             &[("allow", Some(json!({ "update": false })))],
         )
         .unwrap();
-        let binding = UpdateBinding::new_with_restart(RuntimeSlot::Host, home.clone(), false);
+        let binding = UpdateBinding::new_with_restart(RuntimeSlot::Host, home.to_path_buf(), false);
         let authorization =
-            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home.clone()));
+            ConsentAuthorization::new(ConsentSource::new(RuntimeSlot::Host, home.to_path_buf()));
         let (hub, runtime) = serve_update(&binding, Arc::new(authorization)).await;
 
         let mut params = begin_params(b"next");
@@ -1299,7 +1297,7 @@ mod tests {
     #[test]
     fn a_non_canonical_base64_chunk_is_refused_without_writing() {
         let home = scratch("non-canonical-chunk");
-        let service = UpdateService::new(RuntimeSlot::Remote, home.clone());
+        let service = UpdateService::new(RuntimeSlot::Remote, home.to_path_buf());
         let begun = service.begin("owner", begin_params(b"next")).unwrap();
         let id = begun["sessionId"].as_str().unwrap().to_owned();
         for encoded in ["*not-base64*", "bmV4dA", "bmV4dB==", "bmV4 dA=="] {
@@ -1348,7 +1346,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn an_abandoned_session_expires_and_removes_its_stage() {
         let home = scratch("expiry");
-        let service = Arc::new(UpdateService::new(RuntimeSlot::Remote, home.clone()));
+        let service = Arc::new(UpdateService::new(RuntimeSlot::Remote, home.to_path_buf()));
         let begun = service.begin("owner", begin_params(b"next")).unwrap();
         let id = begun["sessionId"].as_str().unwrap().to_owned();
         let slot = slot_dir(RuntimeSlot::Remote, &home);
