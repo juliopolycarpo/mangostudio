@@ -44,12 +44,15 @@ fn capture_runners(name: &str) -> String {
 ///
 /// A child keeps its parent's id after the parent exits, so the tree is
 /// walked from the recorded runners even once `Stop-ScheduledTask` has ended
-/// them; a child created before its supposed parent is a reused id, not a
-/// child. This command's own ancestors are never terminated: a `service stop`
-/// issued from inside the runtime it would stop reports that runtime as still
-/// running instead of ending itself.
+/// them. Windows reuses process ids, so identity is the id plus its creation
+/// time: a child created before its supposed parent, or after another
+/// process took the parent's id, is not in the tree, and an id is terminated
+/// only while the process holding it is still the one recorded. This
+/// command's own ancestors are never terminated: a `service stop` issued from
+/// inside the runtime it would stop reports that runtime as still running
+/// instead of ending itself.
 ///
-/// Usage: `format!("{}\n$deadline = ...\n{}", capture_runners(name), terminate_runner_tree())`.
+/// Usage: `format!("$deadline = ...\n{}\n{}", capture_runners(name), terminate_runner_tree())`.
 pub(super) fn terminate_runner_tree() -> &'static str {
     "$processes = @(Get-CimInstance Win32_Process)\n\
      $byId = @{}\n\
@@ -62,14 +65,16 @@ pub(super) fn terminate_runner_tree() -> &'static str {
      while ($frontier.Count -gt 0) {\n\
        $next = @()\n\
        foreach ($parent in $frontier) {\n\
+         $holder = $byId[[uint32]$parent.ProcessId]\n\
+         $reusedAt = if (($null -ne $holder) -and ($holder.CreationDate -ne $parent.CreationDate)) { $holder.CreationDate } else { $null }\n\
          foreach ($child in $processes) {\n\
-           if (($child.ParentProcessId -eq $parent.ProcessId) -and ($child.CreationDate -ge $parent.CreationDate) -and -not $tree.ContainsKey([uint32]$child.ProcessId)) { $tree[[uint32]$child.ProcessId] = $child; $next += $child }\n\
+           if (($child.ParentProcessId -eq $parent.ProcessId) -and ($child.CreationDate -ge $parent.CreationDate) -and (($null -eq $reusedAt) -or ($child.CreationDate -lt $reusedAt)) -and -not $tree.ContainsKey([uint32]$child.ProcessId)) { $tree[[uint32]$child.ProcessId] = $child; $next += $child }\n\
          }\n\
        }\n\
        $frontier = $next\n\
      }\n\
      foreach ($runner in $runners) { $tree[[uint32]$runner.ProcessId] = $runner }\n\
-     foreach ($id in @($tree.Keys)) { if (-not $ancestors.ContainsKey($id)) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } }\n\
+     foreach ($id in @($tree.Keys)) { $live = $byId[$id]; if (($null -ne $live) -and ($live.CreationDate -eq $tree[$id].CreationDate) -and -not $ancestors.ContainsKey($id)) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } }\n\
      do {\n\
        $alive = @($tree.Values | Where-Object { $live = Get-CimInstance Win32_Process -Filter \"ProcessId = $($_.ProcessId)\"; ($null -ne $live) -and ($live.CreationDate -eq $_.CreationDate) })\n\
        if (($alive.Count -eq 0) -or ((Get-Date) -ge $deadline)) { break }\n\
@@ -86,10 +91,13 @@ pub(super) fn verb_script(action: ServiceAction, wait: Duration) -> String {
     let name = ps_quote(TASK);
     let start = format!("Start-ScheduledTask -TaskPath '\\' -TaskName {name}");
     let wait_ms = wait.as_millis();
+    // The deadline is taken first, before any manager call, so the stop wait,
+    // the tree's termination and its survivor check all end `wait` after this
+    // script starts: the caller's process timeout leaves only a fixed margin.
     let stop = format!(
-        "{capture}\n\
+        "$deadline = (Get-Date).AddMilliseconds({wait_ms})\n\
+         {capture}\n\
          Stop-ScheduledTask -TaskPath '\\' -TaskName {name} -ErrorAction SilentlyContinue\n\
-         $deadline = (Get-Date).AddMilliseconds({wait_ms})\n\
          while (((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') -and ((Get-Date) -lt $deadline)) {{ Start-Sleep -Milliseconds 200 }}\n\
          if ((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') {{ throw 'Scheduled Task still running after {wait_ms} ms' }}\n\
          {terminate}",
@@ -135,15 +143,21 @@ mod tests {
             ServiceAction::Uninstall,
         ] {
             let script = verb_script(action, Duration::from_millis(20_000));
+            let deadline = position(&script, "$deadline = (Get-Date).AddMilliseconds(20000)");
             let capture = position(&script, "$runners = @(");
             let stop = position(&script, "Stop-ScheduledTask");
-            let wait = position(&script, "AddMilliseconds(20000)");
+            let wait = position(&script, ".State -eq 'Running') -and");
             let kill = position(&script, "Stop-Process -Id $id -Force");
             let survivors = position(&script, "still running after the task stopped");
             assert!(
-                capture < stop && stop < wait && wait < kill && kill < survivors,
-                "expected {action:?} order: capture < stop < wait < kill < survivor check | \
-                 received positions {capture}, {stop}, {wait}, {kill}, {survivors}"
+                deadline < capture
+                    && capture < stop
+                    && stop < wait
+                    && wait < kill
+                    && kill < survivors,
+                "expected {action:?} order: deadline < capture < stop < wait < kill < survivor \
+                 check | received positions {deadline}, {capture}, {stop}, {wait}, {kill}, \
+                 {survivors}"
             );
         }
     }
@@ -176,12 +190,21 @@ mod tests {
         }
     }
 
-    /// The walk must skip this command's own ancestors and a reused id.
+    /// The walk must skip this command's own ancestors and never follow or kill a reused id.
     #[test]
     fn the_tree_walk_spares_this_commands_ancestors_and_reused_ids() {
         let terminate = super::terminate_runner_tree();
-        assert!(terminate.contains("-not $ancestors.ContainsKey($id)"));
-        assert!(terminate.contains("$child.CreationDate -ge $parent.CreationDate"));
-        assert!(terminate.contains("$live.CreationDate -eq $_.CreationDate"));
+        for guard in [
+            "-not $ancestors.ContainsKey($id)",
+            "$child.CreationDate -ge $parent.CreationDate",
+            "$child.CreationDate -lt $reusedAt",
+            "$live.CreationDate -eq $tree[$id].CreationDate",
+            "$live.CreationDate -eq $_.CreationDate",
+        ] {
+            assert!(
+                terminate.contains(guard),
+                "expected the tree walk to guard with {guard:?} | received:\n{terminate}"
+            );
+        }
     }
 }
