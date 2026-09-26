@@ -1354,15 +1354,20 @@ fn copy_move_no_overwrite(
             &tombstone,
             CopiedMoveState::Temporary,
             std::io::Error::from(std::io::ErrorKind::AlreadyExists),
+            false,
             hooks,
         ));
     }
     if let Err(cause) = publish_temporary_no_replace(copied.to_parent, copied.prepared) {
+        // The no-replace rename refusing an existing name is the destination
+        // that appeared after the pre-stage absence check.
+        let destination_appeared = cause.kind() == std::io::ErrorKind::AlreadyExists;
         return Err(recover_staged_source_after_copy_failure(
             &mut copied,
             &tombstone,
             CopiedMoveState::Temporary,
             cause,
+            destination_appeared,
             hooks,
         ));
     }
@@ -1388,6 +1393,7 @@ fn copy_move_no_overwrite(
                 &tombstone,
                 CopiedMoveState::Published,
                 std::io::Error::from(std::io::ErrorKind::AlreadyExists),
+                false,
                 hooks,
             ));
         }
@@ -1702,11 +1708,18 @@ enum CopiedMoveState {
     Published,
 }
 
+/// Restores the staged source after a copied move failed, and reports what is
+/// left. `destination_appeared` marks a publish refused because the
+/// destination now exists: once the source is restored and the temporary
+/// removed, nothing of this move remains, so that case answers the same
+/// already-exists error the pre-stage check gives instead of asking the
+/// caller to inspect paths that are back as they were.
 fn recover_staged_source_after_copy_failure(
     copied: &mut PreparedCopyMove<'_>,
     tombstone: &OsString,
     state: CopiedMoveState,
     cause: impl std::fmt::Display,
+    destination_appeared: bool,
     hooks: &mut impl MoveCopyHooks,
 ) -> RemoteError {
     let tombstone_path = copied.paths.from.with_file_name(tombstone);
@@ -1761,6 +1774,9 @@ fn recover_staged_source_after_copy_failure(
         .with_detail("pathsMayHaveChanged", true);
     }
 
+    if destination_appeared && matches!(state, CopiedMoveState::Temporary) {
+        return destination_exists_error(copied.paths.to);
+    }
     let publication = match state {
         CopiedMoveState::Temporary => "The destination was not published",
         CopiedMoveState::Published => "The destination changed after publication",
@@ -3663,8 +3679,13 @@ mod tests {
         assert_eq!(fs::read(&tombstone).unwrap(), b"captured source");
     }
 
+    /// A destination that appears after the pre-stage absence check makes
+    /// the no-replace publish refuse. Once the staged source is restored and
+    /// the temporary removed nothing of the move remains, so the caller gets
+    /// the same already-exists error the pre-stage check gives, not a
+    /// "paths may have changed" recovery report.
     #[test]
-    fn copy_move_restores_the_staged_source_when_destination_collides_before_publish() {
+    fn copy_move_reports_a_destination_created_before_publish_as_already_existing() {
         let root = scratch_dir("fs-io-copy-move-source-stage-destination-swap");
         let source = root.join("source");
         let destination = root.join("destination");
@@ -3679,11 +3700,26 @@ mod tests {
             copy_move_no_overwrite_bound_with_hooks(&policy, &source, &destination, &mut hooks)
                 .unwrap_err();
 
+        let expected = destination_exists_error(&destination);
+        assert_eq!(
+            (&error.message, &error.details),
+            (&expected.message, &expected.details),
+            "expected the already-exists error | received: {error:?}"
+        );
         let tombstone = hooks.tombstone.unwrap();
-        assert_eq!(error.details.unwrap()["pathsMayHaveChanged"], true);
         assert_eq!(fs::read(&source).unwrap(), b"captured source");
         assert_eq!(fs::read(&destination).unwrap(), b"external destination");
         assert!(!tombstone.exists());
+        let mut left: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            ["destination", "source"],
+            "expected only the restored source and the external destination | received: {left:?}"
+        );
     }
 
     #[test]
