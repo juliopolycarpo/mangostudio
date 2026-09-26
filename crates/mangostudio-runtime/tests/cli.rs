@@ -334,7 +334,17 @@ fn serve_with_no_token_anywhere_generates_one_prints_it_once_and_persists_it() {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         match receiver.recv_timeout(remaining) {
             Ok(line) => lines.push(line),
-            Err(_) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let _ = child.kill();
+                panic!("expected the serve token line within 60s | received only: {lines:?}");
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!(
+                    "expected the serve token line before stderr closed | received only: {lines:?}, \
+                     exit status {:?}",
+                    child.wait()
+                );
+            }
         }
     }
     let _ = child.kill();
