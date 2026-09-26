@@ -17,6 +17,11 @@ use crate::runtime_home::lock::{current_hostname, is_process_alive};
 
 const LOCK_NAME: &str = "runtime-update.lock";
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+/// How many times an open that met a delete-pending file is tried, and how
+/// long to wait between tries: about 200ms in all. See
+/// [`past_delete_pending`].
+const DELETE_PENDING_ATTEMPTS: u32 = 10;
+const DELETE_PENDING_PAUSE: Duration = Duration::from_millis(20);
 
 #[derive(Serialize, Deserialize)]
 struct Owner {
@@ -38,6 +43,16 @@ impl SlotUpdateLock {
     /// a dead same-host holder. Foreign holders require explicit cleanup,
     /// because an age check cannot fence a paused process on another host.
     pub fn acquire(slot_dir: &Path, token: String, _hold_timeout: Duration) -> io::Result<Self> {
+        Self::acquire_pausing(slot_dir, token, &mut || thread::sleep(DELETE_PENDING_PAUSE))
+    }
+
+    /// [`Self::acquire`], with `pause` run between tries of an open that met
+    /// a delete-pending file, so a test can end that state deterministically.
+    fn acquire_pausing(
+        slot_dir: &Path,
+        token: String,
+        pause: &mut dyn FnMut(),
+    ) -> io::Result<Self> {
         fs::create_dir_all(slot_dir)?;
         let path = slot_dir.join(LOCK_NAME);
         let reclaim_path = path.with_extension("lock.reclaim");
@@ -45,7 +60,7 @@ impl SlotUpdateLock {
         for attempt in 0..2 {
             // A stranded marker needs explicit operator cleanup. Removing it
             // automatically races another reclaimer's path-based unlink.
-            if reclaim_path.try_exists()? {
+            if past_delete_pending(|| reclaim_path.try_exists(), pause)? {
                 return Err(io::Error::new(
                     io::ErrorKind::WouldBlock,
                     format!(
@@ -61,7 +76,7 @@ impl SlotUpdateLock {
                 use std::os::unix::fs::OpenOptionsExt as _;
                 options.mode(0o600);
             }
-            let mut file = match options.open(&path) {
+            let mut file = match past_delete_pending(|| options.open(&path), pause) {
                 Ok(file) => file,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     if attempt == 0 && reclaim_abandoned(&path, &reclaim_path) {
@@ -137,6 +152,53 @@ impl Drop for SlotUpdateLock {
         {
             let _ = fs::remove_file(&self.path);
         }
+    }
+}
+
+/// Runs `open`, trying again (after `pause`, a bounded number of times)
+/// while it fails the way Windows fails any open of a delete-pending file.
+///
+/// Removing a file on Windows only marks it for deletion while any other
+/// handle to it is still open — an antivirus or indexer scanning the lock
+/// or reclaim marker just written, or a concurrent reader — and every open
+/// of that name fails with `ERROR_ACCESS_DENIED` until the last handle
+/// closes. Without this, an update racing a lock release fails with a
+/// permission error instead of claiming the slot a moment later. The
+/// state cannot be told apart from a real denial through `std`, so a
+/// denial that outlasts the retries is returned as it came: a slot
+/// directory this process really cannot write still fails with its own
+/// error, just ~200ms later. Elsewhere the name is gone the moment it is
+/// removed, and `open` runs once.
+///
+/// Usage: `past_delete_pending(|| options.open(&path), &mut || thread::sleep(pause))`.
+fn past_delete_pending<T>(
+    mut open: impl FnMut() -> io::Result<T>,
+    pause: &mut dyn FnMut(),
+) -> io::Result<T> {
+    let mut attempts = 1;
+    loop {
+        match open() {
+            Err(error)
+                if attempts < DELETE_PENDING_ATTEMPTS && is_delete_pending_denial(&error) =>
+            {
+                pause();
+                attempts += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
+fn is_delete_pending_denial(error: &io::Error) -> bool {
+    #[cfg(windows)]
+    {
+        error.raw_os_error()
+            == i32::try_from(windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED).ok()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = error;
+        false
     }
 }
 
@@ -355,6 +417,107 @@ mod tests {
             );
             fs::remove_dir_all(dir).unwrap();
         }
+    }
+
+    /// Any error other than a Windows access denial is returned from the
+    /// first try, never retried.
+    #[test]
+    fn an_open_that_fails_for_another_reason_is_tried_once() {
+        let mut tries = 0;
+        let mut pauses = 0;
+        let result: io::Result<()> = past_delete_pending(
+            || {
+                tries += 1;
+                Err(io::Error::from(io::ErrorKind::NotFound))
+            },
+            &mut || pauses += 1,
+        );
+        let kind = result.as_ref().err().map(io::Error::kind);
+        assert_eq!(
+            (tries, pauses, kind),
+            (1, 0, Some(io::ErrorKind::NotFound)),
+            "expected (tries, pauses, error): (1, 0, Some(NotFound)) | received: ({tries}, {pauses}, {kind:?})"
+        );
+    }
+
+    /// A denial that never clears is a real one: it is tried a bounded
+    /// number of times and then returned unchanged, never read as busy.
+    #[cfg(windows)]
+    #[test]
+    fn a_denial_that_outlasts_the_retries_is_returned_as_it_came() {
+        let denied = i32::try_from(windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED).unwrap();
+        let mut tries = 0;
+        let result: io::Result<()> = past_delete_pending(
+            || {
+                tries += 1;
+                Err(io::Error::from_raw_os_error(denied))
+            },
+            &mut || {},
+        );
+        let code = result.as_ref().err().and_then(io::Error::raw_os_error);
+        assert_eq!(
+            (tries, code),
+            (DELETE_PENDING_ATTEMPTS, Some(denied)),
+            "expected (tries, os error): ({DELETE_PENDING_ATTEMPTS}, Some({denied})) | received: ({tries}, {code:?})"
+        );
+    }
+
+    /// The lock a releasing holder just removed can still be delete-pending
+    /// while another handle to it is open; claiming it then must wait for
+    /// that handle rather than fail with `PermissionDenied`. The pending
+    /// state is real: the file is opened delete-on-close beside a second
+    /// handle, and the delete-on-close handle is closed first. The second
+    /// handle is closed from the claim's first pause, so the retry is
+    /// exercised without timing.
+    #[cfg(windows)]
+    #[test]
+    fn a_delete_pending_lock_is_claimed_once_its_last_handle_closes() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE};
+        use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_FLAG_DELETE_ON_CLOSE};
+
+        let dir = slot("delete-pending");
+        let path = dir.join(LOCK_NAME);
+        let deleting = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
+            .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
+            .open(&path)
+            .unwrap();
+        let mut lingering = Some(OpenOptions::new().read(true).open(&path).unwrap());
+        drop(deleting);
+        let setup = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map(drop);
+        let denied = i32::try_from(ERROR_ACCESS_DENIED).unwrap();
+        assert_eq!(
+            setup.as_ref().err().and_then(io::Error::raw_os_error),
+            Some(denied),
+            "expected the lock delete-pending (os error {denied}) before claiming | received: {setup:?}"
+        );
+
+        let mut pauses = 0;
+        let claim = SlotUpdateLock::acquire_pausing(&dir, "after-release".into(), &mut || {
+            pauses += 1;
+            drop(lingering.take());
+        });
+        let received = claim
+            .as_ref()
+            .map(|_| "claimed")
+            .map_err(ToString::to_string);
+        assert!(
+            claim.is_ok(),
+            "expected the delete-pending lock claimed once its last handle closed | received: {received:?}"
+        );
+        assert!(
+            pauses >= 1,
+            "expected the claim to wait out the delete-pending lock | received: {pauses} pauses"
+        );
+        drop(claim);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(unix)]
