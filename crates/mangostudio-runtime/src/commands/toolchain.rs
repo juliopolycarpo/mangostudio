@@ -369,6 +369,43 @@ mod tests {
         }
     }
 
+    /// Counts the real directory scans the native reader performs.
+    #[derive(Default)]
+    struct CountingDirectoryReader {
+        scans: std::cell::Cell<usize>,
+    }
+
+    impl read_cache::Reader for CountingDirectoryReader {
+        type Value = Vec<String>;
+        fn identity(&self, path: &str) -> Option<String> {
+            read_cache::Reader::identity(&NativeDirectoryReader, path)
+        }
+        fn read(&self, path: &str) -> Option<Vec<String>> {
+            self.scans.set(self.scans.get() + 1);
+            read_cache::Reader::read(&NativeDirectoryReader, path)
+        }
+    }
+
+    /// Regression: on Windows a directory identity read failed, so every
+    /// resolution re-scanned the managed-versions directory.
+    #[test]
+    fn an_unchanged_versions_directory_is_scanned_once() {
+        let versions = crate::test_support::scratch_dir("toolchain-versions-cache");
+        std::fs::create_dir(versions.join("v22.0.0")).unwrap();
+        let path = versions.to_str().unwrap();
+        let cache = read_cache::ReadCache::default();
+        let reader = CountingDirectoryReader::default();
+        for _ in 0..3 {
+            assert_eq!(cache.read(path, &reader).unwrap(), ["v22.0.0"]);
+        }
+        assert_eq!(
+            reader.scans.get(),
+            1,
+            "expected directory scans: 1 (then cache hits) | received: {}",
+            reader.scans.get()
+        );
+    }
+
     fn host(platform: &str) -> PathEnv {
         PathEnv {
             platform: platform.into(),
