@@ -129,21 +129,6 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           VERSION: ${{ inputs.version }}
 
-      # Manual runs only: the startup numbers docs/reference/tooling.md records
-      # for each hosted runner, taken from the release-shaped runtime this leg
-      # just staged. Informational — a slow runner must not fail the smoke.
-      - name: Measure runtime startup (manual rebuild)
-        if: ${{ inputs.rebuild }}
-        continue-on-error: true
-        shell: bash
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          runtime=".mango/out/${PLATFORM}/mangostudio-runtime"
-          [ -f "${runtime}.exe" ] && runtime="${runtime}.exe"
-          bun run scripts/bench/runtime-handshake.ts "$runtime" --runs 20
-          bun run scripts/bench/runtime-handshake.ts "$runtime" --runs 10 --fresh-copy
-
   docker:
     name: Docker ${{ matrix.variant }} ${{ matrix.docker_arch }}
     needs: [runtime]

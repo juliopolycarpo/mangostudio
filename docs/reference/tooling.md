@@ -370,8 +370,8 @@ it shows:
 
 ### Hosted runners
 
-A manual smoke run (`gh workflow run smoke-binary.yml -f rebuild=true`) measures the
-release-shaped runtime each binary leg stages, on GitHub's hosted runners. Run
+A one-off manual smoke run on a measurement branch ran `scripts/bench/runtime-handshake.ts`
+against the release-shaped runtime each binary leg staged, on GitHub's hosted runners. Run
 [36219246581](https://github.com/juliopolycarpo/mangostudio/actions/runs/36219246581), source
 `46558e95` (release profile with fat LTO), 2026-09-26, Bun 1.4.2, milliseconds as min / median /
 p95 / max:

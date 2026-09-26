@@ -97,8 +97,8 @@ que um filho local. Os detalhes e as medições num desktop estão na versão em
 página (`docs/reference/tooling.md`, "Runtime startup budgets").
 
 `scripts/bench/runtime-handshake.ts` inicia o runtime por stdio como o hub faz e mede cada
-fase. Uma execução manual do smoke (`gh workflow run smoke-binary.yml -f rebuild=true`) mede o
-runtime de release que cada job binário prepara nos runners hospedados do GitHub. Execução
+fase. Uma execução manual pontual do smoke, num branch de medição, rodou o script contra o
+runtime de release que cada job binário preparou nos runners hospedados do GitHub. Execução
 [36219246581](https://github.com/juliopolycarpo/mangostudio/actions/runs/36219246581), código
 `46558e95` (perfil de release com LTO fat), 2026-09-26, Bun 1.4.2, em milissegundos como mín /
 mediana / p95 / máx:
