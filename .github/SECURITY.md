@@ -58,7 +58,7 @@ In-memory rate limiter with configurable window and max requests per window. Pro
 
 Pull requests are checked by two GitHub security workflows before merge:
 
-- **CodeQL** (`.github/workflows/codeql.yml`) runs on pull requests to `main`, pushes to `main`, a weekly schedule, and manual dispatch. It uses CodeQL advanced setup for JavaScript/TypeScript with explicit no-build extraction and the `security-extended` query suite. The workflow uploads SARIF with a stable language category so alerts are visible in the Security tab and in the PR `Code scanning results / CodeQL` check.
+- **CodeQL** (`.github/workflows/codeql.yml`) runs on pull requests to `main`, pushes to `main`, a weekly schedule, and manual dispatch. It uses CodeQL advanced setup for JavaScript/TypeScript and Rust with explicit no-build extraction and the `security-extended` query suite. The workflow uploads SARIF with a stable per-language category so alerts are visible in the Security tab and in the PR `Code scanning results / CodeQL` check.
 - **Dependency Review** (`.github/workflows/dependency-review.yml`) runs on pull requests to `main` and blocks newly introduced moderate-or-worse vulnerable dependencies from manifest or lockfile changes. License checks are intentionally disabled.
 
 When GitHub posts an Advanced Security setup comment on a PR, use it as a pointer
