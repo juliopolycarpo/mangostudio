@@ -3,8 +3,9 @@
 //! `CreateProcessW` cannot run a `.ps1`: it is not an executable image and, unlike a batch file,
 //! no interpreter is implied. Some vendor CLIs install only a script (Cursor's Windows installer
 //! lays down `%LOCALAPPDATA%\cursor-agent\cursor-agent.ps1`), so a script target is rewritten into
-//! the same invocation the vendor's own `.cmd` shim uses:
-//! `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script> ...`.
+//! nearly the invocation the vendor's own `.cmd` shim uses:
+//! `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File <script>
+//! ...`.
 //!
 //! - The interpreter is named by full path under the child's own `SystemRoot` (or the Windows
 //!   directory the runtime inherits, for a request that inherits the environment), never found
@@ -12,9 +13,24 @@
 //! - `-File` passes every later argument to the script as a literal string; nothing is parsed as
 //!   PowerShell command text.
 //! - The script path must be absolute. A relative one would resolve against the child's working
-//!   directory, which for an agent is the workspace it was pointed at.
-//! - `-ExecutionPolicy Bypass` applies to this process only and matches Cursor's own shim; a
-//!   machine or user Group Policy still takes precedence over it.
+//!   directory, which for an agent is the workspace it was pointed at. A verbatim `\\?\` path
+//!   (what `canonicalize` returns on Windows, and so what the launch receives) is passed in its
+//!   Win32 spelling, the same form the probe ran.
+//! - Arguments containing `"` and empty arguments are refused. Windows PowerShell 5.1 re-quotes
+//!   `$args` when the script starts its native program, and on that second hop it mangles an
+//!   embedded `"` and drops an empty string, so the vendor would receive something other than
+//!   what was asked for.
+//! - `-ExecutionPolicy RemoteSigned`, not the `Bypass` Cursor's `.cmd` shim uses. The switch is
+//!   not scoped to this process: PowerShell records it in `PSExecutionPolicyPreference`, which
+//!   every descendant inherits, so any PowerShell the agent later runs as a tool gets the same
+//!   policy (checked on Windows 11: a nested `powershell.exe` reported `RemoteSigned`).
+//!   `RemoteSigned` still runs the vendor script, which an `irm | iex` installer writes without a
+//!   Mark-of-the-Web (checked against the real `cursor-agent.ps1`), while a downloaded, unsigned
+//!   script run by a descendant stays blocked; `Bypass` would have switched that check off for
+//!   the whole agent tree. It can still relax a stricter user policy (`AllSigned`, `Restricted`)
+//!   to `RemoteSigned` for that tree, and a machine or user Group Policy still overrides it.
+//!   The External Agents SDK's own `.ps1` fallback passes no `-ExecutionPolicy` at all, so it
+//!   fails under the default `Restricted` policy; this launcher diverges from it on purpose.
 //!
 //! The rewrite returns an ordinary request for `powershell.exe`, so the Job containment, the
 //! exact environment and the hidden window of the original request carry over unchanged. The
@@ -33,7 +49,7 @@ const POWERSHELL_SWITCHES: [&str; 5] = [
     "-NoProfile",
     "-NonInteractive",
     "-ExecutionPolicy",
-    "Bypass",
+    "RemoteSigned",
 ];
 
 /// Whether `program` names a PowerShell script (`.ps1`, any case).
@@ -81,6 +97,14 @@ pub(crate) fn powershell_script_request(
             request.program
         )));
     }
+    for (index, argument) in request.args.iter().enumerate() {
+        refuse_unforwardable(index, argument)?;
+    }
+    let script = request
+        .program
+        .to_str()
+        .and_then(crate::library::simplify_verbatim)
+        .map_or_else(|| request.program.clone().into_os_string(), OsString::from);
     let mut launch = request.clone();
     launch.program = PathBuf::from(format!(
         "{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
@@ -89,10 +113,33 @@ pub(crate) fn powershell_script_request(
     launch.args = POWERSHELL_SWITCHES
         .iter()
         .map(OsString::from)
-        .chain([OsString::from("-File"), request.program.clone().into()])
+        .chain([OsString::from("-File"), script])
         .chain(request.args.iter().cloned())
         .collect();
     Ok(launch)
+}
+
+/// Refuses an argument Windows PowerShell 5.1 cannot hand on unchanged to the native program the
+/// script starts: an embedded `"` is mangled and an empty string is dropped on that second hop.
+fn refuse_unforwardable(index: usize, argument: &OsStr) -> io::Result<()> {
+    let reason = if argument.is_empty() {
+        Some(
+            "it is empty, and Windows PowerShell drops an empty argument when the script starts its program",
+        )
+    } else if argument.to_string_lossy().contains('"') {
+        Some(
+            "it contains '\"', which Windows PowerShell mangles when the script starts its program",
+        )
+    } else {
+        None
+    };
+    match reason {
+        None => Ok(()),
+        Some(reason) => Err(invalid(format!(
+            "argument {index} cannot be passed through a PowerShell script entry point: {reason}; \
+             expected a non-empty argument without '\"'"
+        ))),
+    }
 }
 
 /// A drive-absolute (`C:\...`, `C:/...`) or UNC (`\\server\...`) path, judged by its text so the
@@ -167,7 +214,7 @@ mod tests {
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
-            "Bypass",
+            "RemoteSigned",
             "-File",
             r"C:\Users\me\AppData\Local\cursor-agent\cursor-agent.ps1",
             "acp",
@@ -244,6 +291,49 @@ mod tests {
             assert!(
                 powershell_script_request(&request(absolute, &[]), None).is_ok(),
                 "expected {absolute} accepted as absolute"
+            );
+        }
+    }
+
+    /// Regression: Windows PowerShell 5.1 mangles an embedded `"` and drops an empty argument
+    /// when the script forwards `$args` to its program, so neither may reach the launch.
+    #[test]
+    fn quotes_and_empty_arguments_are_refused_not_forwarded() {
+        for (argument, named) in [("", "it is empty"), (r#"say "hi""#, "contains '\"'")] {
+            let error = powershell_script_request(
+                &request(r"C:\c\cursor-agent.ps1", &["acp", argument]),
+                None,
+            )
+            .expect_err("expected the argument refused");
+            let message = error.to_string();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(
+                message.contains("argument 1 cannot be passed") && message.contains(named),
+                "expected the refusal to name argument 1 and why ({named}) | received: {message}"
+            );
+        }
+    }
+
+    /// Regression: the launch receives the canonical path, which on Windows is verbatim
+    /// (`\\?\C:\...`), while the probe ran the raw path; both must reach `-File` the same way.
+    #[test]
+    fn a_verbatim_script_path_is_passed_in_its_win32_spelling() {
+        for (verbatim, win32) in [
+            (r"\\?\C:\c\cursor-agent.ps1", r"C:\c\cursor-agent.ps1"),
+            (
+                r"\\?\UNC\srv\share\cursor-agent.ps1",
+                r"\\srv\share\cursor-agent.ps1",
+            ),
+        ] {
+            let launch = powershell_script_request(&request(verbatim, &["--version"]), None)
+                .expect("a valid script launch");
+            let file = launch.args.iter().position(|argument| argument == "-File");
+            let script = file.and_then(|index| launch.args.get(index + 1));
+            assert_eq!(
+                script.map(OsString::as_os_str),
+                Some(OsStr::new(win32)),
+                "expected -File {win32} | received: {:?}",
+                launch.args
             );
         }
     }

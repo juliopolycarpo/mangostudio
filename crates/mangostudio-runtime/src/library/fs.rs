@@ -126,8 +126,15 @@ pub(crate) fn simplify_verbatim_path(path: &str) -> Option<String> {
 
 /// The Win32 spelling of a verbatim drive or UNC path, or `None` for any
 /// other path (including verbatim forms with no Win32 equivalent, such as a
-/// volume GUID).
-fn simplify_verbatim(path: &str) -> Option<String> {
+/// volume GUID). A text rule, the same on every host; callers that only
+/// mean it on Windows gate it, as [`simplify_verbatim_path`] does.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(simplify_verbatim(r"\\?\C:\tools").as_deref(), Some(r"C:\tools"));
+/// ```
+pub(crate) fn simplify_verbatim(path: &str) -> Option<String> {
     let rest = path.strip_prefix(r"\\?\")?;
     if let Some(unc) = rest.strip_prefix(r"UNC\") {
         return Some(format!(r"\\{unc}"));

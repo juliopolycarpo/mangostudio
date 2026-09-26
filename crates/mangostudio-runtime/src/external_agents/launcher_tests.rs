@@ -598,7 +598,7 @@ fn a_powershell_script_spec_becomes_a_contained_powershell_file_launch() {
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
-            "Bypass",
+            "RemoteSigned",
             "-File",
             script,
             "acp",
