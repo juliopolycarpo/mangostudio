@@ -226,12 +226,9 @@ const PROBE_MAX_STDERR_BYTES: usize = 1024;
 /// share a cache slot).
 static PROBE_VERSION_CACHE: ProbeCache<Option<String>> = ProbeCache::new();
 
-/// Clears every cached `probe_version` answer. Test-only, gated the same
-/// way [`crate::health`]'s `invalidate_git_probe_cache` is: every caller
-/// lives behind this crate's `#[cfg(unix)]` real-child tests, so an
-/// unqualified `#[cfg(test)]` here would be reported dead code on a
-/// Windows build under `-D warnings`.
-#[cfg(all(test, unix))]
+/// Clears every cached `probe_version` answer. Test-only; real-child tests
+/// on every platform call it (the Windows one probes a batch shim).
+#[cfg(test)]
 pub(crate) fn invalidate_probe_version_cache() {
     PROBE_VERSION_CACHE.clear();
 }
@@ -245,7 +242,7 @@ pub(crate) fn invalidate_probe_version_cache() {
 /// `crate::blocking::pool_saturation_test_lock`
 /// — the identical class of problem, once per process-wide test-only
 /// cache this crate has.
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) fn probe_version_test_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
@@ -660,6 +657,32 @@ mod tests {
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
         path
+    }
+
+    /// Regression: a probe inherits the runtime's environment, and a `.cmd`
+    /// candidate (Cursor's `agent.cmd`, npm shims) was refused before launch
+    /// for lacking an exact `SystemRoot`, so the vendor read as not installed.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn probe_binary_version_runs_a_batch_shim_under_the_inherited_environment() {
+        let _exclusive = probe_version_test_lock().lock().await;
+        invalidate_probe_version_cache();
+        let dir = scratch_dir("probe-batch");
+        let shim = dir.join("fake-agent.cmd");
+        std::fs::write(&shim, "@echo 9.9.9\r\n").unwrap();
+        let cancel = CancellationToken::new();
+
+        let version = probe_binary_version(
+            shim.to_string_lossy().into_owned(),
+            vec!["--version".to_string()],
+            10_000,
+            &cancel,
+        )
+        .await;
+        assert!(
+            matches!(version.as_ref(), Ok(Some(text)) if text == "9.9.9"),
+            "expected the shim's version: Ok(Some(\"9.9.9\")) | received: {version:?}"
+        );
     }
 
     #[cfg(unix)]

@@ -942,6 +942,56 @@ over rather than resuming. A session the SDK sealed itself — Codex does after 
 app-server or a cancel that never settled — takes the same path. Graceful interruption on Windows stays tracked separately and is not
 required unless a bundled launcher comes to depend on it.
 
+### Windows script entry points
+
+Cursor's Windows installer puts its CLI in `%LOCALAPPDATA%\cursor-agent` as PowerShell scripts
+(`agent.ps1`, `cursor-agent.ps1`); some installs also add `.cmd` shims that run those scripts. The
+runtime supports that layout as follows:
+
+- **Discovery.** On Windows the Cursor definition also searches `cursor-agent.ps1` after every
+  `PATHEXT` name in each directory (so a `.cmd` or `.exe` beside it still wins), and searches
+  `%LOCALAPPDATA%\cursor-agent` after `PATH`, read from the probing environment snapshot. A script
+  found only there reports `installed-but-not-on-path` and still launches. `agent.ps1` is never
+  searched: `agent` is a name other CLIs install too, and a probe runs the script it finds. No
+  other vendor searches `.ps1`.
+- **Launch.** A `.ps1` cannot be started by `CreateProcessW`. The Windows Job spawner
+  (`crates/mangostudio-runtime/src/subprocess/powershell_script.rs`) rewrites it to
+  `<SystemRoot>\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile
+  -NonInteractive -ExecutionPolicy RemoteSigned -File <script> <args...>`. The interpreter is
+  named by full path, never searched for. The script path must be absolute, and a verbatim
+  `\\?\` path (the canonical form the launch receives) is passed in its Win32 spelling, the same
+  form the probe runs. `-File` passes every argument as a literal string, but Windows PowerShell
+  5.1 re-quotes `$args` when the script starts its native program and on that hop mangles an
+  embedded `"` and drops an empty string, so such arguments are refused rather than forwarded
+  changed.
+- **Execution policy.** The switch is not scoped to one process: PowerShell records it in
+  `PSExecutionPolicyPreference`, which every descendant inherits, so any PowerShell the agent
+  runs as a tool gets the same policy (checked on Windows 11: a nested `powershell.exe` reported
+  `RemoteSigned`). That is why the launch uses `RemoteSigned` rather than the `Bypass` Cursor's
+  own `.cmd` shim passes. `RemoteSigned` still runs the vendor script, which the `irm | iex`
+  installer writes without a Mark-of-the-Web (checked against the real `cursor-agent.ps1`, which
+  answered `--version`; `AllSigned` refused it, so the switch does take effect), while a
+  downloaded, unsigned script run by a descendant stays blocked. `Bypass` would have turned that
+  check off for the whole agent tree. The accepted cost: a stricter user policy (`AllSigned`,
+  `Restricted`) is relaxed to `RemoteSigned` for the agent's tree. A machine or user Group Policy
+  still overrides it. The External Agents SDK's own `.ps1` fallback passes no `-ExecutionPolicy`
+  at all, and so fails under the default `Restricted` policy; the runtime diverges from it on
+  purpose.
+- **What is preserved.** The rewrite happens inside the same request the SDK's `ProcessLauncher`
+  port handed the runtime's `GuardedProcessLauncher`, so the launch check, the kill-on-close Job
+  that contains PowerShell and the vendor's `node.exe`, the SDK's environment allowlist (nothing
+  is added for PowerShell), and the hidden window all apply unchanged. The version probe goes
+  through the same spawner.
+- **Batch shims.** A `.cmd` run by a probe inherits the runtime's environment; `cmd.exe` is then
+  located from the runtime's own Windows directory (`GetSystemWindowsDirectoryW`) rather than
+  refused for lacking an exact `SystemRoot`.
+
+Support level: argv construction and discovery are unit-tested on every OS, and the batch probe
+has a Windows test. The PowerShell launch is not exercised in CI, because Windows PowerShell with
+a piped stdout is not a reliable test fixture. It was checked by hand against a real
+`cursor-agent.ps1` on Windows 11 with the SDK's allowlisted environment and piped stdio, where
+`--version` answered under both `Bypass` (about 2.3 s) and `RemoteSigned`.
+
 ### TypeScript assertion replacement map
 
 TypeScript paths are pinned to `88800868f01c611c58234c6904b5f1288b3a942b`, the last

@@ -46,6 +46,7 @@ use windows_sys::Win32::System::JobObjects::{
     TerminateJobObject,
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
+use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
     DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
@@ -180,12 +181,25 @@ impl WindowsJobChild {
 
 /// Creates a child atomically associated with a non-inheritable kill-on-close Job.
 pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
+    // A PowerShell script cannot be run by CreateProcessW at all; it becomes a request for the
+    // system `powershell.exe -File <script>` (see `super::powershell_script`), which then takes
+    // the ordinary path below with the original environment, window, and Job.
+    let script_request;
+    let request = if super::powershell_script::is_powershell_script(&request.program) {
+        let inherited = inherited_windows_directory(request)?;
+        script_request =
+            super::powershell_script::powershell_script_request(request, inherited.as_deref())?;
+        &script_request
+    } else {
+        request
+    };
     let job = Arc::new(create_killing_job()?);
     let pipes = ChildPipes::from_request(request)?;
     // A batch file is run by cmd.exe, which does not understand the MSVC quoting below; it gets
     // its own interpreter path and cmd.exe-safe command line (see `super::batch`).
     let (application, mut command_line) = if super::batch::is_batch(&request.program) {
-        let launch = super::batch::BatchLaunch::new(request)?;
+        let inherited = inherited_windows_directory(request)?;
+        let launch = super::batch::BatchLaunch::new(request, inherited.as_deref())?;
         (
             Some(wide_nul(launch.interpreter.as_os_str(), "program")?),
             wide_nul(OsStr::new(&launch.command_line), "command line")?,
@@ -285,6 +299,41 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
         stderr: Some(stderr),
         pty: None,
     })
+}
+
+/// The runtime's own Windows directory, when `request` inherits the runtime's environment and
+/// its `SystemRoot` is therefore this one; `None` for an exact environment, which must carry its
+/// own. Read from the operating system, never from an environment variable.
+///
+/// Usage: `let inherited = inherited_windows_directory(&request)?;`
+fn inherited_windows_directory(request: &ProcessRequest) -> io::Result<Option<String>> {
+    if request.env.is_some() {
+        return Ok(None);
+    }
+    let mut buffer = vec![0_u16; 260];
+    loop {
+        let capacity = u32::try_from(buffer.len())
+            .map_err(|_| io::Error::other("Windows directory buffer size does not fit u32"))?;
+        // SAFETY: `buffer` is writable for `capacity` UTF-16 units for the whole call.
+        let written = unsafe { GetSystemWindowsDirectoryW(buffer.as_mut_ptr(), capacity) };
+        let written = usize::try_from(written)
+            .map_err(|_| io::Error::other("Windows directory length does not fit usize"))?;
+        if written == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // On success the length excludes the NUL; a too-small buffer reports the size needed
+        // including it.
+        if written < buffer.len() {
+            buffer.truncate(written);
+            return String::from_utf16(&buffer).map(Some).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "the Windows directory is not valid Unicode; expected a Unicode path",
+                )
+            });
+        }
+        buffer.resize(written, 0);
+    }
 }
 
 /// `CreateProcessW` flags for a bounded (piped) child: started suspended so the Job owns it before

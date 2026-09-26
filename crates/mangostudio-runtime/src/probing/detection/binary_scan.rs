@@ -81,6 +81,14 @@ pub struct RuntimeDefinition {
     /// binary, so the effective-installation choice also accepts a later
     /// readable installation under the same name.
     pub shared_binary_names: &'static [&'static str],
+    /// Names from [`RuntimeDefinition::binary_names`] that are also searched as
+    /// `<name>.ps1` on `win32`, after every `PATHEXT` name for that binary
+    /// name. For a vendor whose Windows installer ships only a PowerShell
+    /// script entry point; the process layer runs such a candidate through
+    /// `powershell.exe -File`. Never a name another vendor also installs
+    /// (see [`RuntimeDefinition::shared_binary_names`]), since probing runs
+    /// the script it finds.
+    pub windows_powershell_script_names: &'static [&'static str],
 }
 
 /// A candidate that failed to become an installation.
@@ -251,7 +259,9 @@ pub fn default_probe_timeout_ms(platform: &str) -> u64 {
 }
 
 /// The binary names [`scan_runtime`] searches for, including every
-/// win32 `PATHEXT` extension a definition's bare names could carry.
+/// win32 `PATHEXT` extension a definition's bare names could carry, and
+/// `<name>.ps1` after them for each name listed in
+/// [`RuntimeDefinition::windows_powershell_script_names`].
 #[must_use]
 pub fn binary_candidate_names(
     definition: &RuntimeDefinition,
@@ -286,6 +296,14 @@ pub fn binary_candidate_names(
             if !names.contains(&candidate_name) {
                 names.push(candidate_name);
             }
+        }
+        let script_name = format!("{binary_name}.ps1");
+        if definition
+            .windows_powershell_script_names
+            .contains(binary_name)
+            && !names.contains(&script_name)
+        {
+            names.push(script_name);
         }
         names.push((*binary_name).to_string());
     }
@@ -939,6 +957,7 @@ mod tests {
             well_known_dirs: |_| Vec::new(),
             include_bare_binary_names: false,
             shared_binary_names: &[],
+            windows_powershell_script_names: &[],
         }
     }
 
@@ -1450,6 +1469,110 @@ mod tests {
         let result = scan_runtime(&node_definition(), deps, BinaryScanOptions::default()).await;
 
         assert_eq!(result.installations[0].raw_path, "C:\\tools\\node.cmd");
+    }
+
+    #[test]
+    fn only_an_opted_in_definition_searches_powershell_scripts_after_pathext() {
+        let pathext = env(&[("PATHEXT", ".EXE;.CMD;.PS1")]);
+        let names = binary_candidate_names(&cursor_definition(), "win32", &pathext);
+        assert_eq!(
+            names,
+            [
+                "agent.exe",
+                "agent.cmd",
+                "agent",
+                "cursor-agent.exe",
+                "cursor-agent.cmd",
+                "cursor-agent.ps1",
+                "cursor-agent"
+            ],
+            "expected .ps1 after the PATHEXT names | received: {names:?}"
+        );
+        let node = binary_candidate_names(&node_definition(), "win32", &pathext);
+        assert!(
+            node.iter().all(|name| !name.ends_with(".ps1")),
+            "expected no .ps1 candidate for a definition that did not opt in | received: {node:?}"
+        );
+        let linux = binary_candidate_names(&cursor_definition(), "linux", &pathext);
+        assert_eq!(linux, ["agent", "cursor-agent"]);
+    }
+
+    /// Regression: Cursor's Windows installer ships only `cursor-agent.ps1`,
+    /// which no `PATHEXT` name matches, so the CLI was reported not installed.
+    #[tokio::test]
+    async fn finds_cursors_powershell_script_on_path_and_in_its_install_directory() {
+        let script = "C:\\Users\\tester\\AppData\\Local\\cursor-agent\\cursor-agent.ps1";
+        for path in [
+            "C:\\Users\\tester\\AppData\\Local\\cursor-agent",
+            "C:\\other",
+        ] {
+            let deps = Arc::new(FakeBinaryScanDeps {
+                path_env: PathEnv {
+                    platform: "win32".to_string(),
+                    home_dir: "C:\\Users\\tester".to_string(),
+                    env: env(&[
+                        ("PATH", path),
+                        ("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+                        ("LOCALAPPDATA", "C:\\Users\\tester\\AppData\\Local"),
+                    ]),
+                },
+                existing: HashSet::from([script.to_string()]),
+                responses: HashMap::from([(script.to_string(), "2026.08.04-aaa8809".to_string())]),
+                ..Default::default()
+            });
+
+            let result =
+                scan_runtime(&cursor_definition(), deps, BinaryScanOptions::default()).await;
+
+            let found: Vec<(&str, Option<&str>)> = result
+                .installations
+                .iter()
+                .map(|installation| {
+                    (
+                        installation.raw_path.as_str(),
+                        installation.version.as_deref(),
+                    )
+                })
+                .collect();
+            assert!(
+                found.first().is_some_and(|(raw, _)| *raw == script),
+                "PATH={path}: expected an installation at {script} | received: {found:?}"
+            );
+        }
+    }
+
+    /// `agent` is a name other CLIs install too, so an `agent.ps1` on `PATH`
+    /// is never a candidate: probing it would run an unrelated script.
+    #[tokio::test]
+    async fn never_probes_an_agent_powershell_script_on_path() {
+        let unrelated = "C:\\tools\\agent.ps1";
+        let deps = Arc::new(FakeBinaryScanDeps {
+            path_env: PathEnv {
+                platform: "win32".to_string(),
+                home_dir: "C:\\Users\\tester".to_string(),
+                env: env(&[("PATH", "C:\\tools"), ("PATHEXT", ".EXE;.CMD;.PS1")]),
+            },
+            existing: HashSet::from([unrelated.to_string()]),
+            responses: HashMap::from([(unrelated.to_string(), "2026.08.04-aaa8809".to_string())]),
+            ..Default::default()
+        });
+        let calls = Arc::clone(&deps.calls);
+
+        let result = scan_runtime(&cursor_definition(), deps, BinaryScanOptions::default()).await;
+
+        let probed = calls.lock().unwrap().clone();
+        assert!(
+            !probed
+                .iter()
+                .any(|path| path.to_lowercase().ends_with("agent.ps1")
+                    && !path.to_lowercase().ends_with("cursor-agent.ps1")),
+            "expected agent.ps1 never probed | received probes: {probed:?}"
+        );
+        assert!(
+            result.installations.is_empty(),
+            "expected no installation from an unrelated agent.ps1 | received: {:?}",
+            result.installations
+        );
     }
 
     #[tokio::test]

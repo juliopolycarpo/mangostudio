@@ -560,3 +560,55 @@ async fn windows_interrupt_is_unsupported_and_kill_ends_the_job() {
         "expected the Job to end the child within the bound | received {killed:?}"
     );
 }
+
+/// Cursor's Windows entry point is a `.ps1`: the request built from the SDK's launch spec, once
+/// the Job spawner rewrites it, runs the system PowerShell on that script with the spec's own
+/// arguments, environment, working directory, stdin and hidden window. Checked as argv, never by
+/// running PowerShell with a piped stdout.
+#[test]
+fn a_powershell_script_spec_becomes_a_contained_powershell_file_launch() {
+    let script = r"C:\Users\me\AppData\Local\cursor-agent\cursor-agent.ps1";
+    let spec = LaunchSpec {
+        argv: vec![script.into(), "acp".into()],
+        cwd: std::path::PathBuf::from(r"C:\workspace"),
+        env: BTreeMap::from([
+            ("PATH".to_owned(), r"C:\Windows\system32".to_owned()),
+            ("SystemRoot".to_owned(), r"C:\Windows".to_owned()),
+        ]),
+        stdin: true,
+        hide_window: true,
+    };
+    let exact = request(&spec);
+    let launch = crate::subprocess::powershell_script_request(&exact, None)
+        .unwrap_or_else(|error| panic!("expected a PowerShell launch | received {error}"));
+
+    let argv: Vec<String> = std::iter::once(launch.program.to_string_lossy().into_owned())
+        .chain(
+            launch
+                .args
+                .iter()
+                .map(|argument| argument.to_string_lossy().into_owned()),
+        )
+        .collect();
+    assert_eq!(
+        argv,
+        [
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "RemoteSigned",
+            "-File",
+            script,
+            "acp",
+        ],
+        "expected the PowerShell -File argv | received {argv:?}"
+    );
+    assert_eq!(
+        launch.env, exact.env,
+        "expected the SDK's exact environment"
+    );
+    assert_eq!(launch.cwd.as_deref(), Some(spec.cwd.as_path()));
+    assert!(launch.hide_window, "expected no console window");
+}

@@ -11,7 +11,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use super::binary_scan::RuntimeDefinition;
-use super::path_env::PathEnv;
+use super::path_env::{PathEnv, join_path};
 use super::types::{RuntimeId, SemVer};
 
 /// Which agent-CLI target a definition is about — this crate's mirror of
@@ -130,6 +130,26 @@ fn no_well_known_directories(_env: &PathEnv) -> Vec<String> {
     Vec::new()
 }
 
+/// Where Cursor's Windows installer puts its CLI: `%LOCALAPPDATA%\cursor-agent`, holding
+/// `agent.ps1` and `cursor-agent.ps1` (some installs also add `.cmd` shims that run those
+/// scripts). Searched after `PATH`, so a CLI the installer did not put on `PATH` is still found
+/// and reported as installed but not on `PATH`. Nothing on other platforms.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(cursor_well_known_directories(&windows_env), [r"C:\Users\me\AppData\Local\cursor-agent"]);
+/// ```
+fn cursor_well_known_directories(env: &PathEnv) -> Vec<String> {
+    if env.platform != "win32" {
+        return Vec::new();
+    }
+    env.env_var("LOCALAPPDATA")
+        .filter(|value| !value.trim().is_empty())
+        .map(|localappdata| vec![join_path("win32", &[localappdata, "cursor-agent"])])
+        .unwrap_or_default()
+}
+
 /// Claude Code. Verified on Linux 2026-07-26: `claude --version` printed
 /// `2.1.220 (Claude Code)`.
 pub const CLAUDE_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgentCliDefinition {
@@ -143,6 +163,7 @@ pub const CLAUDE_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgen
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
         shared_binary_names: &[],
+        windows_powershell_script_names: &[],
     },
     auth: AgentAuthDefinition::File {
         file_name: ".credentials.json",
@@ -163,6 +184,7 @@ pub const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgent
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
         shared_binary_names: &[],
+        windows_powershell_script_names: &[],
     },
     auth: AgentAuthDefinition::File {
         file_name: "auth.json",
@@ -174,6 +196,13 @@ pub const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgent
 /// documented and installed as `agent`. `cursor-agent` stays second for
 /// an install laid down before the rename — Cursor has not said the old
 /// name is ever removed.
+///
+/// On Windows the installer's entry points are PowerShell scripts
+/// (`cursor-agent.ps1`, verified 2026-09-25 on Windows 11), so a
+/// `cursor-agent.ps1` candidate is searched after the `PATHEXT` ones and
+/// launched through `powershell.exe -File` (see `crate::subprocess`'s
+/// `powershell_script`). `agent.ps1` is never searched: `agent` is a shared
+/// name, and a probe runs whatever script it finds.
 pub const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgentCliDefinition {
     target_id: AgentTargetId::Cursor,
     runtime: RuntimeDefinition {
@@ -182,10 +211,13 @@ pub const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgen
         version_args: &["--version"],
         parse_version: parse_cursor_agent_version,
         keep_unparsed_version: true,
-        well_known_dirs: no_well_known_directories,
+        well_known_dirs: cursor_well_known_directories,
         include_bare_binary_names: false,
         // Grok Build also installs `agent`.
         shared_binary_names: &["agent"],
+        // Only the vendor-specific name: `agent` is shared with other CLIs,
+        // so an unrelated `agent.ps1` on PATH must never be probed.
+        windows_powershell_script_names: &["cursor-agent"],
     },
     auth: AgentAuthDefinition::ConfigKey {
         file_name: "cli-config.json",

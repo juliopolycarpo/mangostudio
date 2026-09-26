@@ -176,9 +176,10 @@ rustix = { version = "1.1", default-features = false, features = ["fs"] }
 # Win32_Security(_Authorization): the owner-only DACL rewrite.
 # Win32_Storage_FileSystem: the FILE_GENERIC_* / DELETE access mask.
 # Wdk_Storage_FileSystem and Win32_System_IO: handle-relative no-replace rename.
-# Win32_System_SystemInformation: GetComputerNameExW, for the lock body's `host` field.
+# Win32_System_SystemInformation: GetComputerNameExW, for the lock body's `host` field, and
+# GetSystemWindowsDirectoryW, which locates cmd.exe/powershell.exe for an inheriting child.
 # Win32_System_JobObjects/Pipes/Threading: Windows child-tree containment uses a kill-on-close
 # Job atomically attached through CreateProcessW's attribute list, with explicit pipe inheritance.
 # Threading also provides OpenProcess/OpenProcessToken/GetExitCodeProcess for lock-holder liveness
 # and the owner-only module's own SID lookup.
-windows-sys = { version = "0.61", features = ["Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Globalization", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Globalization", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_SystemInformation", "Win32_System_Threading"] }

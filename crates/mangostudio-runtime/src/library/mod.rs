@@ -67,6 +67,10 @@ mod names;
 mod read;
 mod reader;
 mod service;
+/// The Win32 spelling of a verbatim path, shared with the process layer
+/// (`subprocess::powershell_script`, compiled on Windows and in tests).
+#[cfg(any(windows, test))]
+pub(crate) use fs::simplify_verbatim;
 #[cfg(test)]
 mod service_tests;
 mod settings_sources;

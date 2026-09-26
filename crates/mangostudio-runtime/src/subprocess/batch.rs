@@ -6,7 +6,9 @@
 //! its own command line, modelled on the Rust standard library's batch handling:
 //! `cmd.exe /e:ON /v:OFF /d /c ""<script>" "<arg>" ..."`, with the interpreter named by full
 //! path from the child's own `SystemRoot` (never a search that could find a planted `cmd.exe`),
-//! every argument quoted, and delayed expansion off so `!` is literal.
+//! every argument quoted, and delayed expansion off so `!` is literal. A request that inherits
+//! the runtime's environment uses the runtime's own Windows directory, which is that child's
+//! `SystemRoot`.
 //!
 //! Characters that cannot be carried safely inside a cmd.exe quoted string are refused rather
 //! than escaped: `"` would end the quoting, `%` is expanded even inside quotes, and CR/LF end
@@ -56,13 +58,19 @@ pub(crate) struct BatchLaunch {
 impl BatchLaunch {
     /// Builds the `cmd.exe` launch for `request`, whose program is a batch file.
     ///
+    /// `inherited_windows_directory` is the runtime's own Windows directory, used only when the
+    /// request inherits the environment (`request.env` is `None`).
+    ///
     /// # Example
     /// ```ignore
-    /// let launch = BatchLaunch::new(&request)?;
+    /// let launch = BatchLaunch::new(&request, None)?;
     /// assert!(launch.command_line.starts_with("cmd.exe /e:ON /v:OFF /d /c \"\""));
     /// ```
-    pub(crate) fn new(request: &ProcessRequest) -> io::Result<Self> {
-        let root = system_root(request.env.as_ref()).ok_or_else(|| {
+    pub(crate) fn new(
+        request: &ProcessRequest,
+        inherited_windows_directory: Option<&str>,
+    ) -> io::Result<Self> {
+        let root = interpreter_root(request, inherited_windows_directory).ok_or_else(|| {
             invalid(
                 "a batch file needs SystemRoot in the child environment to locate cmd.exe; \
                  expected an environment that carries SystemRoot"
@@ -108,8 +116,29 @@ impl BatchLaunch {
     }
 }
 
-fn system_root(env: Option<&BTreeMap<OsString, OsString>>) -> Option<String> {
-    env?.iter()
+/// The Windows directory an interpreter for `request` is found under: the exact environment's
+/// `SystemRoot`, or, for a request that inherits the runtime's environment, the runtime's own
+/// Windows directory. An exact environment without `SystemRoot` has none; it is never filled in
+/// from the runtime.
+///
+/// # Example
+/// ```ignore
+/// assert_eq!(interpreter_root(&inheriting, Some(r"C:\Windows")).as_deref(), Some(r"C:\Windows"));
+/// ```
+pub(super) fn interpreter_root(
+    request: &ProcessRequest,
+    inherited_windows_directory: Option<&str>,
+) -> Option<String> {
+    match request.env.as_ref() {
+        Some(env) => system_root(env),
+        None => inherited_windows_directory
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+    }
+}
+
+fn system_root(env: &BTreeMap<OsString, OsString>) -> Option<String> {
+    env.iter()
         .find(|(key, _)| {
             key.to_str()
                 .is_some_and(|key| key.eq_ignore_ascii_case("SystemRoot"))
@@ -162,17 +191,20 @@ mod tests {
 
     #[test]
     fn every_argument_is_quoted_so_shell_syntax_stays_literal() {
-        let launch = BatchLaunch::new(&request(
-            r"C:\Program Files\nodejs\npx.cmd",
-            &[
-                "-y",
-                "a&b|c<d>e^f(g)",
-                "has space",
-                "",
-                "!bang!",
-                r"C:\dir\",
-            ],
-        ))
+        let launch = BatchLaunch::new(
+            &request(
+                r"C:\Program Files\nodejs\npx.cmd",
+                &[
+                    "-y",
+                    "a&b|c<d>e^f(g)",
+                    "has space",
+                    "",
+                    "!bang!",
+                    r"C:\dir\",
+                ],
+            ),
+            None,
+        )
         .expect("these arguments are safe");
         assert_eq!(
             launch.interpreter,
@@ -184,6 +216,22 @@ mod tests {
         );
     }
 
+    /// Regression: a probe inherits the runtime's environment, so it has no exact `SystemRoot`;
+    /// refusing it made every `.cmd` vendor shim (Cursor's `agent.cmd`) look not installed.
+    #[test]
+    fn an_inherited_environment_uses_the_runtimes_windows_directory() {
+        let mut inheriting = request(r"C:\c\agent.cmd", &["--version"]);
+        inheriting.env = None;
+        let launch = BatchLaunch::new(&inheriting, Some(r"D:\Win"))
+            .expect("the inherited Windows directory locates cmd.exe");
+        assert_eq!(
+            launch.interpreter,
+            PathBuf::from(r"D:\Win\System32\cmd.exe"),
+            "expected the runtime's Windows directory | received: {:?}",
+            launch.interpreter
+        );
+    }
+
     #[test]
     fn arguments_cmd_exe_cannot_quote_are_refused_not_escaped() {
         for (argument, named) in [
@@ -192,7 +240,7 @@ mod tests {
             ("a\r\nb", r"'\r'"),
             ("a\nb", r"'\n'"),
         ] {
-            let error = BatchLaunch::new(&request(r"C:\n\npx.cmd", &["ok", argument]))
+            let error = BatchLaunch::new(&request(r"C:\n\npx.cmd", &["ok", argument]), None)
                 .expect_err("expected the argument refused");
             let message = error.to_string();
             assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
@@ -207,13 +255,20 @@ mod tests {
     fn a_batch_file_without_system_root_or_with_an_unquotable_path_is_refused() {
         let mut bare = request(r"C:\n\npx.cmd", &[]);
         bare.env = None;
-        let error = BatchLaunch::new(&bare).expect_err("expected SystemRoot required");
+        let error = BatchLaunch::new(&bare, None).expect_err("expected SystemRoot required");
         assert!(
             error
                 .to_string()
                 .contains("expected an environment that carries SystemRoot")
         );
-        let error = BatchLaunch::new(&request(r"C:\n\dir\", &[])).expect_err("trailing slash");
+        let mut exact_without_root = request(r"C:\n\npx.cmd", &[]);
+        exact_without_root.env = Some(BTreeMap::new());
+        assert!(
+            BatchLaunch::new(&exact_without_root, Some(r"C:\Windows")).is_err(),
+            "expected an exact environment without SystemRoot refused, not filled in"
+        );
+        let error =
+            BatchLaunch::new(&request(r"C:\n\dir\", &[]), None).expect_err("trailing slash");
         assert!(error.to_string().contains("cannot be quoted for cmd.exe"));
     }
 }
