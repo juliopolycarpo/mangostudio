@@ -153,8 +153,14 @@ No Unix, é o ponteiro `current`; no Windows, é o arquivo estável
 `mangostudio-runtime.cmd`, que aponta para um executável de versão imutável e
 dispensa elevação, Modo de Desenvolvedor e privilégio para links simbólicos.
 A Tarefa Agendada `MangoStudio Runtime` reinicia o lançador após o código de
-saída `75`. `service stop` e `restart` aguardam a instalação ativa terminar,
-com limite total de 30 segundos; `service stop --force` pula essa espera.
+saída `75`. Um `connect` ou `serve` iniciado à mão a partir do slot também sai
+com o código `75` depois de uma atualização ao vivo pelo hub, e nada o reinicia:
+execute o mesmo comando de novo para usar a nova versão, ou instale o serviço
+para que a atualização o reinicie sozinha. `service stop` e `restart` aguardam a
+instalação ativa terminar, com limite total de 30 segundos; `service stop --force`
+pula essa espera. No Windows, a parada encerra também qualquer runtime que tenha
+sobrado do slot desta home, e encerra o runtime imediatamente: diferente do
+systemd e do launchd, uma etapa de instalação em andamento é interrompida junto.
 A credencial guardada é restrita
 ao seu usuário — por modo `0600` no POSIX e por ACL (`icacls`) no Windows, onde
 `chmod` só altera o atributo somente-leitura. Detalhes na
