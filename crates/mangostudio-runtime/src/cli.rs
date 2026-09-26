@@ -764,10 +764,12 @@ fn begin_release_on(cancel: &CancellationToken) {
 /// Scheduled Task runner relaunches the new `current`.
 fn update_restart_exit() -> i32 {
     crate::release::Release::process().begin();
+    let code = mangostudio_runtime_contract::strings::RUNTIME_UPDATE_EXIT_CODE;
     eprintln!(
-        "mangostudio-runtime: runtime update committed; exiting for the supervisor to restart."
+        "mangostudio-runtime: update committed; exiting with code {code} so a supervisor can \
+         restart the new version."
     );
-    i32::from(mangostudio_runtime_contract::strings::RUNTIME_UPDATE_EXIT_CODE)
+    i32::from(code)
 }
 
 /// Lets an active installer finish after a user service's signal-driven stop.
