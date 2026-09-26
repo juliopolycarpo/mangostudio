@@ -52,10 +52,11 @@ use super::writer::{DirectorySource, TransferredFile};
 use crate::consent::source::ConsentSource;
 use crate::filesystem::freshness::{PathLockError, PathLocks};
 use crate::library::cache::{cancelled, check_cancelled};
-use crate::library::service::{PathEnvFactory, PathEnvParams, authorize, tool_argument};
+use crate::library::service::{PathEnvFactory, PathEnvParams, authorize};
 use crate::library::workers::run_library_blocking;
 use crate::probing::detection::path_env::{PathEnv, is_absolute};
 use crate::registry::Registry;
+use crate::tool_argument::tool_argument;
 
 /// `LIBRARY_BACKUP_MISSING_KIND`: the hub answers 404 on exactly this.
 pub(crate) const LIBRARY_BACKUP_MISSING_KIND: &str = "library_backup_missing";
@@ -350,9 +351,7 @@ impl MutationService {
         check_cancelled(&cancel)?;
         self.assert_backup_root(&params.backup_root, "library.undo")?;
         if params.backup_id.is_empty() {
-            return Err(tool_argument(
-                "library.undo requires a non-empty backupId.".into(),
-            ));
+            return Err(tool_argument("library.undo requires a non-empty backupId."));
         }
         let env = self.env(params.path_env.as_ref());
         let store = self.store(&params.backup_root, None, None);

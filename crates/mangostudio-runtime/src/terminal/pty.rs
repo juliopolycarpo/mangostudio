@@ -21,6 +21,9 @@ use crate::subprocess::{
 /// A future returned by the object-safe PTY port.
 pub type PtyFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// Receives each chunk of raw PTY output, borrowed from the reader's buffer.
+pub type PtyOutput = Arc<dyn Fn(&[u8]) + Send + Sync>;
+
 /// The number of interactive child trees this runtime will own at once.
 pub const MAX_PTY_CHILDREN: usize = 16;
 const MAX_PTY_COMMANDS: usize = 16;
@@ -153,7 +156,7 @@ pub trait PtySpawner: Send + Sync {
         &self,
         request: PtyRequest,
         check: Arc<dyn LaunchCheck>,
-        on_data: Arc<dyn Fn(Vec<u8>) + Send + Sync>,
+        on_data: PtyOutput,
         on_exit: Arc<dyn Fn(PtyExit) + Send + Sync>,
     ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, PtyError>>;
 }
@@ -167,7 +170,7 @@ impl PtySpawner for DefaultPtySpawner {
         &self,
         request: PtyRequest,
         check: Arc<dyn LaunchCheck>,
-        on_data: Arc<dyn Fn(Vec<u8>) + Send + Sync>,
+        on_data: PtyOutput,
         on_exit: Arc<dyn Fn(PtyExit) + Send + Sync>,
     ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, PtyError>> {
         if request.cols == 0 || request.rows == 0 {
@@ -316,7 +319,7 @@ fn closed_error() -> io::Error {
 async fn supervise_pty(
     request: PtyRequest,
     check: Arc<dyn LaunchCheck>,
-    on_data: Arc<dyn Fn(Vec<u8>) + Send + Sync>,
+    on_data: PtyOutput,
     on_exit: Arc<dyn Fn(PtyExit) + Send + Sync>,
     cancel: CancellationToken,
     ready: oneshot::Sender<Result<Arc<dyn PtyHandle>, PtyError>>,
@@ -493,15 +496,12 @@ async fn supervise_pty(
     let _ = terminal_tx.send(Some(Ok(())));
 }
 
-async fn read_output(
-    mut output: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
-    on_data: Arc<dyn Fn(Vec<u8>) + Send + Sync>,
-) {
+async fn read_output(mut output: Box<dyn tokio::io::AsyncRead + Send + Unpin>, on_data: PtyOutput) {
     let mut buffer = [0_u8; 8192];
     loop {
         match output.read(&mut buffer).await {
             Ok(0) => return,
-            Ok(size) => on_data(buffer[..size].to_vec()),
+            Ok(size) => on_data(&buffer[..size]),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) if error.raw_os_error() == Some(libc_eio()) => return,
             Err(_) => return,
@@ -616,7 +616,7 @@ mod tests {
         let collected = Arc::clone(&output);
         read_output(
             Box::new(InterruptedOnce { step: 0 }),
-            Arc::new(move |bytes| collected.lock().unwrap().extend(bytes)),
+            Arc::new(move |bytes: &[u8]| collected.lock().unwrap().extend_from_slice(bytes)),
         )
         .await;
         assert_eq!(*output.lock().unwrap(), b"after-interrupt");

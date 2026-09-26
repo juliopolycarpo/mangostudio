@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use base64::Engine as _;
 use mango_external_agents::normalize;
@@ -37,12 +37,15 @@ use tokio::sync::watch;
 
 use super::map;
 use super::map_events::{self, Answer, PendingInteraction};
-use super::supervisor::{CloseCause, LiveSession, Supervisor, argument};
+use super::supervisor::{CloseCause, LiveSession, Supervisor};
 use super::wire::{
     AckResult, AgentError, Attachment, AttachmentKind, CancelParams, Event, EventEnvelope,
     RespondParams, StartReviewParams, StartReviewResult, SteerParams, SteerRejection, SteerResult,
     TurnParams, TurnResult,
 };
+use crate::json_size::serialized_len;
+use crate::ports::wall_clock::epoch_millis;
+use crate::tool_argument::tool_argument;
 
 /// The topic every turn event travels on.
 pub(crate) const EVENT_TOPIC: &str = "external-agent.event";
@@ -183,7 +186,7 @@ impl TurnState {
         let Ok(payload) = serde_json::to_value(&envelope) else {
             return Emitted::Invalid;
         };
-        let bytes = serde_json::to_vec(&payload).map_or(usize::MAX, |bytes| bytes.len());
+        let bytes = serialized_len(&payload).unwrap_or(usize::MAX);
         if bytes > remaining {
             return Emitted::OverBudget;
         }
@@ -264,7 +267,7 @@ impl Supervisor {
         let attachments = sdk_attachments(params.attachments.as_deref().unwrap_or_default())?;
         for root in &params.configuration.workspace_roots {
             if !live.authorized_roots.contains(root) {
-                return Err(argument(format!(
+                return Err(tool_argument(format!(
                     "External-agent workspace root {root:?} was not authorized when session {:?} opened; expected one of its opened roots.",
                     params.session_id
                 )));
@@ -320,7 +323,7 @@ impl Supervisor {
             .require_capability(Capability::NativeReview)
             .is_err()
         {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "External-agent target {:?} cannot start a native review; expected a target with native review.",
                 live.target.as_str()
             )));
@@ -403,7 +406,7 @@ impl Supervisor {
                 .err()
                 .map(|failure| format!(" Closing it also failed: {}", failure.message))
                 .unwrap_or_default();
-            return argument(format!(
+            return tool_argument(format!(
                 "External-agent session {:?} can no longer run turns ({error}); expected a new session.{cleanup}",
                 live.session_id
             ));
@@ -463,7 +466,7 @@ impl Supervisor {
                         past_deadline = true;
                         if !relay.failed {
                             relay.fail(
-                                epoch_ms(SystemTime::now()),
+                                epoch_millis(SystemTime::now()),
                                 "adapter-stream",
                                 "External-agent turn exceeded its hard timeout.",
                                 CancelReason::Timeout,
@@ -517,7 +520,7 @@ impl Supervisor {
         match live.turns.active_native_turn() {
             Some((_, native)) if native == params.native_turn_id => {}
             _ => {
-                return Err(argument(format!(
+                return Err(tool_argument(format!(
                     "External-agent turn {:?} is not running on session {:?}; expected the session's running turn.",
                     params.native_turn_id, params.session_id
                 )));
@@ -527,7 +530,7 @@ impl Supervisor {
             .get(&params.request_id)
             .cloned();
         let Some(pending) = pending else {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "External-agent request {:?} is not pending; expected an open approval of the running turn.",
                 params.request_id
             )));
@@ -658,7 +661,7 @@ impl Relay {
         if self.failed || self.shown_commands.as_ref() == Some(&commands) {
             return;
         }
-        let at = epoch_ms(SystemTime::now());
+        let at = epoch_millis(SystemTime::now());
         self.shown_commands = Some(commands.clone());
         self.publish(at, Event::CommandsAvailable { commands });
     }
@@ -675,7 +678,7 @@ impl Relay {
         {
             if !self.failed {
                 self.failed = true;
-                let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_ms(SystemTime::now()));
+                let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_millis(SystemTime::now()));
                 self.error(
                     at,
                     "adapter-stream",
@@ -695,7 +698,7 @@ impl Relay {
             .closed
             .as_ref()
             .is_some_and(|request_id| lock(&live.turns.interactions).remove(request_id).is_none());
-        let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_ms(SystemTime::now()));
+        let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_millis(SystemTime::now()));
         if let Some((response, reason)) = mapped.unrenderable {
             // A form the product cannot show is declined by name, so the
             // vendor is not left waiting on nobody. A required question cannot
@@ -747,7 +750,7 @@ impl Relay {
 
     fn overflow(&mut self, message: &str) {
         self.failed = true;
-        self.error(epoch_ms(SystemTime::now()), "adapter-stream", message);
+        self.error(epoch_millis(SystemTime::now()), "adapter-stream", message);
         let stopping = Arc::clone(&self.live);
         self.tasks.spawn(async move {
             let _ = stopping.session.cancel(CancelReason::Timeout).await;
@@ -826,7 +829,7 @@ fn bounded_native_turn_id(stream: &TurnStream) -> Result<String, RemoteError> {
 /// carries the stream's dispatch: the vendor may already be running it.
 fn admissible_review(live: &LiveSession, review: &ReviewStream) -> Result<String, RemoteError> {
     if review.review_thread_id != live.session.ids().native_session_id {
-        return Err(argument(format!(
+        return Err(tool_argument(format!(
             "External-agent review on session {:?} ran on another vendor thread than the session's; expected a review on the session's own thread.",
             live.session_id
         ))
@@ -871,7 +874,7 @@ fn admit(
     let mut receipts = lock(&live.turns.receipts);
     if let Some(receipt) = receipts.get(client_message_id) {
         if receipt.kind != kind || receipt.fingerprint != fingerprint {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "clientMessageId {client_message_id:?} was reused with different turn input; expected the input it was first sent with."
             )));
         }
@@ -965,7 +968,7 @@ fn sdk_attachments(attachments: &[Attachment]) -> Result<Vec<SdkAttachment>, Rem
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(&attachment.bytes_base64)
                 .map_err(|_| {
-                    argument(format!(
+                    tool_argument(format!(
                         "Attachment {:?} is not valid base64; expected the bytes the hub encoded.",
                         attachment.id
                     ))
@@ -985,12 +988,6 @@ fn sdk_attachments(attachments: &[Attachment]) -> Result<Vec<SdkAttachment>, Rem
             })
         })
         .collect()
-}
-
-fn epoch_ms(at: SystemTime) -> u64 {
-    at.duration_since(UNIX_EPOCH).map_or(0, |elapsed| {
-        u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-    })
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

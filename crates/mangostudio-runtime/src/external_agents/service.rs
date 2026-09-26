@@ -30,6 +30,7 @@ use crate::probing::detection::agent_cli_definitions::AgentTargetId;
 use crate::registry::Registry;
 use crate::runtime_home::{RuntimeSlot, slot_dir};
 use crate::subprocess::LaunchCheck;
+use crate::tool_argument::tool_argument;
 
 /// Every method [`register`] installs.
 pub(crate) const EXTERNAL_AGENT_METHODS: [&str; 10] = [
@@ -110,13 +111,9 @@ async fn call(
 
 fn decode<T: DeserializeOwned>(method: &str, params: Value) -> Result<T, RemoteError> {
     serde_json::from_value(params).map_err(|error| {
-        RemoteError::new(
-            codes::INTERNAL,
-            format!(
+        tool_argument(            format!(
                 "Runtime method {method:?} received an invalid external-agent payload: {error}; expected its declared object shape."
-            ),
-        )
-        .with_detail("kind", "tool_argument")
+            ))
     })
 }
 

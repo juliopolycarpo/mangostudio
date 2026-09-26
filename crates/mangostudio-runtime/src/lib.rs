@@ -11,7 +11,7 @@
 //! second dispatcher. What it adds on top:
 //!
 //! - [`registry`] — a registry of the methods this build actually
-//!   implements. `transport::build_host` (crate-private) populates a
+//!   implements. `transport::build_host_with_restart` (crate-private) populates a
 //!   production one from each implemented method family, including the nine
 //!   `mcp.*` methods (see [`mcp`]).
 //!   A bare [`registry::Registry::new`]
@@ -35,7 +35,7 @@
 //! - [`ports`] — small, named, fail-closed seams (`Authorization`, `Audit`,
 //!   `Clock`, `CallExclusivity`). Every default still refuses or does
 //!   nothing, but three of the four now also have a real production
-//!   adapter that `transport::build_host` (crate-private) wires into every
+//!   adapter that `transport::build_host_with_restart` (crate-private) wires into every
 //!   real connection: [`consent`]'s [`consent::authorization::ConsentAuthorization`]
 //!   for `Authorization`, [`audit::FileAudit`] for `Audit`, and
 //!   `ports::clock::SystemClock` for `Clock`. `CallExclusivity` uses a
@@ -135,7 +135,9 @@ mod external_agents;
 mod file_identity;
 pub mod filesystem;
 pub mod health;
+mod hex;
 mod install;
+mod json_size;
 mod library;
 pub mod manifest;
 pub mod mcp;
@@ -156,6 +158,7 @@ pub mod supervisor;
 pub mod terminal;
 #[cfg(test)]
 pub(crate) mod test_support;
+mod tool_argument;
 pub mod transport;
 mod update;
 mod update_transfer;

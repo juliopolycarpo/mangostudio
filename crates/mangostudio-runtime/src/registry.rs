@@ -1,6 +1,6 @@
 //! The set of methods this build actually implements.
 //!
-//! A bare [`Registry::new`] is empty; `crate::transport::build_host`
+//! A bare [`Registry::new`] is empty; `crate::transport::build_host_with_restart`
 //! (crate-private) fills a production one through [`Registry::implement`]
 //! via the health, workspace, probing, and filesystem registration functions.
 //! The filesystem registration includes the three `snapshot.*` methods.

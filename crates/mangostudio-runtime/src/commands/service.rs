@@ -23,6 +23,7 @@ use crate::subprocess::{
     DefaultProcessSpawner, LaunchCheck, ProcessBudget, ProcessRequest, ProcessSpawner,
     ProcessStartError, ProcessTerminal, ProcessTerminalCause,
 };
+use crate::tool_argument::invalid_argument;
 
 const CLI_OUTPUT_BYTES: usize = 1024 * 1024;
 const SHELL_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
@@ -181,32 +182,32 @@ fn prepare(
         return prepare_shell(params, host, response_limit);
     }
     if params.get("command").is_some() {
-        return Err(argument(
+        return Err(invalid_argument(
             "command=[redacted]",
             "argv in args, without a command field",
         ));
     }
     let params: CliParams = serde_json::from_value(params).map_err(|_| {
-        argument(
+        invalid_argument(
             "params=[redacted]",
             "command argv, cwd, and numeric budgets",
         )
     })?;
     if params.cwd.is_empty() || params.cwd.contains('\0') {
-        return Err(argument(
+        return Err(invalid_argument(
             "cwd=[redacted]",
             "a nonempty directory path without NUL",
         ));
     }
     if params.args.iter().any(|arg| arg.contains('\0')) {
-        return Err(argument("args=[redacted]", "arguments without NUL"));
+        return Err(invalid_argument("args=[redacted]", "arguments without NUL"));
     }
     let accepted = params.accepted_exit_codes.unwrap_or_default();
     if accepted
         .iter()
         .any(|code| !code.is_finite() || code.fract() != 0.0)
     {
-        return Err(argument(
+        return Err(invalid_argument(
             "acceptedExitCodes=[redacted]",
             "integer exit codes",
         ));
@@ -248,16 +249,19 @@ fn prepare_shell(
     response_limit: usize,
 ) -> Result<Prepared, RemoteError> {
     let params: ShellParams = serde_json::from_value(params).map_err(|_| {
-        argument(
+        invalid_argument(
             "params=[redacted]",
             "shell kind, command, and numeric budgets",
         )
     })?;
     if params.command.contains('\0') || params.cwd.as_ref().is_some_and(|cwd| cwd.contains('\0')) {
-        return Err(argument("command/cwd=[redacted]", "strings without NUL"));
+        return Err(invalid_argument(
+            "command/cwd=[redacted]",
+            "strings without NUL",
+        ));
     }
     if !params.max_output_bytes.is_finite() || params.max_output_bytes < 0.0 {
-        return Err(argument(
+        return Err(invalid_argument(
             &format!("maxOutputBytes={}", params.max_output_bytes),
             "a finite nonnegative byte cap",
         ));
@@ -348,19 +352,19 @@ fn shell_cwd(cwd: Option<&str>, home: &str) -> Result<Option<PathBuf>, RemoteErr
 
 fn duration(milliseconds: f64) -> Result<Duration, RemoteError> {
     if milliseconds <= 0.0 {
-        return Err(argument(
+        return Err(invalid_argument(
             &format!("timeoutMs={milliseconds}"),
             "a positive finite duration",
         ));
     }
     let duration = Duration::try_from_secs_f64(milliseconds / 1000.0).map_err(|_| {
-        argument(
+        invalid_argument(
             &format!("timeoutMs={milliseconds}"),
             "a positive finite duration",
         )
     })?;
     if std::time::Instant::now().checked_add(duration).is_none() {
-        return Err(argument(
+        return Err(invalid_argument(
             &format!("timeoutMs={milliseconds}"),
             "a duration representable by the platform clock",
         ));
@@ -374,21 +378,13 @@ fn output_cap(limit: usize, echo: &Value, desired: usize) -> Result<usize, Remot
         .len()
         .saturating_add(1024);
     let available = limit.checked_sub(fixed).ok_or_else(|| {
-        argument(
+        invalid_argument(
             "command context exceeds response budget",
             "a command that fits the negotiated frame",
         )
     })?;
     // JSON can expand a byte sixfold. CLI failures also repeat one stream in the message.
     Ok(desired.min(available / 18))
-}
-
-fn argument(value: &str, expected: &str) -> RemoteError {
-    RemoteError::new(
-        codes::INTERNAL,
-        format!("Invalid {value}; expected {expected}."),
-    )
-    .with_detail("kind", "tool_argument")
 }
 
 fn execution_error(

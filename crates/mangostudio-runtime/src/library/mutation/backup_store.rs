@@ -35,12 +35,14 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
 use super::super::collation::locale_compare;
 use super::disk::{CopyPurpose, EntryType, MutationFs};
 use super::paths::{ResourceKind, fs_path, node_basename, node_dirname, node_join};
+use crate::ports::wall_clock::format_iso8601_millis;
 use crate::probing::locations::location_by_id;
 
 /// `DEFAULT_RETENTION_COUNT`.
@@ -370,28 +372,9 @@ pub(crate) fn is_valid_backup_id(backup_id: &str) -> bool {
     allowed(first) && bytes.all(|byte| allowed(byte) || byte == b'.')
 }
 
-/// `new Date(ms).toISOString()`.
+/// `new Date(ms).toISOString()`, for the non-negative instants a backup id is built from.
 fn iso_string(epoch_ms: f64) -> String {
-    let total_ms = epoch_ms.floor() as i64;
-    let days = total_ms.div_euclid(86_400_000);
-    let of_day = total_ms.rem_euclid(86_400_000);
-    // Howard Hinnant's days-to-civil conversion.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        of_day / 3_600_000,
-        of_day / 60_000 % 60,
-        of_day / 1000 % 60,
-        of_day % 1000
-    )
+    format_iso8601_millis(UNIX_EPOCH + Duration::from_millis(epoch_ms.floor() as u64))
 }
 
 /// The clock a store stamps sets with, in epoch milliseconds.

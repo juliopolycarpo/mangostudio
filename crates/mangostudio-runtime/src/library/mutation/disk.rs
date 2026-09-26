@@ -16,6 +16,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use super::paths::{ResourceKind, node_basename, node_dirname, resolve_through_existing_ancestor};
+use crate::hex::hex;
 
 /// Why a copy is being made. Only a fault fixture reads it: the TypeScript
 /// writer's `copyTree` takes the same tag so a test can fail staging without
@@ -267,7 +268,7 @@ fn make_symlink(target: &Path, link: &Path) -> io::Result<()> {
 pub(crate) fn random_suffix() -> String {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).expect("the operating system's CSPRNG must be available");
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    hex(&bytes)
 }
 
 /// `writeLibraryFileAtomic`. Library file resources are often symlinked

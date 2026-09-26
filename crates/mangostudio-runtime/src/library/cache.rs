@@ -16,6 +16,7 @@
 //! TypeScript host's `settleUnlessAborted`). Both levels are bounded and
 //! evict in insertion order.
 
+use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::hash::Hash;
@@ -69,7 +70,10 @@ impl<K: Eq + Hash + Clone, V> BoundedMap<K, V> {
         }
     }
 
-    fn get(&self, key: &K) -> Option<&V> {
+    fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+    {
         self.entries.get(key).map(|(_, value)| value)
     }
 
@@ -86,7 +90,10 @@ impl<K: Eq + Hash + Clone, V> BoundedMap<K, V> {
         }
     }
 
-    fn remove(&mut self, key: &K) -> Option<V> {
+    fn remove<Q: Eq + Hash + ?Sized>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+    {
         let (sequence, value) = self.entries.remove(key)?;
         self.order.remove(&sequence);
         Some(value)
@@ -153,8 +160,7 @@ impl LibraryCache {
         compute: impl FnOnce() -> Result<CachedInstanceHash, E>,
     ) -> Result<Arc<CachedInstanceHash>, E> {
         if !force
-            && let Some((cached_fingerprint, value)) =
-                lock(&self.instance_hashes).get(&path.to_string())
+            && let Some((cached_fingerprint, value)) = lock(&self.instance_hashes).get(path)
             && cached_fingerprint == fingerprint
         {
             return Ok(Arc::clone(value));
@@ -169,7 +175,7 @@ impl LibraryCache {
                 Ok(value)
             }
             Err(error) => {
-                lock(&self.instance_hashes).remove(&path.to_string());
+                lock(&self.instance_hashes).remove(path);
                 Err(error)
             }
         }

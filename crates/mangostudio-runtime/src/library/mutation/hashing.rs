@@ -22,6 +22,7 @@ use super::super::hash::{
 };
 use super::super::reader::{MAX_LIBRARY_INSTANCE_BYTES, WalkError, collect_leaf_files};
 use super::paths::ResourceKind;
+use crate::hex::hex;
 
 const FILE_HASH_DOMAIN: &[u8] = b"mangostudio/library/file\0";
 
@@ -84,11 +85,7 @@ fn hash_file_streamed(path: &Path) -> Result<String, HashError> {
         }
         hasher.update(&buffer[..read]);
     }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    Ok(hex(&hasher.finalize()))
 }
 
 fn hash_directory(root: &Path, platform: &str) -> Result<String, HashError> {

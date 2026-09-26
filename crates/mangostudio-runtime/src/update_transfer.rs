@@ -13,6 +13,7 @@ use mangostudio_runtime_contract::errors::RUNTIME_UPDATE_REFUSED;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+use crate::hex::hex;
 use crate::slot_publish::validate_slot_version;
 
 #[cfg(unix)]
@@ -97,10 +98,6 @@ impl TryFrom<BeginParams> for ValidatedBegin {
             source_sha: params.source_sha,
         })
     }
-}
-
-fn digest_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub(crate) fn refusal(reason: &str, message: String) -> RemoteError {
@@ -212,7 +209,7 @@ impl StagedTransfer {
             .expect("stage is open until verification")
             .sync_all()?;
         drop(self.file.take());
-        let actual = format!("sha256:{}", digest_hex(&self.hash.clone().finalize()));
+        let actual = format!("sha256:{}", hex(&self.hash.clone().finalize()));
         if actual != self.begin.digest {
             return Err(TransferError::Refused(refusal(
                 "digest_mismatch",
@@ -304,13 +301,8 @@ mod tests {
         .expect("valid fixture")
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "mango-update-transfer-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
+    fn scratch(name: &str) -> crate::test_support::ScratchDir {
+        crate::test_support::scratch_path(&format!("mango-update-transfer-{name}"))
     }
 
     #[test]
@@ -393,7 +385,7 @@ mod tests {
     #[test]
     fn verified_transfer_keeps_bytes_until_publication_scope_ends() {
         let slot = scratch("verified");
-        let digest = format!("sha256:{}", digest_hex(&Sha256::digest(b"abc")));
+        let digest = format!("sha256:{}", hex(&Sha256::digest(b"abc")));
         let mut transfer = StagedTransfer::begin(&slot, "three", begin(3.0, &digest)).unwrap();
         assert_eq!(transfer.chunk(0, b"a").unwrap(), 1);
         assert_eq!(transfer.chunk(1, b"bc").unwrap(), 3);

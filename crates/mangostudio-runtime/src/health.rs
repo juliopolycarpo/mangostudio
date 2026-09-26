@@ -63,7 +63,7 @@ const GIT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2)
 
 /// Registers `runtime.health` on `registry`.
 ///
-/// Threaded through [`crate::transport::build_host`] rather than built
+/// Threaded through [`crate::transport::build_host_with_restart`] rather than built
 /// there directly, so this module owns every fact its own handler needs —
 /// `slot`, `mango_home`, and the running `runtime_version` — behind one
 /// seam this crate's three transports all share identically.

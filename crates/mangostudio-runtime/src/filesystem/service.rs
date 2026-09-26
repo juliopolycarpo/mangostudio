@@ -24,9 +24,11 @@ use super::snapshot::SNAPSHOT_MAX_BYTES;
 use super::text;
 use crate::blocking::run_blocking;
 use crate::consent::source::ConsentSource;
+use crate::json_size::serialized_len;
 use crate::ports::audit::lock;
 use crate::ports::authorization::consent_denial;
 use crate::registry::Registry;
+use crate::tool_argument::tool_argument;
 
 pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
 pub(super) const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
@@ -465,12 +467,12 @@ impl Service {
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         if params.old_string.is_empty() {
-            return Err(argument(
+            return Err(tool_argument(
                 "oldString must not be empty. Use create_file for a new file, or provide existing text to replace.",
             ));
         }
         if params.old_string == params.new_string {
-            return Err(argument("oldString and newString must be different."));
+            return Err(tool_argument("oldString and newString must be different."));
         }
         let paths = vec![params.resolved_path.clone()];
         let locks = self.state.locks.clone();
@@ -486,7 +488,7 @@ impl Service {
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
             let replace_all = params.replace_all.unwrap_or(false);
             let count = edit_match_count(&observed.bytes, params.old_string.as_bytes(), replace_all);
-            if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
+            if count == 0 { return Err(tool_argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
             if count > 1 && !replace_all { return Err(ambiguous_edit_error(count)); }
             let replacement_count = if replace_all { count } else { 1 };
             let projected_bytes = if params.new_string.len() >= params.old_string.len() {
@@ -500,12 +502,12 @@ impl Service {
             };
             let Some(projected_bytes) = projected_bytes.filter(|size| *size <= READ_MAX_BYTES) else {
                 let received = projected_bytes.map_or_else(|| "an overflowing byte length".to_owned(), |size| format!("{size} bytes"));
-                return Err(argument(format!("Cannot edit \"{}\": the replacement would produce {received}; expected at most {READ_MAX_BYTES} bytes so the result remains readable by fs.read-file.", params.input_path)));
+                return Err(tool_argument(format!("Cannot edit \"{}\": the replacement would produce {received}; expected at most {READ_MAX_BYTES} bytes so the result remains readable by fs.read-file.", params.input_path)));
             };
             let (updated, replaced, first) = text::replace_matches(&observed.bytes, params.old_string.as_bytes(), params.new_string.as_bytes(), replace_all);
             debug_assert_eq!(updated.len(), projected_bytes);
             debug_assert_eq!(replaced, replacement_count);
-            if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
+            if text::looks_binary(&updated) { return Err(tool_argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let written = ContentDigest::of(&updated);
             let expected_hash = &written.sha256;
             let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),expected_hash,None);
@@ -551,7 +553,7 @@ impl Service {
             let total = text::total_lines(&observed.bytes);
             let (start, end) = validated_range(&params, total)?;
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
-            if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
+            if text::looks_binary(&updated) { return Err(tool_argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let written = ContentDigest::of(&updated);
             let expected_hash = &written.sha256;
             let replaced = end-start+1;
@@ -854,7 +856,7 @@ fn ambiguous_edit_error(count: usize) -> RemoteError {
     } else {
         count.to_string()
     };
-    argument(format!(
+    tool_argument(format!(
         "Found {found} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."
     ))
 }
@@ -874,10 +876,6 @@ fn blocked_create_parent(params: &WriteParams, error: RemoteError) -> RemoteErro
         "Cannot create \"{}\": \"{blocker}\" is not a directory.",
         params.input_path
     ))
-}
-
-pub(super) fn argument(message: impl Into<String>) -> RemoteError {
-    RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
 pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> {
@@ -948,7 +946,7 @@ fn validated_range(params: &RangeParams, total: usize) -> Result<(usize, usize),
     if whole(start) && whole(end) && start >= 1.0 && start <= end && end <= total as f64 {
         return Ok((start as usize, end as usize));
     }
-    Err(argument(format!(
+    Err(tool_argument(format!(
         "Invalid line range {}-{} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",
         js_number(start),
         js_number(end),
@@ -967,7 +965,7 @@ fn js_number(value: f64) -> String {
 
 fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
     if value < 1.0 || value.fract() != 0.0 || value > ALL_LINES_VALID as f64 {
-        return Err(argument(format!(
+        return Err(tool_argument(format!(
             "Invalid {name} {value}. Expected a positive safe integer."
         )));
     }
@@ -992,7 +990,7 @@ pub(super) fn preflight_response(
         id: response_id.to_owned(),
         result,
     });
-    let size = serialized_len(&frame);
+    let size = serialized_len(&frame).expect("a filesystem mutation response always serializes");
     if size <= response_limit_bytes {
         let Frame::Res(Response { result, .. }) = frame else {
             unreachable!("the frame was built as a response");
@@ -1013,27 +1011,6 @@ pub(super) fn preflight_response(
     .with_detail("kind", "snapshot_too_large")
     .with_detail("sizeBytes", size)
     .with_detail("limitBytes", response_limit_bytes))
-}
-
-/// Counts the bytes `serde_json::to_vec` would produce without buffering them.
-fn serialized_len(frame: &Frame) -> usize {
-    struct ByteCount(usize);
-
-    impl std::io::Write for ByteCount {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 += bytes.len();
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    let mut count = ByteCount(0);
-    serde_json::to_writer(&mut count, frame)
-        .expect("a filesystem mutation response always serializes");
-    count.0
 }
 
 pub(super) fn mutation_result(
@@ -1323,18 +1300,6 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code, codes::CANCELLED);
         assert_eq!(error.message, "Filesystem operation cancelled");
-    }
-
-    #[test]
-    fn serialized_len_counts_the_bytes_to_vec_would_produce() {
-        let frame = Frame::Res(Response {
-            id: "request-\u{e9}".to_owned(),
-            result: json!({"content":"line \"one\"\n\u{1f600}","size":12,"nested":[1.5,null,true]}),
-        });
-        assert_eq!(
-            serialized_len(&frame),
-            serde_json::to_vec(&frame).unwrap().len()
-        );
     }
 
     #[test]

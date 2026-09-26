@@ -131,7 +131,7 @@ pub(crate) struct SessionHost {
 /// claims use a connection-specific namespace.
 // Every transport builds through `build_host_with_restart`; the tests keep
 // this unsupervised shorthand.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn build_host(
     slot: RuntimeSlot,
     mango_home: &Path,

@@ -24,6 +24,7 @@ use sha2::{Digest, Sha256};
 
 use mangostudio_runtime_contract::catalog::catalog;
 
+use crate::hex::hex;
 use crate::manifest::capability_ready;
 use crate::registry::{Classification, Registry};
 
@@ -160,16 +161,6 @@ pub(crate) fn register(registry: Registry) -> Registry {
     });
     let _ = answer.set(discovery_of(&registry));
     registry
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    bytes
-        .iter()
-        .fold(String::with_capacity(64), |mut out, byte| {
-            let _ = write!(out, "{byte:02x}");
-            out
-        })
 }
 
 #[cfg(test)]

@@ -1,7 +1,9 @@
 //! GitHub CLI argument policy, mirroring the TypeScript runtime's allowlists.
 
-use mango_protocol::error::{RemoteError, codes};
+use mango_protocol::error::RemoteError;
 use mangostudio_runtime_contract::strings::github_graphql_documents;
+
+use crate::tool_argument::tool_argument;
 
 const READ: &[&str] = &[
     "auth status",
@@ -64,11 +66,9 @@ fn refused_operation(mutate: bool, operation: &str) -> RemoteError {
 }
 
 fn invalid(reason: &str, expected: &str) -> RemoteError {
-    RemoteError::new(
-        codes::INTERNAL,
-        format!("Invalid gh argv ([redacted]): {reason}; expected {expected}."),
-    )
-    .with_detail("kind", "tool_argument")
+    tool_argument(format!(
+        "Invalid gh argv ([redacted]): {reason}; expected {expected}."
+    ))
 }
 
 fn operation(args: &[String]) -> Option<String> {
@@ -170,6 +170,8 @@ fn normalize(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use mango_protocol::error::codes;
+
     use super::*;
 
     fn argv(values: &[&str]) -> Vec<String> {

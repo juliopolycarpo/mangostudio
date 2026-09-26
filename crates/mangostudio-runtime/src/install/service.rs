@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use mango_protocol::error::{RemoteError, codes};
+use mango_protocol::error::RemoteError;
 use mango_protocol::session::{CallContext, EventInput, Session};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -25,13 +25,14 @@ use crate::consent::source::ConsentSource;
 use crate::ports::audit::{Audit, AuditEntry, Outcome};
 use crate::ports::authorization::consent_denial;
 use crate::ports::exclusivity::EffectClaim;
-use crate::ports::wall_clock::{SystemWallClock, WallClock};
+use crate::ports::wall_clock::{SystemWallClock, WallClock, epoch_millis};
 use crate::probing::detection::path_env::PathEnv;
 use crate::registry::Registry;
 use crate::subprocess::{
     DefaultProcessSpawner, LaunchCheck, ProcessBudget, ProcessControl, ProcessOutputChunk,
     ProcessOutputTap, ProcessRequest, ProcessSpawner, ProcessStartError, ProcessStream,
 };
+use crate::tool_argument::invalid_argument;
 
 #[cfg(test)]
 mod tests;
@@ -224,7 +225,7 @@ impl RunPlan {
     /// Validates the request shape before any reservation or effect.
     fn new(params: RunParams) -> Result<Self, RemoteError> {
         if params.argv.is_empty() {
-            return Err(argument(
+            return Err(invalid_argument(
                 "argv=[]",
                 "a non-empty argv naming the installer to execute",
             ));
@@ -240,7 +241,7 @@ impl RunPlan {
                 (bytes.floor() as usize, js_number(bytes))
             }
             Some(bytes) => {
-                return Err(argument(
+                return Err(invalid_argument(
                     &format!("outputLimitBytes={bytes}"),
                     "a finite non-negative byte count",
                 ));
@@ -281,7 +282,7 @@ impl Service {
         claim: EffectClaim,
     ) -> Result<Value, RemoteError> {
         let params: RunParams = serde_json::from_value(params).map_err(|_| {
-            argument(
+            invalid_argument(
                 "params=[redacted]",
                 "a run id, argv, numeric timeout and log path",
             )
@@ -292,14 +293,14 @@ impl Service {
             .runs
             .reserve(&plan.run_id)
             .map_err(|AlreadyActive| {
-                argument(
+                invalid_argument(
                     &format!("runId={:?}", plan.run_id),
                     "a run id that is not already active",
                 )
             })?;
         let control = Arc::clone(lease.control());
         let run_id = plan.run_id.clone();
-        let started = epoch_ms(self.ports.clock.now());
+        let started = epoch_millis(self.ports.clock.now());
         let (delivered, mut received) = oneshot::channel();
         tokio::spawn(Arc::clone(self).own(
             plan,
@@ -326,7 +327,7 @@ impl Service {
     /// `install.cancel`: a machine mutation, so it stops the chain rather than killing a step.
     fn cancel(&self, params: Value) -> Result<Value, RemoteError> {
         let params: CancelParams = serde_json::from_value(params)
-            .map_err(|_| argument("params=[redacted]", "a run id to cancel"))?;
+            .map_err(|_| invalid_argument("params=[redacted]", "a run id to cancel"))?;
         self.ports.runs.stop(&params.run_id, StopReason::Cancelled);
         Ok(json!({ "ok": true }))
     }
@@ -349,7 +350,7 @@ impl Service {
         };
         let outcome = self.execute(&plan, lease.control(), &mut stream).await;
         stream.end();
-        let finished = epoch_ms(self.ports.clock.now());
+        let finished = epoch_millis(self.ports.clock.now());
         if delivered.send(outcome.to_wire(started, finished)).is_err() {
             self.record_unobserved(&plan.run_id, outcome, started, finished)
                 .await;
@@ -555,7 +556,7 @@ impl Service {
             truncated: false,
             launched: true,
         };
-        outcome.to_wire(started, epoch_ms(self.ports.clock.now()))
+        outcome.to_wire(started, epoch_millis(self.ports.clock.now()))
     }
 }
 
@@ -760,7 +761,7 @@ impl RunOutput {
 
 fn positive_duration(milliseconds: f64) -> Result<Duration, RemoteError> {
     let invalid = || {
-        argument(
+        invalid_argument(
             &format!("timeoutMs={milliseconds}"),
             "a positive finite duration the platform clock can represent",
         )
@@ -781,18 +782,4 @@ fn js_number(value: f64) -> String {
         return format!("{}", value as i128);
     }
     format!("{value}")
-}
-
-fn epoch_ms(at: SystemTime) -> u64 {
-    at.duration_since(UNIX_EPOCH).map_or(0, |elapsed| {
-        u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-    })
-}
-
-fn argument(value: &str, expected: &str) -> RemoteError {
-    RemoteError::new(
-        codes::INTERNAL,
-        format!("Invalid {value}; expected {expected}."),
-    )
-    .with_detail("kind", "tool_argument")
 }

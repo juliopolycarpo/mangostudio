@@ -17,7 +17,7 @@ use crate::consent::source::ConsentSource;
 use crate::probing::detection::path_env::PathEnv;
 use crate::runtime_home::RuntimeSlot;
 use crate::terminal::flow::TerminalFlow;
-use crate::terminal::pty::{PtyFuture, PtyHandle, PtySpawner};
+use crate::terminal::pty::{PtyFuture, PtyHandle, PtyOutput, PtySpawner};
 use crate::test_support::ScratchDir;
 
 struct FakePtyHandle {
@@ -53,7 +53,7 @@ impl PtySpawner for FakePtySpawner {
         &self,
         _request: crate::terminal::pty::PtyRequest,
         _check: Arc<dyn crate::subprocess::LaunchCheck>,
-        _on_data: Arc<dyn Fn(Vec<u8>) + Send + Sync>,
+        _on_data: PtyOutput,
         _on_exit: Arc<dyn Fn(crate::terminal::pty::PtyExit) + Send + Sync>,
     ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, crate::terminal::pty::PtyError>> {
         Box::pin(async { unreachable!("these tests insert a live fake directly") })
@@ -65,7 +65,7 @@ struct RecordingPtyState {
     closes: usize,
     writes: Vec<Vec<u8>>,
     sizes: Vec<(u16, u16)>,
-    on_data: Option<Arc<dyn Fn(Vec<u8>) + Send + Sync>>,
+    on_data: Option<PtyOutput>,
     on_exit: Option<Arc<dyn Fn(crate::terminal::pty::PtyExit) + Send + Sync>>,
 }
 
@@ -99,7 +99,7 @@ impl PtySpawner for RecordingPtySpawner {
         &self,
         _request: crate::terminal::pty::PtyRequest,
         check: Arc<dyn crate::subprocess::LaunchCheck>,
-        on_data: Arc<dyn Fn(Vec<u8>) + Send + Sync>,
+        on_data: PtyOutput,
         on_exit: Arc<dyn Fn(crate::terminal::pty::PtyExit) + Send + Sync>,
     ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, crate::terminal::pty::PtyError>> {
         let state = Arc::clone(&self.0);
@@ -509,7 +509,7 @@ async fn fake_pty_covers_open_attach_write_resize_ack_detach_and_close() {
     assert_eq!(service.list().unwrap()["sessions"][0]["status"], "running");
 
     let on_data = state.lock().unwrap().on_data.as_ref().unwrap().clone();
-    on_data(b"hello".to_vec());
+    on_data(b"hello");
     let attached = service
         .attach(SessionParams {
             session_id: "terminal-1".into(),
