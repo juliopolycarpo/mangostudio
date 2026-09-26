@@ -23,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::runtime_home::RuntimeSlot;
 use crate::supervisor::join_owned;
-use crate::transport::{build_host, heartbeat_loop, runtime_peer};
+use crate::transport::{UpdateRestart, build_host_with_restart, heartbeat_loop, runtime_peer};
 
 /// Base of the jittered exponential backoff, doubling to [`RECONNECT_MAX_DELAY`].
 pub const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -159,6 +159,9 @@ pub enum ConnectOutcome {
         /// What to tell the operator.
         message: String,
     },
+    /// A supervised runtime update committed; the process exits with
+    /// `RUNTIME_UPDATE_EXIT_CODE` so its supervisor relaunches `current`.
+    UpdateCommitted,
 }
 
 /// What one `connect` invocation dials with. Bundled into one struct —
@@ -186,12 +189,31 @@ pub async fn run(
     jitter: &dyn Jitter,
     log: impl Fn(&str) + Clone + Send + Sync + 'static,
 ) -> ConnectOutcome {
+    run_with_restart(config, cancel, UpdateRestart::unsupervised(), jitter, log).await
+}
+
+/// [`run`], but a supervised update committed over the connection releases
+/// it with the commit's answer already sent and returns
+/// [`ConnectOutcome::UpdateCommitted`] instead of redialling.
+///
+/// Usage: `run_with_restart(config, cancel, UpdateRestart::for_current_exe(&home), &jitter, log)`.
+pub(crate) async fn run_with_restart(
+    config: ConnectConfig,
+    cancel: CancellationToken,
+    restart: UpdateRestart,
+    jitter: &dyn Jitter,
+    log: impl Fn(&str) + Clone + Send + Sync + 'static,
+) -> ConnectOutcome {
     let mut failures: u32 = 0;
+    let restart_requested = restart.requested();
     loop {
-        if cancel.is_cancelled() {
-            return ConnectOutcome::Stopped;
+        if let Some(outcome) = stopped(&cancel, &restart) {
+            return outcome;
         }
-        let attempt = run_one_connection(&config, &cancel, &log).await;
+        let attempt = run_one_connection(&config, &cancel, &restart, &log).await;
+        if restart.is_requested() {
+            return ConnectOutcome::UpdateCommitted;
+        }
         if !attempt.retry {
             return ConnectOutcome::Refused {
                 message: attempt.message,
@@ -218,9 +240,20 @@ pub async fn run(
         tokio::select! {
             biased;
             () = cancel.cancelled() => {}
+            () = restart_requested.cancelled() => {}
             () = tokio::time::sleep(delay) => {}
         }
     }
+}
+
+/// Why the redial loop must stop now, if it must: a committed supervised
+/// update wins over a signal that raced it, since its answer already went out
+/// and the supervisor has to relaunch the new version.
+fn stopped(cancel: &CancellationToken, restart: &UpdateRestart) -> Option<ConnectOutcome> {
+    if restart.is_requested() {
+        return Some(ConnectOutcome::UpdateCommitted);
+    }
+    cancel.is_cancelled().then_some(ConnectOutcome::Stopped)
 }
 
 /// One dial, from opening the socket to releasing everything it built —
@@ -231,6 +264,7 @@ pub async fn run(
 async fn run_one_connection(
     config: &ConnectConfig,
     cancel: &CancellationToken,
+    restart: &UpdateRestart,
     log: &(impl Fn(&str) + Clone + Send + Sync + 'static),
 ) -> ConnectionAttempt {
     let dial_deadline = ConnectDeadline::default()
@@ -249,7 +283,12 @@ async fn run_one_connection(
         }
     };
 
-    let host = build_host(config.slot, &config.mango_home, &config.runtime_version);
+    let host = build_host_with_restart(
+        config.slot,
+        &config.mango_home,
+        &config.runtime_version,
+        restart,
+    );
     // Bounded by this dial's own `cancel`, unlike `stdio`/`serve`'s
     // connection setup: a shutdown mid-probe stops the wait instead of
     // running it out. See `hello_capabilities`'s own doc comment.
@@ -275,16 +314,20 @@ async fn run_one_connection(
         config.slot.as_str(),
     );
 
-    // Owns exactly one job: if `cancel` fires while the connection below is
-    // still being awaited, close it. Terminates on its own the moment
+    // Owns exactly one job: if `cancel` fires (or a supervised update
+    // commits) while the connection below is still being awaited, close it. Terminates on its own the moment
     // either that happens or the session ends on its own — never aborted.
     let watcher = {
         let watched = session.clone();
         let watch_cancel = cancel.clone();
+        let watch_restart = restart.requested();
         tokio::spawn(async move {
             tokio::select! {
                 () = watch_cancel.cancelled() => {
                     watched.close_now(close_codes::RELEASED, Some("Runtime stopping"));
+                }
+                () = watch_restart.cancelled() => {
+                    watched.close_now(close_codes::RELEASED, Some("Runtime update committed"));
                 }
                 _closure = watched.closed() => {}
             }

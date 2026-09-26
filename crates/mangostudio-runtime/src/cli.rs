@@ -106,7 +106,7 @@ struct ServiceArgs {
     force: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ServiceAction {
     Install,
     Uninstall,
@@ -758,6 +758,20 @@ fn begin_release_on(cancel: &CancellationToken) {
     });
 }
 
+/// Ends a `serve` or `connect` run whose supervised update committed: starts
+/// the bounded child release the signal path would have started, and returns
+/// `RUNTIME_UPDATE_EXIT_CODE` so the systemd unit, launchd agent, or
+/// Scheduled Task runner relaunches the new `current`.
+fn update_restart_exit() -> i32 {
+    crate::release::Release::process().begin();
+    let code = mangostudio_runtime_contract::strings::RUNTIME_UPDATE_EXIT_CODE;
+    eprintln!(
+        "mangostudio-runtime: update committed; exiting with code {code} so a supervisor can \
+         restart the new version."
+    );
+    i32::from(code)
+}
+
 /// Lets an active installer finish after a user service's signal-driven stop.
 /// The service unit enforces the final 30-second process cap.
 async fn settle_installer_until_service_cap() {
@@ -926,23 +940,30 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
             }
         };
         let log = |message: &str| eprintln!("mangostudio-runtime: {message}");
-        let code = match crate::transport::serve::run(
+        let restart = crate::transport::UpdateRestart::for_current_exe(&home);
+        let listen = crate::transport::serve::ServeListen {
             listener,
             token,
-            RuntimeSlot::Remote,
-            home,
-            VERSION.to_string(),
-            cancel,
-            log,
-        )
-        .await
-        {
-            Ok(()) => 0,
-            Err(error) => {
-                eprintln!("mangostudio-runtime: {error}");
-                1
-            }
+            slot: RuntimeSlot::Remote,
+            mango_home: home,
+            runtime_version: VERSION.to_string(),
         };
+        let code =
+            match crate::transport::serve::run_with_restart(listen, cancel, restart.clone(), log)
+                .await
+            {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("mangostudio-runtime: {error}");
+                    1
+                }
+            };
+        if restart.is_requested() {
+            // No signal ended this run, so `signal_task` may never finish;
+            // `shut_down` reclaims it. The commit already holds the slot's
+            // update claim, so no installer step is left to settle.
+            return update_restart_exit();
+        }
         // `serve::run`'s accept loop only ever returns once `cancel` fired,
         // and the signal watcher above is the only holder of the sending
         // side, so this task has already finished (or is about to) by now
@@ -1049,7 +1070,12 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
             mango_home: home,
             runtime_version: VERSION.to_string(),
         };
-        match crate::transport::connect::run(config, cancel, &jitter, log).await {
+        let restart = crate::transport::UpdateRestart::for_current_exe(&config.mango_home);
+        match crate::transport::connect::run_with_restart(config, cancel, restart, &jitter, log)
+            .await
+        {
+            // See the identical case in `run_serve`.
+            crate::transport::connect::ConnectOutcome::UpdateCommitted => update_restart_exit(),
             crate::transport::connect::ConnectOutcome::Stopped => {
                 // `cancel` only ever comes from `signal_task` here, so
                 // `Stopped` means it has already fired (and so finished, or

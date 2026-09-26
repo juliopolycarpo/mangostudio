@@ -35,7 +35,7 @@ use tokio_util::sync::CancellationToken;
 use crate::runtime_home::RuntimeSlot;
 use crate::supervisor::{OwnedTasks, join_owned};
 use crate::transport::upgrade_head::{BindingHeader, RecordingStream};
-use crate::transport::{build_host, runtime_peer, tokens_equal};
+use crate::transport::{UpdateRestart, build_host_with_restart, runtime_peer, tokens_equal};
 
 /// How long `stop()` waits for a straggling connection task (one still in
 /// its own upgrade or supersession handoff, never a healthy session, which
@@ -103,12 +103,52 @@ pub async fn run(
     cancel: CancellationToken,
     log: impl Fn(&str) + Send + Sync + 'static,
 ) -> std::io::Result<()> {
+    let listen = ServeListen {
+        listener,
+        token,
+        slot,
+        mango_home,
+        runtime_version,
+    };
+    run_with_restart(listen, cancel, UpdateRestart::unsupervised(), log).await
+}
+
+/// What one `serve` invocation listens with; see [`run`] for each field.
+pub(crate) struct ServeListen {
+    pub listener: TcpListener,
+    pub token: String,
+    pub slot: RuntimeSlot,
+    pub mango_home: std::path::PathBuf,
+    pub runtime_version: String,
+}
+
+/// [`run`], but a supervised update committed over any connection also stops
+/// the accept loop, releases the active session with the commit's answer
+/// already sent, and returns with [`UpdateRestart::is_requested`] set, so
+/// `cli.rs` exits with `RUNTIME_UPDATE_EXIT_CODE` for its supervisor.
+///
+/// Usage: `run_with_restart(listen, cancel, UpdateRestart::for_current_exe(&home), log)`.
+pub(crate) async fn run_with_restart(
+    listen: ServeListen,
+    cancel: CancellationToken,
+    restart: UpdateRestart,
+    log: impl Fn(&str) + Send + Sync + 'static,
+) -> std::io::Result<()> {
+    let ServeListen {
+        listener,
+        token,
+        slot,
+        mango_home,
+        runtime_version,
+    } = listen;
+    let restart_requested = restart.requested();
     let state = Arc::new(ServeState::new());
     let context = Arc::new(ConnectionContext {
         token,
         slot,
         mango_home,
         runtime_version,
+        restart,
         log: Box::new(log),
     });
     let pending_handshakes = Arc::new(Semaphore::new(MAX_PENDING_HANDSHAKES));
@@ -118,6 +158,7 @@ pub async fn run(
         tokio::select! {
             biased;
             () = cancel.cancelled() => break,
+            () = restart_requested.cancelled() => break,
             // Ordered before `accept`, not after: `biased` polls branches
             // in source order and never reaches a later one while an
             // earlier one is ready, and `listener.accept()` stays ready
@@ -167,8 +208,13 @@ pub async fn run(
         }
     }
 
+    let reason = if context.restart.is_requested() {
+        "Runtime update committed"
+    } else {
+        "Runtime stopped"
+    };
     if let Some(previous) = state.begin_shutdown() {
-        release_active(previous, close_codes::RELEASED, "Runtime stopped").await;
+        release_active(previous, close_codes::RELEASED, reason).await;
     }
     let aborted = owned.join_all_or_abort(SHUTDOWN_DRAIN_GRACE).await;
     if aborted > 0 {
@@ -187,6 +233,7 @@ struct ConnectionContext {
     slot: RuntimeSlot,
     mango_home: std::path::PathBuf,
     runtime_version: String,
+    restart: UpdateRestart,
     log: Box<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -509,7 +556,12 @@ async fn serve_upgraded<P: Port>(
         }
     };
 
-    let host = build_host(context.slot, &context.mango_home, &context.runtime_version);
+    let host = build_host_with_restart(
+        context.slot,
+        &context.mango_home,
+        &context.runtime_version,
+        &context.restart,
+    );
     // No request is in flight yet to cancel this against — a fresh token
     // that never fires, bounded only by `GIT_PROBE_TIMEOUT` internally. See
     // `hello_capabilities`'s own doc comment.
@@ -850,6 +902,7 @@ mod tests {
             slot: crate::runtime_home::RuntimeSlot::Host,
             mango_home: home.to_path_buf(),
             runtime_version: "0.0.0".into(),
+            restart: crate::transport::UpdateRestart::unsupervised(),
             log: log.sink(),
         });
         let (hub_port, runtime_port) = port_pair();

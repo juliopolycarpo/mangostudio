@@ -27,6 +27,8 @@ use crate::runtime_home::{
     RuntimeSlot, read_runtime_slot_config, read_runtime_slot_credentials, slot_current_binary_path,
 };
 
+mod scheduled_task;
+
 #[cfg(target_os = "linux")]
 const UNIT: &str = "mangostudio-runtime.service";
 #[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
@@ -571,12 +573,12 @@ pub(super) fn run(
 
 #[cfg(windows)]
 mod windows {
+    use super::scheduled_task::{SlotProcesses, TASK, ps_quote, verb_script};
     use super::*;
     use crate::runtime_home::slot_dir;
     use crate::slot_update_lock::SlotUpdateLock;
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-    const TASK: &str = "MangoStudio Runtime";
     const MANAGER_TIMEOUT: Duration = Duration::from_secs(30);
     const UPDATE_SETTLE: Duration = Duration::from_secs(25);
     /// PowerShell startup plus the verbs around the wait, reserved from the budget.
@@ -653,10 +655,6 @@ mod windows {
         STANDARD.encode(utf16)
     }
 
-    fn ps_quote(text: &str) -> String {
-        format!("'{}'", text.replace('\'', "''"))
-    }
-
     fn mode_arg(mode: ServiceMode) -> &'static str {
         match mode {
             ServiceMode::Connect => "connect",
@@ -709,31 +707,6 @@ mod windows {
             "$ErrorActionPreference = 'Stop'\n$task = Get-ScheduledTask -TaskPath '\\' -TaskName {} -ErrorAction SilentlyContinue\nif ($null -eq $task) {{ '{{\"installed\":false}}'; exit 0 }}\n$action = @($task.Actions)[0]\n$principal = [string]$task.Principal.UserId\n$principalSid = $null\ntry {{ if ($principal -match '^S-\\d+(?:-\\d+)+$') {{ $principalSid = $principal }} else {{ $principalSid = ([System.Security.Principal.NTAccount]::new($principal)).Translate([System.Security.Principal.SecurityIdentifier]).Value }} }} catch {{}}\n@{{ installed = $true; state = [string]$task.State; enabled = [bool]$task.Settings.Enabled; execute = [string]$action.Execute; arguments = [string]$action.Arguments; principal = $principal; principalSid = $principalSid; currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value }} | ConvertTo-Json -Compress",
             ps_quote(TASK)
         )
-    }
-
-    /// Builds one Scheduled Task verb; the stop wait ends `wait` from launch.
-    /// Usage: `verb_script(ServiceAction::Restart, false, Duration::from_secs(27))`.
-    fn verb_script(action: ServiceAction, force: bool, wait: Duration) -> String {
-        let name = ps_quote(TASK);
-        let stop = format!(
-            "Stop-ScheduledTask -TaskPath '\\' -TaskName {name} -ErrorAction SilentlyContinue"
-        );
-        let wait_ms = wait.as_millis();
-        let wait = format!(
-            "$deadline = (Get-Date).AddMilliseconds({wait_ms})\nwhile (((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') -and ((Get-Date) -lt $deadline)) {{ Start-Sleep -Milliseconds 200 }}\nif ((Get-ScheduledTask -TaskPath '\\' -TaskName {name}).State -eq 'Running') {{ throw 'Scheduled Task still running after {wait_ms} ms' }}"
-        );
-        let start = format!("Start-ScheduledTask -TaskPath '\\' -TaskName {name}");
-        let body = match action {
-            ServiceAction::Start => start,
-            ServiceAction::Stop if force => stop,
-            ServiceAction::Stop => format!("{stop}\n{wait}"),
-            ServiceAction::Restart => format!("{stop}\n{wait}\n{start}"),
-            ServiceAction::Uninstall => format!(
-                "{stop}\n{wait}\nUnregister-ScheduledTask -TaskPath '\\' -TaskName {name} -Confirm:$false"
-            ),
-            _ => unreachable!(),
-        };
-        format!("$ErrorActionPreference = 'Stop'\n{body}")
     }
 
     fn require(exec: &impl Exec, script: &str, timeout: Duration, action: &str) -> io::Result<()> {
@@ -891,9 +864,16 @@ mod windows {
                         ),
                     ));
                 }
+                let slot_dir = slot_dir(RuntimeSlot::Remote, home);
+                let slot_dir = slot_dir.to_string_lossy();
+                let shim_path = shim.to_string_lossy();
+                let slot = SlotProcesses {
+                    slot_dir: &slot_dir,
+                    shim: &shim_path,
+                };
                 require(
                     exec,
-                    &verb_script(action, force, remaining - VERB_MARGIN),
+                    &verb_script(action, remaining - VERB_MARGIN, &slot),
                     remaining,
                     "Scheduled Task service action",
                 )?;
@@ -909,7 +889,14 @@ mod windows {
                 }
                 require(
                     exec,
-                    &verb_script(action, force, Duration::ZERO),
+                    &verb_script(
+                        action,
+                        Duration::ZERO,
+                        &SlotProcesses {
+                            slot_dir: "",
+                            shim: "",
+                        },
+                    ),
                     remaining,
                     "Start-ScheduledTask",
                 )?;
@@ -1092,6 +1079,126 @@ mod windows_tests {
         assert!(
             timeout.saturating_sub(wait) >= Duration::from_secs(2),
             "expected the stop wait to end at least 2s before the kill timeout {timeout:?} | received wait: {wait:?}"
+        );
+    }
+
+    /// What `Stop-ScheduledTask` leaves behind, rebuilt without Task Scheduler: a
+    /// `powershell.exe` runner whose `cmd.exe` child runs a long-lived process,
+    /// with the runner itself terminated. The verbs' tree walk must end both
+    /// orphans from the dead runner's record and confirm they are gone.
+    #[test]
+    fn the_runner_tree_is_terminated_after_the_runner_itself_is_gone() {
+        use super::windows::ProcessExec;
+
+        let mut runner = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "& cmd.exe /d /c 'ping -n 120 127.0.0.1 >nul'",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the stand-in runner starts");
+        let pid = runner.id();
+        // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
+        let script = [
+            "$ErrorActionPreference = 'Stop'".to_owned(),
+            format!("$runners = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\")"),
+            "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
+            "$shell = $null; $leaf = $null".to_owned(),
+            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $shell = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid} AND Name = 'cmd.exe'\"; if ($null -ne $shell) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = $($shell.ProcessId)\" }}; Start-Sleep -Milliseconds 100 }}"),
+            "if ($null -eq $leaf) { throw 'the stand-in runner never started cmd.exe and its child' }".to_owned(),
+            format!("Stop-Process -Id {pid} -Force"),
+            "Start-Sleep -Milliseconds 300".to_owned(),
+            super::scheduled_task::terminate_runner_tree().to_owned(),
+            "[string]$shell.ProcessId + ',' + [string]$leaf.ProcessId".to_owned(),
+        ]
+        .join("\n");
+        let result = ProcessExec.run(&script, Duration::from_secs(60));
+        let _ = runner.kill();
+        let _ = runner.wait();
+        let (ok, output) = result.expect("PowerShell runs the tree walk");
+        assert!(
+            ok,
+            "expected the runner tree terminated | received: {output}"
+        );
+        let (ok, alive) = ProcessExec
+            .run(
+                &format!(
+                    "@({output} | ForEach-Object {{ Get-Process -Id $_ -ErrorAction SilentlyContinue }}).Count"
+                ),
+                Duration::from_secs(30),
+            )
+            .expect("PowerShell counts the survivors");
+        assert!(
+            ok && alive == "0",
+            "expected orphans {output} gone | received: {alive} alive"
+        );
+    }
+
+    /// A runtime started by hand through the shim, with no task run behind
+    /// it: the runner capture finds nothing, so the slot fallback must find
+    /// the shim's `cmd.exe` by its command line and end it with its child.
+    #[test]
+    fn the_slot_fallback_ends_a_shim_run_that_no_task_started() {
+        use std::os::windows::process::CommandExt as _;
+
+        use super::scheduled_task::{SlotProcesses, capture_slot_orphans, terminate_runner_tree};
+        use super::windows::ProcessExec;
+
+        let home = scratch_dir("win-service-slot-orphan");
+        let slot_dir = home.join("runtime").join("remote");
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let shim = slot_dir.join("mangostudio-runtime.cmd");
+        std::fs::write(&shim, "@ping -n 120 127.0.0.1 >nul\r\n").unwrap();
+        let mut orphan = Command::new("cmd.exe")
+            .raw_arg(format!("/d /c \"\"{}\" serve\"", shim.display()))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the hand-started shim runs");
+        let pid = orphan.id();
+        let slot_dir_text = slot_dir.to_string_lossy();
+        let shim_text = shim.to_string_lossy();
+        let slot = SlotProcesses {
+            slot_dir: &slot_dir_text,
+            shim: &shim_text,
+        };
+        // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
+        let script = [
+            "$ErrorActionPreference = 'Stop'".to_owned(),
+            "$runners = @()".to_owned(),
+            "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
+            "$leaf = $null".to_owned(),
+            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid}\"; Start-Sleep -Milliseconds 100 }}"),
+            "if ($null -eq $leaf) { throw 'the hand-started shim never started its child' }".to_owned(),
+            capture_slot_orphans(&slot),
+            format!("if (@($orphans | Where-Object {{ $_.ProcessId -eq {pid} }}).Count -ne 1) {{ throw ('expected the shim cmd.exe {pid} among the orphans | received: ' + (($orphans | ForEach-Object {{ $_.ProcessId }}) -join ',')) }}"),
+            terminate_runner_tree().to_owned(),
+            "[string]$leaf.ProcessId".to_owned(),
+        ]
+        .join("\n");
+        let result = ProcessExec.run(&script, Duration::from_secs(60));
+        let _ = orphan.kill();
+        let _ = orphan.wait();
+        let (ok, leaf) = result.expect("PowerShell runs the fallback");
+        assert!(
+            ok,
+            "expected the hand-started shim tree terminated | received: {leaf}"
+        );
+        let (ok, alive) = ProcessExec
+            .run(
+                &format!("@(Get-Process -Id {pid},{leaf} -ErrorAction SilentlyContinue).Count"),
+                Duration::from_secs(30),
+            )
+            .expect("PowerShell counts the survivors");
+        assert!(
+            ok && alive == "0",
+            "expected the shim {pid} and its child {leaf} gone | received: {alive} alive"
         );
     }
 

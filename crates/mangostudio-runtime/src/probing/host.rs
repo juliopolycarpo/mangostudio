@@ -120,6 +120,7 @@ pub(crate) fn compose_runtime_path_env(
     platform: &str,
     overrides: Option<&HashMap<String, String>>,
 ) -> PathEnv {
+    process_env.retain(|key, _| inheritable_environment_key(key));
     if let Some(overrides) = overrides {
         for (key, value) in overrides {
             process_env.insert(key.clone(), value.clone());
@@ -130,6 +131,25 @@ pub(crate) fn compose_runtime_path_env(
         home_dir,
         env: with_canonical_path_key(process_env),
     }
+}
+
+/// Whether an entry of this process's own environment can be handed to a
+/// child by name.
+///
+/// `cmd.exe` records per-drive working directories and its last exit code as
+/// hidden entries (`=C:=C:\work`, `=ExitCode=00000000`), and
+/// [`std::env::vars`] keeps the leading `=` as part of the name. Every runtime
+/// started through the slot's `.cmd` shim, so every Scheduled Task runtime,
+/// inherits them. A child environment is spelled as `name=value` pairs, so
+/// both spawners refuse such a name; skipping the inherited ones keeps them
+/// from failing every child, while a key a caller sets through `overrides`
+/// still reaches the spawner's own validation. The child resolves relative
+/// paths from the working directory it is given, so it loses nothing.
+///
+/// Usage: `inheritable_environment_key("=C:")` is `false`,
+/// `inheritable_environment_key("PATH")` is `true`.
+fn inheritable_environment_key(key: &str) -> bool {
+    !key.is_empty() && !key.contains('=')
 }
 
 /// Restores a canonical `PATH` key after the override merge above, mirroring
@@ -648,6 +668,83 @@ mod tests {
             "expected home_dir from this host | received {:?}",
             env.home_dir
         );
+    }
+
+    #[test]
+    fn compose_runtime_path_env_skips_inherited_hidden_drive_entries() {
+        let process_env = HashMap::from([
+            ("=C:".to_string(), "C:\\work".to_string()),
+            ("=ExitCode".to_string(), "00000000".to_string()),
+            ("PATH".to_string(), "C:\\Windows".to_string()),
+        ]);
+        let env = compose_runtime_path_env(process_env, "C:\\Users\\ada".into(), "win32", None);
+        let mut keys: Vec<&str> = env.env.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["PATH"],
+            "expected inherited keys: [\"PATH\"] | received: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn compose_runtime_path_env_keeps_an_override_key_for_the_spawn_to_validate() {
+        let overrides = HashMap::from([("=C:".to_string(), "C:\\hub".to_string())]);
+        let env =
+            compose_runtime_path_env(HashMap::new(), String::new(), "win32", Some(&overrides));
+        assert_eq!(
+            env.env_var("=C:"),
+            Some("C:\\hub"),
+            "expected a caller-set key to reach the spawn's own validation | received: {:?}",
+            env.env
+        );
+    }
+
+    /// `cmd.exe` (the slot's `.cmd` shim, so every Scheduled Task runtime) hands this process
+    /// hidden `=X:` entries. A child built from the inherited environment must still start.
+    #[tokio::test]
+    async fn a_child_starts_from_an_inherited_environment_with_a_hidden_drive_entry() {
+        // Only what the child needs, copied from this host: the composed host
+        // environment already carries both `Path` and the canonical `PATH` on
+        // Windows, which composing it a second time would hand the spawner twice.
+        let host = build_runtime_path_env(None).env;
+        let mut inherited: HashMap<String, String> = ["PATH", "SystemRoot", "ComSpec"]
+            .into_iter()
+            .filter_map(|key| Some((key.to_string(), host.get(key)?.clone())))
+            .collect();
+        inherited.insert("=C:".to_string(), "C:\\".to_string());
+        let env = compose_runtime_path_env(inherited, String::new(), "win32", None);
+        #[cfg(windows)]
+        let (program, args) = (
+            PathBuf::from(
+                env.env_var("ComSpec")
+                    .unwrap_or("C:\\Windows\\System32\\cmd.exe"),
+            ),
+            ["/d", "/c", "exit 0"],
+        );
+        #[cfg(unix)]
+        let (program, args) = (PathBuf::from("/bin/sh"), ["-c", "exit 0", "sh"]);
+        let budget = ChildBudget {
+            deadline: Duration::from_secs(10),
+            max_stdout_bytes: 1024,
+            max_stderr_bytes: 1024,
+        };
+        let outcome = run_bounded_child(
+            &program,
+            &args,
+            Some(&env.env),
+            budget,
+            &CancellationToken::new(),
+        )
+        .await;
+        match outcome {
+            Ok(outcome) => assert!(
+                outcome.status_success,
+                "expected child exit: success | received: {:?}",
+                String::from_utf8_lossy(&outcome.stderr)
+            ),
+            Err(error) => panic!("expected child start: started | received: {error:?}"),
+        }
     }
 
     #[cfg(unix)]

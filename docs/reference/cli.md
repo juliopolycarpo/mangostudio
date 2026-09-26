@@ -413,8 +413,10 @@ each failure. It exits non-zero only when redialing cannot help: a revoked token
 a disabled environment, a protocol version the hub will not serve, or another
 runtime that took the same environment over — two processes sharing one pairing
 token would otherwise trade it back and forth forever, so the loser stops and
-names the conflict. Keep it running under whatever supervises long-lived
-processes on that machine, or install a user service:
+names the conflict. A `connect` started from a runtime slot (`~/.mango/runtime/<slot>/`)
+also exits after the hub updates it live, with code `75` so a supervisor can start the
+new version. Run by hand, nothing relaunches it: run it again, or keep it under
+whatever supervises long-lived processes on that machine, or install a user service:
 
 ```bash
 printf %s "$TOKEN" | mangostudio-runtime connect --hub wss://hub.example.com/api/runtime --token -
@@ -458,7 +460,8 @@ Tokens supplied on stdin or via the environment are not written to disk.
 Binding anything other than loopback prints a warning: whoever holds the serve token gets
 shell access on that machine. Put TLS in front with a reverse proxy when the dial leaves
 a trusted network — the runtime itself does not terminate TLS. A second hub connection
-supersedes the first.
+supersedes the first. Like `connect`, a `serve` started from a runtime slot exits with code
+`75` after a live update, and must be relaunched when no service supervises it.
 
 ```bash
 mangostudio-runtime serve --listen 8787

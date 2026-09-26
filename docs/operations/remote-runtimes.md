@@ -59,6 +59,11 @@ consented and holds a working credential, and one of these finishes it there.
 ~/.mango/runtime/remote/current/mangostudio-runtime connect
 ```
 
+A runtime started by hand from the slot exits after a live update from the hub
+(exit code `75`, so a supervisor can start the new version), and nothing starts
+it again. Run the same command to relaunch it on the new version, or install the
+service so the update restarts it on its own.
+
 Neither needs flags — the hub URL and token are already stored. The full path is
 not decoration: the flow installs into the managed slot and never puts the
 binary on `PATH`, so a bare `mangostudio-runtime` is `command not found` on a
@@ -262,8 +267,18 @@ What the CLI registers:
   The task command contains no credentials.
 
 `service stop`, `restart`, and `uninstall` wait for an active update to settle
-before stopping the task. The complete operation has a 30-second cap;
-`service stop --force` skips the installer wait.
+before stopping the task. `Stop-ScheduledTask` ends only the hidden runner, so
+each verb then ends the `cmd.exe` shim and the runtime the runner started. It
+also ends any runtime left over from this home's slot, such as one started by
+hand through the shim or orphaned by an earlier stop, even when the task is not
+running. It fails rather than reporting success when any of them is still
+running. The complete operation has a 30-second cap; `service stop --force`
+skips the installer wait.
+
+Unlike systemd and launchd, which send `SIGTERM` and let a running installer
+step finish within that cap, a Windows stop terminates the runtime at once, and
+the Job that owns an installer step ends that step with it. Wait for an install
+to finish before stopping the service if you do not want it cut off.
 
 Task Scheduler captures no output of its own, and the runtime's task does not
 redirect any, so there is no Windows equivalent of

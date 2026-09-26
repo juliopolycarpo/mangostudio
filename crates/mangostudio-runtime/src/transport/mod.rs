@@ -31,8 +31,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mango_protocol::contract::Contract;
+use mango_protocol::frame::Frame;
 use mango_protocol::frame::PeerInfo;
-use mango_protocol::port::Port;
+use mango_protocol::port::{Port, PortTx, SendOutcome};
 use mango_protocol::session::{EventInput, Session, SessionClosure, SessionOptions};
 use mangostudio_runtime_contract::catalog::catalog;
 use tokio_util::sync::CancellationToken;
@@ -136,12 +137,89 @@ pub(crate) struct SessionHost {
 /// methods, the two install methods, and the three runtime update methods.
 /// Other groups remain unsupported. Every connection shares the slot's update
 /// exclusivity tracker; its request claims use a connection-specific namespace.
+// Every transport builds through `build_host_with_restart`; the tests keep
+// this unsupervised shorthand.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn build_host(
     slot: RuntimeSlot,
     mango_home: &Path,
     runtime_version: &str,
 ) -> SessionHost {
-    build_host_with_restart(slot, mango_home, runtime_version, false)
+    build_host_with_restart(
+        slot,
+        mango_home,
+        runtime_version,
+        &UpdateRestart::unsupervised(),
+    )
+}
+
+/// Whether a committed runtime update ends this process for its supervisor
+/// to relaunch `current`: true when `executable` sits in one of
+/// `mango_home`'s runtime slots, whatever the transport.
+///
+/// Mirrors the TypeScript runtime's `supervisedUpdateSession`, which every
+/// transport (`--stdio`, `serve`, `connect`) consulted through
+/// `resolveRuntimeSource() === 'provisioned'`. A provisioned binary is the
+/// one a hub, `install`, or a user service launches through the slot's
+/// `current` pointer, and every one of those relaunches on exit code 75:
+/// the hub's stdio spawner, the systemd and launchd units, and the Scheduled
+/// Task runner. A bundled binary has nothing to relaunch it and answers
+/// `restart: "manual"` instead.
+///
+/// Usage: `update_restart_supervised(home, Some(&home.join("runtime/remote/1.0.0/mangostudio-runtime")))`
+/// is `true`; the same call with `/usr/local/bin/mangostudio-runtime` is `false`.
+pub(crate) fn update_restart_supervised(mango_home: &Path, executable: Option<&Path>) -> bool {
+    crate::runtime_home::resolve_runtime_source(mango_home, executable) == "provisioned"
+}
+
+/// One process's answer to "a supervised update committed": every connection
+/// the process builds a host for shares it, so a commit over any of them
+/// ends the whole process, not just its own session.
+///
+/// Usage: `let restart = UpdateRestart::for_current_exe(home);` then pass
+/// `&restart` to [`build_host_with_restart`] per connection and exit with
+/// `RUNTIME_UPDATE_EXIT_CODE` once [`UpdateRestart::is_requested`].
+#[derive(Clone)]
+pub(crate) struct UpdateRestart {
+    supervised: bool,
+    requested: CancellationToken,
+}
+
+impl UpdateRestart {
+    /// Decides supervision for this running executable; see
+    /// [`update_restart_supervised`].
+    pub(crate) fn for_current_exe(mango_home: &Path) -> Self {
+        let executable = std::env::current_exe().ok();
+        Self::new(update_restart_supervised(mango_home, executable.as_deref()))
+    }
+
+    /// A restart request that a commit fires only when `supervised`.
+    pub(crate) fn new(supervised: bool) -> Self {
+        Self {
+            supervised,
+            requested: CancellationToken::new(),
+        }
+    }
+
+    /// A process nothing relaunches: commits answer `restart: "manual"`.
+    pub(crate) fn unsupervised() -> Self {
+        Self::new(false)
+    }
+
+    /// Whether a commit schedules a restart rather than asking for a manual one.
+    pub(crate) fn supervised(&self) -> bool {
+        self.supervised
+    }
+
+    /// Fires once a committed supervised update has had time to send its response.
+    pub(crate) fn requested(&self) -> CancellationToken {
+        self.requested.clone()
+    }
+
+    /// Whether a committed supervised update asked this process to exit.
+    pub(crate) fn is_requested(&self) -> bool {
+        self.requested.is_cancelled()
+    }
 }
 
 /// Whether `slot` records protocol calls to `audit.log`, from its
@@ -175,12 +253,13 @@ fn slot_audit_enabled(slot: RuntimeSlot, mango_home: &Path) -> bool {
         .or_insert(enabled)
 }
 
-/// Builds a stdio host that can exit for a supervisor after a verified commit.
+/// Builds a host whose verified update commit fires `restart` when it is
+/// supervised, so the transport can end the process with exit code 75.
 pub(crate) fn build_host_with_restart(
     slot: RuntimeSlot,
     mango_home: &Path,
     runtime_version: &str,
-    supervised: bool,
+    restart: &UpdateRestart,
 ) -> SessionHost {
     let audit: Arc<dyn Audit> = if slot_audit_enabled(slot, mango_home) {
         Arc::new(crate::audit::FileAudit::new(
@@ -190,8 +269,12 @@ pub(crate) fn build_host_with_restart(
     } else {
         Arc::new(crate::ports::audit::NoopAudit)
     };
-    let update =
-        crate::update::UpdateBinding::new_with_restart(slot, mango_home.to_path_buf(), supervised);
+    let update = crate::update::UpdateBinding::sharing_restart(
+        slot,
+        mango_home.to_path_buf(),
+        restart.supervised(),
+        restart.requested(),
+    );
     let exclusivity = update.exclusivity();
     let registry = Registry::with_ports_and_exclusivity(
         Arc::clone(&audit),
@@ -385,16 +468,79 @@ pub(crate) fn start_session<P: Port>(
     update: crate::update::UpdateBinding,
     slot: &str,
 ) -> (Session, tokio::task::JoinHandle<SessionClosure>) {
+    let answers = update.answer_watch();
+    let port = AnswerReportingPort {
+        inner: port,
+        answers: answers.clone(),
+    };
     let (session, driver) = Session::open(port, options);
     let guard = crate::serve::serve(runtime_contract(), &session, registry, authorization, slot)
         .expect("Registry::implement already panics on a catalog mismatch at registration time");
     guard.persist();
     let driver_handle = tokio::spawn(async move {
         let closure = driver.run().await;
+        answers.session_ended();
         update.close().await;
         closure
     });
     (session, driver_handle)
+}
+
+/// A [`Port`] that tells the connection's [`crate::update::AnswerWatch`]
+/// about every answer it has sent, so a supervised update restarts only after
+/// the hub was sent its commit answer.
+struct AnswerReportingPort<P> {
+    inner: P,
+    answers: crate::update::AnswerWatch,
+}
+
+impl<P: Port> Port for AnswerReportingPort<P> {
+    type Tx = AnswerReportingTx<P::Tx>;
+    type Rx = P::Rx;
+
+    fn max_frame_bytes(&self) -> Option<usize> {
+        self.inner.max_frame_bytes()
+    }
+
+    fn split(self) -> (Self::Tx, Self::Rx) {
+        let (tx, rx) = self.inner.split();
+        (
+            AnswerReportingTx {
+                inner: tx,
+                answers: self.answers,
+            },
+            rx,
+        )
+    }
+}
+
+/// The send half of an [`AnswerReportingPort`].
+struct AnswerReportingTx<Tx> {
+    inner: Tx,
+    answers: crate::update::AnswerWatch,
+}
+
+impl<Tx: PortTx> PortTx for AnswerReportingTx<Tx> {
+    async fn send(&mut self, frame: Frame) -> SendOutcome {
+        let answered = match &frame {
+            Frame::Res(response) => Some(response.id.clone()),
+            Frame::Err(response) => Some(response.id.clone()),
+            _ => None,
+        };
+        let outcome = self.inner.send(frame).await;
+        // Only an answer that reached the transport counts. One that did not
+        // ends the session, and `AnswerWatch::session_ended` fires from there.
+        if outcome == SendOutcome::Sent
+            && let Some(id) = answered
+        {
+            self.answers.answered(&id);
+        }
+        outcome
+    }
+
+    async fn close(self, code: u16, reason: Option<String>) {
+        self.inner.close(code, reason).await;
+    }
 }
 
 #[cfg(test)]
@@ -410,6 +556,251 @@ mod tests {
     };
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::scratch_path;
+
+    /// An audit sink that takes `delay` to record a commit: the work that
+    /// still runs inside the handler task after the handler returned, before
+    /// the session can queue the answer.
+    struct SlowCommitAudit {
+        delay: std::time::Duration,
+    }
+
+    impl crate::ports::audit::Audit for SlowCommitAudit {
+        fn record<'a>(
+            &'a self,
+            entry: crate::ports::audit::AuditEntry,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                if entry.method == "runtime.update.commit" {
+                    tokio::time::sleep(self.delay).await;
+                }
+            })
+        }
+    }
+
+    /// Grants every call, so the test reaches the update methods.
+    struct GrantsEverything;
+
+    impl crate::ports::authorization::Authorization for GrantsEverything {
+        fn missing_capabilities<'a>(
+            &'a self,
+            _method: &'a str,
+            _capabilities: &'a [String],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<String>> + Send + 'a>> {
+            Box::pin(async { Vec::new() })
+        }
+    }
+
+    /// The restart a supervised commit asks for must not overtake its answer:
+    /// the transport closes the session as soon as the restart fires, and a
+    /// close that lands before the `res` is queued loses the answer the hub
+    /// is waiting for. The audit record here holds the handler task for
+    /// 300 ms after the commit itself, which is longer than any fixed delay
+    /// the restart could have used.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_supervised_commit_answers_before_its_restart_closes_the_session() {
+        use base64::Engine as _;
+        use sha2::Digest as _;
+
+        let home = scratch_path("transport-commit-before-restart");
+        std::fs::create_dir_all(&*home).unwrap();
+        let restart = super::UpdateRestart::new(true);
+        let update = crate::update::UpdateBinding::sharing_restart(
+            RuntimeSlot::Remote,
+            home.to_path_buf(),
+            true,
+            restart.requested(),
+        );
+        // Not `update.exclusivity()`: that one also refuses while any blocking
+        // work runs anywhere in this process, which parallel tests supply.
+        let exclusivity: std::sync::Arc<dyn crate::ports::exclusivity::CallExclusivity> =
+            std::sync::Arc::new(crate::ports::exclusivity::UpdateExclusivityTracker::new(
+                std::sync::Arc::new(crate::ports::exclusivity::NotUpdating),
+            ));
+        let registry = crate::update::register(
+            crate::registry::Registry::with_ports_and_exclusivity(
+                std::sync::Arc::new(SlowCommitAudit {
+                    delay: std::time::Duration::from_millis(300),
+                }),
+                std::sync::Arc::new(crate::ports::clock::SystemClock),
+                exclusivity.clone(),
+            ),
+            &update,
+            exclusivity,
+        );
+        let (hub_port, runtime_port) = port_pair();
+        let (hub, _hub_driver) = Session::spawn(hub_port, SessionOptions::new(peer("hub")));
+        let (runtime, _runtime_driver) = start_session(
+            runtime_port,
+            SessionOptions::new(runtime_peer("9.9.9")),
+            registry,
+            std::sync::Arc::new(GrantsEverything),
+            update,
+            RuntimeSlot::Remote.as_str(),
+        );
+        // What every transport does once the restart fires.
+        let requested = restart.requested();
+        let closing = runtime.clone();
+        tokio::spawn(async move {
+            requested.cancelled().await;
+            closing.close_now(
+                mango_protocol::close::close_codes::RELEASED,
+                Some("Runtime update committed"),
+            );
+        });
+        hub.ready().await.unwrap();
+
+        let bytes = b"next runtime";
+        let digest: String = sha2::Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let begun = hub
+            .request(
+                "runtime.update.begin",
+                serde_json::json!({
+                    "version": "9.9.10",
+                    "digest": format!("sha256:{digest}"),
+                    "totalBytes": bytes.len(),
+                }),
+            )
+            .await
+            .expect("begin is accepted");
+        let session_id = begun["sessionId"].as_str().unwrap().to_owned();
+        hub.request(
+            "runtime.update.chunk",
+            serde_json::json!({
+                "sessionId": session_id,
+                "seq": 0,
+                "bytesBase64": base64::engine::general_purpose::STANDARD.encode(bytes),
+            }),
+        )
+        .await
+        .expect("chunk is accepted");
+        let committed = hub
+            .request(
+                "runtime.update.commit",
+                serde_json::json!({ "sessionId": session_id }),
+            )
+            .await;
+        match committed {
+            Ok(value) => assert_eq!(
+                value["restart"], "scheduled",
+                "expected commit restart: \"scheduled\" | received: {value}"
+            ),
+            Err(error) => {
+                panic!("expected the commit answer before the restart close | received: {error:?}")
+            }
+        }
+        let closure = tokio::time::timeout(std::time::Duration::from_secs(5), hub.closed())
+            .await
+            .expect("expected the restart to close the session after the answer");
+        assert_eq!(
+            closure.reason.as_deref(),
+            Some("Runtime update committed"),
+            "expected the restart close | received: {closure:?}"
+        );
+        assert!(restart.is_requested());
+    }
+
+    /// A send half whose transport is already gone, standing in for a hub
+    /// that dropped the connection while the commit answer was in flight.
+    struct ClosedTx;
+
+    impl mango_protocol::port::PortTx for ClosedTx {
+        async fn send(
+            &mut self,
+            _frame: mango_protocol::frame::Frame,
+        ) -> mango_protocol::port::SendOutcome {
+            mango_protocol::port::SendOutcome::Closed
+        }
+
+        async fn close(self, _code: u16, _reason: Option<String>) {}
+    }
+
+    /// An answer the transport never took must not fire the restart: the hub
+    /// did not get it, and the session's end is what fires it instead.
+    #[tokio::test]
+    async fn an_answer_the_transport_refused_does_not_fire_the_restart() {
+        use mango_protocol::port::PortTx as _;
+
+        let restart = super::UpdateRestart::new(true);
+        let home = scratch_path("transport-refused-answer");
+        std::fs::create_dir_all(&*home).unwrap();
+        let update = crate::update::UpdateBinding::sharing_restart(
+            RuntimeSlot::Remote,
+            home.to_path_buf(),
+            true,
+            restart.requested(),
+        );
+        let answers = update.answer_watch();
+        answers.arm_for_test("r-1");
+        let mut tx = super::AnswerReportingTx {
+            inner: ClosedTx,
+            answers: answers.clone(),
+        };
+        let frame = mango_protocol::frame::Frame::Res(mango_protocol::frame::Response {
+            id: "r-1".into(),
+            result: serde_json::Value::Null,
+        });
+        assert_eq!(
+            tx.send(frame).await,
+            mango_protocol::port::SendOutcome::Closed
+        );
+        assert!(
+            !restart.is_requested(),
+            "expected no restart for an answer the transport refused | received: requested"
+        );
+        answers.session_ended();
+        assert!(
+            restart.is_requested(),
+            "expected the ended session to fire the armed restart | received: not requested"
+        );
+    }
+
+    /// `serve` and `connect` must decide supervision the way `--stdio` does:
+    /// the TypeScript runtime scheduled the restart in every transport for a
+    /// binary launched from a slot, and a hub waits for it.
+    #[test]
+    fn a_slot_binary_is_supervised_and_a_bundled_one_is_not() {
+        let home = std::path::Path::new("/home/ada/.mango");
+        for slot in ["remote", "host", "wsl"] {
+            let binary = home
+                .join("runtime")
+                .join(slot)
+                .join("0.1.1")
+                .join("mangostudio-runtime");
+            assert!(
+                super::update_restart_supervised(home, Some(&binary)),
+                "expected supervised: true | received: false for {}",
+                binary.display()
+            );
+        }
+        for binary in [
+            Some(std::path::Path::new("/usr/local/bin/mangostudio-runtime")),
+            Some(std::path::Path::new(
+                "/home/ada/.mango-other/runtime/remote/0.1.1/x",
+            )),
+            None,
+        ] {
+            assert!(
+                !super::update_restart_supervised(home, binary),
+                "expected supervised: false | received: true for {binary:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_update_restart_is_requested_only_once_its_token_fires() {
+        let restart = super::UpdateRestart::new(true);
+        assert!(restart.supervised());
+        assert!(!restart.is_requested());
+        restart.requested().cancel();
+        assert!(
+            restart.clone().is_requested(),
+            "expected a clone to observe the shared request | received: not requested"
+        );
+        assert!(!super::UpdateRestart::unsupervised().supervised());
+    }
 
     fn peer(role: &str) -> PeerInfo {
         PeerInfo {
