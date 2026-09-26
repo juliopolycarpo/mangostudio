@@ -163,7 +163,7 @@ pub const CLAUDE_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgen
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
         shared_binary_names: &[],
-        windows_powershell_scripts: false,
+        windows_powershell_script_names: &[],
     },
     auth: AgentAuthDefinition::File {
         file_name: ".credentials.json",
@@ -184,7 +184,7 @@ pub const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgent
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
         shared_binary_names: &[],
-        windows_powershell_scripts: false,
+        windows_powershell_script_names: &[],
     },
     auth: AgentAuthDefinition::File {
         file_name: "auth.json",
@@ -198,9 +198,11 @@ pub const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgent
 /// name is ever removed.
 ///
 /// On Windows the installer's entry points are PowerShell scripts
-/// (`cursor-agent.ps1`, verified 2026-09-25 on Windows 11), so `.ps1`
-/// candidates are searched after the `PATHEXT` ones and launched through
-/// `powershell.exe -File` (see `crate::subprocess`'s `powershell_script`).
+/// (`cursor-agent.ps1`, verified 2026-09-25 on Windows 11), so a
+/// `cursor-agent.ps1` candidate is searched after the `PATHEXT` ones and
+/// launched through `powershell.exe -File` (see `crate::subprocess`'s
+/// `powershell_script`). `agent.ps1` is never searched: `agent` is a shared
+/// name, and a probe runs whatever script it finds.
 pub const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgentCliDefinition {
     target_id: AgentTargetId::Cursor,
     runtime: RuntimeDefinition {
@@ -213,7 +215,9 @@ pub const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgen
         include_bare_binary_names: false,
         // Grok Build also installs `agent`.
         shared_binary_names: &["agent"],
-        windows_powershell_scripts: true,
+        // Only the vendor-specific name: `agent` is shared with other CLIs,
+        // so an unrelated `agent.ps1` on PATH must never be probed.
+        windows_powershell_script_names: &["cursor-agent"],
     },
     auth: AgentAuthDefinition::ConfigKey {
         file_name: "cli-config.json",
