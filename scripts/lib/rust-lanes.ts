@@ -128,7 +128,10 @@ const SOURCE_EXTENSIONS = ['', '.ts', '.tsx', '/index.ts', '/index.tsx'];
 
 function listSources(dir: string): string[] {
   const found: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  const entries = readdirSync(dir, { withFileTypes: true }).sort((x, y) =>
+    x.name < y.name ? -1 : x.name > y.name ? 1 : 0
+  );
+  for (const entry of entries) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       found.push(...listSources(path));
@@ -152,33 +155,36 @@ function resolveImport(fromFile: string, specifier: string): string | undefined 
   return undefined;
 }
 
-function relativeImports(file: string): string[] {
+function relativeImports(file: string, cache: Map<string, string[]>): string[] {
+  const cached = cache.get(file);
+  if (cached) return cached;
   const text = readFileSync(file, 'utf8');
   const imports: string[] = [];
   for (const match of text.matchAll(IMPORT_SPECIFIER)) {
     const resolved = resolveImport(file, match[1] as string);
     if (resolved) imports.push(resolved);
   }
+  cache.set(file, imports);
   return imports;
 }
 
-function reachesResolver(
-  file: string,
-  resolver: string,
-  memo: Map<string, boolean>,
-  visiting: Set<string>
-): boolean {
-  const known = memo.get(file);
-  if (known !== undefined) return known;
-  if (file === resolver) return true;
-  if (visiting.has(file)) return false;
-  visiting.add(file);
-  const reaches = relativeImports(file).some((next) =>
-    reachesResolver(next, resolver, memo, visiting)
-  );
-  visiting.delete(file);
-  memo.set(file, reaches);
-  return reaches;
+/**
+ * A plain reachability search from one test file, with its own visited set.
+ * Nothing but the parsed import lists is shared between searches: a module
+ * judged unreachable while an import cycle through it was still open can
+ * reach the resolver by another path, so no per-module verdict is reused.
+ */
+function reachesResolver(start: string, resolver: string, imports: Map<string, string[]>): boolean {
+  const visited = new Set<string>();
+  const stack = [start];
+  while (stack.length > 0) {
+    const file = stack.pop() as string;
+    if (file === resolver) return true;
+    if (visited.has(file)) continue;
+    visited.add(file);
+    stack.push(...relativeImports(file, imports));
+  }
+  return false;
 }
 
 function toPosix(path: string): string {
@@ -201,12 +207,12 @@ export function discoverQualificationTests(
 ): QualificationSuites {
   const apiDir = join(root, API_DIR);
   const resolver = join(root, RUST_BINARY_RESOLVER);
-  const memo = new Map<string, boolean>();
+  const imports = new Map<string, string[]>();
   const unit: string[] = [];
   const integration: string[] = [];
   const tests = listSources(join(apiDir, 'tests')).filter((file) => file.endsWith('.test.ts'));
   for (const file of tests) {
-    if (!reachesResolver(file, resolver, memo, new Set())) continue;
+    if (!reachesResolver(file, resolver, imports)) continue;
     const path = toPosix(relative(apiDir, file));
     if (excluded.includes(path)) continue;
     (path.startsWith('tests/unit/') ? unit : integration).push(path);

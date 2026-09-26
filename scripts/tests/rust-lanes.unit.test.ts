@@ -213,4 +213,31 @@ describe('discoverQualificationTests', () => {
       });
     });
   });
+
+  describe('on a tree whose cycle reaches the resolver through a third module', () => {
+    // a -> b, b -> a, a -> c, c -> resolver. Searching from a visits b while a
+    // is still open, so b's own answer is incomplete there; a later test that
+    // imports only b must still be selected.
+    const root = mkdtempSync(join(tmpdir(), 'rust-lanes-cycle-'));
+    const write = (path: string, text: string) => {
+      const full = join(root, path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, text);
+    };
+    afterAll(() => rmSync(root, { force: true, recursive: true }));
+
+    write(RUST_BINARY_RESOLVER, 'export const resolve = () => 1;\n');
+    write('apps/api/tests/support/a.ts', "import './b';\nimport './c';\n");
+    write('apps/api/tests/support/b.ts', "import './a';\n");
+    write('apps/api/tests/support/c.ts', "import './rust-runtime-binary';\n");
+    write('apps/api/tests/integration/a-first.integration.test.ts', "import '../support/a';\n");
+    write('apps/api/tests/integration/b-second.integration.test.ts', "import '../support/b';\n");
+
+    test('selects a test that enters the cycle at the module searched mid-cycle', () => {
+      expect(discoverQualificationTests(root).integration).toEqual([
+        'tests/integration/a-first.integration.test.ts',
+        'tests/integration/b-second.integration.test.ts',
+      ]);
+    });
+  });
 });
