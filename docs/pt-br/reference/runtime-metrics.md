@@ -27,34 +27,36 @@ construído uma vez por alvo de release no CI, então o download menor vence.
 
 ## Tamanho do binário por alvo
 
-Artefatos do `runtime-build.yml`, descompactados. Antes: CI no head `72172b38` de
-`feat/rust-runtime` (merge ref `4be9c25e`, perfil de release padrão do cargo). Depois: CI com
-este perfil, fonte `b2ee0c77` (merge ref `a400be5e`). Os tempos de build são as durações dos
-jobs do `runtime-build.yml` nessas execuções, em runners compartilhados do GitHub.
+Artefatos do `runtime-build.yml`, descompactados, os dois construídos sobre a mesma fonte de
+`feat/rust-runtime` (`520a5bea`). Antes: a execução de CI 36205909878 da própria branch, com o
+perfil de release padrão do cargo. Depois: a execução de CI 36205927848 deste perfil sobre ela
+(head `97c53736`, merge ref `877d447c`). Os tempos de build são as durações dos jobs do
+`runtime-build.yml` nessas execuções, em runners compartilhados do GitHub.
 
 | Plataforma         | Antes (bytes) | Depois (bytes) | Variação | Build no CI antes | Build no CI depois |
 | ------------------ | ------------: | -------------: | -------: | ----------------: | -----------------: |
-| `linux-x64`        |    33.810.720 |     26.022.592 |   −23,0% |             4m21s |              7m01s |
-| `linux-arm64`      |    30.824.608 |     22.709.960 |   −26,3% |             5m04s |              6m07s |
-| `linux-x64-musl`   |    32.847.992 |     25.519.248 |   −22,3% |             3m23s |              5m58s |
-| `linux-arm64-musl` |    29.967.520 |     22.208.256 |   −25,9% |             5m06s |              6m58s |
-| `darwin-x64`       |    41.598.856 |     24.483.648 |   −41,1% |             5m46s |              9m48s |
-| `darwin-arm64`     |    40.541.120 |     22.275.376 |   −45,1% |             8m23s |             11m19s |
-| `windows-x64`      |    40.247.296 |     33.669.120 |   −16,3% |             9m15s |             12m41s |
-| `windows-arm64`    |    33.764.352 |     28.660.224 |   −15,1% |            10m33s |             14m08s |
-| **as 8**           |   283.602.464 |    205.548.424 |   −27,5% |                   |                    |
+| `linux-x64`        |    33.817.680 |     26.031.832 |   −23,0% |             4m46s |              7m17s |
+| `linux-arm64`      |    30.815.272 |     22.716.960 |   −26,3% |             3m43s |              7m22s |
+| `linux-x64-musl`   |    32.848.976 |     25.528.488 |   −22,3% |             4m46s |              5m17s |
+| `linux-arm64-musl` |    29.962.288 |     22.215.192 |   −25,9% |             5m01s |              6m38s |
+| `darwin-x64`       |    41.646.136 |     24.491.872 |   −41,2% |             5m50s |             11m16s |
+| `darwin-arm64`     |    40.625.104 |     22.291.904 |   −45,1% |             6m04s |              9m27s |
+| `windows-x64`      |    40.036.352 |     33.679.872 |   −15,9% |             9m27s |             12m23s |
+| `windows-arm64`    |    33.780.736 |     28.668.928 |   −15,1% |             9m50s |             13m41s |
+| **as 8**           |   283.532.544 |    205.625.048 |   −27,5% |                   |                    |
 
 Os alvos Linux já saíam sem símbolos antes (o linker do zig os descarta), então a variação
 deles vem só do LTO e da codegen unit única. Os binários darwin encolhem mais porque o perfil
 padrão deixava a tabela de símbolos neles (cerca de 88.000 símbolos, contra 251 agora). Um
-executável Windows não tem tabela de símbolos para remover, então a variação dele é só do LTO. O build com LTO fat acrescenta de
-1 a 4 minutos por alvo, bem dentro do timeout de 30 minutos do job.
+executável Windows não tem tabela de símbolos para remover, então a variação dele é só do LTO.
+O build com LTO fat acrescenta de meio minuto a cinco minutos e meio por alvo, bem dentro do
+timeout de 30 minutos do job.
 
 ## Do que o binário linux-x64 é feito
 
 `CARGO_PROFILE_RELEASE_STRIP=false cargo bloat --release --locked -p mangostudio-runtime --bin mangostudio-runtime --crates -n 20`
-com o perfil entregue. A seção `.text` tem 18,8 MiB de um arquivo de 34,3 MiB com símbolos; a
-atribuição sob LTO fat é aproximada.
+com o perfil entregue, na fonte do runtime em `72172b38`. A seção `.text` tem 18,8 MiB de um
+arquivo de 34,3 MiB com símbolos; a atribuição sob LTO fat é aproximada.
 
 | Crate                   | Fatia de `.text` |   Tamanho |
 | ----------------------- | ---------------: | --------: |
@@ -78,7 +80,7 @@ dependência sem uso, e o `tokio` habilita só as features que o runtime chama.
 
 ## Volume de código da migração para Rust
 
-`git diff -M50% --numstat origin/main...b2ee0c77`, classificado por caminho:
+`git diff -M50% --numstat origin/main...59a59156`, classificado por caminho:
 
 - **docs**: `docs/**` e qualquer `*.md`.
 - **generated**: caminhos sob `generated/`, `Cargo.lock`, `bun.lock`.
@@ -90,19 +92,19 @@ dependência sem uso, e o `tokio` habilita só as features que o runtime chama.
 
 | Tipo           | Linguagem             | Arquivos | Adicionadas | Removidas | Líquido |
 | -------------- | --------------------- | -------: | ----------: | --------: | ------: |
-| production     | TypeScript            |      889 |       5,596 |    40,556 | −34,960 |
-| production     | Rust                  |      179 |      64,079 |        25 | +64,054 |
-| production     | other                 |       39 |         882 |       469 |    +413 |
-| tests          | TypeScript            |      268 |      19,721 |    29,215 |  −9,494 |
-| tests          | Rust (test files)     |       49 |      23,072 |        16 | +23,056 |
-| tests          | Rust (inline modules) |      131 |      32,637 |         0 | +32,637 |
-| tests          | other                 |       20 |       4,401 |       177 |  +4,224 |
-| docs           | Markdown              |       39 |       1,683 |       480 |  +1,203 |
-| generated      | other                 |        8 |      25,217 |       245 | +24,972 |
-| **production** | todas                 |          |      70,557 |    41,050 | +29,507 |
-| **tests**      | todas                 |          |      79,831 |    29,408 | +50,423 |
-| **docs**       | todas                 |          |       1,683 |       480 |  +1,203 |
-| **generated**  | todas                 |          |      25,217 |       245 | +24,972 |
+| production     | TypeScript            |      892 |       6.071 |    40.631 | −34.560 |
+| production     | Rust                  |      180 |      64.404 |        25 | +64.379 |
+| production     | other                 |       39 |         883 |       469 |    +414 |
+| tests          | TypeScript            |      270 |      20.010 |    29.216 |  −9.206 |
+| tests          | Rust (test files)     |       49 |      23.072 |        16 | +23.056 |
+| tests          | Rust (inline modules) |      132 |      33.155 |         0 | +33.155 |
+| tests          | other                 |       20 |       4.401 |       177 |  +4.224 |
+| docs           | Markdown              |       40 |       1.772 |       489 |  +1.283 |
+| generated      | other                 |        8 |      25.217 |       245 | +24.972 |
+| **production** | todas                 |          |      71.358 |    41.125 | +30.233 |
+| **tests**      | todas                 |          |      80.638 |    29.409 | +51.229 |
+| **docs**       | todas                 |          |       1.772 |       489 |  +1.283 |
+| **generated**  | todas                 |          |      25.217 |       245 | +24.972 |
 
 A linha de módulos inline reconta linhas de arquivos Rust de production, então sua contagem de
 arquivos se sobrepõe à linha de Rust em production; as linhas dela são subtraídas lá. Um arquivo

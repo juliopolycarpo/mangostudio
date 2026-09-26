@@ -27,34 +27,35 @@ built once per release target in CI, so the smaller download wins.
 
 ## Binary size per target
 
-`runtime-build.yml` artifacts, uncompressed. Before: CI on the `feat/rust-runtime` head
-`72172b38` (merge ref `4be9c25e`, cargo's default release profile). After: CI on this
-profile, source `b2ee0c77` (merge ref `a400be5e`). Build times are the `runtime-build.yml`
-job durations of those runs, on shared GitHub-hosted runners.
+`runtime-build.yml` artifacts, uncompressed, both built on the same `feat/rust-runtime` source
+(`520a5bea`). Before: that branch's own CI run 36205909878, with cargo's default release
+profile. After: CI run 36205927848 for this profile on top of it (head `97c53736`, merge ref
+`877d447c`). Build times are the `runtime-build.yml` job durations of those runs, on shared
+GitHub-hosted runners.
 
 | Platform           | Before (bytes) | After (bytes) | Change | CI build before | CI build after |
 | ------------------ | -------------: | ------------: | -----: | --------------: | -------------: |
-| `linux-x64`        |     33,810,720 |    26,022,592 | −23.0% |           4m21s |          7m01s |
-| `linux-arm64`      |     30,824,608 |    22,709,960 | −26.3% |           5m04s |          6m07s |
-| `linux-x64-musl`   |     32,847,992 |    25,519,248 | −22.3% |           3m23s |          5m58s |
-| `linux-arm64-musl` |     29,967,520 |    22,208,256 | −25.9% |           5m06s |          6m58s |
-| `darwin-x64`       |     41,598,856 |    24,483,648 | −41.1% |           5m46s |          9m48s |
-| `darwin-arm64`     |     40,541,120 |    22,275,376 | −45.1% |           8m23s |         11m19s |
-| `windows-x64`      |     40,247,296 |    33,669,120 | −16.3% |           9m15s |         12m41s |
-| `windows-arm64`    |     33,764,352 |    28,660,224 | −15.1% |          10m33s |         14m08s |
-| **all 8**          |    283,602,464 |   205,548,424 | −27.5% |                 |                |
+| `linux-x64`        |     33,817,680 |    26,031,832 | −23.0% |           4m46s |          7m17s |
+| `linux-arm64`      |     30,815,272 |    22,716,960 | −26.3% |           3m43s |          7m22s |
+| `linux-x64-musl`   |     32,848,976 |    25,528,488 | −22.3% |           4m46s |          5m17s |
+| `linux-arm64-musl` |     29,962,288 |    22,215,192 | −25.9% |           5m01s |          6m38s |
+| `darwin-x64`       |     41,646,136 |    24,491,872 | −41.2% |           5m50s |         11m16s |
+| `darwin-arm64`     |     40,625,104 |    22,291,904 | −45.1% |           6m04s |          9m27s |
+| `windows-x64`      |     40,036,352 |    33,679,872 | −15.9% |           9m27s |         12m23s |
+| `windows-arm64`    |     33,780,736 |    28,668,928 | −15.1% |           9m50s |         13m41s |
+| **all 8**          |    283,532,544 |   205,625,048 | −27.5% |                 |                |
 
 Linux targets were already stripped before (zig's linker drops symbols), so their change is
 LTO and one codegen unit alone. The darwin binaries shrink most because the default profile
 left their symbol table in (about 88,000 symbols, against 251 now). A Windows executable
-carries no symbol table to strip, so its change is LTO alone. The fat-LTO build adds 1 to 4 minutes per target, well inside
-the job's 30-minute timeout.
+carries no symbol table to strip, so its change is LTO alone. The fat-LTO build adds between
+half a minute and five and a half minutes per target, well inside the job's 30-minute timeout.
 
 ## What the linux-x64 binary is made of
 
 `CARGO_PROFILE_RELEASE_STRIP=false cargo bloat --release --locked -p mangostudio-runtime --bin mangostudio-runtime --crates -n 20`
-on the shipped profile. The `.text` section is 18.8 MiB of a 34.3 MiB unstripped file;
-attribution under fat LTO is approximate.
+on the shipped profile, at the `72172b38` runtime source. The `.text` section is 18.8 MiB of a
+34.3 MiB unstripped file; attribution under fat LTO is approximate.
 
 | Crate                   | `.text` share |      Size |
 | ----------------------- | ------------: | --------: |
@@ -78,7 +79,7 @@ unused dependency, and `tokio` enables only the features the runtime calls.
 
 ## Code volume of the Rust migration
 
-`git diff -M50% --numstat origin/main...b2ee0c77`, classified by path:
+`git diff -M50% --numstat origin/main...59a59156`, classified by path:
 
 - **docs**: `docs/**` and any `*.md`.
 - **generated**: paths under `generated/`, `Cargo.lock`, `bun.lock`.
@@ -90,18 +91,18 @@ unused dependency, and `tokio` enables only the features the runtime calls.
 
 | Kind           | Language              | Files |  Added | Deleted |     Net |
 | -------------- | --------------------- | ----: | -----: | ------: | ------: |
-| production     | TypeScript            |   889 |  5,596 |  40,556 | −34,960 |
-| production     | Rust                  |   179 | 64,079 |      25 | +64,054 |
-| production     | other                 |    39 |    882 |     469 |    +413 |
-| tests          | TypeScript            |   268 | 19,721 |  29,215 |  −9,494 |
+| production     | TypeScript            |   892 |  6,071 |  40,631 | −34,560 |
+| production     | Rust                  |   180 | 64,404 |      25 | +64,379 |
+| production     | other                 |    39 |    883 |     469 |    +414 |
+| tests          | TypeScript            |   270 | 20,010 |  29,216 |  −9,206 |
 | tests          | Rust (test files)     |    49 | 23,072 |      16 | +23,056 |
-| tests          | Rust (inline modules) |   131 | 32,637 |       0 | +32,637 |
+| tests          | Rust (inline modules) |   132 | 33,155 |       0 | +33,155 |
 | tests          | other                 |    20 |  4,401 |     177 |  +4,224 |
-| docs           | Markdown              |    39 |  1,683 |     480 |  +1,203 |
+| docs           | Markdown              |    40 |  1,772 |     489 |  +1,283 |
 | generated      | other                 |     8 | 25,217 |     245 | +24,972 |
-| **production** | all                   |       | 70,557 |  41,050 | +29,507 |
-| **tests**      | all                   |       | 79,831 |  29,408 | +50,423 |
-| **docs**       | all                   |       |  1,683 |     480 |  +1,203 |
+| **production** | all                   |       | 71,358 |  41,125 | +30,233 |
+| **tests**      | all                   |       | 80,638 |  29,409 | +51,229 |
+| **docs**       | all                   |       |  1,772 |     489 |  +1,283 |
 | **generated**  | all                   |       | 25,217 |     245 | +24,972 |
 
 The inline-module row re-counts lines of production Rust files, so its file count overlaps the
