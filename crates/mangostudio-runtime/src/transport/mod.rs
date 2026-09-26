@@ -211,7 +211,10 @@ impl UpdateRestart {
         self.supervised
     }
 
-    /// Fires once a committed supervised update has had time to send its response.
+    /// Fires once a committed supervised update's answer was sent: the
+    /// connection's [`crate::update::AnswerWatch`] fires it when its
+    /// `AnswerReportingPort` reports that answer as [`SendOutcome::Sent`], or
+    /// when the session ends with the commit still unanswered.
     pub(crate) fn requested(&self) -> CancellationToken {
         self.requested.clone()
     }
