@@ -575,6 +575,7 @@ pub(super) fn run(
 mod windows {
     use super::scheduled_task::{SlotProcesses, TASK, ps_quote, verb_script};
     use super::*;
+    use crate::runtime_home::lock::is_windows_access_denied;
     use crate::runtime_home::slot_dir;
     use crate::slot_update_lock::SlotUpdateLock;
     use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -720,6 +721,15 @@ mod windows {
         }
     }
 
+    /// Waits, up to [`UPDATE_SETTLE`], for any runtime update to release the
+    /// remote slot, and claims it so none starts while the service stops.
+    ///
+    /// Retries while the slot is busy and, on the assumption that it is a
+    /// lock or reclaim marker still delete-pending behind another handle,
+    /// while a claim is denied access: [`SlotUpdateLock::acquire`]'s own
+    /// retries cover a short window, and this budget covers a longer one. A
+    /// denial that outlasts the budget is a real one and is returned with its
+    /// own message.
     fn settle_update(home: &Path) -> io::Result<SlotUpdateLock> {
         let slot = slot_dir(RuntimeSlot::Remote, home);
         let deadline = Instant::now() + UPDATE_SETTLE;
@@ -734,9 +744,7 @@ mod windows {
                 MANAGER_TIMEOUT,
             ) {
                 Ok(claim) => return Ok(claim),
-                Err(error)
-                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
-                {
+                Err(error) if settle_retries(&error) && Instant::now() < deadline => {
                     thread::sleep(Duration::from_millis(100))
                 }
                 Err(error) => {
@@ -749,6 +757,11 @@ mod windows {
                 }
             }
         }
+    }
+
+    /// Whether [`settle_update`] tries again after `error`, deadline allowing.
+    pub(super) fn settle_retries(error: &io::Error) -> bool {
+        error.kind() == io::ErrorKind::WouldBlock || is_windows_access_denied(error)
     }
 
     fn inspect_task_owner(home: &Path, exec: &impl Exec) -> io::Result<()> {
@@ -1041,6 +1054,31 @@ mod windows_tests {
         assert!(calls[1].find("Stop-ScheduledTask") < calls[1].find("Start-ScheduledTask"));
         assert!(calls[1].contains("AddMilliseconds("));
         assert!(!home.join("runtime/remote/runtime-update.lock").exists());
+    }
+
+    /// A settle waits out a busy slot and an access denial (a lock or
+    /// reclaim marker still delete-pending) alike; any other failure, such
+    /// as a denial reported without its OS code, ends it at once.
+    #[test]
+    fn a_settle_retries_a_busy_slot_and_an_access_denial_but_nothing_else() {
+        use super::windows::settle_retries;
+        let cases = [
+            ("busy", io::Error::from(io::ErrorKind::WouldBlock), true),
+            ("os error 5", io::Error::from_raw_os_error(5), true),
+            (
+                "denied without an OS code",
+                io::Error::new(io::ErrorKind::PermissionDenied, "not a delete-pending open"),
+                false,
+            ),
+            ("not found", io::Error::from(io::ErrorKind::NotFound), false),
+        ];
+        for (name, error, expected) in cases {
+            let received = settle_retries(&error);
+            assert_eq!(
+                received, expected,
+                "expected {name} retried: {expected} | received: {received}"
+            );
+        }
     }
 
     #[test]
