@@ -106,7 +106,7 @@ struct ServiceArgs {
     force: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ServiceAction {
     Install,
     Uninstall,

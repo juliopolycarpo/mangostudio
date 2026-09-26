@@ -262,8 +262,10 @@ What the CLI registers:
   The task command contains no credentials.
 
 `service stop`, `restart`, and `uninstall` wait for an active update to settle
-before stopping the task. The complete operation has a 30-second cap;
-`service stop --force` skips the installer wait.
+before stopping the task. `Stop-ScheduledTask` ends only the hidden runner, so
+each verb then ends the `cmd.exe` shim and the runtime the runner started, and
+fails rather than reporting success when either is still running. The complete
+operation has a 30-second cap; `service stop --force` skips the installer wait.
 
 Task Scheduler captures no output of its own, and the runtime's task does not
 redirect any, so there is no Windows equivalent of
