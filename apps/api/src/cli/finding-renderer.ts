@@ -82,6 +82,13 @@ export function renderFinding(finding: RenderableFinding): string {
     }
   }
 
+  // `not-found` is shared by runtimes and version managers, but its template
+  // names the subject `{runtime}`; a version manager's finding carries
+  // `manager` instead, so that name is the subject when no runtime is given.
+  if (params.runtime === undefined && params.manager !== undefined) {
+    params.runtime = params.manager;
+  }
+
   const template = environmentFindingTemplatesEn[finding.code];
   return template ? formatMessage(template, params) : finding.code;
 }
