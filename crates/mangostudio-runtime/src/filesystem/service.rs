@@ -28,6 +28,7 @@ use crate::ports::audit::lock;
 use crate::ports::authorization::consent_denial;
 use crate::registry::Registry;
 
+use crate::tool_argument::tool_argument;
 pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
 pub(super) const BYTE_VIEW_MAX_BYTES: usize = 256 * 1024;
 /// Most `fs.edit-file` matches counted for an ambiguity report; past it the
@@ -465,12 +466,12 @@ impl Service {
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         if params.old_string.is_empty() {
-            return Err(argument(
+            return Err(tool_argument(
                 "oldString must not be empty. Use create_file for a new file, or provide existing text to replace.",
             ));
         }
         if params.old_string == params.new_string {
-            return Err(argument("oldString and newString must be different."));
+            return Err(tool_argument("oldString and newString must be different."));
         }
         let paths = vec![params.resolved_path.clone()];
         let locks = self.state.locks.clone();
@@ -486,7 +487,7 @@ impl Service {
                 .map_err(|error| io::explain_unread(&policy, &params.resolved_path, "edit", error))?;
             let replace_all = params.replace_all.unwrap_or(false);
             let count = edit_match_count(&observed.bytes, params.old_string.as_bytes(), replace_all);
-            if count == 0 { return Err(argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
+            if count == 0 { return Err(tool_argument(format!("The text to replace was not found in \"{}\". Re-read the file — it may have changed, or adjust oldString to match exactly (including whitespace).", params.input_path))); }
             if count > 1 && !replace_all { return Err(ambiguous_edit_error(count)); }
             let replacement_count = if replace_all { count } else { 1 };
             let projected_bytes = if params.new_string.len() >= params.old_string.len() {
@@ -500,12 +501,12 @@ impl Service {
             };
             let Some(projected_bytes) = projected_bytes.filter(|size| *size <= READ_MAX_BYTES) else {
                 let received = projected_bytes.map_or_else(|| "an overflowing byte length".to_owned(), |size| format!("{size} bytes"));
-                return Err(argument(format!("Cannot edit \"{}\": the replacement would produce {received}; expected at most {READ_MAX_BYTES} bytes so the result remains readable by fs.read-file.", params.input_path)));
+                return Err(tool_argument(format!("Cannot edit \"{}\": the replacement would produce {received}; expected at most {READ_MAX_BYTES} bytes so the result remains readable by fs.read-file.", params.input_path)));
             };
             let (updated, replaced, first) = text::replace_matches(&observed.bytes, params.old_string.as_bytes(), params.new_string.as_bytes(), replace_all);
             debug_assert_eq!(updated.len(), projected_bytes);
             debug_assert_eq!(replaced, replacement_count);
-            if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
+            if text::looks_binary(&updated) { return Err(tool_argument(format!("Refusing to edit \"{}\": newString contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let written = ContentDigest::of(&updated);
             let expected_hash = &written.sha256;
             let result = mutation_result(json!({"path":params.input_path,"replacements":replaced,"firstChangedLine":first,"sha256":expected_hash}), &params.mutation, &params.resolved_path,"edit",Some(&observed.bytes),expected_hash,None);
@@ -551,7 +552,7 @@ impl Service {
             let total = text::total_lines(&observed.bytes);
             let (start, end) = validated_range(&params, total)?;
             let updated = text::replace_range(&observed.bytes,start,end,params.content.as_bytes());
-            if text::looks_binary(&updated) { return Err(argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
+            if text::looks_binary(&updated) { return Err(tool_argument(format!("Refusing to edit \"{}\": content contains a NUL byte, which would make the file unreadable by read_file and leave it unrecoverable by the file tools.",params.input_path))); }
             let written = ContentDigest::of(&updated);
             let expected_hash = &written.sha256;
             let replaced = end-start+1;
@@ -854,7 +855,7 @@ fn ambiguous_edit_error(count: usize) -> RemoteError {
     } else {
         count.to_string()
     };
-    argument(format!(
+    tool_argument(format!(
         "Found {found} occurrences. Provide a longer oldString with more surrounding context to make it unique, or set replaceAll: true."
     ))
 }
@@ -874,10 +875,6 @@ fn blocked_create_parent(params: &WriteParams, error: RemoteError) -> RemoteErro
         "Cannot create \"{}\": \"{blocker}\" is not a directory.",
         params.input_path
     ))
-}
-
-pub(super) fn argument(message: impl Into<String>) -> RemoteError {
-    RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
 pub(super) fn snapshot_limit(path: &Path, size: u64) -> Result<(), RemoteError> {
@@ -948,7 +945,7 @@ fn validated_range(params: &RangeParams, total: usize) -> Result<(usize, usize),
     if whole(start) && whole(end) && start >= 1.0 && start <= end && end <= total as f64 {
         return Ok((start as usize, end as usize));
     }
-    Err(argument(format!(
+    Err(tool_argument(format!(
         "Invalid line range {}-{} for \"{}\" ({total} lines). Expected 1 <= startLine <= endLine <= {total}.",
         js_number(start),
         js_number(end),
@@ -967,7 +964,7 @@ fn js_number(value: f64) -> String {
 
 fn positive_integer(value: f64, name: &str) -> Result<usize, RemoteError> {
     if value < 1.0 || value.fract() != 0.0 || value > ALL_LINES_VALID as f64 {
-        return Err(argument(format!(
+        return Err(tool_argument(format!(
             "Invalid {name} {value}. Expected a positive safe integer."
         )));
     }

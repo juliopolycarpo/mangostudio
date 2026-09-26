@@ -16,8 +16,9 @@ use super::{
     params::Mutation,
     patch::{self, V4aUpdateHunk},
     policy::CompiledPolicy,
-    service::{Service, argument, preflight_response, run_locked, snapshot_record},
+    service::{Service, preflight_response, run_locked, snapshot_record},
 };
+use crate::tool_argument::tool_argument;
 use crate::{blocking::run_blocking, ports::audit::lock};
 
 /// Decoded parameters for `fs.apply-patch`.
@@ -184,7 +185,7 @@ fn plan_operation(
             hunks,
         } => {
             if move_to.is_some() != resolved_move_to.is_some() {
-                return Err(argument(format!(
+                return Err(tool_argument(format!(
                     "Invalid move fields for \"{input_path}\": received moveTo={} and resolvedMoveTo={}; expected both fields or neither.",
                     move_to.is_some(),
                     resolved_move_to.is_some()
@@ -207,7 +208,7 @@ fn plan_operation(
                 .strip_prefix('\u{feff}')
                 .map_or(("", source), |text| ("\u{feff}", text));
             let applied = patch::apply_update_hunks(visible_source, hunks, input_path)
-                .map_err(|error| argument(error.to_string()))?;
+                .map_err(|error| tool_argument(error.to_string()))?;
             let content = format!("{bom}{}", applied.content);
             assert_text(&content, input_path)?;
             if let Some(destination) = resolved_move_to {
@@ -724,7 +725,8 @@ fn read_patch_target(
 }
 
 fn assert_text(content: &str, input_path: &str) -> Result<(), RemoteError> {
-    patch::assert_text_content(content, input_path).map_err(|error| argument(error.to_string()))
+    patch::assert_text_content(content, input_path)
+        .map_err(|error| tool_argument(error.to_string()))
 }
 
 fn assert_no_path_conflicts(planned: &[PlannedOperation]) -> Result<(), RemoteError> {
@@ -748,7 +750,7 @@ fn assert_no_path_conflicts(planned: &[PlannedOperation]) -> Result<(), RemoteEr
     if failures.is_empty() {
         Ok(())
     } else {
-        Err(argument(format!(
+        Err(tool_argument(format!(
             "Patch could not be applied:\n{}",
             failures
                 .into_iter()
@@ -768,7 +770,7 @@ fn operation_failures(mut failures: Vec<(String, RemoteError)>) -> RemoteError {
         );
         return error;
     }
-    argument(format!(
+    tool_argument(format!(
         "Patch could not be applied:\n{}",
         failures
             .into_iter()

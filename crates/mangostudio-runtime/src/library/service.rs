@@ -33,6 +33,7 @@ use crate::probing::detection::path_env::PathEnv;
 use crate::probing::host::{RealLocationFsProbe, build_runtime_path_env};
 use crate::probing::locations::{LOCATION_DEFINITIONS, describe_location};
 use crate::registry::Registry;
+use crate::tool_argument::tool_argument;
 
 /// `RuntimeLibraryPathEnvParams`: variables merged over this host's own
 /// environment. `workspaceRoot` is accepted and unused — no registered
@@ -103,10 +104,6 @@ pub(crate) struct LibraryService {
     pub consent: Arc<ConsentSource>,
     pub path_env: PathEnvFactory,
     pub scan: ScanDeps,
-}
-
-pub(crate) fn tool_argument(message: String) -> RemoteError {
-    RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
 fn unresolved(location_id: &str) -> String {

@@ -31,6 +31,7 @@ use mango_external_agents as sdk;
 use mango_protocol::error::{RemoteError, codes};
 
 use super::wire::{self, TargetId};
+use crate::tool_argument::tool_argument;
 
 /// The only ACP profile the product drives.
 const CURSOR_PROFILE: &str = "cursor";
@@ -905,11 +906,11 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
     match cause {
         sdk::Error::Busy => busy(message),
         sdk::Error::NotSupported { capability } => {
-            argument(message).with_detail("capability", capability.to_string())
+            tool_argument(message).with_detail("capability", capability.to_string())
         }
         sdk::Error::UnsupportedTransport { .. }
         | sdk::Error::HostConfiguration { .. }
-        | sdk::Error::LimitExceeded { .. } => argument(message),
+        | sdk::Error::LimitExceeded { .. } => tool_argument(message),
         sdk::Error::VersionGate { minimum, .. } => external(
             codes::UNAVAILABLE,
             message,
@@ -940,11 +941,6 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
             .with_detail("reason", cancel_reason_name(*reason)),
         _ => external(codes::INTERNAL, message, "external_agent_failure"),
     }
-}
-
-/// A caller mistake: `INTERNAL` with `kind: tool_argument`.
-pub(super) fn argument(message: String) -> RemoteError {
-    RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
 /// A session still running a turn: transient, so retryable.

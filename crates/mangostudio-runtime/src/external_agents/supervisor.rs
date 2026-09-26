@@ -56,6 +56,7 @@ use crate::consent::read::{ConsentRead, ConsentReader};
 use crate::ports::wall_clock::epoch_millis;
 use crate::probing::detection::path_env::PathEnv;
 
+use crate::tool_argument::tool_argument;
 /// How many sessions may be live or opening at once, as in the TS host.
 pub(crate) const DEFAULT_SESSION_CAP: usize = 4;
 /// How often a live or opening session re-reads `externalAgents` consent.
@@ -518,7 +519,7 @@ impl Supervisor {
     pub(super) fn require_live(&self, session_id: &str) -> Result<Arc<LiveSession>, RemoteError> {
         match self.slots().get(session_id) {
             Some(Slot::Live(live)) if !live.closing.load(Ordering::Acquire) => Ok(Arc::clone(live)),
-            _ => Err(argument(format!(
+            _ => Err(tool_argument(format!(
                 "External-agent session {session_id:?} is not open; expected an open session id."
             ))),
         }
@@ -627,7 +628,7 @@ impl Supervisor {
         cancel: &CancellationToken,
     ) -> Result<OpenResult, RemoteError> {
         if self.shutdown.is_cancelled() {
-            return Err(argument(
+            return Err(tool_argument(
                 "The external-agent supervisor is closed; expected a live runtime session.",
             ));
         }
@@ -682,7 +683,7 @@ impl Supervisor {
         };
         if let Some((target, admission)) = existing_target {
             if target != params.target_id {
-                return Err(argument(format!(
+                return Err(tool_argument(format!(
                     "External-agent session {:?} already belongs to target {:?}; expected {:?}.",
                     params.session_id,
                     target.as_str(),
@@ -692,12 +693,12 @@ impl Supervisor {
             return Ok(admission);
         }
         if self.shutdown.is_cancelled() {
-            return Err(argument(
+            return Err(tool_argument(
                 "The external-agent supervisor is closed; expected a live runtime session.",
             ));
         }
         if slots.len() >= self.ports.session_cap {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "External-agent session capacity is {}; close a session before opening another.",
                 self.ports.session_cap
             )));
@@ -749,7 +750,7 @@ impl Supervisor {
                 .resolve(target, &cancel)
                 .await
                 .ok_or_else(|| {
-                    argument(format!(
+                    tool_argument(format!(
                         "External-agent executable for {:?} is not installed; expected an installed target.",
                         target.as_str()
                     ))
@@ -1046,7 +1047,7 @@ impl Supervisor {
             stopped_before_launch(cancel, &host_cancel)?;
             match harness.list_sessions(&host, query).await {
                 Ok(page) => Ok(map::native_sessions(target, page)),
-                Err(SdkError::NotSupported { .. }) => Err(argument(format!(
+                Err(SdkError::NotSupported { .. }) => Err(tool_argument(format!(
                     "External-agent target {:?} cannot list sessions; expected a target with session listing.",
                     target.as_str()
                 ))),
@@ -1115,7 +1116,7 @@ impl Supervisor {
             _ => return Ok(None),
         };
         if live.target != target {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "Session {session_id:?} belongs to {:?}; expected {:?}.",
                 live.target.as_str(),
                 target.as_str()
@@ -1135,18 +1136,18 @@ impl Supervisor {
         let canonical = crate::blocking::run_blocking(move || crate::workspace_path::canonical_directory(&requested))
         .await
         .ok_or_else(|| {
-            argument(format!(
+            tool_argument(format!(
                 "External-agent workspace {input:?} is not a directory; expected an existing directory."
             ))
         })?;
         if path_text(&canonical) != input {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "External-agent workspace {input:?} is not canonical; expected {:?}.",
                 path_text(&canonical)
             )));
         }
         if !self.ports.workspaces.authorize(hub, &canonical).await {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "External-agent workspace {input:?} is not authorized for this session; expected a workspace the runtime owner authorized."
             )));
         }
@@ -1381,7 +1382,7 @@ pub(super) fn refuse_unoffered_configuration(
     if target == TargetId::Cursor
         && configuration.routing == super::wire::ApprovalRouting::AutoReview
     {
-        return Err(argument(
+        return Err(tool_argument(
             "External-agent target \"cursor\" does not offer auto-review routing; expected routing \"user\".",
         ));
     }
@@ -1479,10 +1480,6 @@ fn without_detail(mut error: RemoteError, key: &str) -> RemoteError {
 
 fn remove_scratch(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir);
-}
-
-pub(super) fn argument(message: impl Into<String>) -> RemoteError {
-    RemoteError::new(codes::INTERNAL, message).with_detail("kind", "tool_argument")
 }
 
 #[cfg(test)]

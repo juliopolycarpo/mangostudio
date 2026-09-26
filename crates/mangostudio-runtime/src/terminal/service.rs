@@ -27,6 +27,7 @@ use crate::ports::authorization::consent_denial;
 use crate::probing::detection::path_env::PathEnv;
 use crate::registry::Registry;
 use crate::subprocess::LaunchCheck;
+use crate::tool_argument::invalid_argument;
 
 const MAX_TERMINAL_SESSIONS: usize = 16;
 // The PTY pool is process-wide; a smaller one refuses, with `UNAVAILABLE`, a session this
@@ -187,7 +188,7 @@ impl Service {
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner());
             if sessions.contains_key(&id) {
-                return Err(argument(
+                return Err(invalid_argument(
                     &format!("sessionId={id:?}"),
                     "a fresh terminal session id",
                 ));
@@ -206,8 +207,9 @@ impl Service {
         let host = (self.host)();
         let prepared = run_blocking(move || prepare(params, host)).await?;
         let flow = Arc::new(Mutex::new(
-            TerminalFlow::new(prepared.scrollback_bytes)
-                .map_err(|message| argument(&message, "a positive scrollback byte count"))?,
+            TerminalFlow::new(prepared.scrollback_bytes).map_err(|message| {
+                invalid_argument(&message, "a positive scrollback byte count")
+            })?,
         ));
         let on_data = {
             let flow = Arc::clone(&flow);
@@ -345,11 +347,11 @@ impl Service {
 
     async fn write(&self, params: WriteParams) -> Result<Value, RemoteError> {
         let entry = self.require(&params.session_id)?;
-        let data = STANDARD
-            .decode(params.data.as_bytes())
-            .map_err(|_| argument("data=[invalid base64]", "base64-encoded terminal input"))?;
+        let data = STANDARD.decode(params.data.as_bytes()).map_err(|_| {
+            invalid_argument("data=[invalid base64]", "base64-encoded terminal input")
+        })?;
         if data.len() > MAX_WRITE_BYTES {
-            return Err(argument(
+            return Err(invalid_argument(
                 &format!("data={} raw bytes", data.len()),
                 &format!("at most {MAX_WRITE_BYTES} raw terminal input bytes"),
             ));
@@ -649,7 +651,7 @@ impl LaunchCheck for FreshLaunch {
         if let Some(cwd) = &self.cwd
             && !std::fs::metadata(cwd).is_ok_and(|metadata| metadata.is_dir())
         {
-            return Err(argument(
+            return Err(invalid_argument(
                 &format!("cwd={cwd:?}"),
                 "an existing terminal working directory",
             ));
@@ -717,7 +719,10 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         None => SCROLLBACK_MAX_BYTES,
     };
     if scrollback_bytes == 0 {
-        return Err(argument("scrollbackBytes=0", "a positive byte count"));
+        return Err(invalid_argument(
+            "scrollbackBytes=0",
+            "a positive byte count",
+        ));
     }
     let shell = params.shell.unwrap_or_else(|| default_shell(&host));
     let program = shell_program(shell, &host)?;
@@ -851,7 +856,7 @@ fn size(value: f64, min: u16, max: u16, name: &str) -> Result<u16, RemoteError> 
         || value < f64::from(min)
         || value > f64::from(max)
     {
-        return Err(argument(
+        return Err(invalid_argument(
             &format!("{name}={value}"),
             &format!("an integer from {min} through {max}"),
         ));
@@ -861,7 +866,7 @@ fn size(value: f64, min: u16, max: u16, name: &str) -> Result<u16, RemoteError> 
 
 fn count(value: f64, name: &str) -> Result<usize, RemoteError> {
     if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > usize::MAX as f64 {
-        return Err(argument(
+        return Err(invalid_argument(
             &format!("{name}={value}"),
             "a nonnegative finite integer byte count",
         ));
@@ -871,19 +876,11 @@ fn count(value: f64, name: &str) -> Result<usize, RemoteError> {
 
 fn decode<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, RemoteError> {
     serde_json::from_value(value).map_err(|error| {
-        argument(
+        invalid_argument(
             &format!("params={error}"),
             "the terminal method's declared object shape",
         )
     })
-}
-
-fn argument(value: &str, expected: &str) -> RemoteError {
-    RemoteError::new(
-        codes::INTERNAL,
-        format!("Invalid {value}; expected {expected}."),
-    )
-    .with_detail("kind", "tool_argument")
 }
 
 fn not_found(id: &str) -> RemoteError {
@@ -919,7 +916,7 @@ fn start_error(error: PtyError) -> RemoteError {
         PtyError::LimitExceeded => {
             RemoteError::new(codes::UNAVAILABLE, "Terminal process capacity is full.")
         }
-        PtyError::InvalidSize { cols, rows } => argument(
+        PtyError::InvalidSize { cols, rows } => invalid_argument(
             &format!("size={cols}x{rows}"),
             "a size within the terminal's column and row limits",
         ),

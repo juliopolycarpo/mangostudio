@@ -38,8 +38,9 @@ use mango_external_agents as sdk;
 use mango_external_agents::normalize::{self, APPROVAL_MAX_OPTIONS, BoundedText, TextLimit};
 use mango_protocol::error::RemoteError;
 
-use super::map::{self, argument, epoch_ms};
+use super::map::{self, epoch_ms};
 use super::wire::{self, TargetId};
+use crate::tool_argument::tool_argument;
 
 /// The `optionId` an `approval_resolved` carries for a question that ended
 /// without a choice: expired, cancelled, refused or declined.
@@ -285,7 +286,7 @@ pub(crate) fn answer(pending: &PendingInteraction, option_id: &str) -> Result<An
 
 fn unknown_option<'a>(received: &str, offered: impl Iterator<Item = &'a String>) -> RemoteError {
     let offered: Vec<&str> = offered.map(String::as_str).collect();
-    argument(format!(
+    tool_argument(format!(
         "optionId \"{received}\" is not an option this request offered; expected one of {offered:?}."
     ))
 }

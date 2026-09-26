@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mango_protocol::error::{RemoteError, codes};
+use mango_protocol::error::RemoteError;
 use mango_protocol::session::{CallContext, EventInput, Session};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -32,6 +32,7 @@ use crate::subprocess::{
     DefaultProcessSpawner, LaunchCheck, ProcessBudget, ProcessControl, ProcessOutputChunk,
     ProcessOutputTap, ProcessRequest, ProcessSpawner, ProcessStartError, ProcessStream,
 };
+use crate::tool_argument::invalid_argument;
 
 #[cfg(test)]
 mod tests;
@@ -224,7 +225,7 @@ impl RunPlan {
     /// Validates the request shape before any reservation or effect.
     fn new(params: RunParams) -> Result<Self, RemoteError> {
         if params.argv.is_empty() {
-            return Err(argument(
+            return Err(invalid_argument(
                 "argv=[]",
                 "a non-empty argv naming the installer to execute",
             ));
@@ -240,7 +241,7 @@ impl RunPlan {
                 (bytes.floor() as usize, js_number(bytes))
             }
             Some(bytes) => {
-                return Err(argument(
+                return Err(invalid_argument(
                     &format!("outputLimitBytes={bytes}"),
                     "a finite non-negative byte count",
                 ));
@@ -281,7 +282,7 @@ impl Service {
         claim: EffectClaim,
     ) -> Result<Value, RemoteError> {
         let params: RunParams = serde_json::from_value(params).map_err(|_| {
-            argument(
+            invalid_argument(
                 "params=[redacted]",
                 "a run id, argv, numeric timeout and log path",
             )
@@ -292,7 +293,7 @@ impl Service {
             .runs
             .reserve(&plan.run_id)
             .map_err(|AlreadyActive| {
-                argument(
+                invalid_argument(
                     &format!("runId={:?}", plan.run_id),
                     "a run id that is not already active",
                 )
@@ -326,7 +327,7 @@ impl Service {
     /// `install.cancel`: a machine mutation, so it stops the chain rather than killing a step.
     fn cancel(&self, params: Value) -> Result<Value, RemoteError> {
         let params: CancelParams = serde_json::from_value(params)
-            .map_err(|_| argument("params=[redacted]", "a run id to cancel"))?;
+            .map_err(|_| invalid_argument("params=[redacted]", "a run id to cancel"))?;
         self.ports.runs.stop(&params.run_id, StopReason::Cancelled);
         Ok(json!({ "ok": true }))
     }
@@ -760,7 +761,7 @@ impl RunOutput {
 
 fn positive_duration(milliseconds: f64) -> Result<Duration, RemoteError> {
     let invalid = || {
-        argument(
+        invalid_argument(
             &format!("timeoutMs={milliseconds}"),
             "a positive finite duration the platform clock can represent",
         )
@@ -781,12 +782,4 @@ fn js_number(value: f64) -> String {
         return format!("{}", value as i128);
     }
     format!("{value}")
-}
-
-fn argument(value: &str, expected: &str) -> RemoteError {
-    RemoteError::new(
-        codes::INTERNAL,
-        format!("Invalid {value}; expected {expected}."),
-    )
-    .with_detail("kind", "tool_argument")
 }

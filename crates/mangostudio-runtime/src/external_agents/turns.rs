@@ -37,7 +37,7 @@ use tokio::sync::watch;
 
 use super::map;
 use super::map_events::{self, Answer, PendingInteraction};
-use super::supervisor::{CloseCause, LiveSession, Supervisor, argument};
+use super::supervisor::{CloseCause, LiveSession, Supervisor};
 use super::wire::{
     AckResult, AgentError, Attachment, AttachmentKind, CancelParams, Event, EventEnvelope,
     RespondParams, StartReviewParams, StartReviewResult, SteerParams, SteerRejection, SteerResult,
@@ -45,6 +45,7 @@ use super::wire::{
 };
 use crate::ports::wall_clock::epoch_millis;
 
+use crate::tool_argument::tool_argument;
 /// The topic every turn event travels on.
 pub(crate) const EVENT_TOPIC: &str = "external-agent.event";
 /// `EXTERNAL_TURN_PAYLOAD_MAX_BYTES`: what the hub will persist for one turn.
@@ -265,7 +266,7 @@ impl Supervisor {
         let attachments = sdk_attachments(params.attachments.as_deref().unwrap_or_default())?;
         for root in &params.configuration.workspace_roots {
             if !live.authorized_roots.contains(root) {
-                return Err(argument(format!(
+                return Err(tool_argument(format!(
                     "External-agent workspace root {root:?} was not authorized when session {:?} opened; expected one of its opened roots.",
                     params.session_id
                 )));
@@ -321,7 +322,7 @@ impl Supervisor {
             .require_capability(Capability::NativeReview)
             .is_err()
         {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "External-agent target {:?} cannot start a native review; expected a target with native review.",
                 live.target.as_str()
             )));
@@ -404,7 +405,7 @@ impl Supervisor {
                 .err()
                 .map(|failure| format!(" Closing it also failed: {}", failure.message))
                 .unwrap_or_default();
-            return argument(format!(
+            return tool_argument(format!(
                 "External-agent session {:?} can no longer run turns ({error}); expected a new session.{cleanup}",
                 live.session_id
             ));
@@ -518,7 +519,7 @@ impl Supervisor {
         match live.turns.active_native_turn() {
             Some((_, native)) if native == params.native_turn_id => {}
             _ => {
-                return Err(argument(format!(
+                return Err(tool_argument(format!(
                     "External-agent turn {:?} is not running on session {:?}; expected the session's running turn.",
                     params.native_turn_id, params.session_id
                 )));
@@ -528,7 +529,7 @@ impl Supervisor {
             .get(&params.request_id)
             .cloned();
         let Some(pending) = pending else {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "External-agent request {:?} is not pending; expected an open approval of the running turn.",
                 params.request_id
             )));
@@ -827,7 +828,7 @@ fn bounded_native_turn_id(stream: &TurnStream) -> Result<String, RemoteError> {
 /// carries the stream's dispatch: the vendor may already be running it.
 fn admissible_review(live: &LiveSession, review: &ReviewStream) -> Result<String, RemoteError> {
     if review.review_thread_id != live.session.ids().native_session_id {
-        return Err(argument(format!(
+        return Err(tool_argument(format!(
             "External-agent review on session {:?} ran on another vendor thread than the session's; expected a review on the session's own thread.",
             live.session_id
         ))
@@ -872,7 +873,7 @@ fn admit(
     let mut receipts = lock(&live.turns.receipts);
     if let Some(receipt) = receipts.get(client_message_id) {
         if receipt.kind != kind || receipt.fingerprint != fingerprint {
-            return Err(argument(format!(
+            return Err(tool_argument(format!(
                 "clientMessageId {client_message_id:?} was reused with different turn input; expected the input it was first sent with."
             )));
         }
@@ -966,7 +967,7 @@ fn sdk_attachments(attachments: &[Attachment]) -> Result<Vec<SdkAttachment>, Rem
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(&attachment.bytes_base64)
                 .map_err(|_| {
-                    argument(format!(
+                    tool_argument(format!(
                         "Attachment {:?} is not valid base64; expected the bytes the hub encoded.",
                         attachment.id
                     ))

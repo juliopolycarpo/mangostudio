@@ -52,6 +52,7 @@ use super::host;
 use super::locations::{self, LocationStatus};
 use crate::ports::wall_clock::epoch_millis;
 use crate::registry::Registry;
+use crate::tool_argument::tool_argument;
 
 /// Registers `probing.runtimes`, `probing.version-managers`, and
 /// `probing.agent-clis` on `registry`.
@@ -163,11 +164,7 @@ fn cancelled_error(method: &str) -> RemoteError {
 /// declared kinds — the closest match this crate's own error vocabulary
 /// offers, and the one this handler's own reference actually uses.
 fn unknown_id_error(label: &str, unknown: &[String]) -> RemoteError {
-    RemoteError::new(
-        codes::INTERNAL,
-        format!("Unknown {label}: {}.", unknown.join(", ")),
-    )
-    .with_detail("kind", "tool_argument")
+    tool_argument(format!("Unknown {label}: {}.", unknown.join(", ")))
 }
 
 fn build_binary_scan_options(budget: &Option<ProbeBudget>) -> BinaryScanOptions {

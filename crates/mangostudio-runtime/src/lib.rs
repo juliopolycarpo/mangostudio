@@ -156,6 +156,7 @@ pub mod supervisor;
 pub mod terminal;
 #[cfg(test)]
 pub(crate) mod test_support;
+mod tool_argument;
 pub mod transport;
 mod update;
 mod update_transfer;
