@@ -10,7 +10,10 @@ import type {
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
 import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
-import type { RuntimeUpdateCommitResult } from '@mangostudio/shared/runtime-contract';
+import {
+  RUNTIME_UPDATE_EXIT_CODE,
+  type RuntimeUpdateCommitResult,
+} from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
@@ -284,6 +287,8 @@ interface ProvisionedRustServe {
   readonly mangoHome: string;
   readonly baseUrl: string;
   readonly runtimeVersion: string;
+  /** Resolves to the `serve` process's exit code. */
+  readonly exited: Promise<number>;
   /** Where a committed update lands for this slot on this platform. */
   publishedBinaryPath(version: string): string;
 }
@@ -294,9 +299,10 @@ interface ProvisionedRustServe {
  *
  * Running from the slot's version directory is what makes it report
  * `source: "provisioned"`, the one source the hub offers a live update to.
- * `serve` always answers as the `remote` slot, is never supervised (so it
- * commits with `restart: "manual"`), and has no `current` until an update
- * publishes one.
+ * `serve` always answers as the `remote` slot and has no `current` until an
+ * update publishes one. A binary running from a slot is the one a user service
+ * relaunches, so a committed update answers `restart: "scheduled"` and the
+ * process exits with the update code; nothing here relaunches it.
  *
  * @example
  * const peer = await serveProvisionedRustRuntime('http-live-update');
@@ -349,6 +355,7 @@ async function serveProvisionedRustRuntime(environmentId: string): Promise<Provi
     mangoHome,
     baseUrl: `http://127.0.0.1:${port}`,
     runtimeVersion,
+    exited: serve.exited,
     publishedBinaryPath: (version) =>
       process.platform === 'win32'
         ? runtimeSlotVersionBinaryPath('remote', version, { mangoHome, platform: process.platform })
@@ -1633,11 +1640,13 @@ describe('environment entity routes', () => {
     await manager.closeAll();
   });
 
-  // Real runtime behaviour: what lands on the peer's disk, and the restart
-  // answer an unsupervised peer gives. Served by the Rust binary from inside a
-  // slot, dialled over the same Direct URL transport a LAN runtime uses.
+  // Real runtime behaviour: what lands on the peer's disk, and the handoff to
+  // the supervisor a slot runtime asks for. Served by the Rust binary from
+  // inside a slot, dialled over the same Direct URL transport a LAN runtime
+  // uses. No supervisor relaunches it here, so the run is cancelled once the
+  // hub is waiting for the restart.
   it.skipIf(skipWithoutRustBinary(rustBinary, 'environment-entities'))(
-    'updates a connected runtime over its existing protocol connection',
+    'hands a live update over its existing protocol connection to the supervisor',
     async () => {
       const peer = await serveProvisionedRustRuntime('http-live-update');
       const bytes = new TextEncoder().encode('verified-runtime-binary');
@@ -1692,15 +1701,33 @@ describe('environment entity routes', () => {
       const log = await app.handle(
         new Request(`http://localhost/environments/http-live-update/runtime/runs/${runId}/log`)
       );
-      const body = await log.text();
-
-      expect(body).toContain('"status":"succeeded"');
-      expect(body).toContain('Restart this manually launched runtime');
+      const reader = (log.body as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      let body = '';
+      while (!body.includes('waiting for the supervised restart')) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        body += decoder.decode(chunk.value, { stream: true });
+      }
+      expect(body).toContain('waiting for the supervised restart');
+      expect(await peer.exited).toBe(RUNTIME_UPDATE_EXIT_CODE);
       // The exact identity the peer reported, not one the hub derived.
       expect(loadedPlatformId).toBe(reportedPlatformId);
       expect(await publishedAt(peer.publishedBinaryPath(getVersion()))).toBe(
         'verified-runtime-binary'
       );
+
+      const cancelled = await app.handle(
+        new Request(
+          `http://localhost/environments/http-live-update/runtime/runs/${runId}/cancel`,
+          jsonRequest('POST')
+        )
+      );
+      expect(cancelled.status).toBe(200);
+      for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+        body += decoder.decode(chunk.value, { stream: true });
+      }
+      expect(body).toContain('"status":"cancelled"');
       await manager.closeAll();
     },
     60_000
