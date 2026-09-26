@@ -10,7 +10,7 @@
 //   bun ./scripts/ci/rust-lanes.ts list
 //     Prints both suites, one path per line, for a local look.
 //
-// Dependency-free (Node built-ins only); runs without `bun install`.
+// Dependency-free (Bun and Node built-ins only); runs without `bun install`.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
