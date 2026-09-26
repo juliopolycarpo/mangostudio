@@ -18,6 +18,7 @@ import {
   locateLocalRuntimeBinary,
   RuntimeBinaryNotFoundError,
   resolveRuntimeLaunchCommand,
+  workspaceCargoTargetDir,
 } from '../../../src/lib/runtime-paths';
 
 const originalExecPath = process.execPath;
@@ -93,6 +94,27 @@ describe('runtime paths', () => {
     setExecPath('/usr/bin/bun');
 
     expect(getSourceFrontendDir()).toBe(join(tempDir, 'apps', 'frontend', 'dist'));
+  });
+
+  describe('workspaceCargoTargetDir', () => {
+    it('resolves CARGO_TARGET_DIR against the checkout, and <root>/target without it', () => {
+      const root = join(tempDir, 'checkout');
+      const shared = join(tempDir, 'shared-target');
+
+      const received = {
+        unset: workspaceCargoTargetDir(root, {}),
+        blank: workspaceCargoTargetDir(root, { CARGO_TARGET_DIR: '  ' }),
+        relative: workspaceCargoTargetDir(root, { CARGO_TARGET_DIR: join('moved', 'target') }),
+        absolute: workspaceCargoTargetDir(root, { CARGO_TARGET_DIR: shared }),
+      };
+
+      expect(received).toEqual({
+        unset: join(root, 'target'),
+        blank: join(root, 'target'),
+        relative: join(root, 'moved', 'target'),
+        absolute: shared,
+      });
+    });
   });
 
   describe('resolveRuntimeLaunchCommand', () => {

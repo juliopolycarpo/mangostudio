@@ -9,7 +9,8 @@
  *
  * `MANGOSTUDIO_FAKE_CURSOR_AGENT` names the exact binary CI built, in the same
  * way `MANGOSTUDIO_RUNTIME_BINARY` names the runtime. Locally, this falls back to
- * `target/debug/examples/fake_cursor_agent`, which
+ * `debug/examples/fake_cursor_agent` under the checkout's cargo target directory
+ * (`CARGO_TARGET_DIR` when set), which
  * `cargo build -p mangostudio-runtime --example fake_cursor_agent` produces.
  */
 
@@ -23,6 +24,7 @@ import type {
   MessagePart,
 } from '@mangostudio/shared/types';
 import { getDb } from '../../../src/db/database';
+import { workspaceCargoTargetDir } from '../../../src/lib/runtime-paths';
 import { createExternalApprovalRegistry } from '../../../src/modules/external-agents/application/external-approval-registry';
 import { createExternalCommandCatalogCache } from '../../../src/modules/external-agents/application/external-command-catalog-cache';
 import { createExternalSessionManager } from '../../../src/modules/external-agents/application/external-session-manager';
@@ -35,8 +37,9 @@ import type { RuntimeClient } from '../../../src/services/runtime-client/runtime
 const executable = (name: string) => (process.platform === 'win32' ? `${name}.exe` : name);
 
 const FALLBACK_FAKE_CURSOR_AGENT = join(
-  import.meta.dir,
-  '../../../../../target/debug/examples',
+  workspaceCargoTargetDir(),
+  'debug',
+  'examples',
   executable('fake_cursor_agent')
 );
 

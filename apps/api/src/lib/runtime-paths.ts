@@ -89,10 +89,26 @@ export function getRuntimeBinaryPath(): string | null {
 }
 
 /**
- * The cargo builds a source checkout may launch, `debug` first, under the
- * directory cargo writes them to: `CARGO_TARGET_DIR` when it is set (a
- * relative one taken from `root`, where `cargo build` runs), otherwise
- * `<root>/target`.
+ * The directory a source checkout's cargo builds land in: `CARGO_TARGET_DIR`
+ * when it is set (a relative one taken from `root`, where `cargo build`
+ * runs), otherwise `<root>/target`. Every lookup of a checkout's cargo output
+ * goes through here, so one that ignores a moved target directory cannot drift.
+ *
+ * @example
+ * workspaceCargoTargetDir('/repo', { CARGO_TARGET_DIR: 'out' }); // → '/repo/out'
+ */
+export function workspaceCargoTargetDir(
+  root: string = SOURCE_CHECKOUT_ROOT,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const moved = getCargoTargetDir(env);
+  if (!moved) return join(root, 'target');
+  return isAbsolute(moved) ? moved : join(root, moved);
+}
+
+/**
+ * The cargo builds a source checkout may launch, `debug` first, under
+ * {@link workspaceCargoTargetDir}.
  *
  * @example
  * workspaceRuntimeBinaryCandidates('/repo', {});
@@ -102,8 +118,7 @@ export function workspaceRuntimeBinaryCandidates(
   root: string = SOURCE_CHECKOUT_ROOT,
   env: NodeJS.ProcessEnv = process.env
 ): readonly string[] {
-  const moved = getCargoTargetDir(env);
-  const targetDir = moved ? (isAbsolute(moved) ? moved : join(root, moved)) : join(root, 'target');
+  const targetDir = workspaceCargoTargetDir(root, env);
   return WORKSPACE_BUILD_PROFILES.map((profile) => join(targetDir, profile, RUNTIME_BINARY_NAME));
 }
 
