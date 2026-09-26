@@ -274,7 +274,13 @@ fn classify_create_failure(
 /// rather than a `#[cfg]` block deliberately — every branch below it then
 /// compiles, type-checks and unit-tests on a Linux or macOS development host,
 /// instead of existing only in a Windows build nobody runs locally.
-fn is_windows_access_denied(error: &io::Error) -> bool {
+///
+/// Shared with [`crate::slot_update_lock`] so both lock protocols read a
+/// delete-pending denial the same way.
+///
+/// Usage: `is_windows_access_denied(&io::Error::from_raw_os_error(5))` is
+/// `true` on Windows and `false` elsewhere.
+pub(crate) fn is_windows_access_denied(error: &io::Error) -> bool {
     cfg!(windows) && error.raw_os_error() == Some(5)
 }
 

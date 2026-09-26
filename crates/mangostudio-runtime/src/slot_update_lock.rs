@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use crate::runtime_home::lock::{current_hostname, is_process_alive};
+use crate::runtime_home::lock::{current_hostname, is_process_alive, is_windows_access_denied};
 
 const LOCK_NAME: &str = "runtime-update.lock";
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -179,26 +179,13 @@ fn past_delete_pending<T>(
     loop {
         match open() {
             Err(error)
-                if attempts < DELETE_PENDING_ATTEMPTS && is_delete_pending_denial(&error) =>
+                if attempts < DELETE_PENDING_ATTEMPTS && is_windows_access_denied(&error) =>
             {
                 pause();
                 attempts += 1;
             }
             result => return result,
         }
-    }
-}
-
-fn is_delete_pending_denial(error: &io::Error) -> bool {
-    #[cfg(windows)]
-    {
-        error.raw_os_error()
-            == i32::try_from(windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED).ok()
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = error;
-        false
     }
 }
 
