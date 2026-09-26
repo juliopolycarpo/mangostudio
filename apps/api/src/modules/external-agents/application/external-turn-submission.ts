@@ -38,11 +38,9 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { isRequestNotSent } from '../../../services/runtime-client/request-not-sent';
 import {
   backoffDelay,
-  clampRetryHint,
   classifySubmissionFailure,
   failureClosedConnection,
   type RetryPolicy,
-  retryHintOf,
 } from '../domain/external-turn-retry-policy';
 import {
   insertAttempt,
@@ -148,15 +146,9 @@ export async function submitExternalTurn(
   let handle: ExternalSessionHandle | undefined = input.handle;
   let retries = 0;
 
-  const wait = async (hintAtMs?: number): Promise<void> => {
-    const computed = backoffDelay(retries, input.policy, input.random);
+  const wait = async (): Promise<void> => {
+    const ms = backoffDelay(retries, input.policy, input.random);
     retries += 1;
-    const ms = clampRetryHint({
-      computedDelayMs: computed,
-      maxDelayMs: input.policy.maxDelayMs,
-      nowMs: input.now(),
-      ...(hintAtMs !== undefined ? { hintAtMs } : {}),
-    });
     await input.sleep(ms, input.signal);
   };
 
@@ -173,7 +165,7 @@ export async function submitExternalTurn(
         // loop keeps waiting for someone to reconnect it rather than forcing a
         // connect itself or treating the latch as the end.
         logger.info('submission_waiting_for_connection', { messageId: input.messageId });
-        await wait(retryHintOf(error));
+        await wait();
         continue;
       }
       if (input.signal.aborted) break;
@@ -194,11 +186,10 @@ type AttemptResult =
 async function runAttempt(
   input: SubmitExternalTurnInput,
   handle: ExternalSessionHandle,
-  wait: (hintAtMs?: number) => Promise<void>
+  wait: () => Promise<void>
 ): Promise<AttemptResult> {
   const params = handle.turnParams(input.turn);
   const attemptId = input.newId();
-  const revision = handle.connectionRevision;
   try {
     await insertAttempt(
       {
@@ -210,7 +201,6 @@ async function runAttempt(
         sessionId: params.sessionId,
         clientMessageId: params.clientMessageId,
         inputFingerprint: fingerprintTurnParams(params),
-        connectionRevision: revision,
         createdAt: input.now(),
         updatedAt: input.now(),
       },
@@ -254,7 +244,7 @@ async function runAttempt(
       if (provenAbsent) {
         await settle('not-submitted');
         pending(false);
-        await wait(retryHintOf(error));
+        await wait();
         return { kind: 'retry' };
       }
       if (failure === 'refused') {
@@ -273,7 +263,7 @@ async function runAttempt(
         await settle('unresolved', 'acceptance-unknown');
         return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
       }
-      await wait(retryHintOf(error));
+      await wait();
       continue;
     }
 

@@ -25,6 +25,7 @@ import {
 } from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/shared/process';
 import type { HubExternalAgentIsolation } from '@mangostudio/shared/runtime-contract';
+import { raceAgainstAbort } from '../../lib/abort-race';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 import { resolveHandshakeTimeoutMs } from './handshake-budget';
@@ -164,21 +165,21 @@ export async function spawnRuntimeChild(
 
   let hub: ProtocolHubSession;
   try {
-    hub = await raceAgainstAbort(
-      openHubSession(peer.port, {
-        hubVersion: options.hubVersion,
-        workspaceBinding: options.workspaceBinding,
-        handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
-        // Defaults to on: the runtime ships inside the hub's own distribution, so
-        // a binary from another release is a stale install rather than a peer to
-        // negotiate with.
-        requireMatchingRelease: options.requireMatchingRelease ?? true,
-        ...(options.externalAgentIsolation
-          ? { externalAgentIsolation: options.externalAgentIsolation }
-          : {}),
-      }),
-      signal
-    );
+    const handshake = openHubSession(peer.port, {
+      hubVersion: options.hubVersion,
+      workspaceBinding: options.workspaceBinding,
+      handshakeTimeoutMs: options.handshakeTimeoutMs ?? resolveHandshakeTimeoutMs(),
+      // Defaults to on: the runtime ships inside the hub's own distribution, so
+      // a binary from another release is a stale install rather than a peer to
+      // negotiate with.
+      requireMatchingRelease: options.requireMatchingRelease ?? true,
+      ...(options.externalAgentIsolation
+        ? { externalAgentIsolation: options.externalAgentIsolation }
+        : {}),
+    });
+    hub = await (signal
+      ? raceAgainstAbort(handshake, signal, () => new SpawnCancelled())
+      : handshake);
   } catch (error) {
     if (error instanceof SpawnCancelled) {
       // Reject only once the child is actually being torn down, not merely
@@ -354,7 +355,7 @@ function asRemoteFailure(error: unknown, message: string): RemoteError {
 }
 
 /**
- * Marks a rejection from {@link raceAgainstAbort}'s own sentinel promise, so
+ * Marks the rejection `raceAgainstAbort` raises when the launch signal fires, so
  * the catch in `spawnRuntimeChild` can tell "the signal fired" from "the
  * handshake itself failed" without inspecting `signal.aborted` — which a
  * handshake failure landing in the same tick as an unrelated abort could also
@@ -368,30 +369,6 @@ function cancelledError(command: string): RemoteError {
     RESERVED_ERROR_CODES.CANCELLED,
     `The connection to ${command} was cancelled before it finished handshaking.`
   );
-}
-
-/**
- * Races `promise` against `signal`, rejecting with {@link SpawnCancelled} the
- * moment it aborts — the same idiom `isAuthorizedEnvironmentWorkspace`
- * (`hub-workspace-authority.ts`) uses: a `Promise.withResolvers` sentinel
- * wired to the abort event, raced rather than substituted for the original.
- * Whichever side loses is not awaited again once the race settles, so its
- * eventual settlement is caught here instead of surfacing as unhandled — a
- * handshake that fails after cancellation already started tearing its child
- * down is not news to anyone still holding this promise.
- *
- * @example
- * await raceAgainstAbort(openHubSession(port, opts), controller.signal);
- */
-function raceAgainstAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) return promise;
-  const aborted = Promise.withResolvers<never>();
-  const onAbort = () => aborted.reject(new SpawnCancelled());
-  signal.addEventListener('abort', onAbort, { once: true });
-  promise.catch(() => undefined);
-  return Promise.race([promise, aborted.promise]).finally(() => {
-    signal.removeEventListener('abort', onAbort);
-  });
 }
 
 function excerpt(stderr: string): string {

@@ -17,6 +17,7 @@ import {
   type HubWorkspaceAuthorizeResult,
 } from '@mangostudio/shared/runtime-contract';
 import { getDb } from '../../db/database';
+import { raceAgainstAbort } from '../../lib/abort-race';
 
 /** Who a hub session speaks for, as the hub recorded it when it opened. */
 export interface HubWorkspaceBinding {
@@ -64,21 +65,13 @@ export async function isAuthorizedEnvironmentWorkspace(
     .where('workdir', '=', canonicalPath)
     .limit(1)
     .executeTakeFirst();
-  const aborted = Promise.withResolvers<never>();
-  const abort = () =>
-    aborted.reject(
-      signal.reason instanceof Error
-        ? signal.reason
-        : new Error('Workspace authorization was cancelled.')
-    );
-  signal.addEventListener('abort', abort, { once: true });
-  try {
-    const chat = await Promise.race([query, aborted.promise]);
-    signal.throwIfAborted();
-    return chat !== undefined;
-  } finally {
-    signal.removeEventListener('abort', abort);
-  }
+  const chat = await raceAgainstAbort(query, signal, () =>
+    signal.reason instanceof Error
+      ? signal.reason
+      : new Error('Workspace authorization was cancelled.')
+  );
+  signal.throwIfAborted();
+  return chat !== undefined;
 }
 
 function isRealBinding(binding: HubWorkspaceBinding): boolean {

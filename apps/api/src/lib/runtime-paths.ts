@@ -3,8 +3,8 @@
  */
 
 import { realpathSync, statSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
-import { getRuntimeBinaryOverride } from './config';
+import { basename, dirname, isAbsolute, join } from 'node:path';
+import { getCargoTargetDir, getRuntimeBinaryOverride } from './config';
 
 function isBunBinary(execPath: string): boolean {
   const executableName = basename(execPath).toLowerCase();
@@ -89,18 +89,22 @@ export function getRuntimeBinaryPath(): string | null {
 }
 
 /**
- * The cargo builds a source checkout may launch, `target/debug` first.
+ * The cargo builds a source checkout may launch, `debug` first, under the
+ * directory cargo writes them to: `CARGO_TARGET_DIR` when it is set (a
+ * relative one taken from `root`, where `cargo build` runs), otherwise
+ * `<root>/target`.
  *
  * @example
- * workspaceRuntimeBinaryCandidates('/repo');
+ * workspaceRuntimeBinaryCandidates('/repo', {});
  * // → ['/repo/target/debug/mangostudio-runtime', '/repo/target/release/mangostudio-runtime']
  */
 export function workspaceRuntimeBinaryCandidates(
-  root: string = SOURCE_CHECKOUT_ROOT
+  root: string = SOURCE_CHECKOUT_ROOT,
+  env: NodeJS.ProcessEnv = process.env
 ): readonly string[] {
-  return WORKSPACE_BUILD_PROFILES.map((profile) =>
-    join(root, 'target', profile, RUNTIME_BINARY_NAME)
-  );
+  const moved = getCargoTargetDir(env);
+  const targetDir = moved ? (isAbsolute(moved) ? moved : join(root, moved)) : join(root, 'target');
+  return WORKSPACE_BUILD_PROFILES.map((profile) => join(targetDir, profile, RUNTIME_BINARY_NAME));
 }
 
 /** Modification time of a regular file, or null when there is no file to run. */
@@ -208,7 +212,7 @@ export function resolveRuntimeLaunchCommand(
   const sibling = getRuntimeBinaryPath();
   if (sibling) return { command: sibling, args: [], source: 'sibling' };
 
-  const candidates = workspaceRuntimeBinaryCandidates(options.workspaceRoot);
+  const candidates = workspaceRuntimeBinaryCandidates(options.workspaceRoot, env);
   const built = newestRuntimeBuild(candidates);
   if (built) return { command: built, args: [], source: 'workspace-build' };
 

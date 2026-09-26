@@ -14,9 +14,7 @@ import type { Migration } from 'kysely/migration';
  * `messageId` is the logical operation (the assistant message the turn
  * fills); several attempts may share it. `inputFingerprint` is a digest of the
  * exact params sent, never the params themselves: they can carry attachment
- * bytes. `connectionRevision` names the runtime connection the attempt was
- * sent on, which is what decides whether an unanswered attempt can still be
- * reconciled by re-sending it.
+ * bytes.
  */
 export const externalTurnAttempts: Migration = {
   async up(db): Promise<void> {
@@ -34,7 +32,6 @@ export const externalTurnAttempts: Migration = {
       .addColumn('clientMessageId', 'text', (col) => col.notNull())
       .addColumn('inputFingerprint', 'text', (col) => col.notNull())
       .addColumn('state', 'text', (col) => col.notNull())
-      .addColumn('connectionRevision', 'integer', (col) => col.notNull())
       .addColumn('nativeTurnId', 'text')
       .addColumn('terminalReason', 'text')
       .addColumn('createdAt', 'integer', (col) => col.notNull())

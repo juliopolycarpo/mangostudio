@@ -43,6 +43,7 @@ import { getDevFrontendDir } from './dev-frontend-dir';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
+import { subscribeRuntimeScopeReaps } from './runtime-scope-reaps';
 import { registerShutdownHandler, requestShutdown } from './shutdown-request';
 import {
   type StaleTurnReconcileSweep,
@@ -63,6 +64,7 @@ export interface StartOptions {
 let staleTurnReconcileSweep: StaleTurnReconcileSweep | null = null;
 let stopTerminalIdleReaper: (() => void) | null = null;
 let stopUpdateChecks: (() => void) | null = null;
+let stopRuntimeScopeReaps: (() => void) | null = null;
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
@@ -82,27 +84,12 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   await sealOrphanedExternalTurnAttempts(getDb());
   await reconcileStaleTurns({ reasonCode: 'server_restart' }, getDb());
   await loadObservabilitySnapshot();
-  // A peer that withdraws external-agent consent closes its vendor sessions
-  // without saying so on the wire, so the hub learns it from the next manifest
-  // refresh. Without this the chats it was running would keep a session the
-  // runtime no longer has, and their turns would wait on events that stopped.
-  getRuntimeConnectionManager().onExternalAgentsRevoked((userId, environmentId) => {
-    void externalSessionManager
-      .reapScope({ userId, environmentId }, 'consent-revoked')
-      .catch(() => undefined);
-  });
-  // A turn waiting to resubmit reconnects on its own after a dropped socket;
-  // after the user's own Disconnect, disable, repoint or removal it must not.
-  onEnvironmentWithdrawn((userId, environmentId) => {
-    void externalSessionManager
-      .reapScope({ userId, environmentId }, 'runtime-disconnected', {
-        keepContinuation: true,
-        explicit: true,
-      })
-      .catch(() => undefined);
-  });
-  getRuntimeConnectionManager().onTerminalsRevoked((userId, environmentId) => {
-    terminalSessionService.revokeScope(userId, environmentId);
+  stopRuntimeScopeReaps?.();
+  stopRuntimeScopeReaps = subscribeRuntimeScopeReaps({
+    manager: getRuntimeConnectionManager(),
+    onEnvironmentWithdrawn,
+    sessions: externalSessionManager,
+    terminals: terminalSessionService,
   });
   // Populated only by src/dev.ts, before startServer() runs — never by the
   // binary entry. It is an override for getSourceFrontendDir() alone: the dev
@@ -211,6 +198,9 @@ async function gracefulStop(): Promise<void> {
   // simply dropping out from under it.
   await terminalSessionService.closeAll();
   await closeAllRuntimeConnections();
+  // After the connections close, so a scope withdrawn while they closed is still reaped.
+  stopRuntimeScopeReaps?.();
+  stopRuntimeScopeReaps = null;
   await removeState();
   await closeDb();
 }

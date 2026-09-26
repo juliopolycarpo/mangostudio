@@ -1,7 +1,6 @@
 /**
  * Pure decisions for resubmitting an external turn: how one failed submission
- * is classified, how long to wait before the next one, and how a runtime's
- * retry hint may stretch that wait.
+ * is classified, and how long to wait before the next one.
  *
  * Kept free of I/O so each rule is tested on its own; the loop that applies
  * them is `external-turn-submission.ts`.
@@ -13,7 +12,7 @@ import { isRequestNotSent, noReplyOf } from '../../../services/runtime-client/re
 export interface RetryPolicy {
   /** First backoff, before jitter. */
   readonly baseDelayMs: number;
-  /** No single wait exceeds this, hint or not. */
+  /** No single wait exceeds this. */
   readonly maxDelayMs: number;
 }
 
@@ -85,40 +84,4 @@ export function backoffDelay(retry: number, policy: RetryPolicy, random: () => n
   const capped = Math.min(policy.baseDelayMs * 2 ** exponent, policy.maxDelayMs);
   const fraction = Math.min(Math.max(random(), 0), 1);
   return Math.round(capped * (1 - JITTER_SPREAD + JITTER_SPREAD * fraction));
-}
-
-/**
- * The wait before the next attempt once a runtime's hint is taken into
- * account.
- *
- * A hint asks for a *longer* wait; it never permits a shorter one, and it
- * never stretches a wait past the cap. `hintAtMs` is an absolute epoch-ms
- * instant, resolved against `nowMs`. A missing, non-finite or past hint leaves
- * the computed delay unchanged.
- *
- * @example
- * clampRetryHint({ computedDelayMs: 1_000, maxDelayMs: 30_000, hintAtMs: 5_000, nowMs: 0 }); // 5_000
- */
-export function clampRetryHint(input: {
-  readonly computedDelayMs: number;
-  readonly maxDelayMs: number;
-  readonly hintAtMs?: number;
-  readonly nowMs: number;
-}): number {
-  const floor = Math.min(input.computedDelayMs, input.maxDelayMs);
-  if (input.hintAtMs === undefined || !Number.isFinite(input.hintAtMs)) return floor;
-  const requested = input.hintAtMs - input.nowMs;
-  return Math.min(Math.max(floor, requested), input.maxDelayMs);
-}
-
-/**
- * The runtime's retry hint, if it sent one as `details.retryAfterMs` (epoch ms).
- *
- * @example
- * retryHintOf(new RemoteError('UNAVAILABLE', 'busy', { retryAfterMs: 1_700 })); // 1_700
- */
-export function retryHintOf(error: unknown): number | undefined {
-  if (!(error instanceof RemoteError)) return undefined;
-  const hint = error.details?.retryAfterMs;
-  return typeof hint === 'number' && Number.isFinite(hint) ? hint : undefined;
 }

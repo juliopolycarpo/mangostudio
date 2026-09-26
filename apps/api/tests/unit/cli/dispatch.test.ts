@@ -17,6 +17,25 @@ describe('dispatch', () => {
       stderrSpy.mockRestore();
     }
   });
+
+  test('still reports the operator error and exits 1 when releasing runtimes also fails', async () => {
+    const exitSpy = spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const failingRelease = () => Promise.reject(new Error('runtime child did not exit'));
+
+    try {
+      await expect(dispatch(['status', '--bogus'], failingRelease)).resolves.toBeUndefined();
+
+      expect(stderrSpy).toHaveBeenCalledWith(
+        'Could not release runtime connections: runtime child did not exit\n'
+      );
+      expect(stderrSpy).toHaveBeenCalledWith('Unknown option for status: --bogus\n');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
 });
 
 describe('dispatch service', () => {

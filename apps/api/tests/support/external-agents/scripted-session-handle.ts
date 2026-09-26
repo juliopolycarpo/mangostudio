@@ -29,7 +29,6 @@ export function createScriptedSessionHandle(sessionId = 'session-1'): ScriptedSe
     resumed: false,
     effectiveConfiguration: { level: 'default', routing: 'user', workspaceRoots: ['/w'] },
     capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
-    connectionRevision: 1,
     isLive: () => true,
     subscribe: () => () => undefined,
     beginTurn: () => undefined,
