@@ -31,7 +31,8 @@ use std::path::{Path, PathBuf};
 
 use mango_agent_codex::account::AccountFingerprintKey;
 use mangostudio_runtime_contract::manifest::{ExternalIdentityIsolation, IdentityIsolationMethod};
-use sha2::{Digest, Sha256};
+
+use crate::hex::sha256_hex;
 
 /// Vendor credential locations relative to the credential home.
 const VENDOR_CREDENTIAL_PATHS: [&str; 7] = [
@@ -229,13 +230,6 @@ fn fingerprint_for(identity: &str) -> String {
 
 fn digest_key_for(identity: &str) -> String {
     sha256_hex(format!("{HOST_DIGEST_KEY_DOMAIN}{identity}").as_bytes())
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 /// The unpublished material every digest is built from. Not domain-separated

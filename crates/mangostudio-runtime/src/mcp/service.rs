@@ -33,6 +33,7 @@ use super::types::{
 };
 use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentRead, ConsentReader};
 use crate::consent::source::ConsentSource;
+use crate::hex::hex;
 use crate::registry::Registry;
 
 /// Live sessions one runtime connection may hold. The hub keeps one per enabled server row, so
@@ -739,10 +740,7 @@ fn new_request_id() -> String {
     getrandom::fill(&mut bytes).expect("the operating system's CSPRNG must be available");
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex = bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let hex = hex(&bytes);
     format!(
         "{}-{}-{}-{}-{}",
         &hex[0..8],

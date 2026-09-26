@@ -135,6 +135,7 @@ mod external_agents;
 mod file_identity;
 pub mod filesystem;
 pub mod health;
+mod hex;
 mod install;
 mod library;
 pub mod manifest;

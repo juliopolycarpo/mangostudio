@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::collation::locale_compare;
 use super::js::{cmp_utf16, strip_js_whitespace, text_decoder_decode, utf16_len};
+use crate::hex::hex;
 
 const FILE_HASH_DOMAIN: &[u8] = b"mangostudio/library/file\0";
 /// `DIRECTORY_HASH_DOMAIN`. Versioned: v2 is the length-prefixed manifest.
@@ -82,16 +83,6 @@ fn sha256_hex(domain: &[u8], bytes: &[u8]) -> String {
     hasher.update(domain);
     hasher.update(bytes);
     hex(&hasher.finalize())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    bytes
-        .iter()
-        .fold(String::with_capacity(64), |mut out, byte| {
-            let _ = write!(out, "{byte:02x}");
-            out
-        })
 }
 
 /// `hashLibraryFile`'s digest: SHA-256 over the file domain and the bytes.

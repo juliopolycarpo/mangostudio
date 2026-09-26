@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::{AuditArgs, EnvSource, InstallArgs, ServiceAction, ServiceArgs};
+use crate::hex::hex;
 use crate::runtime_home::{
     RuntimeSlot, read_runtime_slot_config, resolve_runtime_slot_for_current_exe,
     slot_audit_log_path, slot_current_binary_path, slot_dir, slot_for_path,
@@ -131,13 +132,7 @@ fn digest_file(path: &Path) -> io::Result<String> {
         }
         sha.update(&buffer[..len]);
     }
-    Ok(format!(
-        "sha256:{}",
-        sha.finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-    ))
+    Ok(format!("sha256:{}", hex(&sha.finalize())))
 }
 
 pub(super) fn run_install(args: InstallArgs, env: &impl EnvSource, version: &str) -> i32 {

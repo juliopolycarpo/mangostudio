@@ -53,10 +53,11 @@ use super::wire::{
     RefreshAccountUsageResult, ResumeMode, TargetId,
 };
 use crate::consent::read::{ConsentRead, ConsentReader};
+use crate::hex::hex;
 use crate::ports::wall_clock::epoch_millis;
 use crate::probing::detection::path_env::PathEnv;
-
 use crate::tool_argument::tool_argument;
+
 /// How many sessions may be live or opening at once, as in the TS host.
 pub(crate) const DEFAULT_SESSION_CAP: usize = 4;
 /// How often a live or opening session re-reads `externalAgents` consent.
@@ -1419,11 +1420,7 @@ fn path_text(path: &Path) -> String {
 fn scratch_leaf_name(session_id: &str, nonce: u64) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(session_id.as_bytes());
-    let hex: String = digest
-        .iter()
-        .take(8)
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let hex = hex(&digest[..8]);
     format!("s-{hex}-{nonce:016x}")
 }
 
