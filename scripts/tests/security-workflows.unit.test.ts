@@ -26,6 +26,7 @@ describe('security workflows', () => {
     expect(workflow).toContain('security-events: write');
 
     expect(workflow).toContain('language: javascript-typescript');
+    expect(workflow).toContain('language: rust');
     expect(workflow).toContain('build-mode: none');
     expect(workflow).toContain('queries: security-extended');
     expect(workflow).toContain(`category: "/language:${languageExpression}"`);
