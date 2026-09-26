@@ -681,14 +681,7 @@ export class RuntimeConnectionManager {
           closeDetached(connection);
           throw unavailable('Runtime connection was closed.');
         }
-        entry.connection = connection;
-        entry.announcedManifest = connection.client.manifest;
-        this.#discoveryCache.observe(
-          runtimeDiscoveryKey(userId, environmentId),
-          connection.client.manifest
-        );
-        entry.connectedAtMs = Date.now();
-        entry.manifestReadAtMs = entry.connectedAtMs;
+        this.#adopt(entry, connection, userId, environmentId);
         // The failure count is not cleared here: a handshake only shows the
         // runtime started, and one that dies straight after every start is
         // exactly the case the cap has to catch. `#markUnavailable` clears it
@@ -779,6 +772,23 @@ export class RuntimeConnectionManager {
     }
   }
 
+  /** Installs a handshaken connection on `entry` and records its manifest for discovery. */
+  #adopt(
+    entry: RuntimeConnectionEntry,
+    connection: ManagedRuntimeConnection,
+    userId: string,
+    environmentId: string
+  ): void {
+    entry.connection = connection;
+    entry.announcedManifest = connection.client.manifest;
+    this.#discoveryCache.observe(
+      runtimeDiscoveryKey(userId, environmentId),
+      connection.client.manifest
+    );
+    entry.connectedAtMs = Date.now();
+    entry.manifestReadAtMs = entry.connectedAtMs;
+  }
+
   /**
    * Lets an attempt this caller stopped waiting for finish on its own. Its
    * rejection is already recorded on the entry's status by `connect`; without
@@ -853,14 +863,7 @@ export class RuntimeConnectionManager {
       throw unavailable('Runtime connection was superseded while it was handshaking.');
     }
 
-    entry.connection = connection;
-    entry.announcedManifest = connection.client.manifest;
-    this.#discoveryCache.observe(
-      runtimeDiscoveryKey(userId, environmentId),
-      connection.client.manifest
-    );
-    entry.connectedAtMs = Date.now();
-    entry.manifestReadAtMs = entry.connectedAtMs;
+    this.#adopt(entry, connection, userId, environmentId);
     entry.failureCount = 0;
     entry.retryAfterMs = 0;
     entry.status = {
