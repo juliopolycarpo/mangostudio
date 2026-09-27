@@ -40,7 +40,7 @@ capabilities: {
 }
 ```
 
-O DeepSeek é modelado como provedor de primeira classe, em vez de mero connector OpenAI-compatible. Ele ainda usa a superfície de runtime do AI SDK, mas o tipo separado permite ao catálogo expor capacidades específicas de reasoning, tool, cache e continuação sem alterar o comportamento genérico OpenAI-compatible.
+O DeepSeek é modelado como provedor de primeira classe, em vez de mero connector OpenAI-compatible. Ele ainda fala com o DeepSeek pelo SDK da OpenAI, mas o tipo separado permite ao catálogo expor capacidades específicas de reasoning, tool, cache e continuação sem alterar o comportamento genérico OpenAI-compatible.
 
 ---
 

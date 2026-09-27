@@ -1,5 +1,4 @@
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
-import { generateText, streamText } from 'ai';
 import { parseStringArray } from '../../../utils/json';
 import { withModelCache } from '../core/model-cache';
 import { createProviderLifecycle } from '../core/provider-lifecycle';
@@ -15,16 +14,10 @@ import type {
   TextGenerationResult,
 } from '../types';
 import { streamDeepSeekAgentTurn } from './agent-stream';
-import { createDeepSeekAgentClient, createDeepSeekClient, validateDeepSeekApiKey } from './client';
+import { createDeepSeekClient, validateDeepSeekApiKey } from './client';
 import { fetchDeepSeekModels, getDeepSeekFallbackModels } from './model-catalog';
-import {
-  buildDeepSeekChatMessages,
-  buildDeepSeekSystemPrompt,
-  toErrorMessage,
-} from './normalizers';
-import { buildDeepSeekProviderOptions, normalizeDeepSeekBaseUrl } from './options';
-
-const GENERATION_TIMEOUT_MS = 120_000;
+import { normalizeDeepSeekBaseUrl } from './options';
+import { generateDeepSeekText, streamDeepSeekText } from './text-stream';
 
 const secretService = createProviderSecretService({
   provider: 'deepseek',
@@ -87,8 +80,7 @@ async function listConnectorModels(row: SecretMetadataRow, apiKey: string): Prom
 interface PreparedDeepSeekRuntime {
   readonly apiKey: string;
   readonly baseUrl: string;
-  readonly textClient: ReturnType<typeof createDeepSeekClient>;
-  readonly agentClient: ReturnType<typeof createDeepSeekAgentClient>;
+  readonly client: ReturnType<typeof createDeepSeekClient>;
 }
 
 async function loadPreparedRuntime(
@@ -99,8 +91,7 @@ async function loadPreparedRuntime(
   return {
     apiKey,
     baseUrl,
-    textClient: createDeepSeekClient({ apiKey, baseUrl }),
-    agentClient: createDeepSeekAgentClient({ apiKey, baseUrl }),
+    client: createDeepSeekClient({ apiKey, baseUrl }),
   };
 }
 
@@ -115,58 +106,24 @@ const deepSeekProvider: AIProvider = {
   providerType: 'deepseek',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const { textClient } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-    const result = await generateText({
-      model: textClient(req.modelName),
-      system: buildDeepSeekSystemPrompt(req),
-      messages: buildDeepSeekChatMessages(req),
-      abortSignal: req.signal,
-      timeout: { totalMs: GENERATION_TIMEOUT_MS },
-      providerOptions: buildDeepSeekProviderOptions(req.generationConfig),
-    });
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
+    const result = await generateDeepSeekText(client, req);
 
     if (!result.text) {
       throw new DeepSeekConnectorError(`No text returned from DeepSeek model "${req.modelName}".`);
     }
 
-    return { text: result.text };
+    return result;
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { textClient } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-    const result = streamText({
-      model: textClient(req.modelName),
-      system: buildDeepSeekSystemPrompt(req),
-      messages: buildDeepSeekChatMessages(req),
-      abortSignal: req.signal,
-      timeout: { totalMs: GENERATION_TIMEOUT_MS },
-      providerOptions: buildDeepSeekProviderOptions(req.generationConfig),
-    });
-
-    for await (const part of result.fullStream) {
-      if (req.signal?.aborted) break;
-      if (part.type === 'text-delta' && part.text) {
-        yield { type: 'text', text: part.text, done: false };
-      }
-      if (part.type === 'reasoning-delta' && part.text) {
-        yield { type: 'thinking', text: part.text, done: false };
-      }
-      if (part.type === 'error') {
-        yield {
-          type: 'error',
-          content: toErrorMessage(part.error, 'DeepSeek stream failed'),
-          done: true,
-        };
-        return;
-      }
-    }
-
-    yield { type: 'text', text: '', done: true };
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
+    yield* streamDeepSeekText(client, req);
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const { agentClient } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-    yield* streamDeepSeekAgentTurn(agentClient, req);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
+    yield* streamDeepSeekAgentTurn(client, req);
   },
 
   listModels(userId: string): Promise<ModelInfo[]> {

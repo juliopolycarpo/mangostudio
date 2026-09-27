@@ -29,6 +29,16 @@ export const DISALLOWED_WORKSPACE_DEPENDENCIES = [
     reason: 'OpenAI-compatible providers use the project-owned OpenAI SDK wrapper.',
   },
   {
+    workspacePath: 'apps/api',
+    packageName: 'ai',
+    reason: 'DeepSeek text and agent turns share the OpenAI SDK client.',
+  },
+  {
+    workspacePath: 'apps/api',
+    packageName: '@ai-sdk/deepseek',
+    reason: 'DeepSeek text and agent turns share the OpenAI SDK client.',
+  },
+  {
     workspacePath: 'apps/frontend',
     packageName: 'shiki',
     reason: 'The syntax highlighter imports granular @shikijs/* packages directly.',

@@ -24,6 +24,8 @@ describe('dependency policy', () => {
 
     expect(blockedPackages).toEqual([
       '@ai-sdk/openai-compatible',
+      'ai',
+      '@ai-sdk/deepseek',
       'shiki',
       '@tanstack/router-devtools',
     ]);

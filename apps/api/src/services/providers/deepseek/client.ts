@@ -1,4 +1,3 @@
-import { createDeepSeek, type DeepSeekProvider } from '@ai-sdk/deepseek';
 import OpenAI from 'openai';
 import { validateBaseUrl } from '../core/base-url-policy';
 import { getOrCreateCachedClient } from '../core/client-cache';
@@ -13,8 +12,7 @@ import { normalizeDeepSeekBaseUrl } from './options';
 
 const VALIDATION_TIMEOUT_MS = 5_000;
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-const providerClientCache = new Map<string, DeepSeekProvider>();
-const agentClientCache = new Map<string, OpenAI>();
+const clientCache = new Map<string, OpenAI>();
 
 export interface DeepSeekClientConfig {
   apiKey: string;
@@ -25,23 +23,16 @@ function createCacheKey(config: DeepSeekClientConfig): string {
   return `${normalizeDeepSeekBaseUrl(config.baseUrl)}\u0000${config.apiKey}`;
 }
 
-export function createDeepSeekClient(config: DeepSeekClientConfig): DeepSeekProvider {
+/**
+ * The OpenAI SDK client for one DeepSeek connector, shared by text and agent
+ * turns and cached per base URL and key.
+ *
+ * // Usage: const client = createDeepSeekClient({ apiKey, baseUrl });
+ */
+export function createDeepSeekClient(config: DeepSeekClientConfig): OpenAI {
   const baseUrl = normalizeDeepSeekBaseUrl(config.baseUrl);
   return getOrCreateCachedClient(
-    providerClientCache,
-    createCacheKey(config),
-    () => createDeepSeek({ apiKey: config.apiKey, baseURL: baseUrl }),
-    {
-      onHit: () => recordProviderCacheHit('deepseek', 'sdk-client'),
-      onMiss: () => recordProviderCacheMiss('deepseek', 'sdk-client'),
-    }
-  );
-}
-
-export function createDeepSeekAgentClient(config: DeepSeekClientConfig): OpenAI {
-  const baseUrl = normalizeDeepSeekBaseUrl(config.baseUrl);
-  return getOrCreateCachedClient(
-    agentClientCache,
+    clientCache,
     createCacheKey(config),
     () =>
       new OpenAI({
