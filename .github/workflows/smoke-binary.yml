@@ -53,6 +53,7 @@ jobs:
       version: ${{ inputs.version || '' }}
       source_sha: ${{ inputs.source_sha || github.sha }}
       artifact_prefix: smoke-rebuild-runtime
+      cache: true
 
   binary:
     name: Binary ${{ matrix.platform }}

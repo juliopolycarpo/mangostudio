@@ -33,6 +33,13 @@ on:
         description: Artifact name prefix; each platform uploads `<prefix>-<platform-id>`.
         type: string
         required: true
+      cache:
+        description: >-
+          Restore dependency build state from the cargo cache main writes.
+          Release builds leave it off so a shipped binary never starts from
+          restored state.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,6 +69,18 @@ jobs:
       - name: Install zig and cargo-zigbuild
         if: runner.os == 'Linux'
         uses: ./.github/actions/setup-zigbuild
+
+      # One cache per platform, shared by every caller that opts in. Only main
+      # saves it: pull requests restore main's entry instead of each adding a
+      # copy to the repository's cache quota.
+      - name: Restore the cargo cache
+        if: inputs.cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: runtime-build-${{ matrix.platform }}
+          # setup-zigbuild pins cargo-zigbuild; a cached ~/.cargo/bin must not shadow it.
+          cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build runtime
         shell: bash

@@ -19,6 +19,10 @@ on:
         description: Actions artifact retention in days.
         type: number
         required: true
+      cache:
+        description: Let the runtime build restore the cargo cache; see runtime-build.yml.
+        type: boolean
+        default: false
     outputs:
       version:
         description: Version embedded into the distribution.
@@ -55,6 +59,7 @@ jobs:
       version: ${{ inputs.version }}
       source_sha: ${{ inputs.source_sha }}
       artifact_prefix: runtime-${{ inputs.source_sha }}
+      cache: ${{ inputs.cache }}
 
   build:
     name: Build immutable distribution
