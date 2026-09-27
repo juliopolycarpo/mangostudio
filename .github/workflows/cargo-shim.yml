@@ -113,7 +113,13 @@ jobs:
 
       - run: rustup show active-toolchain
 
+      # prefix-key hashes the root manifest because rust-cache's own key ignores
+      # [profile.*]: after a profile change it would restore every crate built
+      # under the old profile, rebuild them all, and, on an exact key hit, never
+      # save the rebuild. scripts/tests/cache-policy.unit.test.ts pins this.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
 
       - run: cargo fmt --all -- --check
 
@@ -166,6 +172,8 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
 
       - run: cargo check -p mangostudio --all-targets --locked
 
@@ -193,6 +201,8 @@ jobs:
       - uses: ./.github/actions/setup-zigbuild
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
 
       - run: cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target x86_64-unknown-linux-musl -- -D warnings
 
@@ -244,6 +254,8 @@ jobs:
       - run: rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
 
       - run: cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored
 
@@ -302,6 +314,8 @@ jobs:
       - run: rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
 
       - run: cargo build -p mangostudio-runtime --locked
 

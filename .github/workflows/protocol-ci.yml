@@ -139,7 +139,13 @@ jobs:
         with:
           persist-credentials: false
       - run: rustup show active-toolchain
+      # prefix-key hashes the root manifest because rust-cache's own key ignores
+      # [profile.*]: after a profile change it would restore every crate built
+      # under the old profile, rebuild them all, and, on an exact key hit, never
+      # save the rebuild. scripts/tests/cache-policy.unit.test.ts pins this.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
       - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
         with:
           tool: cargo-hack
@@ -195,6 +201,8 @@ jobs:
           bun-version-file: .bun-version
       - run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
       - run: bun install --frozen-lockfile
       # Built here rather than inside the suite, so a compile failure is
       # reported as one instead of as every interop case timing out.
@@ -238,6 +246,7 @@ jobs:
       # toolchain, this one with 1.97.0, and sharing a key would mix artefacts from both.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           key: msrv
       - run: cargo +1.97.0 check --all-features --locked
 
@@ -268,6 +277,8 @@ jobs:
         with:
           tool: cargo-semver-checks
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
       # Compares against the last version published to crates.io automatically; no baseline flag.
       - run: cargo semver-checks check-release --all-features
         continue-on-error: true
@@ -287,6 +298,8 @@ jobs:
           bun-version-file: .bun-version
       - run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
       - run: bun install --frozen-lockfile
       - run: bun ./scripts/protocol/verify-schema-equality.ts
       - run: bun ./scripts/protocol/verify-roundtrip.ts

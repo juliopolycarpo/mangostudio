@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
+import { extractJobBlocks, extractStepBlocksAtIndent } from './support/workflow-blocks';
 import {
   cacheScopedCallSites,
   compositeActionFiles,
@@ -11,6 +12,37 @@ const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
 const EXPECTED_FAMILIES = ['bun', 'turbo', 'lint-tools', 'playwright', 'timings'] as const;
+const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-${EXPRESSION_START} hashFiles('Cargo.toml') }}`;
+// The fuzz workspace is excluded from the root workspace and has its own
+// manifest, so the root manifest's profiles never apply to it.
+const RUST_CACHE_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
+
+interface RustCacheStep {
+  readonly file: string;
+  readonly block: string;
+}
+
+/**
+ * Every Swatinem/rust-cache step across workflows (steps at indent 6) and
+ * composite actions (steps at indent 4), outside the exempt fuzz workspace.
+ *
+ * @example
+ * for (const step of rustCacheSteps()) expect(step.block).toContain('prefix-key:');
+ */
+function rustCacheSteps(): RustCacheStep[] {
+  const isRustCache = (block: string) => /^\s*(?:-\s+)?uses: Swatinem\/rust-cache@/m.test(block);
+  const workflowSteps = workflowFiles()
+    .filter((file) => !RUST_CACHE_EXEMPT_FILES.has(file))
+    .flatMap((file) =>
+      extractJobBlocks(readText(file)).flatMap(({ block }) =>
+        extractStepBlocksAtIndent(block, 6).map((step) => ({ file, block: step }))
+      )
+    );
+  const actionSteps = compositeActionFiles().flatMap((file) =>
+    extractStepBlocksAtIndent(readText(file), 4).map((step) => ({ file, block: step }))
+  );
+  return [...workflowSteps, ...actionSteps].filter((step) => isRustCache(step.block));
+}
 
 describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {
@@ -161,6 +193,22 @@ describe('CI cache policy', () => {
           true
         );
       }
+    }
+  });
+
+  // rust-cache keys on the lockfile, toolchain, and environment, not on
+  // `[profile.*]`. A profile change then restores an exact-match entry full of
+  // artifacts built under the old profile, cargo rebuilds every crate, and the
+  // save step skips an exact hit ("Cache up-to-date"), so the stale entry is
+  // never replaced. Hashing the root manifest into the prefix makes a profile
+  // change a new key.
+  test('keys every rust-cache step on the root manifest', () => {
+    const steps = rustCacheSteps();
+    expect(steps.length).toBeGreaterThan(0);
+    for (const step of steps) {
+      expect(step.block, `${step.file}: rust-cache step without the manifest prefix-key`).toContain(
+        RUST_CACHE_PREFIX_KEY
+      );
     }
   });
 });
