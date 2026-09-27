@@ -161,6 +161,25 @@ describe('security workflows', () => {
     }
   });
 
+  test('Dependabot holds sse-stream at 0.2 only while rmcp resolves sse-stream 0.2', () => {
+    const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as DependabotConfig;
+    const cargoUpdates = config.updates.find((update) => update['package-ecosystem'] === 'cargo');
+    const sseIgnore = cargoUpdates?.ignore?.find(
+      (rule) => rule['dependency-name'] === 'sse-stream'
+    );
+    expect(sseIgnore?.versions).toEqual(['>=0.3.0']);
+
+    const lock = Bun.TOML.parse(readText('Cargo.lock')) as {
+      package: Array<{ name: string; version: string }>;
+    };
+    const sseVersions = lock.package
+      .filter((pkg) => pkg.name === 'sse-stream')
+      .map((pkg) => pkg.version);
+    // Stale-rule tripwire: an sse-stream 0.3 in Cargo.lock means rmcp moved to it.
+    // Delete the ignore rule from .github/dependabot.yml and bump the direct dependency.
+    expect(sseVersions.filter((version) => !version.startsWith('0.2.'))).toEqual([]);
+  });
+
   test('the launcher has a classification label glob', () => {
     expect(readText('.github/labeler.yml')).toContain('crates/mangostudio-launcher/**');
   });
