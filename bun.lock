@@ -33,7 +33,7 @@
         "@anthropic-ai/sdk": "^0.128.0",
         "@better-auth/api-key": "1.7.6",
         "@elysia/cors": "2.0.0-beta.1",
-        "@elysia/openapi": "2.0.0-beta.1",
+        "@elysia/openapi": "2.0.0-exp.1",
         "@elysia/static": "2.0.0-beta.2",
         "@google/genai": "^2.24.0",
         "@mangostudio/protocol": "workspace:*",
@@ -130,9 +130,6 @@
         "typescript": "7.0.2",
       },
     },
-  },
-  "patchedDependencies": {
-    "@elysia/openapi@2.0.0-beta.1": "patches/@elysia%2Fopenapi@2.0.0-beta.1.patch",
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.4.4", "", {}, "sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg=="],
@@ -255,7 +252,7 @@
 
     "@elysia/eden": ["@elysia/eden@2.0.0-beta.2", "", { "peerDependencies": { "elysia": ">= 2.0.0-exp.23" } }, "sha512-GOEbbodTCpMOKqek/Kui5Sl0RCbcWV7IoTpIP3623Dz2r/Kbr2H/aqSEYUWIdVw3elQOvY6VKfupAhU3mTynGA=="],
 
-    "@elysia/openapi": ["@elysia/openapi@2.0.0-beta.1", "", { "peerDependencies": { "elysia": ">= 2.0.0-beta.1" } }, "sha512-a64MdtzxV4id27/Ub39Ji6a7sYWvjnBnfpGj/EEJM0Qan3a88zx6K9Vdsd5RMNEvBewk/kOmizDKbYbY5E14mw=="],
+    "@elysia/openapi": ["@elysia/openapi@2.0.0-exp.1", "", { "peerDependencies": { "elysia": "2.0.0-exp.12", "typebox": "1.2.16" } }, "sha512-qfSp4OIodrSE7j3ABAQv2eAN0Ls5hucb/W1M7s6sgTOi0ixSotF3cVvOfUmjmt5wm5KREIKhoJMRLA69jxfz9w=="],
 
     "@elysia/static": ["@elysia/static@2.0.0-beta.2", "", { "peerDependencies": { "elysia": ">= 2.0.0-beta.1" } }, "sha512-uAUhcmBQAdPqp2Jc/veOUnzfc3UqTbOYnVsTyBerSGNC8XnNuPYzkzw2SomirC1PAv65XdgMHip0L6JcGsTgxg=="],
 
