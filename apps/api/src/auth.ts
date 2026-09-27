@@ -50,17 +50,6 @@ function createAuthInstance() {
     baseURL: config.auth.url,
 
     plugins: [
-      // @better-auth/api-key is a separately published package on the same
-      // version line as better-auth. Bun's isolated linker materializes its
-      // @better-auth/core peer as a byte-identical but nominally distinct
-      // module instance from the one better-auth itself imports (a dual
-      // package hazard), so the plugin's internal `hooks.before` shape fails
-      // structural assignment against BetterAuthPlugin below even though the
-      // two packages are functionally identical. This also means the
-      // generic plugin-endpoint augmentation on `.api` does not pick up
-      // verifyApiKey/createApiKey — see ApiKeyPluginApi/getApiKeyApi below
-      // for the hand-typed accessor that works around it.
-      // @ts-expect-error dual package hazard: see comment above.
       apiKey({
         apiKeyHeaders: API_KEY_HEADER,
         defaultPrefix: 'mango_',
