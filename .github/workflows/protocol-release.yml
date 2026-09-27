@@ -125,10 +125,13 @@ jobs:
       # prefix-key hashes the root manifest because rust-cache's own key ignores
       # [profile.*]: after a profile change it would restore every crate built
       # under the old profile, rebuild them all, and, on an exact key hit, never
-      # save the rebuild. scripts/tests/cache-policy.unit.test.ts pins this.
+      # save the rebuild. Only main saves: pull requests restore main's entry
+      # instead of each adding a copy to the repository's cache quota.
+      # scripts/tests/cache-policy.unit.test.ts pins both.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # `protocol:check` adds the feature-powerset lane only when cargo-hack is
       # already on PATH, and skips it with a warning otherwise — a runner
       # without it verifies a release with less than protocol-ci.yml runs on the
@@ -208,6 +211,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - id: published
         name: Already on crates.io?
         env:

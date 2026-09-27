@@ -142,10 +142,13 @@ jobs:
       # prefix-key hashes the root manifest because rust-cache's own key ignores
       # [profile.*]: after a profile change it would restore every crate built
       # under the old profile, rebuild them all, and, on an exact key hit, never
-      # save the rebuild. scripts/tests/cache-policy.unit.test.ts pins this.
+      # save the rebuild. Only main saves: pull requests restore main's entry
+      # instead of each adding a copy to the repository's cache quota.
+      # scripts/tests/cache-policy.unit.test.ts pins both.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
         with:
           tool: cargo-hack
@@ -203,6 +206,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: bun install --frozen-lockfile
       # Built here rather than inside the suite, so a compile failure is
       # reported as one instead of as every interop case timing out.
@@ -247,6 +251,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           key: msrv
       - run: cargo +1.97.0 check --all-features --locked
 
@@ -279,6 +284,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Compares against the last version published to crates.io automatically; no baseline flag.
       - run: cargo semver-checks check-release --all-features
         continue-on-error: true
@@ -300,6 +306,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: bun install --frozen-lockfile
       - run: bun ./scripts/protocol/verify-schema-equality.ts
       - run: bun ./scripts/protocol/verify-roundtrip.ts

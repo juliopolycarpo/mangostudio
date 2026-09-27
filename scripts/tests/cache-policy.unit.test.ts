@@ -13,6 +13,7 @@ const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
 const EXPECTED_FAMILIES = ['bun', 'turbo', 'lint-tools', 'playwright', 'timings'] as const;
 const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-${EXPRESSION_START} hashFiles('Cargo.toml') }}`;
+const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/heads/main' }}`;
 // The fuzz workspace is excluded from the root workspace and has its own
 // manifest, so the root manifest's profiles never apply to it.
 const RUST_CACHE_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
@@ -208,6 +209,19 @@ describe('CI cache policy', () => {
     for (const step of steps) {
       expect(step.block, `${step.file}: rust-cache step without the manifest prefix-key`).toContain(
         RUST_CACHE_PREFIX_KEY
+      );
+    }
+  });
+
+  // Pull requests restore main's rust caches but cannot replace them, so a
+  // pull request adds nothing to the 10 GiB repository quota that main's own
+  // entries already fill most of.
+  test('saves rust caches only from main', () => {
+    const steps = rustCacheSteps();
+    expect(steps.length).toBeGreaterThan(0);
+    for (const step of steps) {
+      expect(step.block, `${step.file}: rust-cache step that saves outside main`).toContain(
+        RUST_CACHE_SAVE_IF
       );
     }
   });
