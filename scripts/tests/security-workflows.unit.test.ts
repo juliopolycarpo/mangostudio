@@ -107,6 +107,28 @@ describe('security workflows', () => {
     expect(bunBlock).toContain('prod-minor-patch:');
   });
 
+  test('Dependabot does not propose TypeBox patch or minor bumps while Elysia beta.4 requires 1.3.13', () => {
+    const api = JSON.parse(readText('apps/api/package.json')) as {
+      dependencies: { elysia: string; typebox: string };
+    };
+    expect(api.dependencies.elysia).toBe('2.0.0-beta.4');
+    expect(api.dependencies.typebox).toBe('1.3.13');
+
+    const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as {
+      updates: Array<{
+        'package-ecosystem': string;
+        ignore?: Array<{ 'dependency-name': string; 'update-types'?: string[] }>;
+      }>;
+    };
+    const bunUpdates = config.updates.find((update) => update['package-ecosystem'] === 'bun');
+    const typeboxIgnore = bunUpdates?.ignore?.find((rule) => rule['dependency-name'] === 'typebox');
+
+    expect(typeboxIgnore?.['update-types']).toEqual([
+      'version-update:semver-minor',
+      'version-update:semver-patch',
+    ]);
+  });
+
   test('the launcher has a classification label glob', () => {
     expect(readText('.github/labeler.yml')).toContain('crates/mangostudio-launcher/**');
   });

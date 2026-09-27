@@ -48,6 +48,13 @@ updates:
     # Five grouped PRs are possible in one week; keep headroom so ungrouped
     # major bumps are not starved out by the limit.
     open-pull-requests-limit: 10
+    # Elysia 2.0.0-beta.4 needs typebox 1.3.13. Remove this when Elysia can
+    # compile validation schemas with newer TypeBox releases.
+    ignore:
+      - dependency-name: typebox
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
     groups:
       # Keep the three existing coordinated-release groups: these packages must
       # move together or the workspace breaks.
