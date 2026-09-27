@@ -115,9 +115,35 @@ A remoção do runtime TypeScript é a maior parte das deleções de TypeScript 
 comportamento dele foi para as linhas de Rust em production, e a cobertura de compatibilidade
 para testes Rust e fixtures congeladas.
 
+## Binário do hub: bytecode
+
+O hub não é um build do cargo, mas é distribuído ao lado do runtime, então seu tempo de
+inicialização e tamanho também ficam registrados aqui. O `scripts/build.ts` o compila com
+`--bytecode --format=esm` (bytecode sozinho emite CommonJS, que rejeita o `await` de nível
+superior do entry). O JSC passa a carregar bytecode pré-compilado em vez de analisar o bundle
+minificado a cada inicialização.
+
+Medido em linux-x64 com Bun 1.4.2, sobre `7d7263d6` com e sem as duas flags, ambos via
+`bun run build:binary --platform linux-x64` (produção, frontend embutido). A inicialização é a
+mediana de 15 execuções de `scripts/bench/startup.ts`; `--version` é a mediana de 20.
+
+| Medida                          | Sem bytecode | Com bytecode | Variação |
+| ------------------------------- | -----------: | -----------: | -------: |
+| `--version`                     |       427 ms |       148 ms |     −65% |
+| Início a frio → `/api/health`   |       908 ms |       406 ms |     −55% |
+| Início a quente → `/api/health` |       803 ms |       356 ms |     −56% |
+| Pico de RSS na inicialização    |       123 MB |       129 MB |      +5% |
+| Tamanho do binário (bytes)      |   99,218,912 |  116,930,016 |     +18% |
+
+Todos os alvos crescem os mesmos ~17,7 MB de bytecode (`bun build --compile` do mesmo entry
+embutido para os outros sete alvos). O `.map` externo mantém o formato, e os stack traces
+continuam apontando para as linhas do código original.
+
 ## Como medir de novo
 
 - Tamanhos: baixe os artefatos `runtime-<sha>-<platform>` de uma execução de CI
   (`gh run download <run-id> -p 'runtime-*'`) e compare os tamanhos.
 - Composição: o comando `cargo bloat` acima, em Linux x64.
 - Volume de código: o `git diff` acima contra o `origin/main` atual.
+- Inicialização do hub: `bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 15`
+  (com `--warm` para um reinício) contra binários com e sem as flags.

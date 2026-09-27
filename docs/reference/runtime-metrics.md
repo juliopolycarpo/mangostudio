@@ -113,9 +113,34 @@ The TypeScript runtime's removal is most of the production TS deletions; its beh
 into the Rust production lines, and its compatibility coverage into Rust tests and frozen
 fixtures.
 
+## Hub binary: bytecode
+
+The hub is not a cargo build, but it ships beside the runtime, so its startup and size are
+recorded here too. `scripts/build.ts` compiles it with `--bytecode --format=esm` (bytecode
+alone emits CommonJS, which rejects the entry's top-level `await`). JSC then loads
+precompiled bytecode instead of parsing the minified bundle on every start.
+
+Measured on linux-x64 with Bun 1.4.2, on `7d7263d6` with and without the two flags, both from
+`bun run build:binary --platform linux-x64` (production, embedded frontend). Startup is the
+median of 15 runs of `scripts/bench/startup.ts`; `--version` is the median of 20 runs.
+
+| Measure                    | Without bytecode | With bytecode | Change |
+| -------------------------- | ---------------: | ------------: | -----: |
+| `--version`                |           427 ms |        148 ms |   −65% |
+| Cold start → `/api/health` |           908 ms |        406 ms |   −55% |
+| Warm start → `/api/health` |           803 ms |        356 ms |   −56% |
+| Peak RSS during startup    |           123 MB |        129 MB |    +5% |
+| Binary size (bytes)        |       99,218,912 |   116,930,016 |   +18% |
+
+Every target grows by the same ~17.7 MB of bytecode (`bun build --compile` of the same embed
+entry for the other seven targets). The external `.map` is unchanged in shape, and stack
+traces still resolve to original source lines.
+
 ## Re-measuring
 
 - Sizes: download the `runtime-<sha>-<platform>` artifacts of a CI run
   (`gh run download <run-id> -p 'runtime-*'`) and compare file sizes.
 - Composition: the `cargo bloat` command above, on Linux x64.
 - Code volume: the `git diff` above against the current `origin/main`.
+- Hub startup: `bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 15`
+  (add `--warm` for a restart) against binaries built with and without the flags.
