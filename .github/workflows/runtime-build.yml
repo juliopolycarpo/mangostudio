@@ -36,8 +36,9 @@ on:
       cache:
         description: >-
           Restore dependency build state from the cargo cache main writes.
-          Release builds leave it off so a shipped binary never starts from
-          restored state.
+          Release builds leave it off, and main only looks the entry up, so a
+          published binary (a release, or the canary built from main) never
+          starts from restored state.
         type: boolean
         default: false
 
@@ -70,10 +71,12 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/setup-zigbuild
 
-      # One cache per platform, shared by every caller that opts in. Only main
-      # saves it: pull requests restore main's entry instead of each adding a
-      # copy to the repository's cache quota. prefix-key hashes the root
-      # manifest because rust-cache's own key ignores [profile.*].
+      # One cache per platform, shared by every caller that opts in. Pull
+      # requests restore main's entry but never save one. Main never restores,
+      # because canary publishes its distribution: `lookup-only` only checks for
+      # the entry, and a miss saves this clean build for pull requests to use.
+      # prefix-key hashes the root manifest because rust-cache's own key
+      # ignores [profile.*].
       - name: Restore the cargo cache
         if: inputs.cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -83,6 +86,7 @@ jobs:
           # setup-zigbuild pins cargo-zigbuild; a cached ~/.cargo/bin must not shadow it.
           cache-bin: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          lookup-only: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build runtime
         shell: bash

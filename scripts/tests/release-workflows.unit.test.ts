@@ -414,7 +414,7 @@ describe('release workflow binary gate', () => {
     expect(zigbuild).toContain('tool: cargo-zigbuild@0.23.4');
   });
 
-  test('release builds never restore the runtime cargo cache, and only main saves it', () => {
+  test('published builds never restore the runtime cargo cache, and only main saves it', () => {
     const runtime = readText('.github/workflows/runtime-build.yml');
     const cacheStep = extractStepBlocks(runtime).find((step) =>
       step.includes('Swatinem/rust-cache@')
@@ -423,6 +423,11 @@ describe('release workflow binary gate', () => {
     expect(cacheStep, 'runtime-build.yml rust-cache step').toBeDefined();
     expect(cacheStep).toContain('if: inputs.cache');
     expect(cacheStep).toContain('save-if: $' + "{{ github.ref == 'refs/heads/main' }}");
+    // Canary publishes main's CI distribution, so main only looks the entry up
+    // and saves a clean build when it is stale; it never restores one.
+    expect(cacheStep, 'runtime-build.yml rust-cache restores on main').toContain(
+      'lookup-only: $' + "{{ github.ref == 'refs/heads/main' }}"
+    );
     expect(runtime).toMatch(/\n {6}cache:\n(?: {8}.*\n)*? {8}default: false\n/);
 
     // Release bytes never start from restored build state: the release path,
