@@ -34,6 +34,26 @@ export function formatList(items: readonly string[], locale: string): string {
   return formatter.format(items);
 }
 
+const clockTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * "3:07 PM" in English, "15:07" in Portuguese — the clock time a chat message
+ * was sent, in the viewer's time zone.
+ *
+ * The 12- or 24-hour clock is a locale rule, so a fixed pattern would print
+ * English meridiems to every locale. Cached per locale because the chat feed
+ * formats one timestamp per rendered turn.
+ *
+ * // Usage: formatClockTime(msg.timestamp, locale)
+ */
+export function formatClockTime(timestampMs: number, locale: string): string {
+  const cached = clockTimeFormatters.get(locale);
+  const formatter =
+    cached ?? new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' });
+  if (!cached) clockTimeFormatters.set(locale, formatter);
+  return formatter.format(timestampMs);
+}
+
 const RELATIVE_UNITS: ReadonlyArray<readonly [Intl.RelativeTimeFormatUnit, number]> = [
   ['year', 365 * 24 * 60 * 60 * 1000],
   ['month', 30 * 24 * 60 * 60 * 1000],

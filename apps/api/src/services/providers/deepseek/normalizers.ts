@@ -1,6 +1,5 @@
-import type { DeepSeekLanguageModelOptions } from '@ai-sdk/deepseek';
 import type { ReasoningEffort } from '@mangostudio/shared/types';
-import type { ModelMessage } from 'ai';
+import type OpenAI from 'openai';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import type { TextGenerationRequest } from '../types';
 
@@ -14,9 +13,7 @@ import type { TextGenerationRequest } from '../types';
  * - `xhigh` maps to `max`
  * - `max` stays `max`
  */
-export function normalizeDeepSeekReasoningEffort(
-  effort: ReasoningEffort
-): DeepSeekLanguageModelOptions['reasoningEffort'] {
+export function normalizeDeepSeekReasoningEffort(effort: ReasoningEffort): 'high' | 'max' {
   switch (effort) {
     case 'low':
     case 'medium':
@@ -41,11 +38,15 @@ export function buildDeepSeekSystemPrompt(req: TextGenerationRequest): string | 
     : DEEPSEEK_REASONING_LANGUAGE_INSTRUCTION;
 }
 
-export function buildDeepSeekChatMessages(req: TextGenerationRequest): ModelMessage[] {
+export function buildDeepSeekChatMessages(
+  req: TextGenerationRequest
+): OpenAI.ChatCompletionMessageParam[] {
   const prompt = appendAttachmentFallbackNotes(req.prompt, req.attachments, req.modelCapabilities);
+  const systemPrompt = buildDeepSeekSystemPrompt(req);
 
   return [
-    ...req.history.map((message): ModelMessage => {
+    ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+    ...req.history.map((message): OpenAI.ChatCompletionMessageParam => {
       if (message.role === 'ai') {
         return { role: 'assistant', content: message.text };
       }

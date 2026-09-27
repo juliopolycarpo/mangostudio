@@ -6,7 +6,7 @@ O DeepSeek é modelado como um provedor de primeira classe, e não apenas como u
 
 - **Provider ID:** `deepseek`
 - **Base URL:** `https://api.deepseek.com` (configurável)
-- **SDK:** `@ai-sdk/deepseek` (Vercel AI SDK)
+- **SDK:** `openai` (SDK da OpenAI apontado para a base URL do DeepSeek)
 - **Formato wire:** API OpenAI Chat Completions
 
 ## Estratégia De Continuação

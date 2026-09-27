@@ -10,7 +10,6 @@ import {
   streamDeepSeekAgentTurn,
 } from '../../../../src/services/providers/deepseek/agent-stream';
 import {
-  createDeepSeekAgentClient,
   createDeepSeekClient,
   validateDeepSeekApiKey,
 } from '../../../../src/services/providers/deepseek/client';
@@ -95,25 +94,12 @@ function findAssistantMsg(state: Record<string, unknown>): Record<string, unknow
 // ---------------------------------------------------------------------------
 
 describe('DeepSeek provider foundation', () => {
-  it('reuses the same SDK client for the same connector config', () => {
+  it('reuses the same client for the same connector config', () => {
     const clientA = createDeepSeekClient({
-      apiKey: 'sk-test-deepseek-cache',
-      baseUrl: 'https://api.deepseek.com',
-    });
-    const clientB = createDeepSeekClient({
-      apiKey: 'sk-test-deepseek-cache',
-      baseUrl: 'https://api.deepseek.com/',
-    });
-
-    expect(clientA).toBe(clientB);
-  });
-
-  it('reuses the same agent client for the same connector config', () => {
-    const clientA = createDeepSeekAgentClient({
       apiKey: 'sk-test-deepseek-agent-cache',
       baseUrl: 'https://api.deepseek.com',
     });
-    const clientB = createDeepSeekAgentClient({
+    const clientB = createDeepSeekClient({
       apiKey: 'sk-test-deepseek-agent-cache',
       baseUrl: 'https://api.deepseek.com/',
     });
@@ -122,11 +108,11 @@ describe('DeepSeek provider foundation', () => {
   });
 
   it('creates different clients when connector config changes', () => {
-    const flashClient = createDeepSeekAgentClient({
+    const flashClient = createDeepSeekClient({
       apiKey: 'sk-test-deepseek-agent-cache-a',
       baseUrl: 'https://api.deepseek.com/v1',
     });
-    const alternateClient = createDeepSeekAgentClient({
+    const alternateClient = createDeepSeekClient({
       apiKey: 'sk-test-deepseek-agent-cache-b',
       baseUrl: 'https://api.deepseek.com/v1',
     });
@@ -266,6 +252,22 @@ describe('buildDeepSeekChatMessages', () => {
       { role: 'assistant', content: 'Hi there' },
       { role: 'user', content: 'Continue' },
     ]);
+  });
+
+  it('leads with the system prompt, including the thinking-language hint', () => {
+    const messages = buildDeepSeekChatMessages({
+      userId: 'test-user',
+      history: [],
+      prompt: 'Continue',
+      systemPrompt: 'You are concise.',
+      modelName: 'deepseek-v4-flash',
+      generationConfig: { thinkingEnabled: true, reasoningEffort: 'medium' },
+    });
+
+    expect(messages[0]?.role).toBe('system');
+    expect(messages[0]?.content).toContain('You are concise.');
+    expect(messages[0]?.content).toContain('same natural language as the current user message');
+    expect(messages.at(-1)).toEqual({ role: 'user', content: 'Continue' });
   });
 });
 
