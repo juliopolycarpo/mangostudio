@@ -76,6 +76,7 @@ export const ROOT_DPRINT_PATHS: string[] = [
   'packages',
   'lefthook.yml',
   'dprint.json',
+  'bunfig.toml',
   // The Mango Protocol tree: the normative spec prose, the Rust crate's own
   // markdown, and the four TOML files its workspace needs at the root.
   'spec',
