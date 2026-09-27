@@ -26,6 +26,7 @@ describe('dependency policy', () => {
       '@ai-sdk/openai-compatible',
       'ai',
       '@ai-sdk/deepseek',
+      'date-fns',
       'shiki',
       '@tanstack/router-devtools',
     ]);

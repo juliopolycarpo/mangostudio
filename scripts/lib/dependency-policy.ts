@@ -40,6 +40,11 @@ export const DISALLOWED_WORKSPACE_DEPENDENCIES = [
   },
   {
     workspacePath: 'apps/frontend',
+    packageName: 'date-fns',
+    reason: 'Locale formatting uses Intl through lib/i18n-format.',
+  },
+  {
+    workspacePath: 'apps/frontend',
     packageName: 'shiki',
     reason: 'The syntax highlighter imports granular @shikijs/* packages directly.',
   },
