@@ -438,6 +438,9 @@ describe('release workflow binary gate', () => {
     expect(extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution')).toContain(
       'cache: true'
     );
+    expect(extractJobBlock(readText('.github/workflows/smoke-binary.yml'), 'runtime')).toContain(
+      'cache: true'
+    );
   });
 
   test('archive upload payloads skip artifact re-compression', () => {
