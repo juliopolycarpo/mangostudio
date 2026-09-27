@@ -1,5 +1,10 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/b9f25ec1-2619-44a6-af6a-00e8f6fb2731" />
+  <img
+    width="1200"
+    height="475"
+    alt="GHBanner"
+    src="https://github.com/user-attachments/assets/b9f25ec1-2619-44a6-af6a-00e8f6fb2731"
+  />
 </div>
 
 # MangoStudio

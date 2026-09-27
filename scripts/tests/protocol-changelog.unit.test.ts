@@ -117,7 +117,7 @@ describe('changelog partition', () => {
       [PROTOCOL_CLIFF_CONFIG, PROTOCOL_CONFIG],
     ] as const) {
       expect(config, name).toContain('<!-- seam -->');
-      expect(config, name).toContain(`{ pattern = '<!-- seam -->', replace = "" }`);
+      expect(config, name).toContain(`{ pattern = "<!-- seam -->", replace = "" }`);
     }
   });
 

@@ -99,7 +99,10 @@ regex = { version = "1.13", default-features = false, features = ["std", "unicod
 # reqwest's default `rustls`, which enables `aws-lc-rs`: the client is handed a
 # preconfigured `ring` config with the webpki root store, the same TLS policy
 # `mango-protocol`'s WebSocket dialler uses.
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = [
+  "rustls-no-provider",
+  "stream",
+] }
 # MCP SDK access stays inside `mcp/`; the host owns the session and wire
 # mapping. Pin this version while the 2026-07-28 client API is integrated.
 # No `transport-child-process`: stdio servers are launched by the shared
@@ -109,7 +112,11 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 # `mcp/http.rs` implements the SDK's HTTP client trait so it owns status
 # handling (the legacy SSE fallback needs the initialize POST's status) and
 # the TLS provider.
-rmcp = { version = "=3.4.0", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"] }
+rmcp = { version = "=3.4.0", default-features = false, features = [
+  "client",
+  "transport-async-rw",
+  "transport-streamable-http-client",
+] }
 # `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
 # code units, named captures, and an engine interrupt hook for its hard deadline.
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
@@ -129,7 +136,17 @@ sse-stream = "0.2"
 # non-Windows child, while Windows turns its explicit pipe handles into
 # `tokio::fs::File` endpoints. See `crate::blocking`'s module docs for the pool
 # it shares the executor threads with.
-tokio = { version = "1.53", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.53", default-features = false, features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "process",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
 # `CancellationToken`: the cooperative shutdown signal `serve`'s accept loop
 # and `connect`'s dial loop both watch. Same version `mango-protocol` itself
 # pins, so `cargo deny`'s duplicate-version check has nothing new to catch.
@@ -155,7 +172,10 @@ webpki-roots = "1"
 # `FakeAcpAgent` is what `examples/fake_cursor_agent.rs` pipes its stdio
 # through for the compiled-runtime qualification suite.
 mango-agent-acp = { version = "=0.3.0", features = ["testing"] }
-mango-external-agents = { version = "=0.3.0", default-features = false, features = ["stdio", "testing"] }
+mango-external-agents = { version = "=0.3.0", default-features = false, features = [
+  "stdio",
+  "testing",
+] }
 mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
 tokio = { version = "1.53", features = ["io-std", "test-util"] }
 
@@ -164,7 +184,12 @@ libc = "0.2.189"
 # `signal`: `kill(pid, 0)` for lock-holder liveness, mirroring `process.kill(pid, 0)` on the
 # TypeScript side. `hostname`: `gethostname()` for the lock body's `host` field. `fs`:
 # `access(2)` for `workspace.validate`'s read+execute directory check.
-nix = { version = "0.31", default-features = false, features = ["signal", "hostname", "user", "fs"] }
+nix = { version = "0.31", default-features = false, features = [
+  "signal",
+  "hostname",
+  "user",
+  "fs",
+] }
 # Restricted same-filesystem moves use renameat2/renameatx_np with NOREPLACE
 # through verified directory handles; cap-std only exposes replacing rename.
 # This exact version is already present transitively through cap-std.
@@ -182,4 +207,18 @@ rustix = { version = "1.1", default-features = false, features = ["fs"] }
 # Job atomically attached through CreateProcessW's attribute list, with explicit pipe inheritance.
 # Threading also provides OpenProcess/OpenProcessToken/GetExitCodeProcess for lock-holder liveness
 # and the owner-only module's own SID lookup.
-windows-sys = { version = "0.61", features = ["Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Globalization", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = [
+  "Wdk_Storage_FileSystem",
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Networking_WinSock",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_IO",
+  "Win32_System_JobObjects",
+  "Win32_System_Pipes",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+] }
