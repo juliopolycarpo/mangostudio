@@ -414,7 +414,7 @@ describe('release workflow binary gate', () => {
     expect(zigbuild).toContain('tool: cargo-zigbuild@0.23.4');
   });
 
-  test('only CI builds restore the runtime cargo cache, and only main saves it', () => {
+  test('release builds never restore the runtime cargo cache, and only main saves it', () => {
     const runtime = readText('.github/workflows/runtime-build.yml');
     const cacheStep = extractStepBlocks(runtime).find((step) =>
       step.includes('Swatinem/rust-cache@')
@@ -425,16 +425,20 @@ describe('release workflow binary gate', () => {
     expect(cacheStep).toContain('save-if: $' + "{{ github.ref == 'refs/heads/main' }}");
     expect(runtime).toMatch(/\n {6}cache:\n(?: {8}.*\n)*? {8}default: false\n/);
 
-    // Release bytes never start from restored build state: neither release
-    // path, nor the distribution build they share, may opt in.
+    // Release bytes never start from restored build state: the release path,
+    // and the distribution build it shares, never opt in.
     const distribution = readText('.github/workflows/distribution-build.yml');
     expect(extractJobBlock(distribution, 'runtime')).toContain('cache: $' + '{{ inputs.cache }}');
     expect(distribution).toMatch(/\n {6}cache:\n(?: {8}.*\n)*? {8}default: false\n/);
-    for (const path of ['.github/workflows/release.yml', '.github/workflows/release-dry-run.yml']) {
-      expect(readText(path), `${path} must not opt into the cargo cache`).not.toMatch(
-        /\n\s+cache: true\n/
-      );
-    }
+    expect(readText('.github/workflows/release.yml'), 'release.yml cargo cache').not.toMatch(
+      /\n\s+cache:/
+    );
+    // The dry run publishes nothing, so pull requests may restore; its weekly
+    // schedule and manual runs keep proving a clean build.
+    expect(
+      extractJobBlock(readText('.github/workflows/release-dry-run.yml'), 'runtime'),
+      'release-dry-run.yml runtime job cargo cache'
+    ).toContain('cache: $' + "{{ github.event_name == 'pull_request' }}");
     expect(extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution')).toContain(
       'cache: true'
     );

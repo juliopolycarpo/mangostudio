@@ -96,6 +96,12 @@ jobs:
       source_sha: ${{ github.sha }}
       platforms: '["linux-x64","windows-x64"]'
       artifact_prefix: dry-run-runtime
+      # Pull requests restore the per-platform cargo cache CI's distribution
+      # build uses (main writes it, nothing here saves): the dry-run bytes are
+      # never published, and the uncached windows-x64 build was the slowest
+      # job on a release-touching PR. The weekly schedule and manual runs stay
+      # uncached, so a clean release-profile build is still proven each week.
+      cache: ${{ github.event_name == 'pull_request' }}
 
   dry-run-linux:
     name: Linux release dry run
