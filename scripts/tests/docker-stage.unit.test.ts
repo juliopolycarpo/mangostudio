@@ -121,7 +121,7 @@ describe('Docker release wiring', () => {
     expect(dockerfile).toContain('libstdc++6');
     expect(dockerfile).toContain(`COPY --chmod=0755 docker-ctx/bookworm/${targetArch}/mangostudio`);
     expect(dockerfile).not.toContain('/public');
-    expect(alpineDockerfile).toContain('FROM alpine:3.21');
+    expect(alpineDockerfile).toContain('FROM alpine:3.24');
     expect(alpineDockerfile).toContain('libstdc++');
     expect(alpineDockerfile).toContain(
       `COPY --chmod=0755 docker-ctx/alpine/${targetArch}/mangostudio`
