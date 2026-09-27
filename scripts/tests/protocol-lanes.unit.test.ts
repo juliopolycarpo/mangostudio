@@ -264,10 +264,9 @@ describe('protocol lane selection', () => {
     if (label === 'protocol:doc') expect(task?.env).toEqual({ RUSTDOCFLAGS: '-D warnings' });
   });
 
-  test('protocol scoping preserves workspace coverage and uses a distinct cache workload', () => {
+  test('protocol scoping preserves workspace coverage', () => {
     const protocol = readText('.github/workflows/protocol-ci.yml');
     const rust = extractJobBlock(protocol, 'rust');
-    expect(rust).toContain('key: protocol-only');
     expect(rust).toContain('RUSTDOCFLAGS: -D warnings');
     expect(extractJobBlock(protocol, 'msrv')).toContain(
       'cargo +1.97.0 check --all-features --locked'

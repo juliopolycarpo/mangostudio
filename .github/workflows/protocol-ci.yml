@@ -149,8 +149,6 @@ jobs:
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          # Replace the former whole-workspace cache with this SDK-only workload.
-          key: protocol-only
       - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
         with:
           tool: cargo-hack
