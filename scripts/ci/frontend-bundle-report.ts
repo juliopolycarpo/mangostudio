@@ -211,7 +211,7 @@ export async function measureBundle(
 
   // One pass, one read per file, all of them in flight at once. The reads do
   // overlap; the gzips do not, because `Bun.gzipSync` occupies the thread it
-  // runs on and Bun 1.4.0 has no async gzip. `node:zlib`'s asynchronous one is
+  // runs on and Bun 1.4.2 has no async gzip. `node:zlib`'s asynchronous one is
   // not a substitute: measured over this dist it disagrees with `gzipSync` on 4
   // files of 55, and a byte the report does not owe to the bundle is exactly
   // what makes a size argument unusable.

@@ -653,12 +653,12 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       // Unhashed files now resolve from the URL per request, so traversal is a
       // live concern rather than a theoretical one.
       //
-      // Measured on Bun 1.4.0, the URL parser handles the two encodings
-      // differently: `/%2e%2e/x` is decoded *and* normalised to `/x` before a
-      // handler sees it, but `/..%2fx` arrives verbatim. So the second form is
-      // the one that actually reaches the resolver and the one this pins — the
-      // resolver has to decode before it can reject, because the `..` is not
-      // visible until then.
+      // Measured on Bun 1.4.0 and re-verified on 1.4.2, the URL parser handles
+      // the two encodings differently: `/%2e%2e/x` is decoded *and* normalised
+      // to `/x` before a handler sees it, but `/..%2fx` arrives verbatim. So
+      // the second form is the one that actually reaches the resolver and the
+      // one this pins — the resolver has to decode before it can reject,
+      // because the `..` is not visible until then.
       const outside = join(server.frontendDir, '..', 'escaped-secret.txt');
       writeFileSync(outside, 'secret');
       // `rmSync(..., { recursive: true, force: true })` in afterEach removes a

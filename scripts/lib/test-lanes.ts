@@ -16,10 +16,10 @@ export type TestLaneId = 'root' | 'api-unit' | 'api-integration' | 'shared' | 'f
  * Total-coverage floors, in percent, enforced by
  * `scripts/qa-gate/enforce-coverage-thresholds.ts` after the lane's run.
  *
- * They live here and not in `bunfig.toml` because Bun 1.4.0's
- * `coverageThreshold` is enforced per *file*: every file must individually
- * clear the bar, so any workspace with a legitimately uncovered file cannot
- * express a total-coverage gate through it (measured; see
+ * They live here and not in `bunfig.toml` because Bun's `coverageThreshold`
+ * is enforced per *file* (still true on 1.4.2; oven-sh/bun#17028): every file
+ * must individually clear the bar, so any workspace with a legitimately
+ * uncovered file cannot express a total-coverage gate through it (measured; see
  * docs/reference/testing.md's Frontend section).
  */
 interface CoverageThresholds {

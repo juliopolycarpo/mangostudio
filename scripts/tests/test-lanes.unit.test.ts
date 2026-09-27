@@ -160,10 +160,10 @@ describe('test lane declarations', () => {
 describe('api lanes', () => {
   // The two api suites need opposite isolation settings, which is why the
   // workspace is two lanes at all. Unit without isolation is 172 failures
-  // (measured on 1.4.0); integration inside Bun's isolate machinery is the
-  // intermittent runner hang (oven-sh/bun#39709) that burned CI's
-  // timeout-minutes. Pin both directions so neither flag drifts onto the
-  // other lane.
+  // (measured on 1.4.0; 351 on the current tree on 1.4.2); integration inside
+  // Bun's isolate machinery is the intermittent runner hang (oven-sh/bun#39709)
+  // that burned CI's timeout-minutes. Pin both directions so neither flag
+  // drifts onto the other lane.
   it('keeps the unit lane isolated and never --no-isolate', async () => {
     const scripts = await readScripts(laneById('api-unit').manifest);
     const script = scripts[laneById('api-unit').coverageScript];
@@ -214,7 +214,8 @@ describe('api lanes', () => {
 describe('frontend lane', () => {
   const frontend = laneById('frontend');
 
-  // `mock.module` leaks across files without isolation (measured on 1.4.0), so
+  // `mock.module` leaks across files without isolation (measured on 1.4.0 and
+  // 1.4.2), so
   // the flag is load-bearing, and `--no-isolate` would quietly re-share the
   // module graph even under `--parallel`.
   it('runs isolated, never --no-isolate', async () => {
@@ -252,7 +253,7 @@ describe('frontend lane', () => {
     }
   });
 
-  // Bun 1.4.0's own `coverageThreshold` is enforced per *file* — any workspace
+  // Bun's own `coverageThreshold` is enforced per *file* (still on 1.4.2) — any workspace
   // with a legitimately uncovered file fails every positive value — and a miss
   // prints nothing. Pinned as absent so re-adding it is a deliberate act, not a
   // copy-paste from Bun's docs.

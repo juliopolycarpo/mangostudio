@@ -37,8 +37,9 @@ describe('test script', () => {
     const testScript = readText('scripts/test.ts');
 
     expect(testScript).toContain('createTurboTestCommand');
-    expect(testScript).toContain("runCommand('workspaces:test:unit'");
-    expect(testScript).toContain("'workspaces:test:integration'");
+    expect(testScript).toContain('createChangedTurboTestCommands');
+    expect(testScript).toContain("workspaceLaneTasks('test:unit')");
+    expect(testScript).toContain("workspaceLaneTasks('test:integration')");
     expect(testScript).toContain("'workspaces:test:coverage'");
     expect(testScript).not.toContain('runWorkspaceScript');
   });

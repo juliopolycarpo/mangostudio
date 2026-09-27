@@ -1,7 +1,7 @@
 /**
  * `bun test`'s stand-in for Vitest's `vi.advanceTimersByTimeAsync`.
  *
- * Bun 1.4.0's fake timers cover `useFakeTimers`, `useRealTimers`,
+ * Bun 1.4.2's fake timers cover `useFakeTimers`, `useRealTimers`,
  * `advanceTimersByTime`, `advanceTimersToNextTimer`, `runAllTimers` and
  * `setSystemTime` — but there is no async variant of any of them, and every
  * timer-driven assertion in this suite is really waiting on the promise chain a
@@ -11,9 +11,9 @@
  * work queue and the microtasks behind it before returning. Callers that are
  * already inside an `act` get a nested one, which React supports.
  *
- * Fake timers also move `Date.now()` (verified on 1.4.0), so code that measures
- * a window by timestamp rather than by timer — `local-write-window.ts` — sees
- * the same jump.
+ * Fake timers also move `Date.now()` (verified on 1.4.0 and 1.4.2), so code
+ * that measures a window by timestamp rather than by timer —
+ * `local-write-window.ts` — sees the same jump.
  */
 
 import { jest } from 'bun:test';
@@ -53,7 +53,7 @@ export async function advanceTimersByTimeAsync(ms: number): Promise<void> {
  * `use-settings-realtime` time out at 5s, while both passed in isolation.
  *
  * Vitest does not need it because `advanceTimersByTimeAsync` flushes between
- * timer callbacks; Bun 1.4.0 has no async advance at all.
+ * timer callbacks; Bun 1.4.2 has no async advance at all.
  *
  * Safe from an unconditional `afterEach`, which is why it tracks installation
  * itself — `jest.advanceTimersByTime()` throws `Fake timers are not active`

@@ -55,8 +55,26 @@ bun run test:e2e:setup     # instala Playwright Chromium + dependências do SO
 bun run test --e2e          # auth smoke suite em Playwright Chromium (opt-in)
 bun run test --coverage     # coleta de cobertura nos workspaces aplicáveis
 bun run test --all          # todas as lanes, incluindo e2e
+bun run test --changed      # só os testes afetados desde merge-base HEAD origin/main
+bun run test --changed --base <ref>  # ... desde merge-base HEAD <ref>
 bun run verify              # gate CI local completo: check → test --coverage → build --all
 ```
+
+`--changed` é um loop local rápido, não um gate. Ele compara o merge-base com a
+working tree (arquivos commitados, staged, unstaged e untracked) e passa
+`bun test --changed=<merge-base>` para cada lane, que mantém só os arquivos de
+teste cujo grafo de imports alcança um arquivo alterado. A varredura do Bun
+para no symlink de workspace — no 1.4.2 uma edição em `apps/shared` não
+seleciona nenhum teste da api ou do frontend — e nunca vê um arquivo que é lido
+em vez de importado. Por isso uma lane roda inteira quando mudou um workspace
+que ela importa pelo nome do pacote (`CHANGED_LANE_DEPENDENCIES` em
+`scripts/lib/test.ts`, fixado contra os manifests), quando mudou um arquivo
+dela que não é módulo, ou, na lane da raiz, quando mudou qualquer arquivo que
+não é módulo. A lane do protocolo só roda quando a superfície do protocolo
+mudou. O runner imprime o modo e o motivo de cada lane antes de começar. Ele
+recusa `--coverage`, porque os pisos precisam da suíte inteira; `--e2e` continua
+rodando inteiro. Um teste que lê código como texto em vez de importá-lo é
+invisível para o `--changed`, então o CI continua rodando tudo.
 
 ### Taxonomia de lanes
 
@@ -328,9 +346,11 @@ arredondados para baixo com ~1pt de folga. Os pisos vivem em
 `scripts/lib/test-lanes.ts` e são aplicados por
 `scripts/qa-gate/enforce-coverage-thresholds.ts`, encadeado dentro do próprio
 `test:coverage` — um estouro falha a mesma invocação que o CI observa. O
-`coverageThreshold` do `bunfig.toml` não serve para isso: no Bun 1.4.0 ele é
-aplicado por *arquivo*, fica silenciosamente inerte com
-`coverageReporter = ["lcov"]` sem `"text"`, e um estouro não imprime nada.
+`coverageThreshold` do `bunfig.toml` não serve para isso: no Bun 1.4.2 ele
+ainda é aplicado por *arquivo* e um estouro não imprime nada
+([oven-sh/bun#17028](https://github.com/oven-sh/bun/issues/17028), ainda
+aberta). No 1.4.0 ele também ficava silenciosamente inerte com
+`coverageReporter = ["lcov"]` sem `"text"`; no 1.4.2 isso não se reproduz.
 
 ## Erros Não Tratados Com Contagens Verdes
 

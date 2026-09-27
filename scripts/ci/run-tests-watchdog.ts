@@ -7,8 +7,9 @@
 // before the runner kills it. `--timeout` bounds a *test*, not the runner
 // process, so nothing inside Bun ends the wait. Observed on this repo's shard
 // jobs at `--parallel=1` on stock Bun 1.4.0; the upstream fix
-// (oven-sh/bun#38008) is unmerged, so until a release carries it this
-// watchdog turns a 10-minute stall plus a manual rerun into a bounded retry.
+// (oven-sh/bun#38008) is still unmerged as of 1.4.2 (oven-sh/bun#39709 open),
+// so until a release carries it this watchdog turns a 10-minute stall plus a
+// manual rerun into a bounded retry.
 //
 // Two details are load-bearing:
 //

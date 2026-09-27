@@ -29,7 +29,7 @@
 // duplicate-claimed 370 files against the shards that actually ran them.)
 //
 // A lane's JUnit report is the tell, but not because "a lane that ran always
-// writes one" — measured on Bun 1.4.0, a shard whose slice of a lane is *empty*
+// writes one" — measured on Bun 1.4.0 and 1.4.2, a shard whose slice of a lane is *empty*
 // runs zero files, writes no JUnit report, and exits 0. What makes the rule
 // safe is that the same empty run also rewrites its `--timings` file to
 // `{"version":1,"files":{}}`, so the two cases a missing report covers are:

@@ -1,7 +1,7 @@
 // Extract unhandled-error counts and headlines from a run log — the one test
 // signal JUnit cannot carry.
 //
-// Measured on Bun 1.4.0-canary.1: an error raised between tests prints a
+// Measured on Bun 1.4.0-canary.1, re-verified on 1.4.2: an error raised between tests prints a
 // `# Unhandled error between tests` block and a ` N error` summary line, exits
 // 1, and leaves the JUnit report reading `failures="0"` with no failing
 // `<testcase>`. So the signal has to come from the log — without it the QA
