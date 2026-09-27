@@ -1,9 +1,9 @@
 import type { Message } from '@mangostudio/shared';
-import { format } from 'date-fns';
 import { FileText, Image, ImageOff } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatClockTime } from '@/lib/i18n-format';
 import { MessageBubble } from './MessageBubble';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
@@ -19,7 +19,7 @@ interface UserMessageBubbleProps {
  * Usage: <UserMessageBubble msg={msg} isImageTurn={isImageTurn} />
  */
 export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   // Local to this row so a broken reference image never re-renders the feed.
   const [referenceImageFailed, setReferenceImageFailed] = useState(false);
 
@@ -73,7 +73,7 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
         )}
       </div>
       <span className="text-[10px] text-on-surface-variant font-label px-2">
-        {format(msg.timestamp, 'h:mm a')}
+        {formatClockTime(msg.timestamp, locale)}
       </span>
     </>
   );

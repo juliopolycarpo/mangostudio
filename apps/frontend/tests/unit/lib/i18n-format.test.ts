@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { formatClockTime, formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 
 const NOW = Date.UTC(2026, 7, 24, 12, 0, 0);
 const MINUTE = 60 * 1000;
@@ -38,6 +38,18 @@ describe('formatMessage', () => {
       'New chat with codex'
     );
     expect(formatMessage('New chat with {runner}')).toBe('New chat with {runner}');
+  });
+});
+
+describe('formatClockTime', () => {
+  // Shapes, not exact strings: the hour depends on the machine's time zone,
+  // the clock convention does not.
+  it('uses a 12-hour clock with a meridiem in English', () => {
+    expect(formatClockTime(NOW, 'en')).toMatch(/^\d{1,2}:\d{2}\s(AM|PM)$/);
+  });
+
+  it('uses a 24-hour clock in Portuguese instead of an English meridiem', () => {
+    expect(formatClockTime(NOW, 'pt-BR')).toMatch(/^\d{2}:\d{2}$/);
   });
 });
 

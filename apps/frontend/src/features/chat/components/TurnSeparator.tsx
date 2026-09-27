@@ -1,11 +1,11 @@
 import type { Message, MessagePart } from '@mangostudio/shared';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
-import { format } from 'date-fns';
 import { TOOL_AVATAR_SIZE_CLASS, ToolAvatar } from '@/components/ui/ToolAvatar';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { MANGO_IDENTITY } from '@/lib/agent-identity';
+import { formatClockTime } from '@/lib/i18n-format';
 import { deriveTurnIdentity } from '../lib/turn-identity';
 import type { TurnStatus } from '../lib/turn-status';
 import { CopyMessageButton } from './CopyMessageButton';
@@ -71,7 +71,7 @@ export function TurnSeparator({
   fileCheckpoint,
   toolIdentities,
 }: TurnSeparatorProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { resolve } = toolIdentities;
   const identity = deriveTurnIdentity(
     msg,
@@ -134,7 +134,7 @@ export function TurnSeparator({
       )}
       {turnIsSettledEnoughForActions && (
         <span className="shrink-0 font-label text-[10px] text-on-surface-variant/50 opacity-0 transition-opacity duration-(--duration-base) group-hover:opacity-100">
-          {format(msg.timestamp, 'h:mm a')}
+          {formatClockTime(msg.timestamp, locale)}
         </span>
       )}
     </div>
