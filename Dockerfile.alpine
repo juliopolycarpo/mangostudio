@@ -10,7 +10,7 @@
 # shape of the COPY lines) must stay byte-for-byte identical so a hardening
 # change applied here propagates to the other variant by copy/paste.
 
-FROM alpine:3.21
+FROM alpine:3.24
 ARG TARGETARCH
 ARG VERSION=dev
 ARG SOURCE_URL=https://github.com/juliopolycarpo/mangostudio

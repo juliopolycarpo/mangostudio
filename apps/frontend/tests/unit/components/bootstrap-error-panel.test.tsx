@@ -7,7 +7,10 @@
 import { describe, expect, it } from 'bun:test';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { screen } from '@testing-library/react';
-import { BootstrapErrorPanel } from '../../../src/components/layout/BootstrapErrorPanel';
+import {
+  BootstrapErrorPanel,
+  errorDetail,
+} from '../../../src/components/layout/BootstrapErrorPanel';
 import { ApiError } from '../../../src/lib/utils';
 import { renderWithRouter } from '../../support/harness/render-with-router';
 
@@ -28,5 +31,20 @@ describe('BootstrapErrorPanel', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent(/every page depends on was refused/);
     expect(screen.getByRole('alert')).toHaveTextContent(/socket hang up/);
+  });
+
+  it('keeps a thrown string as the detail, since a loader may throw any value', async () => {
+    await renderWithRouter(<BootstrapErrorPanel error="gateway closed" />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/gateway closed/);
+  });
+});
+
+describe('errorDetail', () => {
+  it('reads the message from an Error, a string as-is, and nothing from other values', () => {
+    expect(errorDetail(new Error('socket hang up'))).toBe('socket hang up');
+    expect(errorDetail('gateway closed')).toBe('gateway closed');
+    expect(errorDetail({ status: 503 })).toBe('');
+    expect(errorDetail(undefined)).toBe('');
   });
 });

@@ -132,7 +132,7 @@ jobs:
       # already on PATH, and skips it with a warning otherwise — a runner
       # without it verifies a release with less than protocol-ci.yml runs on the
       # pull request that produced it.
-      - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: cargo-hack
       - run: bun install --frozen-lockfile

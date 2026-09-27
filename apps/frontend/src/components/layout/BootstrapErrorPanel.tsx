@@ -17,12 +17,25 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ApiError } from '@/lib/utils';
 
-export function BootstrapErrorPanel({ error }: { readonly error: Error }) {
+/**
+ * The raw line shown beneath the headline. The router types a boundary's error
+ * as `unknown` because a loader can throw any value, so a thrown string still
+ * reaches the person and anything else shows no detail.
+ *
+ * @example errorDetail(new Error('socket hang up')) // 'socket hang up'
+ */
+export function errorDetail(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return typeof error === 'string' ? error : '';
+}
+
+export function BootstrapErrorPanel({ error }: { readonly error: unknown }) {
   const { t } = useI18n();
   const s = t.errors.bootstrap;
   const router = useRouter();
   const [isRetrying, setRetrying] = useState(false);
   const isRateLimited = error instanceof ApiError && error.code === ERROR_CODES.RATE_LIMITED;
+  const detail = errorDetail(error);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-dim px-4">
@@ -46,9 +59,9 @@ export function BootstrapErrorPanel({ error }: { readonly error: Error }) {
         >
           {s.retry}
         </Button>
-        {error.message ? (
+        {detail ? (
           <p className="break-words text-on-surface-variant/50 text-xs">
-            {formatMessage(s.detail, { message: error.message })}
+            {formatMessage(s.detail, { message: detail })}
           </p>
         ) : null}
       </div>

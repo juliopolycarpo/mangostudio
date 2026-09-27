@@ -47,8 +47,8 @@ trim = true
 # with a non-whitespace marker keeps the newline before it, and removing only
 # the marker here leaves the blank line behind.
 postprocessors = [
-  { pattern = '<!-- [0-9]+ -->', replace = "" },
-  { pattern = '<!-- seam -->', replace = "" },
+  { pattern = "<!-- [0-9]+ -->", replace = "" },
+  { pattern = "<!-- seam -->", replace = "" },
 ]
 
 [git]
