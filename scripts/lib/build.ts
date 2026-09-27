@@ -48,7 +48,7 @@ export function binaryCompileDefines(context: BinaryCompileDefines): string[] {
 /**
  * Output flags for every standalone hub compile. `--bytecode` ships JSC
  * bytecode beside the source so a cold start skips parsing the bundle (the
- * hub's `--version` went from ~420 ms to ~120 ms on linux-x64), at the cost
+ * hub's `--version` went from 427 ms to 148 ms on linux-x64, median of 20), at the cost
  * of a larger binary. Bytecode defaults to CommonJS output, which rejects the
  * entry's top-level `await`, so `--format=esm` is required with it.
  * // Usage: binaryCompileFlags('production') // → ['--bytecode', '--format=esm', '--sourcemap=external', '--minify']
