@@ -73,7 +73,7 @@ jobs:
       # One cache per platform, shared by every caller that opts in. Only main
       # saves it: pull requests restore main's entry instead of each adding a
       # copy to the repository's cache quota. prefix-key hashes the root
-      # manifest because rust-cache's own key ignores [profile.release].
+      # manifest because rust-cache's own key ignores [profile.*].
       - name: Restore the cargo cache
         if: inputs.cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
