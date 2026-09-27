@@ -37,6 +37,11 @@ on:
 permissions:
   contents: read
 
+# Every cargo build here is a one-off with no cache, so incremental state
+# would only cost time and disk (rust-cache used to set this).
+env:
+  CARGO_INCREMENTAL: "0"
+
 concurrency:
   group: protocol-release-${{ github.ref }}
   cancel-in-progress: false
@@ -47,8 +52,9 @@ jobs:
     runs-on: ubuntu-latest
     # `protocol-ci.yml` budgets 25 minutes for the Rust half alone, on a warm
     # `Swatinem/rust-cache`. This job runs that half plus the TypeScript one,
-    # both test suites and the pack-and-consume lane, on a cache key no pull
-    # request populates — so 30 would time out a release mid-verify.
+    # both test suites and the pack-and-consume lane, with no cargo cache: a tag
+    # run could never save one (only main saves) or match main's job keys — so
+    # 30 would time out a release mid-verify.
     timeout-minutes: 45
     outputs:
       version: ${{ steps.resolve.outputs.version }}
@@ -122,7 +128,6 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # `protocol:check` adds the feature-powerset lane only when cargo-hack is
       # already on PATH, and skips it with a warning otherwise — a runner
       # without it verifies a release with less than protocol-ci.yml runs on the
@@ -199,7 +204,6 @@ jobs:
         with:
           persist-credentials: false
       - run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - id: published
         name: Already on crates.io?
         env:

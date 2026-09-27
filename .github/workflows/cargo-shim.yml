@@ -113,7 +113,12 @@ jobs:
 
       - run: rustup show active-toolchain
 
+      # Every rust-cache step keys on the root manifest and saves only from
+      # main; scripts/tests/cache-policy.unit.test.ts explains and pins both.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: cargo fmt --all -- --check
 
@@ -166,6 +171,9 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: cargo check -p mangostudio --all-targets --locked
 
@@ -193,6 +201,9 @@ jobs:
       - uses: ./.github/actions/setup-zigbuild
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target x86_64-unknown-linux-musl -- -D warnings
 
@@ -244,6 +255,9 @@ jobs:
       - run: rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored
 
@@ -301,7 +315,13 @@ jobs:
 
       - run: rustup show active-toolchain
 
+      # The same two builds as the local-runtime action CI runs, so both jobs
+      # share one entry per OS instead of storing the same build twice.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: local-runtime
 
       - run: cargo build -p mangostudio-runtime --locked
 

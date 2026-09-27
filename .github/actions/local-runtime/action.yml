@@ -32,10 +32,14 @@ runs:
       shell: bash
       run: rustup show active-toolchain
 
+    # prefix-key hashes the root manifest because rust-cache's own key ignores
+    # [profile.*]. Only main saves; see scripts/tests/cache-policy.unit.test.ts.
     - name: Restore the cargo cache
       if: inputs.artifact == ''
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
+        prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
         shared-key: local-runtime
 
     - name: Build the Local runtime

@@ -62,3 +62,18 @@ strip = true
 # (`the_release_profile_unwinds`) requires this exact setting, and
 # `scripts/tests/protocol-lanes.unit.test.ts` rejects an abort in any manifest.
 panic = "unwind"
+
+# Line tables keep file:line in panics and backtraces, which is all the debug
+# info the workspace needs; dependencies drop theirs. Measured on linux-x64 (30
+# cores, `cargo build --workspace --all-targets`): the cold build falls from
+# 155 s to 123 s, a rebuild after touching the runtime from ~20 s to ~15 s,
+# `target/` from 15 GB to 5.6 GB, and the debug runtime from 509 MB to 161 MB.
+# `profile.test` inherits all of this. For a stepping debugger, override
+# locally with `CARGO_PROFILE_DEV_DEBUG=full`, which reaches only the workspace
+# crates: the package override below outranks it, so dependencies also need
+# `--config 'profile.dev.package."*".debug="full"'`.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

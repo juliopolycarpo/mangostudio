@@ -72,6 +72,8 @@ export function selectLanes(args: readonly string[]): ProtocolLaneSelection {
 const CARGO_CLIPPY = [
   'cargo',
   'clippy',
+  '-p',
+  'mango-protocol',
   '--all-targets',
   '--all-features',
   '--locked',
@@ -128,7 +130,7 @@ function rustCheckTasks(format: boolean, cargoHack: boolean): ProtocolTask[] {
   tasks.push({ label: 'protocol:clippy', cmd: [...CARGO_CLIPPY] });
   tasks.push({
     label: 'protocol:doc',
-    cmd: ['cargo', 'doc', '--no-deps', '--all-features', '--locked'],
+    cmd: ['cargo', 'doc', '-p', 'mango-protocol', '--no-deps', '--all-features', '--locked'],
     env: { RUSTDOCFLAGS: '-D warnings' },
   });
   if (cargoHack) {
@@ -138,6 +140,8 @@ function rustCheckTasks(format: boolean, cargoHack: boolean): ProtocolTask[] {
         'cargo',
         'hack',
         'clippy',
+        '-p',
+        'mango-protocol',
         '--feature-powerset',
         '--all-targets',
         '--locked',
@@ -224,11 +228,11 @@ export function protocolTestTasks(
 
   tasks.push({
     label: 'protocol:cargo-test',
-    cmd: ['cargo', 'test', '--all-targets', '--all-features', '--locked'],
+    cmd: ['cargo', 'test', '-p', 'mango-protocol', '--all-targets', '--all-features', '--locked'],
   });
   tasks.push({
     label: 'protocol:cargo-test-doc',
-    cmd: ['cargo', 'test', '--doc', '--all-features', '--locked'],
+    cmd: ['cargo', 'test', '-p', 'mango-protocol', '--doc', '--all-features', '--locked'],
   });
   return tasks;
 }

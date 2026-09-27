@@ -2,6 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
 import {
+  extractJobBlock,
+  extractJobBlocks,
+  extractStepBlocksAtIndent,
+} from './support/workflow-blocks';
+import {
   cacheScopedCallSites,
   compositeActionFiles,
   workflowFiles,
@@ -11,6 +16,37 @@ const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
 const EXPECTED_FAMILIES = ['bun', 'turbo', 'lint-tools', 'playwright', 'timings'] as const;
+const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-${EXPRESSION_START} hashFiles('Cargo.toml') }}`;
+const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/heads/main' }}`;
+// The fuzz workspace is excluded from the root workspace and has its own
+// manifest, so the root manifest's profiles never apply to it. It is exempt
+// from the prefix-key policy only; it still saves only from main.
+const RUST_PREFIX_KEY_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
+
+interface RustCacheStep {
+  readonly file: string;
+  readonly block: string;
+}
+
+/**
+ * Every Swatinem/rust-cache step across workflows (steps at indent 6) and
+ * composite actions (steps at indent 4).
+ *
+ * @example
+ * for (const step of rustCacheSteps()) expect(step.block).toContain('prefix-key:');
+ */
+function rustCacheSteps(): RustCacheStep[] {
+  const isRustCache = (block: string) => /^\s*(?:-\s+)?uses: Swatinem\/rust-cache@/m.test(block);
+  const workflowSteps = workflowFiles().flatMap((file) =>
+    extractJobBlocks(readText(file)).flatMap(({ block }) =>
+      extractStepBlocksAtIndent(block, 6).map((step) => ({ file, block: step }))
+    )
+  );
+  const actionSteps = compositeActionFiles().flatMap((file) =>
+    extractStepBlocksAtIndent(readText(file), 4).map((step) => ({ file, block: step }))
+  );
+  return [...workflowSteps, ...actionSteps].filter((step) => isRustCache(step.block));
+}
 
 describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {
@@ -162,5 +198,74 @@ describe('CI cache policy', () => {
         );
       }
     }
+  });
+
+  // The two policies below only see steps the job/step split recognises. A
+  // rust-cache step it misses (a column-0 comment ending the `jobs:` block, a
+  // differently indented step list) would escape both without failing them.
+  test('finds every rust-cache step the policies below check', () => {
+    const files = [...workflowFiles(), ...compositeActionFiles()];
+    const declared = files.reduce(
+      (total, file) => total + [...readText(file).matchAll(/uses: Swatinem\/rust-cache@/g)].length,
+      0
+    );
+    expect(rustCacheSteps().length, `rust-cache steps found, of ${declared} declared`).toBe(
+      declared
+    );
+  });
+
+  // rust-cache keys on the lockfile, toolchain, and environment, not on
+  // `[profile.*]`. A profile change then restores an exact-match entry full of
+  // artifacts built under the old profile, cargo rebuilds every crate, and the
+  // save step skips an exact hit ("Cache up-to-date"), so the stale entry is
+  // never replaced. Hashing the root manifest into the prefix makes a profile
+  // change a new key.
+  test('keys every rust-cache step on the root manifest', () => {
+    const steps = rustCacheSteps().filter((step) => !RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file));
+    expect(steps.length).toBeGreaterThan(0);
+    for (const step of steps) {
+      expect(step.block, `${step.file}: rust-cache step without the manifest prefix-key`).toContain(
+        RUST_CACHE_PREFIX_KEY
+      );
+    }
+  });
+
+  // Pull requests restore main's rust caches but cannot replace them, so a
+  // pull request adds nothing to the 10 GiB repository quota that main's own
+  // entries already fill most of.
+  test('saves rust caches only from main', () => {
+    const steps = rustCacheSteps();
+    expect(steps.length).toBeGreaterThan(0);
+    for (const step of steps) {
+      expect(step.block, `${step.file}: rust-cache step that saves outside main`).toContain(
+        RUST_CACHE_SAVE_IF
+      );
+    }
+  });
+
+  // Real-binary qualification builds exactly what the local-runtime action
+  // builds, so the two share one cache entry. If either job's cargo builds
+  // drift, sharing would restore the wrong artifacts and this must fail.
+  test('shares the local runtime cache only while the builds match', () => {
+    const cargoBuilds = (text: string) =>
+      [...text.matchAll(/cargo build -p mangostudio-runtime[^\n]*/g)].map((match) => match[0]);
+    const action = readText('.github/actions/local-runtime/action.yml');
+    const qualification = extractJobBlock(
+      readText('.github/workflows/cargo-shim.yml'),
+      'real-binary-qualification'
+    );
+    const cacheStep = rustCacheSteps().find(
+      (step) =>
+        step.file === '.github/workflows/cargo-shim.yml' && qualification.includes(step.block)
+    );
+
+    expect(action, 'local-runtime action cache key').toContain('shared-key: local-runtime');
+    expect(cacheStep?.block, 'real-binary-qualification rust-cache step').toContain(
+      'shared-key: local-runtime'
+    );
+    expect(cargoBuilds(action), 'local-runtime action cargo builds').toHaveLength(2);
+    expect(cargoBuilds(qualification), 'real-binary-qualification cargo builds').toEqual(
+      cargoBuilds(action)
+    );
   });
 });
