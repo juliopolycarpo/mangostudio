@@ -87,7 +87,7 @@ type LinkedPackage = WorkspaceName | 'protocol';
 /**
  * What each lane imports by package name, transitively, as declared by the
  * `@mangostudio/*` `workspace:*` entries in its manifest.
- * `scripts/tests/test-lanes.unit.test.ts` derives the same closure from the
+ * `scripts/tests/changed-lanes.unit.test.ts` derives the same closure from the
  * manifests and fails if this table drifts from them.
  */
 export const CHANGED_LANE_DEPENDENCIES: Readonly<Record<ChangedLane, readonly LinkedPackage[]>> = {
