@@ -234,6 +234,54 @@ describe('protocol lane selection', () => {
       labels(protocolCheckTasks(['--rs-only'], { cargo: true, cargoHack: false }))
     ).not.toContain('protocol:feature-powerset');
   });
+
+  test.each([
+    ['protocol:clippy', ['--all-targets', '--all-features', '--locked', '-D', 'warnings']],
+    ['protocol:doc', ['--no-deps', '--all-features', '--locked']],
+    [
+      'protocol:feature-powerset',
+      ['--feature-powerset', '--all-targets', '--locked', '-D', 'warnings'],
+    ],
+    ['protocol:cargo-test', ['--all-targets', '--all-features', '--locked']],
+    ['protocol:cargo-test-doc', ['--doc', '--all-features', '--locked']],
+  ])('%s validates the protocol package without dropping its coverage', (label, flags) => {
+    const tasks = [
+      ...protocolCheckTasks(['--rs-only'], INSTALLED),
+      ...protocolTestTasks(['--rs-only'], [], INSTALLED),
+    ];
+    const task = tasks.find((entry) => entry.label === label);
+    expect(task, label).toBeDefined();
+    const command = task?.cmd ?? [];
+    const packageIndex = command.indexOf('-p');
+    expect(packageIndex, `${label}: missing package selection`).toBeGreaterThan(0);
+    expect(command[packageIndex + 1]).toBe('mango-protocol');
+    for (const flag of flags) expect(command, label).toContain(flag);
+
+    const rust = extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'rust');
+    expect(rust, `${label}: CI must run the same validation`).toContain(
+      `run: ${command.join(' ')}`
+    );
+    if (label === 'protocol:doc') expect(task?.env).toEqual({ RUSTDOCFLAGS: '-D warnings' });
+  });
+
+  test('protocol scoping preserves workspace coverage and uses a distinct cache workload', () => {
+    const protocol = readText('.github/workflows/protocol-ci.yml');
+    const rust = extractJobBlock(protocol, 'rust');
+    expect(rust).toContain('key: protocol-only');
+    expect(rust).toContain('RUSTDOCFLAGS: -D warnings');
+    expect(extractJobBlock(protocol, 'msrv')).toContain(
+      'cargo +1.97.0 check --all-features --locked'
+    );
+
+    const workspace = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
+    expect(workspace).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(workspace).toContain(
+      'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings'
+    );
+    expect(workspace).toContain('cargo test --workspace --all-targets --all-features --locked');
+    expect(workspace).toContain('cargo test --doc --workspace --all-features --locked');
+    expect(workspace).toContain('cargo doc --no-deps --workspace --all-features --locked');
+  });
 });
 
 describe('the protocol tree at the repository root', () => {
