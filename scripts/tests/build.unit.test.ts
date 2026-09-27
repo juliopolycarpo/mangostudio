@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { binaryCompileDefines, createTurboBuildCommand, selectBuildWorkspaces } from '../lib/build';
+import {
+  binaryCompileDefines,
+  binaryCompileFlags,
+  createTurboBuildCommand,
+  selectBuildWorkspaces,
+} from '../lib/build';
 import { readText } from './support/read-text';
 
 describe('build script', () => {
@@ -75,6 +80,22 @@ describe('build script', () => {
     });
 
     expect(defines).toContain('process.env.BUILD_PLATFORM_ID="linux-x64-musl"');
+  });
+
+  test('compiles every standalone binary to ESM bytecode with external sourcemaps', () => {
+    // Bytecode without `--format=esm` falls back to CommonJS, which rejects
+    // the hub entry's top-level `await` and fails the compile.
+    expect(binaryCompileFlags('production')).toEqual([
+      '--bytecode',
+      '--format=esm',
+      '--sourcemap=external',
+      '--minify',
+    ]);
+    expect(binaryCompileFlags('development')).toEqual([
+      '--bytecode',
+      '--format=esm',
+      '--sourcemap=external',
+    ]);
   });
 
   test('uses the binary alias for standalone smoke builds', () => {

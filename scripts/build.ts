@@ -3,7 +3,12 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { basename, isAbsolute, join } from 'node:path';
 
-import { binaryCompileDefines, createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
+import {
+  binaryCompileDefines,
+  binaryCompileFlags,
+  createTurboBuildCommand,
+  selectBuildWorkspaces,
+} from './lib/build';
 import {
   bunCompiledRuntimes,
   bunCrossCompileChannel,
@@ -176,12 +181,8 @@ async function compileBinary(
       version: options.version,
       platformId: target.arch,
     }),
-    '--sourcemap=external',
+    ...binaryCompileFlags(options.buildType),
   ];
-
-  if (options.buildType === 'production') {
-    args.push('--minify');
-  }
 
   // Supplying the target's Bun keeps `--compile` from resolving a download by
   // version, which no channel build can satisfy.
