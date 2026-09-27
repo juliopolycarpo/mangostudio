@@ -43,7 +43,7 @@ websocket = [
 
 [dependencies]
 futures-util = { version = "0.3", optional = true, default-features = false, features = ["sink"] }
-jsonschema = { version = "0.56", optional = true, default-features = false }
+jsonschema = { version = "0.57", optional = true, default-features = false }
 # `ring`, not the `aws-lc-rs` default: it builds without cmake or nasm, which
 # is what keeps the Windows and aarch64 CI lanes from needing a C toolchain.
 rustls = { version = "0.23", optional = true, default-features = false, features = [
