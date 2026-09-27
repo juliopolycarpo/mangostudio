@@ -4,13 +4,13 @@
 // wrote. Chained after `bun test --coverage` in the lane's `test:coverage`
 // script, so a miss fails the same invocation CI already watches.
 //
-// This exists because Bun 1.4.0's own `coverageThreshold` cannot express a
-// total gate: it is enforced per *file* (every file must individually clear
-// the bar, measured on both a fixture and the real suite), it goes silently
-// inert under `coverageReporter = ["lcov"]` without `"text"`, and a miss
-// prints nothing at all. Reading the LCOV back and comparing totals here
-// avoids all three traps and adds the statement/branch figures Bun's reporter
-// does not carry (derived from the sources by coverage-summary.ts).
+// This exists because Bun's own `coverageThreshold` cannot express a total
+// gate: it is enforced per *file* (every file must individually clear the bar,
+// measured on 1.4.0 on both a fixture and the real suite, re-verified on a
+// fixture on 1.4.2; oven-sh/bun#17028), and a miss prints nothing at all.
+// Reading the LCOV back and comparing totals here avoids both traps and adds
+// the statement/branch figures Bun's reporter does not carry (derived from the
+// sources by coverage-summary.ts).
 //
 // Usage: bun ./scripts/qa-gate/enforce-coverage-thresholds.ts <lane-id>
 

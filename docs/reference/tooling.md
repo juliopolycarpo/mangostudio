@@ -250,7 +250,7 @@ or `zip`. The split is not a staged migration: creation cannot convert until
 ### The blocker
 
 `Bun.Archive` writes every entry `0644` and offers no way to say otherwise.
-Re-verified on the pinned `1.4.0`: a `mode` passed in the options object or
+Re-verified on the pinned `1.4.2`: a `mode` passed in the options object or
 per-entry is accepted and ignored, and unknown options are accepted silently, so
 there is no error to notice. (Per-entry, `{ data, mode }` is worse than ignored —
 the object itself gets serialized instead of the blob.) A natively created

@@ -124,11 +124,12 @@ if (shard && only) {
 
 // Bun refuses to create the parent directory for `--reporter-outfile` and
 // prints `JUnitReportFailed` while still exiting 0 when it is missing — the
-// lane's counts silently go to zero. Re-verified on the pinned 1.4.0: running
-// `test:scripts` on its own, outside this script, reports 765 passing tests,
-// fails to write the report, and exits 0. Create it here rather than in each of
-// the six lane scripts. Clearing it first keeps a lane that did not run this
-// time from contributing last run's counts to the merged totals.
+// lane's counts silently go to zero. Measured on 1.4.0 (running `test:scripts`
+// on its own, outside this script, reported 765 passing tests, failed to write
+// the report, and exited 0) and re-verified on 1.4.2 with a fixture. Create it
+// here rather than in each of the six lane scripts. Clearing it first keeps a
+// lane that did not run this time from contributing last run's counts to the
+// merged totals.
 const junitDir = join(ROOT_DIR, JUNIT_DIR);
 await rm(junitDir, { recursive: true, force: true });
 await mkdir(junitDir, { recursive: true });

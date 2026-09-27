@@ -108,8 +108,9 @@ test asserts; otherwise take the floor.
 > **Do not set this in `bunfig.toml`.** Bun has no `[test] timeout` key and
 > ignores one **silently** rather than erroring — a 6s test still fails under
 > `timeout = 20000`. `BUN_TEST_TIMEOUT` is ignored too. The `--timeout` CLI flag
-> is the only mechanism that works (re-verified on Bun `1.4.0-canary.1`: a 6s
-> test still times out at 5000ms under both, and passes under `--timeout 20000`).
+> is the only mechanism that works (re-verified on Bun `1.4.0-canary.1` and
+> `1.4.2`: a 6s test still times out at 5000ms under both, and passes under
+> `--timeout 20000`).
 
 Raising the floor is not a substitute for fixing a slow test. Prefer removing the
 cost — replay migrations against `:memory:` rather than a temp-dir SQLite file,
@@ -243,7 +244,8 @@ better, so measure before adopting it.
 > firing on the post-rewrite builds this repo now tracks, but the leak that
 > causes it did not go away. Counting how many of an isolate's fds point at the
 > same pipe as fd 2 — PR #38008's own regression test — gives `4 6 8 10 12 14 16
-> 18` across eight files on `1.4.0-canary.1+32e87032b`: two leaked per file,
+> 18` across eight files on `1.4.0-canary.1+32e87032b`, unchanged on
+> `1.4.2+744846f84`: two leaked per file,
 > still climbing. Only #38008 flattens it to a constant `4`. So the collision
 > merely stopped being *observable* on this suite; whether it reappears is a
 > question of fd-number timing on some future runner. Wait for that patch
@@ -282,7 +284,7 @@ and [oven-sh/bun#39584](https://github.com/oven-sh/bun/issues/39584). In the
 the [oven-sh/bun#38008](https://github.com/oven-sh/bun/pull/38008) build, so
 that patch is the unblock for this too.
 
-**Still true on the 1.4.2 pin (checked 2026-09-05).** None of #38008, #39709,
+**Still true on the 1.4.2 pin (re-checked 2026-09-27).** None of #38008, #39709,
 #39584, or #37190 — the candidate fix for #39584 — is merged upstream; #39709
 has no fix in flight at all. Both mitigations below stay. What 1.4.1 *did* ship
 is adjacent and easy to mistake for the unblock:
@@ -526,7 +528,7 @@ per `describe`, so summing headers double-counts. A `<testcase>` is a leaf.
 Unhandled errors are the exception. An error raised between tests prints a
 `# Unhandled error between tests` block and a `N error` summary line and exits
 1, while the JUnit report reads `failures="0"` with no failing `<testcase>`
-(measured on 1.4.0-canary.1). So the failure class in
+(measured on 1.4.0-canary.1, re-verified on 1.4.2). So the failure class in
 [Unhandled Errors With Green Test Counts](#unhandled-errors-with-green-test-counts)
 exists only in the log, and each test job — the shards and the frontend job
 alike — extracts it with `scripts/qa-gate/unhandled-errors.ts` before the log
@@ -535,7 +537,8 @@ reporter first rather than assuming the XML grew an `errors` count.
 
 > Bun does not create the parent directory for `--reporter-outfile`, and it does
 > **not** fail the run when it is missing: it prints `JUnitReportFailed` and
-> still exits 0 (measured on 1.4.0-canary.1), so the lane's counts go silently to
+> still exits 0 (measured on 1.4.0-canary.1, re-verified on 1.4.2), so the
+> lane's counts go silently to
 > zero. That is why `scripts/test.ts` creates `.mango/artifacts/junit/` before
 > any lane starts — and clears it, so a lane that did not run this time cannot
 > contribute last run's counts. The QA collector also treats a configured lane
@@ -634,7 +637,7 @@ before the preload-registered one, so a local teardown still sees its own
 override — `describe` scopes unwind inner→outer, and hooks sharing a scope run
 in reverse registration order, which is what covers a test file's own top-level
 `afterEach` (root scope, same as the preload's, registered later). Both verified
-on Bun 1.4.0. `afterAll` is the other side of that: it runs *after* the
+on Bun 1.4.0 and 1.4.2. `afterAll` is the other side of that: it runs *after* the
 preload's `afterEach`, so per-file teardown cannot read the last test's
 override.
 
@@ -1020,13 +1023,16 @@ istanbul 70/60/64/72 are not comparable.) The floors live in
 and functions read from the LCOV, statements and branches derived from the
 sources by `coverage-summary.ts`.
 
-> **Why not `bunfig.toml`'s `coverageThreshold`?** Measured on Bun 1.4.0, it is
-> a different feature than it looks: the threshold applies per *file* (every
-> file must individually clear the bar, so one legitimately uncovered file
-> fails any positive value), a key you omit still enforces a hidden ~0.9
-> default, singular key names (`line`) are silently ignored, the whole gate is
-> silently inert under `coverageReporter = ["lcov"]` without `"text"`, and a
-> miss prints nothing — it exists only in the exit code.
+> **Why not `bunfig.toml`'s `coverageThreshold`?** Measured on Bun 1.4.0 and
+> re-verified on 1.4.2, it is a different feature than it looks: the threshold
+> applies per *file* (every file must individually clear the bar, so one
+> legitimately uncovered file fails any positive value), a key you omit still
+> enforces a hidden ~0.9 default, singular key names (`line`) are silently
+> ignored, and a miss prints nothing — it exists only in the exit code
+> ([oven-sh/bun#17028](https://github.com/oven-sh/bun/issues/17028), still
+> open). On 1.4.0 the gate was also silently inert under
+> `coverageReporter = ["lcov"]` without `"text"`; on 1.4.2 it enforces under
+> either reporter.
 > `test-lanes.unit.test.ts` pins the key's absence so it cannot come back by
 > accident.
 
@@ -1117,7 +1123,7 @@ Every `Bun.spawn`/`Bun.spawnSync` and every `node:child_process`
 with the command, the pid and elapsed time, and a second line when the child
 exits. A child that logs a spawn and no exit is one that outlived the run.
 
-`bun test` on 1.4.0 exposes no current-test API — not `expect.getState()`, not a
+`bun test` on 1.4.2 exposes no current-test API — not `expect.getState()`, not a
 hook argument — so events carry elapsed time rather than a test name. Interleaved
 with the reporter's `(pass)`/`(fail)` lines that still places a spawn between two
 named tests.

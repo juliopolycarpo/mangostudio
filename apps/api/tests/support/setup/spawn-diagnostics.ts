@@ -12,7 +12,7 @@
  * set it (`.github/workflows/test.yml`); locally, set it for one run.
  *
  * `bun test` exposes no current-test API — neither `expect.getState()` nor a
- * hook argument carries one on 1.4.0 — so an event is stamped with elapsed time
+ * hook argument carries one on 1.4.2 — so an event is stamped with elapsed time
  * instead. Interleaved with the reporter's own `(pass)`/`(fail)` lines that
  * places a spawn between two named tests, and CI's per-file `##[group]` headers
  * place it in a file.

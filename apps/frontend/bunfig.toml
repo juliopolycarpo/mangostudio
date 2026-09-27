@@ -10,12 +10,12 @@ coveragePathIgnorePatterns = [
   "**/*.d.ts",
   "**/*.config.*",
 ]
-# No `coverageThreshold` here, deliberately. On Bun 1.4.0 it is enforced per
-# *file* — every file must individually clear the bar, so a workspace with a
-# legitimately uncovered file cannot express a total gate through it — and a
-# miss prints nothing at all. The real gate reads the LCOV back:
-# scripts/qa-gate/enforce-coverage-thresholds.ts, chained in `test:coverage`,
-# with the floors in scripts/lib/test-lanes.ts.
+# No `coverageThreshold` here, deliberately. On Bun 1.4.2 it is still enforced
+# per *file* — every file must individually clear the bar, so a workspace with
+# a legitimately uncovered file cannot express a total gate through it — and a
+# miss prints nothing at all (oven-sh/bun#17028, still open). The real gate
+# reads the LCOV back: scripts/qa-gate/enforce-coverage-thresholds.ts, chained
+# in `test:coverage`, with the floors in scripts/lib/test-lanes.ts.
 # Two files, in this order, and not one: `GlobalRegistrator.register()` has to
 # run before anything imports `@testing-library/dom`, or `screen` initializes
 # against a `document` that does not exist yet and every query then fails

@@ -319,7 +319,7 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
         // rewrites the member read but leaves any surrounding
         // `typeof process` guard to evaluate false in a browser and discard the
         // inlined value, and an unset variable survives verbatim — both
-        // measured on 1.4.0.
+        // measured on 1.4.0 and re-verified on 1.4.2.
         'process.env.MANGO_API_URL': JSON.stringify(apiUrlOverride),
       },
       metafile: true,

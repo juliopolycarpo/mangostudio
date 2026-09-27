@@ -328,9 +328,11 @@ arredondados para baixo com ~1pt de folga. Os pisos vivem em
 `scripts/lib/test-lanes.ts` e são aplicados por
 `scripts/qa-gate/enforce-coverage-thresholds.ts`, encadeado dentro do próprio
 `test:coverage` — um estouro falha a mesma invocação que o CI observa. O
-`coverageThreshold` do `bunfig.toml` não serve para isso: no Bun 1.4.0 ele é
-aplicado por *arquivo*, fica silenciosamente inerte com
-`coverageReporter = ["lcov"]` sem `"text"`, e um estouro não imprime nada.
+`coverageThreshold` do `bunfig.toml` não serve para isso: no Bun 1.4.2 ele
+ainda é aplicado por *arquivo* e um estouro não imprime nada
+([oven-sh/bun#17028](https://github.com/oven-sh/bun/issues/17028), ainda
+aberta). No 1.4.0 ele também ficava silenciosamente inerte com
+`coverageReporter = ["lcov"]` sem `"text"`; no 1.4.2 isso não se reproduz.
 
 ## Erros Não Tratados Com Contagens Verdes
 

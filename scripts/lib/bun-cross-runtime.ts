@@ -265,7 +265,7 @@ export async function bunCompiledRuntimes(
 }
 
 function hostProvenance(): BunRuntimeProvenance {
-  // `Bun.revision`, not `--revision`: the flag prints `1.4.0+34cbb9a40` while
+  // `Bun.revision`, not `--revision`: the flag prints `1.4.2+744846f84` while
   // the API returns the full 40-character sha, and the two spellings of one
   // build do not compare equal.
   return { source: 'host', revision: Bun.revision, sha256: null, tagAdvanced: false };
