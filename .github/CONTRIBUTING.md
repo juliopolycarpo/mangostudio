@@ -168,6 +168,8 @@ Every PR also runs the repository security gates:
 
 - **CodeQL** (`.github/workflows/codeql.yml`) uses GitHub code scanning advanced setup for JavaScript/TypeScript and Rust, no-build extraction, and the `security-extended` query suite. Review the `CodeQL / Analyze (javascript-typescript)`, `CodeQL / Analyze (rust)`, and `CodeQL / Analyze (rust, windows)` workflow checks and the follow-up `Code scanning results / CodeQL` check. New high, critical, or error-level alerts must be fixed or intentionally triaged before merge.
 - **Dependency Review** (`.github/workflows/dependency-review.yml`) runs when manifests or lockfiles change and fails on new moderate-or-worse vulnerable dependencies. It does not enforce license policy.
+- **Dependency Audit** (`.github/workflows/dependency-audit.yml`) runs `bun audit --audit-level=moderate` over the whole `bun.lock` daily and on PRs that change a manifest or the lockfile, so it also catches advisories published against versions already on `main`. Fix findings with `bun audit fix`.
+- `bun run check` includes `bun dedupe --check`: a lockfile that holds two versions of a package one version satisfies fails. Run `bun dedupe` and commit the lockfile.
 - The first PR that adds or changes code scanning may get a generic `github-advanced-security[bot]` setup comment. Treat that as an enablement notice; the actionable status is in the checks above and the repository Security tab.
 
 ## Database Migrations

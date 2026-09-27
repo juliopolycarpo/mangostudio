@@ -1,0 +1,49 @@
+name: Dependency Audit
+
+# Audits every package pinned in bun.lock against the npm advisory database.
+# This complements dependency-review.yml, which only sees vulnerabilities a PR
+# *introduces*: an advisory published later against a version already locked
+# on main surfaces here, on the daily schedule.
+#
+# Pull requests run it only when they touch the dependency graph, so a fresh
+# upstream advisory never fails an unrelated PR; a PR that does move the lock
+# is the right place to run `bun audit fix`.
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main, feat/rust-runtime]
+    paths:
+      - bun.lock
+      - "**/package.json"
+      - bunfig.toml
+      - .bun-version
+      - .github/workflows/dependency-audit.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      # `bun audit` reads bun.lock directly, so there is no install step and
+      # no dependency code runs. `--audit-level` gates the exit status as well
+      # as the report; moderate matches dependency-review.yml's threshold.
+      - name: Audit bun.lock
+        run: bun audit --audit-level=moderate
