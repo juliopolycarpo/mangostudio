@@ -2,9 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { RuntimeInstallation } from '@mangostudio/shared/environments';
 import {
   markWingetOwnedNodeInstallations,
-  NODE_LTS_WINGET_PACKAGE_ID,
   parseWingetListOutput,
-  WINGET_LIST_ARGV,
 } from '@mangostudio/shared/environments/detection';
 
 function installation(overrides: Partial<RuntimeInstallation> = {}): RuntimeInstallation {
@@ -18,19 +16,6 @@ function installation(overrides: Partial<RuntimeInstallation> = {}): RuntimeInst
     ...overrides,
   };
 }
-
-describe('WINGET_LIST_ARGV', () => {
-  it('never prompts for anything a host adapter cannot answer', () => {
-    expect(WINGET_LIST_ARGV(NODE_LTS_WINGET_PACKAGE_ID)).toEqual([
-      'list',
-      '--id',
-      'OpenJS.NodeJS.LTS',
-      '--exact',
-      '--accept-source-agreements',
-      '--disable-interactivity',
-    ]);
-  });
-});
 
 describe('parseWingetListOutput', () => {
   // Real captures from a pt-BR Windows host, winget v1.29.290.

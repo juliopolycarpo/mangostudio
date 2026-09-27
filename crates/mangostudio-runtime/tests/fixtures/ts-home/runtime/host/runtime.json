@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "slot": "host",
+  "source": "bundled",
+  "version": "0.9.0",
+  "binaryPath": "/opt/mangostudio/mangostudio-runtime",
+  "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "allow": {
+    "fsRead": true,
+    "fsWrite": true,
+    "shell": true,
+    "git": true,
+    "probing": true,
+    "mcp": true,
+    "library": true,
+    "checkpoints": true,
+    "update": true,
+    "externalAgents": true
+  },
+  "setup": {
+    "state": "configured",
+    "at": "2026-01-01T00:00:00.000Z",
+    "by": "launch"
+  },
+  "installedBy": {
+    "hubVersion": "0.9.0",
+    "host": "ts-fixture-host",
+    "transport": "stdio",
+    "at": "2026-01-01T00:00:00.000Z"
+  },
+  "audit": {
+    "enabled": false
+  }
+}

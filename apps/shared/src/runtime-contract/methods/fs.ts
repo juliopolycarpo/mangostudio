@@ -232,6 +232,24 @@ export const RuntimePatchHunkSchema = Type.Object({
 });
 export type RuntimePatchHunk = Static<typeof RuntimePatchHunkSchema>;
 
+const RuntimePatchUpdateBaseSchema = Type.Object({
+  type: Type.Literal('update'),
+  inputPath: Type.String(),
+  resolvedPath: Type.String(),
+  hunks: ReadonlyArraySchema(RuntimePatchHunkSchema),
+});
+
+const RuntimePatchUpdateSchema = Type.Union([
+  Type.Interface([RuntimePatchUpdateBaseSchema], {
+    moveTo: Type.Optional(Type.Never()),
+    resolvedMoveTo: Type.Optional(Type.Never()),
+  }),
+  Type.Interface([RuntimePatchUpdateBaseSchema], {
+    moveTo: Type.String(),
+    resolvedMoveTo: Type.String(),
+  }),
+]);
+
 export const RuntimePatchOperationSchema = Type.Union([
   Type.Object({
     type: Type.Literal('add'),
@@ -244,14 +262,7 @@ export const RuntimePatchOperationSchema = Type.Union([
     inputPath: Type.String(),
     resolvedPath: Type.String(),
   }),
-  Type.Object({
-    type: Type.Literal('update'),
-    inputPath: Type.String(),
-    resolvedPath: Type.String(),
-    moveTo: Type.Optional(Type.String()),
-    resolvedMoveTo: Type.Optional(Type.String()),
-    hunks: ReadonlyArraySchema(RuntimePatchHunkSchema),
-  }),
+  RuntimePatchUpdateSchema,
 ]);
 export type RuntimePatchOperation = Static<typeof RuntimePatchOperationSchema>;
 

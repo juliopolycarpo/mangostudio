@@ -82,16 +82,35 @@ pub use version::{Negotiation, PROTOCOL_VERSION, ProtocolVersion, negotiate};
 /// Wire major version this crate speaks. Mirrors [`PROTOCOL_VERSION`].
 pub const PROTOCOL_MAJOR: u16 = 1;
 /// Highest wire minor version this crate speaks. Mirrors [`PROTOCOL_VERSION`].
-pub const PROTOCOL_MINOR: u16 = 1;
+pub const PROTOCOL_MINOR: u16 = 2;
+/// The wire minor from which a responder writes every frame a handler asked
+/// for ahead of that request's answer (spec §6.2). A feature minor, not the
+/// current one: it stays `2` when later minors ship.
+///
+/// ```
+/// use mango_protocol::ORDERED_ANSWER_MINOR;
+///
+/// let effective_minor = 2;
+/// assert!(effective_minor >= ORDERED_ANSWER_MINOR);
+/// ```
+pub const ORDERED_ANSWER_MINOR: u16 = 2;
 
 #[cfg(test)]
 mod tests {
-    use super::{PROTOCOL_MAJOR, PROTOCOL_MINOR, PROTOCOL_VERSION};
+    use super::{ORDERED_ANSWER_MINOR, PROTOCOL_MAJOR, PROTOCOL_MINOR, PROTOCOL_VERSION};
 
     #[test]
-    fn speaks_wire_one_one() {
+    fn speaks_wire_one_two() {
         assert_eq!(PROTOCOL_MAJOR, 1);
-        assert_eq!(PROTOCOL_MINOR, 1);
+        assert_eq!(PROTOCOL_MINOR, 2);
+    }
+
+    #[test]
+    fn keeps_the_answer_ordering_feature_minor_at_two() {
+        assert_eq!(
+            ORDERED_ANSWER_MINOR, 2,
+            "expected the feature minor from spec 6.2 | received {ORDERED_ANSWER_MINOR}"
+        );
     }
 
     #[test]

@@ -19,7 +19,6 @@ describe('renderTestFailureLead', () => {
       frontend: 1150,
       api: 0,
       shared: 0,
-      runtime: 0,
       failed: 0,
       failedFiles: 0,
       errors: 2,
@@ -49,7 +48,6 @@ describe('renderTestFailureLead', () => {
       frontend: 0,
       api: 0,
       shared: 0,
-      runtime: 0,
       parseMiss: true,
     });
 
@@ -67,7 +65,6 @@ describe('renderTestFailureLead', () => {
       frontend: 10,
       api: 0,
       shared: 0,
-      runtime: 0,
       failed: 2,
       failedFiles: 1,
       errors: 0,

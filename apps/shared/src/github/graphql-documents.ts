@@ -61,27 +61,3 @@ export const GITHUB_PR_REVIEW_THREADS_QUERY = `query($owner: String!, $name: Str
 export const PINNED_GITHUB_GRAPHQL_DOCUMENTS: readonly string[] = Object.freeze([
   GITHUB_PR_REVIEW_THREADS_QUERY,
 ]);
-
-const NORMALIZED_PINNED_DOCUMENTS: ReadonlySet<string> = new Set(
-  PINNED_GITHUB_GRAPHQL_DOCUMENTS.map(normalizeGraphqlDocument)
-);
-
-/**
- * Whether a GraphQL document is one this product pinned.
- *
- * Both the hub-side caller and the runtime-side argument validator ask this, so
- * they agree by construction rather than by review.
- *
- * @example
- * isPinnedGithubGraphqlDocument(GITHUB_PR_REVIEW_THREADS_QUERY); // true
- * isPinnedGithubGraphqlDocument('query { viewer { login } }'); // false
- */
-export function isPinnedGithubGraphqlDocument(value: string): boolean {
-  if (typeof value !== 'string' || value.length === 0) return false;
-  return NORMALIZED_PINNED_DOCUMENTS.has(normalizeGraphqlDocument(value));
-}
-
-/** Collapses insignificant layout so a reflowed document still matches its pin. */
-function normalizeGraphqlDocument(document: string): string {
-  return document.trim().replace(/\s+/g, ' ');
-}

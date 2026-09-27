@@ -36,7 +36,6 @@ describe('dependency policy', () => {
       '',
       'apps/api',
       'apps/frontend',
-      'apps/runtime',
       'apps/shared',
       'packages/cli',
       'packages/protocol',
@@ -88,7 +87,7 @@ describe('dependency policy', () => {
     const entries = [
       { workspacePath: 'apps/api', manifest: { dependencies: { typebox: '1.3.13' } } },
       { workspacePath: 'apps/shared', manifest: { dependencies: { typebox: '1.3.13' } } },
-      { workspacePath: 'apps/runtime', manifest: { devDependencies: { typebox: '1.3.13' } } },
+      { workspacePath: 'packages/protocol', manifest: { devDependencies: { typebox: '1.3.13' } } },
     ];
 
     expect(findCohortVersionConflicts(entries)).toEqual([]);

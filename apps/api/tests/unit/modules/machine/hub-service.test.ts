@@ -70,6 +70,26 @@ describe('buildHubServiceDefinition', () => {
     });
   });
 
+  it('forwards the runtime binary override, so an installed unit honors it too', () => {
+    // getRuntimeBinaryOverride (runtime-paths.ts) reads MANGOSTUDIO_RUNTIME_BINARY
+    // directly from process.env on every stdio launch, exactly as
+    // detach-env.test.ts's identical test already pins for a detached child.
+    // Before this, an operator exporting it and then running `service install`
+    // got a unit that silently fell back to the sibling binary or Bun the
+    // moment the hub handed over to the service manager.
+    const definition = buildHubServiceDefinition({
+      executable: { argv: ['/opt/mangostudio'], pointer: 'external' },
+      unitName: 'mangostudio.service',
+      logFile: '/x.log',
+      platform: 'linux',
+      env: { MANGOSTUDIO_RUNTIME_BINARY: '/opt/mangostudio/mangostudio-runtime' },
+    });
+
+    expect(definition.env).toMatchObject({
+      MANGOSTUDIO_RUNTIME_BINARY: '/opt/mangostudio/mangostudio-runtime',
+    });
+  });
+
   it('leaves the auth secret out even though it configures the hub', () => {
     const definition = buildHubServiceDefinition({
       executable: { argv: ['/opt/mangostudio'], pointer: 'external' },

@@ -104,7 +104,6 @@ describe('buildTestSuiteStats', () => {
       root: 4,
       api: 10,
       shared: 0,
-      runtime: 0,
       frontend: 8,
     });
   });
@@ -195,7 +194,7 @@ describe('buildTestSuiteStats', () => {
           })
         ),
         laneResult(
-          'runtime',
+          'frontend',
           counts({
             tests: 1,
             failed: 1,

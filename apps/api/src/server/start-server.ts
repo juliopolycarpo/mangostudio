@@ -18,8 +18,12 @@ import {
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getSourceFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
+import { onEnvironmentWithdrawn } from '../modules/environments/application/environment-service';
 import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
-import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
+import {
+  reconcileExternalTurns,
+  sealOrphanedExternalTurnAttempts,
+} from '../modules/external-agents/application/external-turn-recovery';
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
@@ -39,6 +43,7 @@ import { getDevFrontendDir } from './dev-frontend-dir';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
+import { subscribeRuntimeScopeReaps } from './runtime-scope-reaps';
 import { registerShutdownHandler, requestShutdown } from './shutdown-request';
 import {
   type StaleTurnReconcileSweep,
@@ -59,6 +64,7 @@ export interface StartOptions {
 let staleTurnReconcileSweep: StaleTurnReconcileSweep | null = null;
 let stopTerminalIdleReaper: (() => void) | null = null;
 let stopUpdateChecks: (() => void) | null = null;
+let stopRuntimeScopeReaps: (() => void) | null = null;
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
@@ -75,19 +81,15 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   // External turns first: they carry their own terminal vocabulary, and the
   // generic sweep below would clear the same rows without recording why.
   await reconcileExternalTurns({ reason: 'hub-restarted' }, getDb());
+  await sealOrphanedExternalTurnAttempts(getDb());
   await reconcileStaleTurns({ reasonCode: 'server_restart' }, getDb());
   await loadObservabilitySnapshot();
-  // A peer that withdraws external-agent consent closes its vendor sessions
-  // without saying so on the wire, so the hub learns it from the next manifest
-  // refresh. Without this the chats it was running would keep a session the
-  // runtime no longer has, and their turns would wait on events that stopped.
-  getRuntimeConnectionManager().onExternalAgentsRevoked((userId, environmentId) => {
-    void externalSessionManager
-      .reapScope({ userId, environmentId }, 'consent-revoked')
-      .catch(() => undefined);
-  });
-  getRuntimeConnectionManager().onTerminalsRevoked((userId, environmentId) => {
-    terminalSessionService.revokeScope(userId, environmentId);
+  stopRuntimeScopeReaps?.();
+  stopRuntimeScopeReaps = subscribeRuntimeScopeReaps({
+    manager: getRuntimeConnectionManager(),
+    onEnvironmentWithdrawn,
+    sessions: externalSessionManager,
+    terminals: terminalSessionService,
   });
   // Populated only by src/dev.ts, before startServer() runs — never by the
   // binary entry. It is an override for getSourceFrontendDir() alone: the dev
@@ -196,6 +198,9 @@ async function gracefulStop(): Promise<void> {
   // simply dropping out from under it.
   await terminalSessionService.closeAll();
   await closeAllRuntimeConnections();
+  // After the connections close, so a scope withdrawn while they closed is still reaped.
+  stopRuntimeScopeReaps?.();
+  stopRuntimeScopeReaps = null;
   await removeState();
   await closeDb();
 }

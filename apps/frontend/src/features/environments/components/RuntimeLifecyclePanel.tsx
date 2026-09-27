@@ -241,6 +241,12 @@ function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
     version ? formatMessage(labels.version, { version }) : null,
     health.slot ? formatMessage(labels.slot, { slot: health.slot }) : null,
     health.digest ? formatMessage(labels.digest, { digest: health.digest.slice(0, 15) }) : null,
+    view.implementation
+      ? formatMessage(labels.implementation, {
+          count: String(view.implementation.methods.length),
+          fingerprint: view.implementation.fingerprint.slice(0, 12),
+        })
+      : null,
   ].filter((bit): bit is string => Boolean(bit));
 
   return <p className="font-mono text-[10px] text-on-surface-variant">{bits.join(' · ')}</p>;

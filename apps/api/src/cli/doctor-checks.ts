@@ -18,8 +18,10 @@ import {
 import {
   AUTH_SECRET_MIN_LENGTH,
   getAuthSecretValidationMessage,
+  isDevelopmentVersion,
   type MangoConfig,
 } from '../lib/config';
+import { RUNTIME_BUILD_COMMAND } from '../lib/runtime-paths';
 import type { ServerState } from '../lib/server-state';
 import type { RuntimeBinaryProbe } from './runtime-binary-probe';
 import type { RuntimeSlotProbe } from './runtime-slot-probe';
@@ -117,16 +119,23 @@ export function checkRuntime(version: string, standalone: boolean): CheckResult 
 }
 
 /**
- * Reports the runtime binary as a warning rather than a failure: a hub without
- * it still serves chats through the embedded Local runtime, it just cannot
- * spawn stdio environments.
+ * Reports the runtime binary the hub launches for Local — and for a stdio
+ * environment with no binary path of its own. A missing one is a failure: the
+ * hub has no other runtime, so without it Local cannot start. A release drift
+ * is only a warning, and a development hub has no release to drift from.
  */
 export function checkRuntimeBinary(probe: RuntimeBinaryProbe, hubVersion: string): CheckResult {
   if (!probe.path) {
-    return ok('Runtime binary', 'workspace entry (source checkout)');
+    return fail(
+      'Runtime binary',
+      `not built in this source checkout; Local cannot start. Run "${RUNTIME_BUILD_COMMAND}" from the repository root`
+    );
   }
   if (!probe.present) {
-    return warn('Runtime binary', `missing at ${probe.path}; stdio environments cannot start`);
+    return fail(
+      'Runtime binary',
+      `missing at ${probe.path}; Local cannot start. Reinstall MangoStudio so it ships beside the hub, or set MANGOSTUDIO_RUNTIME_BINARY`
+    );
   }
   if (probe.error || !probe.version) {
     return warn(
@@ -134,7 +143,7 @@ export function checkRuntimeBinary(probe: RuntimeBinaryProbe, hubVersion: string
       `${probe.path} did not report a version (${probe.error ?? 'unknown reason'})`
     );
   }
-  if (probe.version !== hubVersion) {
+  if (!isDevelopmentVersion(hubVersion) && probe.version !== hubVersion) {
     return warn(
       'Runtime binary',
       `v${probe.version} does not match hub v${hubVersion}; reinstall so both come from one release`

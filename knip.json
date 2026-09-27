@@ -8,6 +8,7 @@
         ".claude/hooks/*.mjs",
         ".codex/hooks/*.mjs",
         "scripts/bench/startup.ts",
+        "scripts/bench/runtime-handshake.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,verify-cross-runtimes}.ts",
         "scripts/examples/external-api-smoke.ts",
         "scripts/protocol/*.test.ts",
@@ -42,16 +43,6 @@
     "apps/shared": {
       "entry": ["tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
-    },
-    "apps/runtime": {
-      "entry": [
-        "src/cli.ts",
-        "tests/**/*.test.ts",
-        "tests/support/external-agent-fixture.ts",
-        "tests/support/codex-rate-limit-fixtures.ts"
-      ],
-      "project": ["src/**/*.ts", "tests/**/*.ts"],
-      "ignore": ["src/services/external-agents/codex/protocol/**"]
     },
     "packages/protocol": {
       "entry": ["src/{index,stdio,ipc,in-process,ws,spawn,testing}.ts", "tests/**/*.test.ts"],

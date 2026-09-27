@@ -11,9 +11,15 @@
  * be tested without touching disk.
  */
 
+import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   CONSENT_DENIED_KIND,
+  HUB_BINDING_KEY_HEADER,
+  HUB_BINDING_KEY_LENGTH,
+  HUB_CONTRACT,
   HubIdentitySchema,
+  RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+  RUNTIME_ALREADY_BOUND_REASON,
   RUNTIME_CONTRACT,
   RUNTIME_CONTRACT_EVENTS,
   RUNTIME_CONTRACT_NAME,
@@ -38,9 +44,11 @@ import {
   RUNTIME_SLOTS,
   RuntimeAuditRecordSchema,
   RuntimeHealthReportSchema,
+  RuntimeServiceStatusSchema,
   RuntimeSlotConfigSchema,
   RuntimeSlotCredentialsSchema,
 } from '@mangostudio/shared/runtime-home';
+import { corpusDocument } from './corpus';
 
 /** Where the committed artifacts live, relative to the repository root. */
 export const ARTIFACT_DIR = 'apps/shared/src/runtime-contract/generated';
@@ -75,6 +83,14 @@ function catalogDocument(): Record<string, unknown> {
   return { $schema: CATALOG_SCHEMA_URL, ...RUNTIME_CONTRACT.catalog() };
 }
 
+/**
+ * The contract a hub serves back to its runtimes, as a catalog of its own: a
+ * runtime validates what it sends and what it receives against this file.
+ */
+function hubCatalogDocument(): Record<string, unknown> {
+  return { $schema: CATALOG_SCHEMA_URL, ...HUB_CONTRACT.catalog() };
+}
+
 function runtimeHomeDocument(): Record<string, unknown> {
   return schemaDocument(
     {
@@ -82,13 +98,14 @@ function runtimeHomeDocument(): Record<string, unknown> {
         slotConfig: RuntimeSlotConfigSchema,
         credentials: RuntimeSlotCredentialsSchema,
         auditRecord: RuntimeAuditRecordSchema,
+        serviceStatus: RuntimeServiceStatusSchema,
       },
     },
     {
       id: 'runtime-home.json',
       title: 'MangoStudio runtime home',
       description:
-        'What a runtime keeps under its slot directory: runtime.json, credentials.json, and one line of audit.log. The file and directory names these shapes are stored under are in strings.json.',
+        "What a runtime keeps under its slot directory: runtime.json, credentials.json, and one line of audit.log, plus the `service status --json` report about the slot's user service. The file and directory names these shapes are stored under are in strings.json.",
     }
   );
 }
@@ -147,6 +164,13 @@ function stringsDocument(): Record<string, unknown> {
     setupPendingSignature: RUNTIME_SETUP_PENDING_SIGNATURE,
     updateExitCode: RUNTIME_UPDATE_EXIT_CODE,
     pairingTokenPrefix: RUNTIME_PAIRING_TOKEN_PREFIX,
+    binding: {
+      header: HUB_BINDING_KEY_HEADER,
+      length: HUB_BINDING_KEY_LENGTH,
+      alreadyBoundCloseCode: RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+      alreadyBoundReason: RUNTIME_ALREADY_BOUND_REASON,
+    },
+    githubGraphqlDocuments: [...PINNED_GITHUB_GRAPHQL_DOCUMENTS],
     runtimeHome: {
       slots: [...RUNTIME_SLOTS],
       homeDirName: MANGO_HOME_DIR_NAME,
@@ -168,11 +192,13 @@ export interface ContractArtifact {
 
 export const CONTRACT_ARTIFACTS: readonly ContractArtifact[] = [
   { name: 'catalog.json', build: catalogDocument },
+  { name: 'hub-catalog.json', build: hubCatalogDocument },
   { name: 'runtime-home.schema.json', build: runtimeHomeDocument },
   { name: 'manifest.schema.json', build: manifestDocument },
   { name: 'health.schema.json', build: healthDocument },
   { name: 'install-output.schema.json', build: installOutputDocument },
   { name: 'strings.json', build: stringsDocument },
+  { name: 'conformance-corpus.json', build: corpusDocument },
 ];
 
 /**

@@ -63,7 +63,7 @@ interface EnvironmentBackups {
 /**
  * Which machines are worth asking.
  *
- * Local always: it is in-process, and it is the only store that can hold sets
+ * Local always: it is the hub's own machine, and it is the only store that can hold sets
  * written before the index existed. A remote machine is asked when it already
  * has rows (so retention there can be reconciled) or when it happens to be
  * connected (so a store this hub has never indexed is still discovered). A

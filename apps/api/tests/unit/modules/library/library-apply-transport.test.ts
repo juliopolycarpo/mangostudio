@@ -1,24 +1,20 @@
 import { describe, expect, it } from 'bun:test';
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-import { createLibraryService, createLocalRuntimeManifest } from '@mangostudio/runtime';
 import type { PropagationApplyRequest, PropagationPreview } from '@mangostudio/shared/library';
 import {
   LIBRARY_BACKUP_MISSING_KIND,
-  type RuntimeLibraryUndoParams,
   RuntimeServiceError,
 } from '@mangostudio/shared/runtime-contract';
 import {
   applyLibraryPropagation,
   undoLibraryPropagation,
 } from '../../../../src/modules/library/application/propagation-apply';
-import { connectTestRuntime } from '../../../support/runtime-fixture';
+import { connectTestRuntime, TEST_RUNTIME_MANIFEST } from '../../../support/runtime-fixture';
 
+/** A runtime that offers the library engine; these cases only need it to be asked. */
 const manifest = {
-  ...createLocalRuntimeManifest(),
-  features: {
-    ...createLocalRuntimeManifest().features,
-    library: true,
-  },
+  ...TEST_RUNTIME_MANIFEST,
+  features: { ...TEST_RUNTIME_MANIFEST.features, library: true },
 };
 
 /** Minimal preview over `claude-agents`, one file destination per resource. */
@@ -188,29 +184,6 @@ describe('library.apply transport failures', () => {
     ).rejects.toBeInstanceOf(RemoteError);
 
     expect(wrote).toBe(false);
-  });
-
-  it('answers 404 when the runtime reports the backup set is gone', async () => {
-    const runtime = await connectTestRuntime({
-      manifest,
-      handlers: {
-        'library.undo': (params) => createLibraryService().undo(params as RuntimeLibraryUndoParams),
-      },
-    });
-    const client = runtime.client;
-
-    try {
-      // The error class does not cross the frame, so the 404 has to survive on
-      // the kind the payload carries rather than on the message text.
-      await expect(
-        undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', {
-          pathEnv: () => ({ platform: 'linux', homeDir: '/tmp', env: {} }),
-          runtimeUndo: (params) => client.library.undo(params, { timeoutMs: 5_000 }),
-        })
-      ).rejects.toMatchObject({ status: 404 });
-    } finally {
-      await runtime.close();
-    }
   });
 
   it('keys the missing-backup 404 on the payload kind, not the message', async () => {

@@ -11,30 +11,71 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
-import { connectInProcessRuntime } from '../../../../src/services/runtime-client/connect-in-process-runtime';
+import { directoryHashDomainVersion } from '@mangostudio/shared/library';
+import type {
+  RuntimeCapabilityManifest,
+  RuntimeReadFileParams,
+  RuntimeReadFileResult,
+} from '@mangostudio/shared/runtime-contract';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
-import { createLocalRuntimeDefinition } from '../../../support/local-runtime';
+import {
+  connectFakeRuntime,
+  FakeRuntimeDefinition,
+  fixedConsent,
+} from '../../../support/fake-runtime-host';
+import { TEST_RUNTIME_MANIFEST } from '../../../support/runtime-fixture';
 
 const VERSION = 'test';
 
-let workdir: string;
+/** A containment root; the fake runtime never touches a disk, so it need not exist. */
+const workdir = '/workspace/project';
+
 let lines: string[];
 let close: (() => void | Promise<void>) | undefined;
 let previousLogGate: string | undefined;
 
 /**
- * A Local runtime whose manifest is post-processed, so a peer that never
- * declares `enforcesPathPolicy` can be built without a second runtime release.
+ * What a current runtime announces about containment: it enforces the path
+ * policy, and names the directory-hash domain it hashes with.
+ */
+const CURRENT_MANIFEST: RuntimeCapabilityManifest = {
+  ...TEST_RUNTIME_MANIFEST,
+  enforcesPathPolicy: true,
+  directoryHashDomain: directoryHashDomainVersion(),
+};
+
+/** Answers a read the way a runtime would, so the hub sees a well-formed result. */
+function readFile(params: RuntimeReadFileParams): RuntimeReadFileResult {
+  return {
+    content: 'contents\n',
+    path: params.resolvedPath,
+    size: 9,
+    sha256: '0'.repeat(64),
+    totalLines: 1,
+    startLine: 1,
+    endLine: 1,
+    truncated: false,
+  };
+}
+
+/**
+ * A runtime whose manifest is post-processed, so a peer that never declares
+ * `enforcesPathPolicy` can be built without a second runtime release. What is
+ * asserted is the hub's reaction to the manifest, so no filesystem stands
+ * behind it.
  */
 async function connect(
   reshapeManifest: (manifest: RuntimeCapabilityManifest) => RuntimeCapabilityManifest
 ): Promise<RuntimeClient> {
-  const definition = createLocalRuntimeDefinition({ runtimeVersion: VERSION, reshapeManifest });
-  const connection = await connectInProcessRuntime(definition, { hubVersion: VERSION });
+  const definition = new FakeRuntimeDefinition({
+    runtimeVersion: VERSION,
+    manifest: reshapeManifest(CURRENT_MANIFEST),
+    consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
+    handlers: { 'fs.read-file': readFile },
+  });
+  const connection = await connectFakeRuntime(definition, { hubVersion: VERSION });
   close = () => connection.close();
   return new RuntimeClient(connection.hub, undefined, 'env-legacy');
 }
@@ -65,7 +106,7 @@ function warnings(): string[] {
   return lines.filter((line) => line.includes('containment_unenforced'));
 }
 
-beforeEach(async () => {
+beforeEach(() => {
   lines = [];
   // The unit suite runs with diagnostics gated off so 3000 tests stay readable.
   // This one is about a diagnostic, so it opens the gate and puts it back.
@@ -74,8 +115,6 @@ beforeEach(async () => {
   spyOn(console, 'warn').mockImplementation((line: string) => {
     lines.push(line);
   });
-  workdir = realpathSync(mkdtempSync(join(tmpdir(), 'unenforced-containment-')));
-  await Bun.write(join(workdir, 'file.txt'), 'contents\n');
 });
 
 afterEach(async () => {
@@ -84,7 +123,6 @@ afterEach(async () => {
   mock.restore();
   if (previousLogGate === undefined) delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
   else process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousLogGate;
-  rmSync(workdir, { recursive: true, force: true });
 });
 
 describe('a peer that does not declare containment enforcement', () => {

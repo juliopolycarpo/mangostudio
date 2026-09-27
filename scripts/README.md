@@ -10,6 +10,7 @@ script (`bun run <name>`).
 scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
+├── build-runtime.ts  Build the cargo mangostudio-runtime per release target (bun run build:runtime)
 ├── check.ts          Biome + dprint + madge + tsc + workflow static analysis, in parallel (bun run check)
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
@@ -19,15 +20,14 @@ scripts/
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
-├── bench/            Hermetic performance measurement (startup.ts)
-├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge)
+├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts)
+├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge, Rust lane relevance and qualification selection)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
 ├── install/          Canonical installers (install.sh, install.ps1): shipped as release assets on both channels and embedded in the hub binary
 ├── qa-gate/          PR metrics collector, comment renderers + comment publisher
 ├── release/          Release-time packaging + publication (see below)
 ├── runtime-contract/ Emit + drift-check the cross-language hub/runtime artifacts (bun run contracts:emit)
-├── vendor/           Regenerate + drift-check committed vendor contracts (bun run vendor-contracts:regen)
 └── tests/            Cross-cutting unit tests (co-located tests live beside sources)
 ```
 
@@ -36,22 +36,52 @@ scripts/
 `lib/runner.ts` is a barrel re-exporting focused, single-concern modules — prefer
 importing the specific module in new code:
 
-| Module                 | Concern                                                                                                |
-| ---------------------- | ------------------------------------------------------------------------------------------------------ |
-| `log.ts`               | Leveled console output + ANSI colors                                                                   |
-| `args.ts`              | CLI argument + workspace-selection parsing                                                             |
-| `git.ts`               | Change detection (`Bun.spawnSync`), workspace mapping                                                  |
-| `exec.ts`              | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`   |
-| `summary.ts`           | Pass/fail reporting + exit handling                                                                    |
-| `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                         |
-| `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                         |
-| `config.ts`            | Workspace definitions + root lint/format path lists                                                    |
-| `changelog.ts`         | git-cliff arg/format logic (wrapped behind a project API)                                              |
-| `npm-pack.ts`          | npm distribution manifest builders                                                                     |
-| `release-version.ts`   | Canonical release version resolver + lockstep consistency check                                        |
-| `prepare-release.ts`   | Two-phase lockstep version bump for release preparation                                                |
-| `bun-cross-runtime.ts` | Per-target Bun runtime for `--compile` when `.bun-version` names a channel (dormant on a released pin) |
-| `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                            |
+| Module                 | Concern                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `log.ts`               | Leveled console output + ANSI colors                                                                     |
+| `args.ts`              | CLI argument + workspace-selection parsing                                                               |
+| `git.ts`               | Change detection (`Bun.spawnSync`), workspace mapping                                                    |
+| `exec.ts`              | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
+| `summary.ts`           | Pass/fail reporting + exit handling                                                                      |
+| `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                           |
+| `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
+| `config.ts`            | Workspace definitions + root lint/format path lists                                                      |
+| `changelog.ts`         | git-cliff arg/format logic (wrapped behind a project API)                                                |
+| `npm-pack.ts`          | npm distribution manifest builders                                                                       |
+| `release-version.ts`   | Canonical release version resolver + lockstep consistency check                                          |
+| `prepare-release.ts`   | Two-phase lockstep version bump for release preparation                                                  |
+| `bun-cross-runtime.ts` | Per-target Bun runtime for `--compile` when `.bun-version` names a channel (dormant on a released pin)   |
+| `runtime-build.ts`     | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
+| `executable-header.ts` | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
+| `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
+
+## The runtime binary: cargo, not Bun
+
+`bun run build --binary` compiles only the hub with Bun. The
+`mangostudio-runtime[.exe]` beside it is the cargo binary from
+`crates/mangostudio-runtime`, and comes from one of two places:
+
+- `--runtime-dir <dir>` (or `RUNTIME_DIR`): a directory laid out as
+  `<dir>/<platform-id>/mangostudio-runtime[.exe]`, authoritative for every
+  requested target. CI fills it from `.github/workflows/runtime-build.yml`.
+- Otherwise, the host's own target only, via
+  `cargo build --release --locked -p mangostudio-runtime --target <triple>`.
+
+Any other target without a prebuilt file fails before anything compiles,
+naming the file it expected. `bun run build:runtime` produces that layout:
+
+```bash
+bun run build:runtime --platform linux-arm64,linux-x64-musl --zig --out .mango/runtime-prebuilt
+bun run build --binary --platform linux-arm64 --runtime-dir .mango/runtime-prebuilt
+```
+
+`--zig` links Linux targets through cargo-zigbuild (zig and cargo-zigbuild on
+`PATH`): gnu at the `GLIBC_2.17` floor, musl static. `--rustup` installs each
+target's standard library first. Both paths stamp the release version in at
+compile time (`MANGOSTUDIO_RELEASE_VERSION`) — or `dev` with `--dev`, the version a
+source checkout's hub accepts — and check each binary's header —
+and its `--version`, when this machine can run it — before it is staged.
+`docs/reference/releasing.md` records the per-target toolchains and the floor.
 
 ## actions-lint/ — workflow static analysis
 
@@ -161,9 +191,10 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 
 ## bench/ — hermetic performance measurement
 
-| Script       | Purpose                                                            |
-| ------------ | ------------------------------------------------------------------ |
-| `startup.ts` | Median process-start → first healthy `GET /api/health` of a binary |
+| Script                 | Purpose                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `startup.ts`           | Median process-start → first healthy `GET /api/health` of a binary                    |
+| `runtime-handshake.ts` | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max |
 
 ```bash
 bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 10
@@ -178,6 +209,18 @@ module-load time are visible rather than buried under migration work.
 
 Compare two binaries by building both and running the same command against
 each; a startup claim is only worth as much as its median and spread.
+
+`runtime-handshake.ts` spawns `mangostudio-runtime --stdio` through the protocol SDK's
+launcher, exchanges `hello` as the hub does and asks for `runtime.health`, with a fresh
+`MANGO_HOME` per run. It defaults to the newest `target/` build; `--fresh-copy` runs a new
+copy of the binary each time, which on Windows puts the antivirus and loader's first look at a
+file into every sample. The numbers it produced are recorded under "Runtime startup budgets" in
+`docs/reference/tooling.md`.
+
+```bash
+bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --runs 30
+bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --fresh-copy
+```
 
 ## runtime-contract/ — the boundary as files
 
@@ -199,7 +242,7 @@ bun run contracts:check   # diff instead of writing (what `bun run check` runs)
 | `install-output.schema.json` | One frame of an install run's output stream                                  |
 | `strings.json`               | What nothing derives: stderr signature, exit code, token prefix, slot layout |
 
-Unlike the vendor captures below, this needs no third-party binary and no network, so it runs
+It needs no third-party binary and no network, so it runs
 inside `bun run check` rather than in a workflow of its own — including on a scoped `--staged` run,
 because a method's schemas reach most of `apps/shared/src` and an edit two modules away can leave
 the catalog stale.
@@ -207,46 +250,7 @@ the catalog stale.
 `catalog.json` is validated against the protocol's published
 [`catalog.json`](https://mangostudio.dev/protocol/schema/1/catalog.json) on every run of either
 mode, with ajv: a wrong catalog is byte-stable too, so a diff check alone would never see it.
-Nothing under `generated/` is formatted by Biome, for the same reason nothing under the vendor
-captures is.
-
-## vendor/ — committed vendor contracts
-
-Every vendor surface the external-agent adapters depend on is pinned and committed, so a version
-bump shows up as a reviewable diff instead of a silent behaviour change.
-
-```bash
-bun run vendor-contracts:regen                    # recapture everything installed
-bun run vendor-contracts:regen --only cursor-acp  # one set
-bun run vendor-contracts:check                    # diff instead of writing (what CI runs)
-bun run vendor-contracts:check --require-all      # also fail when a set was skipped
-```
-
-| Set              | Artifacts                                                        | Produced by                                          |
-| ---------------- | ---------------------------------------------------------------- | ---------------------------------------------------- |
-| `codex-protocol` | `codex/protocol/**` — the generated TypeScript API               | `bunx @openai/codex@<pinned> app-server generate-ts` |
-| `cursor-acp`     | `cursor/contract/` — `initialize`, `session/new`, `session/list` | a live `cursor-agent acp` handshake                  |
-| `claude-cli`     | `claude/contract/` — the CLI surface and `auth status` shape     | `claude --help` and `claude auth status`             |
-
-Artifacts live beside the adapter that reads them; each set's `contract/manifest.json` records the
-command, the build it came off, the date, and a checksum — without which a regeneration that
-produced identical output is indistinguishable from one that was never run.
-
-**Additive drift is reported, not failed.** A vendor removing or changing something a capture
-recorded fails the check; a vendor adding something is noted. All three CLIs ship constantly, and a
-check that failed on every release would train maintainers to rerun it rather than read it.
-
-**Cursor and Claude captures are normalized**, keeping object keys and leaf types while discarding
-values. `session/list` returns the operator's own session titles and working directories and
-`claude auth status` returns an email address and an organization name, none of which is
-reproducible or ours to publish. Values survive only where the value *is* the contract — a
-negotiated `protocolVersion`, a permission mode's id.
-
-Codex's generator is invoked as a **pinned package**, read from
-`apps/runtime/src/services/external-agents/codex/pinned.ts`, so it reproduces on a machine with no
-Codex installed. Bump the version there, rerun without `--check`, and commit the diff. Nothing under
-`protocol/` or `*/contract/` is formatted by Biome — formatting vendor output would make every
-regeneration report a diff that is ours rather than theirs.
+Nothing under `generated/` is formatted by Biome.
 
 ## Conventions
 

@@ -5,7 +5,16 @@ import type {
   MessagePart,
 } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
-import { reconcileExternalTurns } from '../../../../src/modules/external-agents/application/external-turn-recovery';
+import type { ExternalTurnAttemptState } from '../../../../src/db/types';
+import {
+  reconcileExternalTurns,
+  sealOrphanedExternalTurnAttempts,
+} from '../../../../src/modules/external-agents/application/external-turn-recovery';
+import {
+  insertAttempt,
+  listAttemptsForMessage,
+  transitionAttempt,
+} from '../../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { insertTestUser } from '../../../support/factories';
 
 let userId = '';
@@ -156,5 +165,125 @@ describe('external turn recovery', () => {
     // The flag goes; the reason the turn actually ended for stays.
     expect(stored.generating).toBe(false);
     expect(stored.parts[0]).toMatchObject({ terminalReason: 'cancelled-by-user' });
+  });
+
+  describe('(f) submission receipts at boot', () => {
+    async function withAttempt(state: ExternalTurnAttemptState): Promise<string> {
+      const messageId = await insertGeneratingMessage([{ ...ACTIVE_TURN_PART }]);
+      const id = `attempt-${crypto.randomUUID()}`;
+      await insertAttempt(
+        {
+          id,
+          messageId,
+          chatId,
+          userId,
+          environmentId: 'local',
+          sessionId: 'session-1',
+          clientMessageId: 'client-1',
+          inputFingerprint: 'sha256:0',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        getDb()
+      );
+      if (state !== 'acceptance-unknown') {
+        await transitionAttempt(id, ['acceptance-unknown'], state, { at: 2 }, getDb());
+      }
+      return messageId;
+    }
+
+    async function outcome(messageId: string) {
+      const stored = await readParts(messageId);
+      const attempts = await listAttemptsForMessage(messageId, getDb());
+      return {
+        reason: (stored.parts[0] as ExternalTurnPart).terminalReason,
+        attempts: attempts.map((row) => row.state),
+      };
+    }
+
+    it('ends a turn whose submission was never confirmed as acceptance-unknown', async () => {
+      const messageId = await withAttempt('acceptance-unknown');
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+      expect(await outcome(messageId)).toEqual({
+        reason: 'acceptance-unknown',
+        attempts: ['unresolved'],
+      });
+    });
+
+    it('ends a turn whose submission was already unresolved as acceptance-unknown', async () => {
+      const messageId = await withAttempt('unresolved');
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+      expect(await outcome(messageId)).toEqual({
+        reason: 'acceptance-unknown',
+        attempts: ['unresolved'],
+      });
+    });
+
+    it('keeps hub-restarted for an accepted turn', async () => {
+      const messageId = await withAttempt('accepted');
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+      expect(await outcome(messageId)).toEqual({ reason: 'hub-restarted', attempts: ['terminal'] });
+    });
+
+    it('seals a not-submitted turn without replaying it', async () => {
+      const messageId = await withAttempt('not-submitted');
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+      expect(await outcome(messageId)).toEqual({ reason: 'hub-restarted', attempts: ['terminal'] });
+    });
+
+    it("lets a user's own cancel keep its reason", async () => {
+      const messageId = await withAttempt('acceptance-unknown');
+      await reconcileExternalTurns({ reason: 'cancelled-by-user', messageId }, getDb());
+      expect(await outcome(messageId)).toEqual({
+        reason: 'cancelled-by-user',
+        attempts: ['unresolved'],
+      });
+    });
+
+    it('seals receipts left open under a turn that already finished', async () => {
+      const messageId = await withAttempt('accepted');
+      await getDb()
+        .updateTable('messages')
+        .set({
+          isGenerating: 0,
+          parts: JSON.stringify([
+            { ...ACTIVE_TURN_PART, status: 'terminal', terminalReason: 'completed' },
+          ]),
+        })
+        .where('id', '=', messageId)
+        .execute();
+      const unconfirmed = await withAttempt('acceptance-unknown');
+      await getDb()
+        .updateTable('messages')
+        .set({ isGenerating: 0 })
+        .where('id', '=', unconfirmed)
+        .execute();
+
+      await sealOrphanedExternalTurnAttempts(getDb());
+
+      const rows = [
+        ...(await listAttemptsForMessage(messageId, getDb())),
+        ...(await listAttemptsForMessage(unconfirmed, getDb())),
+      ];
+      expect(rows.map((row) => [row.state, row.terminalReason])).toEqual([
+        ['terminal', 'completed'],
+        ['unresolved', 'hub-restarted'],
+      ]);
+    });
+
+    it('leaves the receipts of a still-generating turn to the message sweep', async () => {
+      const messageId = await withAttempt('acceptance-unknown');
+      await sealOrphanedExternalTurnAttempts(getDb());
+      expect((await listAttemptsForMessage(messageId, getDb())).map((row) => row.state)).toEqual([
+        'acceptance-unknown',
+      ]);
+    });
+
+    it('is idempotent', async () => {
+      const messageId = await withAttempt('accepted');
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+      expect(await outcome(messageId)).toEqual({ reason: 'hub-restarted', attempts: ['terminal'] });
+    });
   });
 });

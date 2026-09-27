@@ -14,21 +14,21 @@ import {
 } from '../../../../src/services/tools/builtin/apply-patch';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeReplaceRange } from '../../../../src/services/tools/builtin/replace-range';
+import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { clearRegistry, executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { assertFresh, clearFileFreshness } from '../../../support/runtime-file-freshness';
 
 let tempDir: string;
 
 beforeEach(() => {
-  clearFileFreshness();
   clearRegistry();
   registerApplyPatchTool();
+  // A fresh directory per case is what isolates read freshness: the runtime
+  // keys it by chat and path and keeps it as long as its process lives.
   tempDir = mkdtempSync(join(tmpdir(), 'apply-patch-test-'));
 });
 
 afterEach(() => {
-  clearFileFreshness();
   clearRegistry();
   rmSync(tempDir, { recursive: true, force: true });
 });
@@ -165,7 +165,14 @@ describe('executeApplyPatch', () => {
       op: 'move',
       movedTo: 'moved/new.txt',
     });
-    await expect(assertFresh('c1', movedPath)).resolves.toBeUndefined();
+    // An overwrite needs a read of the current bytes, so this succeeding
+    // without a re-read is the patched destination being fresh.
+    const written = await executeWriteFile(
+      { path: 'moved/new.txt', content: 'rewritten\n' },
+      makeContext()
+    );
+    expect(written.created).toBe(false);
+    expect(await Bun.file(movedPath).text()).toBe('rewritten\n');
   });
 
   it('supports a move-only update without rewriting content', async () => {

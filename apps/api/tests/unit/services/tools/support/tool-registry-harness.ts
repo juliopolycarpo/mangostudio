@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { clearRegistry } from '../../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../../src/services/tools/types';
-import { clearFileFreshness } from '../../../../support/runtime-file-freshness';
 
 /**
  * Values a provider stream can put where a string argument belongs. Shared so
@@ -71,14 +70,14 @@ export function useToolRegistry(
   let dir = '';
 
   beforeEach(() => {
-    clearFileFreshness();
     clearRegistry();
     for (const register of registrars) register();
+    // A fresh directory per case is what isolates read freshness: the runtime
+    // keys it by chat and path and keeps it as long as its process lives.
     dir = mkdtempSync(join(tmpdir(), `${prefix}-`));
   });
 
   afterEach(() => {
-    clearFileFreshness();
     clearRegistry();
     rmSync(dir, { recursive: true, force: true });
   });

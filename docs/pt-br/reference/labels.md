@@ -31,7 +31,7 @@ limpeza de labels não gere novas cobranças.
 - `area: frontend` — `apps/frontend/**`
 - `area: api` — `apps/api/**`
 - `area: shared` — `apps/shared/**`
-- `area: runtime` — `apps/runtime/**`, `apps/shared/src/runtime-contract/**`, `apps/api/src/services/runtime-client/**`
+- `area: runtime` — `apps/shared/src/runtime-contract/**`, `apps/api/src/services/runtime-client/**`
 - `area: git` — `apps/api/src/modules/{git,github}/**`, `apps/frontend/src/features/workspace/**`, `apps/shared/src/{git,github}/**`
 - `area: auth` — entrypoints de auth + `apps/shared/src/auth/**` + `tests/browser-smoke/auth-flow.spec.ts`
 - `area: chat` — `apps/api/src/modules/{chats,messages}/**`, `apps/frontend/src/features/chat/**`, `apps/shared/src/chat/**`
@@ -42,7 +42,7 @@ limpeza de labels não gere novas cobranças.
 - `area: settings` — módulos de settings de app/provider/tool + settings no frontend
 - `area: tools` — registro de tools, settings de tools, `apps/shared/src/tool-settings/**`
 - `area: skills` — `apps/api/src/modules/skills/**`, `apps/frontend/src/features/settings/skills/**`, `apps/shared/src/skills/**`
-- `area: mcp` — `apps/api/src/services/mcp/**`, `apps/api/src/modules/mcp-servers/**`, `apps/runtime/src/services/mcp/**`, `apps/frontend/src/features/settings/mcp/**`, `apps/shared/src/mcp/**`
+- `area: mcp` — `apps/api/src/services/mcp/**`, `apps/api/src/modules/mcp-servers/**`, `crates/mangostudio-runtime/src/mcp/**`, `apps/frontend/src/features/settings/mcp/**`, `apps/shared/src/mcp/**`
 - `area: i18n` — `apps/shared/src/i18n/**`
 - `area: components` — `apps/frontend/src/components/**`
 

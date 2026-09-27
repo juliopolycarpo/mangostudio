@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// ```
 /// use mango_protocol::{PROTOCOL_VERSION, ProtocolVersion};
 ///
-/// assert_eq!(PROTOCOL_VERSION, ProtocolVersion { major: 1, minor: 1 });
+/// assert_eq!(PROTOCOL_VERSION, ProtocolVersion { major: 1, minor: 2 });
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -49,7 +49,7 @@ impl ProtocolVersion {
 }
 
 /// The wire version this crate speaks.
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 1);
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 2);
 
 /// Outcome of comparing the local and the remote `hello.protocol`.
 ///
@@ -122,8 +122,8 @@ mod tests {
     use super::{Negotiation, PROTOCOL_VERSION, ProtocolVersion, negotiate};
 
     #[test]
-    fn crate_speaks_wire_one_one() {
-        assert_eq!(PROTOCOL_VERSION, ProtocolVersion::new(1, 1));
+    fn crate_speaks_wire_one_two() {
+        assert_eq!(PROTOCOL_VERSION, ProtocolVersion::new(1, 2));
     }
 
     #[test]

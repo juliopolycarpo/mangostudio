@@ -105,11 +105,14 @@ export type MachineDoctorSection = Static<typeof MachineDoctorSectionSchema>;
 
 /** The sibling runtime binary the hub spawns for stdio environments. */
 export const MachineRuntimeBinarySchema = Type.Object({
-  /** Null in a source checkout, which runs the runtime through Bun instead. */
+  /** The binary Local launches; null when a source checkout has no cargo build. */
   path: Type.Union([Type.String({ maxLength: 4_096 }), Type.Null()]),
   present: Type.Boolean(),
   version: Type.Union([Type.String({ maxLength: 128 }), Type.Null()]),
-  /** Whether it reports the hub's own version; null when it could not be asked. */
+  /**
+   * Whether it reports the hub's own version; null when it could not be asked,
+   * or when the hub is a development build with no release to match.
+   */
   versionMatches: Type.Union([Type.Boolean(), Type.Null()]),
   error: Type.Union([Type.String({ maxLength: MACHINE_ERROR_MAX }), Type.Null()]),
 });

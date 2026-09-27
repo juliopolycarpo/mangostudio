@@ -140,9 +140,20 @@ export function sectionKeys(sectionBody: string): string[] {
   return [...sectionBody.matchAll(/^ {2}([\w-]+):/gm)].map((match) => match[1]);
 }
 
-/** Parse a job block's inline `needs: [a, b]` list. Returns [] when absent. */
+/**
+ * Parse a job block's flow-sequence `needs: [a, b]` list. Returns [] when
+ * absent.
+ *
+ * Matches across newlines, not just one line: dprint's YAML plugin wraps a
+ * flow sequence onto its own indented lines once it passes the repo's
+ * 100-column `lineWidth` (`needs:\n  [\n    a,\n    b,\n  ]`), and a job's
+ * `needs` list grows over time — a parser that only recognised the single-
+ * line form would quietly go back to reporting `[]` the next time dprint
+ * reformats a list that has grown past the width, exactly as it already did
+ * once.
+ */
 export function parseNeedsList(jobBlock: string): string[] {
-  const list = /\n\s+needs: \[([^\]]*)\]/.exec(jobBlock)?.[1];
+  const list = /\n\s+needs:\s*\[([\s\S]*?)\]/.exec(jobBlock)?.[1];
   return list
     ? list
         .split(',')

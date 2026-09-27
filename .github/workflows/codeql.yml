@@ -21,8 +21,8 @@ concurrency:
 
 jobs:
   analyze:
-    name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    name: Analyze (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     permissions:
       actions: read # let CodeQL read workflow metadata for its analysis
@@ -33,16 +33,36 @@ jobs:
       matrix:
         include:
           - language: javascript-typescript
+            label: javascript-typescript
+            os: ubuntu-latest
             build-mode: none
             queries: security-extended
+            category: "/language:javascript-typescript"
+          # The runtime host and the protocol crate are Rust. build-mode none
+          # extracts from source, so no cargo build or toolchain setup runs here.
+          # Extraction only follows the modules the runner's own target
+          # compiles, so a Linux leg skips every cfg(windows) module (job
+          # objects, Windows locks and services); the Windows leg covers them.
+          - language: rust
+            label: rust
+            os: ubuntu-latest
+            build-mode: none
+            queries: security-extended
+            category: "/language:rust"
+          - language: rust
+            label: rust, windows
+            os: windows-latest
+            build-mode: none
+            queries: security-extended
+            category: "/language:rust/windows"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # JavaScript/TypeScript extraction does not need a repository build. Keep
-      # build-mode explicit so future compiled-language additions must choose
-      # their own build path instead of inheriting an accidental one.
+      # Neither language's extraction needs a repository build. Keep build-mode
+      # explicit so a future language must choose its own build path instead
+      # of inheriting an accidental one.
       - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: ${{ matrix.language }}
@@ -53,4 +73,4 @@ jobs:
 
       - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
-          category: "/language:${{ matrix.language }}"
+          category: ${{ matrix.category }}

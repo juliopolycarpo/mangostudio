@@ -494,6 +494,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     static NEXT_ADDRESS: AtomicU64 = AtomicU64::new(0);
+    const CONCURRENT_FORKING_RETRY: Duration = Duration::from_millis(10);
+    const CONCURRENT_FORKING_WAIT: Duration = Duration::from_secs(2);
 
     /// A socket path in a directory that goes away with the test. The crate
     /// carries no development dependency for one, and this is the only module
@@ -536,19 +538,43 @@ mod tests {
     /// takes effect at the child's own `execve`. In that microseconds-wide
     /// gap the forked child holds its own copy of the fd, which is enough to
     /// make a probe launched in that instant see the address as live. A
-    /// handful of short retries outlasts the gap without changing what the
-    /// assertion means: the address is stale once the fork elsewhere has
-    /// moved on, which every one of these retries still requires.
+    /// bounded series of retries outlasts the gap without changing what the assertion
+    /// means: the address is stale once the fork elsewhere has moved on,
+    /// which every one of these retries still requires. The deadline is
+    /// absolute because one [`listen_ipc`] call can itself spend
+    /// [`PROBE_TIMEOUT`] judging a socket. Concrete errors other than
+    /// [`io::ErrorKind::AddrInUse`] return unchanged; a probe that reaches
+    /// the deadline reports [`io::ErrorKind::TimedOut`].
     async fn listen_ipc_past_a_concurrent_forking_test(path: &Path) -> io::Result<IpcListener> {
-        for attempt in 0..10 {
-            match listen_ipc(path).await {
-                Err(error) if error.kind() == io::ErrorKind::AddrInUse && attempt < 9 => {
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        retry_inherited_listener(path, || listen_ipc(path)).await
+    }
+
+    async fn retry_inherited_listener<T, F, Fut>(path: &Path, mut listen: F) -> io::Result<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = io::Result<T>>,
+    {
+        let deadline = tokio::time::Instant::now() + CONCURRENT_FORKING_WAIT;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            match tokio::time::timeout(remaining, listen()).await {
+                Ok(Err(error)) if error.kind() == io::ErrorKind::AddrInUse => {
+                    if deadline.saturating_duration_since(tokio::time::Instant::now())
+                        <= CONCURRENT_FORKING_RETRY
+                    {
+                        return Err(error);
+                    }
+                    tokio::time::sleep(CONCURRENT_FORKING_RETRY).await;
                 }
-                outcome => return outcome,
+                Ok(outcome) => return outcome,
+                Err(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("{path:?} did not settle within {CONCURRENT_FORKING_WAIT:?}"),
+                    ));
+                }
             }
         }
-        unreachable!("the loop always returns on its last attempt")
     }
 
     #[tokio::test]
@@ -778,6 +804,84 @@ mod tests {
             .await
             .expect("a stale socket is not an occupied address");
         second.close().await;
+    }
+
+    struct HeldListenerProbe {
+        release_at: tokio::time::Instant,
+    }
+
+    impl HeldListenerProbe {
+        fn listen(&self) -> std::future::Ready<io::Result<()>> {
+            let result = if tokio::time::Instant::now() >= self.release_at {
+                Ok(())
+            } else {
+                Err(io::Error::new(io::ErrorKind::AddrInUse, "listener is held"))
+            };
+            std::future::ready(result)
+        }
+    }
+
+    struct UnresponsiveListenerProbe;
+
+    impl UnresponsiveListenerProbe {
+        fn listen() -> std::future::Pending<io::Result<()>> {
+            std::future::pending()
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_socket_retries_outlast_a_temporarily_live_listener() {
+        let probe = HeldListenerProbe {
+            release_at: tokio::time::Instant::now() + Duration::from_millis(150),
+        };
+        retry_inherited_listener(Path::new("held-listener.sock"), || probe.listen())
+            .await
+            .expect("the retry outlasts the transient inherited listener");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_socket_retry_leaves_a_listener_that_remains_live_occupied() {
+        let start = tokio::time::Instant::now();
+        let probe = HeldListenerProbe {
+            release_at: start + CONCURRENT_FORKING_WAIT * 2,
+        };
+        let error = retry_inherited_listener(Path::new("held-listener.sock"), || probe.listen())
+            .await
+            .expect_err("a listener that remains live is still occupied");
+
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
+        assert!(tokio::time::Instant::now() - start <= CONCURRENT_FORKING_WAIT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_socket_retry_bounds_an_attempt_that_never_settles() {
+        let start = tokio::time::Instant::now();
+        let error = retry_inherited_listener(
+            Path::new("pending-listener.sock"),
+            UnresponsiveListenerProbe::listen,
+        )
+        .await
+        .expect_err("an unresponsive probe cannot exceed the overall deadline");
+
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(error.to_string().contains("pending-listener.sock"));
+        assert_eq!(tokio::time::Instant::now() - start, CONCURRENT_FORKING_WAIT);
+    }
+
+    #[tokio::test]
+    async fn stale_socket_retry_preserves_non_addr_in_use_errors() {
+        let address = Address::new();
+        std::fs::write(address.path(), b"not a socket").expect("the regular file is written");
+
+        let expected = listen_ipc(address.path())
+            .await
+            .expect_err("a regular file is not a socket");
+        let actual = listen_ipc_past_a_concurrent_forking_test(&address.path())
+            .await
+            .expect_err("the retry returns the regular-file error");
+
+        assert_eq!(actual.kind(), expected.kind());
+        assert_eq!(actual.to_string(), expected.to_string());
     }
 
     #[tokio::test]

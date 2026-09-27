@@ -2,15 +2,15 @@
  * Drives real HTTP servers through the Local environment's runtime: a
  * Streamable HTTP fixture on Bun.serve (asserting hub-stored auth headers are
  * delivered at connect and reach the wire) and a legacy SSE-only fixture on
- * node:http proving the 4xx fallback recipe.
+ * node:http proving the 4xx fallback recipe — which Streamable HTTP failures the
+ * runtime answers by retrying over legacy SSE is observed on the wire, not by
+ * calling the runtime's classifier.
  */
 
 import { describe, expect, it } from 'bun:test';
-import { createServer } from 'node:http';
+import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { shouldFallBackToSse } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
@@ -31,6 +31,56 @@ function httpConfig(url: string): McpServerRuntimeConfig {
     url,
     timeoutMs: 5_000,
     environmentId: LOCAL_ENVIRONMENT_ID,
+  };
+}
+
+interface LegacySseServer {
+  readonly url: string;
+  /** `METHOD path` of every request, in arrival order. */
+  readonly requests: string[];
+  stop(): Promise<void>;
+}
+
+/**
+ * A legacy SSE-only MCP server whose base URL answers the modern initialize
+ * POST with `answer` (a status, optionally with a plain-text 200 body).
+ */
+async function startLegacySseServer(answer: {
+  status: number;
+  text?: boolean;
+}): Promise<LegacySseServer> {
+  const requests: string[] = [];
+  const server = createEchoMcpServer();
+  let sse: SSEServerTransport | undefined;
+  const httpServer: HttpServer = createServer((request, response) => {
+    requests.push(`${request.method} ${request.url?.split('?')[0]}`);
+    void (async () => {
+      if (request.method === 'GET' && request.url === '/') {
+        sse = new SSEServerTransport('/messages', response);
+        await server.connect(sse);
+        return;
+      }
+      if (request.method === 'POST' && request.url?.startsWith('/messages')) {
+        await sse?.handlePostMessage(request, response);
+        return;
+      }
+      if (answer.text) {
+        response.writeHead(answer.status, { 'Content-Type': 'text/plain' }).end('not mcp');
+        return;
+      }
+      response.writeHead(answer.status, { Allow: 'GET' }).end();
+    })();
+  });
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/`,
+    requests,
+    stop: async () => {
+      await server.close();
+      httpServer.closeAllConnections();
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    },
   };
 }
 
@@ -123,11 +173,32 @@ describe('mcp http transport', () => {
     await expect(attempt).rejects.toBeInstanceOf(McpConnectionError);
   });
 
-  it('only 4xx Streamable HTTP failures trigger the SSE fallback', () => {
-    expect(shouldFallBackToSse(new StreamableHTTPError(404, 'not found'))).toBe(true);
-    expect(shouldFallBackToSse(new StreamableHTTPError(405, 'method not allowed'))).toBe(true);
-    expect(shouldFallBackToSse(new StreamableHTTPError(500, 'server error'))).toBe(false);
-    expect(shouldFallBackToSse(new StreamableHTTPError(undefined, 'no status'))).toBe(false);
-    expect(shouldFallBackToSse(new Error('fetch failed'))).toBe(false);
-  });
+  for (const [label, answer, fallsBack] of [
+    ['404', { status: 404 }, true],
+    ['405', { status: 405 }, true],
+    ['500', { status: 500 }, false],
+    ['a 200 that is neither JSON nor an event stream', { status: 200, text: true }, false],
+  ] as const) {
+    it(`${fallsBack ? 'falls back' : 'does not fall back'} to SSE when initialize is answered with ${label}`, async () => {
+      const legacy = await startLegacySseServer(answer);
+      try {
+        const attempt = connectMcpClient(httpConfig(legacy.url), {
+          userId: 'http-transport-user',
+        });
+        if (fallsBack) {
+          const handle = await attempt;
+          expect((await handle.callTool('echo', { text: label })).contentText).toBe(label);
+          await handle.close();
+        } else {
+          await expect(attempt).rejects.toBeInstanceOf(McpConnectionError);
+        }
+        // The Streamable HTTP initialize POST always comes first; only a
+        // fallback opens the legacy GET event stream afterwards.
+        expect(legacy.requests[0]).toBe('POST /');
+        expect(legacy.requests.includes('GET /')).toBe(fallsBack);
+      } finally {
+        await legacy.stop();
+      }
+    });
+  }
 });

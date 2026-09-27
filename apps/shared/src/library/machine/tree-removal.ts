@@ -8,7 +8,7 @@
  * destination is gone, and only then deletes the temp tree, or renames it back
  * if anything later in the apply fails.
  *
- * This is the staged write in `resource-writer.ts` run backwards, and it buys
+ * This is a staged write run backwards, and it buys
  * the same property: rollback is a rename, not a restore from a copy.
  */
 

@@ -19,7 +19,6 @@
 "area: runtime":
   - changed-files:
       - any-glob-to-any-file:
-          - "apps/runtime/**"
           - "apps/shared/src/runtime-contract/**"
           - "apps/api/src/services/runtime-client/**"
           # The Mango Protocol: the wire contract the hub and the runtime speak,
@@ -32,6 +31,12 @@
           - "packages/protocol/**"
           - "crates/mango-protocol/**"
           - "scripts/protocol/**"
+          # The Rust runtime foundation: the embedded contract crate and the
+          # dispatcher that serves it. Same reasoning as the protocol crates
+          # above — a change scoped only to one of these would otherwise
+          # carry no area: or type: label.
+          - "crates/mangostudio-runtime-contract/**"
+          - "crates/mangostudio-runtime/**"
 
 "area: git":
   - changed-files:
@@ -120,7 +125,7 @@
       - any-glob-to-any-file:
           - "apps/api/src/services/mcp/**"
           - "apps/api/src/modules/mcp-servers/**"
-          - "apps/runtime/src/services/mcp/**"
+          - "crates/mangostudio-runtime/src/mcp/**"
           - "apps/frontend/src/features/settings/mcp/**"
           - "apps/shared/src/mcp/**"
 

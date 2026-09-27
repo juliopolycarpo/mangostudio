@@ -111,5 +111,8 @@ export interface RuntimeMutationResult<T> {
 /** Parameter base of every mutating filesystem method. */
 export const RuntimeMutationParamsSchema = Type.Interface([RuntimePathPolicyParamsSchema], {
   chatId: Type.String(),
-  captureSnapshot: Type.Boolean(),
+  captureSnapshot: Type.Boolean({
+    description:
+      'When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing.',
+  }),
 });

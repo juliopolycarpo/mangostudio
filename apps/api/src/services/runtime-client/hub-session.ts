@@ -24,6 +24,7 @@ import {
 } from '@mangostudio/protocol';
 import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
 import {
+  acceptedRuntimeImplementation,
   type HubExternalAgentIsolation,
   type HubIdentity,
   RUNTIME_CONTRACT,
@@ -33,6 +34,7 @@ import {
   RUNTIME_TERMINAL_OUTPUT_TOPIC,
   type RuntimeCapabilityManifest,
   RuntimeCapabilityManifestSchema,
+  RuntimeImplementationSchema,
   type RuntimeMethod,
   type RuntimeMethodMap,
   RuntimeTerminalOutputEventSchema,
@@ -51,6 +53,12 @@ import {
   RuntimeContractViolationError,
 } from './contract-violation';
 import { resolveLocalHubIdentity } from './hub-identity';
+import {
+  type EnvironmentWorkspacePolicy,
+  type HubWorkspaceBinding,
+  serveHubContract,
+} from './hub-workspace-authority';
+import { RuntimeRequestNoReplyError, RuntimeRequestNotSentError } from './request-not-sent';
 
 /** Name this hub announces itself under; the runtime's audit log records it. */
 const HUB_PEER_NAME = 'mangostudio';
@@ -206,6 +214,8 @@ export interface HubSession {
   /** The validated manifest after applying the hub claim. */
   readonly manifest: RuntimeCapabilityManifest;
   readonly runtimeVersion: string;
+  /** The wire minor both ends negotiated in `hello` (spec §5.2). */
+  readonly effectiveMinor: number;
   request<K extends RuntimeMethod>(
     method: K,
     params: RuntimeMethodMap[K]['params'],
@@ -247,6 +257,21 @@ export interface OpenHubSessionOptions {
    * alone cannot catch that: it only changes when the frame format does.
    */
   readonly requireMatchingRelease?: boolean;
+  /**
+   * The user and environment this connection speaks for, from the hub's own
+   * record of it. `hub.workspace.authorize` answers for this binding only;
+   * `null` is a connection with no real user, and every answer is `false`.
+   * Required so every transport states its binding rather than forgetting it.
+   */
+  readonly workspaceBinding: HubWorkspaceBinding | null;
+  /**
+   * Aborted when the caller gives up before the handshake completes. The
+   * session is closed at once and the call rejects with `CANCELLED`, instead
+   * of waiting out `handshakeTimeoutMs` on a peer nobody is waiting for.
+   */
+  readonly signal?: AbortSignal;
+  /** Replaces the database policy behind `hub.workspace.authorize`; for tests. */
+  readonly workspacePolicy?: EnvironmentWorkspacePolicy;
 }
 
 /**
@@ -261,7 +286,7 @@ export interface OpenHubSessionOptions {
  * own, so every runtime's audit log can attribute what it served.
  *
  * @example
- * const hub = await openHubSession(port, { hubVersion: getVersion() });
+ * const hub = await openHubSession(port, { hubVersion: getVersion(), workspaceBinding: null });
  * const health = await hub.request('runtime.health', {});
  */
 export async function openHubSession(
@@ -282,13 +307,29 @@ export async function openHubSession(
       ? { handshakeTimeoutMs: options.handshakeTimeoutMs }
       : {}),
   });
+  // Registered before the handshake settles: the runtime may ask as soon as
+  // its first open arrives, and the handler lives as long as the session.
+  serveHubContract(session, options.workspaceBinding, options.workspacePolicy);
 
+  // `closeNow` rejects `ready` and clears the handshake timer, so an abort
+  // settles this call on the next tick and leaves no timer behind.
+  const cancel = () => session.closeNow(CLOSE_CODES.RELEASED, 'connect cancelled');
+  if (options.signal?.aborted) cancel();
+  options.signal?.addEventListener('abort', cancel, { once: true });
   let remote: Awaited<Session['ready']>;
   try {
     remote = await session.ready;
   } catch (error) {
     session.close(CLOSE_CODES.RELEASED, 'handshake failed');
+    if (options.signal?.aborted) {
+      throw new RemoteError(
+        RESERVED_ERROR_CODES.CANCELLED,
+        'The connection was cancelled before it finished handshaking.'
+      );
+    }
     throw error;
+  } finally {
+    options.signal?.removeEventListener('abort', cancel);
   }
 
   const manifest = manifestOf(remote.capabilities, options.externalAgentIsolation);
@@ -316,15 +357,70 @@ export async function openHubSession(
     session,
     manifest,
     runtimeVersion: remote.peer.version,
+    effectiveMinor: remote.effectiveMinor,
     ...(options.externalAgentIsolation
       ? { externalAgentIsolation: options.externalAgentIsolation }
       : {}),
-    request: (method, params, requestOptions) =>
-      requestValidated(client, method, params, requestOptions),
+    request: (method, params, requestOptions) => {
+      // Checked here, synchronously, rather than inferred from the SDK's
+      // rejection: once `client.request` is called the SDK's own
+      // `UNAVAILABLE` no longer says whether the frame was written.
+      if (session.state === 'closed') {
+        return Promise.reject(new RuntimeRequestNotSentError(method, session.closure));
+      }
+      return requestTaggingNoReply(
+        session,
+        () => requestValidated(client, method, params, requestOptions),
+        requestOptions?.timeoutMs
+      );
+    },
     onEvent,
     onClose,
     close: (code, reason) => session.close(code ?? CLOSE_CODES.RELEASED, reason),
   };
+}
+
+/**
+ * Runs one request and re-raises a failure *this hub* produced — its own
+ * deadline, or its own connection closing — as {@link RuntimeRequestNoReplyError}.
+ *
+ * Everything else is an answer the runtime sent and passes through unchanged.
+ * The deadline is recognized by a marker timer armed before the SDK's own, for
+ * the same duration: timers of equal delay fire in the order they were set, so
+ * by the time the SDK's `TIMEOUT` rejection is handled the marker has fired,
+ * and a `TIMEOUT` the runtime sent earlier finds it unfired. A close is
+ * recognized by the session being closed when the `UNAVAILABLE` arrives.
+ */
+async function requestTaggingNoReply<T>(
+  session: Session,
+  run: () => Promise<T>,
+  timeoutMs: number | undefined
+): Promise<T> {
+  let deadlinePassed = false;
+  const marker =
+    timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          deadlinePassed = true;
+        }, timeoutMs);
+  try {
+    return await run();
+  } catch (error) {
+    if (!(error instanceof RemoteError)) throw error;
+    if (error.code === RESERVED_ERROR_CODES.TIMEOUT && deadlinePassed) {
+      throw new RuntimeRequestNoReplyError(error, 'deadline');
+    }
+    if (
+      error.code === RESERVED_ERROR_CODES.UNAVAILABLE &&
+      session.state === 'closed' &&
+      error.details?.closeCode !== undefined
+    ) {
+      throw new RuntimeRequestNoReplyError(error, 'connection-closed');
+    }
+    throw error;
+  } finally {
+    if (marker !== undefined) clearTimeout(marker);
+  }
 }
 
 /**
@@ -464,13 +560,25 @@ function manifestOf(
   capabilities: Readonly<Record<string, unknown>>,
   claimed?: HubExternalAgentIsolation
 ): RuntimeCapabilityManifest | undefined {
-  if (!Value.Check(RuntimeCapabilityManifestSchema, capabilities)) return undefined;
   // `contracts` rides in the same open object and is not part of the manifest.
   // Leaving it in would make every `refreshManifest` comparison see a change
   // that never happened and publish an invalidation for nothing.
-  const { contracts: _announced, ...manifest } = capabilities as RuntimeCapabilityManifest & {
-    readonly contracts?: unknown;
-  };
+  // `implementation` is judged on its own: a descriptor this build cannot
+  // interpret (a newer schema, a renamed key) must cost the hub that
+  // descriptor, never the connection.
+  const { contracts: _announced, implementation, ...rest } = capabilities;
+  if (!Value.Check(RuntimeCapabilityManifestSchema, rest)) return undefined;
+  const accepted = acceptedRuntimeImplementation(implementation);
+  if (implementation !== undefined && !accepted) {
+    logger.warn('runtime_implementation_ignored', {
+      reason: Value.Check(RuntimeImplementationSchema, implementation)
+        ? 'unsupported-schema'
+        : 'malformed',
+    });
+  }
+  const manifest: RuntimeCapabilityManifest = accepted
+    ? { ...rest, implementation: accepted }
+    : rest;
   return applyHubIsolationClaim(manifest, claimed);
 }
 

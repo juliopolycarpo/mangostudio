@@ -44,7 +44,7 @@ name: Randomized Order Nightly
 # ` N fail` summary) still reports non-zero, because the retry proves the
 # isolate runner recovered, not that those failures didn't happen.
 #
-# `--parallel=1` stays on the `api`/`shared`/`runtime` lanes rather than
+# `--parallel=1` stays on the `api`/`shared` lanes rather than
 # sharding it away: it is the only detector for *within-file* order
 # dependence under the merge gate's own unit-lane mode, and dropping it on
 # `api` would duplicate the `api-integration` entry instead of adding
@@ -74,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     # Sized with the step and per-attempt bounds below — see the budget comment
     # on the "Run in a randomized order" step before changing this.
-    timeout-minutes: 22
+    timeout-minutes: 27
     strategy:
       # One lane's ordering bug says nothing about another's, and finding all of
       # them in one night beats finding the first one four nights running. Kept
@@ -103,10 +103,6 @@ jobs:
             workspace: shared
             isolation: "--parallel=1"
             path: ""
-          - lane: runtime
-            workspace: runtime
-            isolation: "--parallel=1"
-            path: ""
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
       SEED: ${{ inputs.seed || github.run_number }}
@@ -121,6 +117,11 @@ jobs:
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
+
+      # The api lanes spawn Local as the Rust runtime; a nightly run builds it
+      # itself rather than depending on another workflow's artifact.
+      - if: matrix.workspace == 'api'
+        uses: ./.github/actions/local-runtime
 
       # The lane script's own flags plus randomization, invoked directly rather
       # than through `bun run test`: this is a diagnostic, not the merge gate,
@@ -143,8 +144,10 @@ jobs:
       #   timeout-minutes: 16    This step. Two full attempts (14m) plus the
       #                          kill grace, group reap and log flush between
       #                          them.
-      #   timeout-minutes: 22    The job. The above plus checkout, setup,
-      #                          migrations and the artifact upload.
+      #   timeout-minutes: 27    The job. The above plus checkout, setup,
+      #                          migrations, the artifact upload and, on the
+      #                          api lanes, the Local runtime's cargo build
+      #                          (~5m on a cold cache).
       #
       # The step bound stays tighter than the job's so even a double hang dies
       # here and still leaves time for the log upload. A job-level timeout

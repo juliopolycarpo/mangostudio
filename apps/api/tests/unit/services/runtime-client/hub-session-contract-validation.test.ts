@@ -14,7 +14,10 @@ describe('openHubSession — result validation', () => {
   it('rejects a method result that does not match the contract', async () => {
     const peer = new FakeHostileRuntimePeer();
     peer.answer('runtime.health', { unexpectedShape: 'SENTINEL-7f3a' });
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
 
     // A rejected promise, not a resolved one carrying the bad value: an
     // `expect(...).toEqual` on a value that never arrived would pass for the
@@ -32,7 +35,10 @@ describe('openHubSession — result validation', () => {
   it('resolves a method result that matches the contract', async () => {
     const peer = new FakeHostileRuntimePeer();
     peer.answer('install.cancel', { ok: true });
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const ack = await hub.request('install.cancel', { runId: 'run-1' });
     expect(ack).toEqual({ ok: true });
     hub.close();
@@ -45,7 +51,10 @@ describe('openHubSession — result validation', () => {
     // leniency of this boundary's own is involved.
     const peer = new FakeHostileRuntimePeer();
     peer.answer('install.cancel', { ok: true, futureField: 'from-a-newer-runtime' });
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const ack = await hub.request('install.cancel', { runId: 'run-1' });
     expect(ack).toMatchObject({ ok: true });
     hub.close();
@@ -62,7 +71,10 @@ describe('openHubSession — result validation', () => {
       resolvedPath: '/workspace',
       futureField: 'from-a-newer-runtime',
     });
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const result = await hub.request('workspace.validate', { path: '/workspace' });
     expect(result).toMatchObject({ ok: true, resolvedPath: '/workspace' });
     hub.close();
@@ -72,7 +84,10 @@ describe('openHubSession — result validation', () => {
 describe('openHubSession — event validation', () => {
   it('forwards an unknown topic unchanged, for forward compatibility', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     hub.onEvent((frame) => received.push(frame));
 
@@ -89,7 +104,10 @@ describe('openHubSession — event validation', () => {
 
   it('drops a malformed known, non-critical topic without closing the session', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     let closed = false;
     hub.onEvent((frame) => received.push(frame));
@@ -112,7 +130,10 @@ describe('openHubSession — event validation', () => {
     // would otherwise pass this boundary and then be silently discarded by
     // whichever run it can't be matched to.
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     let closed = false;
     hub.onEvent((frame) => received.push(frame));
@@ -130,7 +151,10 @@ describe('openHubSession — event validation', () => {
 
   it('closes the session on a terminal.output frame with a recognized kind and a broken field', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     const closure = Promise.withResolvers<{ code: number }>();
     hub.onEvent((frame) => received.push(frame));
@@ -152,7 +176,10 @@ describe('openHubSession — event validation', () => {
     // The peer's own frame must never decide whether it gets checked: `null`
     // is not a newer runtime's forward-compatible extension, it is malformed.
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     const closure = Promise.withResolvers<{ code: number }>();
     hub.onEvent((frame) => received.push(frame));
@@ -167,7 +194,10 @@ describe('openHubSession — event validation', () => {
 
   it('closes the session on a terminal.output frame whose kind is not a string', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     const closure = Promise.withResolvers<{ code: number }>();
     hub.onEvent((frame) => received.push(frame));
@@ -186,7 +216,10 @@ describe('openHubSession — event validation', () => {
 
   it('delivers a terminal.output frame with an unrecognized *string* kind, for forward compatibility', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     hub.onEvent((frame) => received.push(frame));
 
@@ -204,7 +237,10 @@ describe('openHubSession — event validation', () => {
 
   it('closes the session on a malformed external-agent.event envelope', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     const closure = Promise.withResolvers<{ code: number }>();
     hub.onEvent((frame) => received.push(frame));
@@ -230,7 +266,10 @@ describe('openHubSession — event validation', () => {
     // member nobody declared is a vendor surface nobody reviewed"
     // (`contract.ts`). An additive envelope field is not tolerated here.
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     const closure = Promise.withResolvers<{ code: number }>();
     hub.onEvent((frame) => received.push(frame));
@@ -260,7 +299,10 @@ describe('openHubSession — event validation', () => {
     // boundary. That claim about the client is a separate assertion, below —
     // this one only proves the boundary itself does not drop or close.
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     hub.onEvent((frame) => received.push(frame));
 
@@ -287,7 +329,10 @@ describe('openHubSession — event validation', () => {
     // silently discarded every frame — exactly the harm the exemption exists
     // to avoid. This asserts through `RuntimeClient` itself.
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const client = new RuntimeClient(hub);
     const received: unknown[] = [];
     client.externalAgents.onEvent('session-1', (frame) => received.push(frame.event));
@@ -309,7 +354,10 @@ describe('openHubSession — event validation', () => {
 
   it('closes the session on a terminal.output frame missing its streamId, and names the frame not the payload', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     const closure = Promise.withResolvers<{ code: number; reason?: string }>();
     hub.onEvent((frame) => received.push(frame));
@@ -328,7 +376,10 @@ describe('openHubSession — event validation', () => {
 
   it('does not let one throwing listener stop another from seeing the frame', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const received: unknown[] = [];
     hub.onEvent(() => {
       throw new Error('a broken consumer');
@@ -345,7 +396,10 @@ describe('openHubSession — event validation', () => {
 
   it('does not let one throwing onClose listener stop another from settling', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     let settled = false;
     hub.onClose(() => {
       throw new Error('a broken teardown listener');
@@ -369,7 +423,10 @@ describe('openHubSession — event validation', () => {
     // fan out through a subscription taken once at `openHubSession` time,
     // or exactly this replay is lost.
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
 
     hub.close();
     await Promise.resolve();

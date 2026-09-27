@@ -65,6 +65,7 @@ import { RuntimeSettingsSourcesResultSchema } from '../library/settings-sources'
 import type { RuntimeCapabilityAllow } from '../runtime-home';
 import { RuntimeHealthReportSchema } from '../runtime-home/schemas';
 import { RUNTIME_CONTRACT_EVENTS } from './events';
+import { RuntimeDiscoverResultSchema } from './implementation';
 import { RuntimeCapabilityManifestSchema } from './manifest';
 import * as Methods from './methods';
 
@@ -390,6 +391,12 @@ const RUNTIME_METHODS = {
     'fsWrite',
   ]),
   'runtime.health': method(Methods.RuntimeNoParamsSchema, RuntimeHealthReportSchema, []),
+  'runtime.discover': method(
+    Methods.RuntimeNoParamsSchema,
+    RuntimeDiscoverResultSchema,
+    [],
+    'The methods and feature groups this runtime build implements, independent of consent. Unlike rpc.discover, which returns the whole contract, this is proof of implementation.'
+  ),
   'runtime.update.begin': method(
     Methods.RuntimeUpdateBeginParamsSchema,
     Methods.RuntimeUpdateBeginResultSchema,

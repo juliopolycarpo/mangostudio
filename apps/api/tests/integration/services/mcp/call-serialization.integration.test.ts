@@ -1,13 +1,12 @@
 /**
- * Per-server FIFO and elicitation correlation, driven end to end: the fixture
- * substitutes only the MCP transport, so every call crosses the hub → runtime
- * protocol boundary and every elicitation makes the trip back.
+ * Per-server FIFO and elicitation correlation, driven end to end: each fixture
+ * server is a real SDK server the Local runtime spawns as a stdio server through
+ * the relay fixture, so every call crosses the hub → runtime protocol boundary
+ * and the runtime's own MCP client, and every elicitation makes the trip back.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { setMcpTransportFactoryForTest } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { KyselyPlugin } from 'kysely';
@@ -27,24 +26,11 @@ import {
 import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 import type { McpClientHandle } from '../../../../src/services/mcp/types';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
+import { type McpRelayHost, startMcpRelayHost } from '../../../support/fixtures/mcp/mcp-relay-host';
 
-const servers: Server[] = [];
-/** Fixture server per configured id; the transport factory dials into these. */
-const fixtureServers = new Map<string, Server>();
+let relay: McpRelayHost;
 
 const handles: McpClientHandle[] = [];
-
-function installTransportFactory(): void {
-  setMcpTransportFactoryForTest(async (config) => {
-    const server = fixtureServers.get(config.id);
-    if (!server) return null;
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverTransport);
-    return clientTransport;
-  });
-}
-
-installTransportFactory();
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -81,15 +67,14 @@ function createToolServer(
 }
 
 async function connectHandle(serverId: string, server: Server): Promise<McpClientHandle> {
-  fixtureServers.set(serverId, server);
-  servers.push(server);
+  const launch = relay.route(() => server);
   const handle = await connectMcpClient(
     {
       id: serverId,
       slug: serverId,
       transport: 'stdio',
-      command: 'fixture',
-      args: [],
+      command: launch.command,
+      args: [...launch.args],
       env: {},
       url: null,
       timeoutMs: null,
@@ -101,18 +86,17 @@ async function connectHandle(serverId: string, server: Server): Promise<McpClien
   return handle;
 }
 
-beforeEach(() => {
-  installTransportFactory();
+beforeEach(async () => {
+  relay = await startMcpRelayHost();
 });
 
 afterEach(async () => {
   resetElicitationRegistryForTest();
   setMcpClientConnectorForTest(null);
-  setMcpTransportFactoryForTest(null);
   await closeAllMcpClients();
   await Promise.allSettled(handles.splice(0).map((handle) => handle.close()));
-  fixtureServers.clear();
-  await Promise.allSettled(servers.splice(0).map((server) => server.close()));
+  await relay.close();
+  relay.assertNoOpenServers();
 });
 
 describe('MCP call serialization', () => {

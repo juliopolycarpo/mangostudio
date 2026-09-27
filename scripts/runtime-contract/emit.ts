@@ -11,9 +11,8 @@
  * three releases later, when a peer built from a stale catalog starts refusing
  * calls nobody changed.
  *
- * Unlike `vendor-contracts:check`, this needs nothing but the repository — no
- * vendor binary, no network — so there is no reason to keep it out of the main
- * gate.
+ * It needs nothing but the repository — no vendor binary, no network — so
+ * there is no reason to keep it out of the main gate.
  *
  * The catalog is additionally validated against the published
  * `catalog.json` schema on every run, in both modes. Emitting a document the

@@ -9,7 +9,18 @@ import { CLOSE_CODES } from './close';
 export const PROTOCOL_MAJOR = 1 as const;
 
 /** The highest minor of that major this SDK implements. */
-export const PROTOCOL_MINOR = 1 as const;
+export const PROTOCOL_MINOR = 2 as const;
+
+/**
+ * The wire minor from which a responder writes every frame a handler asked
+ * for ahead of that request's answer (spec §6.2). A feature minor, not the
+ * current one: it stays `2` when later minors ship. At or above it a
+ * requester may treat the answer as the end of what the call emitted.
+ *
+ * @example
+ * const ordered = session.remote.effectiveMinor >= ORDERED_ANSWER_MINOR;
+ */
+export const ORDERED_ANSWER_MINOR = 2 as const;
 
 /** The `protocol` member of a `hello` frame. */
 export interface ProtocolVersion {

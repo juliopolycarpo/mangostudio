@@ -454,6 +454,32 @@ describe('GitHub panel reads', () => {
     }
   });
 
+  it('omits rejected gh operands and diagnostic echoes from failure logs', async () => {
+    const privateArgument = 'unpublished project notes';
+    function rejectUnknownGhInvocation(): Promise<never> {
+      return Promise.reject(
+        new GhCliError(['pr', privateArgument], null, `Rejected invocation: ${privateArgument}`)
+      );
+    }
+    function discardLog(): void {
+      // The spy retains calls for assertions without printing private test input.
+    }
+    const { user, chat } = await createChatWithWorkdir();
+    const { plugin } = createPanelPlugin({ respond: { 'pr.list': rejectUnknownGhInvocation } });
+    const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
+    restoreAuth = restore;
+    const errorSpy = spyOn(console, 'error').mockImplementation(discardLog);
+    try {
+      const response = await get(app, '/github/prs', { chatId: chat.id });
+      expect(response.status).toBe(500);
+      expect(errorSpy).toHaveBeenCalled();
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(privateArgument);
+      expect(await response.text()).not.toContain(privateArgument);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('answers a typed error, not gh output, when gh emits unreadable JSON', async () => {
     const { user, chat } = await createChatWithWorkdir();
     const { plugin } = createPanelPlugin({ stdout: { 'pr.list': '{not-json' } });

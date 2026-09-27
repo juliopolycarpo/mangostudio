@@ -150,6 +150,56 @@ describe('TerminalRailPanel', () => {
     expect(screen.getByRole('button', { name: 'New terminal' })).toBeVisible();
   });
 
+  function mockEmptyList(): void {
+    fetchScenario.respondWithJson(
+      'GET',
+      `/api/terminals?environmentId=${ENVIRONMENT_ID}&chatId=${CHAT_ID}`,
+      { body: { sessions: [] } }
+    );
+  }
+
+  function postCount(): number {
+    return fetchScenario.fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST').length;
+  }
+
+  it('shows the refusal reason of a rejected open and returns the button to idle', async () => {
+    const user = userEvent.setup();
+    mockAvailable();
+    mockEmptyList();
+    fetchScenario.respondWithJson('POST', '/api/terminals', {
+      status: 409,
+      body: {
+        error: 'The environment has no live runtime connection.',
+        code: 'UNSUPPORTED',
+        details: { reason: 'disconnected' },
+      },
+    });
+
+    render(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
+    await screen.findByText('No terminal is open for this chat.');
+    await user.click(screen.getByRole('button', { name: 'New terminal' }));
+
+    expect(await screen.findByText('The environment is not connected.')).toBeVisible();
+    const button = screen.getByRole('button', { name: 'New terminal' });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(postCount()).toBe(2));
+  });
+
+  it('shows the generic open failure when the request never reaches the hub', async () => {
+    const user = userEvent.setup();
+    mockAvailable();
+    mockEmptyList();
+    fetchScenario.failWithNetworkError('POST', '/api/terminals');
+
+    render(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
+    await screen.findByText('No terminal is open for this chat.');
+    await user.click(screen.getByRole('button', { name: 'New terminal' }));
+
+    expect(await screen.findByText('Could not open a terminal. Try again.')).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New terminal' })).toBeEnabled());
+  });
+
   it('holds a palette new-session request until the chat’s environment is known', async () => {
     mockAvailable();
     fetchScenario.respondWithJson(

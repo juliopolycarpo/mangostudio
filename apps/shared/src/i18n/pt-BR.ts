@@ -998,7 +998,7 @@ export const messages = {
         editFile: 'Permite que a IA substitua texto exato em arquivos lidos neste chat.',
         replaceRange: 'Permite que a IA substitua trechos de linhas em arquivos lidos neste chat.',
         applyPatch:
-          'Permite que a IA aplique alterações ancoradas por contexto em vários arquivos de texto de uma só vez.',
+          'Permite que a IA aplique alterações ancoradas por contexto em vários arquivos de texto de uma só vez. Os arquivos de destino devem permanecer graváveis exclusivamente pelo Mango durante a execução.',
         createFile:
           'Permite que a IA crie novos arquivos de texto sem sobrescrever caminhos existentes.',
         deleteFile: 'Permite que a IA exclua arquivos regulares lidos neste chat.',
@@ -2039,6 +2039,7 @@ export const messages = {
     disconnected: 'Desconectado do terminal.',
     notFound: 'Esta sessão de terminal não existe mais.',
     refused: 'Esta sessão de terminal não pode ser aberta daqui.',
+    openFailed: 'Não foi possível abrir um terminal. Tente novamente.',
     exited: 'Processo encerrado com código {code}.',
     exitedBySignal: 'Processo encerrado por {signal}.',
     exitedConsentRevoked: 'Terminal fechado porque o acesso ao shell foi revogado.',
@@ -2645,10 +2646,11 @@ export const messages = {
       },
       runtime: {
         title: 'Binário do runtime',
-        source: 'Executa a partir do checkout do código-fonte via Bun',
-        missing: 'não encontrado ao lado do hub',
+        notBuilt:
+          'Não compilado neste checkout do código-fonte. Execute "cargo build -p mangostudio-runtime --locked" para que o Local possa iniciar.',
+        missing: 'não encontrado; o Local não pode iniciar',
         versionMismatch:
-          'O binário do runtime informa uma versão diferente da do hub. Ambientes stdio recusarão o pareamento até que as duas coincidam.',
+          'O binário do runtime informa uma versão diferente da do hub. O Local e os ambientes stdio recusarão a conexão até que as duas coincidam.',
       },
       hostSlot: {
         title: 'Consentimento do host',
@@ -2981,6 +2983,14 @@ export const messages = {
       offlineCache: 'Cache offline',
       offlineCacheHint:
         'Não foi possível alcançar a release, então isto iniciou com um runtime que o hub já havia verificado.',
+      local: {
+        reason: {
+          'binary-missing':
+            'O binário do runtime Local não foi encontrado. Em um checkout do código-fonte, execute "cargo build -p mangostudio-runtime --locked"; em um hub instalado, reinstale o MangoStudio ou defina MANGOSTUDIO_RUNTIME_BINARY.',
+        },
+      },
+      boundElsewhereHint:
+        'Outro registro de ambiente, neste hub ou em outro, está conectado a este runtime. Ele aceita uma conexão de hub por vez, então este registro tenta de novo no máximo uma vez por minuto, sem atrapalhar aquela conexão. Desconecte ou remova o outro registro para usar este.',
       status: {
         connected: 'Conectado',
         connecting: 'Conectando',
@@ -2988,9 +2998,10 @@ export const messages = {
         error: 'Falha na conexão',
         updating: 'Atualizando',
         pulling: 'Baixando imagem',
+        boundElsewhere: 'Vinculado a outro',
       },
       transport: {
-        'in-process': 'No processo',
+        'in-process': 'Iniciado pelo hub',
         stdio: 'Processo local',
         wsl: 'WSL',
         websocket: 'WebSocket',
@@ -3062,6 +3073,7 @@ export const messages = {
         version: 'v{version}',
         slot: 'slot {slot}',
         digest: '{digest}…',
+        implementation: '{count} métodos · build {fingerprint}',
         actions: {
           install: 'Instalar runtime',
           reinstall: 'Reinstalar',
@@ -3910,6 +3922,8 @@ export const messages = {
         'vendor-error': 'O agente relatou uma falha.',
         'runtime-disconnected': 'A conexão com a máquina caiu no meio do turno.',
         'hub-restarted': 'O MangoStudio reiniciou enquanto este turno rodava.',
+        'acceptance-unknown':
+          'O MangoStudio não conseguiu confirmar se o agente recebeu este turno. Envie novamente para tentar de novo.',
         'sequence-gap': 'Parte do fluxo do agente se perdeu, então este registro está incompleto.',
         'limit-exceeded': 'Este turno passou do limite de tamanho e foi interrompido.',
         'consent-revoked': 'O dono da máquina retirou a permissão para agentes externos.',

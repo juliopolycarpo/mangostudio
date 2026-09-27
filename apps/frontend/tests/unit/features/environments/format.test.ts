@@ -127,6 +127,13 @@ describe('describeFinding', () => {
     ).toContain('Claude Code');
   });
 
+  it("names a missing version manager in the runtime template's subject", () => {
+    const message = describeFinding(en, { code: 'not-found', params: { manager: 'fnm' } });
+
+    expect(message).toStartWith('fnm was not found');
+    expect(message).not.toContain('{runtime}');
+  });
+
   it('translates a nested LTS status rather than leaking its code', () => {
     const message = describeFinding(en, {
       code: 'outdated-lts',

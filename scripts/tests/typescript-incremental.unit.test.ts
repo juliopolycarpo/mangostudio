@@ -36,7 +36,6 @@ const TSCONFIGS = [
   'apps/api/tsconfig.json',
   'apps/frontend/tsconfig.json',
   'apps/shared/tsconfig.json',
-  'apps/runtime/tsconfig.json',
 ];
 
 describe('typecheck determinism', () => {

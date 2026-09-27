@@ -14,7 +14,7 @@
  * sequence lives in `runtime-push.ts` so SSH can reuse the same audited path.
  */
 
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   type LinuxPlatformId,
   mangoHomeDir,
@@ -358,13 +358,16 @@ export function localRuntimeBuildPath(baseDir: string, platformId: LinuxPlatform
 }
 
 /**
- * The command that produces the file above. Compiling without a version stamp
- * is deliberate: the runtime then reports `dev` the same way a checkout's hub
- * does, and the handshake only accepts a runtime whose release matches.
- * // Usage: localRuntimeBuildCommand('linux-x64', 'C:\\repo\\.mango\\out\\...')
+ * The command that produces the file above, run from the repository root.
+ * `--dev` stamps the runtime `dev`, the version a checkout's hub reports,
+ * because the handshake only accepts a runtime whose release matches. `--zig`
+ * links the Linux target from any host, Windows included, and `--out` is the
+ * directory above the platform id, which is where `build:runtime` puts it.
+ * // Usage: localRuntimeBuildCommand('linux-x64', 'C:\\repo\\.mango\\out\\linux-x64\\mangostudio-runtime')
  */
 export function localRuntimeBuildCommand(platformId: LinuxPlatformId, outfile: string): string {
-  return `bun build apps/runtime/src/cli.ts --compile --target=bun-${platformId} --outfile ${outfile}`;
+  const outDir = dirname(dirname(outfile));
+  return `bun run build:runtime --platform ${platformId} --dev --zig --rustup --out ${outDir}`;
 }
 
 /**

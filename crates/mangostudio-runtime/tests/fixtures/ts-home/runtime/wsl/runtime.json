@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "slot": "wsl",
+  "source": "provisioned",
+  "version": "0.9.1",
+  "allow": {
+    "fsRead": true,
+    "fsWrite": false,
+    "shell": false,
+    "git": true,
+    "probing": true,
+    "mcp": false,
+    "library": true,
+    "checkpoints": false,
+    "update": false,
+    "externalAgents": false
+  },
+  "setup": {
+    "state": "configured",
+    "at": "2026-01-02T00:00:00.000Z",
+    "by": "cli"
+  },
+  "somethingANewerRuntimeWrote": "from a release this contract predates"
+}

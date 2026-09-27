@@ -4,6 +4,11 @@ Use this guide when you want the shortest path from clone to a validated change.
 
 ## 1. Set Up
 
+You need [Bun](https://bun.sh/) and a Rust toolchain from [rustup](https://rustup.rs/)
+(`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). The hub launches Local as
+the cargo-built `mangostudio-runtime` binary, and `rust-toolchain.toml` pins the version rustup
+installs on first build.
+
 ```bash
 git clone <repo-url>
 cd mangostudio
@@ -23,6 +28,10 @@ cp .mango/.env.example ~/.mango/.env
 ```bash
 bun run dev
 ```
+
+It runs `cargo build -p mangostudio-runtime --locked` first, so Local has a binary to launch; set
+`MANGOSTUDIO_RUNTIME_BINARY` to use one you already built instead. API tests that reach Local
+need the same binary.
 
 One server, one URL — the API builds and serves the frontend:
 

@@ -99,7 +99,7 @@ describe('randomized order nightly workflow', () => {
   });
 
   test('keeps the whole-workspace lanes isolated', () => {
-    for (const lane of ['api', 'shared', 'runtime']) {
+    for (const lane of ['api', 'shared']) {
       expect(matrixEntry(lane)).toContain('isolation: "--parallel=1"');
     }
   });

@@ -63,6 +63,7 @@ import {
   getHomeMangoDir,
   getRuntimeHomeMangoDir,
   getVersion,
+  isDevelopmentVersion,
   resetConfig,
 } from '../../../lib/config';
 import { bridgeEmitter } from '../../../lib/emit-bridge';
@@ -316,7 +317,11 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
           path: binary.path,
           present: binary.present,
           version: binary.version,
-          versionMatches: binary.version === null ? null : binary.version === environment.version,
+          // A development hub has no release for a cargo build to match.
+          versionMatches:
+            binary.version === null || isDevelopmentVersion(environment.version)
+              ? null
+              : binary.version === environment.version,
           error: fitToLimit(binary.error, MACHINE_ERROR_MAX),
         },
         hostSlot: host

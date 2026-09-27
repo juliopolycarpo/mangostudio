@@ -1,5 +1,5 @@
 {
-  "$comment": "Negotiation cases: effective minor is the lower minor when majors match; otherwise close 4426. The 1.1/1.0 pairs are the wire's first minor bump: a 1.1 peer against a 1.0 one runs at 0 and sends nothing minor 1 added.",
+  "$comment": "Negotiation cases: effective minor is the lower minor when majors match; otherwise close 4426. The 1.1/1.0 pairs are the wire's first minor bump: a 1.1 peer against a 1.0 one runs at 0 and sends nothing minor 1 added. The 1.2/1.1 pairs run at 1, where a requester cannot rely on the answer ordering minor 2 added.",
   "handshake": {
     "$comment": "The handshake budget of the wire spec section 5.2: a peer that has not received hello within timeoutMs closes with closeCode and this exact reason.",
     "timeoutMs": 15000,
@@ -103,6 +103,34 @@
       },
       "expected": {
         "effectiveMinor": 0
+      }
+    },
+    {
+      "name": "y_one_two_against_one_one",
+      "local": {
+        "major": 1,
+        "minor": 2
+      },
+      "remote": {
+        "major": 1,
+        "minor": 1
+      },
+      "expected": {
+        "effectiveMinor": 1
+      }
+    },
+    {
+      "name": "y_one_one_against_one_two",
+      "local": {
+        "major": 1,
+        "minor": 1
+      },
+      "remote": {
+        "major": 1,
+        "minor": 2
+      },
+      "expected": {
+        "effectiveMinor": 1
       }
     },
     {

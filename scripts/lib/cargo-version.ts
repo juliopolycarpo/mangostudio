@@ -1,6 +1,6 @@
-// Section-aware version stampers for the launcher manifest and workspace lockfile. They
-// mirror the readers in release-version.ts (readCargoManifestVersion /
-// readCargoLockVersion) so the canary job can rewrite an ephemeral prerelease
+// Section-aware version stampers for the launcher manifest and workspace lockfile, plus the
+// lockfile reader they mirror. The stampers mirror readCargoManifestVersion /
+// cargoLockVersion so the canary job can rewrite an ephemeral prerelease
 // version into Cargo.toml + Cargo.lock without a TOML dependency, then publish
 // with `cargo publish --locked --allow-dirty`. Pure string transforms — IO lives
 // in scripts/lib/prepare-release.ts so they stay unit-testable.
@@ -26,6 +26,27 @@ export function setCargoManifestVersion(source: string, version: string): string
   });
   if (!replaced) throw new Error('No [package] version found in Cargo.toml');
   return lines.join('\n');
+}
+
+/** One crate's version from a Cargo.lock `[[package]]` entry, or undefined when the lockfile
+ * does not list it. // Usage: cargoLockVersion(src, 'mangostudio') -> '0.1.0' */
+export function cargoLockVersion(source: string, crateName: string): string | undefined {
+  let inNamedPackage = false;
+  for (const line of source.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '[[package]]') {
+      inNamedPackage = false;
+      continue;
+    }
+    const name = trimmed.match(/^name\s*=\s*"([^"]+)"/);
+    if (name) {
+      inNamedPackage = name[1] === crateName;
+      continue;
+    }
+    const version = inNamedPackage ? trimmed.match(/^version\s*=\s*"([^"]+)"/) : null;
+    if (version?.[1]) return version[1];
+  }
+  return undefined;
 }
 
 /** Rewrite one crate's version in a Cargo.lock `[[package]]` entry.

@@ -385,10 +385,14 @@ as the main binary — that is how MangoStudio finds it. On another machine you 
 `stdio` also works as a bare word (`mangostudio-runtime stdio`).
 
 In `--stdio` mode stdout carries protocol frames and nothing else; every diagnostic
-goes to stderr, which MangoStudio collects into its own logs. `mangostudio doctor`
-reports whether this binary is present and whether its version matches the hub's —
-a mismatch is refused at the protocol handshake, so reinstall rather than mixing
-releases.
+goes to stderr, which MangoStudio collects into its own logs. The hub launches Local
+as this binary. `mangostudio doctor` reports the one Local would run —
+`MANGOSTUDIO_RUNTIME_BINARY`, the sibling beside a standalone hub, or a source checkout's
+newest cargo build — and fails the row when it is missing, since Local cannot start
+without it: reinstall MangoStudio (or set `MANGOSTUDIO_RUNTIME_BINARY`), or in a checkout
+run `cargo build -p mangostudio-runtime`. A version that differs from the hub's is a
+warning — the handshake refuses the mismatch, so reinstall rather than mixing releases —
+and is not reported against a development hub, which has no release to match.
 
 ### `connect`
 
@@ -409,8 +413,10 @@ each failure. It exits non-zero only when redialing cannot help: a revoked token
 a disabled environment, a protocol version the hub will not serve, or another
 runtime that took the same environment over — two processes sharing one pairing
 token would otherwise trade it back and forth forever, so the loser stops and
-names the conflict. Keep it running under whatever supervises long-lived
-processes on that machine, or install a user service:
+names the conflict. A `connect` started from a runtime slot (`~/.mango/runtime/<slot>/`)
+also exits after the hub updates it live, with code `75` so a supervisor can start the
+new version. Run by hand, nothing relaunches it: run it again, or keep it under
+whatever supervises long-lived processes on that machine, or install a user service:
 
 ```bash
 printf %s "$TOKEN" | mangostudio-runtime connect --hub wss://hub.example.com/api/runtime --token -
@@ -454,7 +460,8 @@ Tokens supplied on stdin or via the environment are not written to disk.
 Binding anything other than loopback prints a warning: whoever holds the serve token gets
 shell access on that machine. Put TLS in front with a reverse proxy when the dial leaves
 a trusted network — the runtime itself does not terminate TLS. A second hub connection
-supersedes the first.
+supersedes the first. Like `connect`, a `serve` started from a runtime slot exits with code
+`75` after a live update, and must be relaunched when no service supervises it.
 
 ```bash
 mangostudio-runtime serve --listen 8787
@@ -483,8 +490,8 @@ mangostudio-runtime install --slot remote --json
 It refuses a binary that already runs from a slot — the copy would truncate its
 own source, and a runtime already in a slot is upgraded from its environment
 card. A re-run with the same version and the same bytes does nothing and says
-so; different bytes under the same version reinstall, which is how a partial
-download is repaired.
+so; different bytes under the same version are refused, because a published
+version is immutable. Use a distinct version for different bytes.
 
 The version it just replaced is kept, because a service may still be executing
 out of it. Everything older is removed.
@@ -492,8 +499,9 @@ out of it. Everything older is removed.
 ### `service`
 
 Install a user-level unit so `connect` or `serve` survives logout and reboot.
-`ExecStart` points at the slot's `current` pointer, so the runtime has to be in
-the slot first — run [`install`](#install) or push it from the hub; `service
+The Unix unit uses the slot's `current` pointer; the Windows task uses its
+stable `.cmd` shim. The runtime has to be in the slot first — run
+[`install`](#install) or push it from the hub; `service
 install` refuses rather than write a unit that cannot start. See
 [`docs/operations/remote-runtimes.md`](../operations/remote-runtimes.md) for
 that prerequisite, linger, SSH session-bus workarounds, macOS launchd verbs, and
@@ -513,7 +521,7 @@ what the Windows Scheduled Task looks like.
 | ------- | ------------------------------------------------------ |
 | Linux   | `~/.config/systemd/user/mangostudio-runtime.service`   |
 | macOS   | `~/Library/LaunchAgents/com.mangostudio.runtime.plist` |
-| Windows | Scheduled Task `MangoStudio runtime` (no unit file)    |
+| Windows | Scheduled Task `MangoStudio Runtime` (no unit file)    |
 
 ```bash
 mangostudio-runtime service install --mode connect

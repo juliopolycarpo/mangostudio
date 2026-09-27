@@ -3,6 +3,9 @@ import { ROOT_DIR } from '../lib/config';
 import {
   createTurboDevCommand,
   getDevCwd,
+  LOCAL_RUNTIME_BUILD_COMMAND,
+  planLocalRuntimeBuild,
+  RUSTUP_INSTALL_COMMAND,
   selectDevWorkspaces,
   selectTurboDevUi,
 } from '../lib/dev';
@@ -86,5 +89,49 @@ describe('dev script', () => {
 
   test('forwards the terminal so the Turbo TUI stays interactive', () => {
     expect(readText('scripts/dev.ts')).toContain("stdin: turboUi === 'tui' ? 'inherit' : 'ignore'");
+  });
+
+  test('builds the Local runtime before the hub when cargo is present', () => {
+    expect(planLocalRuntimeBuild({}, true)).toEqual({
+      kind: 'build',
+      command: ['cargo', 'build', '-p', 'mangostudio-runtime', '--locked'],
+    });
+  });
+
+  test('names the rustup one-liner instead of starting a hub that cannot launch Local', () => {
+    const plan = planLocalRuntimeBuild({}, false);
+
+    expect(plan.kind).toBe('missing-cargo');
+    expect(plan.kind === 'missing-cargo' && plan.message).toContain(RUSTUP_INSTALL_COMMAND);
+    expect(RUSTUP_INSTALL_COMMAND).toBe(
+      "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    );
+  });
+
+  test('leaves an explicitly chosen runtime binary alone, with or without cargo', () => {
+    const env = { MANGOSTUDIO_RUNTIME_BINARY: ' /ci/mangostudio-runtime ' };
+
+    expect(planLocalRuntimeBuild(env, false)).toEqual({
+      kind: 'skip',
+      reason: 'MANGOSTUDIO_RUNTIME_BINARY is set to /ci/mangostudio-runtime',
+    });
+    expect(planLocalRuntimeBuild(env, true).kind).toBe('skip');
+    expect(planLocalRuntimeBuild({ MANGOSTUDIO_RUNTIME_BINARY: '  ' }, true).kind).toBe('build');
+  });
+
+  test('builds the runtime before handing the terminal to Turbo', () => {
+    const devScript = readText('scripts/dev.ts');
+
+    expect(devScript.indexOf('planLocalRuntimeBuild(')).toBeGreaterThan(-1);
+    expect(devScript.indexOf('planLocalRuntimeBuild(')).toBeLessThan(
+      devScript.indexOf('createTurboDevCommand(runnableWorkspaces')
+    );
+    expect(LOCAL_RUNTIME_BUILD_COMMAND).toEqual([
+      'cargo',
+      'build',
+      '-p',
+      'mangostudio-runtime',
+      '--locked',
+    ]);
   });
 });

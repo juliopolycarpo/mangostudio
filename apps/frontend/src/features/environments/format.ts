@@ -134,6 +134,13 @@ export function describeFinding(
       params[key] = value;
     }
   }
+  // `not-found` is shared by runtimes and version managers, but its template
+  // names the subject `{runtime}`; a version manager's finding carries
+  // `manager` instead, so that name is the subject when no runtime is given.
+  // The CLI's `renderFinding` applies the same rule.
+  if (params.runtime === undefined && params.manager !== undefined) {
+    params.runtime = params.manager;
+  }
   // A code added to the contract before its translation lands must degrade to
   // something readable, exactly as `displayName` does — never crash the page.
   const template = (t.environments.findings as Record<string, string | undefined>)[finding.code];

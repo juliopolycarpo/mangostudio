@@ -10,6 +10,8 @@
     "ACTIONS_ID_TOKEN_REQUEST_URL",
     "ALLOWED_SKIPS",
     "API_PORT",
+    // Where the runtime build scripts find cargo's output when it is not `target/`.
+    "CARGO_TARGET_DIR",
     "DISTRIBUTION_CHANNEL",
     "DISTRIBUTION_MANIFEST_PATH",
     "DRY_RUN",
@@ -17,8 +19,7 @@
     // Names the repository whose Actions cache usage the gate job reports.
     "GITHUB_REPOSITORY",
     "GITHUB_SHA",
-    // The vendor-drift job renders its findings here. Additive drift does not
-    // fail the run, so the step summary is the only place a maintainer sees it.
+    // The gate's cache-usage report renders its table here.
     "GITHUB_STEP_SUMMARY",
     // Read only by the gate's cache-usage report, which needs `actions: read`.
     "GITHUB_TOKEN",
@@ -31,6 +32,8 @@
     "ONLY_PLATFORM",
     "PLATFORM",
     "QA_FRONTEND_DIST",
+    // Prebuilt cargo runtimes `scripts/build.ts --binary` stages beside each hub.
+    "RUNTIME_DIR",
     "SKIP_BUILD",
     "SOURCE_SHA",
     "VERSION"

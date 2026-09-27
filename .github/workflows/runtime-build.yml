@@ -1,0 +1,84 @@
+name: Runtime Build
+
+# Builds the cargo `mangostudio-runtime` once per release platform and hands
+# each binary to the caller as an artifact laid out for
+# `bun run build --binary --runtime-dir <dir>`:
+# `<dir>/<platform-id>/mangostudio-runtime[.exe]`. The hub stays Bun-compiled
+# in the caller's packaging job; only this sibling comes from here.
+#
+# Toolchains: every Linux target links through cargo-zigbuild on one Ubuntu
+# image (gnu at the GLIBC_2.17 floor, musl static), darwin targets build with
+# Xcode on macOS, and both Windows targets build with MSVC on a Windows x64
+# runner (arm64 cross-compiled, since the image carries the ARM64 MSVC tools
+# and LLVM that ring's aarch64 assembly needs). `scripts/build-runtime.ts`
+# checks every binary's header, and asks each one this runner can execute for
+# its version.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Release version stamped into every runtime binary.
+        type: string
+        required: true
+      source_sha:
+        description: Exact source commit to build.
+        type: string
+        required: true
+      platforms:
+        description: JSON array of release platform ids to build.
+        type: string
+        default: '["linux-x64","linux-arm64","linux-x64-musl","linux-arm64-musl","darwin-x64","darwin-arm64","windows-x64","windows-arm64"]'
+      artifact_prefix:
+        description: Artifact name prefix; each platform uploads `<prefix>-<platform-id>`.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: Runtime ${{ matrix.platform }}
+    runs-on: ${{ startsWith(matrix.platform, 'linux-') && 'ubuntu-latest' || startsWith(matrix.platform, 'darwin-') && 'macos-latest' || 'windows-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platforms) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      # Installs the toolchain rust-toolchain.toml pins.
+      - run: rustup show active-toolchain
+
+      - name: Install zig and cargo-zigbuild
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-zigbuild
+
+      - name: Build runtime
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ inputs.version }}
+        # `--zig` only changes how Linux targets link; it is inert elsewhere.
+        # Dependency-free script; runs without `bun install`.
+        run: bun --no-install ./scripts/build-runtime.ts --platform "$PLATFORM" --zig --rustup --out "${RUNNER_TEMP}/runtime"
+
+      - name: Upload runtime
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_prefix }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/runtime
+          retention-days: 1
+          if-no-files-found: error
+          # A re-run of the consuming job re-runs this one too; the name is
+          # per source commit, so the newer upload is the same build input.
+          overwrite: true

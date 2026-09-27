@@ -15,7 +15,6 @@ const formatSuiteBreakdown = (suite: TestSuiteStats | null): string => {
     `frontend ${formatNumber(suite.frontend)}`,
     `api ${formatNumber(suite.api)}`,
     `shared ${formatNumber(suite.shared)}`,
-    `runtime ${formatNumber(suite.runtime)}`,
   ];
   const status = suite.exitCode == null ? 'status n/a' : `exit ${suite.exitCode}`;
   const extras: string[] = [];

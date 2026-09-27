@@ -3,6 +3,13 @@ name: Smoke — Browser
 on:
   workflow_call:
     inputs:
+      runtime_artifact:
+        description: >
+          Artifact holding the mangostudio-runtime binary the hub launches for
+          Local; empty builds it in this job instead.
+        type: string
+        required: false
+        default: ""
       always_upload_report:
         description: Upload the Playwright HTML report even when the suite passes.
         type: boolean
@@ -82,6 +89,14 @@ jobs:
           exact-restore: "true"
           mode: save
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      # The smoke hub spawns Local as the Rust runtime. With the binary in
+      # MANGOSTUDIO_RUNTIME_BINARY, `bun run dev` skips its own cargo build,
+      # which would otherwise start cold inside the web server's timeout. A
+      # manual dispatch has no artifact to download, so it builds here.
+      - uses: ./.github/actions/local-runtime
+        with:
+          artifact: ${{ inputs.runtime_artifact || '' }}
 
       - name: Run browser smoke suite
         run: |

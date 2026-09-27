@@ -53,7 +53,6 @@ describe('parseQaMetricsEnvelope', () => {
       frontend: 1150,
       api: 0,
       shared: 0,
-      runtime: 0,
       failed: 0,
       failedFiles: 0,
       errors: 2,

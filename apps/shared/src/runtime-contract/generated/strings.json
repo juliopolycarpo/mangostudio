@@ -50,6 +50,15 @@
   "setupPendingSignature": "runtime setup is pending on this machine",
   "updateExitCode": 75,
   "pairingTokenPrefix": "mrt_",
+  "binding": {
+    "header": "x-mangostudio-hub-binding",
+    "length": 64,
+    "alreadyBoundCloseCode": 4423,
+    "alreadyBoundReason": "runtime already bound to another environment"
+  },
+  "githubGraphqlDocuments": [
+    "query($owner: String!, $name: String!, $number: Int!) {\n  repository(owner: $owner, name: $name) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 50) {\n        totalCount\n        nodes {\n          isResolved\n          isOutdated\n          path\n          line\n          comments(first: 20) {\n            totalCount\n            nodes { author { login } body }\n          }\n        }\n      }\n    }\n  }\n}"
+  ],
   "runtimeHome": {
     "slots": [
       "host",

@@ -1,3 +1,0 @@
-[test]
-coverageReporter = ["lcov"]
-coverageDir = "../../.mango/artifacts/coverage/runtime"

@@ -186,6 +186,11 @@ export const DETACH_ENV_ALLOWLIST = new Set<string>([
   'MANGO_LOG_FILE',
   'VERSION',
   'MANGOSTUDIO_DIAGNOSTIC_LOGS',
+  // getRuntimeBinaryOverride (config.ts) reads this directly from
+  // process.env too, on every stdio launch — an operator who exports it
+  // before `serve -d` means the detached child to honor it, not just the
+  // foreground process that happened to read this env first.
+  'MANGOSTUDIO_RUNTIME_BINARY',
   // Who launched this hub, so a `serve -d` child still knows how it was
   // installed — detectInstallOrigin reads these, and an upgrade started from
   // the detached child needs the same answer the foreground process had.

@@ -10,7 +10,9 @@
  *
  * The frame arrives as WebSocket messages: a nine-byte header — format version
  * 1, then the big-endian chunk index and count — followed by the JSON. This
- * frame fits in one message, so there is exactly one.
+ * frame fits in one message, so there is exactly one. Over stdio the same codec
+ * wrote one NDJSON record instead; `LEGACY_HELLO_1_0_1_NDJSON_LINE` is that
+ * record, captured from a separate run (its manifest differs, not its shape).
  */
 
 const HELLO_JSON =
@@ -23,3 +25,9 @@ const CHUNK_HEADER = Uint8Array.of(1, 0, 0, 0, 0, 0, 0, 0, 1);
 export const LEGACY_HELLO_1_0_1_CHUNKS: readonly Uint8Array[] = [
   Uint8Array.from([...CHUNK_HEADER, ...new TextEncoder().encode(HELLO_JSON)]),
 ];
+
+const STDIO_HELLO_JSON =
+  '{"type":"hello","protocolVersion":"1.0.1","runtimeVersion":"9.9.9-legacy","manifest":{"platform":"linux","arch":"x64","pathStyle":"posix","homeDir":"/home/test","shells":["bash"],"git":{"available":false},"features":{"tools":true,"git":false,"probing":false,"mcp":false,"library":false,"checkpoints":true}}}';
+
+/** The stdio record a 1.0.1 runtime writes to stdout, newline included. */
+export const LEGACY_HELLO_1_0_1_NDJSON_LINE = `${STDIO_HELLO_JSON}\n`;

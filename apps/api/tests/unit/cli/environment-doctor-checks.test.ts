@@ -33,4 +33,20 @@ describe('collectEnvironmentDoctorSection', () => {
     expect(labels).toContain('fnm');
     expect(labels).toContain('Volta');
   });
+
+  it('names a missing version manager in its not-found row', async () => {
+    const rows = await collectEnvironmentDoctorSection({
+      listRuntimes: async () => [],
+      listVersionManagers: async () => [
+        manager('fnm', {
+          installed: false,
+          findings: [{ code: 'not-found', params: { manager: 'fnm' } }],
+        }),
+      ],
+      listAgents: async () => [],
+    });
+
+    const row = rows.find((candidate) => candidate.label === 'fnm');
+    expect(row?.detail).toBe('fnm was not found on PATH or in any well-known location.');
+  });
 });

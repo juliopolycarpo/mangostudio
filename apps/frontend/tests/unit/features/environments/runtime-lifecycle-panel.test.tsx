@@ -317,5 +317,40 @@ describe('RuntimeLifecyclePanel', () => {
         expect(screen.queryByTestId('runtime-offer-matched')).not.toBeInTheDocument();
       }
     );
+
+    it('names how many methods the connected build implements', async () => {
+      const environment: Environment = { ...WSL, id: 'discovered', status: { state: 'connected' } };
+      const implemented = {
+        schema: 1,
+        fingerprint: `${'e'.repeat(12)}${'0'.repeat(52)}`,
+        features: {
+          git: true,
+          probing: true,
+          mcp: true,
+          library: true,
+          checkpoints: true,
+          fsRead: true,
+          fsWrite: true,
+          shell: true,
+          update: true,
+          externalAgents: true,
+          terminal: true,
+        },
+        methods: ['runtime.discover', 'runtime.health', 'shell.run'],
+      };
+      scenario
+        .respondWithJson('GET', '/api/environments/discovered/runtime', {
+          body: { ...viewWith('9.9.9'), implementation: implemented },
+        })
+        .install();
+      render(<RuntimeLifecyclePanel environment={environment} />);
+
+      expect(
+        await screen.findByText(
+          formatMessage(labels.implementation, { count: '3', fingerprint: 'e'.repeat(12) }),
+          { exact: false }
+        )
+      ).toBeInTheDocument();
+    });
   });
 });

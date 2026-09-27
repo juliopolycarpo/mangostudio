@@ -10,6 +10,9 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 - [Bun](https://bun.sh/) 1.4.2 or newer — `bun upgrade`, or
   `curl -fsSL https://bun.sh/install | bash` for a first install
+- A Rust toolchain via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. The hub launches
+  Local as the cargo-built `mangostudio-runtime`; `bun run dev` builds it first, and
+  `rust-toolchain.toml` pins the version
 - Git with GPG signing configured (see [Commit Guidelines](#commit-guidelines))
 
 The repo pins Bun 1.4.2. The pin moved to the 1.4.x line at 1.4.0, the release that made the post-rewrite runtime generally available; it tracked the `canary` channel until then. `.bun-version` is what CI installs, and `packageManager` must name the same version — see [`docs/reference/tooling.md`](../docs/reference/tooling.md#bun).
@@ -163,7 +166,7 @@ metrics report. Preview the changelog locally with `bun run changelog --preview`
 
 Every PR also runs the repository security gates:
 
-- **CodeQL** (`.github/workflows/codeql.yml`) uses GitHub code scanning advanced setup for JavaScript/TypeScript, no-build extraction, and the `security-extended` query suite. Review both the `CodeQL / Analyze (javascript-typescript)` workflow check and the follow-up `Code scanning results / CodeQL` check. New high, critical, or error-level alerts must be fixed or intentionally triaged before merge.
+- **CodeQL** (`.github/workflows/codeql.yml`) uses GitHub code scanning advanced setup for JavaScript/TypeScript and Rust, no-build extraction, and the `security-extended` query suite. Review the `CodeQL / Analyze (javascript-typescript)`, `CodeQL / Analyze (rust)`, and `CodeQL / Analyze (rust, windows)` workflow checks and the follow-up `Code scanning results / CodeQL` check. New high, critical, or error-level alerts must be fixed or intentionally triaged before merge.
 - **Dependency Review** (`.github/workflows/dependency-review.yml`) runs when manifests or lockfiles change and fails on new moderate-or-worse vulnerable dependencies. It does not enforce license policy.
 - The first PR that adds or changes code scanning may get a generic `github-advanced-security[bot]` setup comment. Treat that as an enablement notice; the actionable status is in the checks above and the repository Security tab.
 

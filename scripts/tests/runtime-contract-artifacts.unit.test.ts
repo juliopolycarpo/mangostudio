@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   ARTIFACT_DIR,
   CATALOG_SCHEMA_URL,
@@ -57,6 +58,24 @@ describe('runtime contract artifacts', () => {
     await expect(assertCatalogValid(renderArtifacts())).resolves.toBeUndefined();
   });
 
+  test('the hub catalog declares only hub.workspace.authorize, with closed shapes', () => {
+    const text = renderArtifacts().get(`${ARTIFACT_DIR}/hub-catalog.json`);
+    if (text === undefined) throw new Error('renderArtifacts() produced no hub-catalog.json.');
+    const hub = JSON.parse(text) as CatalogDocument;
+    expect(hub.name).toBe('mangostudio.hub');
+    expect(hub.methods.map((method) => method.name)).toEqual(['hub.workspace.authorize']);
+    for (const method of hub.methods) {
+      expect(method.params.additionalProperties).toBe(false);
+      expect(method.result.additionalProperties).toBe(false);
+    }
+  });
+
+  test('a hub catalog the published schema refuses fails validation, naming the file', async () => {
+    const artifacts = renderArtifacts();
+    artifacts.set(`${ARTIFACT_DIR}/hub-catalog.json`, JSON.stringify({ name: 'mangostudio.hub' }));
+    await expect(assertCatalogValid(artifacts)).rejects.toThrow(/hub-catalog\.json/);
+  });
+
   test('the catalog names itself and points at the schema it satisfies', () => {
     const catalog = renderedCatalog();
     expect(catalog.name).toBe('mangostudio.runtime');
@@ -87,7 +106,7 @@ describe('runtime contract artifacts', () => {
    * Health must answer regardless of consent, and terminal.close must still
    * terminate an existing PTY after shell consent has been withdrawn.
    */
-  test('every method declares a capability list, with health and terminal cleanup ungated', () => {
+  test('every method declares a capability list, with health, discovery and terminal cleanup ungated', () => {
     const withoutList = renderedCatalog()
       .methods.filter((method) => method.capabilities === undefined)
       .map((method) => method.name);
@@ -96,7 +115,7 @@ describe('runtime contract artifacts', () => {
     const ungated = renderedCatalog()
       .methods.filter((method) => (method.capabilities ?? []).length === 0)
       .map((method) => method.name);
-    expect(ungated).toEqual(['terminal.close', 'runtime.health']);
+    expect(ungated).toEqual(['terminal.close', 'runtime.health', 'runtime.discover']);
   });
 
   test('the catalog carries the events and the manifest a peer negotiates with', () => {
@@ -122,6 +141,13 @@ describe('runtime contract artifacts', () => {
     expect(strings.setupPendingSignature).toBe('runtime setup is pending on this machine');
     expect(strings.updateExitCode).toBe(75);
     expect(strings.pairingTokenPrefix).toBe('mrt_');
+    expect(strings.binding).toEqual({
+      header: 'x-mangostudio-hub-binding',
+      length: 64,
+      alreadyBoundCloseCode: 4423,
+      alreadyBoundReason: 'runtime already bound to another environment',
+    });
+    expect(strings.githubGraphqlDocuments).toEqual(PINNED_GITHUB_GRAPHQL_DOCUMENTS);
     expect(strings.runtimeHome.slots).toEqual(['host', 'wsl', 'remote']);
     expect(strings.errors.serviceErrorKinds).toContain('consent_denied');
   });

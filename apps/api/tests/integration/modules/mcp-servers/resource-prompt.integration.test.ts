@@ -1,6 +1,7 @@
 /**
  * End-to-end coverage of the MCP resources/prompts endpoints' application
- * layer over a real SDK server (in-memory transport): capability gating
+ * layer over a real SDK server, spawned by the Local runtime as a stdio server
+ * through the relay fixture: capability gating
  * against a tools-only server, resource listing/reading with text inlining
  * and binary attach-to-chat, and prompt listing/resolution.
  */
@@ -9,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setMcpTransportFactoryForTest } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { getDb } from '../../../../src/db/database';
@@ -21,10 +21,7 @@ import {
   readMcpServerResource,
 } from '../../../../src/modules/mcp-servers/application/mcp-resource-prompt-service';
 import { McpServerError } from '../../../../src/modules/mcp-servers/domain/mcp-server';
-import {
-  closeAllMcpClients,
-  setMcpClientConnectorForTest,
-} from '../../../../src/services/mcp/connection-manager';
+import { closeAllMcpClients } from '../../../../src/services/mcp/connection-manager';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
 import { createEchoMcpServer } from '../../../support/fixtures/mcp/create-echo-mcp-server';
 import {
@@ -33,12 +30,18 @@ import {
   LIBRARY_NOTES_URI,
   LIBRARY_REPORT_URI,
 } from '../../../support/fixtures/mcp/create-library-mcp-server';
-import { inMemoryMcpConnector } from '../../../support/fixtures/mcp/in-memory-mcp';
+import {
+  type McpRelayHost,
+  type McpStdioLaunch,
+  startMcpRelayHost,
+} from '../../../support/fixtures/mcp/mcp-relay-host';
 
 let user: UserFixture;
 let uploadsDir: string;
+let relay: McpRelayHost;
+let libraryLaunch: McpStdioLaunch;
 
-async function insertServer(slug: string): Promise<string> {
+async function insertServer(slug: string, launch = libraryLaunch): Promise<string> {
   const id = `${user.id}-${slug}`;
   const now = Date.now();
   await getDb()
@@ -50,8 +53,8 @@ async function insertServer(slug: string): Promise<string> {
       slug,
       transport: 'stdio',
       environmentId: LOCAL_ENVIRONMENT_ID,
-      command: 'bun',
-      argsJson: '[]',
+      command: launch.command,
+      argsJson: JSON.stringify(launch.args),
       envJson: '{}',
       url: null,
       enabled: 1,
@@ -70,21 +73,21 @@ beforeEach(async () => {
     database: { path: ':memory:' },
     uploads: { dir: uploadsDir },
   });
-  setMcpClientConnectorForTest(inMemoryMcpConnector(createLibraryMcpServer));
+  relay = await startMcpRelayHost();
+  libraryLaunch = relay.route(createLibraryMcpServer);
   user = await insertTestUser();
 });
 
 afterEach(async () => {
-  setMcpClientConnectorForTest(null);
-  setMcpTransportFactoryForTest(null);
   await closeAllMcpClients();
+  await relay.close();
+  relay.assertNoOpenServers();
   rmSync(uploadsDir, { recursive: true, force: true });
 });
 
 describe('capability gating', () => {
   it('rejects resources and prompts on a tools-only server with a 404 code', async () => {
-    setMcpClientConnectorForTest(inMemoryMcpConnector(createEchoMcpServer));
-    const id = await insertServer('tools-only');
+    const id = await insertServer('tools-only', relay.route(createEchoMcpServer));
 
     for (const call of [
       () => listMcpServerResources(getDb(), user.id, id),

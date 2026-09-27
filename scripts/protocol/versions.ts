@@ -10,6 +10,7 @@
  * assertLockstep(versions); // throws naming the manifest that drifted
  */
 
+import { cargoLockVersion } from '../lib/cargo-version';
 import { ROOT_DIR } from '../lib/config';
 
 export interface ManifestVersion {
@@ -24,10 +25,41 @@ export const MANIFESTS = {
   cargoLock: 'Cargo.lock',
 } as const;
 
+/**
+ * Every `[workspace.dependencies]` path member whose `version` field must
+ * track `[workspace.package].version` by hand — Cargo has no "same as the
+ * workspace version" shorthand for a dependency requirement the way it does
+ * for a member crate's own `version.workspace = true`, and `deny.toml`'s
+ * `bans.wildcards = "deny"` requires a path dependency between workspace
+ * members to carry an explicit version at all.
+ *
+ * This is the **protocol** version line (`protocol-v*`). It is a different
+ * table from `scripts/lib/release-version.ts`'s `APP_VERSIONED_CRATES`,
+ * which tracks the **application** release version (root `package.json`) —
+ * two version lines that never move together. A crate whose
+ * `[workspace.dependencies]` pin should track this file's version belongs
+ * here, not there.
+ *
+ * Missing an entry here is silent until the next protocol version bump:
+ * `readVersions`/`writeVersions` would keep agreeing with each other while
+ * the omitted crate's own pin drifted from `[workspace.package].version`,
+ * so `check:versions` reports lockstep right up until `cargo build --locked`
+ * fails on the stale requirement.
+ */
+export const WORKSPACE_DEPENDENCY_CRATES = [
+  'mango-protocol',
+  'mangostudio-runtime-contract',
+] as const;
+
 export const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 /** The `"version": "…"` line of a package manifest; the field may already hold the target. */
 const VERSION_FIELD = /^(\s*"version":\s*)"[^"]+"/m;
+
+/** Escapes regex metacharacters so a crate name can be dropped into a pattern literally. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /**
  * Reads the version each manifest under `root` declares.
@@ -44,7 +76,18 @@ export async function readVersions(root = ROOT_DIR): Promise<ManifestVersion[]> 
   return [
     { file: MANIFESTS.protocolPackage, version: protocolPackage.version },
     { file: MANIFESTS.cargoWorkspace, version: workspaceVersion(cargo) },
-    { file: MANIFESTS.cargoLock, version: lockedCrateVersion(lock) },
+    ...WORKSPACE_DEPENDENCY_CRATES.map((crateName) => ({
+      // Same file as `cargoWorkspace`, a different section — kept as its own display label so a
+      // lockstep failure names which of Cargo.toml's version fields drifted.
+      file: `Cargo.toml ([workspace.dependencies] ${crateName})`,
+      version: workspaceDependencyVersion(cargo, crateName),
+    })),
+    ...WORKSPACE_DEPENDENCY_CRATES.map((crateName) => ({
+      // The lockfile has one resolved entry per workspace dependency. Keep each one labeled so
+      // a stale path-dependency resolution identifies its crate rather than merely Cargo.lock.
+      file: `${MANIFESTS.cargoLock} (${crateName})`,
+      version: lockedCrateVersion(lock, crateName),
+    })),
   ];
 }
 
@@ -77,15 +120,48 @@ export function workspaceVersion(cargoToml: string): string {
 }
 
 /**
- * The version Cargo.lock records for the `mango-protocol` crate.
+ * The version pinned in `[workspace.dependencies]`'s `crateName` entry — a `path`
+ * dependency between workspace members that `deny.toml`'s `bans.wildcards = "deny"` requires
+ * to also carry an explicit `version`, kept in lockstep with `[workspace.package].version` by
+ * hand rather than structurally, since Cargo has no "same as the workspace version" shorthand
+ * for a dependency requirement the way it does for a member crate's own `version.workspace =
+ * true`. `crateName` is one of `WORKSPACE_DEPENDENCY_CRATES`.
  *
  * @example
- * lockedCrateVersion('[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n'); // '0.1.0'
+ * workspaceDependencyVersion(
+ *   'mango-protocol = { path = "crates/mango-protocol", version = "0.1.0" }\n',
+ *   'mango-protocol'
+ * ); // '0.1.0'
  */
-export function lockedCrateVersion(cargoLock: string): string {
-  const match = cargoLock.match(/name = "mango-protocol"\nversion = "([^"]+)"/);
-  if (!match?.[1]) throw new Error('Cargo.lock has no entry for mango-protocol.');
-  return match[1];
+export function workspaceDependencyVersion(cargoToml: string, crateName: string): string {
+  const match = cargoToml.match(workspaceDependencyPattern(crateName));
+  if (!match?.[2]) throw missingWorkspaceDependency(crateName);
+  return match[2];
+}
+
+/** `crateName`'s `[workspace.dependencies]` pin: $1 up to the version, $2 the version, $3 its
+ * closing quote. // Usage: cargoToml.match(workspaceDependencyPattern('mango-protocol'))?.[2] */
+function workspaceDependencyPattern(crateName: string): RegExp {
+  return new RegExp(`(${escapeRegExp(crateName)}\\s*=\\s*\\{[^}]*version\\s*=\\s*")([^"]+)(")`);
+}
+
+function missingWorkspaceDependency(crateName: string): Error {
+  return new Error(`Cargo.toml has no ${crateName} entry under [workspace.dependencies].`);
+}
+
+/**
+ * The version Cargo.lock records for `crateName`.
+ *
+ * @example
+ * lockedCrateVersion(
+ *   '[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n',
+ *   'mango-protocol'
+ * ); // '0.1.0'
+ */
+export function lockedCrateVersion(cargoLock: string, crateName: string): string {
+  const version = cargoLockVersion(cargoLock, crateName);
+  if (version === undefined) throw new Error(`Cargo.lock has no entry for ${crateName}.`);
+  return version;
 }
 
 /**
@@ -108,12 +184,26 @@ export async function writeVersions(version: string, root = ROOT_DIR): Promise<v
   if (!VERSION_FIELD.test(text)) {
     throw new Error(`${MANIFESTS.protocolPackage} has no version field to rewrite.`);
   }
-  await Bun.write(path, text.replace(VERSION_FIELD, `$1"${version}"`));
+  const updatedPackage = text.replace(VERSION_FIELD, `$1"${version}"`);
 
   const cargoPath = `${root}/${MANIFESTS.cargoWorkspace}`;
   const cargo = await Bun.file(cargoPath).text();
   const [head, tail] = cargo.split(/^\[workspace\.package\]$/m);
   if (tail === undefined) throw new Error('Cargo.toml has no [workspace.package] section.');
+  if (!/^version = "[^"]+"$/m.test(tail)) {
+    throw new Error('Cargo.toml [workspace.package] has no version field to rewrite.');
+  }
   const nextTail = tail.replace(/^version = "[^"]+"$/m, `version = "${version}"`);
-  await Bun.write(cargoPath, `${head}[workspace.package]${nextTail}`);
+  let updated = `${head}[workspace.package]${nextTail}`;
+
+  for (const crateName of WORKSPACE_DEPENDENCY_CRATES) {
+    const dependencyPattern = workspaceDependencyPattern(crateName);
+    if (!dependencyPattern.test(updated)) throw missingWorkspaceDependency(crateName);
+    updated = updated.replace(dependencyPattern, `$1${version}$3`);
+  }
+
+  // Validate and compute every rewrite before touching either manifest. Otherwise a missing later
+  // workspace dependency pin would leave the package manifest updated but Cargo.toml unchanged.
+  await Bun.write(path, updatedPackage);
+  await Bun.write(cargoPath, updated);
 }

@@ -6,19 +6,18 @@ import { resolveWorkspacePath } from './path';
 /** Bounds symlink traversal, including chains whose final target exists. */
 const MAX_SYMLINK_HOPS = 32;
 
-/** True when `candidate` is `root` or a strict descendant (separator-safe). */
+/**
+ * True when an already-resolved `candidate` is `root` or a strict descendant.
+ * Exact component spelling is part of resolved filesystem identity: on
+ * Windows, `realpathSync` canonicalizes ordinary case-insensitive ancestors
+ * while preserving distinct names below a case-sensitive directory.
+ * // Usage: isPathPrefix('/workspace', '/workspace/src') === true
+ */
 export function isPathPrefix(root: string, candidate: string): boolean {
   if (candidate === root) {
     return true;
   }
   return candidate.startsWith(`${root}${sep}`);
-}
-
-export class WorkdirContainmentError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'WorkdirContainmentError';
-  }
 }
 
 interface PathParts {
@@ -107,12 +106,4 @@ function isInsideResolvedRoot(resolvedRoot: string, candidate: string): boolean 
 
 export function isInside(root: string, candidate: string): boolean {
   return isInsideResolvedRoot(resolveContainmentRoot(root), candidate);
-}
-
-export function assertInsideWorkdir(root: string, candidate: string): void {
-  if (!isInside(root, candidate)) {
-    throw new WorkdirContainmentError(
-      `Path "${candidate}" is outside the chat working directory. Use a path inside "${root}".`
-    );
-  }
 }

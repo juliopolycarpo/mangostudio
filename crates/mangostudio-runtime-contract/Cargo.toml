@@ -1,0 +1,32 @@
+[package]
+name = "mangostudio-runtime-contract"
+version.workspace = true
+authors.workspace = true
+categories = ["encoding"]
+edition.workspace = true
+keywords = ["mangostudio", "runtime", "contract", "json-schema"]
+license.workspace = true
+# The catalog and schema JSON this crate embeds live under apps/shared, one
+# workspace root above `crates/`, so `cargo package`'s file list (rooted at
+# this manifest) can never include them. This crate is consumed in-tree only.
+publish = false
+repository.workspace = true
+rust-version.workspace = true
+description = "MangoStudio hub/runtime contract: the TypeScript-generated catalog and schemas, embedded and validated"
+
+[lints]
+workspace = true
+
+[dependencies]
+# `mango-protocol.workspace = true` pulls in the default feature set only — no
+# Tokio, no OS dependency. The dispatcher in `crates/mangostudio-runtime` is
+# the one that needs the `tokio` feature's `Contract` builder.
+#
+# `jsonschema`'s `default-features = false` matches mango-protocol's own
+# `tokio`-gated dependency on it: the default feature pulls in `resolve-http`
+# (and reqwest's license/duplicate graph with it), which this crate's offline,
+# draft-2020-12-only compilation never needs.
+jsonschema = { version = "0.56", default-features = false }
+mango-protocol.workspace = true
+serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0.140", default-features = false, features = ["std"] }

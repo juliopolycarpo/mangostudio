@@ -130,6 +130,11 @@ export class ExternalTurnTranscript {
     return this.#terminated;
   }
 
+  /** The turn moved to a reopened session before the vendor accepted it. */
+  rebindSession(sessionId: string): void {
+    this.#turnPart.sessionId = sessionId;
+  }
+
   bindNativeTurn(nativeTurnId: string): void {
     this.#turnPart.nativeTurnId = nativeTurnId;
   }

@@ -8,13 +8,13 @@ themselves. The surface lives under **Environments** and describes whichever mac
 
 ## Where things run
 
-| Concern                                                                 | Owner                    |
-| ----------------------------------------------------------------------- | ------------------------ |
-| Detecting toolchains, version managers and agent CLIs                   | Runtime (`apps/runtime`) |
-| Building the environment a spawned process starts with (`spawn-env.ts`) | Runtime (`apps/runtime`) |
-| Storing and validating the per-environment toolchain selection          | Hub (`apps/api`)         |
-| Recipes, guards, audit rows, prerequisite findings, the setup checklist | Hub (`apps/api`)         |
-| Rendering cards, the picker and the checklist                           | Frontend                 |
+| Concern                                                                          | Owner                                  |
+| -------------------------------------------------------------------------------- | -------------------------------------- |
+| Detecting toolchains, version managers and agent CLIs                            | Runtime (`crates/mangostudio-runtime`) |
+| Building the environment a spawned process starts with (`commands/toolchain.rs`) | Runtime (`crates/mangostudio-runtime`) |
+| Storing and validating the per-environment toolchain selection                   | Hub (`apps/api`)                       |
+| Recipes, guards, audit rows, prerequisite findings, the setup checklist          | Hub (`apps/api`)                       |
+| Rendering cards, the picker and the checklist                                    | Frontend                               |
 
 ## Setup checklist
 
@@ -46,7 +46,7 @@ foreign key to `environments`. Deleting an environment removes its row in the sa
   to automatic** once one is pinned; the effective line says what spawned processes run with.
 
 The hub resolves the selection and sends it on every spawn method — `shell.run`,
-`install.run`, `terminal.open` and `external-agent.open`. The runtime's `spawn-env.ts` builds
+`install.run`, `terminal.open` and `external-agent.open`. The runtime's `commands/toolchain.rs` builds
 the base environment once per spawn: at most one directory per runtime is put first on `PATH`,
 plus `NVM_DIR`, `FNM_DIR` or `BUN_INSTALL` when the directory came from that manager and the
 variable was not already set. Each consumer then applies its own secret policy on top.

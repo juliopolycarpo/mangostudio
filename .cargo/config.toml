@@ -1,0 +1,10 @@
+# Link the C runtime statically into every MSVC build (the runtime, tests, and
+# examples alike). A dynamically linked CRT imports VCRUNTIME140.dll, which
+# ships with the Visual C++ Redistributable rather than with Windows, so a
+# shipped `mangostudio-runtime.exe` would fail with STATUS_DLL_NOT_FOUND on a
+# machine that never installed it. The Bun-compiled hub beside it has no such
+# dependency. `scripts/lib/runtime-build.ts` rejects a staged Windows runtime
+# that imports a Redistributable DLL, so a build that loses this flag (for
+# example, a RUSTFLAGS override, which replaces it) fails packaging instead.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

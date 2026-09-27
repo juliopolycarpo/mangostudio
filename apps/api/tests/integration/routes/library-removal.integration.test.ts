@@ -17,23 +17,19 @@ import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudi
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../src/db/database';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
-import { undoLibraryPropagation } from '../../../src/modules/library/application/propagation-apply';
 import { applyLibraryRemoval } from '../../../src/modules/library/application/removal-apply';
 import { previewLibraryRemoval } from '../../../src/modules/library/application/removal-preview';
 import {
   createRemovalRoutes,
   type RemovalRouteService,
 } from '../../../src/modules/library/http/removal-routes';
-import {
-  type BackupStoreDeps,
-  defaultBackupStoreDeps,
-} from '../../../src/modules/library/infrastructure/backup-store';
 import { LibraryCache } from '../../../src/modules/library/infrastructure/library-cache';
 import {
   createLibraryPathEnv,
   describeLocation,
 } from '../../../src/modules/library/infrastructure/location-probe';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { refuseLibraryRemove } from '../../support/mocks/refusing-library-runtime';
 
 const TEST_USER = {
   id: 'library-removal-user',
@@ -57,7 +53,6 @@ const SKILL_DIRECTORIES: Record<string, readonly string[]> = {
 };
 
 let home: string;
-let backupRoot: string;
 const authRestores: (() => void)[] = [];
 
 function skillAt(locationId: LibraryLocationId, body: string): string {
@@ -79,15 +74,6 @@ function skillLocationSettings(): typeof DEFAULT_APP_SETTINGS {
     home: Object.fromEntries(SKILL_LOCATIONS.map((id) => [id, true])),
     workspace: {},
   });
-}
-
-function backupDeps(): BackupStoreDeps {
-  return {
-    ...defaultBackupStoreDeps,
-    backupDir: () => backupRoot,
-    retentionCount: () => 10,
-    retentionBytes: () => 1024 ** 3,
-  };
 }
 
 function previewRemoval(
@@ -131,10 +117,9 @@ function applyRemoval(request: RemovalApplyRequest, userId: string = TEST_USER.i
     preview: (previewUserId, previewRequest) =>
       previewRemoval(previewRequest.locationIds, previewUserId),
     pathEnv: libraryPathEnv,
-    // Drives the engine directly against this suite's temp home; the runtime
-    // engine would resolve locations against the real one.
-    writeEngine: 'in-process',
-    backup: backupDeps(),
+    // Only refusals run here; removals that write run against the real runtime
+    // in `rust-runtime-library-removal.integration.test.ts`.
+    runtimeRemove: refuseLibraryRemove,
   });
 }
 
@@ -170,17 +155,6 @@ function removeEverything(
   };
 }
 
-async function currentDivergence(): Promise<string | undefined> {
-  const { resources } = await discoverLibraryResources(getDb(), TEST_USER.id, {
-    force: true,
-    kinds: ['skill'],
-    cache: new LibraryCache(),
-    pathEnv: libraryPathEnv(),
-    settings: skillLocationSettings(),
-  });
-  return resources.find((resource) => resource.key === 'skill:gh')?.divergence;
-}
-
 const unsupportedService: RemovalRouteService = {
   preview: () => Promise.reject(new Error('preview not stubbed')),
   apply: () => Promise.reject(new Error('apply not stubbed')),
@@ -205,7 +179,6 @@ function jsonRequest(path: string, method: string, body?: unknown): Request {
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'mango-removal-integration-'));
-  backupRoot = join(home, 'backups');
 });
 
 afterEach(() => {
@@ -237,45 +210,6 @@ describe('library removal over real locations', () => {
     expect(entry.wouldRemoveLastCopy).toBe(true);
   });
 
-  it('removes every copy, then restores them all through the shared undo route', async () => {
-    const paths = SKILL_LOCATIONS.map((locationId) => skillAt(locationId, 'identical\n'));
-    expect(await currentDivergence()).toBe('uniform');
-
-    const preview = await previewRemoval(SKILL_LOCATIONS);
-    const result = await applyRemoval(removeEverything(preview, { acknowledge: true }));
-
-    expect(result.partial).toBe(false);
-    expect(result.failed).toEqual([]);
-    expect(result.removed).toHaveLength(4);
-    expect(paths.filter((path) => existsSync(path))).toEqual([]);
-    expect(await currentDivergence()).toBeUndefined();
-
-    const undone = await undoLibraryPropagation(result.backupId ?? '', {
-      backup: backupDeps(),
-      pathEnv: libraryPathEnv,
-      writeEngine: 'in-process',
-    });
-
-    expect(undone.restored).toHaveLength(4);
-    expect(paths.every((path) => existsSync(path))).toBe(true);
-    expect(await currentDivergence()).toBe('uniform');
-  });
-
-  it('resolves a divergence by removing the copy the user does not want', async () => {
-    skillAt('mango-skills', 'keep this\n');
-    skillAt('claude-skills', 'drifted\n');
-    expect(await currentDivergence()).toBe('divergent');
-
-    const preview = await previewRemoval(['claude-skills']);
-    const result = await applyRemoval(removeEverything(preview));
-
-    expect(result.failed).toEqual([]);
-    expect(result.removed).toHaveLength(1);
-    // Deleting the version you do not want is a legitimate resolution, and it
-    // needs no last-copy acknowledgement while another copy survives.
-    expect(await currentDivergence()).toBe('single');
-  });
-
   it('rejects an apply whose preview no longer describes the disk', async () => {
     skillAt('mango-skills', 'before\n');
     skillAt('claude-skills', 'before\n');
@@ -301,24 +235,6 @@ describe('POST /library/removal/apply', () => {
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({ code: 'LAST_COPY_UNACKNOWLEDGED' });
     expect(existsSync(join(home, '.mango', 'skills', 'gh'))).toBe(true);
-  });
-
-  it('removes the last copy once the request acknowledges it', async () => {
-    const path = skillAt('mango-skills', 'only copy\n');
-    const preview = await previewRemoval(['mango-skills']);
-    const app = harness({ apply: (_userId, request) => applyRemoval(request) });
-
-    const response = await app.handle(
-      jsonRequest(
-        '/library/removal/apply',
-        'POST',
-        removeEverything(preview, { acknowledge: true })
-      )
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ partial: false });
-    expect(existsSync(path)).toBe(false);
   });
 });
 

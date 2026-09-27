@@ -9,8 +9,9 @@
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use futures_util::SinkExt;
+use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
@@ -41,19 +42,35 @@ use super::{WEBSOCKET_SUBPROTOCOL, WebSocketOptions, WebSocketPort, websocket_po
 ///     .with_allowed_origins(["https://app.example"]);
 /// assert_eq!(options.allowed_origins, ["https://app.example"]);
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AcceptOptions {
     /// How this connection chunks, reassembles and closes.
     pub socket: WebSocketOptions,
     /// Serialised origins a browser may dial from. Empty admits no browser.
     pub allowed_origins: Vec<String>,
+    /// Whether an upgrade that never offered `mango.v1` is refused with
+    /// `PROTOCOL_ERROR`. `true` by default, matching every native Mango
+    /// Protocol dialler, which always offers it — see
+    /// [`AcceptOptions::with_subprotocol_optional`] for the one acceptor
+    /// that must let an older peer through unlabelled instead.
+    subprotocol_required: bool,
+}
+
+impl Default for AcceptOptions {
+    fn default() -> Self {
+        Self {
+            socket: WebSocketOptions::default(),
+            allowed_origins: Vec::new(),
+            subprotocol_required: true,
+        }
+    }
 }
 
 impl From<WebSocketOptions> for AcceptOptions {
     fn from(socket: WebSocketOptions) -> Self {
         Self {
             socket,
-            allowed_origins: Vec::new(),
+            ..Self::default()
         }
     }
 }
@@ -77,6 +94,36 @@ impl AcceptOptions {
     {
         self.allowed_origins = allowed_origins.into_iter().map(Into::into).collect();
         self
+    }
+
+    /// Admits an upgrade that never offered `mango.v1`, rather than closing
+    /// it with `PROTOCOL_ERROR` — for an acceptor that must still admit a
+    /// peer built before the subprotocol was mandatory (`serve.ts`'s own
+    /// documented reasoning: an older hub's socket still gets to answer its
+    /// `hello` with a real close code instead of a bare HTTP refusal it has
+    /// no vocabulary for). The subprotocol is still echoed back whenever the
+    /// peer *does* offer it — this only removes the refusal for one that
+    /// offers none.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mango_protocol::transports::websocket::server::AcceptOptions;
+    ///
+    /// let options = AcceptOptions::default().with_subprotocol_optional();
+    /// assert!(!options.requires_subprotocol());
+    /// ```
+    #[must_use]
+    pub fn with_subprotocol_optional(mut self) -> Self {
+        self.subprotocol_required = false;
+        self
+    }
+
+    /// Whether this acceptor refuses an upgrade that never offered
+    /// `mango.v1`. See [`AcceptOptions::with_subprotocol_optional`].
+    #[must_use]
+    pub fn requires_subprotocol(&self) -> bool {
+        self.subprotocol_required
     }
 }
 
@@ -183,8 +230,9 @@ impl std::error::Error for AcceptError {}
 /// sees this side's identity.
 ///
 /// Two checks run before `authorize` ever does. The subprotocol is echoed only
-/// when it was offered, and a dialler that offered nothing is closed with
-/// `4400` rather than left on a socket neither side agrees about. An upgrade
+/// when it was offered; a dialler that offered nothing is closed with `4400`
+/// rather than left on a socket neither side agrees about, unless
+/// [`AcceptOptions::with_subprotocol_optional`] admits it instead. An upgrade
 /// carrying an `Origin` outside [`AcceptOptions::allowed_origins`] is closed
 /// with `4403`: the default list is empty, so a hub a browser is meant to dial
 /// must say which sites it serves.
@@ -266,7 +314,7 @@ where
         .map(|upgrade| upgrade.clone())
         .unwrap_or_default();
 
-    if !upgrade.offered_subprotocol {
+    if !upgrade.offered_subprotocol && options.subprotocol_required {
         close_with(
             stream,
             close_codes::PROTOCOL_ERROR,
@@ -389,8 +437,32 @@ pub fn bearer_token(authorization: &str) -> Option<&str> {
     (!token.is_empty()).then_some(token)
 }
 
+/// How long a refused socket is given to answer this side's `close` before it
+/// is dropped anyway. Bounds the drain after every refusal
+/// [`accept_websocket`] sends, so a dialler that never answers holds a refusal
+/// up by this much at most.
+///
+/// Public so an acceptor that refuses a socket after the upgrade, outside
+/// [`accept_websocket`], drains it for the same bound.
+///
+/// # Example
+///
+/// ```
+/// use mango_protocol::transports::websocket::server::REFUSAL_DRAIN_GRACE;
+///
+/// assert_eq!(REFUSAL_DRAIN_GRACE.as_secs(), 2);
+/// ```
+pub const REFUSAL_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
 /// Closes a socket the upgrade produced but the session will not use, with a
 /// code the dialler can read.
+///
+/// Then reads the socket until the dialler's own `close` arrives (bounded by
+/// [`REFUSAL_DRAIN_GRACE`]) instead of dropping it at once. A dialler usually
+/// sends its `hello` the moment the upgrade completes, so by now those bytes
+/// are sitting unread; a socket dropped with unread bytes is answered with an
+/// RST rather than a FIN, and Windows discards the `close` frame along with
+/// it — the dialler reads a bare `4000` instead of the refusal's code.
 async fn close_with<S>(mut stream: WebSocketStream<S>, code: u16, reason: &str)
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -399,8 +471,17 @@ where
         code: CloseCode::from(code),
         reason: reason.into(),
     };
-    let _ = stream.send(Message::Close(Some(frame))).await;
-    let _ = stream.close(None).await;
+    if stream.send(Message::Close(Some(frame))).await.is_err() {
+        return;
+    }
+    let _ = tokio::time::timeout(REFUSAL_DRAIN_GRACE, async {
+        while let Some(Ok(message)) = stream.next().await {
+            if matches!(message, Message::Close(_)) {
+                return;
+            }
+        }
+    })
+    .await;
 }
 
 #[cfg(test)]

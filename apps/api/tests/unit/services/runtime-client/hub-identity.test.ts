@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { hostname, userInfo } from 'node:os';
-import type { RuntimeAuditSink } from '@mangostudio/runtime';
 import type { HubIdentity } from '@mangostudio/shared/runtime-contract';
 import {
   type HubIdentitySource,
   resolveLocalHubIdentity,
 } from '../../../../src/services/runtime-client/hub-identity';
+import type { FakeRuntimeAudit } from '../../../support/fake-runtime-host';
 import { connectTestRuntime } from '../../../support/runtime-fixture';
 
 /**
@@ -48,31 +48,13 @@ function unwrap(answer: string | Error): string {
  * const audit = new RecordingAuditSink();
  * expect(await audit.identifiedHub()).toEqual({ host: 'box', user: 'ana' });
  */
-class RecordingAuditSink implements RuntimeAuditSink {
-  readonly enabled = true;
-  readonly path = '(memory)';
+class RecordingAuditSink implements FakeRuntimeAudit {
   readonly announced: (HubIdentity | null)[] = [];
   readonly #identified = Promise.withResolvers<HubIdentity>();
-
-  lastError(): string | null {
-    return null;
-  }
 
   setHub(hub: HubIdentity | null): void {
     this.announced.push(hub);
     if (hub) this.#identified.resolve(hub);
-  }
-
-  record(): void {
-    // The hub identity is all this fixture is asked about.
-  }
-
-  async flush(): Promise<void> {
-    // Nothing is buffered.
-  }
-
-  async close(): Promise<void> {
-    // Nothing is held open.
   }
 
   /** The first identified hub, or null when none arrives inside `timeoutMs`. */

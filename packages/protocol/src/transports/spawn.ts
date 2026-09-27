@@ -140,6 +140,14 @@ export interface SpawnedPeer {
  */
 export interface LaunchedPeer extends SpawnedPeer {
   /**
+   * Changes the stdin-to-SIGTERM grace before termination starts. Returns
+   * false if a closed port has already started the escalation sequence.
+   *
+   * @example
+   * peer.setTerminateGraceMs(27_000); // after a successful handshake
+   */
+  setTerminateGraceMs(ms: number): boolean;
+  /**
    * Why a launch that never reached a handshake failed, read once the child
    * has had `graceMs` to report how it ended. A refused launch is nearly
    * always gone already — a wrapper that could not start its target exits at
@@ -265,12 +273,16 @@ export function spawnPort(options: SpawnOptions, spawnChild: SpawnChild = spawn)
   wire(child, handle, options, tail, exit, launch);
 
   let termination: Promise<ExitStatus | undefined> | undefined;
+  let terminateGraceMs = graces.terminateMs;
   const terminate = async (): Promise<ExitStatus | undefined> => {
     // The escalation runs once, but its answer is not cached: a child that
     // outlived the graces and exited afterwards has an exit status now, and
     // a caller who asks again deserves it rather than the `undefined` the
     // first call was right about at the time.
-    termination ??= escalate(child, handle, exit.promise, graces);
+    termination ??= escalate(child, handle, exit.promise, {
+      ...graces,
+      terminateMs: terminateGraceMs,
+    });
     return (await termination) ?? (await settledStatus(exit.promise));
   };
   // The launcher owns the child's lifetime whichever side ended the port: a
@@ -285,6 +297,12 @@ export function spawnPort(options: SpawnOptions, spawnChild: SpawnChild = spawn)
     stderrTail: () => tail.text(),
     startError: (graceMs = DEFAULT_START_ERROR_GRACE_MS) =>
       observeStartError(exit.promise, tail, launch, graceMs),
+    setTerminateGraceMs: (ms) => {
+      const next = resolveIntegerAtLeast('terminateGraceMs', ms, terminateGraceMs, 0);
+      if (termination !== undefined) return false;
+      terminateGraceMs = next;
+      return true;
+    },
     terminate,
   };
 }

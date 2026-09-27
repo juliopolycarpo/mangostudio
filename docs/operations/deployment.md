@@ -116,10 +116,16 @@ Windows-only environment variable:
 ## Production Build
 
 ```bash
-bun run build --binary
+bun run build --binary --platform linux-x64                  # this machine's platform
+bun run build --binary --runtime-dir .mango/runtime-prebuilt # all 8, with prebuilt runtimes
 ```
 
-This compiles the API into binaries under `.mango/out/<platform>/` with the frontend assets as sidecar files.
+This compiles the hub (with the frontend embedded) into `.mango/out/<platform>/mangostudio`
+and places the cargo-built `mangostudio-runtime` beside it. Without `--runtime-dir`, only the
+host's own platform can be built, because only its runtime is built locally with `cargo build`.
+Any other platform needs a prebuilt runtime at `<dir>/<platform>/mangostudio-runtime[.exe]`
+(`bun run build:runtime`, or the CI artifact); see
+[releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built).
 
 ## Platform Targets
 
@@ -138,12 +144,38 @@ This compiles the API into binaries under `.mango/out/<platform>/` with the fron
 
 ```
 .mango/out/linux-x64/
-  ├── mangostudio       # Statically compiled binary (frontend embedded)
-  ├── run.sh             # Startup helper script
-  └── README.md          # Platform notes
+  ├── mangostudio          # Bun-compiled hub (frontend embedded)
+  ├── mangostudio-runtime  # cargo-built runtime; launched as Local
+  ├── run.sh               # Startup helper script
+  └── README.md            # Platform notes
 ```
 
 The binary serves the embedded frontend SPA. API routes are served under `/api/` and SPA routes fallback to `index.html`.
+
+The two binaries are one unit: the hub launches `mangostudio-runtime` from beside its own
+executable, and the protocol handshake refuses a runtime whose version differs. Keep them
+together when copying a build, and upgrade both at once.
+
+## Runtime Binary Requirements
+
+The runtime is a native Rust binary with no interpreter or shared runtime to install:
+
+- **Linux glibc** (`linux-x64`, `linux-arm64`): glibc 2.17 or newer, the same floor as the hub.
+- **Linux musl** (`*-musl`): statically linked; runs on Alpine without extra packages.
+- **Windows**: the MSVC C runtime is linked statically, so no Visual C++ Redistributable is
+  needed.
+- **macOS**: one binary per architecture (`darwin-x64`, `darwin-arm64`).
+
+`mangostudio-runtime --version` prints the bare release version; `mangostudio doctor` and
+WSL/SSH provisioning compare it with the hub's. Every release asset, raw runtime binaries
+included, is listed in `SHA256SUMS`, and `SHA256SUMS` carries a build provenance attestation:
+
+```bash
+gh attestation verify SHA256SUMS --repo juliopolycarpo/mangostudio
+```
+
+See [releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built) for how each
+target is built and checked.
 
 ## Configuration
 

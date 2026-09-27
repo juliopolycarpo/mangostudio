@@ -345,6 +345,8 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       hubVersion: hubVersion(),
       handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
       requireMatchingRelease: false,
+      // The verified credential's own user and environment, never the runtime's word.
+      workspaceBinding: { userId: peer.userId, environmentId: peer.environmentId },
     });
     state.hub = hub;
 

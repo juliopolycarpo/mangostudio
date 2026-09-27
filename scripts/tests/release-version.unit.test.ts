@@ -3,14 +3,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  APP_VERSIONED_CRATES,
   assertVersionsInLockstep,
   canaryCargoVersion,
   canaryReleaseVersion,
   collectVersionConsistency,
   isValidSemver,
+  LAUNCHER_CRATE,
   LAUNCHER_MANIFEST,
   LOCKSTEP_PACKAGES,
   normalizeVersion,
+  RUNTIME_CRATE,
+  RUNTIME_MANIFEST,
   readCargoLockVersion,
   readCargoManifestVersion,
   readPackageVersion,
@@ -39,12 +43,19 @@ class TempRepo {
     writeFileSync(fullPath, content);
   }
 
-  writeCargoManifest(version: string): void {
+  // Defaults to the launcher, this fixture's original and most-used subject;
+  // pass `manifest`/`crateName` to target a different `APP_VERSIONED_CRATES`
+  // entry.
+  writeCargoManifest(
+    version: string,
+    manifest: string = LAUNCHER_MANIFEST,
+    crateName: string = LAUNCHER_CRATE
+  ): void {
     this.writeRaw(
-      LAUNCHER_MANIFEST,
+      manifest,
       [
         '[package]',
-        'name = "mangostudio"',
+        `name = "${crateName}"`,
         `version = "${version}"`,
         'edition = "2021"',
         '',
@@ -55,7 +66,21 @@ class TempRepo {
     );
   }
 
-  writeCargoLock(version: string): void {
+  // Rewrites the whole lockfile from `entries`, one `[[package]]` per crate
+  // plus a fixed `flate2` dependency — defaults to just the launcher, at
+  // `version`, for call sites that only care about that one crate.
+  writeCargoLock(
+    entries: readonly { crateName: string; version: string }[] = [
+      { crateName: LAUNCHER_CRATE, version: '0.0.0' },
+    ]
+  ): void {
+    const packages = entries.flatMap(({ crateName, version }) => [
+      '[[package]]',
+      `name = "${crateName}"`,
+      `version = "${version}"`,
+      'dependencies = ["flate2"]',
+      '',
+    ]);
     this.writeRaw(
       WORKSPACE_CARGO_LOCKFILE,
       [
@@ -65,11 +90,7 @@ class TempRepo {
         'name = "flate2"',
         'version = "1.1.9"',
         '',
-        '[[package]]',
-        'name = "mangostudio"',
-        `version = "${version}"`,
-        'dependencies = ["flate2"]',
-        '',
+        ...packages,
       ].join('\n')
     );
   }
@@ -78,8 +99,12 @@ class TempRepo {
     for (const relativePath of LOCKSTEP_PACKAGES) {
       this.writePackage(relativePath, version);
     }
-    this.writeCargoManifest(version);
-    this.writeCargoLock(version);
+    for (const crate of APP_VERSIONED_CRATES) {
+      this.writeCargoManifest(version, crate.manifest, crate.crateName);
+    }
+    this.writeCargoLock(
+      APP_VERSIONED_CRATES.map((crate) => ({ crateName: crate.crateName, version }))
+    );
   }
 
   cleanup(): void {
@@ -186,6 +211,13 @@ describe('readCargoManifestVersion', () => {
     expect(WORKSPACE_CARGO_LOCKFILE).toBe('Cargo.lock');
   });
 
+  test('APP_VERSIONED_CRATES names every crate whose version tracks the app release', () => {
+    expect(APP_VERSIONED_CRATES).toEqual([
+      { manifest: LAUNCHER_MANIFEST, crateName: LAUNCHER_CRATE },
+      { manifest: RUNTIME_MANIFEST, crateName: RUNTIME_CRATE },
+    ]);
+  });
+
   test('returns the [package] version, not dependency versions', () => {
     repo.writeCargoManifest('1.4.0');
     expect(readCargoManifestVersion(join(repo.dir, LAUNCHER_MANIFEST))).toBe('1.4.0');
@@ -207,14 +239,14 @@ describe('readCargoManifestVersion', () => {
 
 describe('readCargoLockVersion', () => {
   test('returns the version of the named crate among other packages', () => {
-    repo.writeCargoLock('1.4.0');
+    repo.writeCargoLock([{ crateName: 'mangostudio', version: '1.4.0' }]);
     expect(readCargoLockVersion(join(repo.dir, WORKSPACE_CARGO_LOCKFILE), 'mangostudio')).toBe(
       '1.4.0'
     );
   });
 
   test('throws when the crate is not listed', () => {
-    repo.writeCargoLock('1.4.0');
+    repo.writeCargoLock([{ crateName: 'mangostudio', version: '1.4.0' }]);
     expect(() => readCargoLockVersion(join(repo.dir, WORKSPACE_CARGO_LOCKFILE), 'missing')).toThrow(
       /does not list missing/
     );
@@ -263,7 +295,7 @@ describe('collectVersionConsistency', () => {
     repo.seedLockstep('0.1.0');
     const result = collectVersionConsistency(repo.dir);
     expect(result.expected).toBe('0.1.0');
-    expect(result.entries).toHaveLength(LOCKSTEP_PACKAGES.length + 2);
+    expect(result.entries).toHaveLength(LOCKSTEP_PACKAGES.length + APP_VERSIONED_CRATES.length * 2);
     expect(result.mismatches).toHaveLength(0);
   });
 
@@ -281,11 +313,41 @@ describe('collectVersionConsistency', () => {
     expect(result.mismatches).toEqual([{ path: LAUNCHER_MANIFEST, version: '0.2.0' }]);
   });
 
-  test('reports a Cargo.lock that missed the version bump', () => {
+  test('reports a drifted Cargo.toml for every app-versioned crate, not only the launcher', () => {
+    for (const crate of APP_VERSIONED_CRATES) {
+      repo.seedLockstep('0.1.0');
+      repo.writeCargoManifest('0.2.0', crate.manifest, crate.crateName);
+      const result = collectVersionConsistency(repo.dir);
+      expect(result.mismatches).toEqual([{ path: crate.manifest, version: '0.2.0' }]);
+    }
+  });
+
+  test('reports a Cargo.lock that missed the version bump, naming the launcher specifically', () => {
     repo.seedLockstep('0.2.0');
-    repo.writeCargoLock('0.1.0');
+    repo.writeCargoLock([
+      { crateName: LAUNCHER_CRATE, version: '0.1.0' },
+      { crateName: RUNTIME_CRATE, version: '0.2.0' },
+    ]);
     const result = collectVersionConsistency(repo.dir);
-    expect(result.mismatches).toEqual([{ path: WORKSPACE_CARGO_LOCKFILE, version: '0.1.0' }]);
+    expect(result.mismatches).toEqual([
+      { path: `${WORKSPACE_CARGO_LOCKFILE} (${LAUNCHER_CRATE})`, version: '0.1.0' },
+    ]);
+  });
+
+  test('reports a Cargo.lock that missed the version bump, naming the dispatcher specifically', () => {
+    // The sibling of the launcher case above: with two crates sharing one
+    // Cargo.lock, a report that only said "Cargo.lock" could not tell an
+    // operator which crate's entry drifted. Each crate's own lock entry
+    // needs its own label for exactly this reason.
+    repo.seedLockstep('0.2.0');
+    repo.writeCargoLock([
+      { crateName: LAUNCHER_CRATE, version: '0.2.0' },
+      { crateName: RUNTIME_CRATE, version: '0.1.0' },
+    ]);
+    const result = collectVersionConsistency(repo.dir);
+    expect(result.mismatches).toEqual([
+      { path: `${WORKSPACE_CARGO_LOCKFILE} (${RUNTIME_CRATE})`, version: '0.1.0' },
+    ]);
   });
 });
 

@@ -34,7 +34,7 @@ export interface McpSecretTransportTarget {
  *
  * Only Direct URL environments can be judged here, and that is not a gap: the
  * hub dials them, so it is the side that chose the scheme. stdio, WSL, and
- * in-process never leave the machine; ssh is encrypted by construction; a
+ * Local never leave the machine; ssh is encrypted by construction; a
  * dial-in WebSocket runtime chose its own URL, and the hub sees a socket a
  * reverse proxy may already have terminated — guessing from that would be
  * security theatre.

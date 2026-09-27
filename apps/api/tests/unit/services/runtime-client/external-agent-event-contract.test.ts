@@ -23,7 +23,10 @@ function envelope(event: unknown) {
 describe('RuntimeClient.externalAgents.onEvent — known-event contract validation', () => {
   it('delivers a well-formed known event unchanged', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const client = new RuntimeClient(hub);
     const received: unknown[] = [];
     client.externalAgents.onEvent('session-1', (frame) => received.push(frame.event));
@@ -37,7 +40,10 @@ describe('RuntimeClient.externalAgents.onEvent — known-event contract validati
 
   it('passes an unrecognized event type through unchanged, for forward compatibility', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const client = new RuntimeClient(hub);
     const received: unknown[] = [];
     client.externalAgents.onEvent('session-1', (frame) => received.push(frame.event));
@@ -51,7 +57,10 @@ describe('RuntimeClient.externalAgents.onEvent — known-event contract validati
 
   it('substitutes a terminal error event for a malformed `error` event', async () => {
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const client = new RuntimeClient(hub);
     const received: unknown[] = [];
     client.externalAgents.onEvent('session-1', (frame) => received.push(frame.event));
@@ -80,7 +89,10 @@ describe('RuntimeClient.externalAgents.onEvent — known-event contract validati
     // `unrecognized_event_type` and returns without finalizing — the turn
     // hangs, the exact #988 shape, reached through this substitution path.
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const client = new RuntimeClient(hub);
     const received: unknown[] = [];
     client.externalAgents.onEvent('session-1', (frame) => received.push(frame.event));
@@ -101,7 +113,10 @@ describe('RuntimeClient.externalAgents.onEvent — known-event contract validati
     // …)` as inert and moves on. Substituting `error` here would end the turn
     // over one broken progress update instead of costing it one log line.
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const client = new RuntimeClient(hub);
     const received: unknown[] = [];
     client.externalAgents.onEvent('session-1', (frame) => received.push(frame.event));
@@ -119,7 +134,10 @@ describe('RuntimeClient.externalAgents.onEvent — known-event contract validati
     // dropping it here would strand this sequence number and turn the next,
     // perfectly ordinary event into a gap (#964).
     const peer = new FakeHostileRuntimePeer();
-    const hub = await openHubSession(peer.hubPort, { hubVersion: 'hub-test' });
+    const hub = await openHubSession(peer.hubPort, {
+      workspaceBinding: null,
+      hubVersion: 'hub-test',
+    });
     const client = new RuntimeClient(hub);
     const received: unknown[] = [];
     client.externalAgents.onEvent('session-1', (frame) => received.push(frame));

@@ -1368,6 +1368,13 @@ export const ExternalTurnTerminalReasonSchema = Type.Union([
   Type.Literal('consent-revoked'),
   /** The runtime no longer has the session this turn was addressed to. */
   Type.Literal('session-lost'),
+  /**
+   * The hub sent the turn but could not confirm whether the runtime accepted
+   * it — the acknowledgement was lost and the connection that could have
+   * reconciled it is gone. Deliberately not a guess either way: the user's
+   * next send is the authorized decision.
+   */
+  Type.Literal('acceptance-unknown'),
 ]);
 
 export type ExternalTurnTerminalReason = Static<typeof ExternalTurnTerminalReasonSchema>;

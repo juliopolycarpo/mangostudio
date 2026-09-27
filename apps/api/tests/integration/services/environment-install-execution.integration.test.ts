@@ -13,8 +13,14 @@ import { createInstallService } from '../../../src/modules/environments/applicat
 import type { EnvironmentProbingService } from '../../../src/modules/environments/application/probing-service';
 import type { InstallRecipe } from '../../../src/modules/environments/domain/install-recipes';
 import { createInstallRunRepository } from '../../../src/modules/environments/infrastructure/install-run-repository';
-import { installRunner } from '../../../src/modules/environments/infrastructure/install-runner';
+import {
+  createInstallRunner,
+  type InstallRunner,
+  installRunner,
+} from '../../../src/modules/environments/infrastructure/install-runner';
 import { insertTestUser } from '../../support/factories';
+import { resolveRustRuntimeBinary, skipWithoutRustBinary } from '../../support/rust-runtime-binary';
+import { type RustStdioRuntime, spawnRustStdioRuntime } from '../../support/rust-stdio-runtime';
 
 const ALLOWED_GUARD: InstallGuard = { allowed: true, reasons: [] };
 const BUN_STATUS: RuntimeStatus = {
@@ -77,7 +83,7 @@ function detectionServices() {
   return { probingService };
 }
 
-async function execute(argv: readonly string[]) {
+async function execute(argv: readonly string[], runner: InstallRunner = installRunner) {
   const user = await insertTestUser();
   userIds.push(user.id);
   const logDir = await mkdtemp(join(tmpdir(), 'mangostudio-install-test-'));
@@ -88,7 +94,7 @@ async function execute(argv: readonly string[]) {
     recipes: [directRecipe(argv)],
     ...detectionServices(),
     repository,
-    runner: installRunner,
+    runner,
     resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
     generateId: () => {
       nextId += 1;
@@ -119,20 +125,23 @@ function terminalStatus(events: readonly InstallStreamEvent[]) {
   )?.status;
 }
 
+/** The success case's own assertions, shared by the production Local run and the fresh stdio run. */
+function expectStreamedSuccess(result: Awaited<ReturnType<typeof execute>>) {
+  expect(result.events).toContainEqual({
+    type: 'log',
+    stream: 'stdout',
+    line: 'hello',
+    done: false,
+  });
+  expect(result.events.some((event) => event.type === 'probe')).toBe(true);
+  expect(terminalStatus(result.events)).toBe('succeeded');
+  expect(result.run?.status).toBe('succeeded');
+  expect(result.run?.exitCode).toBe(0);
+}
+
 describe('environment install execution', () => {
   it('streams a direct command, emits a probe, and persists success', async () => {
-    const result = await execute(['printf', 'hello\n']);
-
-    expect(result.events).toContainEqual({
-      type: 'log',
-      stream: 'stdout',
-      line: 'hello',
-      done: false,
-    });
-    expect(result.events.some((event) => event.type === 'probe')).toBe(true);
-    expect(terminalStatus(result.events)).toBe('succeeded');
-    expect(result.run?.status).toBe('succeeded');
-    expect(result.run?.exitCode).toBe(0);
+    expectStreamedSuccess(await execute(['printf', 'hello\n']));
   });
 
   it('streams a non-zero exit and persists the failed audit result', async () => {
@@ -142,4 +151,33 @@ describe('environment install execution', () => {
     expect(result.run?.status).toBe('failed');
     expect(result.run?.exitCode).not.toBe(0);
   });
+});
+
+const binary = resolveRustRuntimeBinary();
+
+describe('environment install execution over a real Rust runtime', () => {
+  let runtime: RustStdioRuntime | undefined;
+
+  afterEach(async () => {
+    await runtime?.close();
+    runtime = undefined;
+  });
+
+  // A fresh stdio connection per run, the shape that lost the output: the
+  // runner unsubscribes from install.output the moment `install.run`
+  // answers, so every line has to arrive ahead of that answer. Bun itself
+  // prints the line, so the command exists on every OS the job runs on.
+  it.skipIf(skipWithoutRustBinary(binary, 'environment-install-execution'))(
+    'streams a direct command, emits a probe, and persists success',
+    async () => {
+      runtime = await spawnRustStdioRuntime(binary.path, { label: 'environment-install' });
+      const client = runtime.client;
+      const runner = createInstallRunner({ resolveClient: () => Promise.resolve(client) });
+
+      expectStreamedSuccess(
+        await execute([process.execPath, '-e', 'process.stdout.write("hello\\n")'], runner)
+      );
+    },
+    30_000
+  );
 });

@@ -53,6 +53,7 @@ right depth quickly instead of scanning a flat list of files.
 - [`reference/cli.md`](./reference/cli.md)
 - [`reference/ci.md`](./reference/ci.md)
 - [`reference/releasing.md`](./reference/releasing.md)
+- [`reference/runtime-metrics.md`](./reference/runtime-metrics.md)
 - [`operations/deployment.md`](./operations/deployment.md)
 - [`operations/remote-runtimes.md`](./operations/remote-runtimes.md)
 - [`SECURITY.md`](../.github/SECURITY.md)

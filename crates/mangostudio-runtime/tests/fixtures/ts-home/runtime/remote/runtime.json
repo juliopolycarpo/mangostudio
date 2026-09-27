@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "slot": "remote",
+  "hubUrl": "wss://hub.fixture.test/api/runtime"
+}

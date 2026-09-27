@@ -49,7 +49,6 @@ describe('check script', () => {
       'apps/api/package.json',
       'apps/frontend/package.json',
       'apps/shared/package.json',
-      'apps/runtime/package.json',
     ]) {
       const manifest = JSON.parse(readText(manifestPath)) as { scripts?: Record<string, string> };
 

@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { cargoLockVersion } from './cargo-version';
 import { ROOT_DIR } from './config';
 
 // Official semver grammar (https://semver.org), anchored. Accepts optional
@@ -21,20 +22,49 @@ export const LOCKSTEP_PACKAGES: readonly string[] = [
   'apps/api/package.json',
   'apps/frontend/package.json',
   'apps/shared/package.json',
-  'apps/runtime/package.json',
   'packages/cli/package.json',
 ];
 
 /** The crates.io launcher manifest; its [package] version must match root. */
 export const LAUNCHER_MANIFEST = 'crates/mangostudio-launcher/Cargo.toml';
 
-/** The shared workspace lockfile. It records the launcher's own version, and
- * the release job publishes with `--locked`, so a launcher manifest bump
- * without a matching lock entry must fail before the release pipeline. */
+/** The shared workspace lockfile. It records every app-versioned crate's own
+ * version (see `APP_VERSIONED_CRATES`), and the release job publishes with
+ * `--locked`, so a manifest bump without a matching lock entry must fail
+ * before the release pipeline. */
 export const WORKSPACE_CARGO_LOCKFILE = 'Cargo.lock';
 
 /** The crate name the lockstep check looks up inside Cargo.lock. */
 export const LAUNCHER_CRATE = 'mangostudio';
+
+/** The dispatcher crate's manifest. Ships in the same release archive as the
+ * launcher (see `crates/mangostudio-runtime/Cargo.toml`'s own version
+ * comment), so it tracks the same app release version, not
+ * `[workspace.package].version` (the protocol version). */
+export const RUNTIME_MANIFEST = 'crates/mangostudio-runtime/Cargo.toml';
+
+/** The crate name the lockstep check looks up inside Cargo.lock. */
+export const RUNTIME_CRATE = 'mangostudio-runtime';
+
+/** One `[package]`-versioned Rust crate whose version must track the root
+ * release version rather than `[workspace.package].version` — every crate
+ * whose binary ships inside the app's own release archive. Add a new entry
+ * the same commit a new app-versioned crate joins the workspace: nothing
+ * about `Cargo.toml` enforces this lockstep on its own, only this list does,
+ * for both `collectVersionConsistency` and `bumpLockstepVersions`.
+ *
+ * This is the **application** release version line (root `package.json`).
+ * It is a different table from `scripts/protocol/versions.ts`'s
+ * `WORKSPACE_DEPENDENCY_CRATES`, which tracks the **protocol** version
+ * (`protocol-v*`) pinned in `[workspace.dependencies]` — two version lines
+ * that never move together. A crate whose `[package].version` should track
+ * the protocol version instead (i.e. `version.workspace = true`, with a
+ * `[workspace.dependencies]` self-pin) belongs in that file's list, not
+ * this one. */
+export const APP_VERSIONED_CRATES: readonly { manifest: string; crateName: string }[] = [
+  { manifest: LAUNCHER_MANIFEST, crateName: LAUNCHER_CRATE },
+  { manifest: RUNTIME_MANIFEST, crateName: RUNTIME_CRATE },
+];
 
 interface VersionEntry {
   /** Manifest path (package.json, Cargo.toml, or Cargo.lock) relative to the repo root. */
@@ -142,24 +172,11 @@ export function readCargoManifestVersion(manifestPath: string): string {
  * // Usage: readCargoLockVersion('/repo/Cargo.lock', 'mangostudio') */
 export function readCargoLockVersion(lockfilePath: string, crateName: string): string {
   const raw = readTextFile(lockfilePath, 'Cargo lockfile');
-  let inNamedPackage = false;
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed === '[[package]]') {
-      inNamedPackage = false;
-      continue;
-    }
-    const name = trimmed.match(/^name\s*=\s*"([^"]+)"/);
-    if (name) {
-      inNamedPackage = name[1] === crateName;
-      continue;
-    }
-    const version = inNamedPackage && trimmed.match(/^version\s*=\s*"([^"]+)"/);
-    if (version) {
-      return version[1];
-    }
+  const version = cargoLockVersion(raw, crateName);
+  if (version === undefined) {
+    throw new Error(`Cargo.lock at ${lockfilePath} does not list ${crateName}`);
   }
-  throw new Error(`Cargo.lock at ${lockfilePath} does not list ${crateName}`);
+  return version;
 }
 
 /** The version every release artifact should carry: the VERSION env override
@@ -217,14 +234,16 @@ export function collectVersionConsistency(rootDir: string = ROOT_DIR): VersionCo
       path: relativePath,
       version: readPackageVersion(join(rootDir, relativePath)),
     })),
-    {
-      path: LAUNCHER_MANIFEST,
-      version: readCargoManifestVersion(join(rootDir, LAUNCHER_MANIFEST)),
-    },
-    {
-      path: WORKSPACE_CARGO_LOCKFILE,
-      version: readCargoLockVersion(join(rootDir, WORKSPACE_CARGO_LOCKFILE), LAUNCHER_CRATE),
-    },
+    ...APP_VERSIONED_CRATES.flatMap((crate) => [
+      {
+        path: crate.manifest,
+        version: readCargoManifestVersion(join(rootDir, crate.manifest)),
+      },
+      {
+        path: `${WORKSPACE_CARGO_LOCKFILE} (${crate.crateName})`,
+        version: readCargoLockVersion(join(rootDir, WORKSPACE_CARGO_LOCKFILE), crate.crateName),
+      },
+    ]),
   ];
 
   const expected = entries[0].version;

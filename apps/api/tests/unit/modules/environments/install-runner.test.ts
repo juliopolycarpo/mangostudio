@@ -1,7 +1,7 @@
 /**
  * The hub half of an install: it asks a machine to run an argv it built and
  * relays that machine's output frames back onto the stream a browser reads.
- * Execution itself lives in `apps/runtime`; what is tested here is the seam.
+ * Execution itself lives in `crates/mangostudio-runtime`; what is tested here is the seam.
  */
 
 import { describe, expect, it } from 'bun:test';
@@ -13,6 +13,7 @@ import {
 import {
   createInstallRunner,
   type InstallLogLine,
+  ORDERED_ANSWER_MINOR,
 } from '../../../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 
@@ -38,6 +39,10 @@ interface FakeClientOptions {
   readonly result?: RuntimeInstallRunResult | (() => Promise<RuntimeInstallRunResult>);
   /** Frames the runtime publishes once `install.run` has been called. */
   readonly frames?: readonly Partial<EventFrame>[];
+  /** Frames the runtime publishes on the next tick after it answered. */
+  readonly framesAfterAnswer?: readonly Partial<EventFrame>[];
+  /** The negotiated wire minor; the current one unless a test says otherwise. */
+  readonly effectiveMinor?: number;
 }
 
 function fakeClient(options: FakeClientOptions = {}) {
@@ -45,8 +50,17 @@ function fakeClient(options: FakeClientOptions = {}) {
   const cancelled: string[] = [];
   const runParams: unknown[] = [];
 
+  const publish = (frames: readonly Partial<EventFrame>[]) => {
+    for (const frame of frames) {
+      for (const listener of [...listeners]) {
+        listener({ type: 'evt', seq: 0, topic: '', payload: {}, ...frame } as EventFrame);
+      }
+    }
+  };
+
   const client = {
     manifest: { features: { toolchain: options.toolchainSupported ?? true } },
+    effectiveMinor: options.effectiveMinor ?? ORDERED_ANSWER_MINOR,
     onEvent: (listener: (event: EventFrame) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -54,17 +68,9 @@ function fakeClient(options: FakeClientOptions = {}) {
     install: {
       run: (params: unknown) => {
         runParams.push(params);
-        for (const frame of options.frames ?? []) {
-          for (const listener of [...listeners]) {
-            listener({
-              type: 'evt',
-              seq: 0,
-              topic: '',
-              payload: {},
-              ...frame,
-            } as EventFrame);
-          }
-        }
+        publish(options.frames ?? []);
+        const late = options.framesAfterAnswer;
+        if (late) setTimeout(() => publish(late), 0);
         const result = options.result ?? SUCCESS;
         return typeof result === 'function' ? result() : Promise.resolve(result);
       },
@@ -78,13 +84,20 @@ function fakeClient(options: FakeClientOptions = {}) {
   return { client, cancelled, runParams, listenerCount: () => listeners.size };
 }
 
-function runnerFor(client: RuntimeClient) {
+function runnerFor(client: RuntimeClient, unorderedOutputGraceMs = 50) {
   return createInstallRunner({
     resolveClient: () => Promise.resolve(client),
     logPathFor: (runId) => `/logs/${runId}.log`,
     now: () => 1_700_000_000_000,
+    unorderedOutputGraceMs,
   });
 }
+
+const LATE_LINE: Partial<EventFrame> = {
+  topic: RUNTIME_INSTALL_OUTPUT_TOPIC,
+  streamId: 'run-1',
+  payload: { stream: 'stdout', line: 'written before the answer, delivered after it' },
+};
 
 describe('install relay', () => {
   it('turns the runtime output frames for this run into log lines', async () => {
@@ -161,6 +174,38 @@ describe('install relay', () => {
     await runnerFor(fake.client).run(COMMAND);
 
     expect(fake.listenerCount()).toBe(0);
+  });
+
+  it('keeps listening briefly past the answer of a peer below wire 1.2', async () => {
+    const fake = fakeClient({
+      effectiveMinor: ORDERED_ANSWER_MINOR - 1,
+      framesAfterAnswer: [LATE_LINE],
+    });
+    const events: InstallLogLine[] = [];
+
+    const result = await runnerFor(fake.client).run(COMMAND, {
+      onLog: (event) => events.push(event),
+    });
+
+    // Below 1.2 the answer may overtake output written ahead of it (§6.2).
+    expect(result.status).toBe('succeeded');
+    expect(events).toEqual([
+      { stream: 'stdout', line: 'written before the answer, delivered after it' },
+    ]);
+    expect(fake.listenerCount()).toBe(0);
+  });
+
+  it('stops listening at the answer of a peer on wire 1.2', async () => {
+    const fake = fakeClient({ framesAfterAnswer: [LATE_LINE] });
+    const events: InstallLogLine[] = [];
+
+    // A grace far past the test timeout: waiting it out would fail the test.
+    await runnerFor(fake.client, 60_000).run(COMMAND, { onLog: (event) => events.push(event) });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // From 1.2 the answer ends the run's output, so the relay has let go.
+    expect(fake.listenerCount()).toBe(0);
+    expect(events).toEqual([]);
   });
 
   it('asks the runtime to cancel rather than signalling a child it does not own', async () => {

@@ -6,8 +6,8 @@ import type { EffectiveToolSettings, RegisteredTool } from './types';
  * owner can classify the outcome as `timed_out` without matching message text.
  */
 export class ToolExecutionTimedOutError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'ToolExecutionTimedOutError';
   }
 }

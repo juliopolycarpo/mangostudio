@@ -3,7 +3,7 @@
  *
  * Action availability is decided here, not in the browser: a button the hub
  * cannot honour must never render, because dial-in machines are unreachable
- * before pairing and local/in-process installs ship with the hub itself.
+ * before pairing and the Local runtime ships with the hub itself.
  */
 
 import type {
@@ -13,6 +13,7 @@ import type {
   RuntimeManualCommands,
   RuntimeStagedAsset,
 } from '@mangostudio/shared/environments';
+import type { RuntimeDiscoverResult } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { resolveRuntimeRelease } from './runtime-release-resolution';
@@ -57,6 +58,8 @@ export interface BuildRuntimeLifecycleViewInput {
    * every build from before the capability existed.
    */
   readonly publishesWindowsSlot?: boolean | undefined;
+  /** The connected build's `runtime.discover` answer, when it has one. */
+  readonly implementation?: RuntimeDiscoverResult | undefined;
 }
 
 export function buildRuntimeLifecycleView(
@@ -91,6 +94,7 @@ export function buildRuntimeLifecycleView(
     ...(input.directoryHashDomain === undefined
       ? {}
       : { directoryHashDomain: input.directoryHashDomain }),
+    ...(input.implementation ? { implementation: input.implementation } : {}),
   };
 }
 

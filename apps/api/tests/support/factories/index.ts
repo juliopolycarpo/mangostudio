@@ -48,14 +48,16 @@ export function makeTestIdentity(prefix: string, name: string): UserFixture {
 }
 
 /**
- * Creates a user row in the test database with realistic faker-generated data.
- * Returns the inserted user so it can be passed to createAuthenticatedApiTestApp.
+ * Creates a user row in the test database with a realistic name and an email
+ * tied uniquely to its id. Returns the inserted user so it can be passed to
+ * createAuthenticatedApiTestApp.
  */
 export async function insertTestUser(overrides: Partial<UserFixture> = {}): Promise<UserFixture> {
+  const id = overrides.id ?? faker.string.uuid();
   const user: UserFixture = {
-    id: faker.string.uuid(),
+    id,
     name: faker.person.fullName(),
-    email: faker.internet.email({ provider: 'mangostudio.test' }),
+    email: `${id}@mangostudio.test`,
     ...overrides,
   };
 

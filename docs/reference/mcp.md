@@ -31,7 +31,7 @@ Consequences worth knowing:
 
 ## Transports
 
-Two MCP transports are supported (`apps/runtime/src/services/mcp/client-factory.ts`). They are
+Two MCP transports are supported (`crates/mangostudio-runtime/src/mcp/sdk.rs`). They are
 independent of the environment transport that connects the hub to the runtime.
 
 - **stdio** — the runtime spawns a process (`command` + `args`) and speaks MCP over its
@@ -41,11 +41,11 @@ independent of the environment transport that connects the hub to the runtime.
   HTTP client is tried first; on a 4xx from the initialize POST it falls back to the legacy
   SSE transport, per the MCP spec-compat recipe.
 
-Only production code under `apps/runtime/src/services/mcp/**` may import
-`@modelcontextprotocol/sdk`; the hub and the rest of the codebase consume the project-owned
-`McpClientHandle` wrapper, so an SDK bump stays contained to that directory. API test fixtures
-(for example in-memory servers under `apps/api/tests/support/fixtures/mcp/`) may import the SDK
-to stand up controlled peers.
+Only `crates/mangostudio-runtime/src/mcp/sdk.rs` depends on the Rust MCP SDK (`rmcp`); the rest
+of the runtime speaks the project-owned traits in `mcp/client.rs`, and the hub consumes the
+`McpClientHandle` wrapper, so an SDK bump stays contained to that file. API test fixtures (for
+example the servers under `apps/api/tests/support/fixtures/mcp/`) may import
+`@modelcontextprotocol/sdk` to stand up controlled peers.
 
 ## Configuration
 
@@ -118,7 +118,7 @@ header **names** (`headerNames`). Stdio servers use `env` for non-secret variabl
 two maps are merged, with secret values winning on a duplicate key.
 
 The spawned child does **not** inherit the runtime process environment wholesale. Only a small
-allowlist (`PATH`, `HOME`, `TERM`, … — see `apps/runtime/src/services/mcp/stdio-env.ts`) plus
+allowlist (`PATH`, `HOME`, `TERM`, … — see `child_env` in `crates/mangostudio-runtime/src/mcp/stdio.rs`) plus
 the managed public and secret environment maps is forwarded, so connector API keys and the
 app's auth secret never leak accidentally. Exported shell functions are stripped to avoid a
 Shellshock-style injection vector.
@@ -138,7 +138,7 @@ RFC4193 address gets a typed error naming TLS
 address cannot be proven local, so it is treated as public. Put the runtime behind a TLS
 reverse proxy, or keep the secret-bearing server on an environment the hub reaches privately.
 
-stdio, WSL and in-process environments never put the credential on a wire at all; ssh is
+stdio, WSL and Local environments never put the credential on a wire at all; ssh is
 encrypted by construction; a dial-in WebSocket runtime chose its own hub URL, and the hub sees
 a socket a reverse proxy may already have terminated — so those are not judged here.
 

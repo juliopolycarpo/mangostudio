@@ -132,13 +132,51 @@ const defaultEnvironmentRuntimeEffects: EnvironmentRuntimeEffects = {
   },
 };
 
+/** Told when a user took an environment away; see {@link onEnvironmentWithdrawn}. */
+export type EnvironmentWithdrawnListener = (userId: string, environmentId: string) => void;
+
+const withdrawnListeners = new Set<EnvironmentWithdrawnListener>();
+
+/**
+ * Subscribes to the user's own actions that take an environment away:
+ * Disconnect, disabling it, repointing its config, rotating its token and
+ * removing it. Returns the unsubscribe.
+ *
+ * Deliberately not the connection manager's disconnect, which also runs for
+ * dial-in drops and pairing: only these say "stop using this", and work that
+ * would otherwise reconnect on its own — a turn waiting to resubmit — has to
+ * hear them. Registered rather than imported, because the modules that care
+ * already depend on this one.
+ *
+ * @example
+ * const stop = onEnvironmentWithdrawn((userId, id) => reap(userId, id));
+ */
+export function onEnvironmentWithdrawn(listener: EnvironmentWithdrawnListener): () => void {
+  withdrawnListeners.add(listener);
+  return () => withdrawnListeners.delete(listener);
+}
+
+function notifyEnvironmentWithdrawn(userId: string, environmentId: string): void {
+  for (const listener of [...withdrawnListeners]) {
+    try {
+      listener(userId, environmentId);
+    } catch (error) {
+      console.warn(
+        '[environments] An environment-withdrawn listener failed:',
+        error instanceof Error ? error.message : 'unknown error'
+      );
+    }
+  }
+}
+
 export function createEnvironmentService(
   repository: EnvironmentRepository = environmentRepository,
   manager: RuntimeConnectionManager = getRuntimeConnectionManager(),
   publish: (userId: string) => void = publishEnvironmentInvalidation,
   secretStore: SecretStore = bunSecretStore,
   runtimeEffects: EnvironmentRuntimeEffects = defaultEnvironmentRuntimeEffects,
-  toolchain: ToolchainService = toolchainService
+  toolchain: ToolchainService = toolchainService,
+  withdrawn: EnvironmentWithdrawnListener = notifyEnvironmentWithdrawn
 ): EnvironmentService {
   async function findRecord(userId: string, id: string): Promise<EnvironmentRecord | null> {
     if (id === LOCAL_ENVIRONMENT_ID) return localRecord(userId);
@@ -280,6 +318,7 @@ export function createEnvironmentService(
       // the token must drop it, or the reported status keeps describing the
       // persisted config while every tool call keeps reaching the old endpoint.
       if (input.enabled === false || input.config !== undefined || token !== undefined) {
+        withdrawn(userId, id);
         manager.disconnect(userId, id);
         // Disconnect keeps health for transient drops; a config repoint must
         // not leave the card showing the previous host's version/digest.
@@ -328,6 +367,7 @@ export function createEnvironmentService(
 
       // Only now: disconnect before byte cleanup so a live spawn is not holding
       // the binary being deleted.
+      withdrawn(userId, id);
       manager.disconnect(userId, id);
 
       // A staged download does not block this delete — its bytes land in the
@@ -391,6 +431,7 @@ export function createEnvironmentService(
 
     async disconnect(userId, id) {
       const record = await requireRecord(userId, id);
+      withdrawn(userId, id);
       manager.disconnect(userId, id);
       return await toEnvironment(record, manager, secretStore, toolchain);
     },

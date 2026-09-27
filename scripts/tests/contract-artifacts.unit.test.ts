@@ -30,7 +30,6 @@ describe('contract artifact check scoping', () => {
     for (const file of [
       'apps/frontend/src/main.tsx',
       'apps/api/src/app.ts',
-      'apps/runtime/src/session.ts',
       'apps/shared/AGENTS.md',
       'apps/shared/tests/unit/runtime-contract.test.ts',
       'docs/architecture/hub-runtime.md',

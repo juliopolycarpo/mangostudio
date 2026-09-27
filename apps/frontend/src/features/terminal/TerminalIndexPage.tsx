@@ -3,10 +3,12 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import { TerminalSquare } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { useToast } from '@/components/ui/Toast';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import type { EnvironmentScopeSearch } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { LazyTerminalView } from './LazyTerminalView';
+import { openFailureMessage } from './open-failure-message';
 import { useOpenTerminalMutation, useTerminalSessionsQuery } from './services/terminal-service';
 import { TerminalUnavailableNotice } from './TerminalUnavailableNotice';
 import { useTerminalAvailability } from './use-terminal-availability';
@@ -19,6 +21,7 @@ import { useTerminalAvailability } from './use-terminal-availability';
  */
 export function TerminalIndexPage() {
   const { t } = useI18n();
+  const { toast } = useToast();
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as EnvironmentScopeSearch;
   const environmentId = search.environmentId ?? LOCAL_ENVIRONMENT_ID;
@@ -41,7 +44,13 @@ export function TerminalIndexPage() {
 
   function openNewSession(): void {
     if (unavailable) return;
-    openMutation.mutate({ environmentId }, { onSuccess: (session) => setActiveId(session.id) });
+    openMutation.mutate(
+      { environmentId },
+      {
+        onSuccess: (session) => setActiveId(session.id),
+        onError: (error) => toast(openFailureMessage(t, error), 'error'),
+      }
+    );
   }
 
   return (

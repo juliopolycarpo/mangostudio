@@ -161,20 +161,19 @@ describe('Test workflow shape', () => {
       'resolve-timings',
       'shard',
       'frontend',
-      'runtime-slot-windows',
       'merge',
     ]);
   });
 
-  // The only lane that does not run on Linux. Everywhere else the Windows slot
-  // paths go through a recording fake, so removing this leaves the fake with
-  // nothing checking that it describes the real filesystem.
-  test('runs the runtime slot suite on a Windows runner', () => {
-    const windows = extractJobBlock(workflow, 'runtime-slot-windows');
-    expect(windows).toContain('runs-on: windows-latest');
-    expect(windows).toContain('tests/unit/services/slot-publish.windows.test.ts');
-    // No artifact at all, so the merge job's per-lane count stays right.
-    expect(windows).not.toContain('upload-artifact');
+  // The Windows slot paths (the `current` shim, its rollback, the stage sweep,
+  // and owner-only credentials across a rotation) are the Rust runtime's
+  // `#[cfg(windows)]` tests now. They run in cargo-shim.yml's workspace
+  // matrix, so that matrix, not this workflow, is what must keep Windows.
+  test('leaves the Windows runtime slot tests to the cargo workspace matrix', () => {
+    const cargo = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
+    expect(cargo).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(cargo).toContain('cargo test --workspace --all-targets --all-features --locked');
+    expect(workflow).not.toContain('windows-latest');
   });
 
   // ci.yml calls this as one `test` job, so the aggregate gate's `needs` list

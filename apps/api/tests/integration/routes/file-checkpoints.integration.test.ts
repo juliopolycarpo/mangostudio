@@ -22,7 +22,6 @@ import {
   type UserFixture,
 } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
-import { clearFileFreshness } from '../../support/runtime-file-freshness';
 
 let user: UserFixture;
 let chat: ChatFixture;
@@ -32,7 +31,8 @@ let outsideDir: string;
 let restoreAuth: (() => void) | null = null;
 
 beforeEach(async () => {
-  clearFileFreshness();
+  // A fresh directory per case is what isolates read freshness: the runtime
+  // keys it by chat and path and keeps it as long as its process lives.
   workdir = mkdtempSync(join(tmpdir(), 'checkpoint-routes-'));
   outsideDir = mkdtempSync(join(tmpdir(), 'checkpoint-routes-outside-'));
   user = await insertTestUser();
@@ -61,7 +61,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  clearFileFreshness();
   restoreAuth?.();
   restoreAuth = null;
   rmSync(workdir, { recursive: true, force: true });

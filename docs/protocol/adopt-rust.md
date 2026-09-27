@@ -301,6 +301,11 @@ let port = accept_websocket(socket, options, |upgrade| authorize(upgrade.bearer(
 let port = websocket_port(already_upgraded, WebSocketOptions::default());
 ```
 
+A refusal is not dropped the instant its `close` frame is written: the acceptor reads on until
+the dialler answers with its own `close`, for up to two seconds. A dialler that already sent its
+`hello` would otherwise leave bytes unread, and the reset that follows loses the `close` frame on
+Windows. Budget those two seconds into any timeout you wrap around `accept_websocket`.
+
 `wss://` uses rustls with the webpki root set and the `ring` provider, named explicitly rather
 than installed as the process default — a library that installed one would be deciding for the
 binary it is linked into. `ring` also builds without cmake or nasm, which keeps the Windows and

@@ -38,7 +38,6 @@
         "@elysia/static": "2.0.0-beta.2",
         "@google/genai": "^2.19.0",
         "@mangostudio/protocol": "workspace:*",
-        "@mangostudio/runtime": "workspace:*",
         "@mangostudio/shared": "workspace:*",
         "ai": "^7.0.55",
         "better-auth": "^1.6.26",
@@ -99,20 +98,6 @@
         "@types/react-dom": "^19.2.4",
         "bun-plugin-tailwind": "^0.1.2",
         "tailwindcss": "^4.3.3",
-        "typescript": "7.0.2",
-      },
-    },
-    "apps/runtime": {
-      "name": "@mangostudio/runtime",
-      "version": "0.1.1",
-      "dependencies": {
-        "@mangostudio/protocol": "workspace:*",
-        "@mangostudio/shared": "workspace:*",
-        "@modelcontextprotocol/sdk": "^1.30.0",
-        "typebox": "1.3.13",
-      },
-      "devDependencies": {
-        "@types/bun": "^1.4.1",
         "typescript": "7.0.2",
       },
     },
@@ -314,8 +299,6 @@
     "@mangostudio/frontend": ["@mangostudio/frontend@workspace:apps/frontend"],
 
     "@mangostudio/protocol": ["@mangostudio/protocol@workspace:packages/protocol"],
-
-    "@mangostudio/runtime": ["@mangostudio/runtime@workspace:apps/runtime"],
 
     "@mangostudio/shared": ["@mangostudio/shared@workspace:apps/shared"],
 

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bumpLockstepVersions, setPackageVersion } from '../lib/prepare-release';
 import {
+  APP_VERSIONED_CRATES,
   collectVersionConsistency,
   LAUNCHER_MANIFEST,
   LOCKSTEP_PACKAGES,
@@ -37,19 +38,28 @@ class TempRepo {
         `${JSON.stringify({ name: relativePath, version, private: true }, null, 2)}\n`
       );
     }
-    this.writeRaw(
-      LAUNCHER_MANIFEST,
-      [
-        '[package]',
-        'name = "mangostudio"',
-        `version = "${version}"`,
-        'edition = "2021"',
-        '',
-        '[dependencies]',
-        'ureq = { version = "3", default-features = false }',
-        '',
-      ].join('\n')
-    );
+    for (const crate of APP_VERSIONED_CRATES) {
+      this.writeRaw(
+        crate.manifest,
+        [
+          '[package]',
+          `name = "${crate.crateName}"`,
+          `version = "${version}"`,
+          'edition = "2021"',
+          '',
+          '[dependencies]',
+          'ureq = { version = "3", default-features = false }',
+          '',
+        ].join('\n')
+      );
+    }
+    const crateLockEntries = APP_VERSIONED_CRATES.flatMap((crate) => [
+      '[[package]]',
+      `name = "${crate.crateName}"`,
+      `version = "${version}"`,
+      'dependencies = ["flate2"]',
+      '',
+    ]);
     this.writeRaw(
       WORKSPACE_CARGO_LOCKFILE,
       [
@@ -59,11 +69,7 @@ class TempRepo {
         'name = "flate2"',
         'version = "1.1.9"',
         '',
-        '[[package]]',
-        'name = "mangostudio"',
-        `version = "${version}"`,
-        'dependencies = ["flate2"]',
-        '',
+        ...crateLockEntries,
         '[[package]]',
         'name = "mango-protocol"',
         'version = "0.2.0"',
@@ -126,12 +132,18 @@ describe('bumpLockstepVersions', () => {
     repo.seedLockstep('0.1.0');
     const bumped = bumpLockstepVersions('0.2.0', repo.dir);
 
-    expect(bumped).toEqual([...LOCKSTEP_PACKAGES, LAUNCHER_MANIFEST, WORKSPACE_CARGO_LOCKFILE]);
+    expect(bumped).toEqual([
+      ...LOCKSTEP_PACKAGES,
+      ...APP_VERSIONED_CRATES.map((crate) => crate.manifest),
+      WORKSPACE_CARGO_LOCKFILE,
+    ]);
     const result = collectVersionConsistency(repo.dir);
     expect(result.expected).toBe('0.2.0');
     expect(result.mismatches).toHaveLength(0);
-    // Dependency pins survive both cargo rewrites.
-    expect(repo.read(LAUNCHER_MANIFEST)).toContain('ureq = { version = "3"');
+    // Dependency pins survive every cargo rewrite, for every crate.
+    for (const crate of APP_VERSIONED_CRATES) {
+      expect(repo.read(crate.manifest)).toContain('ureq = { version = "3"');
+    }
     expect(repo.read(WORKSPACE_CARGO_LOCKFILE)).toContain('name = "flate2"\nversion = "1.1.9"');
     expect(repo.read(WORKSPACE_CARGO_LOCKFILE)).toContain(
       'name = "mango-protocol"\nversion = "0.2.0"'

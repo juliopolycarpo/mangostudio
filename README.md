@@ -112,6 +112,9 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
 
 - [Bun](https://bun.sh/) 1.4.2 or newer (`bun upgrade`, or
   `curl -fsSL https://bun.sh/install | bash` for a first install)
+- A Rust toolchain via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). The hub launches
+  Local as the cargo-built `mangostudio-runtime`, and `rust-toolchain.toml` pins the version
+  rustup installs on first build.
 - One or more API keys or sign-in capable accounts for supported providers
   (Gemini, OpenAI-compatible, Anthropic, DeepSeek, ChatGPT)
 
@@ -136,8 +139,11 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
    bun run dev
    ```
 
-   This starts one server at `http://localhost:3001` (Elysia + Kysely/SQLite) that also
-   builds and serves the React frontend. There is no separate frontend port.
+   This first runs `cargo build -p mangostudio-runtime --locked` — the Local runtime the hub spawns —
+   then starts one server at `http://localhost:3001` (Elysia + Kysely/SQLite) that also
+   builds and serves the React frontend. There is no separate frontend port. Without cargo it
+   stops and prints the rustup one-liner; set `MANGOSTUDIO_RUNTIME_BINARY` to use a binary you
+   already built instead.
 
 ## Connector Configuration (Secrets)
 
@@ -255,7 +261,7 @@ mangostudio/
 | `bun run dev`             | Start all dev servers concurrently                             |
 | `bun run dev --api`       | Start only the API dev server                                  |
 | `bun run build`           | Build the frontend for production                              |
-| `bun run build --binary`  | Generate standalone binaries with embedded frontend            |
+| `bun run build --binary`  | Build the host's standalone binaries (hub + cargo runtime)     |
 | `bun run check`           | Run formatting, lint, typecheck, and code-health gates         |
 | `bun run code-health`     | Run the standalone Knip unused code/dependency report          |
 | `bun run test`            | Run unit and integration lanes                                 |
@@ -443,7 +449,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 
 ## Standalone Build Notes
 
-The `bun run build --binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`.
+The `bun run build --binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`, next to the cargo-built `mangostudio-runtime`. Locally it builds the host's own platform (`--platform <host>`); other platforms need prebuilt runtimes via `--runtime-dir <dir>` (see [releasing](docs/reference/releasing.md#how-the-runtime-binary-is-built)).
 
 - The database is persisted at `~/.mango/database.sqlite` by default.
 - Frontend assets are embedded into the executable at build time.

@@ -298,6 +298,21 @@ export function createRuntimeLifecycleService(
   const activeByRun = new Map<string, ActiveRun>();
   const recentStreams = new Map<string, { userId: string; stream: EventBuffer }>();
 
+  /**
+   * The connected build's detailed surface for the panel, or undefined. A
+   * peer that cannot answer costs the view this one line, never the view.
+   */
+  const discoverImplementation = async (userId: string, environmentId: string) => {
+    try {
+      return await manager.discoverImplementation(userId, environmentId);
+    } catch {
+      // Reported once per failed connection by the discovery cache, which
+      // re-throws the cached failure on every later read; logging here would
+      // repeat it on each panel load.
+      return undefined;
+    }
+  };
+
   const installKey = (userId: string, environmentId: string): string =>
     `${userId}:${environmentId}`;
 
@@ -520,6 +535,7 @@ export function createRuntimeLifecycleService(
         stagedRuntime: await resolveStagedRuntime(transportKind, cached?.health ?? null),
         ...(status.state === 'connected'
           ? {
+              implementation: await discoverImplementation(userId, environmentId),
               enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true,
               directoryHashDomain: directoryHashDomainOf(status.manifest?.directoryHashDomain),
               publishesWindowsSlot: status.manifest?.publishesWindowsSlot === true,
@@ -1415,7 +1431,7 @@ function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
  * `remote` either way; that is where the SSH transport reads it from.
  *
  * `custom` is not a `--profile` value the CLI accepts — `setup` requires a
- * base preset whenever `--yes` is set (`apps/runtime/src/setup.ts`), so
+ * base preset whenever `--yes` is set (`crates/mangostudio-runtime/src/cli.rs`), so
  * `custom` sends the narrowest preset (`none`) and lets `--allow` override
  * every key explicitly; the CLI derives the `custom` name itself from the
  * resulting non-preset allow set.
