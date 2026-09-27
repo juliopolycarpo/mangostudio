@@ -33,7 +33,7 @@ runs:
       run: rustup show active-toolchain
 
     # prefix-key hashes the root manifest because rust-cache's own key ignores
-    # [profile.dev]. Only main saves; see scripts/tests/cache-policy.unit.test.ts.
+    # [profile.*]. Only main saves; see scripts/tests/cache-policy.unit.test.ts.
     - name: Restore the cargo cache
       if: inputs.artifact == ''
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
