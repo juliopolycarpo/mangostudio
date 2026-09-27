@@ -124,7 +124,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
 sha2 = "0.11"
-sse-stream = "0.2"
+sse-stream = "0.3"
 # A normal dependency, not a dev one: `main.rs` builds its own multi-thread
 # runtime for `stdio`/`serve`/`connect` (never `#[tokio::main]` — the
 # consent/setup/token/lock work those subcommands do first is synchronous by
