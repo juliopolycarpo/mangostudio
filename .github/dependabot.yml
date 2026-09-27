@@ -55,6 +55,18 @@ updates:
         update-types:
           - version-update:semver-minor
           - version-update:semver-patch
+      # Elysia publishes an experimental `2.0.0-exp.*` channel beside the
+      # `2.0.0-beta.*` line tracked here (npm tag `next`). Semver sorts `exp`
+      # above `beta`, so Dependabot offers these older experimental builds as
+      # upgrades. Remove both rules once Elysia 2.0.0 is stable; the unit test
+      # in scripts/tests/security-workflows.unit.test.ts fails as a reminder
+      # when the pinned elysia is no longer a 2.0.0 prerelease.
+      - dependency-name: elysia
+        versions:
+          - ">=2.0.0-exp.0 <2.0.0-rc.0"
+      - dependency-name: "@elysia/*"
+        versions:
+          - ">=2.0.0-exp.0 <2.0.0-rc.0"
     groups:
       # Keep the three existing coordinated-release groups: these packages must
       # move together or the workspace breaks.

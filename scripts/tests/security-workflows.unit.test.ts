@@ -13,6 +13,13 @@ function expectWorkflowHasPinnedAction(workflow: string, action: string): void {
   expect(workflow).toMatch(new RegExp(`uses: ${escapedAction}@[a-f0-9]{40} # v\\d`));
 }
 
+interface DependabotConfig {
+  updates: Array<{
+    'package-ecosystem': string;
+    ignore?: Array<{ 'dependency-name': string; versions?: string[] }>;
+  }>;
+}
+
 describe('security workflows', () => {
   test('CodeQL uses explicit advanced setup for the repository languages', () => {
     const workflow = readText('.github/workflows/codeql.yml');
@@ -127,6 +134,31 @@ describe('security workflows', () => {
       'version-update:semver-minor',
       'version-update:semver-patch',
     ]);
+  });
+
+  test('Dependabot skips Elysia 2.0.0-exp builds only while Elysia 2 is in prerelease', () => {
+    const api = JSON.parse(readText('apps/api/package.json')) as {
+      dependencies: { elysia: string };
+    };
+    const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as DependabotConfig;
+    const bunUpdates = config.updates.find((update) => update['package-ecosystem'] === 'bun');
+    const expIgnores = (bunUpdates?.ignore ?? []).filter((rule) =>
+      ['elysia', '@elysia/*'].includes(rule['dependency-name'])
+    );
+
+    expect(expIgnores.map((rule) => rule['dependency-name'])).toEqual(['elysia', '@elysia/*']);
+    // Stale-rule tripwire: once elysia is pinned to a stable release, delete both
+    // exp ignore rules from .github/dependabot.yml and this test.
+    expect(api.dependencies.elysia).toMatch(/^2\.0\.0-/);
+
+    for (const rule of expIgnores) {
+      const [range] = rule.versions ?? [];
+      expect(range).toBeDefined();
+      expect(Bun.semver.satisfies('2.0.0-exp.64', range as string)).toBe(true);
+      expect(Bun.semver.satisfies('2.0.0-beta.19', range as string)).toBe(false);
+      expect(Bun.semver.satisfies('2.0.0-rc.0', range as string)).toBe(false);
+      expect(Bun.semver.satisfies('2.0.0', range as string)).toBe(false);
+    }
   });
 
   test('the launcher has a classification label glob', () => {
