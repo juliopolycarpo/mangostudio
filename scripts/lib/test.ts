@@ -77,3 +77,116 @@ export function testLaneEnv(shard: TestShard | null): Record<string, string> {
   if (!shard) return { MANGOSTUDIO_BUN_TEST_ARGS: '' };
   return { MANGOSTUDIO_BUN_TEST_ARGS: `--shard=${shard.index}/${shard.count}` };
 }
+
+/** A lane `scripts/test.ts` can hand `--changed` to: a workspace, or the root scripts. */
+export type ChangedLane = 'root' | WorkspaceName;
+
+/** A package another lane imports by name — a workspace or the protocol SDK. */
+type LinkedPackage = WorkspaceName | 'protocol';
+
+/**
+ * What each lane imports by package name, transitively, as declared by the
+ * `@mangostudio/*` `workspace:*` entries in its manifest.
+ * `scripts/tests/test-lanes.unit.test.ts` derives the same closure from the
+ * manifests and fails if this table drifts from them.
+ */
+export const CHANGED_LANE_DEPENDENCIES: Readonly<Record<ChangedLane, readonly LinkedPackage[]>> = {
+  root: ['shared', 'protocol'],
+  shared: ['protocol'],
+  api: ['shared', 'protocol'],
+  frontend: ['api', 'shared', 'protocol'],
+};
+
+/** How a lane runs under `--changed`: Bun-selected files, or every file. */
+export interface ChangedLaneRun {
+  readonly lane: ChangedLane;
+  readonly mode: 'changed' | 'full';
+  /** Why a `full` lane could not trust Bun's selection; null for `changed`. */
+  readonly reason: string | null;
+}
+
+const MODULE_FILE = /\.(?:[cm]?[jt]sx?)$/;
+
+function packageOwning(file: string): LinkedPackage | 'root' {
+  const workspace = /^apps\/(frontend|api|shared)\//.exec(file)?.[1];
+  if (workspace) return workspace as WorkspaceName;
+  return file.startsWith('packages/protocol/') ? 'protocol' : 'root';
+}
+
+function fullRunReason(lane: ChangedLane, files: readonly string[]): string | null {
+  for (const file of files) {
+    const owner = packageOwning(file);
+    if (owner !== 'root' && CHANGED_LANE_DEPENDENCIES[lane].includes(owner)) {
+      return `${file} is in ${owner}, which ${lane} imports by package name`;
+    }
+    // The root lane polices repository files (workflows, docs, manifests) by
+    // reading them, so any non-module change anywhere is one it cannot trace.
+    if (!MODULE_FILE.test(file) && (lane === 'root' || owner === lane)) {
+      return `${file} is not a module, so Bun cannot trace its importers`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Decide how each lane runs for `bun run test --changed`.
+ *
+ * `bun test --changed` walks the module graph from the changed files to the
+ * test files, but it stops at a workspace symlink: an edit under apps/shared
+ * selects no api or frontend test even though both import it (measured on Bun
+ * 1.4.2), and a file that is read rather than imported (a manifest, a fixture,
+ * a workflow) selects nothing at all. A lane whose changes reach it in either
+ * way runs whole; every other lane gets `--changed` and lets Bun choose.
+ *
+ * @example
+ * planChangedLanes(['apps/shared/src/errors/index.ts'], ['api', 'shared']);
+ * // [{ lane: 'api', mode: 'full', reason: '… imports by package name' },
+ * //  { lane: 'shared', mode: 'changed', reason: null }]
+ */
+export function planChangedLanes(
+  files: readonly string[],
+  lanes: readonly ChangedLane[]
+): ChangedLaneRun[] {
+  return lanes.map((lane) => {
+    const reason = fullRunReason(lane, files);
+    return { lane, mode: reason ? 'full' : 'changed', reason };
+  });
+}
+
+/**
+ * The `bun test` argument that scopes a lane to the files changed since `base`,
+ * forwarded through Turbo after `--`.
+ * // Usage: [...createTurboTestCommand('test:unit', ['shared']), '--', changedTestArg(sha)];
+ */
+export function changedTestArg(base: string): string {
+  if (base.trim() === '' || base.startsWith('-')) {
+    throw new Error(
+      `Invalid --changed base: '${base}'. Expected a git ref or sha, e.g. origin/main.`
+    );
+  }
+  return `--changed=${base}`;
+}
+
+/**
+ * The Turbo commands that run one test task for the planned workspace lanes:
+ * one scoped with `--changed=<base>` for the lanes Bun can select for, one
+ * unscoped for the lanes that must run whole. Either is omitted when empty;
+ * the root lane is not a Turbo workspace filter and is left to the caller.
+ * // Usage: createChangedTurboTestCommands('test:unit', planChangedLanes(files, lanes), base);
+ */
+export function createChangedTurboTestCommands(
+  task: TestLaneTask,
+  runs: readonly ChangedLaneRun[],
+  base: string
+): string[][] {
+  const workspacesIn = (mode: ChangedLaneRun['mode']): WorkspaceName[] =>
+    runs.flatMap((run) => (run.mode === mode && run.lane !== 'root' ? [run.lane] : []));
+  const scoped = workspacesIn('changed');
+  const whole = workspacesIn('full');
+  const commands: string[][] = [];
+  if (scoped.length > 0) {
+    commands.push([...createTurboTestCommand(task, scoped), '--', changedTestArg(base)]);
+  }
+  if (whole.length > 0) commands.push(createTurboTestCommand(task, whole));
+  return commands;
+}

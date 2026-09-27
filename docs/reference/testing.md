@@ -76,8 +76,25 @@ bun run test:e2e:setup     # install Playwright Chromium + OS dependencies
 bun run test --e2e          # Playwright Chromium auth smoke suite (opt-in)
 bun run test --coverage     # coverage collection across applicable workspaces
 bun run test --all          # all lanes including e2e
+bun run test --changed      # only tests affected since merge-base HEAD origin/main
+bun run test --changed --base <ref>  # ... since merge-base HEAD <ref>
 bun run verify              # full local CI gate: check → test --coverage → build --all
 ```
+
+`--changed` is a local fast loop, not a gate. It diffs the merge-base against
+the working tree (committed, staged, unstaged and untracked files) and hands
+`bun test --changed=<merge-base>` to each lane, which keeps only the test
+files whose import graph reaches a changed file. Bun's walk stops at a
+workspace symlink — on 1.4.2 an edit under `apps/shared` selects no api or
+frontend test — and never sees a file that is read rather than imported, so a
+lane runs whole instead when a workspace it imports by package name changed
+(`CHANGED_LANE_DEPENDENCIES` in `scripts/lib/test.ts`, pinned against the
+manifests), when one of its own non-module files changed, or, for the root
+lane, when any non-module file changed. The protocol lane runs only when the
+protocol surface changed. The runner prints each lane's mode and reason before
+it starts. It refuses `--coverage`, since the floors need the whole suite;
+`--e2e` still runs whole. A test that reads source as text rather than
+importing it is invisible to `--changed`, so CI keeps running everything.
 
 ### Lane Taxonomy
 

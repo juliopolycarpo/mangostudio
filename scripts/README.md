@@ -16,7 +16,7 @@ scripts/
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
-├── test.ts           Run unit/integration/e2e/coverage lanes, whole or sharded (bun run test)
+├── test.ts           Run unit/integration/e2e/coverage lanes, whole, sharded, or --changed (bun run test)
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)

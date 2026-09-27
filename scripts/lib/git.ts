@@ -40,6 +40,34 @@ export function getChangedFiles(baseRef: string): string[] {
   return out.split('\n').filter(Boolean);
 }
 
+/**
+ * Files that differ between `baseRef` and the working tree: committed, staged,
+ * unstaged and untracked alike, as repository-relative paths. This is the set
+ * `bun test --changed=<baseRef>` selects from, so a caller planning around that
+ * flag sees the same files Bun will.
+ *
+ * @example
+ * getWorkingTreeChanges('origin/main'); // ['apps/api/src/app.ts', 'notes.md']
+ */
+export function getWorkingTreeChanges(baseRef: string, cwd?: string): string[] {
+  const tracked = git(['diff', '--name-only', baseRef], cwd);
+  const untracked = git(['ls-files', '--others', '--exclude-standard', '--full-name', ':/'], cwd);
+  return [...new Set(`${tracked}\n${untracked}`.split('\n').filter(Boolean))];
+}
+
+/**
+ * The merge-base of HEAD and `ref`, as a full sha. `bun test --changed=<ref>`
+ * diffs against `ref` itself, so a base branch that moved on would pull its own
+ * new commits into the selection; passing the merge-base keeps it to this
+ * branch's changes, the same range `getChangedFiles` reads.
+ *
+ * @example
+ * resolveMergeBase('origin/main'); // '7d7263d6…'
+ */
+export function resolveMergeBase(ref: string, cwd?: string): string {
+  return git(['merge-base', 'HEAD', ref], cwd).trim();
+}
+
 /** Reduce a file list to the affected workspaces and whether root files changed. */
 export function mapFilesToWorkspaces(files: string[]): {
   workspaces: WorkspaceName[];

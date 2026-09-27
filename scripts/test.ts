@@ -3,19 +3,29 @@ import { join } from 'node:path';
 
 import { BROWSER_SMOKE_TEST_COMMAND } from './lib/browser-smoke';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from './lib/config';
+import { touchesProtocolSurface } from './lib/protocol';
 import {
   exitWithResults,
   fatal,
+  getWorkingTreeChanges,
   header,
   info,
   type RunResult,
+  resolveDefaultBase,
+  resolveMergeBase,
   runCommand,
   runParallel,
 } from './lib/runner';
 import {
+  type ChangedLane,
+  type ChangedLaneRun,
+  changedTestArg,
+  createChangedTurboTestCommands,
   createTurboTestCommand,
   parseShard,
+  planChangedLanes,
   shardedCoverageWorkspaces,
+  type TestLaneTask,
   type TestShard,
   testLaneEnv,
 } from './lib/test';
@@ -59,6 +69,12 @@ Lane flags:
                  lane is excluded: its LCOV cannot be merged across shards, so
                  CI runs it whole via --only=frontend in its own job.
   --only=<ws>    Run only that workspace's lanes (and skip the root scripts).
+  --changed      Run only the test files affected by changes since the base
+                 (committed, staged, unstaged and untracked), via bun test
+                 --changed. A lane whose changes Bun cannot trace — a
+                 workspace it imports by package name, or a non-module file —
+                 runs whole instead. Not with --coverage; e2e runs whole.
+  --base <ref>   Base ref for --changed (default: merge-base HEAD origin/main)
   --help`);
   process.exit(0);
 }
@@ -71,9 +87,12 @@ let runCoverage = false;
 let runAllLanes = false;
 let shard: TestShard | null = null;
 let only: WorkspaceName | null = null;
+let runChanged = false;
+let baseRef: string | null = null;
 const unexpectedArgs: string[] = [];
 
-for (const arg of args) {
+for (let index = 0; index < args.length; index += 1) {
+  const arg = args[index] as string;
   if (arg === '--help') {
     printHelp();
   } else if (arg === '--unit') {
@@ -98,6 +117,14 @@ for (const arg of args) {
       fatal(`Unknown workspace '${workspace}'. Expected one of: ${ALL_WORKSPACE_NAMES.join(', ')}`);
     }
     only = workspace as WorkspaceName;
+  } else if (arg === '--changed') {
+    runChanged = true;
+  } else if (arg === '--base' || arg.startsWith('--base=')) {
+    const value = arg === '--base' ? args[++index] : arg.slice('--base='.length);
+    if (!value || value.startsWith('-')) {
+      fatal(`--base expects a git ref, e.g. --base origin/main; received: '${value ?? ''}'.`);
+    }
+    baseRef = value;
   } else {
     unexpectedArgs.push(arg);
   }
@@ -120,6 +147,16 @@ if (shard && !runCoverage) {
 // --only names one workspace whole.
 if (shard && only) {
   fatal('--shard and --only are mutually exclusive.');
+}
+
+if (baseRef && !runChanged) {
+  fatal('--base only applies to --changed.');
+}
+
+// A coverage run over a subset of files would fail the total-coverage floors
+// for every file it skipped, and its LCOV would feed the merge as if whole.
+if (runChanged && runCoverage) {
+  fatal('--changed and --coverage are mutually exclusive; coverage floors need the whole suite.');
 }
 
 // Bun refuses to create the parent directory for `--reporter-outfile` and
@@ -152,15 +189,55 @@ const coverageWorkspaces: WorkspaceName[] = shard ? shardedCoverageWorkspaces() 
 // Neither the root scripts lane nor the protocol lane has a workspace, so
 // --only leaves both out.
 const runRootScripts = only === null;
+
+/** The files changed since the base and how each lane runs over them, or null without --changed. */
+function planChangedRun(): { base: string; files: string[]; runs: ChangedLaneRun[] } | null {
+  if (!runChanged) return null;
+  let base: string;
+  try {
+    base = baseRef ? resolveMergeBase(baseRef) : resolveDefaultBase();
+  } catch (caught) {
+    fatal(
+      `Cannot resolve --base '${baseRef}': ${caught instanceof Error ? caught.message : caught}`
+    );
+  }
+  const files = getWorkingTreeChanges(base);
+  if (files.length === 0) {
+    info('No changed files — nothing to test.');
+    process.exit(0);
+  }
+  const lanes: ChangedLane[] = runRootScripts ? ['root', ...laneWorkspaces] : [...laneWorkspaces];
+  return { base, files, runs: planChangedLanes(files, lanes) };
+}
+
+const changedRun = planChangedRun();
+const rootRun = changedRun?.runs.find((run) => run.lane === 'root');
+const rootScriptsCommand =
+  changedRun && rootRun?.mode === 'changed'
+    ? [...ROOT_SCRIPTS_TEST_COMMAND, '--', changedTestArg(changedRun.base)]
+    : ROOT_SCRIPTS_TEST_COMMAND;
 const rootScriptsTask = runRootScripts
-  ? [
-      () =>
-        runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR, env: laneEnv }),
-    ]
+  ? [() => runCommand('root:test:scripts', rootScriptsCommand, { cwd: ROOT_DIR, env: laneEnv })]
   : [];
-const protocolTask = runRootScripts
+// The protocol suite is seconds and has no Bun-traceable boundary with the
+// spec fixtures and Rust sources it reads, so --changed runs it whole or not
+// at all, on the same predicate scripts/check.ts scopes it with.
+const runProtocol = runRootScripts && (!changedRun || touchesProtocolSurface(changedRun.files));
+const protocolTask = runProtocol
   ? [() => runCommand('root:test:protocol', PROTOCOL_TEST_COMMAND, { cwd: ROOT_DIR })]
   : [];
+
+/** One task per Turbo invocation a workspace test phase needs. */
+function workspaceLaneTasks(task: TestLaneTask): (() => Promise<RunResult>)[] {
+  const commands = changedRun
+    ? createChangedTurboTestCommands(task, changedRun.runs, changedRun.base)
+    : [createTurboTestCommand(task, laneWorkspaces)];
+  return commands.map((command) => {
+    const scoped = command.at(-1)?.startsWith('--changed=') ? ':changed' : '';
+    return () =>
+      runCommand(`workspaces:${task}${scoped}`, command, { cwd: ROOT_DIR, env: laneEnv });
+  });
+}
 
 const hasExplicitLaneSelection =
   runUnitLane || runIntegrationLane || runE2ELane || runCoverage || runAllLanes;
@@ -171,6 +248,15 @@ const shouldRunE2E = runAllLanes || runE2ELane;
 
 header('Test');
 
+if (changedRun) {
+  info(`\n--changed: ${changedRun.files.length} file(s) since ${changedRun.base.slice(0, 12)}`);
+  for (const run of changedRun.runs) {
+    info(
+      `  ${run.lane}: ${run.mode === 'changed' ? 'affected files only' : `whole — ${run.reason}`}`
+    );
+  }
+}
+
 const results: RunResult[] = [];
 
 if (shouldRunUnit) {
@@ -178,11 +264,7 @@ if (shouldRunUnit) {
   const unitResults = await runParallel([
     ...rootScriptsTask,
     ...protocolTask,
-    () =>
-      runCommand('workspaces:test:unit', createTurboTestCommand('test:unit', laneWorkspaces), {
-        cwd: ROOT_DIR,
-        env: laneEnv,
-      }),
+    ...workspaceLaneTasks('test:unit'),
   ]);
   results.push(...unitResults);
 }
@@ -193,14 +275,7 @@ if (results.some((result) => result.exitCode !== 0)) {
 
 if (shouldRunIntegration) {
   info('\nPhase: integration');
-  const integrationResults = await runParallel([
-    () =>
-      runCommand(
-        'workspaces:test:integration',
-        createTurboTestCommand('test:integration', laneWorkspaces),
-        { cwd: ROOT_DIR, env: laneEnv }
-      ),
-  ]);
+  const integrationResults = await runParallel(workspaceLaneTasks('test:integration'));
   results.push(...integrationResults);
 }
 
