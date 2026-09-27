@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
-import { extractJobBlocks, extractStepBlocksAtIndent } from './support/workflow-blocks';
+import {
+  extractJobBlock,
+  extractJobBlocks,
+  extractStepBlocksAtIndent,
+} from './support/workflow-blocks';
 import {
   cacheScopedCallSites,
   compositeActionFiles,
@@ -224,5 +228,31 @@ describe('CI cache policy', () => {
         RUST_CACHE_SAVE_IF
       );
     }
+  });
+
+  // Real-binary qualification builds exactly what the local-runtime action
+  // builds, so the two share one cache entry. If either job's cargo builds
+  // drift, sharing would restore the wrong artifacts and this must fail.
+  test('shares the local runtime cache only while the builds match', () => {
+    const cargoBuilds = (text: string) =>
+      [...text.matchAll(/cargo build -p mangostudio-runtime[^\n]*/g)].map((match) => match[0]);
+    const action = readText('.github/actions/local-runtime/action.yml');
+    const qualification = extractJobBlock(
+      readText('.github/workflows/cargo-shim.yml'),
+      'real-binary-qualification'
+    );
+    const cacheStep = rustCacheSteps().find(
+      (step) =>
+        step.file === '.github/workflows/cargo-shim.yml' && qualification.includes(step.block)
+    );
+
+    expect(action, 'local-runtime action cache key').toContain('shared-key: local-runtime');
+    expect(cacheStep?.block, 'real-binary-qualification rust-cache step').toContain(
+      'shared-key: local-runtime'
+    );
+    expect(cargoBuilds(action), 'local-runtime action cargo builds').toHaveLength(2);
+    expect(cargoBuilds(qualification), 'real-binary-qualification cargo builds').toEqual(
+      cargoBuilds(action)
+    );
   });
 });

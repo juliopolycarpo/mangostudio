@@ -319,10 +319,13 @@ jobs:
 
       - run: rustup show active-toolchain
 
+      # The same two builds as the local-runtime action CI runs, so both jobs
+      # share one entry per OS instead of storing the same build twice.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: local-runtime
 
       - run: cargo build -p mangostudio-runtime --locked
 
