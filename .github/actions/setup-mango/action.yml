@@ -45,6 +45,7 @@ runs:
       name: Restore Bun install cache
       uses: ./.github/actions/cache-scoped
       with:
+        mode: restore
         family: bun
         path: ~/.bun/install/cache
         validity: ${{ steps.toolchain.outputs.bun }}-${{ hashFiles('bun.lock') }}
@@ -60,3 +61,15 @@ runs:
         echo "::group::bun install"
         bun install --frozen-lockfile
         echo "::endgroup::"
+
+    # Save inline: nested actions/cache post steps lose their path input.
+    # Publish only trusted main entries after the frozen install succeeds.
+    - name: Save Bun install cache
+      if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+      uses: ./.github/actions/cache-scoped
+      with:
+        mode: save
+        family: bun
+        path: ~/.bun/install/cache
+        validity: ${{ steps.toolchain.outputs.bun }}-${{ hashFiles('bun.lock') }}
+        cache-epoch: ${{ inputs.cache-epoch }}
