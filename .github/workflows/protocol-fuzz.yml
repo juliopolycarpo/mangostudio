@@ -73,7 +73,7 @@ jobs:
         with:
           workspaces: crates/mango-protocol/fuzz
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+      - uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with:
           tool: cargo-fuzz
       - name: Run the target for 5 minutes
