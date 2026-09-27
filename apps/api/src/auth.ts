@@ -50,17 +50,6 @@ function createAuthInstance() {
     baseURL: config.auth.url,
 
     plugins: [
-      // @better-auth/api-key is a separately published package on the same
-      // version line as better-auth. Bun's isolated linker materializes its
-      // @better-auth/core peer as a byte-identical but nominally distinct
-      // module instance from the one better-auth itself imports (a dual
-      // package hazard), so the plugin's internal `hooks.before` shape fails
-      // structural assignment against BetterAuthPlugin below even though the
-      // two packages are functionally identical. This also means the
-      // generic plugin-endpoint augmentation on `.api` does not pick up
-      // verifyApiKey/createApiKey — see ApiKeyPluginApi/getApiKeyApi below
-      // for the hand-typed accessor that works around it.
-      // @ts-expect-error dual package hazard: see comment above.
       apiKey({
         apiKeyHeaders: API_KEY_HEADER,
         defaultPrefix: 'mango_',
@@ -103,11 +92,14 @@ export function resetAuth(): void {
 }
 
 /**
- * Shape of the two @better-auth/api-key endpoints this codebase calls,
- * hand-typed rather than relying on betterAuth()'s generic plugin-endpoint
- * augmentation — the dual-package-hazard cast on the `apiKey(...)` plugin
- * registration above prevents that augmentation from picking these up.
+ * Narrow port over the four @better-auth/api-key endpoints this codebase
+ * calls, so services can take an injectable fake instead of the whole auth
+ * instance. `getApiKeyApi` delegates to the plugin-augmented `auth.api`, so
+ * the compiler checks this shape against Better Auth's own endpoint types.
  * Kept intentionally narrow to the fields callers actually read.
+ *
+ * @example
+ * const { valid, key } = await getApiKeyApi().verifyApiKey({ body: { key: raw } });
  */
 export interface ApiKeyPluginApi {
   createApiKey(options: {
@@ -137,7 +129,9 @@ export interface ApiKeyPluginApi {
   }): Promise<{ success: boolean }>;
   verifyApiKey(options: { body: { key: string } }): Promise<{
     valid: boolean;
-    error: { message?: string; code: string } | null;
+    // `message` is omitted: Better Auth returns a string for some failures and
+    // a `{ code, message }` object for others, and no caller reads it.
+    error: { code: string } | null;
     key: ApiKeyPluginRecord | null;
   }>;
 }
@@ -170,7 +164,20 @@ export function resolveApiKeyScope(metadata: unknown): ApiKeyScope {
   return 'read-only';
 }
 
-/** Typed accessor for the api-key plugin's endpoints. See ApiKeyPluginApi. */
+/**
+ * Returns the api-key plugin's endpoints behind the narrow ApiKeyPluginApi port.
+ * Each method delegates to `getAuth().api`; no cast, so a Better Auth upgrade
+ * that drifts from the port fails typecheck here.
+ *
+ * @example
+ * await getApiKeyApi().deleteApiKey({ body: { keyId }, headers });
+ */
 export function getApiKeyApi(): ApiKeyPluginApi {
-  return getAuth().api as unknown as ApiKeyPluginApi;
+  const api = getAuth().api;
+  return {
+    createApiKey: (options) => api.createApiKey(options),
+    listApiKeys: (options) => api.listApiKeys(options),
+    deleteApiKey: (options) => api.deleteApiKey(options),
+    verifyApiKey: (options) => api.verifyApiKey(options),
+  };
 }

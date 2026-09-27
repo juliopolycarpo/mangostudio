@@ -36,9 +36,9 @@ function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
 Runs Biome, dprint, madge circular checks, tsc typechecks, Knip code health,
-generated contract-artifact freshness, the Mango Protocol lanes (spec, schema
-equality, fixtures, Cargo) and workflow static analysis (actionlint, zizmor,
-ShellCheck) in parallel.
+generated contract-artifact freshness, lockfile dedupe, the Mango Protocol
+lanes (spec, schema equality, fixtures, Cargo) and workflow static analysis
+(actionlint, zizmor, ShellCheck) in parallel.
 Default workspace selection: --all
 
 Workspace flags:
@@ -93,6 +93,10 @@ function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
       }),
     () => runTask('root:dependency-policy', () => assertNoDisallowedWorkspaceDependencies()),
     () => runTask('root:dependency-cohort', () => assertDependencyCohort()),
+    // A lockfile edit (a bump, `bun audit fix`) can leave two versions of a
+    // package that one version satisfies, which is how better-auth once got a
+    // second @better-auth/core instance. Reads bun.lock only; run `bun dedupe`.
+    () => runCommand('root:dedupe', ['bun', 'dedupe', '--check'], { cwd: ROOT_DIR }),
     () =>
       runCommand(
         'root:typecheck-scripts',
