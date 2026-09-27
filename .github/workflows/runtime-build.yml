@@ -83,8 +83,6 @@ jobs:
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           shared-key: runtime-build-${{ matrix.platform }}
-          # setup-zigbuild pins cargo-zigbuild; a cached ~/.cargo/bin must not shadow it.
-          cache-bin: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
           lookup-only: ${{ github.ref == 'refs/heads/main' }}
 
