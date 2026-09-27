@@ -32,7 +32,7 @@
       "dependencies": {
         "@anthropic-ai/sdk": "^0.128.0",
         "@better-auth/api-key": "1.7.6",
-        "@elysia/cors": "2.0.0-beta.1",
+        "@elysia/cors": "2.0.0-exp.1",
         "@elysia/openapi": "2.0.0-beta.1",
         "@elysia/static": "2.0.0-beta.2",
         "@google/genai": "^2.24.0",
@@ -251,7 +251,7 @@
 
     "@dprint/win32-x64": ["@dprint/win32-x64@0.57.4", "", { "os": "win32", "cpu": "x64" }, "sha512-P91JJG2sDvK+SvZHdqjKygy7fYABbMH1KYop+WCowyjZUin09977qltdXwJ1vb77Cbi2OD0GWUuAlqO0PjNmaw=="],
 
-    "@elysia/cors": ["@elysia/cors@2.0.0-beta.1", "", { "peerDependencies": { "elysia": ">= 2.0.0-beta.1" } }, "sha512-dHb21xI4Dm7wcf5+rWLiLSwJARLAewnOzRjRk0wRMfBiLGA1t/CXsblzKUtwYRFhQCteUEGdhEace+6PF0UUKw=="],
+    "@elysia/cors": ["@elysia/cors@2.0.0-exp.1", "", { "peerDependencies": { "elysia": ">= 2.0.0-exp.14" } }, "sha512-Y23iaNj82ml5jCjvckQAZIgdTDcCS7FZtEQU018Pf2Yd8a3Ogsqa8+hPdjwje7uCJHBLE88QyZeJgo2bly2Hrw=="],
 
     "@elysia/eden": ["@elysia/eden@2.0.0-beta.2", "", { "peerDependencies": { "elysia": ">= 2.0.0-exp.23" } }, "sha512-GOEbbodTCpMOKqek/Kui5Sl0RCbcWV7IoTpIP3623Dz2r/Kbr2H/aqSEYUWIdVw3elQOvY6VKfupAhU3mTynGA=="],
 
