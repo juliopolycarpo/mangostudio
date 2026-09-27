@@ -19,8 +19,9 @@ const EXPECTED_FAMILIES = ['bun', 'turbo', 'lint-tools', 'playwright', 'timings'
 const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-${EXPRESSION_START} hashFiles('Cargo.toml') }}`;
 const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/heads/main' }}`;
 // The fuzz workspace is excluded from the root workspace and has its own
-// manifest, so the root manifest's profiles never apply to it.
-const RUST_CACHE_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
+// manifest, so the root manifest's profiles never apply to it. It is exempt
+// from the prefix-key policy only; it still saves only from main.
+const RUST_PREFIX_KEY_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
 
 interface RustCacheStep {
   readonly file: string;
@@ -29,20 +30,18 @@ interface RustCacheStep {
 
 /**
  * Every Swatinem/rust-cache step across workflows (steps at indent 6) and
- * composite actions (steps at indent 4), outside the exempt fuzz workspace.
+ * composite actions (steps at indent 4).
  *
  * @example
  * for (const step of rustCacheSteps()) expect(step.block).toContain('prefix-key:');
  */
 function rustCacheSteps(): RustCacheStep[] {
   const isRustCache = (block: string) => /^\s*(?:-\s+)?uses: Swatinem\/rust-cache@/m.test(block);
-  const workflowSteps = workflowFiles()
-    .filter((file) => !RUST_CACHE_EXEMPT_FILES.has(file))
-    .flatMap((file) =>
-      extractJobBlocks(readText(file)).flatMap(({ block }) =>
-        extractStepBlocksAtIndent(block, 6).map((step) => ({ file, block: step }))
-      )
-    );
+  const workflowSteps = workflowFiles().flatMap((file) =>
+    extractJobBlocks(readText(file)).flatMap(({ block }) =>
+      extractStepBlocksAtIndent(block, 6).map((step) => ({ file, block: step }))
+    )
+  );
   const actionSteps = compositeActionFiles().flatMap((file) =>
     extractStepBlocksAtIndent(readText(file), 4).map((step) => ({ file, block: step }))
   );
@@ -205,10 +204,7 @@ describe('CI cache policy', () => {
   // rust-cache step it misses (a column-0 comment ending the `jobs:` block, a
   // differently indented step list) would escape both without failing them.
   test('finds every rust-cache step the policies below check', () => {
-    const files = [
-      ...workflowFiles().filter((file) => !RUST_CACHE_EXEMPT_FILES.has(file)),
-      ...compositeActionFiles(),
-    ];
+    const files = [...workflowFiles(), ...compositeActionFiles()];
     const declared = files.reduce(
       (total, file) => total + [...readText(file).matchAll(/uses: Swatinem\/rust-cache@/g)].length,
       0
@@ -225,7 +221,7 @@ describe('CI cache policy', () => {
   // never replaced. Hashing the root manifest into the prefix makes a profile
   // change a new key.
   test('keys every rust-cache step on the root manifest', () => {
-    const steps = rustCacheSteps();
+    const steps = rustCacheSteps().filter((step) => !RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file));
     expect(steps.length).toBeGreaterThan(0);
     for (const step of steps) {
       expect(step.block, `${step.file}: rust-cache step without the manifest prefix-key`).toContain(
