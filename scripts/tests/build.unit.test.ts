@@ -83,19 +83,19 @@ describe('build script', () => {
   });
 
   test('compiles every standalone binary to ESM bytecode with external sourcemaps', () => {
-    for (const buildType of ['production', 'development']) {
-      const flags = binaryCompileFlags(buildType);
-      // Bytecode without `--format=esm` falls back to CommonJS, which rejects
-      // the hub entry's top-level `await` and fails the compile.
-      expect(flags).toContain('--bytecode');
-      expect(flags).toContain('--format=esm');
-      expect(flags).toContain('--sourcemap=external');
-    }
-  });
-
-  test('minifies only production binaries', () => {
-    expect(binaryCompileFlags('production')).toContain('--minify');
-    expect(binaryCompileFlags('development')).not.toContain('--minify');
+    // Bytecode without `--format=esm` falls back to CommonJS, which rejects
+    // the hub entry's top-level `await` and fails the compile.
+    expect(binaryCompileFlags('production')).toEqual([
+      '--bytecode',
+      '--format=esm',
+      '--sourcemap=external',
+      '--minify',
+    ]);
+    expect(binaryCompileFlags('development')).toEqual([
+      '--bytecode',
+      '--format=esm',
+      '--sourcemap=external',
+    ]);
   });
 
   test('uses the binary alias for standalone smoke builds', () => {
