@@ -201,6 +201,23 @@ describe('CI cache policy', () => {
     }
   });
 
+  // The two policies below only see steps the job/step split recognises. A
+  // rust-cache step it misses (a column-0 comment ending the `jobs:` block, a
+  // differently indented step list) would escape both without failing them.
+  test('finds every rust-cache step the policies below check', () => {
+    const files = [
+      ...workflowFiles().filter((file) => !RUST_CACHE_EXEMPT_FILES.has(file)),
+      ...compositeActionFiles(),
+    ];
+    const declared = files.reduce(
+      (total, file) => total + [...readText(file).matchAll(/uses: Swatinem\/rust-cache@/g)].length,
+      0
+    );
+    expect(rustCacheSteps().length, `rust-cache steps found, of ${declared} declared`).toBe(
+      declared
+    );
+  });
+
   // rust-cache keys on the lockfile, toolchain, and environment, not on
   // `[profile.*]`. A profile change then restores an exact-match entry full of
   // artifacts built under the old profile, cargo rebuilds every crate, and the
