@@ -27,6 +27,7 @@ import { RuntimeConnectionManager } from '../../../src/services/runtime-client/r
 import { LEGACY_HELLO_1_0_1_CHUNKS } from '../../fixtures/legacy-hello-1-0-1';
 import { insertTestUser } from '../../support/factories';
 import { serveFakeRuntime } from '../../support/fake-runtime-host';
+import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 import {
   FakeRuntimeDefinition,
   fixedConsent,
@@ -164,9 +165,7 @@ async function startHub(options: StartHubOptions = {}) {
       })
     )
   );
-  app.listen(0);
-  const port = (app.server as { port?: number } | null)?.port;
-  expect(port).toBeNumber();
+  const port = await listenOnEphemeralPort(app);
   stopServer = () => {
     void app.server?.stop(true);
   };

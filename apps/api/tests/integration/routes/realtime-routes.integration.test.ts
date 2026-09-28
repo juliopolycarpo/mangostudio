@@ -22,6 +22,7 @@ import { apiKeyGuard } from '../../../src/plugins/api-key-guard';
 import { authRoutes } from '../../../src/routes/auth';
 import { createRealtimeBus, type RealtimeBus } from '../../../src/services/realtime/realtime-bus';
 import { createApiTestApp } from '../../support/harness/create-api-test-app';
+import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 
 interface TestUser {
   id: string;
@@ -36,7 +37,7 @@ interface SocketClose {
 const sockets = new Set<WebSocket>();
 let stopServer: (() => void) | undefined;
 
-function startServer(
+async function startServer(
   dependencies: Parameters<typeof createRealtimeRoutes>[0] = {},
   options: { withApiKeyGuard?: boolean } = {}
 ) {
@@ -60,10 +61,7 @@ function startServer(
   // them so protocol cases can run without the limits; the cap itself is
   // asserted by listening on the exported application.
   const app = createApiTestApp(apiRoutes);
-  app.listen(0);
-  const port = (app.server as { port?: number } | null)?.port;
-
-  expect(port).toBeNumber();
+  const port = await listenOnEphemeralPort(app);
   stopServer = () => {
     // Bun can leave the stop promise pending after a server-initiated close.
     // Trigger abrupt shutdown; the following test starts on a fresh port.
@@ -174,7 +172,7 @@ afterEach(() => {
 describe('realtime WebSocket authentication', () => {
   it('does not resolve realtime sessions for neighboring HTTP routes', async () => {
     let sessionResolutions = 0;
-    const { httpUrl } = startServer({
+    const { httpUrl } = await startServer({
       resolveUserId: () => {
         sessionResolutions += 1;
         return Promise.resolve(null);
@@ -215,7 +213,7 @@ describe('realtime WebSocket authentication', () => {
   });
 
   it('rejects API keys without ever sending ready', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const apiKey = await getApiKeyApi().createApiKey({
       body: {
@@ -237,7 +235,7 @@ describe('realtime WebSocket authentication', () => {
   });
 
   it('keeps the 4401 WebSocket rejection when apiKeyGuard is mounted', async () => {
-    const { httpUrl, wsUrl } = startServer({}, { withApiKeyGuard: true });
+    const { httpUrl, wsUrl } = await startServer({}, { withApiKeyGuard: true });
     const user = await signUp(httpUrl);
     const apiKey = await getApiKeyApi().createApiKey({
       body: {
@@ -280,7 +278,7 @@ describe('realtime WebSocket origins and liveness', () => {
     // nothing in the handshake may depend on one. Duplicated and unknown keys
     // are the shapes a proxy or a future client would introduce, and a query
     // parser that starts rejecting or reshaping them must not reach this route.
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
 
     for (const suffix of ['', '?topic=a&topic=b', '?unexpected=1&unexpected=2&other=']) {
@@ -295,7 +293,7 @@ describe('realtime WebSocket origins and liveness', () => {
   // the same cfg.corsOrigins but is off under NODE_ENV=test — do not model a
   // test of that one on this one. See apps/api/tests/unit/auth.test.ts.
   it('accepts configured and absent origins but rejects other browser origins', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const acceptedOrigins = ['http://localhost:3001', 'http://127.0.0.1:3001'];
 
@@ -338,7 +336,7 @@ describe('realtime WebSocket origins and liveness', () => {
       },
     });
 
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
 
     const configuredClient = connect(wsUrl, {
@@ -367,7 +365,7 @@ describe('realtime WebSocket origins and liveness', () => {
   // the unisolated integration lane, before whichever test file happens to load
   // its own config. A Set captured at construction rejects this handshake.
   it('accepts an origin the config gains after the routes were built', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
 
     loadConfigForTest({
@@ -392,7 +390,7 @@ describe('realtime WebSocket origins and liveness', () => {
   // "trust everything": an origin no config ever named is still rejected after
   // the routes have been serving.
   it('still rejects an origin no config named', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
 
     const rejectedClient = connect(wsUrl, {
@@ -409,7 +407,7 @@ describe('realtime WebSocket origins and liveness', () => {
   });
 
   it('responds to application-level ping messages', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const client = connect(wsUrl, { Cookie: user.cookie });
 
@@ -423,7 +421,7 @@ describe('realtime WebSocket origins and liveness', () => {
 
 describe('realtime WebSocket subscriptions', () => {
   it('delivers user-scoped environment invalidations without a resource ownership lookup', async () => {
-    const { bus, httpUrl, wsUrl } = startServer();
+    const { bus, httpUrl, wsUrl } = await startServer();
     const firstUser = await signUp(httpUrl);
     const secondUser = await signUp(httpUrl);
     const firstClient = connect(wsUrl, { Cookie: firstUser.cookie });
@@ -462,7 +460,7 @@ describe('realtime WebSocket subscriptions', () => {
     // hub's discovery cache; a background probe announcing itself through that
     // topic would delete the answer it had just written and induce the next
     // probe. A subscriber to one must therefore not receive the other.
-    const { bus, httpUrl, wsUrl } = startServer();
+    const { bus, httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const client = connect(wsUrl, { Cookie: user.cookie });
 
@@ -492,7 +490,7 @@ describe('realtime WebSocket subscriptions', () => {
   });
 
   it('delivers settings invalidations only to subscribed sockets for the same user', async () => {
-    const { bus, httpUrl, wsUrl } = startServer();
+    const { bus, httpUrl, wsUrl } = await startServer();
     const firstUser = await signUp(httpUrl);
     const secondUser = await signUp(httpUrl);
     const firstClient = connect(wsUrl, { Cookie: firstUser.cookie });
@@ -537,7 +535,7 @@ describe('realtime WebSocket subscriptions', () => {
   });
 
   it('authorizes owned git topics without revealing foreign chats', async () => {
-    const { bus, httpUrl, wsUrl } = startServer();
+    const { bus, httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const otherUser = await signUp(httpUrl);
     const ownedChat = await createChat({ title: 'Owned', userId: user.id }, getDb());
@@ -584,7 +582,7 @@ describe('realtime WebSocket subscriptions', () => {
   });
 
   it('acknowledges idempotent re-subscribe of already-active topics', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const client = connect(wsUrl, { Cookie: user.cookie });
 
@@ -608,7 +606,7 @@ describe('realtime WebSocket subscriptions', () => {
     const ownershipGate = new Promise<void>((resolve) => {
       releaseOwnership = resolve;
     });
-    const { bus, httpUrl, wsUrl } = startServer({
+    const { bus, httpUrl, wsUrl } = await startServer({
       ownsChat: async () => {
         await ownershipGate;
         return true;
@@ -656,7 +654,7 @@ describe('realtime WebSocket subscriptions', () => {
         };
       },
     };
-    const { bus, httpUrl, wsUrl } = startServer({ bus: trackingBus });
+    const { bus, httpUrl, wsUrl } = await startServer({ bus: trackingBus });
     const user = await signUp(httpUrl);
     const client = connect(wsUrl, { Cookie: user.cookie });
 
@@ -687,7 +685,7 @@ describe('realtime WebSocket subscriptions', () => {
 
 describe('realtime WebSocket protocol errors', () => {
   it('reports unknown topics without closing the socket', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const client = connect(wsUrl, { Cookie: user.cookie });
 
@@ -705,7 +703,7 @@ describe('realtime WebSocket protocol errors', () => {
   });
 
   it('returns validation once and closes the second malformed message with 4400', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const client = connect(wsUrl, { Cookie: user.cookie });
 
@@ -728,7 +726,7 @@ describe('realtime WebSocket protocol errors', () => {
   });
 
   it('closes unexpected handler failures with 1011', async () => {
-    const { httpUrl, wsUrl } = startServer({
+    const { httpUrl, wsUrl } = await startServer({
       ownsChat: () => Promise.reject(new Error('database unavailable')),
     });
     const user = await signUp(httpUrl);
@@ -748,7 +746,7 @@ describe('realtime WebSocket protocol errors', () => {
 
 describe('realtime WebSocket limits', () => {
   it('caps user connections at eight and recovers the released slot', async () => {
-    const { httpUrl, wsUrl } = startServer();
+    const { httpUrl, wsUrl } = await startServer();
     const user = await signUp(httpUrl);
     const accepted = Array.from({ length: 8 }, () => connect(wsUrl, { Cookie: user.cookie }));
 
@@ -774,7 +772,7 @@ describe('realtime WebSocket limits', () => {
   });
 
   it('rejects subscription operations atomically above 64 active topics', async () => {
-    const { bus, httpUrl, wsUrl } = startServer({
+    const { bus, httpUrl, wsUrl } = await startServer({
       ownsChat: () => Promise.resolve(true),
     });
     const user = await signUp(httpUrl);
@@ -829,7 +827,7 @@ describe('realtime WebSocket limits', () => {
     let gateOwnership = false;
     let ownershipStarted = 0;
 
-    const { bus, httpUrl, wsUrl } = startServer({
+    const { bus, httpUrl, wsUrl } = await startServer({
       ownsChat: async () => {
         ownershipStarted += 1;
         if (gateOwnership) await ownershipGate;
@@ -902,7 +900,7 @@ describe('realtime WebSocket limits', () => {
 
   it('closes the twenty-first message in one second and releases the connection slot', async () => {
     const fixedTime = 10_000;
-    const { httpUrl, wsUrl } = startServer({ now: () => fixedTime });
+    const { httpUrl, wsUrl } = await startServer({ now: () => fixedTime });
     const user = await signUp(httpUrl);
     const client = connect(wsUrl, { Cookie: user.cookie });
 
@@ -935,7 +933,7 @@ describe('realtime WebSocket limits', () => {
     let gateOwnership = false;
     let ownershipCalls = 0;
 
-    const { httpUrl, wsUrl } = startServer({
+    const { httpUrl, wsUrl } = await startServer({
       now: () => clock,
       ownsChat: async () => {
         ownershipCalls += 1;
@@ -988,7 +986,7 @@ describe('realtime WebSocket limits', () => {
     let gateOwnership = false;
     let ownershipCalls = 0;
 
-    const { httpUrl, wsUrl } = startServer({
+    const { httpUrl, wsUrl } = await startServer({
       now: () => clock,
       ownsChat: async () => {
         ownershipCalls += 1;
