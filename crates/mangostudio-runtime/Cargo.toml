@@ -51,10 +51,10 @@ cap-std = { version = "4.0.3", default-features = false }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 # The CSPRNG behind `generate_serve_token` (see the `base64` comment above).
-# Already in the workspace graph at this exact version (ring 0.17's RNG shim
-# pins 0.2, rand 0.10 pins 0.4; this crate is the uncontested consumer of 0.3,
-# alongside jsonschema's `ahash` — see `deny.toml`), so this adds no new
-# version for `cargo deny`'s duplicate check to catch either.
+# Shares 0.4 with rand 0.10 (tungstenite's frame-masking key) and uuid, so it
+# adds no new version for `cargo deny`'s duplicate check to catch either. The
+# graph still holds three majors: ring 0.17's RNG shim pins 0.2 and
+# jsonschema's `ahash` pins 0.3 — see `deny.toml`.
 getrandom = { version = "0.4", default-features = false }
 # `fs.glob` uses its brace, character-class, and recursive-wildcard parser,
 # while this crate owns traversal, dotfile rules, ordering, and path policy.

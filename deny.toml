@@ -72,10 +72,11 @@ skip = [
   { crate = "windows-sys@0.52.0", reason = "pulled in only by ring 0.17's RNG shim; our own windows-sys is 0.61" },
 
   # getrandom has three majors in the graph because three unrelated dependency chains each pin
-  # their own: ring 0.17 wants 0.2, rand 0.10 (tungstenite's frame-masking key) wants 0.4. We
-  # keep 0.3 uncontested — it's ahash's (via jsonschema), the chain most likely to move next.
+  # their own: ring 0.17 wants 0.2; rand 0.10 (tungstenite's frame-masking key), uuid, and
+  # mangostudio-runtime's own CSPRNG use 0.4. We keep 0.3 uncontested — it is now only ahash's
+  # (via jsonschema), the chain most likely to move next; when it moves to 0.4, drop the 0.4 skip.
   { crate = "getrandom@0.2.17", reason = "ring 0.17's RNG shim; ring does not track getrandom's latest major" },
-  { crate = "getrandom@0.4.3", reason = "pulled in by rand 0.10, used by tungstenite only for WebSocket frame masking keys" },
+  { crate = "getrandom@0.4.3", reason = "shared by rand 0.10 (tungstenite frame masking), uuid, and mangostudio-runtime's CSPRNG" },
 
   # r-efi is a UEFI target binding, unreachable on every platform this crate builds for. It is
   # duplicated only because it rides along as getrandom 0.3's and 0.4's own UEFI shim; skipping
