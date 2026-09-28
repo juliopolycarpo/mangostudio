@@ -52,7 +52,10 @@ export function readTomlStringSections(filePath: string): TomlStringSections {
 
 /**
  * Read a full TOML document, preserving every value type, with a missing file
- * treated as an empty document. // Usage: const doc = readTomlDocument(configPath);
+ * treated as an empty document.
+ *
+ * @example
+ * const doc = readTomlDocument(configPath);
  */
 export function readTomlDocument(filePath: string): Record<string, unknown> {
   const content = readUtf8FileOrNull(filePath);
@@ -62,7 +65,10 @@ export function readTomlDocument(filePath: string): Record<string, unknown> {
 
 /**
  * Parse a complete TOML document without reading from disk. Throws on
- * malformed TOML. // Usage: const doc = parseTomlDocument('[auth]\nsecret = "s"');
+ * malformed TOML.
+ *
+ * @example
+ * const doc = parseTomlDocument('[auth]\nsecret = "s"');
  */
 export function parseTomlDocument(content: string): Record<string, unknown> {
   const parsed = parseToml(content);
@@ -71,7 +77,9 @@ export function parseTomlDocument(content: string): Record<string, unknown> {
 
 /**
  * Serialize a document to TOML text, the write half of a read-modify-write.
- * // Usage: writeFileAtomic(path, stringifyTomlDocument(doc));
+ *
+ * @example
+ * const toml = stringifyTomlDocument({ auth: { secret: 's' } });
  */
 export function stringifyTomlDocument(doc: Record<string, unknown>): string {
   return stringifyToml(doc);
@@ -80,7 +88,9 @@ export function stringifyTomlDocument(doc: Record<string, unknown>): string {
 /**
  * Set `key` in `section` of `doc`, preserving the rest of the document.
  * Mutates `doc` in place so a read-modify-write keeps unrelated config intact.
- * // Usage: setTomlSectionValue(doc, 'machine', 'installs_enabled', true)
+ *
+ * @example
+ * setTomlSectionValue(doc, 'machine', 'installs_enabled', true);
  */
 export function setTomlSectionValue(
   doc: Record<string, unknown>,

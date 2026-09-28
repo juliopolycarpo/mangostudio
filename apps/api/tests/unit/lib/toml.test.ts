@@ -14,7 +14,9 @@ const ADAPTER = 'src/lib/toml.ts';
 
 /** The TOML library, spelled so this file does not import-match itself. */
 const TOML_LIBRARY = ['smol', 'toml'].join('-');
-const TOML_LIBRARY_SPECIFIER = new RegExp(`(?:from|import)\\s*\\(?\\s*['"]${TOML_LIBRARY}['"]`);
+const TOML_LIBRARY_SPECIFIER = new RegExp(
+  `\\b(?:from|import|require)\\s*\\(?\\s*['"]${TOML_LIBRARY}['"]`
+);
 
 function sourceFilesUnder(directory: string): string[] {
   return readdirSync(directory, { recursive: true, encoding: 'utf8' })
@@ -41,6 +43,17 @@ describe('parseTomlDocument', () => {
 });
 
 describe('TOML library boundary', () => {
+  it('recognizes static imports, dynamic imports, and CommonJS requires', () => {
+    for (const source of [
+      `import { parse } from '${TOML_LIBRARY}'`,
+      `import '${TOML_LIBRARY}'`,
+      `await import('${TOML_LIBRARY}')`,
+      `require('${TOML_LIBRARY}')`,
+    ]) {
+      expect(TOML_LIBRARY_SPECIFIER.test(source), source).toBe(true);
+    }
+  });
+
   it(`imports ${TOML_LIBRARY} only from ${ADAPTER}`, () => {
     const offenders = ['src', 'tests']
       .flatMap((directory) => sourceFilesUnder(join(API_ROOT, directory)))
