@@ -1,6 +1,6 @@
 /**
  * `bun run protocol:release:prepare <version>`: moves every protocol manifest
- * to one version, refreshes Cargo.lock, and regenerates
+ * to one version, refreshes Cargo.lock and the fuzz workspace's own lock, and regenerates
  * `packages/protocol/CHANGELOG.md` with the new tag applied to the unreleased
  * commits. Nothing is committed or tagged; the printed commands do that after
  * review.
@@ -18,6 +18,9 @@ import { PROTOCOL_CHANGELOG, PROTOCOL_CLIFF_CONFIG, protocolTag } from '../lib/p
 import { fatal, runCommand, runSequential } from '../lib/runner';
 import { assertLockstep, readVersions, writeVersions } from './versions';
 
+/** The excluded fuzz workspace's manifest, whose own lock also records the protocol version. */
+const FUZZ_MANIFEST = 'crates/mango-protocol/fuzz/Cargo.toml';
+
 const version = process.argv[2];
 if (!version) {
   fatal('Usage: bun run protocol:release:prepare <version>');
@@ -28,6 +31,14 @@ const tag = protocolTag(version);
 await writeVersions(version);
 const results = await runSequential([
   () => runCommand('cargo update -w', ['cargo', 'update', '--workspace'], { cwd: ROOT_DIR }),
+  // The fuzz workspace is excluded from the root one and records mango-protocol's version in
+  // its own lock; without this the next `cargo metadata --locked` on it exits 101.
+  () =>
+    runCommand(
+      'cargo update -w (fuzz)',
+      ['cargo', 'update', '--workspace', '--manifest-path', FUZZ_MANIFEST],
+      { cwd: ROOT_DIR }
+    ),
   () =>
     runCommand(
       'git-cliff',

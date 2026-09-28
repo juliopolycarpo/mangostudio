@@ -76,6 +76,13 @@ jobs:
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: cargo-fuzz
+      # `cargo fuzz` has no `--locked` and shells out to a plain `cargo build`,
+      # which would quietly re-resolve and rewrite a stale Cargo.lock, so the
+      # run would fuzz dependency versions nobody committed. Resolving with
+      # `--locked` first turns that into a failure.
+      - name: Fail on a stale fuzz lockfile
+        working-directory: crates/mango-protocol/fuzz
+        run: cargo +nightly metadata --locked --all-features --format-version 1 > /dev/null
       - name: Run the target for 5 minutes
         working-directory: crates/mango-protocol/fuzz
         # Matrix values reach the shell through `env:`, never through `${{ }}`

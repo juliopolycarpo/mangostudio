@@ -864,3 +864,48 @@ exit 0
     expect(run('absent', 'true').ghCalls).toContain('--prerelease');
   });
 });
+
+describe('the fuzz workspace lockfile', () => {
+  // The fuzz crate is excluded from the root workspace and keeps its own Cargo.lock, so a change
+  // to crates/mango-protocol/Cargo.toml (a dependency or its requirement) or to the workspace
+  // version leaves it stale in a pull request that never touches fuzz/. `cargo fuzz` cannot
+  // refuse that itself, so the gates below have to.
+
+  test('cargo-shim resolves the fuzz workspace with --locked, not --no-deps', () => {
+    // `--no-deps` skips the resolve, so it passes on a stale lock.
+    const job = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'fuzz-workspace');
+    const command = /run: (cargo metadata .*fuzz\/Cargo\.toml.*)/.exec(job)?.[1];
+    expect(command, 'the fuzz-workspace job has no `cargo metadata` step').toBeDefined();
+    expect(command, '--no-deps skips the resolve, so a stale lock passes').not.toContain(
+      '--no-deps'
+    );
+    expect(command).toContain('--locked');
+    expect(command).toContain('--all-features');
+  });
+
+  test('protocol-fuzz refuses a stale lock before cargo-fuzz can rewrite it', () => {
+    // `cargo fuzz` has no `--locked`, so the guard is a `cargo metadata --locked`
+    // step that has to run before the fuzz step.
+    const steps = extractStepBlocks(
+      extractJobBlock(readText('.github/workflows/protocol-fuzz.yml'), 'fuzz')
+    );
+    const guard = steps.findIndex((step) => /cargo \+nightly metadata .*--locked/.test(step));
+    const fuzz = steps.findIndex((step) => step.includes('cargo +nightly fuzz run'));
+    expect(
+      guard,
+      'no `cargo +nightly metadata --locked` step in protocol-fuzz.yml'
+    ).toBeGreaterThan(-1);
+    expect(guard, 'the --locked guard must precede the `cargo fuzz run` step').toBeLessThan(fuzz);
+    expect(steps[guard]).toContain('--all-features');
+  });
+
+  test('release-prepare refreshes the fuzz lock along with the root one', () => {
+    // The fuzz lock records mango-protocol's version, so a bump that only runs
+    // `cargo update -w` at the root leaves `cargo metadata --locked` failing on it.
+    const script = readText('scripts/protocol/release-prepare.ts');
+    expect(script, 'release-prepare.ts never updates the fuzz workspace lock').toMatch(
+      /'--manifest-path',\s*FUZZ_MANIFEST/
+    );
+    expect(script).toContain("'crates/mango-protocol/fuzz/Cargo.toml'");
+  });
+});
