@@ -53,6 +53,11 @@ export const DISALLOWED_WORKSPACE_DEPENDENCIES = [
     packageName: '@tanstack/router-devtools',
     reason: 'Router devtools are not mounted by the application shell.',
   },
+  {
+    workspacePath: 'apps/api',
+    packageName: 'kysely-bun-sqlite',
+    reason: 'The project-owned Bun adapter uses Kysely SQLite driver and connection locking.',
+  },
 ] as const satisfies readonly DisallowedWorkspaceDependency[];
 
 interface RetiredDependencyRule {

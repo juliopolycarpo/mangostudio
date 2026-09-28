@@ -10,7 +10,7 @@ import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Kysely, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
-import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
+import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 
 const TARGET = '052_clear_stale_divergence_acks';
@@ -32,7 +32,7 @@ async function migrateTo(name: string): Promise<void> {
 
 beforeEach(() => {
   sqlite = new SQLiteDatabase(':memory:');
-  db = new Kysely({ dialect: new BunSqliteDialect({ database: sqlite }) });
+  db = new Kysely({ dialect: createBunSqliteDialect(sqlite) });
 });
 
 afterEach(() => {
