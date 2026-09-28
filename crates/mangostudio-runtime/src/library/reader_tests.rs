@@ -10,11 +10,15 @@
 use std::cell::Cell;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 
+#[cfg(unix)]
 use tokio_util::sync::CancellationToken;
 
 use super::*;
+#[cfg(unix)]
 use crate::library::collation::locale_compare;
 
 #[cfg(unix)]
