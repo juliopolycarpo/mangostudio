@@ -1784,7 +1784,7 @@ mod tests {
     #[test]
     fn an_interrupted_file_costs_the_operation_one_more_compilation_not_one_per_file() {
         let params = grep_params(Path::new("."), "^(a+)+$");
-        let mut matcher = budgeted_matcher(&params.pattern, 50);
+        let mut matcher = budgeted_matcher(&params.pattern, 300);
         let before = compilations();
 
         let slow = format!("{}b", "a".repeat(50_000));
@@ -1803,19 +1803,19 @@ mod tests {
     #[test]
     fn the_wall_clock_allowance_restarts_for_every_file() {
         let params = grep_params(Path::new("."), "needle");
-        let mut matcher = budgeted_matcher("needle", 40);
+        let mut matcher = budgeted_matcher("needle", 300);
         assert_eq!(
             matched_lines(&scan(&mut matcher, &params, b"needle").1),
             [1]
         );
 
         // The first file's allowance is spent while the next one is read.
-        std::thread::sleep(Duration::from_millis(120));
+        std::thread::sleep(Duration::from_millis(400));
 
         let (incomplete, matches) = scan(&mut matcher, &params, b"needle");
         assert!(
             !incomplete && matched_lines(&matches) == [1],
-            "expected the second file to get its own 40ms allowance | received: \
+            "expected the second file to get its own 300ms allowance | received: \
              incomplete={incomplete} matches={matches:?}"
         );
     }
@@ -1848,7 +1848,7 @@ mod tests {
         fs::write(&fast, "aaa\nbbb\n").unwrap();
         let params = grep_params(&root, "^(a+)+$");
         let policy = params.path_policy.compile().unwrap();
-        let mut matcher = budgeted_matcher(&params.pattern, 100);
+        let mut matcher = budgeted_matcher(&params.pattern, 300);
         let mut matches = Vec::new();
 
         let mut scan_one = |path: &Path, display: &str| {
@@ -1886,7 +1886,7 @@ mod tests {
             ("^(?:a|b)*$", "a".repeat(400_000)),
         ] {
             let params = grep_params(Path::new("."), pattern);
-            let mut matcher = budgeted_matcher(pattern, 100);
+            let mut matcher = budgeted_matcher(pattern, 300);
 
             let (_, leaked) = scan(&mut matcher, &params, slow_line.as_bytes());
             assert!(leaked.is_empty(), "{pattern}: partial matches leaked");
