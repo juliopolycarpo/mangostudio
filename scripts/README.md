@@ -20,7 +20,7 @@ scripts/
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
-├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts)
+├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts)
 ├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge, Rust lane relevance and qualification selection)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
@@ -195,6 +195,7 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 | ---------------------- | ------------------------------------------------------------------------------------- |
 | `startup.ts`           | Median process-start → first healthy `GET /api/health` of a binary                    |
 | `runtime-handshake.ts` | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max |
+| `grep.ts`              | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel  |
 
 ```bash
 bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 10
@@ -220,6 +221,16 @@ file into every sample. The numbers it produced are recorded under "Runtime star
 ```bash
 bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --runs 30
 bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --fresh-copy
+```
+
+`grep.ts` drives `fs.grep` on the real runtime binary, one fresh child (and `MANGO_HOME`) per
+sample so peak RSS (`VmHWM`, Linux) belongs to that scenario alone. Each sample times only the
+request. `cancel` aborts a catastrophic match after 200 ms and reports the abort-to-answer
+latency. Run the same command on a base and a head binary on a quiet machine to compare them.
+
+```bash
+bun run scripts/bench/grep.ts target/release/mangostudio-runtime --runs 15
+bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
 ```
 
 ## runtime-contract/ — the boundary as files
