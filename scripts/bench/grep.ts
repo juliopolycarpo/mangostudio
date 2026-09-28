@@ -21,13 +21,14 @@
  * Usage:
  *   bun run scripts/bench/grep.ts                        # newest target/ build
  *   bun run scripts/bench/grep.ts <binary> --runs 15
+ *   bun run scripts/bench/grep.ts base=<old-binary> head=<new-binary> --runs 15 --warmup 3
  *   bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
  *   bun run scripts/bench/grep.ts <binary> --large-mib 64
  *   bun run scripts/bench/grep.ts <binary> --restricted  # capability walk, as under a path policy
  */
 
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
-import { arch, cpus, platform, release, tmpdir, totalmem } from 'node:os';
+import { arch, cpus, loadavg, platform, release, tmpdir, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Session } from '@mangostudio/protocol';
 import { spawnPort } from '@mangostudio/protocol/spawn';
@@ -71,10 +72,12 @@ interface Fixture {
 }
 
 function printHelp(): never {
-  log(`Usage: bun run scripts/bench/grep.ts [binary] [--runs N] [--scenario a,b] [--large-mib N] [--restricted] [--json]
+  log(`Usage: bun run scripts/bench/grep.ts [[label=]binary ...] [--runs N] [--warmup N] [--scenario a,b] [--large-mib N] [--restricted] [--json]
 
-  [binary]         A mangostudio-runtime executable (default: newest of target/release, target/debug)
+  [label=]binary   mangostudio-runtime executables; several are interleaved run by run
+                   (default: newest of target/release, target/debug)
   --runs N         Measured runs per scenario (default 15)
+  --warmup N       Untimed runs per binary before measuring (default 0)
   --scenario LIST  Comma-separated subset of: ${SCENARIOS.join(', ')}
   --large-mib N    Size of the large-file fixture (default 32)
   --restricted     Send a path policy, as a restricted chat does (capability walk and reads)
@@ -257,18 +260,36 @@ function summarize(samples: readonly Sample[], pick: (sample: Sample) => number)
   return summarizeLatencies(samples.map(pick));
 }
 
-async function environmentNotes(binary: string) {
+interface Candidate {
+  readonly label: string;
+  readonly binary: string;
+}
+
+/** `label=path` or a bare path (labelled `binary`); labels keep interleaved results apart. */
+function parseCandidate(argument: string): Candidate {
+  const separator = argument.indexOf('=');
+  if (separator <= 0) return { label: 'binary', binary: resolve(argument) };
+  return { label: argument.slice(0, separator), binary: resolve(argument.slice(separator + 1)) };
+}
+
+async function environmentNotes(candidates: readonly Candidate[]) {
   const cpu = cpus();
-  const size = (await stat(binary)).size;
-  const version = await Bun.spawn([binary, '--version'], { stdout: 'pipe' }).stdout.text();
+  const binaries = await Promise.all(
+    candidates.map(async ({ label, binary }) => ({
+      label,
+      binary,
+      binaryBytes: (await stat(binary)).size,
+      runtimeVersion: (
+        await Bun.spawn([binary, '--version'], { stdout: 'pipe' }).stdout.text()
+      ).trim(),
+    }))
+  );
   return {
     os: `${platform()} ${release()} ${arch()}`,
     cpu: `${cpu[0]?.model.trim() ?? 'unknown'} x${cpu.length}`,
     memoryGiB: Math.round(totalmem() / 2 ** 30),
     bun: Bun.version,
-    binary,
-    binaryBytes: size,
-    runtimeVersion: version.trim(),
+    binaries,
     pattern: PATTERN,
     restricted,
   };
@@ -276,22 +297,37 @@ async function environmentNotes(binary: string) {
 
 const { flags, values, positional } = parseArgs({
   booleanFlags: ['--json', '--restricted'],
-  valueFlags: ['--runs', '--scenario', '--large-mib'],
+  valueFlags: ['--runs', '--warmup', '--scenario', '--large-mib'],
 });
 if (flags['--help']) printHelp();
 
-const supplied = positional.shift();
-assertNoUnexpectedArguments(positional);
-const binary = supplied ? resolve(supplied) : await newestWorkspaceBuild();
-if (!binary)
+const candidates: Candidate[] = positional.splice(0).map(parseCandidate);
+if (candidates.length === 0) {
+  const newest = await newestWorkspaceBuild();
+  if (!newest) {
+    fatal(
+      'No runtime binary. Build one with `cargo build --release -p mangostudio-runtime --locked`.'
+    );
+  }
+  candidates.push({ label: 'binary', binary: newest });
+}
+for (const { binary } of candidates) {
+  if (!(await Bun.file(binary).exists())) fatal(`No such binary: ${binary}`);
+}
+const labels = new Set(candidates.map(({ label }) => label));
+if (labels.size !== candidates.length) {
   fatal(
-    'No runtime binary. Build one with `cargo build --release -p mangostudio-runtime --locked`.'
+    `binary labels must be unique | received: ${candidates.map(({ label }) => label).join(', ')}`
   );
-if (!(await Bun.file(binary).exists())) fatal(`No such binary: ${binary}`);
+}
 
 const runs = Number(values['--runs'] ?? 15);
 if (!Number.isInteger(runs) || runs < 1) {
   fatal(`\`--runs\` must be a positive integer | received: ${values['--runs']}`);
+}
+const warmup = Number(values['--warmup'] ?? 0);
+if (!Number.isInteger(warmup) || warmup < 0) {
+  fatal(`\`--warmup\` must be a non-negative integer | received: ${values['--warmup']}`);
 }
 const largeMib = Number(values['--large-mib'] ?? 32);
 if (!Number.isInteger(largeMib) || largeMib < 1) {
@@ -308,7 +344,9 @@ const restricted = flags['--restricted'] ?? false;
 
 if (!quiet) {
   header('fs.grep benchmark');
-  info(`${binary} — ${runs} run(s) per scenario: ${scenarios.join(', ')}`);
+  info(
+    `${candidates.map(({ label, binary }) => `${label}=${binary}`).join(' vs ')} — ${runs} run(s) per scenario (after ${warmup} warm-up), interleaved: ${scenarios.join(', ')}`
+  );
 }
 
 const scratch = await mkdtemp(join(tmpdir(), 'mango-grep-bench-'));
@@ -329,32 +367,51 @@ try {
       Math.max(fixture.bytes, 1) + 1,
       restricted ? scratch : undefined
     );
-    const samples: Sample[] = [];
-    for (let run = 0; run < runs; run += 1) {
-      const home = join(scratch, `home-${scenario}-${run}`);
-      const sample = await withRuntime(binary, home, (session, pid) =>
-        scenario === 'cancel'
-          ? cancelledGrep(session, pid, params)
-          : timedGrep(session, pid, params)
-      );
-      samples.push(sample);
-      if (!quiet) info(`  ${scenario} run ${run + 1}/${runs}: ${sample.elapsedMs.toFixed(1)} ms`);
+    const samples = new Map<string, Sample[]>(candidates.map(({ label }) => [label, []]));
+    const loadBefore = loadavg()[0] ?? 0;
+    // Interleaved (A B A B ...) so drift in machine load hits every binary alike.
+    for (let run = -warmup; run < runs; run += 1) {
+      for (const { label, binary } of candidates) {
+        const home = join(scratch, `home-${scenario}-${label}-${run + warmup}`);
+        const sample = await withRuntime(binary, home, (session, pid) =>
+          scenario === 'cancel'
+            ? cancelledGrep(session, pid, params)
+            : timedGrep(session, pid, params)
+        );
+        if (run < 0) continue;
+        samples.get(label)?.push(sample);
+        if (!quiet) {
+          info(`  ${scenario} ${label} run ${run + 1}/${runs}: ${sample.elapsedMs.toFixed(1)} ms`);
+        }
+      }
     }
-    const first = samples[0] as Sample;
-    const elapsed = summarize(samples, (sample) => sample.elapsedMs);
+    const perBinary: Record<string, unknown> = {};
+    for (const [label, own] of samples) {
+      const first = own[0] as Sample;
+      const elapsed = summarize(own, (sample) => sample.elapsedMs);
+      perBinary[label] = {
+        filesScanned: first.filesScanned,
+        matches: first.matches,
+        elapsedMs: { ...elapsed, ...spread(own.map((sample) => sample.elapsedMs)) },
+        peakRssKb: {
+          ...summarize(own, (sample) => sample.peakRssKb),
+          ...spread(own.map((sample) => sample.peakRssKb)),
+        },
+        ...(scenario === 'large-file'
+          ? {
+              throughputMiBPerS:
+                Math.round((fixture.bytes / 2 ** 20 / (elapsed.median / 1000)) * 10) / 10,
+            }
+          : {}),
+        rawElapsedMs: own.map((sample) => Math.round(sample.elapsedMs * 10) / 10),
+        rawPeakRssKb: own.map((sample) => sample.peakRssKb),
+      };
+    }
     results[scenario] = {
       fixtureBytes: fixture.bytes,
-      filesScanned: first.filesScanned,
-      matches: first.matches,
-      elapsedMs: { ...elapsed, ...spread(samples.map((sample) => sample.elapsedMs)) },
-      peakRssKb: summarize(samples, (sample) => sample.peakRssKb),
-      ...(scenario === 'large-file'
-        ? {
-            throughputMiBPerS:
-              Math.round((fixture.bytes / 2 ** 20 / (elapsed.median / 1000)) * 10) / 10,
-          }
-        : {}),
-      rawElapsedMs: samples.map((sample) => Math.round(sample.elapsedMs * 10) / 10),
+      loadAverage1mBefore: loadBefore,
+      loadAverage1mAfter: loadavg()[0] ?? 0,
+      binaries: perBinary,
     };
   }
 } catch (error) {
@@ -364,5 +421,9 @@ try {
 }
 
 console.log(
-  JSON.stringify({ environment: await environmentNotes(binary), runs, scenarios: results }, null, 2)
+  JSON.stringify(
+    { environment: await environmentNotes(candidates), runs, warmup, scenarios: results },
+    null,
+    2
+  )
 );
