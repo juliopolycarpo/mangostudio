@@ -3,6 +3,17 @@
 // token, so every value it derives comes from the GitHub API — never from
 // artifact content, which stays untrusted until render-report.ts validates it
 // against the report context this module produces.
+//
+// One deliberate exception: the base SHA the head envelope recorded at CI time.
+// It selects which main commit the PR is compared against, so the baseline is
+// the one that was actually tested rather than the live base tip. The value is
+// read by metrics-archive.mjs, accepted only as a 40-hex SHA, and can only pick a
+// commit that has its own main-push CI run — a PR can therefore choose which
+// main SHA it is compared with, which is acceptable for a report-only comment.
+// The baseline archive is a main-push artifact, but it is still read (for
+// completeness only) as untrusted bytes by the same bounded reader.
+
+import { baselineIncompleteReason, recordedBaseSha } from './metrics-archive.mjs';
 
 /** Artifact name shared with the collector (pinned to metrics-envelope.ts by test). */
 export const QA_METRICS_ARTIFACT_NAME = 'qa-metrics';
@@ -54,16 +65,54 @@ async function downloadMetricsArchive(github, context, runId) {
   return { archive, reason: null };
 }
 
-async function findBaselineRun(github, context, baseSha) {
+/**
+ * A main-push CI run is a usable baseline candidate when it finished for the
+ * exact base SHA on main and was not cancelled. Any other conclusion (success,
+ * failure, timed_out, ...) qualifies: a red run can still carry a complete
+ * metrics artifact, and the artifact itself is validated downstream.
+ */
+const isBaselineCandidate = (run, baseSha) =>
+  run.head_sha === baseSha &&
+  run.event === 'push' &&
+  run.head_branch === 'main' &&
+  run.status === 'completed' &&
+  run.conclusion !== 'cancelled';
+
+async function listBaselineRuns(github, context, baseSha) {
   const { data } = await github.rest.actions.listWorkflowRuns({
     ...context.repo,
     workflow_id: CI_WORKFLOW_FILE,
     head_sha: baseSha,
     event: 'push',
-    status: 'success',
+    status: 'completed',
     per_page: 10,
   });
-  return data.workflow_runs?.[0] ?? null;
+  return (data.workflow_runs ?? []).filter((run) => isBaselineCandidate(run, baseSha));
+}
+
+/**
+ * Newest completed, non-cancelled main-push run for `baseSha` that still has a
+ * downloadable, readable and complete qa-metrics artifact. Without one, `archive` is null and `reason`
+ * says why; `run` stays the newest candidate (or null) so its job durations can
+ * still be reported.
+ */
+async function findBaseline(github, context, baseSha) {
+  const runs = await listBaselineRuns(github, context, baseSha);
+  if (runs.length === 0) {
+    return {
+      run: null,
+      archive: null,
+      reason: `no completed, non-cancelled main CI run found for base ${baseSha}`,
+    };
+  }
+  let reason = null;
+  for (const run of runs) {
+    const download = await downloadMetricsArchive(github, context, run.id);
+    const rejected = download.reason ?? baselineIncompleteReason(download.archive, baseSha);
+    if (!rejected) return { run, archive: download.archive, reason: null };
+    reason = `main CI run ${run.id} for base ${baseSha}: ${rejected}`;
+  }
+  return { run: runs[0], archive: null, reason };
 }
 
 const boundedText = (value, maxLength, fallback) => {
@@ -150,9 +199,10 @@ async function findPreviousPullRequestRun(github, context, run, pullRequest) {
 /**
  * Resolve everything the publisher needs from trusted API data: the open PR
  * matching the triggering run's exact head SHA, the head qa-metrics archive
- * from that run, and the baseline archive from the successful main-push CI
- * run for the PR's base SHA (exact-base only — a missing baseline is reported
- * as unavailable, never approximated).
+ * from that run, and the baseline archive from the completed (not cancelled)
+ * main-push CI run for the base SHA the head envelope recorded at CI time
+ * (exact-base only — a missing baseline is reported as unavailable, never
+ * approximated).
  *
  * Returns `{ skip }` when there is nothing to publish (non-PR run, stale head,
  * or closed PR).
@@ -171,21 +221,25 @@ export async function resolveReportInputs({ github, context }) {
   }
 
   const head = await downloadMetricsArchive(github, context, run.id);
-  const [baselineRun, previousRun] = await Promise.all([
-    findBaselineRun(github, context, pullRequest.base.sha),
+  // The baseline is the base the head was actually collected against; the live
+  // base tip may have advanced since and was never tested. Without a usable
+  // recorded base the baseline is unavailable, and the live base only labels the
+  // commit range (it never selects a baseline).
+  const recorded = recordedBaseSha(head.archive);
+  const baseSha = recorded.sha ?? pullRequest.base.sha;
+  const unavailableReason = `baseline unavailable: ${recorded.reason}`;
+  const [baseline, previousRun] = await Promise.all([
+    recorded.sha
+      ? findBaseline(github, context, recorded.sha)
+      : { run: null, archive: null, reason: unavailableReason },
     findPreviousPullRequestRun(github, context, run, pullRequest),
   ]);
-  const base = baselineRun
-    ? await downloadMetricsArchive(github, context, baselineRun.id)
-    : { archive: null, reason: `no successful main CI run found for base ${pullRequest.base.sha}` };
+  const base = { archive: baseline.archive, reason: baseline.reason };
   const [headDurations, baseDurations, previousDurations] = await Promise.all([
     collectCiDurations(github, context, run.id),
-    baselineRun
-      ? collectCiDurations(github, context, baselineRun.id)
-      : unavailableDurations(
-          null,
-          `no successful main CI run found for base ${pullRequest.base.sha}`
-        ),
+    baseline.run
+      ? collectCiDurations(github, context, baseline.run.id)
+      : unavailableDurations(null, baseline.reason),
     previousRun.run
       ? collectCiDurations(github, context, previousRun.run.id)
       : unavailableDurations(null, previousRun.error),
@@ -204,7 +258,7 @@ export async function resolveReportInputs({ github, context }) {
       repository: `${context.repo.owner}/${context.repo.repo}`,
       prNumber: pullRequest.number,
       headSha: run.head_sha,
-      baseSha: pullRequest.base.sha,
+      baseSha,
       runUrl: run.html_url,
       headArtifact: { found: head.archive !== null, reason: head.reason },
       baseArtifact: { found: base.archive !== null, reason: base.reason },
