@@ -29,7 +29,7 @@
     "@anthropic-ai/sdk": "^0.128.0",
     "@better-auth/api-key": "1.7.6",
     "@elysia/cors": "2.0.0-beta.1",
-    "@elysia/openapi": "2.0.0-beta.1",
+    "@elysia/openapi": "2.0.0-beta.4",
     "@elysia/static": "2.0.0-beta.2",
     "@google/genai": "^2.24.0",
     "@mangostudio/protocol": "workspace:*",
