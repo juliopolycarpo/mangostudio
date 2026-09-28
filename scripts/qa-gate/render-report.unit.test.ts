@@ -68,7 +68,7 @@ describe('render-report baseline handling', () => {
     const envelope = headEnvelope();
     const recorded = head.recordedBaseSha === undefined ? BASE_SHA : head.recordedBaseSha;
     await writeFile(join(dir, 'head.json'), JSON.stringify({ ...envelope, baseSha: recorded }));
-    const args = ['context.json', '--head', 'head.json'];
+    const args = ['context.json', '--part', 'metrics', '--head', 'head.json'];
     if (base.text !== null) {
       await writeFile(join(dir, 'base.json'), base.text);
       args.push('--base', 'base.json');
@@ -170,7 +170,17 @@ describe('render-report head envelope base', () => {
     );
     await writeFile(join(dir, 'base.json'), validBase());
     const proc = Bun.spawn(
-      ['bun', RENDER_REPORT, 'context.json', '--head', 'head.json', '--base', 'base.json'],
+      [
+        'bun',
+        RENDER_REPORT,
+        'context.json',
+        '--part',
+        'metrics',
+        '--head',
+        'head.json',
+        '--base',
+        'base.json',
+      ],
       { cwd: dir, stdout: 'pipe', stderr: 'pipe' }
     );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
