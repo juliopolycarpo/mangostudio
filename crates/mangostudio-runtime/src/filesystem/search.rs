@@ -153,7 +153,9 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
     check_cancel(cancel)?;
     let policy = params.path_policy.compile()?;
     policy.check(&params.resolved_path)?;
-    validate_regex(&params.pattern, params.case_insensitive)?;
+    // Compiles the pattern once: it validates the request up front and its
+    // engine then serves every candidate file of this operation.
+    let mut matcher = GrepMatcher::new(&params.pattern, params.case_insensitive, cancel.clone())?;
     let (metadata, restricted_file, mut restricted_directory) = if policy.is_unrestricted() {
         (
             Some(fs::metadata(&params.resolved_path).map_err(|error| {
@@ -187,6 +189,7 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
             file,
             &params.resolved_path.to_string_lossy(),
             &params,
+            &mut matcher,
             cancel,
             &mut matches,
         )?;
@@ -197,6 +200,7 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
             &params.resolved_path.to_string_lossy(),
             &params,
             &policy,
+            &mut matcher,
             cancel,
             &mut matches,
         )?;
@@ -251,6 +255,7 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
                         file,
                         &search.display_path(&match_path),
                         &params,
+                        &mut matcher,
                         cancel,
                         &mut matches,
                     )?
@@ -260,6 +265,7 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
                         &search.display_path(&match_path),
                         &params,
                         &policy,
+                        &mut matcher,
                         cancel,
                         &mut matches,
                     )?
@@ -443,20 +449,14 @@ fn compile_glob(pattern: &str, cwd: &Path) -> Result<PathGlob, RemoteError> {
     })
 }
 
-fn validate_regex(pattern: &str, case_insensitive: bool) -> Result<(), RemoteError> {
+fn check_pattern_length(pattern: &str) -> Result<(), RemoteError> {
     let units = pattern.encode_utf16().count();
     if units > MAX_PATTERN_UTF16_UNITS {
         return Err(grep_pattern_error(format!(
             "Pattern is {units} characters, past the {MAX_PATTERN_UTF16_UNITS}-character limit."
         )));
     }
-    JavascriptRegex::new(
-        pattern,
-        case_insensitive,
-        CancellationToken::new(),
-        quickjs_heap_limit(pattern.len()),
-    )
-    .map(|_| ())
+    Ok(())
 }
 
 fn grep_pattern_error(message: impl Into<String>) -> RemoteError {
@@ -468,6 +468,7 @@ fn scan_file(
     display: &str,
     params: &GrepParams,
     policy: &CompiledPolicy,
+    matcher: &mut GrepMatcher,
     cancel: &CancellationToken,
     matches: &mut Vec<Value>,
 ) -> Result<bool, RemoteError> {
@@ -496,7 +497,7 @@ fn scan_file(
             return Ok(false);
         }
     };
-    scan_bytes(observed.bytes, display, params, cancel, matches)
+    scan_bytes(observed.bytes, display, params, matcher, cancel, matches)
 }
 
 /// Scans a file that was opened relative to a verified directory capability.
@@ -507,6 +508,7 @@ fn scan_opened_file(
     mut file: fs::File,
     display: &str,
     params: &GrepParams,
+    matcher: &mut GrepMatcher,
     cancel: &CancellationToken,
     matches: &mut Vec<Value>,
 ) -> Result<bool, RemoteError> {
@@ -549,13 +551,14 @@ fn scan_opened_file(
     if bytes.len() > params.max_file_size_bytes {
         return Ok(false);
     }
-    scan_bytes(bytes, display, params, cancel, matches)
+    scan_bytes(bytes, display, params, matcher, cancel, matches)
 }
 
 fn scan_bytes(
     bytes: Vec<u8>,
     display: &str,
     params: &GrepParams,
+    matcher: &mut GrepMatcher,
     cancel: &CancellationToken,
     matches: &mut Vec<Value>,
 ) -> Result<bool, RemoteError> {
@@ -563,13 +566,7 @@ fn scan_bytes(
         return Ok(false);
     }
     let content = String::from_utf8_lossy(&bytes);
-    let regex = JavascriptRegex::new(
-        &params.pattern,
-        params.case_insensitive,
-        cancel.clone(),
-        quickjs_heap_limit(bytes.len()),
-    )?;
-    regex.start_file_budget(GREP_FILE_BUDGET);
+    let regex = matcher.for_file(bytes.len())?;
     let matches_before_file = matches.len();
     let allowance = params
         .max_matches_per_file
@@ -593,11 +590,106 @@ fn scan_bytes(
                 // terminates it. Keeping these would claim results from a file
                 // that was only partly searched.
                 matches.truncate(matches_before_file);
+                matcher.discard_engine();
                 return Ok(true);
             }
         }
     }
     Ok(more_matches)
+}
+
+/// The regular-expression engine of one grep operation.
+///
+/// Compiling the pattern and building its QuickJS context is the expensive
+/// part of a scan, so it is done once and lent to every candidate file. What
+/// is per file is reset in [`GrepMatcher::for_file`]: the heap limit, which is
+/// sized to that file, and the wall-clock allowance. The matcher is owned by
+/// one `grep` call on its blocking worker; nothing is shared or cached across
+/// operations.
+///
+/// An engine whose file was interrupted is dropped rather than reset, so no
+/// state of an abandoned match can reach the next file; the next
+/// [`GrepMatcher::for_file`] compiles a fresh one.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut matcher = GrepMatcher::new("^needle", false, cancel.clone())?;
+/// let regex = matcher.for_file(bytes.len())?;
+/// let hit = regex.is_match("needle in a haystack")?;
+/// ```
+struct GrepMatcher {
+    pattern: String,
+    case_insensitive: bool,
+    cancel: CancellationToken,
+    file_budget: Duration,
+    engine: Option<JavascriptRegex>,
+}
+
+impl GrepMatcher {
+    /// Validates `pattern` and compiles it for the operation's files.
+    fn new(
+        pattern: &str,
+        case_insensitive: bool,
+        cancel: CancellationToken,
+    ) -> Result<Self, RemoteError> {
+        Self::with_file_budget(pattern, case_insensitive, cancel, GREP_FILE_BUDGET)
+    }
+
+    /// [`Self::new`] with a wall-clock allowance other than [`GREP_FILE_BUDGET`].
+    fn with_file_budget(
+        pattern: &str,
+        case_insensitive: bool,
+        cancel: CancellationToken,
+        file_budget: Duration,
+    ) -> Result<Self, RemoteError> {
+        check_pattern_length(pattern)?;
+        let mut matcher = Self {
+            pattern: pattern.to_owned(),
+            case_insensitive,
+            cancel,
+            file_budget,
+            engine: None,
+        };
+        matcher.engine = Some(matcher.compile(quickjs_heap_limit(pattern.len()))?);
+        Ok(matcher)
+    }
+
+    fn compile(&self, heap_limit: usize) -> Result<JavascriptRegex, RemoteError> {
+        JavascriptRegex::new(
+            &self.pattern,
+            self.case_insensitive,
+            self.cancel.clone(),
+            heap_limit,
+        )
+        // The interrupt handler also stops a compilation, which the engine
+        // reports as an invalid pattern; a cancelled operation is not one.
+        .map_err(|error| match check_cancel(&self.cancel) {
+            Err(cancelled) => cancelled,
+            Ok(()) => error,
+        })
+    }
+
+    /// Prepares the engine for a file of `input_bytes` bytes.
+    ///
+    /// The heap limit is what a fresh engine would get for this file and the
+    /// wall-clock allowance starts over, so an earlier file's size or slowness
+    /// never counts against this one.
+    fn for_file(&mut self, input_bytes: usize) -> Result<&JavascriptRegex, RemoteError> {
+        let heap_limit = quickjs_heap_limit(input_bytes);
+        let engine = match self.engine.take() {
+            Some(engine) => engine,
+            None => self.compile(heap_limit)?,
+        };
+        engine.set_heap_limit(heap_limit);
+        engine.start_file_budget(self.file_budget);
+        Ok(self.engine.insert(engine))
+    }
+
+    /// Drops the engine; the next file compiles a new one.
+    fn discard_engine(&mut self) {
+        self.engine = None;
+    }
 }
 
 enum JsMatch {
@@ -616,6 +708,14 @@ struct JavascriptRegex {
     interruption: Arc<RegexInterruption>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Engines built on this thread; grep runs synchronously on its caller's
+    /// thread, so a test can count one operation's compilations without
+    /// seeing another test's.
+    static COMPILATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 struct RegexInterruption {
     deadline: Mutex<Option<Instant>>,
     triggered: AtomicBool,
@@ -628,6 +728,8 @@ impl JavascriptRegex {
         cancel: CancellationToken,
         heap_limit: usize,
     ) -> Result<Self, RemoteError> {
+        #[cfg(test)]
+        COMPILATIONS.with(|count| count.set(count.get() + 1));
         let runtime =
             Runtime::new().map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))?;
         runtime.set_memory_limit(heap_limit);
@@ -671,6 +773,10 @@ impl JavascriptRegex {
             cancel,
             interruption,
         })
+    }
+
+    fn set_heap_limit(&self, heap_limit: usize) {
+        self._runtime.set_memory_limit(heap_limit);
     }
 
     /// Starts the wall-clock allowance after compiling the regular expression.
@@ -1484,7 +1590,7 @@ mod tests {
     #[test]
     fn grep_regex_validation_uses_the_service_error_shape() {
         for pattern in ["(", &"a".repeat(MAX_PATTERN_UTF16_UNITS + 1)] {
-            let error = validate_regex(pattern, false).unwrap_err();
+            let error = GrepMatcher::new(pattern, false, token()).err().unwrap();
             assert_eq!(error.code, codes::INTERNAL);
             assert_eq!(
                 error
@@ -1553,12 +1659,14 @@ mod tests {
         let params = grep_params(&root, "^(a+)+$");
         let previous = json!({"file":"earlier.txt","line":1,"text":"a"});
         let mut matches = vec![previous.clone()];
+        let mut matcher = GrepMatcher::new(&params.pattern, false, token()).unwrap();
         assert!(
             scan_file(
                 &path,
                 "slow.txt",
                 &params,
                 &params.path_policy.compile().unwrap(),
+                &mut matcher,
                 &token(),
                 &mut matches
             )
@@ -1580,6 +1688,530 @@ mod tests {
         assert_eq!(
             grep(grep_params(&root, "^\u{feff}first"), &token()).unwrap()["matches"],
             json!([{ "file": "bom.txt", "line": 1, "text": "\u{feff}first" }])
+        );
+    }
+
+    // ---- one engine per operation -------------------------------------------
+
+    fn budgeted_matcher(pattern: &str, budget_ms: u64) -> GrepMatcher {
+        GrepMatcher::with_file_budget(pattern, false, token(), Duration::from_millis(budget_ms))
+            .unwrap()
+    }
+
+    fn compilations() -> usize {
+        COMPILATIONS.with(std::cell::Cell::get)
+    }
+
+    /// Scans one in-memory file through a matcher shared with earlier files.
+    fn scan(matcher: &mut GrepMatcher, params: &GrepParams, content: &[u8]) -> (bool, Vec<Value>) {
+        let mut matches = Vec::new();
+        let incomplete = scan_bytes(
+            content.to_vec(),
+            "file.txt",
+            params,
+            matcher,
+            &token(),
+            &mut matches,
+        )
+        .unwrap();
+        (incomplete, matches)
+    }
+
+    fn matched_lines(matches: &[Value]) -> Vec<u64> {
+        matches
+            .iter()
+            .map(|entry| entry["line"].as_u64().unwrap())
+            .collect()
+    }
+
+    /// The engine's `(heap limit, live heap bytes)`.
+    fn engine_memory(matcher: &GrepMatcher) -> (i64, i64) {
+        let usage = matcher.engine.as_ref().unwrap()._runtime.memory_usage();
+        (usage.malloc_limit, usage.malloc_size)
+    }
+
+    /// A file whose first line needs 6-8 MB of backtracking state under
+    /// `^(?:a|b)*$`: past the ~4.8 MB a 100 KB file is given, within the
+    /// ~12.8 MB this 1.1 MB file is given.
+    fn heavy_line_in_a_large_file() -> Vec<u8> {
+        let mut file = format!("{}\n", "a".repeat(100_000)).into_bytes();
+        file.extend(std::iter::repeat_n(b'x', 1_000_000));
+        file
+    }
+
+    #[test]
+    fn a_grep_operation_compiles_its_pattern_once_for_every_candidate_file() {
+        let root = scratch_dir("filesystem-search-compile-once");
+        for index in 0..6 {
+            fs::write(root.join(format!("file-{index}.txt")), "needle\nhay\n").unwrap();
+        }
+        fs::write(root.join("binary.bin"), b"needle\0").unwrap();
+
+        let before = compilations();
+        let result = grep(grep_params(&root, "needle"), &token()).unwrap();
+        let compiled = compilations() - before;
+
+        assert_eq!(result["filesScanned"], 7, "fixture must offer 7 candidates");
+        assert_eq!(
+            result["matches"].as_array().unwrap().len(),
+            6,
+            "fixture must match in each of the 6 text files"
+        );
+        assert_eq!(
+            compiled, 1,
+            "expected 1 engine compilation for 7 candidate files | received: {compiled}"
+        );
+    }
+
+    #[test]
+    fn a_single_file_grep_compiles_its_pattern_once() {
+        let root = scratch_dir("filesystem-search-compile-once-file");
+        fs::write(root.join("only.txt"), "needle\n").unwrap();
+        let mut params = grep_params(&root.join("only.txt"), "needle");
+        params.input_path = "only.txt".to_owned();
+
+        let before = compilations();
+        let result = grep(params, &token()).unwrap();
+        let compiled = compilations() - before;
+
+        assert_eq!(result["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            compiled, 1,
+            "expected 1 engine compilation for a single file | received: {compiled}"
+        );
+    }
+
+    #[test]
+    fn an_interrupted_file_costs_the_operation_one_more_compilation_not_one_per_file() {
+        let params = grep_params(Path::new("."), "^(a+)+$");
+        let mut matcher = budgeted_matcher(&params.pattern, 50);
+        let before = compilations();
+
+        let slow = format!("{}b", "a".repeat(50_000));
+        assert!(scan(&mut matcher, &params, slow.as_bytes()).0);
+        for _ in 0..3 {
+            assert_eq!(matched_lines(&scan(&mut matcher, &params, b"aaa").1), [1]);
+        }
+
+        let rebuilt = compilations() - before;
+        assert_eq!(
+            rebuilt, 1,
+            "expected 1 recompilation after the interrupted file | received: {rebuilt}"
+        );
+    }
+
+    #[test]
+    fn the_wall_clock_allowance_restarts_for_every_file() {
+        let params = grep_params(Path::new("."), "needle");
+        let mut matcher = budgeted_matcher("needle", 40);
+        assert_eq!(
+            matched_lines(&scan(&mut matcher, &params, b"needle").1),
+            [1]
+        );
+
+        // The first file's allowance is spent while the next one is read.
+        std::thread::sleep(Duration::from_millis(120));
+
+        let (incomplete, matches) = scan(&mut matcher, &params, b"needle");
+        assert!(
+            !incomplete && matched_lines(&matches) == [1],
+            "expected the second file to get its own 40ms allowance | received: \
+             incomplete={incomplete} matches={matches:?}"
+        );
+    }
+
+    #[test]
+    fn recompiling_after_an_interruption_under_a_cancelled_token_reports_cancellation() {
+        let cancel = token();
+        let mut matcher = GrepMatcher::new("needle", false, cancel.clone()).unwrap();
+        matcher.discard_engine();
+        cancel.cancel();
+
+        let outcome = matcher.for_file(6);
+
+        let code = outcome.as_ref().err().map(|error| error.code.clone());
+        assert_eq!(
+            code.as_deref(),
+            Some(codes::CANCELLED),
+            "expected the recompilation refused as {} | received: {:?}",
+            codes::CANCELLED,
+            outcome.map(|_| "an engine").map_err(|error| error.message)
+        );
+    }
+
+    #[test]
+    fn a_timeout_on_one_file_still_lets_the_next_file_match() {
+        let root = scratch_dir("filesystem-grep-timeout-then-match");
+        let slow = root.join("slow.txt");
+        let fast = root.join("fast.txt");
+        fs::write(&slow, format!("aa\n{}b\n", "a".repeat(50_000))).unwrap();
+        fs::write(&fast, "aaa\nbbb\n").unwrap();
+        let params = grep_params(&root, "^(a+)+$");
+        let policy = params.path_policy.compile().unwrap();
+        let mut matcher = budgeted_matcher(&params.pattern, 100);
+        let mut matches = Vec::new();
+
+        let mut scan_one = |path: &Path, display: &str| {
+            scan_file(
+                path,
+                display,
+                &params,
+                &policy,
+                &mut matcher,
+                &token(),
+                &mut matches,
+            )
+            .unwrap()
+        };
+        let slow_incomplete = scan_one(&slow, "slow.txt");
+        let fast_incomplete = scan_one(&fast, "fast.txt");
+
+        assert!(
+            slow_incomplete,
+            "expected the catastrophic file to time out"
+        );
+        assert!(!fast_incomplete);
+        assert_eq!(
+            matches,
+            vec![json!({ "file": "fast.txt", "line": 1, "text": "aaa" })],
+            "expected only the file after the timeout to report a match"
+        );
+    }
+
+    #[test]
+    fn adversarial_expressions_time_out_their_file_and_never_poison_the_next() {
+        for (pattern, slow_line) in [
+            ("^(a+)+$", format!("{}b", "a".repeat(50_000))),
+            ("(a|aa)+$", format!("{}b", "a".repeat(50_000))),
+            ("^(?:a|b)*$", "a".repeat(400_000)),
+        ] {
+            let params = grep_params(Path::new("."), pattern);
+            let mut matcher = budgeted_matcher(pattern, 100);
+
+            let (_, leaked) = scan(&mut matcher, &params, slow_line.as_bytes());
+            assert!(leaked.is_empty(), "{pattern}: partial matches leaked");
+            let (incomplete, matches) = scan(&mut matcher, &params, b"aaa");
+
+            assert!(!incomplete, "{pattern}: the next file must complete");
+            assert_eq!(matched_lines(&matches), [1], "{pattern}: the next file");
+        }
+    }
+
+    #[test]
+    fn the_heap_limit_is_reset_to_each_files_size() {
+        let mut matcher = GrepMatcher::new("x", false, token()).unwrap();
+        for input_bytes in [10, 3_000_000, 0, 200_000_000, 10] {
+            matcher.for_file(input_bytes).unwrap();
+            assert_eq!(
+                engine_memory(&matcher).0,
+                i64::try_from(quickjs_heap_limit(input_bytes)).unwrap(),
+                "expected the heap limit for a {input_bytes}-byte file"
+            );
+        }
+    }
+
+    #[test]
+    fn heap_exhaustion_is_judged_against_the_current_files_size() {
+        let small_file = "a".repeat(100_000).into_bytes();
+        let params = grep_params(Path::new("."), "^(?:a|b)*$");
+        let mut matcher = GrepMatcher::new(&params.pattern, false, token()).unwrap();
+
+        assert_eq!(matched_lines(&scan(&mut matcher, &params, b"a").1), [1]);
+        let (raised, matches) = scan(&mut matcher, &params, &heavy_line_in_a_large_file());
+        assert!(
+            !raised && matched_lines(&matches) == [1],
+            "expected the large file to fit its raised heap limit | received: \
+             incomplete={raised} matches={matches:?}"
+        );
+
+        let (lowered, matches) = scan(&mut matcher, &params, &small_file);
+        assert!(
+            lowered && matches.is_empty(),
+            "expected the small file to exhaust the heap limit of its own size, not the \
+             large file's | received: incomplete={lowered} matches={matches:?}"
+        );
+        assert_eq!(
+            matched_lines(&scan(&mut matcher, &params, b"a").1),
+            [1],
+            "expected the next file to scan after heap exhaustion"
+        );
+    }
+
+    #[test]
+    fn a_large_file_leaves_no_residual_heap_for_the_next_file() {
+        let params = grep_params(Path::new("."), "^(?:a|b)*$");
+        let mut matcher = GrepMatcher::new(&params.pattern, false, token()).unwrap();
+        matcher.for_file(2).unwrap();
+        let (_, baseline) = engine_memory(&matcher);
+
+        let large = heavy_line_in_a_large_file();
+        assert_eq!(matched_lines(&scan(&mut matcher, &params, &large).1), [1]);
+
+        let (_, residual) = engine_memory(&matcher);
+        assert!(
+            residual <= baseline + 64 * 1024,
+            "expected the heap back at its {baseline}-byte baseline after a large file | \
+             received: {residual} bytes"
+        );
+    }
+
+    #[test]
+    fn cancelling_interrupts_a_running_match_and_the_shared_engine_stays_cancelled() {
+        let cancel = token();
+        let mut matcher = GrepMatcher::new("^(a+)+$", false, cancel.clone()).unwrap();
+        let regex = matcher.for_file(50_001).unwrap();
+        let trigger = cancel.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            trigger.cancel();
+        });
+        let started = Instant::now();
+
+        let outcome = regex.is_match(&format!("{}b", "a".repeat(50_000)));
+        let elapsed = started.elapsed();
+        canceller.join().unwrap();
+
+        let code = outcome.as_ref().err().map(|error| error.code.clone());
+        assert_eq!(
+            code.as_deref(),
+            Some(codes::CANCELLED),
+            "expected the match cancelled as {} | received: {:?}",
+            codes::CANCELLED,
+            outcome.map(|_| "a completed match")
+        );
+        assert!(
+            elapsed < GREP_FILE_BUDGET,
+            "expected cancellation before the {GREP_FILE_BUDGET:?} file budget | received: {elapsed:?}"
+        );
+        let params = grep_params(Path::new("."), "x");
+        let next = scan_bytes(
+            b"x".to_vec(),
+            "next.txt",
+            &params,
+            &mut matcher,
+            &cancel,
+            &mut Vec::new(),
+        );
+        assert_eq!(next.unwrap_err().code, codes::CANCELLED);
+    }
+
+    #[test]
+    fn parallel_greps_share_no_engine_budget_or_cancellation() {
+        let root = scratch_dir("filesystem-grep-parallel");
+        fs::write(root.join("slow.txt"), format!("{}b\n", "a".repeat(50_000))).unwrap();
+        fs::write(root.join("a.txt"), "needle\nhay\n").unwrap();
+        fs::write(root.join("b.txt"), "Needle\n").unwrap();
+        let cancelled = token();
+
+        std::thread::scope(|scope| {
+            let trigger = cancelled.clone();
+            scope.spawn(move || {
+                std::thread::sleep(Duration::from_millis(50));
+                trigger.cancel();
+            });
+            let doomed = scope.spawn(|| grep(grep_params(&root, "^(a+)+$"), &cancelled));
+            let siblings: Vec<_> = (0..4)
+                .map(|index| {
+                    let root = root.to_path_buf();
+                    scope.spawn(move || {
+                        let mut params = grep_params(&root, "needle");
+                        params.case_insensitive = index % 2 == 1;
+                        let before = compilations();
+                        let result = grep(params, &token()).unwrap();
+                        (index, result, compilations() - before)
+                    })
+                })
+                .collect();
+
+            let outcome = doomed.join().unwrap();
+            assert_eq!(
+                outcome.as_ref().err().map(|error| error.code.as_str()),
+                Some(codes::CANCELLED),
+                "expected the cancelled grep to stop with {} | received: {:?}",
+                codes::CANCELLED,
+                outcome.as_ref().map(|_| "a result")
+            );
+            for sibling in siblings {
+                let (index, result, compiled) = sibling.join().unwrap();
+                let expected = if index % 2 == 1 { 2 } else { 1 };
+                assert_eq!(
+                    result["matches"].as_array().unwrap().len(),
+                    expected,
+                    "grep {index} must see only its own pattern and files"
+                );
+                assert_eq!(compiled, 1, "grep {index} engine compilations");
+            }
+        });
+    }
+
+    // ---- parity with the per-file engine (also run against the base) --------
+
+    fn grep_lines(pattern: &str, case_insensitive: bool, content: &[u8]) -> Vec<u64> {
+        let root = scratch_dir("filesystem-grep-parity");
+        fs::write(root.join("case.txt"), content).unwrap();
+        let mut params = grep_params(&root.join("case.txt"), pattern);
+        params.input_path = "case.txt".to_owned();
+        params.case_insensitive = case_insensitive;
+        params.max_matches_per_file = 1_000;
+        let result = grep(params, &token()).unwrap();
+        matched_lines(result["matches"].as_array().unwrap())
+    }
+
+    #[test]
+    fn parity_captures_and_lookarounds_follow_ecmascript() {
+        for (pattern, content, expected) in [
+            (r"(\w)\1", "book\nbok\nfoo", vec![1, 3]),
+            (r"(?<y>\d{4})-\k<y>", "2020-2020\n2020-2021", vec![1]),
+            (r"foo(?=bar)", "foobar\nfoobaz", vec![1]),
+            (r"foo(?!bar)", "foobar\nfoobaz", vec![2]),
+            (r"(?<=\$)\d+", "$12\n12", vec![1]),
+            (r"(?<!\$)\b\d+", "$12\n12", vec![2]),
+            (r"^(a|ab)(c|bcd)(d*)$", "abcd\nacd\nxbcd", vec![1, 2]),
+        ] {
+            assert_eq!(
+                grep_lines(pattern, false, content.as_bytes()),
+                expected,
+                "pattern {pattern:?} over {content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parity_unicode_matches_utf16_code_units_without_the_u_flag() {
+        for (pattern, ci, content, expected) in [
+            ("^..$", false, "😀\né\nab", vec![1, 3]),
+            ("^.$", false, "😀\né\nab", vec![2]),
+            ("^[😀]$", false, "😀", vec![]),
+            ("^[😀]{2}$", false, "😀", vec![1]),
+            (r"^\u{1F600}$", false, "😀", vec![]),
+            (r"^😀$", false, "😀", vec![1]),
+            ("é", true, "É\ne", vec![1]),
+            ("σ", true, "ς\nΣ", vec![1, 2]),
+            ("k", true, "\u{212a}\nK", vec![2]),
+            ("ß", true, "SS\nß", vec![2]),
+            (r"^\w+$", false, "café\ncafe", vec![2]),
+        ] {
+            assert_eq!(
+                grep_lines(pattern, ci, content.as_bytes()),
+                expected,
+                "pattern {pattern:?} (ignore case: {ci}) over {content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parity_line_terminators_and_invalid_utf8_are_matched_as_the_reader_yields_them() {
+        assert_eq!(grep_lines("foo$", false, b"foo\r\nfoo\n"), vec![2]);
+        assert_eq!(
+            grep_lines("^foo.$", false, b"foo\r\nfoo\xe2\x80\xa8\n"),
+            Vec::<u64>::new()
+        );
+        assert_eq!(grep_lines(r"^��$", false, b"\xff\xfe\nab"), vec![1]);
+        assert_eq!(grep_lines("^$", false, b"a\n\nb\n"), vec![2, 4]);
+    }
+
+    #[test]
+    fn parity_binary_detection_looks_only_at_the_first_8_kib() {
+        let root = scratch_dir("filesystem-grep-parity-binary");
+        fs::write(root.join("early.txt"), b"needle\0tail\n").unwrap();
+        let mut late = vec![b'x'; 8 * 1024];
+        late.extend_from_slice(b"\nneedle\0tail\n");
+        fs::write(root.join("late.txt"), late).unwrap();
+
+        let result = grep(grep_params(&root, "needle"), &token()).unwrap();
+
+        assert_eq!(result["filesScanned"], 2);
+        assert_eq!(
+            result["matches"],
+            json!([{ "file": "late.txt", "line": 2, "text": "needle\0tail" }])
+        );
+    }
+
+    #[test]
+    fn parity_invalid_patterns_are_refused_before_the_path_is_touched() {
+        let root = scratch_dir("filesystem-grep-parity-invalid");
+        for pattern in [
+            "(",
+            ")",
+            "[b-a]",
+            "a{2,1}",
+            "*a",
+            r"(?<n>a)(?<n>b)",
+            r"(?<=a)+",
+            "\\",
+        ] {
+            let error =
+                grep(grep_params(&root.join("missing"), pattern), &token()).expect_err(pattern);
+            assert_eq!(
+                error
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.get("kind")),
+                Some(&json!("grep_pattern")),
+                "pattern {pattern:?} must be refused as grep_pattern | received: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parity_deeply_nested_groups_stay_an_engine_result_on_a_small_stack() {
+        let nested = format!("{}a{}", "(?:".repeat(240), ")".repeat(240));
+        let outcome = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let root = scratch_dir("filesystem-grep-parity-nesting");
+                fs::write(root.join("a.txt"), "a\nb\n").unwrap();
+                grep(grep_params(&root, &nested), &token()).map(|result| result["matches"].clone())
+            })
+            .unwrap()
+            .join()
+            .expect("a deeply nested pattern must not overflow the thread stack");
+        assert_eq!(
+            outcome
+                .as_ref()
+                .ok()
+                .map(|matches| matches.as_array().unwrap().len()),
+            Some(1),
+            "expected 1 match for the nested group | received: {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn parity_multi_file_order_equals_the_files_scanned_one_by_one() {
+        let root = scratch_dir("filesystem-grep-parity-order");
+        fs::create_dir_all(root.join("deep/er")).unwrap();
+        for (path, content) in [
+            ("a.txt", "x1\nno\nx2\n"),
+            ("b.txt", "no\n"),
+            ("deep/c.txt", "x3\nx4\n"),
+            ("deep/er/d.txt", "x5\n"),
+            ("e.bin", "x6\0"),
+        ] {
+            fs::write(root.join(path), content).unwrap();
+        }
+        let mut params = grep_params(&root, r"x\d");
+        params.max_matches_per_file = 1;
+        let together = grep(params, &token()).unwrap();
+
+        let mut one_by_one = Vec::new();
+        for entry in together["matches"].as_array().unwrap() {
+            let file = entry["file"].as_str().unwrap();
+            let mut single = grep_params(&root.join(file), r"x\d");
+            single.input_path = file.to_owned();
+            single.max_matches_per_file = 1;
+            let alone = grep(single, &token()).unwrap();
+            // A lone file is displayed by its resolved path, not the directory's.
+            let mut first = alone["matches"][0].clone();
+            first["file"] = json!(file);
+            one_by_one.push(first);
+        }
+
+        assert_eq!(together["filesScanned"], 5);
+        assert_eq!(together["matches"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            together["matches"].as_array().unwrap(),
+            &one_by_one,
+            "expected each file's first match alone to equal its place in the directory result"
         );
     }
 }
