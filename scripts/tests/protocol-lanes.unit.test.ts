@@ -1,7 +1,7 @@
-import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import {
   PROTOCOL_CHANGELOG,
@@ -862,5 +862,154 @@ exit 0
 
   test('marks a pre-release version as one', () => {
     expect(run('absent', 'true').ghCalls).toContain('--prerelease');
+  });
+});
+
+describe('the fuzz workspace lockfile', () => {
+  // The fuzz crate is excluded from the root workspace, so a shared dependency
+  // bumped in the root Cargo.lock (jsonschema, through the path dependency)
+  // leaves fuzz/Cargo.lock stale in a pull request that never touches fuzz/.
+  const FUZZ_MANIFEST = 'crates/mango-protocol/fuzz/Cargo.toml';
+  const FUZZ_LOCK = 'crates/mango-protocol/fuzz/Cargo.lock';
+  const hasCargo = Bun.which('cargo') !== null;
+  const LOCK_TIMEOUT_MS = 30_000;
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+
+  /**
+   * Ask cargo whether a manifest's lockfile is current without writing it:
+   * `--locked` forbids a rewrite and `--offline` forbids the network, so a cold
+   * registry cache reads as `inconclusive` instead of being mistaken for a
+   * stale lock. Runs from a temp directory so the repository's pinned
+   * `rust-toolchain.toml` can never make rustup download a toolchain here.
+   *
+   * Usage: `checkCargoLock(join(ROOT_DIR, FUZZ_MANIFEST)).state // 'current'`
+   */
+  const checkCargoLock = (
+    manifest: string
+  ): { state: 'current' | 'stale' | 'inconclusive'; stderr: string } => {
+    expect(isAbsolute(manifest), `manifest path must be absolute, received: ${manifest}`).toBe(
+      true
+    );
+    const result = Bun.spawnSync({
+      cmd: [
+        'cargo',
+        'metadata',
+        '--locked',
+        '--offline',
+        '--all-features',
+        '--format-version',
+        '1',
+        '--manifest-path',
+        manifest,
+      ],
+      cwd: tmpdir(),
+      stdout: 'ignore',
+      stderr: 'pipe',
+      timeout: LOCK_TIMEOUT_MS / 2,
+    });
+    const stderr = result.stderr.toString();
+    if (result.exitCode === 0) return { state: 'current', stderr };
+    // The message cargo prints when `--locked` stops it from rewriting a lockfile.
+    const stale = stderr.includes('cannot update the lock file');
+    return { state: stale ? 'stale' : 'inconclusive', stderr };
+  };
+
+  const LOCK_HEADER = 'version = 4\n\n[[package]]\nname = "app"\nversion = "0.1.0"\n';
+  const LOCK_WITH_DEP = `${LOCK_HEADER}dependencies = [\n "dep",\n]\n\n[[package]]\nname = "dep"\nversion = "0.1.0"\n`;
+
+  /** A two-crate tree: `app` depends on `dep` by path, with the given `app/Cargo.lock`. */
+  const makeTree = (lock: string): string => {
+    const root = mkdtempSync(join(tmpdir(), 'fuzz-lock-'));
+    roots.push(root);
+    const crate = (name: string, extra: string): void => {
+      mkdirSync(join(root, name, 'src'), { recursive: true });
+      writeFileSync(join(root, name, 'src/lib.rs'), '');
+      writeFileSync(
+        join(root, name, 'Cargo.toml'),
+        `[package]\nname = "${name}"\nversion = "0.1.0"\nedition = "2024"\n${extra}`
+      );
+    };
+    crate('dep', '');
+    crate('app', '[workspace]\n[dependencies]\ndep = { path = "../dep" }\n');
+    writeFileSync(join(root, 'app/Cargo.lock'), lock);
+    return root;
+  };
+
+  test.skipIf(!hasCargo)(
+    'checkCargoLock reports a lock that lacks a dependency as stale',
+    () => {
+      const root = makeTree(LOCK_HEADER);
+      const check = checkCargoLock(join(root, 'app/Cargo.toml'));
+      expect(check?.state, check?.stderr).toBe('stale');
+      // `--locked` must refuse instead of repairing the file.
+      expect(readFileSync(join(root, 'app/Cargo.lock'), 'utf8')).toBe(LOCK_HEADER);
+    },
+    LOCK_TIMEOUT_MS
+  );
+
+  test.skipIf(!hasCargo)(
+    'checkCargoLock reports a complete lock as current',
+    () => {
+      const root = makeTree(LOCK_WITH_DEP);
+      const check = checkCargoLock(join(root, 'app/Cargo.toml'));
+      expect(check?.state, check?.stderr).toBe('current');
+    },
+    LOCK_TIMEOUT_MS
+  );
+
+  test.skipIf(!hasCargo)(
+    'checkCargoLock does not read a missing manifest as a stale lock',
+    () => {
+      const check = checkCargoLock(join(tmpdir(), 'no-such-fuzz-lock-dir/Cargo.toml'));
+      expect(check?.state, check?.stderr).toBe('inconclusive');
+    },
+    LOCK_TIMEOUT_MS
+  );
+
+  test.skipIf(!hasCargo)(
+    'the committed lock resolves with --all-features and is left untouched',
+    () => {
+      const before = readText(FUZZ_LOCK);
+      const check = checkCargoLock(join(ROOT_DIR, FUZZ_MANIFEST));
+      // `inconclusive` is a cold local registry cache, not a stale lock; the
+      // cargo-shim `fuzz-workspace` lane is what fails CI on the latter.
+      expect(
+        check?.state,
+        `${FUZZ_LOCK} is stale: run \`cargo update -w --manifest-path ${FUZZ_MANIFEST}\`\n${check?.stderr}`
+      ).not.toBe('stale');
+      expect(readText(FUZZ_LOCK)).toBe(before);
+    },
+    LOCK_TIMEOUT_MS
+  );
+
+  test('cargo-shim resolves the fuzz workspace with --locked, not --no-deps', () => {
+    // `--no-deps` skips the resolve, so it passes on a stale lock.
+    const job = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'fuzz-workspace');
+    const command = /run: (cargo metadata .*fuzz\/Cargo\.toml.*)/.exec(job)?.[1];
+    expect(command, 'the fuzz-workspace job has no `cargo metadata` step').toBeDefined();
+    expect(command, '--no-deps skips the resolve, so a stale lock passes').not.toContain(
+      '--no-deps'
+    );
+    expect(command).toContain('--locked');
+    expect(command).toContain('--all-features');
+  });
+
+  test('protocol-fuzz refuses a stale lock before cargo-fuzz can rewrite it', () => {
+    // `cargo fuzz` has no `--locked`, so the guard is a `cargo metadata --locked`
+    // step that has to run before the fuzz step.
+    const steps = extractStepBlocks(
+      extractJobBlock(readText('.github/workflows/protocol-fuzz.yml'), 'fuzz')
+    );
+    const guard = steps.findIndex((step) => /cargo \+nightly metadata .*--locked/.test(step));
+    const fuzz = steps.findIndex((step) => step.includes('cargo +nightly fuzz run'));
+    expect(
+      guard,
+      'no `cargo +nightly metadata --locked` step in protocol-fuzz.yml'
+    ).toBeGreaterThan(-1);
+    expect(guard, 'the --locked guard must precede the `cargo fuzz run` step').toBeLessThan(fuzz);
+    expect(steps[guard]).toContain('--all-features');
   });
 });

@@ -220,7 +220,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --no-deps --format-version 1
+      # Resolving is the point: `--no-deps` skips the resolve, so a lock left
+      # stale by a shared-dependency bump in the main workspace still passed.
+      # `--locked` makes a stale lock a failure instead of a rewrite;
+      # `--all-features` also names the optional `tokio` feature set.
+      - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --all-features --format-version 1 > /dev/null
 
   runtime-home-fixture-freshness:
     # `tests/fixtures/rust-home` is committed output, not built at test time:
