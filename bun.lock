@@ -78,7 +78,7 @@
         "clsx": "^2.1.1",
         "lucide-react": "^1.48.0",
         "marked": "^18.0.14",
-        "motion": "^13.4.0",
+        "motion": "^13.4.3",
         "react": "^19.3.0",
         "react-dom": "^19.3.0",
         "tailwind-merge": "^3.7.0",
@@ -1084,7 +1084,7 @@
 
     "module-lookup-amd": ["module-lookup-amd@9.1.1", "", { "dependencies": { "commander": "^12.1.0", "requirejs": "^2.3.8", "requirejs-config-file": "^4.0.0" }, "bin": { "lookup-amd": "bin/cli.js" } }, "sha512-JzXhQvud8K3yT9l24XTDMXMQ4/LD9a9oXBcbLP0ubdvBpVrGFsybm5+2PDIl0negUYP1l88fCgjQzoMMg247+Q=="],
 
-    "motion": ["motion@13.4.0", "", { "dependencies": { "framer-motion": "^13.4.0", "tslib": "^2.4.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-aiNSA29N+vgV5p5cJSB5cFzx8KTuuxB99z8zGtxsaqlwKtBK6sq8YgPRpkVQLkbJMOcLDU0q/ShdT95qpBy/0g=="],
+    "motion": ["motion@13.4.3", "", { "dependencies": { "framer-motion": "^13.4.3", "tslib": "^2.4.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-Js4rk+VUxSRMKOFT4hOMyMKlxyF11ee9jomiLT3uuwMOU88EoSro0ZEbTYes4m457pqZQ2G3RsLdHQzoEDyBCQ=="],
 
     "motion-dom": ["motion-dom@13.4.2", "", { "dependencies": { "motion-utils": "^13.3.0" } }, "sha512-mY293Iyj4rOQo5sDxUwPYLOKiveLQrJoK1tKfG8V1H3MMGMfan3s2i7NBW18WnD39DD79ogyiL/1fmy22GLG5w=="],
 
