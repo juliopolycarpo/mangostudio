@@ -75,9 +75,11 @@ Useful docs:
 - `Cargo.toml` and the root `Cargo.lock` own every stable Rust crate in this repository. Add new
   crates as workspace members instead of creating another lockfile or toolchain root.
 - `crates/mango-protocol/fuzz` is the sole exception. It is an excluded nightly-only workspace
-  with its own lockfile. When a root `Cargo.lock` bump touches a crate the fuzz graph shares, also
-  run `cargo update -w --manifest-path crates/mango-protocol/fuzz/Cargo.toml`; the
-  `fuzz-workspace` gate fails on a stale fuzz lock.
+  with its own lockfile. It never reads the root one, so it goes stale when
+  `crates/mango-protocol/Cargo.toml` changes (a new dependency or a changed requirement) or the
+  protocol version moves (`protocol:release:prepare` refreshes it). Then run
+  `cargo update -w --manifest-path crates/mango-protocol/fuzz/Cargo.toml`; the `fuzz-workspace`
+  gate fails on a stale fuzz lock.
 - `rust-toolchain.toml` pins the development toolchain. The protocol inherits the workspace MSRV;
   the published `mangostudio` launcher declares its lower MSRV explicitly. The launcher keeps the
   application version, while `[workspace.package].version` remains the protocol version.

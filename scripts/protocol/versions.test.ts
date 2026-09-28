@@ -22,6 +22,8 @@ const CARGO_TOML =
 const CARGO_LOCK =
   '[[package]]\nname = "serde"\nversion = "1.0.0"\n\n[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n\n' +
   '[[package]]\nname = "mangostudio-runtime-contract"\nversion = "0.1.0"\n';
+const FUZZ_CARGO_LOCK =
+  '[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n\n[[package]]\nname = "serde"\nversion = "1.0.0"\n';
 
 /** A throwaway repository root holding the protocol's lockstep manifests. */
 class FakeRepository {
@@ -36,6 +38,7 @@ class FakeRepository {
     );
     await repo.write(MANIFESTS.cargoWorkspace, CARGO_TOML);
     await repo.write(MANIFESTS.cargoLock, CARGO_LOCK);
+    await repo.write(MANIFESTS.fuzzCargoLock, FUZZ_CARGO_LOCK);
     return repo;
   }
 
@@ -149,7 +152,19 @@ describe('readVersions', () => {
       },
       { file: 'Cargo.lock (mango-protocol)', version: '0.1.0' },
       { file: 'Cargo.lock (mangostudio-runtime-contract)', version: '0.1.0' },
+      { file: 'crates/mango-protocol/fuzz/Cargo.lock (mango-protocol)', version: '0.1.0' },
     ]);
+  });
+
+  it('names a fuzz lockfile that still records the previous protocol version', async () => {
+    // `cargo update -w` at the root leaves the fuzz workspace's own lock behind, and
+    // `cargo metadata --locked` on the fuzz manifest then exits 101 on the next bump.
+    await repo.write(MANIFESTS.fuzzCargoLock, FUZZ_CARGO_LOCK.replace('0.1.0', '0.0.9'));
+
+    const versions = await readVersions(repo.root);
+    expect(() => assertLockstep(versions)).toThrow(
+      'crates/mango-protocol/fuzz/Cargo.lock (mango-protocol) has 0.0.9.'
+    );
   });
 
   it('names a mangostudio-runtime-contract lockfile drift', async () => {
@@ -189,6 +204,7 @@ describe('writeVersions', () => {
       '0.2.0',
       '0.1.0',
       '0.1.0',
+      '0.1.0',
     ]);
     expect(await repo.read(MANIFESTS.protocolPackage)).toContain('"typebox": "1.3.13"');
     expect(await repo.read(MANIFESTS.cargoWorkspace)).toContain('edition = "2024"');
@@ -216,6 +232,7 @@ describe('writeVersions', () => {
     await writeVersions('0.1.0', repo.root);
     const versions = await readVersions(repo.root);
     expect(versions.map((entry) => entry.version)).toEqual([
+      '0.1.0',
       '0.1.0',
       '0.1.0',
       '0.1.0',

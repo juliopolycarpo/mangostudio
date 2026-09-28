@@ -23,6 +23,9 @@ export const MANIFESTS = {
   protocolPackage: 'packages/protocol/package.json',
   cargoWorkspace: 'Cargo.toml',
   cargoLock: 'Cargo.lock',
+  // The excluded fuzz workspace's own lock. It records the path dependency's version too,
+  // so a bump that skips it leaves `cargo metadata --locked` failing on the fuzz manifest.
+  fuzzCargoLock: 'crates/mango-protocol/fuzz/Cargo.lock',
 } as const;
 
 /**
@@ -73,6 +76,7 @@ export async function readVersions(root = ROOT_DIR): Promise<ManifestVersion[]> 
   };
   const cargo = await Bun.file(`${root}/${MANIFESTS.cargoWorkspace}`).text();
   const lock = await Bun.file(`${root}/${MANIFESTS.cargoLock}`).text();
+  const fuzzLock = await Bun.file(`${root}/${MANIFESTS.fuzzCargoLock}`).text();
   return [
     { file: MANIFESTS.protocolPackage, version: protocolPackage.version },
     { file: MANIFESTS.cargoWorkspace, version: workspaceVersion(cargo) },
@@ -88,6 +92,10 @@ export async function readVersions(root = ROOT_DIR): Promise<ManifestVersion[]> 
       file: `${MANIFESTS.cargoLock} (${crateName})`,
       version: lockedCrateVersion(lock, crateName),
     })),
+    {
+      file: `${MANIFESTS.fuzzCargoLock} (mango-protocol)`,
+      version: lockedCrateVersion(fuzzLock, 'mango-protocol'),
+    },
   ];
 }
 
@@ -166,7 +174,8 @@ export function lockedCrateVersion(cargoLock: string, crateName: string): string
 
 /**
  * Rewrites every protocol manifest under `root` to `version`. Cargo.lock is not
- * touched: `cargo update -w` refreshes it afterwards. The root `package.json`
+ * touched: `cargo update -w` refreshes it afterwards, and the same command with
+ * `--manifest-path` refreshes the fuzz workspace's. The root `package.json`
  * is deliberately untouched — it carries the application's version, not this
  * one.
  *
