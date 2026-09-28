@@ -1,13 +1,14 @@
 // Assembles the sticky QA metrics PR comment from the section renderers, including
 // the non-fatal collector-error and out-of-scope detail blocks and the marker.
 
-import { ALL_WORKSPACE_NAMES } from '../../lib/config';
 import type { Metrics } from '../collect/types';
+import { describeState, needsAttention } from '../model/states';
+import { componentMeasurements, globalMeasurements } from './access';
 import { renderBundleSection } from './bundle';
 import { renderCoverageSection } from './coverage';
 import { renderDependenciesSection } from './dependencies';
 import { renderDuplicationSection } from './duplication';
-import { inlineCode, isError, shortSha } from './format';
+import { inlineCode, shortSha } from './format';
 import { renderLocSection } from './loc';
 import { renderSummary } from './summary';
 import { renderTestFailureLead } from './test-failures';
@@ -32,25 +33,12 @@ const collectErrorNotes = (base: Metrics | null, head: Metrics | null): string[]
       notes.push(`- **${side}** metrics file was not loadable.`);
       continue;
     }
-    for (const workspace of ALL_WORKSPACE_NAMES) {
-      const cov = metrics.coverage?.[workspace];
-      if (isError(cov)) notes.push(`- ${side}/coverage/${workspace}: ${inlineCode(cov.error)}`);
-      const ts = metrics.tsErrors?.[workspace];
-      if (isError(ts)) notes.push(`- ${side}/tsErrors/${workspace}: ${inlineCode(ts.error)}`);
-      const loc = metrics.loc?.[workspace];
-      if (isError(loc)) notes.push(`- ${side}/loc/${workspace}: ${inlineCode(loc.error)}`);
+    for (const [name, cell] of [
+      ...componentMeasurements(metrics),
+      ...globalMeasurements(metrics),
+    ]) {
+      if (needsAttention(cell)) notes.push(`- ${side}/${name}: ${inlineCode(describeState(cell))}`);
     }
-    if (isError(metrics.tooling))
-      notes.push(`- ${side}/tooling: ${inlineCode(metrics.tooling.error)}`);
-    if (isError(metrics.duplication))
-      notes.push(`- ${side}/duplication: ${inlineCode(metrics.duplication.error)}`);
-    if (isError(metrics.circularDeps))
-      notes.push(`- ${side}/circularDeps: ${inlineCode(metrics.circularDeps.error)}`);
-    if (isError(metrics.frontendBundle))
-      notes.push(`- ${side}/frontendBundle: ${inlineCode(metrics.frontendBundle.error)}`);
-    if (isError(metrics.dependencies))
-      notes.push(`- ${side}/dependencies: ${inlineCode(metrics.dependencies.error)}`);
-    if (isError(metrics.tests)) notes.push(`- ${side}/tests: ${inlineCode(metrics.tests.error)}`);
   }
   return notes;
 };

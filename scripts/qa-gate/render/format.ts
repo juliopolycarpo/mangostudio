@@ -1,14 +1,6 @@
 // Pure formatting helpers and Failable guards shared by every render section.
 
-import type { CollectorError, Failable } from '../collect/types';
-
 export const NA = 'n/a';
-
-export const isError = <T>(value: Failable<T> | null | undefined): value is CollectorError =>
-  typeof value === 'object' && value !== null && 'error' in value;
-
-export const ok = <T>(value: Failable<T> | null | undefined): value is T =>
-  value !== null && value !== undefined && !isError(value);
 
 export const shortSha = (sha: string | undefined): string => (sha ? sha.slice(0, 7) : NA);
 

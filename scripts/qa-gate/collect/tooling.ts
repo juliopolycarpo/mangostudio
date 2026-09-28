@@ -7,7 +7,7 @@ import type { ToolingCheckStats } from './types';
 // biome-ignore lint/complexity/useRegexLiterals: Keep the escape code out of a regex literal.
 const ANSI_RE = new RegExp(String.raw`\x1B\[[0-?]*[ -/]*[@-~]`, 'g');
 
-const collectFailedTasks = (text: string): readonly string[] => {
+const collectFailedTasks = (text: string): string[] => {
   const failedTasks: string[] = [];
 
   for (const line of text.replaceAll(ANSI_RE, '').split('\n')) {

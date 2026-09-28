@@ -1,18 +1,19 @@
-// TypeScript error count per workspace via tsc --noEmit.
+// TypeScript error count per component via tsc --noEmit.
 
-import type { WorkspaceName } from '../../lib/config';
 import { runCapture } from './support';
 
 const TS_ERROR_RE = /error TS\d+:/g;
 
-/** Number of `error TSxxxx:` diagnostics for a workspace's tsconfig. */
-export const countTsErrors = async (workspace: WorkspaceName): Promise<number> => {
-  const cfg = `apps/${workspace}/tsconfig.json`;
+/**
+ * Number of `error TSxxxx:` diagnostics for the tsconfig under a component root.
+ * // Usage: await countTsErrors('apps/api')
+ */
+export const countTsErrors = async (root: string): Promise<number> => {
   const { stdout, stderr } = await runCapture([
     'bunx',
     'tsc',
     '-p',
-    cfg,
+    `${root}/tsconfig.json`,
     '--noEmit',
     '--pretty',
     'false',

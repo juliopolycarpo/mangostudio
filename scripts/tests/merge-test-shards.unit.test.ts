@@ -279,8 +279,8 @@ describe('collect-test-metrics degradation', () => {
 
       const { stdout, exitCode } = await collect(summaryPath);
       expect(exitCode).toBe(0);
-      const fragment = JSON.parse(stdout) as { tests: { exitCode: number } };
-      expect(fragment.tests.exitCode).toBe(1);
+      const fragment = JSON.parse(stdout) as { tests: { value: { exitCode: number } } };
+      expect(fragment.tests.value.exitCode).toBe(1);
     },
     COLLECT_TIMEOUT
   );
@@ -291,7 +291,9 @@ describe('collect-test-metrics degradation', () => {
       const dir = await makeTemp();
       const { stdout, exitCode } = await collect(join(dir, 'missing.json'), join(dir, 'no-shards'));
       expect(exitCode).toBe(0);
-      expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(1);
+      expect(
+        (JSON.parse(stdout) as { tests: { value: { exitCode: number } } }).tests.value.exitCode
+      ).toBe(1);
     },
     COLLECT_TIMEOUT
   );
@@ -313,7 +315,9 @@ describe('collect-test-metrics degradation', () => {
 
       const { stdout, exitCode } = await collect(summaryPath);
       expect(exitCode).toBe(0);
-      expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(0);
+      expect(
+        (JSON.parse(stdout) as { tests: { value: { exitCode: number } } }).tests.value.exitCode
+      ).toBe(0);
     },
     COLLECT_TIMEOUT
   );

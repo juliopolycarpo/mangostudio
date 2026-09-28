@@ -2,7 +2,7 @@
 // piped command execution, and the current commit SHA.
 
 import { ROOT_DIR } from '../../lib/config';
-import type { Failable } from './types';
+import { type Measurement, measured, unavailable } from '../model/states';
 
 /** Write a namespaced diagnostic line to stderr (keeps stdout pure JSON). */
 export const stderrLog = (message: string): void => {
@@ -10,17 +10,18 @@ export const stderrLog = (message: string): void => {
 };
 
 /**
- * Run a collector, returning its value or an `{ error }` placeholder so one
- * failing metric never aborts the whole report.
- * // Usage: const loc = await safe('loc', () => measureLoc('apps/api'));
+ * Run a collector, returning `measured(value)` or an explicit `unavailable`
+ * measurement carrying the error, so one failing metric never aborts the whole
+ * report and never reads as zero.
+ * // Usage: const dupes = await measure('duplication', collectDuplication);
  */
-export const safe = async <T>(label: string, fn: () => Promise<T>): Promise<Failable<T>> => {
+export const measure = async <T>(label: string, fn: () => Promise<T>): Promise<Measurement<T>> => {
   try {
-    return await fn();
+    return measured(await fn());
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     stderrLog(`${label} failed: ${message}`);
-    return { error: message };
+    return unavailable(message);
   }
 };
 

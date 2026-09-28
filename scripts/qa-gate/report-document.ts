@@ -30,6 +30,8 @@ export interface ReportStatus {
   readonly headNote: string | null;
   /** Reason the exact-base baseline is unavailable. */
   readonly baseNote: string | null;
+  /** True when the baseline exists but was recorded under another schema version. */
+  readonly baseIncomparable?: boolean;
 }
 
 export interface ReportSections {
@@ -46,7 +48,12 @@ const statusBlock = (status: ReportStatus): string => {
   if (status.headNote) {
     lines.push('', `> ⚠️ Head metrics unavailable: ${inlineCode(status.headNote)}`);
   }
-  if (status.baseNote) {
+  if (status.baseNote && status.baseIncomparable) {
+    lines.push(
+      '',
+      `> ℹ️ Baseline incomparable — base columns render as n/a and no deltas are computed: ${inlineCode(status.baseNote)}.`
+    );
+  } else if (status.baseNote) {
     lines.push(
       '',
       `> ℹ️ Baseline unavailable — base columns render as n/a: ${inlineCode(status.baseNote)}.`,

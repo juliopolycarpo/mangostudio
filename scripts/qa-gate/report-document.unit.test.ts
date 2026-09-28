@@ -66,6 +66,23 @@ describe('composeMetricsReport', () => {
     expect(report).toContain("`metrics payload failed schema validation ('/evil': injection)`");
     expect(report.endsWith(QA_METRICS_MARKER)).toBe(true);
   });
+
+  it('says an older-schema baseline is incomparable instead of promising a future baseline', () => {
+    const report = composeMetricsReport(
+      status({
+        baseNote: 'metrics schema version 3 is incomparable with expected 4',
+        baseIncomparable: true,
+      }),
+      null,
+      makeMetrics(HEAD_SHA),
+      null
+    );
+
+    expect(report).toContain('ℹ️ Baseline incomparable — base columns render as n/a and no deltas');
+    expect(report).toContain('`metrics schema version 3 is incomparable with expected 4`');
+    expect(report).not.toContain('Baseline unavailable');
+    expect(report).not.toContain('first green CI run on `main`');
+  });
 });
 
 describe('composeCommitsReport', () => {
