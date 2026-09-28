@@ -282,8 +282,9 @@ describe('settings agents routes', () => {
     expect(update.status).toBe(200);
     expect(updated.systemPrompt).toBe('Research and cite files.');
 
+    // Eden Treaty percent-encodes path params; the route must resolve the decoded id.
     const deleted = await app.handle(
-      new Request('http://localhost/settings/agents/user:researcher', { method: 'DELETE' })
+      new Request('http://localhost/settings/agents/user%3Aresearcher', { method: 'DELETE' })
     );
     expect(deleted.status).toBe(200);
     expect(await deleted.json()).toEqual({ success: true });

@@ -115,7 +115,8 @@ describe('AgentSettingsPage integration', () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
     fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
-    fetchScenario.respondWithJson('DELETE', '/api/settings/agents/user:researcher', {
+    // Eden Treaty percent-encodes path params, so the colon in the id travels as `%3A`.
+    fetchScenario.respondWithJson('DELETE', '/api/settings/agents/user%3Aresearcher', {
       body: { success: true },
     });
 
@@ -126,7 +127,7 @@ describe('AgentSettingsPage integration', () => {
     await user.click(screen.getByRole('button', { name: 'Delete agent' }));
 
     await waitFor(() =>
-      expect(hasFetchCall('DELETE', '/api/settings/agents/user:researcher')).toBe(true)
+      expect(hasFetchCall('DELETE', '/api/settings/agents/user%3Aresearcher')).toBe(true)
     );
   });
 
