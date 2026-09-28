@@ -1,13 +1,23 @@
 import { describe, expect, it } from 'bun:test';
 
+import type { WorkspaceName } from '../../lib/config';
 import type { TestMetricsFragment } from '../model/fragment';
-import { measured, measuredValue, unavailable } from '../model/states';
+import type { CoverageSummary } from '../model/metrics';
+import {
+  type Measurement,
+  measured,
+  measuredValue,
+  unavailable,
+  unsupported,
+} from '../model/states';
 import { expectState } from '../testing/measurement-assertions';
 import { makeCoverageSummary, makeMetrics } from '../testing/metrics-fixture';
 import {
+  missingTestMetrics,
   NO_FRAGMENT,
   parseTestMetricsFragment,
   resolveTestMetrics,
+  type TestMetricsInputs,
   unusableTestMetrics,
 } from './fragment';
 
@@ -20,6 +30,14 @@ const makeFragment = (overrides: Partial<TestMetricsFragment> = {}): TestMetrics
   coverage: { api: measured(makeCoverageSummary(77)) },
   ...overrides,
 });
+
+/** Coverage a lane would get from the inputs; a null (disk fallback) shows up as a wrong state. */
+const laneCoverage = (
+  inputs: TestMetricsInputs,
+  lane: WorkspaceName
+): Measurement<CoverageSummary> =>
+  inputs.deliveredCoverage(lane) ??
+  unsupported('deliveredCoverage returned null: the caller would read local coverage from disk');
 
 describe('parseTestMetricsFragment', () => {
   it('accepts a valid fragment', () => {
@@ -103,5 +121,29 @@ describe('absent and unusable fragments', () => {
     expect(expectState(inputs.tests, 'unavailable').reasons).toEqual([
       'test-metrics.json: not valid JSON',
     ]);
+  });
+
+  // Regression: a fragment that was passed but rejected must not fall back to
+  // disk. On a machine with stale `.mango/artifacts/coverage`, coverage would
+  // read `measured` next to `unavailable` tests.
+  it('never falls back to a local coverage read after a rejected fragment', () => {
+    const inputs = unusableTestMetrics('test-metrics.json: not valid JSON');
+
+    expect(expectState(laneCoverage(inputs, 'api'), 'unavailable').reasons).toEqual([
+      'test-metrics.json: not valid JSON',
+    ]);
+  });
+
+  it('a fragment path that does not exist is unavailable for tests and every lane, not a disk read', () => {
+    const inputs = missingTestMetrics('./qa-test-metrics/test-metrics.json');
+
+    const reasons = ['test metrics fragment ./qa-test-metrics/test-metrics.json not found'];
+    expect(expectState(inputs.tests, 'unavailable').reasons).toEqual(reasons);
+    expect(
+      expectState(
+        inputs.deliveredCoverage('frontend') ?? measured(makeCoverageSummary()),
+        'unavailable'
+      ).reasons
+    ).toEqual(reasons);
   });
 });

@@ -41,7 +41,7 @@ export const parseTestMetricsFragment = (
   return { fragment: parsed };
 };
 
-/** Fragment absent with no reason recorded: local runs read coverage from disk. */
+/** No `--test-metrics` flag was passed (a local run): tests are unavailable and coverage is read from disk. */
 export const NO_FRAGMENT: TestMetricsInputs = {
   tests: absentFromProducer('test metrics fragment', 'missing'),
   deliveredCoverage: () => null,
@@ -65,8 +65,23 @@ export const resolveTestMetrics = (
   return { tests: stale(reason), deliveredCoverage: () => stale(reason) };
 };
 
-/** A fragment that exists but cannot be used, e.g. failed validation. */
+/**
+ * A fragment that was passed but cannot be used, e.g. it failed validation.
+ * Tests and every lane are unavailable with the same reason: a rejected
+ * fragment never means "try the disk", which could pair stale local coverage
+ * with unavailable tests.
+ * // Usage: unusableTestMetrics('test-metrics.json: not valid JSON')
+ */
 export const unusableTestMetrics = (reason: string): TestMetricsInputs => ({
   tests: unavailable(reason),
-  deliveredCoverage: () => null,
+  deliveredCoverage: () => unavailable(reason),
 });
+
+/**
+ * A fragment path that was passed but does not exist: the Test job's output
+ * never arrived, so tests and every lane are unavailable rather than read from
+ * disk.
+ * // Usage: missingTestMetrics('./qa-test-metrics/test-metrics.json')
+ */
+export const missingTestMetrics = (path: string): TestMetricsInputs =>
+  unusableTestMetrics(`test metrics fragment ${path} not found`);

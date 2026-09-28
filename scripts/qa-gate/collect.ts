@@ -25,6 +25,7 @@ import { collectComponents } from './collect/components';
 import { collectDependencyStats } from './collect/dependencies';
 import { collectDuplication } from './collect/duplication';
 import {
+  missingTestMetrics,
   NO_FRAGMENT,
   parseTestMetricsFragment,
   resolveTestMetrics,
@@ -54,7 +55,7 @@ const parseTestMetricsPath = (argv: readonly string[]): string | null => {
 
 const loadTestMetrics = async (path: string, sourceSha: string): Promise<TestMetricsInputs> => {
   const file = Bun.file(path);
-  if (!(await file.exists())) return NO_FRAGMENT;
+  if (!(await file.exists())) return missingTestMetrics(path);
   const parsed = parseTestMetricsFragment(await file.text());
   if ('error' in parsed) {
     stderrLog(`${path}: ${parsed.error}`);
