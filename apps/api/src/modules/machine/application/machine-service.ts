@@ -46,7 +46,6 @@ import {
   type UpgradeReport,
   type UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
-import { stringify as stringifyToml } from 'smol-toml';
 import { restartExecutableOptions, spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
 import {
@@ -72,7 +71,7 @@ import { getLogsDir, getServerLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { writeFileAtomic } from '../../../lib/safe-file';
 import { readLiveState, readState, type ServerState } from '../../../lib/server-state';
-import { readTomlDocument, setTomlSectionValue } from '../../../lib/toml';
+import { readTomlDocument, setTomlSectionValue, stringifyTomlDocument } from '../../../lib/toml';
 import { requestShutdown } from '../../../server/shutdown-request';
 import {
   resolveInstallStatus,
@@ -517,7 +516,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
     const configFile = d.resolveConfigPath(d.configFilePath());
     const doc = d.readConfigDocument(configFile);
     setTomlSectionValue(doc, 'environments', 'installs_enabled', body.environments.installsEnabled);
-    d.writeConfigFile(configFile, stringifyToml(doc));
+    d.writeConfigFile(configFile, stringifyTomlDocument(doc));
 
     // The write always happens — even under an env override, the file is
     // meant to say `true` from now on — but the response never claims

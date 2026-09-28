@@ -3,10 +3,14 @@
  */
 
 import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
-import { stringify as stringifyToml } from 'smol-toml';
 import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
 import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../../../lib/safe-file';
-import { deleteTomlSectionValue, readTomlDocument, setTomlSectionValue } from '../../../lib/toml';
+import {
+  deleteTomlSectionValue,
+  readTomlDocument,
+  setTomlSectionValue,
+  stringifyTomlDocument,
+} from '../../../lib/toml';
 import { bunSecretStore } from '../../../services/secret-store/store';
 import { PROVIDER_SECRET_CONFIG } from '../domain/connector';
 
@@ -32,7 +36,7 @@ export async function persistSecret(
       const configPath = getConfig().configFilePath;
       const config = readTomlDocument(configPath);
       setTomlSectionValue(config, cfg.tomlSection, name, apiKey);
-      writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
+      writeFileAtomic(configPath, stringifyTomlDocument(config), { mode: SECRET_FILE_MODE });
       break;
     }
 
@@ -77,7 +81,7 @@ export async function removeSecret(
         const configPath = getConfig().configFilePath;
         const config = readTomlDocument(configPath);
         if (deleteTomlSectionValue(config, cfg.tomlSection, name)) {
-          writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
+          writeFileAtomic(configPath, stringifyTomlDocument(config), { mode: SECRET_FILE_MODE });
         }
       } catch (err) {
         console.error(`[connectors] Failed to remove key from config.toml:`, err);

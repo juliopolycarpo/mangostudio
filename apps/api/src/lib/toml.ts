@@ -1,4 +1,8 @@
-import { parse as parseToml } from 'smol-toml';
+/**
+ * The API's only TOML boundary. Every parse and serialize in `apps/api` goes
+ * through this module, so the underlying library can change in one place.
+ */
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { readUtf8FileOrNull } from './safe-file';
 
 export type TomlStringSections = Record<string, Record<string, string>>;
@@ -48,7 +52,10 @@ export function readTomlStringSections(filePath: string): TomlStringSections {
 
 /**
  * Read a full TOML document, preserving every value type, with a missing file
- * treated as an empty document. // Usage: const doc = readTomlDocument(configPath);
+ * treated as an empty document.
+ *
+ * @example
+ * const doc = readTomlDocument(configPath);
  */
 export function readTomlDocument(filePath: string): Record<string, unknown> {
   const content = readUtf8FileOrNull(filePath);
@@ -56,16 +63,34 @@ export function readTomlDocument(filePath: string): Record<string, unknown> {
   return parseTomlDocument(content);
 }
 
-/** Parse a complete TOML document without reading from disk. */
+/**
+ * Parse a complete TOML document without reading from disk. Throws on
+ * malformed TOML.
+ *
+ * @example
+ * const doc = parseTomlDocument('[auth]\nsecret = "s"');
+ */
 export function parseTomlDocument(content: string): Record<string, unknown> {
   const parsed = parseToml(content);
   return isRecord(parsed) ? parsed : {};
 }
 
 /**
+ * Serialize a document to TOML text, the write half of a read-modify-write.
+ *
+ * @example
+ * const toml = stringifyTomlDocument({ auth: { secret: 's' } });
+ */
+export function stringifyTomlDocument(doc: Record<string, unknown>): string {
+  return stringifyToml(doc);
+}
+
+/**
  * Set `key` in `section` of `doc`, preserving the rest of the document.
  * Mutates `doc` in place so a read-modify-write keeps unrelated config intact.
- * // Usage: setTomlSectionValue(doc, 'machine', 'installs_enabled', true)
+ *
+ * @example
+ * setTomlSectionValue(doc, 'machine', 'installs_enabled', true);
  */
 export function setTomlSectionValue(
   doc: Record<string, unknown>,

@@ -13,7 +13,6 @@ import { normalizeLibraryLocationSettings } from '@mangostudio/shared/app-settin
 import type { MachineDoctorSection } from '@mangostudio/shared/machine';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
-import { parse as parseToml } from 'smol-toml';
 import type { DoctorArgs } from '../../../cli/args';
 import { DEFAULT_DOCTOR_ARGS } from '../../../cli/args';
 import { collectChatGptDoctorChecks } from '../../../cli/chatgpt-doctor-checks';
@@ -65,6 +64,7 @@ import {
 import { getLogsDir, getRunDir } from '../../../lib/mango-paths';
 import { getSourceFrontendDir, isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { isStateLive, readState, type ServerState } from '../../../lib/server-state';
+import { parseTomlDocument } from '../../../lib/toml';
 import {
   EMBEDDED_FRONTEND_DIR,
   type EmbeddedFrontendFiles,
@@ -415,10 +415,8 @@ export function isCursorConnectorConfigured(config: MangoConfig): boolean {
   const configPath = config.configFilePath;
   if (!configPath || !existsSync(configPath)) return false;
 
-  return hasProviderTomlSecret(
-    tomlSection,
-    configPath,
-    (path) => parseToml(readFileSync(path, 'utf8')) as Record<string, unknown>
+  return hasProviderTomlSecret(tomlSection, configPath, (path) =>
+    parseTomlDocument(readFileSync(path, 'utf8'))
   );
 }
 
@@ -496,7 +494,7 @@ function resolveSkillsConfigOrigin(config: MangoConfig): SkillsConfigOrigin {
   const configPath = config.configFilePath;
   if (configPath && existsSync(configPath)) {
     try {
-      const parsed = parseToml(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      const parsed = parseTomlDocument(readFileSync(configPath, 'utf8'));
       const skills = parsed.skills as Record<string, unknown> | undefined;
       if (skills && typeof skills.dir === 'string' && skills.dir.trim()) return 'toml';
     } catch {
