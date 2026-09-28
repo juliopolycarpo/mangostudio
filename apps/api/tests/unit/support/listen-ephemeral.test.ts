@@ -3,6 +3,31 @@ import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
 import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 
+class NeverPublishingApp {
+  stopped = false;
+  server = { port: 12345 };
+
+  listen(_port: number, _callback: (server: { port?: number }) => void): void {
+    // Simulate a bound server whose publish callback never runs.
+  }
+
+  stop(force: boolean): void {
+    this.stopped = force;
+  }
+}
+
+class PortlessApp {
+  stopped = false;
+
+  listen(_port: number, callback: (server: { port?: number }) => void): void {
+    callback({});
+  }
+
+  stop(force: boolean): void {
+    this.stopped = force;
+  }
+}
+
 let stopServer: (() => void) | undefined;
 
 afterEach(() => {
@@ -33,12 +58,18 @@ describe('listenOnEphemeralPort', () => {
   });
 
   it('names the port it received when the server reports none', async () => {
-    const app = {
-      listen: (_port: number, callback: (server: { port?: number }) => void) => callback({}),
-    };
+    const app = new PortlessApp();
 
     await expect(listenOnEphemeralPort(app)).rejects.toThrow(
       'expected a numeric listening port | received: undefined'
     );
   });
+
+  it('stops a bound server if Elysia never publishes its handlers', async () => {
+    const app = new NeverPublishingApp();
+
+    await expect(listenOnEphemeralPort(app)).rejects.toThrow('no listen callback');
+
+    expect(app.stopped).toBe(true);
+  }, 10_000);
 });

@@ -5,6 +5,7 @@
 /** The part of an Elysia app this helper drives. */
 interface ListenableApp {
   listen(port: number, callback: (server: { port?: number }) => void): unknown;
+  stop(force: boolean): Promise<void> | void;
 }
 
 const PUBLISH_TIMEOUT_MS = 5_000;
@@ -24,7 +25,13 @@ const PUBLISH_TIMEOUT_MS = 5_000;
  */
 export function listenOnEphemeralPort(app: ListenableApp): Promise<number> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
+      // Elysia may have bound the socket even though its publish callback did not run.
+      try {
+        await app.stop(true);
+      } catch {
+        // Preserve the publish timeout as the reported failure.
+      }
       reject(
         new Error(
           `expected Elysia to publish its handlers within ${PUBLISH_TIMEOUT_MS}ms | received: no listen callback`
