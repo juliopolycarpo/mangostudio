@@ -29,6 +29,7 @@ describe('dependency policy', () => {
       'date-fns',
       'shiki',
       '@tanstack/router-devtools',
+      'kysely-bun-sqlite',
     ]);
   });
 

@@ -6,9 +6,9 @@ import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Kysely } from 'kysely';
-import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
 import { getConfig } from '../lib/config';
 import { createDiagnosticLogger } from '../lib/logger';
+import { createBunSqliteDialect } from './bun-sqlite-dialect';
 import type { Database } from './types';
 
 let dbInstance: Kysely<Database> | null = null;
@@ -34,7 +34,7 @@ export function getDb(): Kysely<Database> {
     sqlite.exec('PRAGMA foreign_keys = ON;');
 
     dbInstance = new Kysely<Database>({
-      dialect: new BunSqliteDialect({ database: sqlite }),
+      dialect: createBunSqliteDialect(sqlite),
     });
 
     dbLogger.info('connected', { path: dbPath });
