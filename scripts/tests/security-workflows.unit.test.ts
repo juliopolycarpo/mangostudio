@@ -114,12 +114,12 @@ describe('security workflows', () => {
     expect(bunBlock).toContain('prod-minor-patch:');
   });
 
-  test('Dependabot does not propose TypeBox patch or minor bumps while Elysia beta.4 requires 1.3.13', () => {
+  test('Dependabot does not propose TypeBox patch or minor bumps while Elysia beta.19 requires 1.3.23', () => {
     const api = JSON.parse(readText('apps/api/package.json')) as {
       dependencies: { elysia: string; typebox: string };
     };
-    expect(api.dependencies.elysia).toBe('2.0.0-beta.4');
-    expect(api.dependencies.typebox).toBe('1.3.13');
+    expect(api.dependencies.elysia).toBe('2.0.0-beta.19');
+    expect(api.dependencies.typebox).toBe('1.3.23');
 
     const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as {
       updates: Array<{

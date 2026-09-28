@@ -53,6 +53,7 @@ import {
   runAnsweredTurn,
 } from '../../support/external-agents/rust-agent-turns';
 import { insertTestUser } from '../../support/factories';
+import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 import {
   assertRustRuntimeCommandMethods,
   assertRustRuntimeFeatureCeiling,
@@ -133,9 +134,7 @@ async function startHub(environmentId: string): Promise<Hub> {
     .group('/api', (group) =>
       group.use(createRuntimeSocketRoutes({ pairing, manager, hubVersion: () => 'hub-test' }))
     );
-  app.listen(0);
-  const port = (app.server as { port?: number } | null)?.port;
-  expect(port).toBeNumber();
+  const port = await listenOnEphemeralPort(app);
 
   return {
     manager,

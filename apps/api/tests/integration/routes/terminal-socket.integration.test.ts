@@ -15,6 +15,7 @@ import {
 } from '../../../src/modules/terminals/application/terminal-session-service';
 import { createTerminalSocketRoutes } from '../../../src/modules/terminals/http/terminal-socket-routes';
 import { insertTestUser } from '../../support/factories';
+import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 import { FakeTerminalRuntimeClient } from '../../support/mocks/fake-terminal-runtime-client';
 import { resolveRustRuntimeBinary, skipWithoutRustBinary } from '../../support/rust-runtime-binary';
 import { spawnRustStdioRuntime } from '../../support/rust-stdio-runtime';
@@ -37,7 +38,7 @@ interface StartHubOptions {
   readonly allowedOrigins?: readonly string[];
 }
 
-function startHub(options: StartHubOptions = {}) {
+async function startHub(options: StartHubOptions = {}) {
   const service = options.service ?? createTerminalSessionService();
   const app = new Elysia().use(websocket(REALTIME_WEBSOCKET_OPTIONS)).group('/api', (group) =>
     group.use(
@@ -48,9 +49,7 @@ function startHub(options: StartHubOptions = {}) {
       })
     )
   );
-  app.listen(0);
-  const port = (app.server as { port?: number } | null)?.port;
-  expect(port).toBeNumber();
+  const port = await listenOnEphemeralPort(app);
   stopServer = () => {
     void app.server?.stop(true);
   };
@@ -128,14 +127,14 @@ async function waitForOpen(socket: WebSocket): Promise<void> {
 
 describe('terminal socket handshake', () => {
   it('closes an upgrade with no session as unauthorized', async () => {
-    const hub = startHub();
+    const hub = await startHub();
     const client = connect(`${hub.url}/anything`);
 
     expect((await client.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.UNAUTHORIZED);
   });
 
   it('closes a disallowed browser Origin as forbidden', async () => {
-    const hub = startHub();
+    const hub = await startHub();
     const client = connect(`${hub.url}/anything`, { Origin: 'https://evil.example' });
 
     expect((await client.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.FORBIDDEN);
@@ -143,7 +142,7 @@ describe('terminal socket handshake', () => {
 
   it('never reveals whether an unknown session exists', async () => {
     const user = await insertTestUser();
-    const hub = startHub({ resolveUserId: () => Promise.resolve(user.id) });
+    const hub = await startHub({ resolveUserId: () => Promise.resolve(user.id) });
 
     const client = connect(`${hub.url}/no-such-session`);
 
@@ -164,7 +163,7 @@ describe('terminal socket handshake', () => {
       isIdentityAttested: () => true,
     });
     const session = await service.open(owner.id, { environmentId: ENVIRONMENT_ID });
-    const hub = startHub({ service, resolveUserId: () => Promise.resolve(stranger.id) });
+    const hub = await startHub({ service, resolveUserId: () => Promise.resolve(stranger.id) });
 
     const client = connect(`${hub.url}/${session.id}`);
 
@@ -174,7 +173,7 @@ describe('terminal socket handshake', () => {
 
 describe('terminal socket relay', () => {
   async function openViewer(service: TerminalSessionService, userId: string, sessionId: string) {
-    const hub = startHub({ service, resolveUserId: () => Promise.resolve(userId) });
+    const hub = await startHub({ service, resolveUserId: () => Promise.resolve(userId) });
     const client = connect(`${hub.url}/${sessionId}`);
     await waitForOpen(client.socket);
     return client;
@@ -544,7 +543,7 @@ describe('terminal socket over a real Rust runtime', () => {
           environmentId: 'rust-terminal',
           shell: 'bash',
         });
-        const hub = startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
+        const hub = await startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
         const viewer = connect(`${hub.url}/${session.id}`);
         await waitForOpen(viewer.socket);
 

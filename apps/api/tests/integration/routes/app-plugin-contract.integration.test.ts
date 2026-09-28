@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { app } from '../../../src/app';
 import { getConfig, loadConfigForTest } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
+import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 import { SPLIT_DEPLOYMENT_TEST_ORIGIN } from '../../support/setup/test-environment';
 
 const ROUTE_INVENTORY_FIXTURE = join(
@@ -412,9 +413,7 @@ describe('root WebSocket transport', () => {
     // as the connection below being reset.
     mkdirSync(getConfig().uploads.dir, { recursive: true });
 
-    app.listen(0);
-    const port = (app.server as { port?: number } | null)?.port;
-    expect(port).toBeNumber();
+    const port = await listenOnEphemeralPort(app);
 
     try {
       const signup = await fetch(`http://127.0.0.1:${port}/api/auth/sign-up/email`, {

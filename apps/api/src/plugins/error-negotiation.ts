@@ -52,7 +52,7 @@ function asApiErrorResponse(value: unknown): ApiErrorResponse | null {
  * to do.
  */
 function resolveStatus(responseValue: unknown, set: Context['set']): number | null {
-  const raw = responseValue instanceof ElysiaStatus ? responseValue.code : set.status;
+  const raw = responseValue instanceof ElysiaStatus ? responseValue.status : set.status;
 
   if (typeof raw === 'number') return raw;
   if (typeof raw === 'string') {

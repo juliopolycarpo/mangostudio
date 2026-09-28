@@ -1,0 +1,36 @@
+diff --git a/dist/openapi.js b/dist/openapi.js
+index c347589caec845925849168f33483a5ddd045c13..ada274c4090a1f587b4e700f77859d4f622e6dab 100644
+--- a/dist/openapi.js
++++ b/dist/openapi.js
+@@ -451,7 +451,12 @@ const normalizeSchemaForOpenAPIVersion = (schema, openapiVersion) => {
+ const enumToOpenApi = (_schema) => {
+ 	if (!_schema || typeof _schema !== "object") return _schema;
+ 	if (Array.isArray(_schema)) return _schema.map((item) => enumToOpenApi(item));
+-	const schema = _schema;
++	if (_schema["~kind"] === "File") return {
++		type: "string",
++		format: "binary"
++	};
++	const { "~elyTyp": _elyTyp, ...unmarked } = _schema;
++	const schema = Array.isArray(_schema.anyOf) || Array.isArray(_schema.oneOf) || Array.isArray(_schema.allOf) ? unmarked : _schema;
+ 	if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0 && schema.anyOf.every((item) => item && typeof item === "object" && item.const !== void 0)) return {
+ 		type: "string",
+ 		enum: schema.anyOf.map((item) => item.const)
+diff --git a/dist/openapi.mjs b/dist/openapi.mjs
+index 7a7072f19bb453d3f4627e1a54eed937c00322ff..89062a9b0d37cfed564e462c2e9d790f91439213 100644
+--- a/dist/openapi.mjs
++++ b/dist/openapi.mjs
+@@ -450,7 +450,12 @@ const normalizeSchemaForOpenAPIVersion = (schema, openapiVersion) => {
+ const enumToOpenApi = (_schema) => {
+ 	if (!_schema || typeof _schema !== "object") return _schema;
+ 	if (Array.isArray(_schema)) return _schema.map((item) => enumToOpenApi(item));
+-	const schema = _schema;
++	if (_schema["~kind"] === "File") return {
++		type: "string",
++		format: "binary"
++	};
++	const { "~elyTyp": _elyTyp, ...unmarked } = _schema;
++	const schema = Array.isArray(_schema.anyOf) || Array.isArray(_schema.oneOf) || Array.isArray(_schema.allOf) ? unmarked : _schema;
+ 	if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0 && schema.anyOf.every((item) => item && typeof item === "object" && item.const !== void 0)) return {
+ 		type: "string",
+ 		enum: schema.anyOf.map((item) => item.const)
