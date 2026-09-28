@@ -38,7 +38,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.48.0",
     "marked": "^18.0.14",
-    "motion": "^13.4.0",
+    "motion": "^13.4.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwind-merge": "^3.7.0"
