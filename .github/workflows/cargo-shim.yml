@@ -29,6 +29,10 @@ on:
       - "apps/shared/src/environments/toolchain-schemas.ts"
       - "apps/shared/src/library/**"
       - "apps/shared/src/markdown/**"
+      - "apps/shared/src/i18n/en.ts"
+      - "spec/**"
+      - "scripts/tests/support/SHA256SUMS.sample"
+      - "packages/protocol/src/testing/conformance.ts"
       - "Cargo.toml"
       - "Cargo.lock"
       - "deny.toml"
@@ -134,10 +138,10 @@ jobs:
       # `--all-targets` above excludes doctests by definition, and the doc
       # comments across this workspace (`mangostudio-runtime`,
       # `mangostudio-runtime-contract`) carry runnable examples of their
-      # own. `protocol-ci.yml` runs both of these for the protocol crate,
-      # but only when its own path filter fires, so a runtime-only PR needs
-      # its own copy of the gate. Ubuntu-only: this checks the doc
-      # comments compile and run, not a platform-specific behaviour.
+      # own. This is the one Ubuntu run for every crate, the protocol crate
+      # included: `protocol-ci.yml` no longer repeats it there, and only adds
+      # macOS and Windows, where that crate's `cfg`-gated transports have
+      # doctests and intra-doc links of their own.
       - name: Run doctests
         if: matrix.os == 'ubuntu-latest'
         run: cargo test --doc --workspace --all-features --locked
