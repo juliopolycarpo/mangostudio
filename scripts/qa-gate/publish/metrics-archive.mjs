@@ -41,6 +41,7 @@ function findEntry(view, name) {
   if (offset === ZIP64_SENTINEL) throw new Error('zip64 archives are not supported');
 
   const decoder = new TextDecoder();
+  let found = null;
   for (let index = 0; index < entryCount; index += 1) {
     if (offset + 46 > view.byteLength || view.getUint32(offset, true) !== CENTRAL_SIGNATURE) {
       throw new Error(`corrupt zip central directory at offset ${offset}`);
@@ -55,8 +56,13 @@ function findEntry(view, name) {
       nameLength +
       view.getUint16(offset + 30, true) +
       view.getUint16(offset + 32, true);
+    if (entryName === name && found) {
+      // `unzip -p` in the workflow streams every match, so a first-match reader
+      // could validate one payload while the renderer consumes another.
+      throw new Error(`archive has more than one ${name} entry; expected exactly one`);
+    }
     if (entryName === name) {
-      return {
+      found = {
         flags: view.getUint16(offset + 8, true),
         method: view.getUint16(offset + 10, true),
         compressedSize: view.getUint32(offset + 20, true),
@@ -66,7 +72,8 @@ function findEntry(view, name) {
     }
     offset = next;
   }
-  throw new Error(`archive has no ${name} entry`);
+  if (!found) throw new Error(`archive has no ${name} entry`);
+  return found;
 }
 
 /**

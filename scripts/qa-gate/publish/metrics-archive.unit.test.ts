@@ -43,6 +43,14 @@ describe('readMetricsPayload', () => {
     expect(readMetricsPayload(archive)).toBe('{"b":2}');
   });
 
+  it('rejects an archive with two metrics entries instead of trusting the first', () => {
+    const archive = buildZip([
+      { name: QA_METRICS_FILE_NAME, content: '{"a":1}' },
+      { name: QA_METRICS_FILE_NAME, content: '{"a":2}' },
+    ]);
+    expect(() => readMetricsPayload(archive)).toThrow('more than one metrics.json entry');
+  });
+
   it('rejects an archive without the metrics entry, naming the entry', () => {
     const archive = buildZip([{ name: 'other.txt', content: 'x' }]);
     expect(() => readMetricsPayload(archive)).toThrow('archive has no metrics.json entry');
