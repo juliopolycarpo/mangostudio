@@ -6,7 +6,6 @@
 
 import { randomBytes } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';
-import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import {
   getAuthSecretValidationMessage,
   getConfig,
@@ -14,6 +13,7 @@ import {
   resetConfig,
 } from '../lib/config';
 import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../lib/safe-file';
+import { readTomlDocument, stringifyTomlDocument } from '../lib/toml';
 import { CliError } from './errors';
 import { writeLine } from './output';
 import { isInteractiveTerminal } from './prompt';
@@ -164,18 +164,11 @@ function insertEnvSecretLine(lines: string[], entry: string): void {
 }
 
 function persistTomlSecret(filePath: string, secret: string): void {
-  const config = readTomlRecord(filePath);
+  const config = readTomlDocument(filePath);
   const auth = isRecord(config.auth) ? { ...config.auth } : {};
   auth.secret = secret;
   config.auth = auth;
-  writeFileAtomic(filePath, stringifyToml(config), { mode: SECRET_FILE_MODE });
-}
-
-function readTomlRecord(filePath: string): Record<string, unknown> {
-  const content = readUtf8FileOrNull(filePath);
-  if (content === null) return {};
-  const parsed = parseToml(content);
-  return isRecord(parsed) ? parsed : {};
+  writeFileAtomic(filePath, stringifyTomlDocument(config), { mode: SECRET_FILE_MODE });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

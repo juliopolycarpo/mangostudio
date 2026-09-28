@@ -14,8 +14,8 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { TERMINAL_SCROLLBACK_MAX_BYTES } from '@mangostudio/shared/terminal';
 import type { UpdateChannel } from '@mangostudio/shared/updates';
-import { parse as parseToml } from 'smol-toml';
 import { CliError } from '../cli/errors';
+import { parseTomlDocument } from './toml';
 
 /** `terminal.scrollback_kib` is threaded to the runtime as bytes; it cannot ask for more than the ring buffer holds. */
 const TERMINAL_SCROLLBACK_KIB_MAX = TERMINAL_SCROLLBACK_MAX_BYTES / 1024;
@@ -1010,7 +1010,7 @@ export function loadConfig(overridePath?: string): MangoConfig {
     let parsed: Record<string, unknown> | null = null;
     try {
       const content = readFileSync(tomlPath, 'utf8');
-      parsed = parseToml(content) as Record<string, unknown>;
+      parsed = parseTomlDocument(content);
     } catch (err) {
       console.warn(`[config] Failed to parse ${tomlPath}:`, err);
     }

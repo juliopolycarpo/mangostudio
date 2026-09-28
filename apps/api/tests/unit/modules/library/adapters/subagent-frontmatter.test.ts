@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { parseAgentMarkdown } from '@mangostudio/shared/agents';
-import { parse as parseToml } from 'smol-toml';
+import { parseTomlDocument } from '../../../../../src/lib/toml';
 import { createSubagentAdapter } from '../../../../../src/modules/library/application/adapters/subagent-frontmatter';
 
 describe('subagent frontmatter adapters', () => {
@@ -49,7 +49,7 @@ Review the diff.
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(parseToml(result.content)).toEqual({
+    expect(parseTomlDocument(result.content)).toEqual({
       name: 'reviewer',
       description: 'Reviews changes',
       model: 'sonnet',
@@ -139,7 +139,7 @@ Review the diff.
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(parseToml(result.content).developer_instructions).toBe('Review.\n');
+    expect(parseTomlDocument(result.content).developer_instructions).toBe('Review.\n');
   });
 
   it('rejects invalid source framing without producing partial output', async () => {

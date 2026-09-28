@@ -1,4 +1,8 @@
-import { parse as parseToml } from 'smol-toml';
+/**
+ * The API's only TOML boundary. Every parse and serialize in `apps/api` goes
+ * through this module, so the underlying library can change in one place.
+ */
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { readUtf8FileOrNull } from './safe-file';
 
 export type TomlStringSections = Record<string, Record<string, string>>;
@@ -56,10 +60,21 @@ export function readTomlDocument(filePath: string): Record<string, unknown> {
   return parseTomlDocument(content);
 }
 
-/** Parse a complete TOML document without reading from disk. */
+/**
+ * Parse a complete TOML document without reading from disk. Throws on
+ * malformed TOML. // Usage: const doc = parseTomlDocument('[auth]\nsecret = "s"');
+ */
 export function parseTomlDocument(content: string): Record<string, unknown> {
   const parsed = parseToml(content);
   return isRecord(parsed) ? parsed : {};
+}
+
+/**
+ * Serialize a document to TOML text, the write half of a read-modify-write.
+ * // Usage: writeFileAtomic(path, stringifyTomlDocument(doc));
+ */
+export function stringifyTomlDocument(doc: Record<string, unknown>): string {
+  return stringifyToml(doc);
 }
 
 /**

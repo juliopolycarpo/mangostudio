@@ -5,7 +5,7 @@ import type {
   SubagentDescriptor,
 } from '@mangostudio/shared/library';
 import { type MarkdownFrontmatter, parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
-import { parse as parseToml } from 'smol-toml';
+import { parseTomlDocument } from '../../../../lib/toml';
 import { extractFrontmatterBody, removeFrontmatterSeparator } from './frontmatter-framing';
 import { dialectForMarkdownSubagentLocation } from './subagent-dialect';
 import type { AdaptInput, AdaptResult, FormatAdapter } from './types';
@@ -69,7 +69,7 @@ function adaptSubagent(input: AdaptInput): AdaptResult {
 
 function parseDescriptor(content: string, format: ResourceFormat): ParsedSubagent {
   if (format === 'toml-agent') {
-    const value = parseToml(content);
+    const value = parseTomlDocument(content);
     const name = requiredString(value.name, 'name');
     const description = requiredString(value.description, 'description');
     const body = requiredBody(value.developer_instructions, 'developer_instructions');

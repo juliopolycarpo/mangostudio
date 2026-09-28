@@ -6,7 +6,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
-import { stringify as stringifyToml } from 'smol-toml';
 import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
 import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../../../lib/safe-file';
 import {
@@ -14,6 +13,7 @@ import {
   parseTomlStringSections,
   readTomlDocument,
   setTomlSectionValue,
+  stringifyTomlDocument,
 } from '../../../lib/toml';
 import { ConnectorNotFoundError } from '../../../modules/connectors/application/connector-errors';
 import { parseStringArray } from '../../../utils/json';
@@ -284,7 +284,7 @@ export function createGeminiSecretService(
           const configPath = resolveTomlFilePath();
           const config = readTomlDocument(configPath);
           setTomlSectionValue(config, 'gemini_api_keys', body.name, apiKey);
-          writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
+          writeFileAtomic(configPath, stringifyTomlDocument(config), { mode: SECRET_FILE_MODE });
           break;
         }
 
@@ -358,7 +358,7 @@ export function createGeminiSecretService(
           const configPath = resolveTomlFilePath();
           const config = readTomlDocument(configPath);
           if (deleteTomlSectionValue(config, 'gemini_api_keys', metadata.name)) {
-            writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
+            writeFileAtomic(configPath, stringifyTomlDocument(config), { mode: SECRET_FILE_MODE });
           }
         } catch (err) {
           console.error('[config] Failed to remove key from config.toml:', err);
