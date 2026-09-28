@@ -100,9 +100,57 @@ describe('renderCommitsSection', () => {
     const section = renderCommitsSection(many, RANGE);
 
     expect(section.length).toBeLessThanOrEqual(40_000);
-    expect(section).not.toContain('<details>');
+    expect(section).not.toContain('Full commit messages</summary>');
     expect(section).toContain('Full commit messages omitted');
     expect(section).toContain('- `0000000` commit 0');
+  });
+
+  describe('fold threshold', () => {
+    const commits = (count: number): CommitEntry[] =>
+      Array.from({ length: count }, (_, index) => ({
+        sha: `${index + 1}`.padStart(7, '0') + 'a'.repeat(33),
+        subject: `feat: commit ${index + 1}`,
+        // A multi-line body must not add to the count.
+        message: `feat: commit ${index + 1}\n\n- body bullet\n- another bullet`,
+      }));
+    const listFolded = (section: string): boolean => section.includes('<summary>');
+    const listSummary = (count: number): string => `<summary>${count} commits</summary>`;
+
+    it.each([1, 5])('keeps %d commits expanded in place', (count) => {
+      const section = renderCommitsSection(commits(count), RANGE);
+
+      expect(section).not.toContain(listSummary(count));
+      expect(section).toContain(`- \`${`${count}`.padStart(7, '0')}\` feat: commit ${count}`);
+      expect(section).toContain(`## Commits — ${count} commit`);
+    });
+
+    it.each([6, 12])('folds %d commits behind a summary naming the real count', (count) => {
+      const section = renderCommitsSection(commits(count), RANGE);
+
+      expect(section).toContain(listSummary(count));
+      const foldedList = section.slice(
+        section.indexOf(listSummary(count)),
+        section.indexOf('</details>')
+      );
+      expect(foldedList.split('\n').filter((line) => line.startsWith('- `'))).toHaveLength(count);
+      // Heading and range stay visible above the fold.
+      expect(section.indexOf('## Commits')).toBeLessThan(section.indexOf('<details>'));
+    });
+
+    it('keeps the full-message block collapsed independently of the list', () => {
+      const small = renderCommitsSection(commits(2), RANGE);
+
+      expect(listFolded(small)).toBe(true);
+      expect(small).toContain('<summary>Full commit messages</summary>');
+      expect(small).not.toContain('2 commits</summary>');
+    });
+
+    it('still folds the list when the full messages are dropped for size', () => {
+      const section = renderCommitsSection(commits(8), RANGE, 100);
+
+      expect(section).toContain(listSummary(8));
+      expect(section).toContain('Full commit messages omitted');
+    });
   });
 
   it('sizes the fence past backtick runs inside the body', () => {

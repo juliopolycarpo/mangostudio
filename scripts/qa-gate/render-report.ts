@@ -1,12 +1,17 @@
-// Consolidated PR QA report renderer, run by the trusted publisher workflow
-// with default-branch tooling only. Validates the untrusted qa-metrics
-// artifacts against the report context (trusted values resolved from the
-// GitHub API), renders the commit summary and changelog preview from fetched
-// git data, and writes the final comment markdown to stdout.
+// PR QA comment renderer, run by the trusted publisher workflow with
+// default-branch tooling only. One invocation renders one of the two managed
+// comments and writes its markdown to stdout, so a failure in one part never
+// takes the other down:
+// - `--part metrics`: validates the untrusted qa-metrics artifacts against the
+//   report context (trusted values resolved from the GitHub API) and renders
+//   the QA metrics comparison.
+// - `--part commits`: renders the commit summary and changelog preview from
+//   fetched git data.
 //
-// Usage: bun ./scripts/qa-gate/render-report.ts <context.json> [--head <metrics.json>] [--base <metrics.json>] [--ci <ci-durations.json>]
+// Usage: bun ./scripts/qa-gate/render-report.ts <context.json> --part metrics [--head <metrics.json>] [--base <metrics.json>] [--ci <ci-durations.json>]
+//        bun ./scripts/qa-gate/render-report.ts <context.json> --part commits
 
-import { cliffArgs, renderChangelogPreviewSection } from '../lib/changelog';
+import { cliffArgs } from '../lib/changelog';
 import { ROOT_DIR } from '../lib/config';
 import { type CiDurationComparison, parseCiDurationComparison } from './ci-durations';
 import type { Metrics } from './collect/types';
@@ -16,7 +21,11 @@ import {
   type ExpectedEnvelope,
   parseQaMetricsEnvelope,
 } from './metrics-envelope';
-import { composeReport } from './report-document';
+import {
+  composeCommitsReport,
+  composeMetricsReport,
+  renderChangelogForComment,
+} from './report-document';
 
 interface ArtifactStatus {
   readonly found: boolean;
@@ -38,10 +47,17 @@ const stderr = (message: string): void => {
   process.stderr.write(`[render-report] ${message}\n`);
 };
 
+const REPORT_PARTS = ['metrics', 'commits'] as const;
+type ReportPart = (typeof REPORT_PARTS)[number];
+
+const USAGE =
+  'Usage: bun ./scripts/qa-gate/render-report.ts <context.json> --part <metrics|commits> [--head <metrics.json>] [--base <metrics.json>] [--ci <ci-durations.json>]\n';
+
 const parseArgs = (
   argv: readonly string[]
 ): {
   contextPath: string;
+  part: ReportPart;
   headPath: string | null;
   basePath: string | null;
   ciPath: string | null;
@@ -52,14 +68,16 @@ const parseArgs = (
     const value = index !== -1 ? rest[index + 1] : undefined;
     return value && !value.startsWith('--') ? value : null;
   };
-  if (!contextPath) {
+  const part = flagValue('--part');
+  if (!contextPath || !REPORT_PARTS.includes(part as ReportPart)) {
     process.stderr.write(
-      'Usage: bun ./scripts/qa-gate/render-report.ts <context.json> [--head <metrics.json>] [--base <metrics.json>] [--ci <ci-durations.json>]\n'
+      `${USAGE}Received --part ${JSON.stringify(part)}; expected one of ${REPORT_PARTS.join(', ')}.\n`
     );
     process.exit(1);
   }
   return {
     contextPath,
+    part: part as ReportPart,
     headPath: flagValue('--head'),
     basePath: flagValue('--base'),
     ciPath: flagValue('--ci'),
@@ -115,7 +133,7 @@ const renderChangelog = (baseSha: string, headSha: string): string | null => {
     ...cliffArgs({ kind: 'preview', base: baseSha, head: headSha }),
   ]);
   if (output === null) return null;
-  return renderChangelogPreviewSection(output);
+  return renderChangelogForComment(output);
 };
 
 const loadCiDurations = async (
@@ -133,51 +151,63 @@ const loadCiDurations = async (
   }
 };
 
-const { contextPath, headPath, basePath, ciPath } = parseArgs(process.argv.slice(2));
-const context = JSON.parse(await Bun.file(contextPath).text()) as ReportContext;
+const renderMetricsPart = async (
+  context: ReportContext,
+  paths: { headPath: string | null; basePath: string | null; ciPath: string | null }
+): Promise<string> => {
+  const head = await loadMetrics(
+    paths.headPath,
+    context.headArtifact,
+    {
+      repository: context.repository,
+      headSha: context.headSha,
+      baseSha: context.baseSha,
+      prNumber: context.prNumber,
+    },
+    'head',
+    // #516: a PR base.sha follows the live base tip and can advance after head collection.
+    { enforceBaseSha: false }
+  );
+  const base = await loadMetrics(
+    paths.basePath,
+    context.baseArtifact,
+    {
+      repository: context.repository,
+      headSha: context.baseSha,
+      baseSha: null,
+      prNumber: null,
+    },
+    'base'
+  );
+  const ci = await loadCiDurations(paths.ciPath);
 
-const head = await loadMetrics(
-  headPath,
-  context.headArtifact,
-  {
-    repository: context.repository,
-    headSha: context.headSha,
-    baseSha: context.baseSha,
-    prNumber: context.prNumber,
-  },
-  'head',
-  // #516: a PR base.sha follows the live base tip and can advance after head collection.
-  { enforceBaseSha: false }
-);
-const base = await loadMetrics(
-  basePath,
-  context.baseArtifact,
-  {
-    repository: context.repository,
-    headSha: context.baseSha,
-    baseSha: null,
-    prNumber: null,
-  },
-  'base'
-);
-const ci = await loadCiDurations(ciPath);
+  return composeMetricsReport(
+    {
+      headSha: context.headSha,
+      baseSha: context.baseSha,
+      runUrl: context.runUrl,
+      headNote: head.note,
+      baseNote: base.note,
+    },
+    base.metrics,
+    head.metrics,
+    ci.durations,
+    ci.note
+  );
+};
 
-const report = composeReport(
-  {
-    headSha: context.headSha,
-    baseSha: context.baseSha,
-    runUrl: context.runUrl,
-    headNote: head.note,
-    baseNote: base.note,
-  },
-  {
+const renderCommitsPart = (context: ReportContext): string =>
+  composeCommitsReport({
     commits: renderCommits(context.baseSha, context.headSha),
     changelog: renderChangelog(context.baseSha, context.headSha),
-  },
-  base.metrics,
-  head.metrics,
-  ci.durations,
-  ci.note
-);
+  });
+
+const { contextPath, part, headPath, basePath, ciPath } = parseArgs(process.argv.slice(2));
+const context = JSON.parse(await Bun.file(contextPath).text()) as ReportContext;
+
+const report =
+  part === 'metrics'
+    ? await renderMetricsPart(context, { headPath, basePath, ciPath })
+    : renderCommitsPart(context);
 
 process.stdout.write(`${report}\n`);

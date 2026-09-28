@@ -144,9 +144,10 @@ This is a one-time local setup. The template is at `.gitmessage` in the repo roo
 ## Changelog
 
 `CHANGELOG.md` is generated from Conventional Commits with git-cliff — never edit
-it by hand. The PR QA workflow posts bot comments on every PR — a commit
-summary, a **Changelog Preview** showing the entries the PR would add, and a QA
-metrics report. Preview the changelog locally with `bun run changelog --preview`. See
+it by hand. The PR QA workflow posts two bot comments on every PR — a QA
+metrics report, and a commit summary with a **Changelog Preview** showing the
+entries the PR would add (each list folds once it has more than five items).
+Preview the changelog locally with `bun run changelog --preview`. See
 [`docs/reference/releasing.md`](../docs/reference/releasing.md) for the release flow.
 
 ## Pull Request Process

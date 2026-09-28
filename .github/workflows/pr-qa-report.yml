@@ -1,8 +1,8 @@
 name: PR QA Report
 
-# Privileged publisher for the single managed PR comment (commit summary,
-# changelog preview, run status, QA metrics comparison). Report-only — never
-# fails the PR.
+# Privileged publisher for the two managed PR comments: QA metrics (run status,
+# CI durations, metrics comparison) and commits + changelog preview.
+# Report-only — never fails the PR.
 #
 # Trust boundary: this workflow runs with a write-capable token, so it only
 # ever executes default-branch tooling. It never checks out or runs pull
@@ -14,8 +14,8 @@ name: PR QA Report
 #   schema-validated against API-resolved provenance before rendering,
 # - commits and changelog are rendered from fetched git objects, not from
 #   anything the PR uploaded,
-# - the comment updates in place by marker and is skipped when the PR head
-#   moved on, so a stale run can never clobber a newer report.
+# - each comment updates in place by its own marker and publishing is skipped
+#   when the PR head moved on, so a stale run can never clobber a newer report.
 #
 # The unprivileged side (ci.yml → test.yml/qa-metrics.yml) runs PR code with
 # `contents: read` only and communicates exclusively through artifacts.
@@ -46,7 +46,7 @@ jobs:
     permissions:
       actions: read # download metrics and read CI job durations
       contents: read # default-branch checkout for trusted report tooling
-      pull-requests: write # publish/update the managed QA report comment
+      pull-requests: write # publish/update the managed QA comments
     steps:
       # Default-branch checkout: trusted tooling only, full history so the
       # commit summary and git-cliff can walk base..head once the PR head ref
@@ -118,22 +118,33 @@ jobs:
         run: git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
 
       # continue-on-error: a renderer crash still reaches the publish step,
-      # which substitutes the fallback body instead of stranding a stale
-      # comment. render-report.ts itself degrades per-section on bad input.
-      - name: Render report
+      # which substitutes that comment's fallback body instead of stranding a
+      # stale comment. The two parts render in separate steps so a failure in
+      # one never blocks the other. render-report.ts itself degrades
+      # per-section on bad input.
+      - name: Render QA metrics comment
         if: ${{ steps.resolve.outputs.publish == 'true' }}
         continue-on-error: true
         run: |
           set -euo pipefail
-          args=(report-context.json)
+          args=(report-context.json --part metrics)
           [ -f head-metrics.json ] && args+=(--head head-metrics.json)
           [ -f base-metrics.json ] && args+=(--base base-metrics.json)
           [ -f ci-durations.json ] && args+=(--ci ci-durations.json)
-          bun ./scripts/qa-gate/render-report.ts "${args[@]}" > report.md
-          echo "## Rendered report preview" >> "$GITHUB_STEP_SUMMARY"
-          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          bun ./scripts/qa-gate/render-report.ts "${args[@]}" > metrics.md
+          echo "## Rendered QA metrics preview" >> "$GITHUB_STEP_SUMMARY"
+          cat metrics.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish comment
+      - name: Render commits and changelog comment
+        if: ${{ steps.resolve.outputs.publish == 'true' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          bun ./scripts/qa-gate/render-report.ts report-context.json --part commits > commits.md
+          echo "## Rendered commits and changelog preview" >> "$GITHUB_STEP_SUMMARY"
+          cat commits.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish comments
         if: ${{ steps.resolve.outputs.publish == 'true' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -143,11 +154,12 @@ jobs:
               `${process.env.GITHUB_WORKSPACE}/scripts/qa-gate/publish/managed-comments.mjs`
             );
             const reportContext = JSON.parse(await readFile('report-context.json', 'utf8'));
-            await publish.publishQaReport(
+            await publish.publishQaComments(
               { github, context, core },
               {
                 pullNumber: reportContext.prNumber,
                 expectedHeadSha: reportContext.headSha,
-                body: await publish.readReportBody('report.md'),
+                metricsBody: await publish.readReportBody('metrics.md', 'metrics'),
+                commitsBody: await publish.readReportBody('commits.md', 'commits'),
               }
             );

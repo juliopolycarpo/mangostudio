@@ -2,6 +2,7 @@
 // the PR preview formatting in one testable place; scripts/changelog.ts wires
 // these to the actual binary.
 
+import { collapseWhenLong } from './collapsible';
 import { PROTOCOL_IMPORT_TIP } from './protocol';
 
 /** Default base ref the PR preview diffs against. */
@@ -75,17 +76,54 @@ export function assertChangelogHasRelease(changelog: string, version: string): v
   );
 }
 
-/** Render a git-cliff preview body as a marker-less report section. */
-export function renderChangelogPreviewSection(body: string): string {
+/**
+ * Count the changelog entries in a git-cliff body: one per top-level `- ` line
+ * (cliff.toml writes exactly one per commit). Group headings, blank lines, and
+ * indented continuation lines are not entries.
+ * // Usage: countChangelogEntries('### Features\n\n- a\n- b') -> 2
+ */
+export function countChangelogEntries(body: string): number {
+  return body.split('\n').filter((line) => line.startsWith('- ')).length;
+}
+
+export interface PreviewSectionOptions {
+  /** Fold the entries behind a `<details>` once they outnumber this. */
+  readonly collapseAbove?: number;
+  /** Cut the entries at a line boundary once they exceed this many characters. */
+  readonly maxLength?: number;
+}
+
+const truncateAtLine = (text: string, maxLength: number): string => {
+  if (text.length <= maxLength) return text;
+  const cut = text.slice(0, maxLength);
+  const kept = cut.slice(0, Math.max(cut.lastIndexOf('\n'), 0));
+  return `${kept}\n\n_…changelog preview truncated…_`;
+};
+
+/**
+ * Render a git-cliff preview body as a marker-less report section.
+ * // Usage: renderChangelogPreviewSection(stdout, { collapseAbove: 5, maxLength: 10_000 })
+ */
+export function renderChangelogPreviewSection(
+  body: string,
+  options: PreviewSectionOptions = {}
+): string {
   const trimmed = body.trim();
+  const entries = countChangelogEntries(trimmed);
   const content =
-    trimmed.length > 0 ? trimmed : '_No changelog-relevant commits on this branch yet._';
+    entries > 0
+      ? truncateAtLine(trimmed, options.maxLength ?? Number.POSITIVE_INFINITY)
+      : '_No changelog-relevant commits on this branch yet._';
+  const entriesBlock =
+    options.collapseAbove === undefined
+      ? content
+      : collapseWhenLong(entries, `${entries} changelog entries`, content, options.collapseAbove);
   return [
     '## 📝 Changelog Preview',
     '',
     'Entries this branch would add to the changelog on release:',
     '',
-    content,
+    entriesBlock,
   ].join('\n');
 }
 
