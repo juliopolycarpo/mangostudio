@@ -38,6 +38,8 @@ interface ReportContext {
   readonly prNumber: number;
   readonly headSha: string;
   readonly baseSha: string;
+  /** True when `baseSha` is the base the head envelope recorded, so the envelope must match it. */
+  readonly baseShaRecorded?: boolean;
   readonly runUrl: string;
   readonly headArtifact: ArtifactStatus;
   readonly baseArtifact: ArtifactStatus;
@@ -165,8 +167,10 @@ const renderMetricsPart = async (
       prNumber: context.prNumber,
     },
     'head',
-    // #516: a PR base.sha follows the live base tip and can advance after head collection.
-    { enforceBaseSha: false }
+    // The publisher resolved the base from the head envelope itself, so it must match exactly.
+    // Without a recorded base (`baseSha` is only the live tip, which can advance after head
+    // collection, #516) there is nothing to compare against.
+    { enforceBaseSha: context.baseShaRecorded === true }
   );
   const base = await loadMetrics(
     paths.basePath,

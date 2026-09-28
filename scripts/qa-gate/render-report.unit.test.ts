@@ -50,21 +50,24 @@ describe('render-report baseline handling', () => {
   });
 
   /** Runs the real script the publisher workflow runs, against files on disk. */
-  const render = async (base: {
-    text: string | null;
-    artifact: ArtifactStatus;
-  }): Promise<string> => {
+  const render = async (
+    base: { text: string | null; artifact: ArtifactStatus },
+    head: { baseShaRecorded?: boolean; recordedBaseSha?: string | null } = {}
+  ): Promise<string> => {
     const context = {
       repository: 'mango/studio',
       prNumber: 7,
       headSha: HEAD_SHA,
       baseSha: BASE_SHA,
+      baseShaRecorded: head.baseShaRecorded,
       runUrl: 'https://example.test/runs/42',
       headArtifact: FOUND,
       baseArtifact: base.artifact,
     };
     await writeFile(join(dir, 'context.json'), JSON.stringify(context));
-    await writeFile(join(dir, 'head.json'), JSON.stringify(headEnvelope()));
+    const envelope = headEnvelope();
+    const recorded = head.recordedBaseSha === undefined ? BASE_SHA : head.recordedBaseSha;
+    await writeFile(join(dir, 'head.json'), JSON.stringify({ ...envelope, baseSha: recorded }));
     const args = ['context.json', '--head', 'head.json'];
     if (base.text !== null) {
       await writeFile(join(dir, 'base.json'), base.text);
@@ -131,5 +134,73 @@ describe('render-report baseline handling', () => {
     });
 
     expectUnavailable(report, `metrics headSha ${OTHER_SHA} does not match ${BASE_SHA}`);
+  });
+});
+
+describe('render-report head envelope base', () => {
+  let dir = '';
+  const validBase = () => JSON.stringify(baselineEnvelope(BASE_SHA));
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'render-report-head-'));
+  });
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const renderHead = async (head: {
+    baseShaRecorded: boolean;
+    recordedBaseSha: string | null;
+  }): Promise<string> => {
+    const context = {
+      repository: 'mango/studio',
+      prNumber: 7,
+      headSha: HEAD_SHA,
+      baseSha: BASE_SHA,
+      baseShaRecorded: head.baseShaRecorded,
+      runUrl: 'https://example.test/runs/42',
+      headArtifact: FOUND,
+      baseArtifact: FOUND,
+    };
+    await writeFile(join(dir, 'context.json'), JSON.stringify(context));
+    await writeFile(
+      join(dir, 'head.json'),
+      JSON.stringify({ ...headEnvelope(), baseSha: head.recordedBaseSha })
+    );
+    await writeFile(join(dir, 'base.json'), validBase());
+    const proc = Bun.spawn(
+      ['bun', RENDER_REPORT, 'context.json', '--head', 'head.json', '--base', 'base.json'],
+      { cwd: dir, stdout: 'pipe', stderr: 'pipe' }
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    if (exitCode !== 0) throw new Error(`render-report exited ${exitCode}`);
+    return stdout;
+  };
+
+  it('accepts a head envelope that records the context base', async () => {
+    const report = await renderHead({ baseShaRecorded: true, recordedBaseSha: BASE_SHA });
+
+    expect(report).not.toContain('Head metrics unavailable');
+  });
+
+  it('rejects a head envelope whose baseSha differs from the recorded context base', async () => {
+    const report = await renderHead({ baseShaRecorded: true, recordedBaseSha: OTHER_SHA });
+
+    expect(report).toContain('Head metrics unavailable');
+    expect(report).toContain(`metrics baseSha ${OTHER_SHA} does not match ${BASE_SHA}`);
+  });
+
+  it('rejects a head envelope with a null baseSha when the context claims a recorded base', async () => {
+    const report = await renderHead({ baseShaRecorded: true, recordedBaseSha: null });
+
+    expect(report).toContain('Head metrics unavailable');
+    expect(report).toContain(`metrics baseSha null does not match ${BASE_SHA}`);
+  });
+
+  it('still renders head metrics when only the live base labels the range', async () => {
+    const report = await renderHead({ baseShaRecorded: false, recordedBaseSha: null });
+
+    expect(report).not.toContain('Head metrics unavailable');
   });
 });

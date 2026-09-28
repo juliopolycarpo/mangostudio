@@ -303,6 +303,7 @@ describe('resolveReportInputs', () => {
       prNumber: 7,
       headSha: HEAD_SHA,
       baseSha: BASE_SHA,
+      baseShaRecorded: true,
       runUrl: 'https://example.test/runs/42',
       headArtifact: { found: true, reason: null },
       baseArtifact: { found: true, reason: null },

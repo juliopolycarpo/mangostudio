@@ -7,9 +7,12 @@
 // One deliberate exception: the base SHA the head envelope recorded at CI time.
 // It selects which main commit the PR is compared against, so the baseline is
 // the one that was actually tested rather than the live base tip. The value is
-// read by metrics-archive.mjs, accepted only as a 40-hex SHA, and can only pick a
-// commit that has its own main-push CI run — a PR can therefore choose which
-// main SHA it is compared with, which is acceptable for a report-only comment.
+// read by metrics-archive.mjs, accepted only as a 40-hex SHA, and used solely as
+// the `head_sha` of a run lookup that isBaselineCandidate() then re-checks (push
+// event, `main` branch, completed, not cancelled, exact SHA). A forged value can
+// therefore only select a real commit that was pushed to main and has its own
+// CI run — a PR can choose which such main commit it is compared with, which is
+// acceptable for a report-only comment. Never an arbitrary SHA or artifact.
 // The baseline archive is a main-push artifact, but it is still read (for
 // completeness only) as untrusted bytes by the same bounded reader.
 
@@ -259,6 +262,9 @@ export async function resolveReportInputs({ github, context }) {
       prNumber: pullRequest.number,
       headSha: run.head_sha,
       baseSha,
+      // True when `baseSha` is the head envelope's recorded base, so the head
+      // envelope must record exactly that value; false when it only labels the range.
+      baseShaRecorded: recorded.sha !== null,
       runUrl: run.html_url,
       headArtifact: { found: head.archive !== null, reason: head.reason },
       baseArtifact: { found: base.archive !== null, reason: base.reason },
