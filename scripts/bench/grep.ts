@@ -30,7 +30,7 @@
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { arch, cpus, loadavg, platform, release, tmpdir, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
-import { Session } from '@mangostudio/protocol';
+import { RESERVED_ERROR_CODES, Session } from '@mangostudio/protocol';
 import { spawnPort } from '@mangostudio/protocol/spawn';
 import {
   RUNTIME_CONTRACT_NAME,
@@ -144,9 +144,11 @@ async function writeCatastrophicFile(directory: string): Promise<Fixture> {
 }
 
 /**
- * `restrictedTo` is the hub's containment shape: with a path policy the runtime
- * walks and reads through directory capabilities (`scan_opened_file`) instead
- * of ambient paths, which is what a restricted chat exercises.
+ * `restrictedTo` mirrors the shape the hub sends for a restricted chat
+ * (`runtimePathPolicy`: allowed roots, denied roots and a containment root all
+ * naming the fixture). With a path policy the runtime walks and reads through
+ * directory capabilities (`scan_opened_file`) instead of ambient paths. It
+ * approximates a pinned chat's policy; it is not one.
  */
 function grepParams(
   fixture: Fixture,
@@ -155,7 +157,15 @@ function grepParams(
   restrictedTo: string | undefined
 ) {
   return {
-    ...(restrictedTo ? { pathPolicy: { allowedRoots: [restrictedTo], deniedRoots: [] } } : {}),
+    ...(restrictedTo
+      ? {
+          pathPolicy: {
+            allowedRoots: [restrictedTo],
+            deniedRoots: [],
+            containmentRoot: restrictedTo,
+          },
+        }
+      : {}),
     pattern,
     inputPath: fixture.path,
     resolvedPath: fixture.path,
@@ -231,17 +241,26 @@ async function cancelledGrep(
   const pending = session
     .request('fs.grep', params, { timeoutMs: REQUEST_TIMEOUT_MS, signal: controller.signal })
     .then(
-      () => 'answered' as const,
-      () => 'cancelled' as const
+      () => ({ answered: true as const }),
+      (error: unknown) => ({ answered: false as const, error })
     );
   await Bun.sleep(CANCEL_AFTER_MS);
   const abortedAt = performance.now();
   controller.abort();
   const outcome = await pending;
   const elapsedMs = performance.now() - abortedAt;
-  if (outcome === 'answered') {
+  if (outcome.answered) {
     fatal(
       `expected the catastrophic grep to still be running ${CANCEL_AFTER_MS} ms in | received: an answer before the abort`
+    );
+  }
+  // Only the peer's own cancellation answer is a valid sample; any other failure
+  // (protocol error, early grep error) would record a plausible latency for a bad run.
+  const code = (outcome.error as { code?: unknown } | null)?.code;
+  if (code !== RESERVED_ERROR_CODES.CANCELLED) {
+    const reason = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+    fatal(
+      `expected the aborted grep to end with ${RESERVED_ERROR_CODES.CANCELLED} | received: ${String(code)}: ${reason}`
     );
   }
   return { elapsedMs, peakRssKb: await readPeakRssKb(pid), matches: 0, filesScanned: 0 };
