@@ -20,6 +20,16 @@ export const shortSha = (sha: string | undefined): string => (sha ? sha.slice(0,
 export const inlineCode = (text: string): string =>
   `\`${text.replace(/`/g, "'").replace(/\s+/g, ' ').trim() || NA}\``;
 
+/**
+ * Escape `&`, `<` and `>` so untrusted text (commit subjects, changelog
+ * entries) renders as literal text in a comment: it can never open an HTML
+ * comment, tag, or entity, so it cannot hide content or forge a managed-comment
+ * marker. Do not use inside a fenced code block, where it would show literally.
+ * // Usage: escapeHtml('fix <!-- x --> & y') -> 'fix &lt;!-- x --&gt; &amp; y'
+ */
+export const escapeHtml = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 export const formatNumber = (value: number): string => value.toLocaleString('en-US');
 
 export const formatPct = (value: number): string => `${value.toFixed(2)}%`;

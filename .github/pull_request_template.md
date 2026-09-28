@@ -22,4 +22,4 @@
 
 <!-- Mention any new environment variables, schema changes, breaking changes, or open questions. -->
 
-<!-- The commit list is published automatically as a bot comment by the PR QA workflow. -->
+<!-- The commit list and changelog preview are published automatically as one bot comment, and the QA metrics as another, by the PR QA workflow. -->

@@ -1,9 +1,10 @@
-// Pure rendering for the commit-summary section of the consolidated PR QA
-// report: a compact commit list plus an expandable section with each full
-// commit message. The git invocation lives in render-report.ts; everything
-// here is testable without git.
+// Pure rendering for the commit-summary section of the PR commits comment: a
+// compact commit list (folded once it outgrows COLLAPSE_THRESHOLD) plus an
+// expandable section with each full commit message. The git invocation lives
+// in render-report.ts; everything here is testable without git.
 
-import { shortSha } from './render/format';
+import { collapseWhenLong } from '../lib/collapsible';
+import { escapeHtml, shortSha } from './render/format';
 
 // Unit separators emitted by `git log --format` (%x1f / %x1e) so parsing
 // never collides with characters inside commit messages.
@@ -48,10 +49,13 @@ const fenceFor = (text: string): string => {
   return '`'.repeat(Math.max(4, longestRun + 1));
 };
 
+// The full message sits in a fenced code block, where HTML is already literal
+// (escaping there would show `&lt;` verbatim); the fence is sized past any
+// backtick run in it, so it cannot break out.
 const renderFullMessage = (entry: CommitEntry): string => {
   const fence = fenceFor(entry.message);
   return [
-    `#### \`${shortSha(entry.sha)}\` ${entry.subject}`,
+    `#### \`${shortSha(entry.sha)}\` ${escapeHtml(entry.subject)}`,
     '',
     `${fence}text`,
     entry.message,
@@ -60,12 +64,18 @@ const renderFullMessage = (entry: CommitEntry): string => {
 };
 
 // The section shares one GitHub comment (65,536-char cap) with the changelog
-// preview and QA metrics, so it gets a fraction of that budget by default and
-// drops the full-message block first when a long-lived branch outgrows it.
+// preview, so it gets most of that budget by default and drops the
+// full-message block first when a long-lived branch outgrows it.
 const COMMITS_SECTION_MAX_LENGTH = 40_000;
 
-const commitListLines = (entries: readonly CommitEntry[]): string[] =>
-  entries.map((entry) => `- \`${shortSha(entry.sha)}\` ${entry.subject}`);
+// One list item per real commit, so the fold threshold counts commits and
+// never headings or wrapped lines.
+const commitListBlock = (entries: readonly CommitEntry[]): string =>
+  collapseWhenLong(
+    entries.length,
+    `${entries.length} commits`,
+    entries.map((entry) => `- \`${shortSha(entry.sha)}\` ${escapeHtml(entry.subject)}`).join('\n')
+  );
 
 const fullMessagesLines = (entries: readonly CommitEntry[]): string[] => [
   '',
@@ -98,13 +108,13 @@ export const renderCommitsSection = (
     return [...head, '_No commits between base and head._'].join('\n');
   }
 
-  const list = commitListLines(entries);
-  const withMessages = [...head, ...list, ...fullMessagesLines(entries)].join('\n');
+  const list = commitListBlock(entries);
+  const withMessages = [...head, list, ...fullMessagesLines(entries)].join('\n');
   if (withMessages.length <= maxLength) return withMessages;
 
   return [
     ...head,
-    ...list,
+    list,
     '',
     '_Full commit messages omitted — they exceed the comment size budget._',
   ].join('\n');

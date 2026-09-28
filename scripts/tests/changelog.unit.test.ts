@@ -3,9 +3,11 @@ import {
   assertChangelogHasRelease,
   type CliffResult,
   cliffArgs,
+  countChangelogEntries,
   PREVIEW_MARKER,
   parseChangelogArgs,
   releaseHeading,
+  renderChangelogPreviewSection,
   runChangelog,
   wrapPreviewComment,
 } from '../lib/changelog';
@@ -128,6 +130,84 @@ describe('wrapPreviewComment', () => {
 
   test('falls back to a placeholder for empty bodies', () => {
     expect(wrapPreviewComment('   ')).toContain('No changelog-relevant commits');
+  });
+});
+
+const cliffBody = (entries: number): string =>
+  [
+    '## [Unreleased]',
+    '',
+    '### 🚀 Features',
+    '',
+    ...Array.from({ length: entries }, (_, index) => `- **(api)** Entry ${index + 1}`),
+    '',
+  ].join('\n');
+
+describe('countChangelogEntries', () => {
+  test('counts one entry per top-level bullet, not headings or blank lines', () => {
+    expect(countChangelogEntries(cliffBody(3))).toBe(3);
+    expect(countChangelogEntries('')).toBe(0);
+    expect(countChangelogEntries('## [Unreleased]\n\n### Features\n')).toBe(0);
+  });
+
+  test('ignores wrapped and nested continuation lines', () => {
+    const body = [
+      '### Fixes',
+      '',
+      '- first entry that',
+      '  wraps onto a second line',
+      '  - nested',
+    ];
+    expect(countChangelogEntries(body.join('\n'))).toBe(1);
+  });
+
+  test('counts entries across several groups', () => {
+    const body = '### A\n\n- one\n- two\n\n### B\n\n- three\n';
+    expect(countChangelogEntries(body)).toBe(3);
+  });
+});
+
+describe('renderChangelogPreviewSection', () => {
+  const folded = (section: string): boolean => section.includes('<details>');
+
+  test('never folds without a collapseAbove option (local --preview CLI)', () => {
+    expect(folded(renderChangelogPreviewSection(cliffBody(30)))).toBe(false);
+  });
+
+  test('stays expanded at five entries and folds at six', () => {
+    const at5 = renderChangelogPreviewSection(cliffBody(5), { collapseAbove: 5 });
+    const at6 = renderChangelogPreviewSection(cliffBody(6), { collapseAbove: 5 });
+
+    expect(folded(at5)).toBe(false);
+    expect(folded(at6)).toBe(true);
+    expect(at6).toContain('<summary>6 changelog entries</summary>');
+    expect(at6).toContain('## 📝 Changelog Preview');
+    expect(at6).toContain('- **(api)** Entry 6');
+  });
+
+  test.each(['  ', '## [Unreleased]\n\n### 🚀 Features\n'])(
+    'renders the empty placeholder, expanded, for an entry-free body %p',
+    (body) => {
+      const section = renderChangelogPreviewSection(body, { collapseAbove: 5 });
+
+      expect(section).toContain('No changelog-relevant commits');
+      expect(section).not.toContain('### 🚀 Features');
+      expect(folded(section)).toBe(false);
+    }
+  );
+
+  test('truncates at a line boundary before folding so the details block stays closed', () => {
+    const section = renderChangelogPreviewSection(cliffBody(40), {
+      collapseAbove: 5,
+      maxLength: 200,
+    });
+
+    expect(section).toContain('_…changelog preview truncated…_');
+    expect(section.trimEnd().endsWith('</details>')).toBe(true);
+    expect(section).toContain('<summary>40 changelog entries</summary>');
+    expect(section).not.toContain('Entry 40');
+    const keptEntries = section.split('\n').filter((line) => line.startsWith('- '));
+    expect(keptEntries.every((line) => /^- \*\*\(api\)\*\* Entry \d+$/.test(line))).toBe(true);
   });
 });
 

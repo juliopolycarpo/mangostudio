@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { Metrics } from './collect/types';
-import { COMMENT_MARKER, renderDocument } from './render/document';
+import { QA_METRICS_MARKER, renderDocument } from './render/document';
 import { makeCoverageSummary, makeMetrics } from './testing/metrics-fixture';
 
 const makeMetricsWithFrontendLines = (sha: string, lineCoverage: number): Metrics =>
@@ -21,7 +21,7 @@ describe('QA gate document renderer', () => {
     );
 
     expect(comment).toContain('## QA Gate');
-    expect(comment.trimEnd().endsWith(COMMENT_MARKER)).toBe(true);
+    expect(comment.trimEnd().endsWith(QA_METRICS_MARKER)).toBe(true);
     expect(comment).toContain('✅ **No attention signals**');
     expect(comment).toContain('Line coverage (all workspaces)');
     expect(comment).toContain('<summary>Metric details');

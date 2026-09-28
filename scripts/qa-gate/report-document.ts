@@ -1,18 +1,25 @@
-// Pure composition of the consolidated PR QA report comment: run status,
-// commit summary, changelog preview, and the QA metrics comparison, ending in
-// the stable marker the publisher uses to update the comment in place.
-// I/O (git, git-cliff, artifact files) lives in render-report.ts.
+// Pure composition of the two managed PR comments: the QA metrics comment
+// (run status, CI durations, metrics comparison; ends with QA_METRICS_MARKER)
+// and the commits comment (commit summary, changelog preview; ends with
+// QA_COMMITS_MARKER). Each is composed and clamped on its own, so neither can
+// starve or break the other. I/O (git, git-cliff, artifact files) lives in
+// render-report.ts.
 
+import { renderChangelogPreviewSection } from '../lib/changelog';
+import { COLLAPSE_THRESHOLD } from '../lib/collapsible';
 import type { CiDurationComparison } from './ci-durations';
 import type { Metrics } from './collect/types';
 import { renderCiDurationSection } from './render/ci';
-import { COMMENT_MARKER, renderDocument } from './render/document';
-import { inlineCode, shortSha } from './render/format';
+import { QA_METRICS_MARKER, renderDocument } from './render/document';
+import { escapeHtml, inlineCode, shortSha } from './render/format';
 
 /** GitHub rejects issue/PR comment bodies over this many characters (422). */
 export const GITHUB_COMMENT_LIMIT = 65_536;
 
-/** Budget for the changelog preview section inside the shared comment. */
+/** Marker closing the commits + changelog comment (update-or-create target). */
+export const QA_COMMITS_MARKER = '<!-- qa-gate-commits-comment -->';
+
+/** Budget for the changelog preview entries inside the commits comment. */
 const CHANGELOG_SECTION_MAX_LENGTH = 10_000;
 
 export interface ReportStatus {
@@ -32,9 +39,6 @@ export interface ReportSections {
   readonly changelog: string | null;
 }
 
-const truncateSection = (text: string, maxLength: number, note: string): string =>
-  text.length <= maxLength ? text : `${text.slice(0, maxLength)}\n\n${note}`;
-
 const statusBlock = (status: ReportStatus): string => {
   const lines = [
     `**PR head:** \`${shortSha(status.headSha)}\` • **base:** \`${shortSha(status.baseSha)}\` • [CI run](${status.runUrl})`,
@@ -52,21 +56,32 @@ const statusBlock = (status: ReportStatus): string => {
   return lines.join('\n');
 };
 
-/** Clamp a composed report to GitHub's comment limit, keeping the marker. */
-export const clampReportBody = (body: string): string => {
+/** Clamp a composed comment to GitHub's comment limit, keeping its closing marker. */
+export const clampReportBody = (body: string, marker: string): string => {
   if (body.length <= GITHUB_COMMENT_LIMIT) return body;
   const notice = "\n\n_…report truncated to fit GitHub's comment size limit…_\n\n";
-  const keep = GITHUB_COMMENT_LIMIT - notice.length - COMMENT_MARKER.length;
-  return `${body.slice(0, keep)}${notice}${COMMENT_MARKER}`;
+  const keep = GITHUB_COMMENT_LIMIT - notice.length - marker.length;
+  return `${body.slice(0, keep)}${notice}${marker}`;
 };
 
 /**
- * Compose the full consolidated report comment (ends with the QA marker).
- * // Usage: composeReport(status, { commits, changelog }, baseMetrics, headMetrics, ciDurations)
+ * Render git-cliff preview output for the commits comment: entries stay
+ * expanded up to COLLAPSE_THRESHOLD and fold above it, independently of the
+ * commit list. Commit text in the output is HTML-escaped.
+ * // Usage: renderChangelogForComment(cliffStdout)
  */
-export const composeReport = (
+export const renderChangelogForComment = (cliffOutput: string): string =>
+  renderChangelogPreviewSection(escapeHtml(cliffOutput), {
+    collapseAbove: COLLAPSE_THRESHOLD,
+    maxLength: CHANGELOG_SECTION_MAX_LENGTH,
+  });
+
+/**
+ * Compose the QA metrics comment (ends with QA_METRICS_MARKER).
+ * // Usage: composeMetricsReport(status, baseMetrics, headMetrics, ciDurations, ciNote)
+ */
+export const composeMetricsReport = (
   status: ReportStatus,
-  sections: ReportSections,
   base: Metrics | null,
   head: Metrics | null,
   ciDurations: CiDurationComparison | null,
@@ -74,16 +89,24 @@ export const composeReport = (
 ): string => {
   const parts = [
     statusBlock(status),
-    sections.commits ?? '## Commits\n\n_Commit summary failed to render for this run._',
-    truncateSection(
-      sections.changelog ??
-        '## 📝 Changelog Preview\n\n_Changelog preview failed to render for this run._',
-      CHANGELOG_SECTION_MAX_LENGTH,
-      '_…changelog preview truncated…_'
-    ),
     renderCiDurationSection(ciDurations, ciNote),
-    // renderDocument ends with COMMENT_MARKER, which must close the comment.
+    // renderDocument ends with QA_METRICS_MARKER, which must close the comment.
     renderDocument(base, head),
   ];
-  return clampReportBody(parts.join('\n\n'));
+  return clampReportBody(parts.join('\n\n'), QA_METRICS_MARKER);
+};
+
+/**
+ * Compose the commits + changelog comment (ends with QA_COMMITS_MARKER). A
+ * section that failed to render (null) becomes an explicit unavailable note.
+ * // Usage: composeCommitsReport({ commits, changelog })
+ */
+export const composeCommitsReport = (sections: ReportSections): string => {
+  const parts = [
+    sections.commits ?? '## Commits\n\n_Commit summary failed to render for this run._',
+    sections.changelog ??
+      '## 📝 Changelog Preview\n\n_Changelog preview failed to render for this run._',
+    QA_COMMITS_MARKER,
+  ];
+  return clampReportBody(parts.join('\n\n'), QA_COMMITS_MARKER);
 };

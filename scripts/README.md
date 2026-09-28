@@ -115,7 +115,8 @@ reason — never a global ignore.
 
 ## qa-gate/ — PR QA report automation
 
-Powers the consolidated QA report comment on every PR. Collection runs
+Powers the two QA bot comments on every PR: QA metrics, and commits plus
+changelog preview. Collection runs
 unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 `pr-qa-report.yml` workflow with default-branch tooling only:
 
@@ -143,14 +144,18 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 - `metrics-envelope.ts` — TypeBox schema + provenance validation the publisher
   applies to untrusted artifact JSON (size cap, shape, repository/SHA/PR match).
 - `render-report.ts` + `report-document.ts` + `render/*` + `commit-log.ts` —
-  render the consolidated comment: commit summary, changelog preview, and the
-  QA comparison (verdict headline, summary deltas, collapsed metric tables).
+  render the two comments (`--part metrics|commits`, one process each so a
+  failure in one never blocks the other): the QA comparison (verdict headline,
+  summary deltas, collapsed metric tables), and the commit summary plus
+  changelog preview (each list expanded up to 5 items, folded above).
 - `publish/report-pipeline.mjs` — trusted-side input resolution (open-PR
   lookup by exact head SHA, size-capped artifact downloads, exact-base
   baseline run lookup). Plain ESM so `actions/github-script` imports it.
-- `publish/managed-comments.mjs` — publisher that updates the report comment
-  in place by marker (update-or-create), cleans up legacy/duplicate managed
-  comments, and skips publishing when the PR head has moved on.
+- `publish/managed-comments.mjs` — publisher that updates each comment in
+  place by its own marker (update-or-create), removes duplicates per marker,
+  deletes legacy comments (the retired combined report included) only after
+  both replacements are written, and skips publishing when the PR head has
+  moved on.
 
 ## release/ — release-time packaging + publication
 

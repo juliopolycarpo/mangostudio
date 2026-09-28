@@ -126,6 +126,17 @@ describe('privileged publisher side (pr-qa-report.yml)', () => {
     expect(workflow).toContain('args+=(--ci ci-durations.json)');
   });
 
+  test('renders and publishes the two comments independently', () => {
+    // Separate renderer steps, each tolerating failure, so a crashed QA
+    // render still leaves commits.md (and vice versa) for the publish step.
+    expect(workflow).toContain('args=(report-context.json --part metrics)');
+    expect(workflow).toContain('report-context.json --part commits > commits.md');
+    expect(workflow.match(/continue-on-error: true/g)).toHaveLength(2);
+    expect(workflow).toContain(`readReportBody('metrics.md', 'metrics')`);
+    expect(workflow).toContain(`readReportBody('commits.md', 'commits')`);
+    expect(workflow).toContain('publishQaComments');
+  });
+
   test('fetches PR history as git data only', () => {
     expect(workflow).toContain(`git fetch --no-tags origin "refs/pull/\${PR_NUMBER}/head"`);
     expect(workflow).not.toContain('git checkout');

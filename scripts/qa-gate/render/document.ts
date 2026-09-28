@@ -1,4 +1,4 @@
-// Assembles the full sticky PR comment from the section renderers, including
+// Assembles the sticky QA metrics PR comment from the section renderers, including
 // the non-fatal collector-error and out-of-scope detail blocks and the marker.
 
 import { ALL_WORKSPACE_NAMES } from '../../lib/config';
@@ -15,7 +15,12 @@ import { renderTestsSection } from './tests';
 import { renderToolingSection } from './tooling';
 import { renderVerdict } from './verdict';
 
-export const COMMENT_MARKER = '<!-- qa-gate-comment -->';
+/**
+ * Marker closing the QA metrics comment. Distinct from the retired combined
+ * report's `<!-- qa-gate-comment -->` so that comment is recognized as legacy
+ * and removed only once both replacement comments are written.
+ */
+export const QA_METRICS_MARKER = '<!-- qa-gate-metrics-comment -->';
 
 const collectErrorNotes = (base: Metrics | null, head: Metrics | null): string[] => {
   const notes: string[] = [];
@@ -95,7 +100,7 @@ export const renderDocument = (base: Metrics | null, head: Metrics | null): stri
     );
   }
 
-  lines.push(COMMENT_MARKER);
+  lines.push(QA_METRICS_MARKER);
 
   return lines.join('\n');
 };
