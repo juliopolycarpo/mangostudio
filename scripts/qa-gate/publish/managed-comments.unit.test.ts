@@ -341,6 +341,41 @@ describe('publishQaComments', () => {
     expect(github.withMarker(QA_COMMITS_MARKER)).toHaveLength(1);
   });
 
+  // The workflow renders each part in its own continue-on-error step and hands
+  // the resulting files (or their absence) to readReportBody.
+  it.each([
+    ['QA render', 'metrics', 'commits'],
+    ['commits render', 'commits', 'metrics'],
+  ] as const)(
+    'a failed %s still publishes the other comment',
+    async (_label, failedKind, okKind) => {
+      const dir = await mkdtemp(join(tmpdir(), 'mango-publish-'));
+      tempDirs.push(dir);
+      const markers = { metrics: QA_METRICS_MARKER, commits: QA_COMMITS_MARKER };
+      await writeFile(
+        join(dir, `${okKind}.md`),
+        `real ${okKind} body\n${markers[okKind]}\n`,
+        'utf8'
+      );
+      const bodies = {
+        metrics: await readReportBody(join(dir, 'metrics.md'), 'metrics'),
+        commits: await readReportBody(join(dir, 'commits.md'), 'commits'),
+      };
+      const github = new FakeGithubClient([bot(2, LEGACY_COMBINED_MARKER)], 'head-sha');
+
+      await publish(github, { metricsBody: bodies.metrics, commitsBody: bodies.commits });
+
+      const fallbacks = { metrics: METRICS_FALLBACK_BODY, commits: COMMITS_FALLBACK_BODY };
+      expect(github.withMarker(markers[failedKind])[0]?.body).toBe(fallbacks[failedKind]);
+      expect(github.withMarker(markers[okKind])[0]?.body).toBe(
+        `real ${okKind} body\n${markers[okKind]}`
+      );
+      expect(github.withMarker(markers.metrics)).toHaveLength(1);
+      expect(github.withMarker(markers.commits)).toHaveLength(1);
+      expect(github.withMarker(LEGACY_COMBINED_MARKER)).toHaveLength(0);
+    }
+  );
+
   it('heals pre-existing duplicates of both comments in one run', async () => {
     const github = new FakeGithubClient(
       [

@@ -401,9 +401,10 @@ gates on it being there; no job writes the changelog back after the fact.
 | `bun run changelog --preview [--base r] [--head r]` | Print this branch's entries (powers the PR preview bot)                 |
 | `bun run changelog --release <version>`             | Regenerate `CHANGELOG.md` including `<version>`                         |
 
-Every PR gets a changelog preview as part of the single managed QA report
-comment, published by `.github/workflows/pr-qa-report.yml` together with the
-commit summary and QA metrics comparison.
+Every PR gets a changelog preview in a managed bot comment, published by
+`.github/workflows/pr-qa-report.yml` together with the commit summary; the QA
+metrics comparison is a second, separate comment. The commit list and the
+changelog entries each fold once they exceed five items.
 
 ## Testing the release pipeline
 
