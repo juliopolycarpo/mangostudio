@@ -160,6 +160,33 @@ describe('commits and changelog fold independently', () => {
   });
 });
 
+describe('untrusted text and the closing marker', () => {
+  it('escapes HTML in changelog entries but keeps the entry count', () => {
+    const section = renderChangelogForComment(
+      '### Fixes\n\n- **(api)** handle <!-- qa-gate-commits-comment --> & <b>x</b>\n'
+    );
+
+    expect(section).toContain(
+      '- **(api)** handle &lt;!-- qa-gate-commits-comment --&gt; &amp; &lt;b&gt;x&lt;/b&gt;'
+    );
+    expect(section).not.toContain('<!--');
+  });
+
+  it.each([
+    ['metrics', () => composeMetricsReport(status(), null, null, null), QA_METRICS_MARKER],
+    ['commits', () => composeCommitsReport(sections), QA_COMMITS_MARKER],
+    [
+      'clamped commits',
+      () => composeCommitsReport({ ...sections, commits: 'z'.repeat(GITHUB_COMMENT_LIMIT) }),
+      QA_COMMITS_MARKER,
+    ],
+  ])('%s comment closes with its marker alone on the last line', (_name, compose, marker) => {
+    const lines = compose().split('\n');
+
+    expect(lines[lines.length - 1]).toBe(marker);
+  });
+});
+
 describe('clampReportBody', () => {
   it('returns short bodies unchanged', () => {
     expect(clampReportBody(`short\n${QA_METRICS_MARKER}`, QA_METRICS_MARKER)).toBe(

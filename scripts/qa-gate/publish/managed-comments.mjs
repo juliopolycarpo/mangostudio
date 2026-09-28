@@ -49,17 +49,28 @@ const REPORTS = Object.freeze({
   commits: { marker: QA_COMMITS_MARKER, fallback: COMMITS_FALLBACK_BODY },
 });
 
+/**
+ * True when the last non-empty line of `body` is exactly `marker`. Every body
+ * we publish closes with its marker on its own line, so a marker that merely
+ * ends a line of prose (a quote, a commit subject) never counts.
+ * // Usage: endsWithMarkerLine('report\n<!-- m -->', '<!-- m -->') -> true
+ */
+export function endsWithMarkerLine(body, marker) {
+  const lines = body.trimEnd().split('\n');
+  return lines[lines.length - 1].trim() === marker;
+}
+
 function managedMarkerForComment(comment) {
   if (comment?.user?.type !== 'Bot' || typeof comment.body !== 'string') return null;
-  const body = comment.body.trimEnd();
-  return ALL_MARKERS.find((marker) => body.endsWith(marker)) ?? null;
+  return ALL_MARKERS.find((marker) => endsWithMarkerLine(comment.body, marker)) ?? null;
 }
 
 /**
  * True when a PR comment is one of ours: bot-authored and ending in a marker.
- * Anchoring at the end keeps another bot that merely quotes a marker mid-body
- * from being treated (and deleted) as ours; every body always ends with its
- * marker, enforced by publishQaComments.
+ * Anchoring on the last line keeps another bot that merely quotes a marker
+ * (mid-body or at the end of a prose line) from being treated, and deleted, as
+ * ours; every body ends with its marker on its own line, enforced by
+ * publishQaComments.
  * // Usage: comments.filter(isManagedComment)
  */
 export function isManagedComment(comment) {
@@ -82,7 +93,7 @@ export async function readReportBody(path, kind) {
   }
   try {
     const text = (await readFile(path, 'utf8')).trim();
-    if (text.endsWith(report.marker)) return text;
+    if (endsWithMarkerLine(text, report.marker)) return text;
   } catch {
     // Missing file: the render step failed; the fallback below covers it.
   }
@@ -163,8 +174,8 @@ export async function publishQaComments(
     { name: 'commits', marker: QA_COMMITS_MARKER, body: commitsBody },
   ];
   for (const { name, marker, body } of writes) {
-    if (typeof body !== 'string' || !body.trimEnd().endsWith(marker)) {
-      throw new Error(`QA ${name} comment body must end with its marker ${marker}`);
+    if (typeof body !== 'string' || !endsWithMarkerLine(body, marker)) {
+      throw new Error(`QA ${name} comment body must end with ${marker} on its own last line`);
     }
   }
 

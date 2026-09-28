@@ -4,7 +4,7 @@
 // in render-report.ts; everything here is testable without git.
 
 import { collapseWhenLong } from '../lib/collapsible';
-import { shortSha } from './render/format';
+import { escapeHtml, shortSha } from './render/format';
 
 // Unit separators emitted by `git log --format` (%x1f / %x1e) so parsing
 // never collides with characters inside commit messages.
@@ -49,10 +49,13 @@ const fenceFor = (text: string): string => {
   return '`'.repeat(Math.max(4, longestRun + 1));
 };
 
+// The full message sits in a fenced code block, where HTML is already literal
+// (escaping there would show `&lt;` verbatim); the fence is sized past any
+// backtick run in it, so it cannot break out.
 const renderFullMessage = (entry: CommitEntry): string => {
   const fence = fenceFor(entry.message);
   return [
-    `#### \`${shortSha(entry.sha)}\` ${entry.subject}`,
+    `#### \`${shortSha(entry.sha)}\` ${escapeHtml(entry.subject)}`,
     '',
     `${fence}text`,
     entry.message,
@@ -71,7 +74,7 @@ const commitListBlock = (entries: readonly CommitEntry[]): string =>
   collapseWhenLong(
     entries.length,
     `${entries.length} commits`,
-    entries.map((entry) => `- \`${shortSha(entry.sha)}\` ${entry.subject}`).join('\n')
+    entries.map((entry) => `- \`${shortSha(entry.sha)}\` ${escapeHtml(entry.subject)}`).join('\n')
   );
 
 const fullMessagesLines = (entries: readonly CommitEntry[]): string[] => [

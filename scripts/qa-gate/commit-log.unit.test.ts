@@ -153,6 +153,28 @@ describe('renderCommitsSection', () => {
     });
   });
 
+  it('escapes HTML in subjects so a marker or tag cannot render as markup', () => {
+    const hostile: CommitEntry = {
+      sha: 'eeee555eeee555eeee555eeee555eeee555eeee5',
+      subject: 'fix: <!-- qa-gate-metrics-comment --> & <script>',
+      message: 'fix: <!-- qa-gate-metrics-comment --> & <script>\n\nbody -> ok',
+    };
+
+    const section = renderCommitsSection([hostile], RANGE);
+
+    expect(section).toContain(
+      '- `eeee555` fix: &lt;!-- qa-gate-metrics-comment --&gt; &amp; &lt;script&gt;'
+    );
+    expect(section).toContain(
+      '#### `eeee555` fix: &lt;!-- qa-gate-metrics-comment --&gt; &amp; &lt;script&gt;'
+    );
+    // Inside the fence the message stays verbatim: HTML is literal there.
+    expect(section).toContain('\nfix: <!-- qa-gate-metrics-comment --> & <script>\n\nbody -> ok\n');
+    const outsideFence = section.replace(/(`{4,})text[\s\S]*?\1/g, '');
+    expect(outsideFence).not.toContain('<!--');
+    expect(outsideFence).not.toContain('<script>');
+  });
+
   it('sizes the fence past backtick runs inside the body', () => {
     const fencey: CommitEntry = {
       sha: 'dddd444dddd444dddd444dddd444dddd444dddd4',

@@ -4,10 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { PREVIEW_MARKER } from '../../lib/changelog';
+import { type CommitEntry, renderCommitsSection } from '../commit-log';
 import { QA_METRICS_MARKER as TS_METRICS_MARKER } from '../render/document';
-import { QA_COMMITS_MARKER as TS_COMMITS_MARKER } from '../report-document';
+import {
+  composeCommitsReport,
+  renderChangelogForComment,
+  QA_COMMITS_MARKER as TS_COMMITS_MARKER,
+} from '../report-document';
 import {
   COMMITS_FALLBACK_BODY,
+  endsWithMarkerLine,
   fetchCurrentHeadSha,
   isManagedComment,
   LEGACY_MARKERS,
@@ -100,7 +106,7 @@ class FakeGithubClient {
 
   /** Comments whose body ends with `marker`, in PR order. */
   withMarker(marker: string): FakeComment[] {
-    return this.comments.filter((comment) => comment.body.trimEnd().endsWith(marker));
+    return this.comments.filter((comment) => endsWithMarkerLine(comment.body, marker));
   }
 }
 
@@ -160,6 +166,24 @@ describe('managed comment markers', () => {
   });
 });
 
+const ALL_TEST_MARKERS = [QA_METRICS_MARKER, QA_COMMITS_MARKER, ...LEGACY_MARKERS];
+
+describe('endsWithMarkerLine', () => {
+  it('requires the marker alone on the last non-empty line', () => {
+    expect(endsWithMarkerLine(`body\n${QA_METRICS_MARKER}`, QA_METRICS_MARKER)).toBe(true);
+    expect(endsWithMarkerLine(`body\r\n  ${QA_METRICS_MARKER}  \n\n`, QA_METRICS_MARKER)).toBe(
+      true
+    );
+    expect(endsWithMarkerLine(QA_METRICS_MARKER, QA_METRICS_MARKER)).toBe(true);
+  });
+
+  it('rejects a marker that only ends a line of prose or is not last', () => {
+    expect(endsWithMarkerLine(`quoting ${QA_METRICS_MARKER}`, QA_METRICS_MARKER)).toBe(false);
+    expect(endsWithMarkerLine(`${QA_METRICS_MARKER}\ntrailing`, QA_METRICS_MARKER)).toBe(false);
+    expect(endsWithMarkerLine(`body\n${QA_COMMITS_MARKER}`, QA_METRICS_MARKER)).toBe(false);
+  });
+});
+
 describe('isManagedComment', () => {
   it('matches bot comments ending with a live or legacy marker', () => {
     expect(isManagedComment(bot(1, QA_METRICS_MARKER))).toBe(true);
@@ -171,6 +195,10 @@ describe('isManagedComment', () => {
       false
     );
     expect(isManagedComment({ id: 7, body: 'no marker', user: { type: 'Bot' } })).toBe(false);
+    // Another bot whose last line merely ends with a quoted marker is not ours either.
+    for (const marker of ALL_TEST_MARKERS) {
+      expect(isManagedComment({ id: 9, body: `see ${marker}`, user: { type: 'Bot' } })).toBe(false);
+    }
     // Another bot quoting a marker mid-body must never be deleted as ours.
     expect(
       isManagedComment({
@@ -300,8 +328,16 @@ describe('publishQaComments', () => {
   });
 
   it.each([
-    ['metricsBody', 'no marker here', 'QA metrics comment body must end with its marker'],
-    ['commitsBody', METRICS_BODY, 'QA commits comment body must end with its marker'],
+    [
+      'metricsBody',
+      'no marker here',
+      'QA metrics comment body must end with <!-- qa-gate-metrics-comment --> on its own last line',
+    ],
+    [
+      'commitsBody',
+      METRICS_BODY,
+      'QA commits comment body must end with <!-- qa-gate-commits-comment --> on its own last line',
+    ],
   ])(
     'rejects a %s that does not end with its own marker before writing anything',
     async (field, body, message) => {
@@ -373,6 +409,52 @@ describe('publishQaComments', () => {
       expect(github.withMarker(markers.metrics)).toHaveLength(1);
       expect(github.withMarker(markers.commits)).toHaveLength(1);
       expect(github.withMarker(LEGACY_COMBINED_MARKER)).toHaveLength(0);
+    }
+  );
+
+  // Commit subjects and changelog lines are untrusted text that lands in the
+  // commits comment; a marker inside them must neither forge nor hide one.
+  it.each(ALL_TEST_MARKERS)(
+    'a commit subject and changelog line containing %s leave exactly one of each comment and delete nothing else',
+    async (hostileMarker) => {
+      const hostileSubject = `fix: handle ${hostileMarker} & <b>html</b>`;
+      const entries: CommitEntry[] = Array.from({ length: 7 }, (_, index) => ({
+        sha: `${index + 1}`.padStart(7, '0') + 'a'.repeat(33),
+        subject: index === 6 ? hostileSubject : `feat: commit ${index}`,
+        message:
+          index === 6 ? `${hostileSubject}\n\nbody ${hostileMarker}` : `feat: commit ${index}`,
+      }));
+      const commitsBody = composeCommitsReport({
+        commits: renderCommitsSection(entries, {
+          baseSha: 'b'.repeat(40),
+          headSha: 'c'.repeat(40),
+        }),
+        changelog: renderChangelogForComment(
+          `### Fixes\n\n- ${hostileSubject}\n- ${hostileMarker}\n`
+        ),
+      });
+      const bystanders = [
+        human(1),
+        unrelatedBot(2),
+        { id: 3, body: `mentions ${hostileMarker}`, user: { type: 'Bot' } },
+        { id: 4, body: `see ${hostileMarker}`, user: { type: 'Bot' } },
+      ];
+      const github = new FakeGithubClient(
+        [...bystanders, bot(5, QA_METRICS_MARKER), bot(6, QA_COMMITS_MARKER)],
+        'head-sha'
+      );
+
+      await publish(github, { commitsBody });
+      await publish(github, { commitsBody });
+
+      expect(github.deletedIds).toEqual([]);
+      expect(github.comments.map((comment) => comment.id)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(github.withMarker(QA_METRICS_MARKER)).toHaveLength(1);
+      expect(github.withMarker(QA_COMMITS_MARKER)).toHaveLength(1);
+      // Outside the fenced full message, no raw HTML comment survives in the body.
+      const outsideFences = commitsBody.replace(/(`{4,})text[\s\S]*?\1/g, '');
+      expect(outsideFences.match(/<!--/g)).toHaveLength(1);
+      expect(outsideFences).toContain('&lt;!--');
     }
   );
 

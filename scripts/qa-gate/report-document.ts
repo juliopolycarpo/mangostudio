@@ -11,7 +11,7 @@ import type { CiDurationComparison } from './ci-durations';
 import type { Metrics } from './collect/types';
 import { renderCiDurationSection } from './render/ci';
 import { QA_METRICS_MARKER, renderDocument } from './render/document';
-import { inlineCode, shortSha } from './render/format';
+import { escapeHtml, inlineCode, shortSha } from './render/format';
 
 /** GitHub rejects issue/PR comment bodies over this many characters (422). */
 export const GITHUB_COMMENT_LIMIT = 65_536;
@@ -67,11 +67,11 @@ export const clampReportBody = (body: string, marker: string): string => {
 /**
  * Render git-cliff preview output for the commits comment: entries stay
  * expanded up to COLLAPSE_THRESHOLD and fold above it, independently of the
- * commit list.
+ * commit list. Commit text in the output is HTML-escaped.
  * // Usage: renderChangelogForComment(cliffStdout)
  */
 export const renderChangelogForComment = (cliffOutput: string): string =>
-  renderChangelogPreviewSection(cliffOutput, {
+  renderChangelogPreviewSection(escapeHtml(cliffOutput), {
     collapseAbove: COLLAPSE_THRESHOLD,
     maxLength: CHANGELOG_SECTION_MAX_LENGTH,
   });
