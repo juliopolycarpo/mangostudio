@@ -14,40 +14,15 @@ To edit one: `bun patch <package>`, change the files under
 > remove that cache directory to force a re-apply. Verify the result by reading
 > the file in `node_modules`, not by trusting the install output.
 
-## `@elysia/openapi@2.0.0-beta.1`
+## `@elysia/openapi@2.0.0-beta.4`
 
-Two independent defects in the published beta, both in `dist/` only — no
-source change is possible from here.
+One defect in the published beta, in `dist/` only — no source change is
+possible from here. (Through `2.0.0-beta.1` this patch also rewrote leaked
+`../node_modules/typebox/...` import paths in `dist/gen/*` and dropped the
+barrel's eager `./gen` import; `2.0.0-beta.4` imports `typebox/type` and
+declares `typebox` as a peer dependency, so that half was retired.)
 
-### 1. Leaked build-time paths break every import (`dist/gen/*`)
-
-The published bundle imports TypeBox through the packaging machine's own
-directory layout:
-
-```js
-import { Script } from '../node_modules/typebox/build/type/script/script.mjs';
-```
-
-That path does not exist in any consumer's tree. The package's root barrel
-imports `./gen` eagerly, so this throws on `import { openapi } from
-'@elysia/openapi'` — the plugin is entirely unusable, not just its codegen
-entrypoint. The patch rewrites both specifiers to the public `typebox/type`
-subpath, in the ESM and CJS builds.
-
-That alone is not enough for a bundled build. `@elysia/openapi` declares
-`typebox` as a *devDependency*, so under Bun's isolated linker its own
-directory has no `typebox` to resolve against; only the symlinked path a
-dev server walks happens to find one. So the patch also drops the barrel's
-eager `./gen` import and its `fromTypes` re-export, in all three barrels
-(`.mjs`, `.js`, `.d.ts`). Nothing here uses `fromTypes`, it is reachable
-through the `@elysia/openapi/gen` subpath either way, and it is what drags
-the TypeScript compiler API into the bundle.
-
-**Drop when:** the package ships with `typebox` imported by its public
-specifier *and* declared as a real dependency. Verify with
-`bun -e "import('@elysia/openapi')"` and a binary build that starts.
-
-### 2. File schemas are published as internal markers (`dist/openapi.*`)
+### File schemas are published as internal markers (`dist/openapi.*`)
 
 `t.File()` serializes to `{"~kind":"File","~elyTyp":10}` rather than to a
 schema. `enumToOpenApi` passes unrecognized nodes through untouched, so those
@@ -58,8 +33,9 @@ Scalar.
 The patch teaches `enumToOpenApi` two things:
 
 - a `~kind: 'File'` node converts to `{ type: 'string', format: 'binary' }`
-- `anyOf`/`oneOf`/`allOf` branches are recursed into and the `~elyTyp` tag is
-  dropped, so composed file schemas (`t.Files()`) convert too
+- the `~elyTyp` tag is dropped from `anyOf`/`oneOf`/`allOf` nodes; upstream
+  already recurses into their branches, so composed file schemas
+  (`t.Files()`) convert too
 
 `mapJsonSchema` cannot do this from application code: it is consulted only for
 schemas carrying a `~standard` vendor tag, which native TypeBox nodes do not

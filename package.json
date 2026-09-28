@@ -70,6 +70,6 @@
     "typescript": "7.0.2"
   },
   "patchedDependencies": {
-    "@elysia/openapi@2.0.0-beta.1": "patches/@elysia%2Fopenapi@2.0.0-beta.1.patch"
+    "@elysia/openapi@2.0.0-beta.4": "patches/@elysia%2Fopenapi@2.0.0-beta.4.patch"
   }
 }
