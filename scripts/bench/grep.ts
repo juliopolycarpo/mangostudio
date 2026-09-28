@@ -23,6 +23,7 @@
  *   bun run scripts/bench/grep.ts <binary> --runs 15
  *   bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
  *   bun run scripts/bench/grep.ts <binary> --large-mib 64
+ *   bun run scripts/bench/grep.ts <binary> --restricted  # capability walk, as under a path policy
  */
 
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
@@ -70,12 +71,13 @@ interface Fixture {
 }
 
 function printHelp(): never {
-  log(`Usage: bun run scripts/bench/grep.ts [binary] [--runs N] [--scenario a,b] [--large-mib N] [--json]
+  log(`Usage: bun run scripts/bench/grep.ts [binary] [--runs N] [--scenario a,b] [--large-mib N] [--restricted] [--json]
 
   [binary]         A mangostudio-runtime executable (default: newest of target/release, target/debug)
   --runs N         Measured runs per scenario (default 15)
   --scenario LIST  Comma-separated subset of: ${SCENARIOS.join(', ')}
   --large-mib N    Size of the large-file fixture (default 32)
+  --restricted     Send a path policy, as a restricted chat does (capability walk and reads)
   --json           Print only the JSON result
   --help           Show this help message`);
   process.exit(0);
@@ -138,8 +140,19 @@ async function writeCatastrophicFile(directory: string): Promise<Fixture> {
   return { path: directory, bytes: Buffer.byteLength(content) };
 }
 
-function grepParams(fixture: Fixture, pattern: string, maxFileSizeBytes: number) {
+/**
+ * `restrictedTo` is the hub's containment shape: with a path policy the runtime
+ * walks and reads through directory capabilities (`scan_opened_file`) instead
+ * of ambient paths, which is what a restricted chat exercises.
+ */
+function grepParams(
+  fixture: Fixture,
+  pattern: string,
+  maxFileSizeBytes: number,
+  restrictedTo: string | undefined
+) {
   return {
+    ...(restrictedTo ? { pathPolicy: { allowedRoots: [restrictedTo], deniedRoots: [] } } : {}),
     pattern,
     inputPath: fixture.path,
     resolvedPath: fixture.path,
@@ -231,6 +244,15 @@ async function cancelledGrep(
   return { elapsedMs, peakRssKb: await readPeakRssKb(pid), matches: 0, filesScanned: 0 };
 }
 
+/** Nearest-rank quartiles, so the IQR names measured samples like the summary does. */
+function spread(samples: readonly number[]) {
+  const sorted = [...samples].sort((left, right) => left - right);
+  const at = (fraction: number) =>
+    sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1))] ?? 0;
+  const round = (value: number) => Math.round(value * 10) / 10;
+  return { p25: round(at(0.25)), p75: round(at(0.75)), iqr: round(at(0.75) - at(0.25)) };
+}
+
 function summarize(samples: readonly Sample[], pick: (sample: Sample) => number): LatencySummary {
   return summarizeLatencies(samples.map(pick));
 }
@@ -248,11 +270,12 @@ async function environmentNotes(binary: string) {
     binaryBytes: size,
     runtimeVersion: version.trim(),
     pattern: PATTERN,
+    restricted,
   };
 }
 
 const { flags, values, positional } = parseArgs({
-  booleanFlags: ['--json'],
+  booleanFlags: ['--json', '--restricted'],
   valueFlags: ['--runs', '--scenario', '--large-mib'],
 });
 if (flags['--help']) printHelp();
@@ -281,6 +304,7 @@ if (unknown.length > 0) {
 }
 const scenarios = requested as Scenario[];
 const quiet = flags['--json'] ?? false;
+const restricted = flags['--restricted'] ?? false;
 
 if (!quiet) {
   header('fs.grep benchmark');
@@ -302,7 +326,8 @@ try {
     const params = grepParams(
       fixture,
       scenario === 'cancel' ? '^(a+)+$' : PATTERN,
-      Math.max(fixture.bytes, 1) + 1
+      Math.max(fixture.bytes, 1) + 1,
+      restricted ? scratch : undefined
     );
     const samples: Sample[] = [];
     for (let run = 0; run < runs; run += 1) {
@@ -321,7 +346,7 @@ try {
       fixtureBytes: fixture.bytes,
       filesScanned: first.filesScanned,
       matches: first.matches,
-      elapsedMs: elapsed,
+      elapsedMs: { ...elapsed, ...spread(samples.map((sample) => sample.elapsedMs)) },
       peakRssKb: summarize(samples, (sample) => sample.peakRssKb),
       ...(scenario === 'large-file'
         ? {
