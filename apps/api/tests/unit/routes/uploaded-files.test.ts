@@ -199,7 +199,7 @@ describe('resolveUploadedFile', () => {
 
     const file = await resolveUploadedFile(uploadsDir, 'photo.png');
     expect(file?.stats.size).toBe('png-bytes'.length);
-    expect(file?.filePath.endsWith(`${basename(uploadsDir)}/photo.png`)).toBe(true);
+    expect(file?.filePath.endsWith(join(basename(uploadsDir), 'photo.png'))).toBe(true);
   });
 
   test('refuses segments no upload writer produces', async () => {
