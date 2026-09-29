@@ -59,6 +59,37 @@ describe('getModelContextLimit', () => {
     expect(getModelContextLimit('gemini-2.0-flash')).toBe(1_048_576);
   });
 
+  it('returns 1M for gpt-5.6, gpt-6 and later models', () => {
+    expect(getModelContextLimit('gpt-5.6-luna')).toBe(1_048_576);
+    expect(getModelContextLimit('gpt-5.6-terra')).toBe(1_048_576);
+    expect(getModelContextLimit('gpt-5.6-sol')).toBe(1_048_576);
+    expect(getModelContextLimit('gpt-6-luna')).toBe(1_048_576);
+    expect(getModelContextLimit('gpt-6-sol')).toBe(1_048_576);
+    expect(getModelContextLimit('gpt-6-astra')).toBe(1_048_576);
+    expect(getModelContextLimit('gpt-10')).toBe(1_048_576);
+  });
+
+  it('returns the documented input limit for smaller GPT and Codex API models', () => {
+    expect(getModelContextLimit('gpt-5.4-mini')).toBe(272_000);
+    expect(getModelContextLimit('gpt-5.3-codex')).toBe(272_000);
+    expect(getModelContextLimit('codex-mini-latest')).toBe(200_000);
+    expect(getModelContextLimit('gpt-oss-120b')).toBe(131_072);
+  });
+
+  it('keeps the default for gpt-image models', () => {
+    expect(getModelContextLimit('gpt-image-2')).toBe(128_000);
+  });
+
+  it('returns the documented 1M for claude fable 5.1, opus 5.5 and sonnet 5.5', () => {
+    expect(getModelContextLimit('claude-fable-5-1')).toBe(1_000_000);
+    expect(getModelContextLimit('claude-opus-5-5')).toBe(1_000_000);
+    expect(getModelContextLimit('claude-sonnet-5-5')).toBe(1_000_000);
+  });
+
+  it('keeps the conservative 200k for claude fable variants without a documented window', () => {
+    expect(getModelContextLimit('claude-fable-5')).toBe(200_000);
+  });
+
   it('returns 200k for claude-3 models', () => {
     expect(getModelContextLimit('claude-3-opus-20240229')).toBe(200_000);
     expect(getModelContextLimit('claude-3-5-sonnet-20241022')).toBe(200_000);

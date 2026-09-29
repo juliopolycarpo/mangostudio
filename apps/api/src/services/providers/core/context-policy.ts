@@ -198,6 +198,11 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'deepseek-r1-distill-qwen-32b': 65_536,
   'deepseek-r1-distill-llama-70b': 65_536,
   'deepseek-reasoner': 65_536,
+  // OpenAI GPT-5.x smaller / Codex models — max input, below the total window
+  'gpt-5.4-mini': 272_000,
+  'gpt-5.3-codex': 272_000,
+  'codex-mini-latest': 200_000,
+  'gpt-oss': 131_072,
   // Anthropic Claude 3.x
   'claude-3-opus-20240229': 200_000,
   'claude-3-sonnet-20240229': 200_000,
@@ -217,6 +222,10 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'claude-opus-4': 200_000,
   'claude-sonnet-4': 200_000,
   'claude-haiku-4': 200_000,
+  // Anthropic Claude 5.x — 1M standard window (models overview, 2026-09)
+  'claude-fable-5-1': 1_000_000,
+  'claude-opus-5-5': 1_000_000,
+  'claude-sonnet-5-5': 1_000_000,
 };
 
 /**
@@ -250,8 +259,12 @@ export function getModelContextLimit(modelName: string): number {
 
   // Tier 3: legacy prefix heuristics for broad model families not in curated table
 
-  // OpenAI GPT-4o, GPT-4.1, GPT-5 → 1M
-  if (lower.startsWith('gpt-4o') || lower.startsWith('gpt-4.1') || lower.startsWith('gpt-5')) {
+  // OpenAI GPT-4o, GPT-4.1, GPT-5 and later → 1M
+  if (
+    lower.startsWith('gpt-4o') ||
+    lower.startsWith('gpt-4.1') ||
+    /^gpt-(?:[5-9]|\d{2,})/.test(lower)
+  ) {
     return 1_048_576;
   }
 
@@ -274,13 +287,14 @@ export function getModelContextLimit(modelName: string): number {
     return 1_048_576;
   }
 
-  // Claude 3+ and Claude 4 models → 200k
+  // Claude 3+ and Claude 4 models, and the named families (sonnet/opus/haiku/fable) → 200k
   if (
     lower.startsWith('claude-3') ||
     lower.startsWith('claude-4') ||
     lower.startsWith('claude-sonnet') ||
     lower.startsWith('claude-opus') ||
-    lower.startsWith('claude-haiku')
+    lower.startsWith('claude-haiku') ||
+    lower.startsWith('claude-fable')
   ) {
     return 200_000;
   }
