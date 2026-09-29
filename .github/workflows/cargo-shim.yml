@@ -29,7 +29,6 @@ on:
       - "apps/shared/src/environments/toolchain-schemas.ts"
       - "apps/shared/src/library/**"
       - "apps/shared/src/markdown/**"
-      - "apps/shared/src/i18n/en.ts"
       - "spec/**"
       - "scripts/tests/support/SHA256SUMS.sample"
       - "packages/protocol/src/testing/conformance.ts"

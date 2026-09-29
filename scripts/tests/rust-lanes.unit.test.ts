@@ -89,7 +89,7 @@ describe('classifyChangedPaths', () => {
     ['apps/api/src/modules/environments/application/environment-service.ts', false, true],
     ['apps/api/tests/support/rust-runtime-binary.ts', false, true],
     ['apps/shared/src/i18n/pt-BR.ts', false, true],
-    ['apps/shared/src/i18n/en.ts', true, true],
+    ['apps/shared/src/i18n/en.ts', false, true],
     ['scripts/lib/rust-lanes.ts', false, true],
     ['packages/protocol/src/session.ts', false, true],
     // Files a crate reads from outside crates/: a change must run the crate.
@@ -119,9 +119,22 @@ describe('classifyChangedPaths', () => {
   });
 });
 
+/**
+ * Crate inputs that deliberately do NOT select the rust lane, each mapped to
+ * the test that guards the same direction in a lane that already runs on that
+ * path's edits. Adding to this list is a decision, not a fix: prefer a glob.
+ */
+const CRATE_INPUTS_COVERED_ELSEWHERE: Readonly<Record<string, string>> = {
+  // `every_key_in_the_table_is_one_the_frontend_ships` (Rust) guards
+  // Rust -> catalog whenever Rust changes; en.ts is edited on far more PRs than
+  // Rust is, so the catalog -> Rust direction lives in the shared lane instead.
+  'apps/shared/src/i18n/en.ts': 'apps/shared/tests/unit/i18n-rust-keys.test.ts',
+};
+
 describe('files a crate reads from outside crates/', () => {
   test('every one selects the rust lane, so a change to it cannot skip the crate that reads it', () => {
     const uncovered = scanCrateInputs(ROOT_DIR)
+      .filter((input) => !(input.path in CRATE_INPUTS_COVERED_ELSEWHERE))
       // A trailing `/` names a directory the source appends a file name to.
       .filter((input) => !classifyChangedPaths([input.path.replace(/\/$/, '/file')]).rust)
       .map((input) => `${input.path} (read at ${input.source}:${input.line})`);
@@ -129,6 +142,23 @@ describe('files a crate reads from outside crates/', () => {
       uncovered,
       `expected rust lane to cover every crate input | received: rust=false for ${uncovered.join(', ')}`
     ).toEqual([]);
+  });
+
+  test('an input excused from the lane is still found, still outside it, and its guard exists', () => {
+    const found = new Set(scanCrateInputs(ROOT_DIR).map((input) => input.path));
+    for (const [path, guard] of Object.entries(CRATE_INPUTS_COVERED_ELSEWHERE)) {
+      expect(found.has(path), `expected the scan to still find ${path} | received: gone`).toBe(
+        true
+      );
+      expect(
+        classifyChangedPaths([path]).rust,
+        `expected ${path} to stay outside the rust lane | received: rust=true, drop its entry from CRATE_INPUTS_COVERED_ELSEWHERE`
+      ).toBe(false);
+      expect(
+        Bun.file(join(ROOT_DIR, guard)).size,
+        `expected the guard for ${path} at ${guard} | received: missing or empty`
+      ).toBeGreaterThan(0);
+    }
   });
 
   test('the scan finds the inputs known today, so a broken pattern cannot pass vacuously', () => {
