@@ -1257,7 +1257,7 @@ ordinary shards instead of skipping.
   owns the paths that make the lane relevant, so a new Rust-backed test needs no workflow
   edit; `scripts/tests/rust-lanes.unit.test.ts` fails if one would be missed.
 
-## Rust Coverage In CI
+## Rust Coverage in CI
 
 The Ubuntu run of the Rust workspace tests is instrumented: `rust-coverage.yml`
 (called from `ci.yml`) runs `cargo llvm-cov --no-report --workspace
