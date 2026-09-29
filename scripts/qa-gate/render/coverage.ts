@@ -5,10 +5,10 @@
 import type { Metrics } from '../collect/types';
 import type { CoverageBucket } from '../parse-lcov';
 import {
-  COVERAGE_KEYS,
   type CoverageKey,
   componentLabel,
   componentRows,
+  coverageKeysFor,
   findComponent,
   getCoverageBucket,
 } from './access';
@@ -48,7 +48,7 @@ export const renderCoverageSection = (base: Metrics | null, head: Metrics | null
       (side) => side !== null && side.coverage.state !== 'unsupported'
     );
     if (!onLane) continue;
-    for (const key of COVERAGE_KEYS) {
+    for (const key of coverageKeysFor(component.kind)) {
       rows.push(renderCoverageRow(base, head, component.id, componentLabel(component), key));
     }
   }
@@ -56,6 +56,8 @@ export const renderCoverageSection = (base: Metrics | null, head: Metrics | null
     '### Coverage',
     '',
     '_API/shared branches and statements are source-derived from LCOV line hits because Bun LCOV does not emit branch or statement records._',
+    '',
+    '_Rust crates: line, function and region coverage from `cargo llvm-cov` over the ubuntu libtest run. Branch coverage is not collected and doctests are not instrumented. A crate shows n/a when the Rust lane did not run for the change or its profile data is incomplete._',
     '',
     '| Component | Metric | Base | Head | Δ |',
     '|---|---|---|---|---|',

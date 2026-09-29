@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import type { WorkspaceName } from '../../lib/config';
 import type { CoverageSummary } from '../model/metrics';
-import { type Measurement, measured, stale, unavailable } from '../model/states';
+import { type Measurement, measured, stale, unavailable, unsupported } from '../model/states';
 import { BASE_REPOSITORY_FILES, makeFakeRepository } from '../testing/fake-repository';
 import { expectState } from '../testing/measurement-assertions';
 import { makeCoverageSummary } from '../testing/metrics-fixture';
@@ -24,6 +24,7 @@ const makeDeps = (
     readText: repo.readText,
     deliveredCoverage: () => null,
     deliveredLanes: () => unavailable('no lane results in this fixture'),
+    deliveredRustCoverage: () => unsupported('no rust coverage in this fixture'),
     readCoverage: (lane) => {
       calls.coverageReads.push(lane);
       return Promise.resolve(makeCoverageSummary(55));
@@ -124,7 +125,7 @@ describe('collectComponents', () => {
 
     const components = await collectComponents(await specsOf(), deps);
 
-    for (const name of ['alpha-crate', 'beta', 'mangostudio', 'scripts']) {
+    for (const name of ['mangostudio', 'scripts']) {
       const cell = expectState(byName(components, name).coverage, 'unsupported');
       expect(cell.reasons[0]).toContain('no coverage lane is wired');
     }
@@ -138,8 +139,23 @@ describe('collectComponents', () => {
     const reasonOf = (name: string): string | undefined =>
       expectState(byName(components, name).coverage, 'unsupported').reasons[0];
     expect(reasonOf('scripts')).toContain('root `bun test scripts` lane runs without --coverage');
-    expect(reasonOf('beta')).toContain('Rust coverage is not collected');
     expect(reasonOf('mangostudio')).toContain('scripts/lib/test-lanes.ts');
+  });
+
+  it("takes a crate's coverage from the Rust job, per crate, and never from a JS lane", async () => {
+    const alpha = measured(makeCoverageSummary(70));
+    const { deps, calls } = makeDeps({
+      deliveredRustCoverage: (root) =>
+        root === 'crates/alpha' ? alpha : unavailable(`${root}: no profile data`),
+    });
+
+    const components = await collectComponents(await specsOf(), deps);
+
+    expect(byName(components, 'alpha-crate').coverage).toBe(alpha);
+    expect(expectState(byName(components, 'beta').coverage, 'unavailable').reasons).toEqual([
+      'crates/beta: no profile data',
+    ]);
+    expect(calls.coverageReads).toEqual(['api']);
   });
 
   it('runs the type-check only where a tsconfig is tracked', async () => {

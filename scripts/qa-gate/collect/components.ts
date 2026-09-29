@@ -7,6 +7,7 @@ import type { LaneEntry, LaneResult } from '../model/lanes';
 import type { Component, ComponentKind, CoverageSummary } from '../model/metrics';
 import { type Measurement, unsupported } from '../model/states';
 import { lanesForComponentRoot } from '../results/lane-components';
+import type { CrateCoverage } from '../rust-coverage/resolve';
 import { measureComponentLoc } from './loc';
 import { type ComponentSpec, ownerOf } from './registry';
 import { measure } from './support';
@@ -16,6 +17,8 @@ export interface ComponentDeps {
   readonly readText: (path: string) => Promise<string>;
   /** Coverage the Test job delivered for a workspace lane, or null when it delivered none. */
   readonly deliveredCoverage: (workspace: WorkspaceName) => Measurement<CoverageSummary> | null;
+  /** Coverage the Rust coverage job delivered for the crate rooted at a directory. */
+  readonly deliveredRustCoverage: CrateCoverage;
   /** The result the Test job delivered for a test lane (never a local read). */
   readonly deliveredLanes: (laneId: string) => Measurement<LaneResult>;
   /** Local fallback when no fragment delivered a lane's coverage. */
@@ -29,9 +32,8 @@ export const coverageLane = (spec: ComponentSpec): WorkspaceName | null =>
   ALL_WORKSPACE_NAMES.find((lane) => spec.root === `apps/${lane}`) ?? null;
 
 /** Why a component with no JS coverage lane has none, by kind: the fix for each differs. */
-const NO_LANE_DETAIL: Readonly<Record<ComponentKind, string>> = {
+const NO_LANE_DETAIL: Readonly<Record<Exclude<ComponentKind, 'crate'>, string>> = {
   scripts: 'the root `bun test scripts` lane runs without --coverage, so no LCOV is produced',
-  crate: 'Rust coverage is not collected, and the JS LCOV lanes do not measure crates',
   workspace: 'no `bun test --coverage` lane is declared for it in scripts/lib/test-lanes.ts',
 };
 
@@ -39,6 +41,8 @@ const coverageOf = (
   spec: ComponentSpec,
   deps: ComponentDeps
 ): Promise<Measurement<CoverageSummary>> => {
+  // A crate has its own producer (the CI Rust coverage job), never a JS lane.
+  if (spec.kind === 'crate') return Promise.resolve(deps.deliveredRustCoverage(spec.root));
   const lane = coverageLane(spec);
   if (lane === null) {
     return Promise.resolve(

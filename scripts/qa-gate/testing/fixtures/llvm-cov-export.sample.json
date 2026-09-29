@@ -1,0 +1,125 @@
+{
+  "data": [
+    {
+      "files": [
+        {
+          "filename": "/work/mangostudio/crates/mango-protocol/src/catalog.rs",
+          "summary": {
+            "branches": {
+              "count": 0,
+              "covered": 0,
+              "notcovered": 0,
+              "percent": 0.0
+            },
+            "mcdc": {
+              "count": 0,
+              "covered": 0,
+              "notcovered": 0,
+              "percent": 0.0
+            },
+            "functions": {
+              "count": 23,
+              "covered": 23,
+              "percent": 100.0
+            },
+            "instantiations": {
+              "count": 30,
+              "covered": 29,
+              "percent": 96.66666666666667
+            },
+            "lines": {
+              "count": 197,
+              "covered": 193,
+              "percent": 97.96954314720813
+            },
+            "regions": {
+              "count": 328,
+              "covered": 321,
+              "notcovered": 7,
+              "percent": 97.86585365853658
+            }
+          }
+        },
+        {
+          "filename": "/work/mangostudio/crates/mangostudio-launcher/src/main.rs",
+          "summary": {
+            "branches": {
+              "count": 0,
+              "covered": 0,
+              "notcovered": 0,
+              "percent": 0.0
+            },
+            "mcdc": {
+              "count": 0,
+              "covered": 0,
+              "notcovered": 0,
+              "percent": 0.0
+            },
+            "functions": {
+              "count": 33,
+              "covered": 12,
+              "percent": 36.36363636363637
+            },
+            "instantiations": {
+              "count": 33,
+              "covered": 12,
+              "percent": 36.36363636363637
+            },
+            "lines": {
+              "count": 218,
+              "covered": 78,
+              "percent": 35.77981651376147
+            },
+            "regions": {
+              "count": 352,
+              "covered": 123,
+              "notcovered": 229,
+              "percent": 34.94318181818182
+            }
+          }
+        }
+      ],
+      "totals": {
+        "branches": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0
+        },
+        "functions": {
+          "count": 7750,
+          "covered": 7067,
+          "percent": 91.18709677419355
+        },
+        "instantiations": {
+          "count": 19663,
+          "covered": 11343,
+          "percent": 57.68702639475156
+        },
+        "lines": {
+          "count": 67048,
+          "covered": 62029,
+          "percent": 92.51431810046535
+        },
+        "mcdc": {
+          "count": 0,
+          "covered": 0,
+          "notcovered": 0,
+          "percent": 0
+        },
+        "regions": {
+          "count": 103892,
+          "covered": 95881,
+          "notcovered": 8011,
+          "percent": 92.28910791976284
+        }
+      }
+    }
+  ],
+  "type": "llvm.coverage.json.export",
+  "version": "3.1.0",
+  "cargo_llvm_cov": {
+    "version": "0.9.1",
+    "manifest_path": "/work/mangostudio/Cargo.toml"
+  }
+}

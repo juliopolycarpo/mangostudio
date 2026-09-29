@@ -26,6 +26,7 @@ import {
   makeCoverageSummary,
   makeLocStats,
   makeMetrics,
+  makeRustCoverageSummary,
 } from './testing/metrics-fixture';
 
 const HEAD_SHA = `${'a'.repeat(39)}1`;
@@ -270,6 +271,23 @@ describe('v4 schema: counts, consistency and provenance', () => {
   it('rejects covered greater than total, naming the bucket', () => {
     const summary = makeCoverageSummary();
     summary.lines = { total: 10, covered: 12, pct: 100 };
+
+    expect(() => parse(withComponent({ coverage: measured(summary) }))).toThrow(
+      /covered=12 total=10/
+    );
+  });
+
+  it('accepts a region bucket, and an envelope recorded before regions existed', () => {
+    const rust = parse(withComponent({ coverage: measured(makeRustCoverageSummary(90)) }));
+    expect(measuredValue(rust.metrics.components[0].coverage)?.regions?.pct).toBe(90);
+
+    const beforeRegions = parse(withComponent({ coverage: measured(makeCoverageSummary(90)) }));
+    expect(measuredValue(beforeRegions.metrics.components[0].coverage)?.regions).toBeUndefined();
+  });
+
+  it('rejects a region bucket that covers more than it holds, naming the bucket', () => {
+    const summary = makeRustCoverageSummary();
+    summary.regions = { total: 10, covered: 12, pct: 100 };
 
     expect(() => parse(withComponent({ coverage: measured(summary) }))).toThrow(
       /covered=12 total=10/
