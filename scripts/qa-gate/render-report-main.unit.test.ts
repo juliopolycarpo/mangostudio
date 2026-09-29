@@ -15,7 +15,9 @@ const CONTEXT: ReportContext = {
 type MetricsPaths = { headPath: string | null; basePath: string | null; ciPath: string | null };
 
 /** Named fake of everything `main` touches: the context file, both renderers and both streams. */
-const makeFakeReport = () => {
+const makeFakeReport = (
+  readContextText: () => Promise<string> = () => Promise.resolve(JSON.stringify(CONTEXT))
+) => {
   const calls = {
     read: [] as string[],
     metrics: [] as Array<{ context: ReportContext; paths: MetricsPaths }>,
@@ -26,7 +28,7 @@ const makeFakeReport = () => {
   const deps: RenderReportDeps = {
     readText: (path) => {
       calls.read.push(path);
-      return Promise.resolve(JSON.stringify(CONTEXT));
+      return readContextText();
     },
     renderMetrics: (context, paths) => {
       calls.metrics.push({ context, paths });
@@ -114,6 +116,30 @@ describe('render-report main', () => {
     expect(calls.stderr.join('')).toContain('Usage: bun ./scripts/qa-gate/render-report.ts');
     // A refused invocation reads nothing and writes no report.
     expect(calls.read).toEqual([]);
+    expect(calls.metrics).toEqual([]);
+    expect(calls.commits).toEqual([]);
+    expect(calls.stdout).toEqual([]);
+  });
+
+  it.each([
+    {
+      what: 'a context file that cannot be read',
+      readContextText: () => Promise.reject(new Error('ENOENT: no such file')),
+      reason: 'ENOENT: no such file',
+    },
+    {
+      what: 'a context file that is not JSON',
+      readContextText: () => Promise.resolve('not json'),
+      reason: 'JSON',
+    },
+  ])('exits 1 naming the file and the reason for $what', async ({ readContextText, reason }) => {
+    const { deps, calls } = makeFakeReport(readContextText);
+
+    const exitCode = await main(['ctx.json', '--part', 'metrics'], deps);
+
+    expect(exitCode).toBe(1);
+    expect(calls.stderr.join('')).toContain('Cannot read a JSON report context from "ctx.json": ');
+    expect(calls.stderr.join('')).toContain(reason);
     expect(calls.metrics).toEqual([]);
     expect(calls.commits).toEqual([]);
     expect(calls.stdout).toEqual([]);

@@ -194,10 +194,25 @@ export interface RenderReportDeps {
   readonly writeError: (text: string) => void;
 }
 
+/** The parsed context file, or the message naming the file and why it could not be used. */
+const readContext = async (
+  path: string,
+  deps: RenderReportDeps
+): Promise<ReportContext | { readonly error: string }> => {
+  try {
+    return JSON.parse(await deps.readText(path)) as ReportContext;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      error: `Cannot read a JSON report context from ${JSON.stringify(path)}: ${reason}\n`,
+    };
+  }
+};
+
 /**
  * Render one managed comment part and write its markdown. Returns the process
- * exit code: 0 after rendering, 1 for a missing context path or an unknown
- * `--part`.
+ * exit code: 0 after rendering, 1 for a missing context path, an unknown
+ * `--part`, or a context file that is missing or not JSON.
  * // Usage: process.exitCode = await main(process.argv.slice(2), realDeps);
  */
 export const main = async (argv: readonly string[], deps: RenderReportDeps): Promise<number> => {
@@ -206,7 +221,11 @@ export const main = async (argv: readonly string[], deps: RenderReportDeps): Pro
     deps.writeError(args.error);
     return 1;
   }
-  const context = JSON.parse(await deps.readText(args.contextPath)) as ReportContext;
+  const context = await readContext(args.contextPath, deps);
+  if ('error' in context) {
+    deps.writeError(context.error);
+    return 1;
+  }
   const report =
     args.part === 'metrics' ? await deps.renderMetrics(context, args) : deps.renderCommits(context);
   deps.write(`${report}\n`);
