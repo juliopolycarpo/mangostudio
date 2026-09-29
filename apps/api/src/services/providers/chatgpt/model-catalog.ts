@@ -33,12 +33,31 @@ export const CHATGPT_STATIC_MODEL_IDS = [
  */
 const UNSERVABLE_MODEL_ID_PATTERN = /-pro$/;
 
+/**
+ * Default context window of the ChatGPT-plan (Codex) backend. It serves 272k
+ * for the GPT-5.x/6 families even where the public API documents ~1M, so the
+ * shared per-model table over-reports here. Source: openai/codex
+ * `codex-rs/models-manager/models.json` (`context_window`).
+ */
+const CHATGPT_CONTEXT_WINDOW = 272_000;
+
+/**
+ * Input context limit for a model served by the ChatGPT-plan backend: the
+ * smaller of the shared per-model limit and the backend window.
+ *
+ * @example
+ * getChatGptContextLimit('gpt-6-sol'); // 272000
+ */
+export function getChatGptContextLimit(modelId: string): number {
+  return Math.min(getModelContextLimit(modelId), CHATGPT_CONTEXT_WINDOW);
+}
+
 function toChatGptModelInfo(modelId: string): ModelInfo {
   return {
     modelId,
     displayName: modelId,
     provider: 'chatgpt',
-    inputTokenLimit: getModelContextLimit(modelId),
+    inputTokenLimit: getChatGptContextLimit(modelId),
     capabilities: {
       text: true,
       image: false,

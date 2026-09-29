@@ -17,7 +17,6 @@ import type {
 } from '../../types';
 import { type AgentTurnStreamOpenResult, streamAgentTurnLoop } from '../agent-turn-stream-loop';
 import { isReasoningModel } from '../capability-detector';
-import { getModelContextLimit } from '../context-policy';
 import {
   createContinuationEnvelope,
   parseContinuationEnvelope,
@@ -39,6 +38,7 @@ import {
   buildStructuredTextFormat,
   normalizeResponsesReasoningEffort,
   type ResponsesRequestPolicy,
+  resolveResponsesContextLimit,
   resolveResponsesInstructions,
 } from './request-builder';
 
@@ -72,7 +72,7 @@ export async function* streamResponses(
     reasoningSummary: 'auto',
     textFormat: buildStructuredTextFormat(req.generationConfig?.structuredOutput),
     maxOutputTokens: req.generationConfig?.maxOutputTokens,
-    contextLimit: getModelContextLimit(req.modelName),
+    contextLimit: resolveResponsesContextLimit(policy, req.modelName),
   }) as unknown as OpenAI.Responses.ResponseCreateParamsStreaming;
 
   const stream = await client.responses.create(
@@ -150,7 +150,7 @@ export async function* streamAgentTurnWithResponses(
   const rawEffort = req.generationConfig?.reasoningEffort ?? 'medium';
   const effort = normalizeResponsesReasoningEffort(rawEffort, policy.reasoningEffortCeiling);
   const useReasoning = isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled;
-  const contextLimit = getModelContextLimit(req.modelName);
+  const contextLimit = resolveResponsesContextLimit(policy, req.modelName);
   const textFormat = buildStructuredTextFormat(req.generationConfig?.structuredOutput);
 
   let input = buildResponsesAgentTurnInput({

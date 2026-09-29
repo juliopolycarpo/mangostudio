@@ -21,6 +21,7 @@ import {
   listChatGptModels,
 } from '../../../../src/services/providers/chatgpt/model-catalog';
 import { parseResponsesLoopState } from '../../../../src/services/providers/core/responses-protocol/loop-state';
+import { resolveResponsesContextLimit } from '../../../../src/services/providers/core/responses-protocol/request-builder';
 import { streamAgentTurnWithResponses } from '../../../../src/services/providers/core/responses-protocol/stream';
 import type { AgentEvent, AgentTurnRequest } from '../../../../src/services/providers/types';
 import * as realMetadataNs from '../../../../src/services/secret-store/metadata';
@@ -286,6 +287,30 @@ describe('chatgpt model catalog', () => {
       promptCaching: false,
       structuredOutput: false,
     });
+  });
+});
+
+describe('chatgpt context limit', () => {
+  // The ChatGPT-plan backend serves a 272k window even where the public API
+  // serves ~1M, so the shared per-model table must not be used unmodified.
+  const CHATGPT_WINDOW = 272_000;
+
+  it('caps every catalog model at the ChatGPT-plan window', async () => {
+    getConfig().chatgpt.apiBaseUrl = 'http://127.0.0.1:1';
+    const models = await listChatGptModels(makeTokenBundle());
+    const limits = Object.fromEntries(models.map((m) => [m.modelId, m.inputTokenLimit]));
+    expect(limits).toEqual(Object.fromEntries(models.map((m) => [m.modelId, CHATGPT_WINDOW])));
+  });
+
+  it('applies the ChatGPT-plan window to the stream policy, including newer families', () => {
+    const limits = ['gpt-5.5', 'gpt-6-sol', 'gpt-5.3-codex-spark'].map((modelId) =>
+      resolveResponsesContextLimit(CHATGPT_RESPONSES_POLICY, modelId)
+    );
+    expect(limits).toEqual([CHATGPT_WINDOW, CHATGPT_WINDOW, CHATGPT_WINDOW]);
+  });
+
+  it('keeps a smaller curated limit instead of raising it to the ChatGPT window', () => {
+    expect(resolveResponsesContextLimit(CHATGPT_RESPONSES_POLICY, 'gpt-4o')).toBe(128_000);
   });
 });
 

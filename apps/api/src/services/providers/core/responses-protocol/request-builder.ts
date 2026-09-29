@@ -20,6 +20,7 @@ import {
   isAttachmentSupportedByProvider,
   unsupportedAttachmentNotes,
 } from '../attachment-content';
+import { getModelContextLimit } from '../context-policy';
 import { buildOpenAIResponsesReplay } from '../replay-builder';
 
 const RESPONSES_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
@@ -58,6 +59,25 @@ export interface ResponsesRequestPolicy {
   /** Reasoning summary mode for agentic turns (default: 'concise'). */
   readonly reasoningSummary?: ResponsesReasoningSummary;
   readonly extraHeaders?: (ctx: ResponsesRequestHeaderContext) => Record<string, string>;
+  /**
+   * Input context limit for a model on this backend. Defaults to the shared
+   * per-model table; set it when the backend serves a smaller window than the
+   * public API (e.g. the ChatGPT-plan backend).
+   */
+  readonly contextLimit?: (modelName: string) => number;
+}
+
+/**
+ * Resolves the input context limit for `modelName` under `policy`.
+ *
+ * @example
+ * resolveResponsesContextLimit({ ...policy, contextLimit: () => 272_000 }, 'gpt-6-sol'); // 272000
+ */
+export function resolveResponsesContextLimit(
+  policy: ResponsesRequestPolicy,
+  modelName: string
+): number {
+  return (policy.contextLimit ?? getModelContextLimit)(modelName);
 }
 
 interface OpenAIUserContentRequest {

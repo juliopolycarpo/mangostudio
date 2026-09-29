@@ -40,7 +40,12 @@ import type {
 } from '../types';
 import { CHATGPT_BASE_INSTRUCTIONS } from './base-instructions';
 import { createChatGptClient } from './client';
-import { ChatGptBackendAuthError, fetchChatGptModelIds, listChatGptModels } from './model-catalog';
+import {
+  ChatGptBackendAuthError,
+  fetchChatGptModelIds,
+  getChatGptContextLimit,
+  listChatGptModels,
+} from './model-catalog';
 
 export const CHATGPT_RESPONSES_POLICY: ResponsesRequestPolicy = {
   provider: 'chatgpt',
@@ -56,6 +61,7 @@ export const CHATGPT_RESPONSES_POLICY: ResponsesRequestPolicy = {
   // Mango exposes xhigh in settings; the backend tops out at high.
   reasoningEffortCeiling: 'high',
   reasoningSummary: 'auto',
+  contextLimit: getChatGptContextLimit,
   extraHeaders: (ctx): Record<string, string> =>
     ctx.sessionId ? { session_id: ctx.sessionId } : {},
 };

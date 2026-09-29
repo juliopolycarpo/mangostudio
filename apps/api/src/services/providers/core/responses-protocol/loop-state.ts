@@ -14,9 +14,8 @@
 
 import { parseJsonWith } from '../../../../lib/safe-parse';
 import type { AgentTurnRequest } from '../../types';
-import { getModelContextLimit } from '../context-policy';
 import { createContinuationEnvelope } from '../continuation-envelope';
-import type { ResponsesRequestPolicy } from './request-builder';
+import { type ResponsesRequestPolicy, resolveResponsesContextLimit } from './request-builder';
 
 export interface ResponsesLoopState {
   /** Stable id shared by every iteration of one agentic turn. */
@@ -49,7 +48,7 @@ export function serializeResponsesTurnState(
 ): string {
   const envelope = createContinuationEnvelope(policy.provider, 'stateless-loop', req, undefined, {
     providerReportedInputTokens,
-    contextLimit: getModelContextLimit(req.modelName),
+    contextLimit: resolveResponsesContextLimit(policy, req.modelName),
   });
   return JSON.stringify({
     ...envelope,
