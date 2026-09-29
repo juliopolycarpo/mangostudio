@@ -60,6 +60,18 @@ export function isAuthFailure(error: unknown): boolean {
 }
 
 /**
+ * Whether an error is the hub's rate limit.
+ *
+ * The bootstrap panel leads with "wait before retrying" for it, because an
+ * immediate retry would only be refused again.
+ *
+ * @example isRateLimited(new ApiError({ error: 'Too many requests', code: 'RATE_LIMITED' })) // true
+ */
+export function isRateLimited(error: unknown): boolean {
+  return error instanceof ApiError && error.code === ERROR_CODES.RATE_LIMITED;
+}
+
+/**
  * Whether a cached query has failed without ever holding data.
  *
  * Read from `errorUpdateCount` rather than `status`: a refetch of a query with

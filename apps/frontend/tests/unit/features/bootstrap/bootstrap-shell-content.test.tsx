@@ -91,6 +91,25 @@ describe('BootstrapShellContent', () => {
     );
   });
 
+  it('leads with the rate-limit copy when any failed request was rate limited', async () => {
+    // Chats comes first in panel order, so a headline read from the first
+    // failure alone would show the generic lead over a rate-limited catalog.
+    hub = createShellBootstrapHub()
+      .refuse('chats', 'server-error')
+      .refuse('catalog', 'rate-limited')
+      .install();
+    const queryClient = newQueryClient();
+    await loadShellBootstrap(queryClient);
+
+    await renderRegion(queryClient);
+
+    const lead = screen.getByTestId('bootstrap-error').querySelector('h1 + p')?.textContent;
+    expect(
+      lead,
+      `expected panel lead: ${en.errors.bootstrap.rateLimited} | received: ${lead}`
+    ).toBe(en.errors.bootstrap.rateLimited);
+  });
+
   it('retries only the failed request, then shows the page with nothing created', async () => {
     hub = createShellBootstrapHub().refuse('catalog', 'rate-limited').install();
     const queryClient = newQueryClient();

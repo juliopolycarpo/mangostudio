@@ -15,15 +15,13 @@
  * exactly that.
  */
 
-import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { useRouter } from '@tanstack/react-router';
 import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import type { ShellResponsibility } from '@/features/bootstrap/shell-bootstrap';
+import { isRateLimited, type ShellResponsibility } from '@/features/bootstrap/shell-bootstrap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatList, formatMessage } from '@/lib/i18n-format';
-import { ApiError } from '@/lib/utils';
 
 /**
  * The raw line shown beneath the headline. The router types a boundary's error
@@ -74,7 +72,6 @@ export function BootstrapErrorPanel({
   const s = t.errors.bootstrap;
   const router = useRouter();
   const [isRetrying, setRetrying] = useState(false);
-  const isRateLimited = error instanceof ApiError && error.code === ERROR_CODES.RATE_LIMITED;
   const detail = errorDetail(error);
   // Re-runs the route's own loader chain by default, so a transient refusal is
   // repaired in place rather than by making the person reload.
@@ -90,7 +87,9 @@ export function BootstrapErrorPanel({
       >
         <TriangleAlert aria-hidden size={24} className="mx-auto text-error" />
         <h1 className="font-headline font-bold text-lg text-on-surface">{s.title}</h1>
-        <p className="text-on-surface-variant text-sm">{isRateLimited ? s.rateLimited : s.lead}</p>
+        <p className="text-on-surface-variant text-sm">
+          {isRateLimited(error) ? s.rateLimited : s.lead}
+        </p>
         {failedItems.length > 0 ? (
           <p data-testid="bootstrap-error-failed" className="text-on-surface-variant text-sm">
             {formatMessage(s.failed, { items: formatList(failedItems, locale) })}

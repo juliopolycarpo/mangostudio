@@ -11,6 +11,7 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { QueryClient } from '@tanstack/react-query';
 import {
   isAuthFailure,
+  isRateLimited,
   loadShellBootstrap,
   refetchShellResponsibility,
   settleShellQuery,
@@ -42,6 +43,19 @@ describe('isAuthFailure', () => {
     );
     expect(isAuthFailure(new TypeError('Failed to fetch'))).toBe(false);
     expect(isAuthFailure(undefined)).toBe(false);
+  });
+});
+
+describe('isRateLimited', () => {
+  it('recognizes the hub rate limit and nothing else', () => {
+    expect(isRateLimited(new ApiError({ error: 'slow', code: ERROR_CODES.RATE_LIMITED }))).toBe(
+      true
+    );
+    expect(isRateLimited(new ApiError({ error: 'no', code: ERROR_CODES.UNAUTHORIZED }))).toBe(
+      false
+    );
+    expect(isRateLimited(new TypeError('Failed to fetch'))).toBe(false);
+    expect(isRateLimited(undefined)).toBe(false);
   });
 });
 

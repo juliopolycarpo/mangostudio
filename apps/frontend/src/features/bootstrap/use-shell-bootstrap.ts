@@ -5,6 +5,7 @@ import { agentSettingsListQueryOptions } from '@/features/settings/agents/querie
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import {
   isAuthFailure,
+  isRateLimited,
   refetchShellResponsibility,
   SHELL_RESPONSIBILITIES,
   type ShellResponsibility,
@@ -14,7 +15,11 @@ import {
 export interface ShellBootstrapState {
   /** Responsibilities that were refused and have never held data, in panel order. */
   readonly failed: readonly ShellResponsibility[];
-  /** The most recent error among them — the panel's headline and detail. */
+  /**
+   * The error the panel leads with: a rate limit when any failure is one (its
+   * copy asks the person to wait, which matters whichever request hit it),
+   * otherwise the first failure in panel order.
+   */
   readonly error: unknown;
   /** True when a failure is an authentication failure, which the panel must not show. */
   readonly isAuthFailure: boolean;
@@ -65,7 +70,7 @@ export function useShellBootstrap(): ShellBootstrapState {
 
   return {
     failed,
-    error: errors[0],
+    error: errors.find(isRateLimited) ?? errors[0],
     isAuthFailure: errors.some(isAuthFailure),
     retry: async () => {
       await Promise.allSettled(
