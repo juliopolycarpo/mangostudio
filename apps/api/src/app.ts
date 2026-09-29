@@ -7,7 +7,6 @@
 import { mkdirSync } from 'node:fs';
 import { cors } from '@elysia/cors';
 import { openapi } from '@elysia/openapi';
-import { staticPlugin } from '@elysia/static';
 import { Elysia, NotFound } from 'elysia';
 import { websocket } from 'elysia/websocket';
 import { getConfig } from './lib/config';
@@ -53,6 +52,7 @@ import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
 import { settingsRoutes } from './routes/settings';
 import { uploadRoutes } from './routes/upload';
+import { createUploadedFileRoutes } from './routes/uploaded-files';
 import { frontendNotFound } from './server/frontend-fallback';
 import { OPENAPI_PATH, openapiProblemDetails } from './server/openapi-problem-details';
 import { registerApplicationServices } from './services/register-application-services';
@@ -63,10 +63,9 @@ const UPLOADS_DIR = getConfig().uploads.dir;
 const IMAGES_DIR = getConfig().images.dir;
 const requestLogger = createDiagnosticLogger('request');
 
-// `staticPlugin` enumerates its assets directory when the server starts, and a
-// missing one fails the listen rather than serving nothing. The uploads route
-// module creates this directory as an import side effect, which happens to run
-// first today — this does not rely on that ordering holding.
+// Uploads are written into this directory, so it exists from import on. The
+// upload route module creates it as an import side effect too, which happens
+// to run first today — this does not rely on that ordering holding.
 mkdirSync(UPLOADS_DIR, { recursive: true });
 
 /**
@@ -168,13 +167,8 @@ export const app = new Elysia()
       allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
     })
   )
-  // Serve uploaded files as static assets
-  .use(
-    staticPlugin({
-      assets: UPLOADS_DIR,
-      prefix: '/uploads',
-    })
-  )
+  // Serve uploaded files, resolved per request rather than enumerated at startup
+  .use(createUploadedFileRoutes(UPLOADS_DIR))
   .use(createGeneratedImageRoutes(IMAGES_DIR))
   // Adds the negotiated `application/problem+json` media type to the generated
   // document, and classifies the spec route's own failures — `errorHandler` is

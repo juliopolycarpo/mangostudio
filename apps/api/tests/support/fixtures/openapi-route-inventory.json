@@ -180,5 +180,6 @@
   "/api/workspace/fs/": ["get"],
   "/api/workspace/fs/validate": ["post"],
   "/api/ws": [],
-  "/images/*": ["get"]
+  "/images/*": ["get"],
+  "/uploads/*": ["get"]
 }

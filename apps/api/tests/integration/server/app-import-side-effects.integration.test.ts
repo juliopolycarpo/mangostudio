@@ -78,7 +78,7 @@ async function importAppInIsolatedHome(): Promise<ImportResult> {
 
 describe('importing src/app.ts', () => {
   it(
-    'opens no database and creates only the directory the static plugin needs',
+    'opens no database and creates only the uploads directory',
     async () => {
       const result = await importAppInIsolatedHome();
       try {
@@ -91,10 +91,9 @@ describe('importing src/app.ts', () => {
         expect(result.databaseExists).toBe(false);
 
         // The other half of the contract, and the reason this is not simply
-        // "importing writes nothing": `staticPlugin` enumerates its assets
-        // directory while `.use()` evaluates, and Bun.Glob throws on a missing
-        // one — so the uploads directory must exist by the end of the import,
-        // or `app.listen()` fails instead of serving nothing.
+        // "importing writes nothing": `app.ts` creates the uploads directory
+        // at import, so upload writes land in a directory that exists. Serving
+        // uploads resolves per request and no longer needs it at startup.
         expect(result.uploadsExists).toBe(true);
       } finally {
         await rm(result.home, { recursive: true, force: true });
