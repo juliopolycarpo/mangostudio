@@ -11,16 +11,44 @@ results through `scripts/ci/evaluate-gate.ts`. Branch protection and Canary
 depend on these stable names instead of tracking internal job names, matrix
 shapes, or path filters.
 
-| Workflow check name      | Workflow                                | Role                                                                                                                                                                              |
-| ------------------------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, and `qa-metrics` on `workflow_dispatch` |
-| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs locked build/test on Linux, macOS and Windows, the launcher MSRV check, and fuzz-workspace resolution                  |
-| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                    |
+| Workflow check name      | Workflow                                | Role                                                                                                                                                                                                                                                 |
+| ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, `rust-coverage` when no Rust-relevant path changed, and `qa-metrics` on `workflow_dispatch`                |
+| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs the locked build on Linux, macOS and Windows, the plain test run on macOS and Windows (Linux's is `Rust Coverage` in `CI / Gate`), the launcher MSRV check, and fuzz-workspace resolution |
+| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                                                                                       |
 
 Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
 `needs` from the workflow text: every job except the gate itself and any job
 that already depends on the gate. Adding a mandatory lane without wiring it into
 the gate fails the test.
+
+## Rust coverage
+
+The Ubuntu Rust test run is `.github/workflows/rust-coverage.yml`, called from
+`ci.yml`, not a step of Cargo Shim: `cargo llvm-cov --no-report --workspace
+--all-targets --all-features --locked`, the plain step's flags on the same
+libtest runner, instrumented. It lives in the CI run because the QA collector
+(`qa-metrics.yml`) can only download artifacts of its own run, and the
+privileged publisher reads only that run's `qa-metrics` envelope; an artifact
+from a sibling workflow run would need a polling wait in the unprivileged
+collector or a second privileged reader of PR-produced bytes.
+
+- It runs when `ci.yml`'s `changes` job sees a path in `RUST_WORKSPACE_PATHS`
+  (`scripts/lib/rust-lanes.ts`, the manifest Cargo Shim uses), and always on
+  pushes, so every main envelope is a Rust baseline. `CI / Gate` accepts its
+  skip only under that proof, so a Rust test failure is a `CI / Gate` failure.
+- Doctests, the `--ignored` fixture run and real-binary qualification stay in
+  Cargo Shim, uninstrumented; macOS and Windows keep the plain run there.
+- The job holds `contents: read` and uploads `qa-rust-coverage` (`llvm-cov.json`
+  and `receipt.json`, 1 day). `scripts/qa-gate/rust-coverage/` reads it in the
+  collector into one coverage measurement per crate. When the lane was skipped
+  as irrelevant the crates are `unsupported` ("not run"), which is not a gap, so
+  a docs-only PR is not `incomplete`; a job that was due and delivered nothing
+  is `unavailable`, a failed test run is `partial`, and a crate with no profile
+  data is `unavailable`, never 0%.
+- `cargo-llvm-cov` is pinned by version in the workflow (through the
+  SHA-pinned `taiki-e/install-action`) and `llvm-tools-preview` is added in
+  that job only, not to `rust-toolchain.toml`.
 
 ## Concurrency policy
 

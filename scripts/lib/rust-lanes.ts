@@ -44,6 +44,7 @@ export const RUST_WORKSPACE_PATHS = [
   'rust-toolchain.toml',
   '.cargo/config.toml',
   '.github/workflows/cargo-shim.yml',
+  '.github/workflows/rust-coverage.yml',
   '.github/actions/setup-zigbuild/**',
 ] as const;
 

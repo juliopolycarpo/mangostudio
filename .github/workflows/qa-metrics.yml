@@ -2,8 +2,9 @@ name: QA Metrics
 
 # Unprivileged metrics collector, called from ci.yml after the Test job. It
 # merges the test fragment the Test workflow's merge job emits from the sharded
-# coverage run with the static metrics (LoC, bundle, dependencies, duplication,
-# tooling) and uploads the versioned qa-metrics envelope. It runs PR code, so it
+# coverage run, and the llvm-cov export of the Rust Coverage job, with the
+# static metrics (LoC, bundle, dependencies, duplication, tooling) and uploads
+# the versioned qa-metrics envelope. It runs PR code, so it
 # must never hold more than `contents: read`; the privileged side lives in
 # pr-qa-report.yml, which consumes this artifact without executing anything from
 # it.
@@ -13,6 +14,16 @@ on:
     inputs:
       test_result:
         description: Result of the Test job (success, failure, cancelled, skipped) that produced the test fragment.
+        type: string
+        required: false
+        default: ""
+      rust_relevant:
+        description: Whether the changes job saw a Rust-relevant path (true or false); false makes a skipped Rust Coverage job "not run on purpose".
+        type: string
+        required: false
+        default: ""
+      rust_result:
+        description: Result of the Rust Coverage job (success, failure, cancelled, skipped) that produced the llvm-cov export.
         type: string
         required: false
         default: ""
@@ -44,6 +55,16 @@ jobs:
           name: qa-test-metrics
           path: ./qa-test-metrics
 
+      - name: Download Rust coverage
+        # continue-on-error: without the artifact the collector still emits an
+        # envelope whose crate coverage is `unavailable` (or `unsupported` when
+        # no Rust path changed), with the job's result as the reason.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: qa-rust-coverage
+          path: ./qa-rust-coverage
+
       - name: Download frontend dist
         # continue-on-error: without the dist the collector still emits an
         # envelope whose bundle entry is `unavailable`.
@@ -60,11 +81,14 @@ jobs:
           QA_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           QA_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           QA_TEST_RESULT: ${{ inputs.test_result }}
+          QA_RUST_RELEVANT: ${{ inputs.rust_relevant }}
+          QA_RUST_RESULT: ${{ inputs.rust_result }}
         run: |
           set -euo pipefail
           fragment="./qa-test-metrics/test-metrics.json"
           args=()
-          [ -f "$fragment" ] && args=(--test-metrics "$fragment")
+          [ -f "$fragment" ] && args+=(--test-metrics "$fragment")
+          [ -d ./qa-rust-coverage ] && args+=(--rust-coverage ./qa-rust-coverage)
           bun ./scripts/qa-gate/collect.ts "${args[@]}" > metrics.json
 
       - name: Upload qa-metrics envelope

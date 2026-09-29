@@ -110,6 +110,10 @@ config.toml
 # the repository root, its fuzz workspace under crates/mango-protocol/fuzz,
 # and the launcher under crates/mangostudio-launcher.
 target/
+# `cargo llvm-cov` points LLVM_PROFILE_FILE into target/, but a test that
+# spawns an instrumented binary with a cleared environment leaves
+# `default_*.profraw` in that child's working directory.
+*.profraw
 
 # ─── Mango Protocol package build output ─── #
 # `build.ts` copies the normative schema files and the licence in beside
