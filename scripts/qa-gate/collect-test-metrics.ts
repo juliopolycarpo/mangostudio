@@ -74,6 +74,13 @@ const isUnhandledErrors = (value: unknown): value is UnhandledErrors =>
   isFiniteNumber((value as UnhandledErrors).errors) &&
   Array.isArray((value as UnhandledErrors).headlines);
 
+// One reason string per workspace; anything else is a summary the merge did not write.
+const isCoverageErrors = (value: unknown): boolean =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value).every((reason) => typeof reason === 'string' && reason.length > 0);
+
 const isShardSummary = (value: unknown): value is ShardSummary => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const summary = value as Partial<ShardSummary>;
@@ -81,7 +88,8 @@ const isShardSummary = (value: unknown): value is ShardSummary => {
     isFiniteNumber(summary.shards) &&
     isFiniteNumber(summary.exitCode) &&
     isFiniteNumber(summary.durationSeconds) &&
-    (summary.unhandledErrors === undefined || isUnhandledErrors(summary.unhandledErrors))
+    (summary.unhandledErrors === undefined || isUnhandledErrors(summary.unhandledErrors)) &&
+    (summary.coverageErrors === undefined || isCoverageErrors(summary.coverageErrors))
   );
 };
 
@@ -154,11 +162,14 @@ const collectSuite = async (): Promise<{
   return { outcomes, suite: suiteMeasurement(stats, outcomes) };
 };
 
+// A workspace the shard merge could not assemble is unavailable with the
+// merge's reason (which names the shard), not read from whatever file is left.
 const coverage: Record<string, Measurement<CoverageSummary>> = {};
 for (const workspace of ALL_WORKSPACE_NAMES) {
-  coverage[workspace] = await measure(`coverage:${workspace}`, () =>
-    readWorkspaceCoverageSummary(workspace)
-  );
+  const mergeFailure = summary.coverageErrors?.[workspace];
+  coverage[workspace] = mergeFailure
+    ? unavailable(mergeFailure)
+    : await measure(`coverage:${workspace}`, () => readWorkspaceCoverageSummary(workspace));
 }
 
 const collected = await measure('tests', collectSuite);

@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  expectedLcovShards,
   listShardDirs,
   mergeTestShards,
   type ShardMeta,
+  ShardSetError,
   summarizeShardMeta,
 } from '../ci/merge-test-shards';
 import { SHARDED_LCOV_PATHS } from '../lib/test-lanes';
@@ -39,6 +41,8 @@ const lcov = (lines: ReadonlyArray<[number, number]>): string =>
 interface ShardFiles {
   readonly name: string;
   readonly lcovLines?: ReadonlyArray<[number, number]>;
+  /** Per-path override of what the shard wrote: `null` leaves the report out, a string replaces its text. */
+  readonly lcovOverrides?: Readonly<Record<string, string | null>>;
   readonly meta?: { shard: number | string; exitCode: number; durationSeconds: number };
   readonly unhandledErrors?: { errors: number; headlines: [] };
 }
@@ -48,7 +52,9 @@ const writeShards = async (root: string, shards: readonly ShardFiles[]): Promise
     const dir = join(root, shard.name);
     if (shard.lcovLines) {
       for (const lcovPath of Object.values(SHARDED_LCOV_PATHS)) {
-        await Bun.write(join(dir, lcovPath), lcov(shard.lcovLines));
+        const override = shard.lcovOverrides?.[lcovPath];
+        if (override === null) continue;
+        await Bun.write(join(dir, lcovPath), override ?? lcov(shard.lcovLines));
       }
     }
     if (shard.meta) await Bun.write(join(dir, 'shard-meta.json'), JSON.stringify(shard.meta));
@@ -133,6 +139,19 @@ describe('listShardDirs', () => {
   });
 });
 
+describe('expectedLcovShards', () => {
+  const jobs = ['test-shard-1', 'test-shard-2', 'test-shard-frontend'];
+
+  it('owes a sharded workspace one report per numbered shard and none from the frontend job', () => {
+    expect(expectedLcovShards('api', jobs)).toEqual(['test-shard-1', 'test-shard-2']);
+    expect(expectedLcovShards('shared', jobs)).toEqual(['test-shard-1', 'test-shard-2']);
+  });
+
+  it('owes the unsharded frontend a report from its own job only', () => {
+    expect(expectedLcovShards('frontend', jobs)).toEqual(['test-shard-frontend']);
+  });
+});
+
 describe('mergeTestShards', () => {
   it('merges coverage and folds run metadata', async () => {
     const shards = await makeTemp();
@@ -156,13 +175,145 @@ describe('mergeTestShards', () => {
         meta: { shard: 2, exitCode: 0, durationSeconds: 66 },
         unhandledErrors: { errors: 0, headlines: [] },
       },
+      {
+        name: 'test-shard-frontend',
+        lcovLines: [[1, 1]],
+        meta: { shard: 'frontend', exitCode: 0, durationSeconds: 40 },
+      },
     ]);
 
     const summary = await mergeTestShards(shards, output);
-    expect(summary).toMatchObject({ shards: 2, exitCode: 0, durationSeconds: 66 });
+    expect(summary).toMatchObject({ shards: 3, exitCode: 0, durationSeconds: 66 });
+    expect(summary.coverageErrors).toBeUndefined();
 
     const merged = await parseLcovSummary(join(output, SHARDED_LCOV_PATHS.api));
     expect(merged.lines).toMatchObject({ total: 2, covered: 2 });
+  });
+
+  it('merges the frontend from its own job only, never from the numbered shards', async () => {
+    const shards = await makeTemp();
+    const output = await makeTemp();
+    await writeShards(shards, [
+      {
+        name: 'test-shard-1',
+        lcovLines: [[1, 0]],
+        meta: { shard: 1, exitCode: 0, durationSeconds: 1 },
+      },
+      {
+        name: 'test-shard-frontend',
+        lcovLines: [[1, 1]],
+        meta: { shard: 'frontend', exitCode: 0, durationSeconds: 1 },
+      },
+    ]);
+
+    const summary = await mergeTestShards(shards, output);
+
+    expect(summary.coverageErrors).toBeUndefined();
+    const frontend = await parseLcovSummary(join(output, SHARDED_LCOV_PATHS.frontend));
+    expect(frontend.lines).toMatchObject({ total: 1, covered: 1 });
+  });
+
+  // Each of these used to skip the missing input and merge the rest, so a
+  // shard that never delivered its report read as a slightly lower, complete
+  // number. Now the workspace is reported with the shard's name and its merged
+  // file does not exist for the collector to read.
+  describe('coverage of a shard that did not deliver', () => {
+    const twoShardsAndFrontend = (shard2: Partial<ShardFiles>): ShardFiles[] => [
+      {
+        name: 'test-shard-1',
+        lcovLines: [[1, 1]],
+        meta: { shard: 1, exitCode: 0, durationSeconds: 1 },
+      },
+      {
+        name: 'test-shard-2',
+        lcovLines: [[1, 1]],
+        meta: { shard: 2, exitCode: 0, durationSeconds: 1 },
+        ...shard2,
+      },
+      {
+        name: 'test-shard-frontend',
+        lcovLines: [[1, 1]],
+        meta: { shard: 'frontend', exitCode: 0, durationSeconds: 1 },
+      },
+    ];
+
+    it('names the shard whose report is missing and leaves only that workspace unavailable', async () => {
+      const shards = await makeTemp();
+      const output = await makeTemp();
+      await writeShards(
+        shards,
+        twoShardsAndFrontend({ lcovOverrides: { [SHARDED_LCOV_PATHS.shared]: null } })
+      );
+
+      const summary = await mergeTestShards(shards, output);
+
+      expect(Object.keys(summary.coverageErrors ?? {})).toEqual(['shared']);
+      expect(summary.coverageErrors?.shared).toContain('shard test-shard-2: missing report');
+      expect(await Bun.file(join(output, SHARDED_LCOV_PATHS.shared)).exists()).toBe(false);
+      expect(await Bun.file(join(output, SHARDED_LCOV_PATHS.api)).exists()).toBe(true);
+      expect(await Bun.file(join(output, SHARDED_LCOV_PATHS.frontend)).exists()).toBe(true);
+    });
+
+    it('names the shard whose report was truncated', async () => {
+      const shards = await makeTemp();
+      const output = await makeTemp();
+      await writeShards(
+        shards,
+        twoShardsAndFrontend({
+          lcovOverrides: { [SHARDED_LCOV_PATHS.api]: lcov([[1, 1]]).replace('end_of_record', '') },
+        })
+      );
+
+      const summary = await mergeTestShards(shards, output);
+
+      expect(summary.coverageErrors?.api).toContain(
+        'shard test-shard-2: truncated: record for src/a.ts has no end_of_record'
+      );
+    });
+
+    it('reports a frontend job that uploaded no report under its own name', async () => {
+      const shards = await makeTemp();
+      const output = await makeTemp();
+      await writeShards(shards, [
+        {
+          name: 'test-shard-1',
+          lcovLines: [[1, 1]],
+          meta: { shard: 1, exitCode: 0, durationSeconds: 1 },
+        },
+      ]);
+
+      const summary = await mergeTestShards(shards, output);
+
+      expect(summary.coverageErrors?.frontend).toContain(
+        'shard test-shard-frontend: missing report'
+      );
+      expect(summary.coverageErrors?.api).toBeUndefined();
+    });
+
+    it('removes a merged file a previous run left behind when this merge fails', async () => {
+      const shards = await makeTemp();
+      const output = await makeTemp();
+      await Bun.write(join(output, SHARDED_LCOV_PATHS.shared), lcov([[1, 1]]));
+      await writeShards(
+        shards,
+        twoShardsAndFrontend({ lcovOverrides: { [SHARDED_LCOV_PATHS.shared]: null } })
+      );
+
+      await mergeTestShards(shards, output);
+
+      expect(await Bun.file(join(output, SHARDED_LCOV_PATHS.shared)).exists()).toBe(false);
+    });
+
+    it('removes every staged file when the uploaded job set is itself incomplete', async () => {
+      const shards = await makeTemp();
+      const output = await makeTemp();
+      await Bun.write(join(output, SHARDED_LCOV_PATHS.api), lcov([[1, 1]]));
+      await writeShards(shards, [{ name: 'test-shard-1', lcovLines: [[1, 1]] }]);
+
+      await expect(mergeTestShards(shards, output, 9)).rejects.toBeInstanceOf(ShardSetError);
+
+      expect(await Bun.file(join(output, SHARDED_LCOV_PATHS.api)).exists()).toBe(false);
+    });
   });
 
   // The frontend job uploads the same artifact shape as a numbered shard, with
@@ -226,6 +377,18 @@ describe('mergeTestShards', () => {
     );
   });
 
+  it('names the job directories that never uploaded', async () => {
+    const shards = await makeTemp();
+    await writeShards(shards, [
+      { name: 'test-shard-1', lcovLines: [[1, 1]] },
+      { name: 'test-shard-3', lcovLines: [[1, 1]] },
+      { name: 'test-shard-frontend', lcovLines: [[1, 1]] },
+    ]);
+    await expect(mergeTestShards(shards, await makeTemp(), 4)).rejects.toThrow(
+      /found 3; missing: test-shard-2\b/
+    );
+  });
+
   it('accepts a full shard set when an expected count is given', async () => {
     const shards = await makeTemp();
     const output = await makeTemp();
@@ -281,6 +444,61 @@ describe('collect-test-metrics degradation', () => {
       expect(exitCode).toBe(0);
       const fragment = JSON.parse(stdout) as { tests: { value: { exitCode: number } } };
       expect(fragment.tests.value.exitCode).toBe(1);
+    },
+    COLLECT_TIMEOUT
+  );
+
+  interface CollectedFragment {
+    coverage: Record<string, { state: string; reasons?: string[] }>;
+    tests: { value: { exitCode: number } };
+  }
+
+  // The merge names the shard; the fragment must carry that reason as
+  // `unavailable`, not read a leftover file or fall back to a lower number.
+  it(
+    'marks a workspace whose shard merge failed unavailable with the shard named',
+    async () => {
+      const dir = await makeTemp();
+      const summaryPath = join(dir, 'shard-summary.json');
+      const reason = 'Merging api coverage failed: shard test-shard-3: missing report at x';
+      await Bun.write(
+        summaryPath,
+        JSON.stringify({
+          shards: 9,
+          exitCode: 0,
+          durationSeconds: 12,
+          unhandledErrors: { errors: 0, headlines: [] },
+          coverageErrors: { api: reason },
+        })
+      );
+
+      const { stdout } = await collect(summaryPath);
+
+      const fragment = JSON.parse(stdout) as CollectedFragment;
+      expect(fragment.coverage.api).toEqual({ state: 'unavailable', reasons: [reason] });
+      expect(fragment.tests.value.exitCode).toBe(0);
+    },
+    COLLECT_TIMEOUT
+  );
+
+  it(
+    'rejects a summary whose coverageErrors is not a reason per workspace',
+    async () => {
+      const dir = await makeTemp();
+      const summaryPath = join(dir, 'shard-summary.json');
+      await Bun.write(
+        summaryPath,
+        JSON.stringify({
+          shards: 9,
+          exitCode: 0,
+          durationSeconds: 12,
+          coverageErrors: { api: 3 },
+        })
+      );
+
+      const { stdout } = await collect(summaryPath);
+
+      expect((JSON.parse(stdout) as CollectedFragment).tests.value.exitCode).toBe(1);
     },
     COLLECT_TIMEOUT
   );

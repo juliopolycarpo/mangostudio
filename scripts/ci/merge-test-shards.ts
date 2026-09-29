@@ -10,7 +10,12 @@
 //               scripts/qa-gate/merge-lcov-shards.ts for why a plain union of
 //               `DA:` lines reports a coverage regression that did not happen.
 //               The frontend contributes exactly one file (its lane cannot be
-//               sharded for that same reason), so its merge is a copy.
+//               sharded for that same reason), so its merge is a copy. Which
+//               job directories owe a workspace a report comes from the lane
+//               registry (`expectedLcovShards`): a missing, empty or truncated
+//               one fails that workspace's merge naming the shard, and the
+//               workspace is reported in `coverageErrors` so the QA fragment
+//               marks its coverage unavailable with that reason.
 //   run meta    exit codes and durations. The suite's exit code is non-zero if
 //               any job's was, and its duration is the slowest job's, which is
 //               the lane's wall clock now that they run concurrently.
@@ -20,12 +25,12 @@
 //
 // Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [shard-count] > shard-summary.json
 
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readdir, rm } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
-import { mergeLcovFiles } from '../qa-gate/merge-lcov-shards';
+import { type LcovShardInput, mergeLcovFiles } from '../qa-gate/merge-lcov-shards';
 import { mergeUnhandledErrors, type UnhandledErrors } from '../qa-gate/unhandled-errors';
 
 export interface ShardMeta {
@@ -44,6 +49,12 @@ export interface ShardSummary {
   /** Wall clock of the slowest shard, which is the lane's critical path. */
   readonly durationSeconds: number;
   readonly unhandledErrors: UnhandledErrors;
+  /**
+   * Workspaces whose LCOV could not be merged, each with the reason naming the
+   * shard. Present only when non-empty; the QA fragment turns each into an
+   * `unavailable` coverage measurement rather than a lower complete number.
+   */
+  readonly coverageErrors?: Readonly<Record<string, string>>;
 }
 
 // `readJson` casts whatever parsed, so a `shard-meta.json` that is valid JSON
@@ -77,6 +88,40 @@ const readJson = async <T>(path: string, fallback: T): Promise<T> => {
   }
 };
 
+// Each unsharded lane runs whole in its own CI job and uploads its own
+// `test-shard-<id>` directory, so the expected directory count is derived here
+// from the registry rather than restated as arithmetic in the workflow — a new
+// `sharded: false` lane changes it without a YAML edit to forget.
+const unshardedLanes = TEST_LANES.filter((lane) => !lane.sharded);
+const unshardedJobCount = unshardedLanes.length;
+
+const NUMBERED_SHARD = /^test-shard-\d+$/;
+
+/** Every artifact directory name a run with `expectedJobs` jobs must have uploaded. */
+const expectedJobNames = (expectedJobs: number, presentNames: readonly string[]): string[] => {
+  const numbered = Math.max(expectedJobs - unshardedJobCount, 0);
+  return [
+    ...Array.from({ length: numbered }, (_, index) => `test-shard-${index + 1}`),
+    ...presentNames.filter((name) => NUMBERED_SHARD.test(name)),
+    ...unshardedLanes.map((lane) => `test-shard-${lane.id}`),
+  ].filter((name, index, all) => all.indexOf(name) === index);
+};
+
+/**
+ * The job directories that owe `workspace` an LCOV report. A workspace whose
+ * lanes are sharded is owed one by every numbered shard; a workspace with an
+ * unsharded lane is owed one by that lane's own job and by no numbered shard.
+ * // Usage: expectedLcovShards('frontend', names) // ['test-shard-frontend']
+ */
+export const expectedLcovShards = (
+  workspace: string,
+  jobNames: readonly string[]
+): readonly string[] => {
+  const unsharded = unshardedLanes.filter((lane) => lane.workspace === workspace);
+  if (unsharded.length > 0) return unsharded.map((lane) => `test-shard-${lane.id}`);
+  return jobNames.filter((name) => NUMBERED_SHARD.test(name));
+};
+
 /** Shard artifact directories, sorted so blob file names stay stable across runs. */
 export const listShardDirs = async (shardsRoot: string): Promise<readonly string[]> => {
   const entries = await readdir(shardsRoot, { withFileTypes: true });
@@ -86,6 +131,14 @@ export const listShardDirs = async (shardsRoot: string): Promise<readonly string
     .map((entry) => join(shardsRoot, entry.name))
     .sort();
 };
+
+/** The set of uploaded job directories is not the set the run should have produced. */
+export class ShardSetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ShardSetError';
+  }
+}
 
 /**
  * Reassemble one sharded run. `outputRoot` is the checkout the merged files
@@ -98,6 +151,13 @@ export const mergeTestShards = async (
   outputRoot: string = ROOT_DIR,
   expectedShards?: number
 ): Promise<ShardSummary> => {
+  // Whatever an earlier run staged is not this run's coverage: drop it before
+  // anything can fail, so a failed merge leaves no file for the collector to read.
+  await Promise.all(
+    Object.values(SHARDED_LCOV_PATHS).map((lcovPath) =>
+      rm(join(outputRoot, lcovPath), { force: true })
+    )
+  );
   const shardDirs = await listShardDirs(shardsRoot);
   if (shardDirs.length === 0) {
     throw new Error(`No shard directories under ${shardsRoot}; nothing to merge.`);
@@ -107,22 +167,34 @@ export const mergeTestShards = async (
   // so the empty-set check above does not catch it. The remaining shards can
   // still be green, and summarizeShardMeta would report a passing suite over
   // an incomplete file set.
+  const presentNames = shardDirs.map((dir) => basename(dir));
   if (expectedShards !== undefined && shardDirs.length !== expectedShards) {
-    throw new Error(
+    const missing = expectedJobNames(expectedShards, presentNames).filter(
+      (name) => !presentNames.includes(name)
+    );
+    throw new ShardSetError(
       `Expected ${expectedShards} test-job directories under ${shardsRoot} (the numbered shards ` +
-        `plus one job per unsharded lane), found ${shardDirs.length}. A job likely failed before ` +
+        `plus one job per unsharded lane), found ${shardDirs.length}` +
+        `${missing.length > 0 ? `; missing: ${missing.join(', ')}` : ''}. A job likely failed before ` +
         'its upload step ran; merging a partial set would report incomplete coverage and test ' +
         'counts as a green run.'
     );
   }
 
+  const jobNames =
+    expectedShards === undefined ? presentNames : expectedJobNames(expectedShards, presentNames);
+  const coverageErrors: Record<string, string> = {};
   for (const [workspace, lcovPath] of Object.entries(SHARDED_LCOV_PATHS)) {
-    const inputs = shardDirs.map((dir) => join(dir, lcovPath));
-    await mergeLcovFiles(join(outputRoot, lcovPath), inputs).catch((caught: unknown) => {
-      throw new Error(
-        `Merging ${workspace} coverage failed: ${caught instanceof Error ? caught.message : String(caught)}`
-      );
-    });
+    const inputs: LcovShardInput[] = expectedLcovShards(workspace, jobNames).map((name) => ({
+      shard: name,
+      path: join(shardsRoot, name, lcovPath),
+    }));
+    try {
+      await mergeLcovFiles(join(outputRoot, lcovPath), inputs);
+    } catch (caught) {
+      const reason = caught instanceof Error ? caught.message : String(caught);
+      coverageErrors[workspace] = `Merging ${workspace} coverage failed: ${reason}`;
+    }
   }
 
   const metas = await Promise.all(
@@ -145,14 +217,24 @@ export const mergeTestShards = async (
     )
   );
 
-  return { shards: shardDirs.length, ...summarizeShardMeta(metas), unhandledErrors };
+  return {
+    shards: shardDirs.length,
+    ...summarizeShardMeta(metas),
+    unhandledErrors,
+    ...(Object.keys(coverageErrors).length > 0 ? { coverageErrors } : {}),
+  };
 };
 
-// Each unsharded lane runs whole in its own CI job and uploads its own
-// `test-shard-<id>` directory, so the expected directory count is derived here
-// from the registry rather than restated as arithmetic in the workflow — a new
-// `sharded: false` lane changes it without a YAML edit to forget.
-const unshardedJobCount = TEST_LANES.filter((lane) => !lane.sharded).length;
+/** What the merge job hands the collector when the uploaded job set itself is wrong. */
+const incompleteSetSummary = (reason: string): ShardSummary => ({
+  shards: 0,
+  exitCode: 1,
+  durationSeconds: 0,
+  unhandledErrors: { errors: 0, headlines: [] },
+  coverageErrors: Object.fromEntries(
+    Object.keys(SHARDED_LCOV_PATHS).map((workspace) => [workspace, reason])
+  ),
+});
 
 if (import.meta.main) {
   const [, , shardsRoot, shardCountArg] = process.argv;
@@ -162,13 +244,25 @@ if (import.meta.main) {
     );
     process.exit(1);
   }
-  const summary = await mergeTestShards(
-    shardsRoot,
-    ROOT_DIR,
-    shardCountArg ? Number(shardCountArg) + unshardedJobCount : undefined
-  );
+  let summary: ShardSummary;
+  try {
+    summary = await mergeTestShards(
+      shardsRoot,
+      ROOT_DIR,
+      shardCountArg ? Number(shardCountArg) + unshardedJobCount : undefined
+    );
+  } catch (caught) {
+    if (!(caught instanceof ShardSetError)) throw caught;
+    // Still emit a summary so the collector can say why coverage is unavailable.
+    process.stdout.write(`${JSON.stringify(incompleteSetSummary(caught.message), null, 2)}\n`);
+    throw caught;
+  }
   process.stderr.write(
     `Merged ${summary.shards} shard(s): exit ${summary.exitCode}, slowest ${summary.durationSeconds}s\n`
   );
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  for (const [workspace, reason] of Object.entries(summary.coverageErrors ?? {})) {
+    process.stderr.write(`::error title=Coverage merge failed (${workspace})::${reason}\n`);
+  }
+  if (summary.coverageErrors) process.exit(1);
 }
