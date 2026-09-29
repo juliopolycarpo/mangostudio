@@ -177,14 +177,26 @@ describe('verdict with Rust coverage states', () => {
     expect(verdict.gaps).toContain(`coverage/${CRATE}`);
   });
 
-  it('flags an unavailable crate on the base as an incomplete comparison', () => {
+  it('does not let a crate that failed on the base make the JS comparison incomplete', () => {
     const verdict = evaluateVerdict(
-      withCrate('base-sha', unavailable('profile data missing')),
+      withCrate('base-sha', unavailable('rust coverage artifact not delivered: producer failed')),
       withCrate('head-sha', measured(makeRustCoverageSummary(80)))
     );
 
-    expect(verdict.baseGaps).toContain(`coverage/${CRATE}`);
-    expect(verdict.outcome).toBe('incomplete');
+    expect(verdict.baseGaps).toEqual([]);
+    expect(verdict.comparison).toBe('complete');
+    expect(verdict.outcome).toBe('pass');
+  });
+
+  it('still flags an unavailable JS workspace on the base', () => {
+    const verdict = evaluateVerdict(
+      makeMetrics('base-sha', {
+        components: makeComponents({ 'apps/api': { coverage: unavailable('lcov missing') } }),
+      }),
+      makeMetrics('head-sha')
+    );
+
+    expect(verdict.baseGaps).toContain('coverage/apps/api');
   });
 
   it('passes when the crate is measured on both sides', () => {

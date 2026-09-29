@@ -301,3 +301,58 @@ describe('baselineVerdict: other schema versions are incomparable, not unavailab
     expect(baselineVerdict(archive, BASE_SHA)).toEqual({ reason: null, incomparable: false });
   });
 });
+
+describe('baselineVerdict: a crate that was not measured never blanks the baseline', () => {
+  const component = (kind: string, root: string, coverage: object, lanes: object[] = []) => ({
+    id: `${kind}:${root}`,
+    kind,
+    root,
+    coverage,
+    lanes,
+  });
+  const baselineWith = (components: object[]) =>
+    archiveOf(
+      JSON.stringify({
+        schemaVersion: QA_METRICS_SCHEMA_VERSION,
+        headSha: BASE_SHA,
+        metrics: { tests: { state: 'measured', value: 1 }, components },
+      })
+    );
+  const unavailableRust = {
+    state: 'unavailable',
+    reasons: ['rust coverage artifact not delivered'],
+  };
+
+  it.each(['unavailable', 'partial', 'stale'])(
+    'accepts a baseline whose crate coverage is %s, so JS and docs PRs keep their comparison',
+    (state) => {
+      const archive = baselineWith([
+        component('crate', 'crates/a', { state, reasons: ['x'] }),
+        component('workspace', 'apps/api', { state: 'measured', value: {} }),
+      ]);
+
+      const verdict = baselineVerdict(archive, BASE_SHA);
+
+      expect(verdict.reason, `expected a usable baseline | received: ${verdict.reason}`).toBeNull();
+    }
+  );
+
+  it('still rejects a baseline whose JS workspace coverage is unavailable', () => {
+    const archive = baselineWith([
+      component('crate', 'crates/a', unavailableRust),
+      component('workspace', 'apps/api', { state: 'unavailable', reasons: ['lcov missing'] }),
+    ]);
+
+    expect(baselineVerdict(archive, BASE_SHA).reason).toContain('apps/api/coverage=unavailable');
+  });
+
+  it("still rejects a crate's other measurements when they are incomplete", () => {
+    const archive = baselineWith([
+      component('crate', 'crates/a', unavailableRust, [
+        { id: 'rust-lane', tests: { state: 'partial', value: {}, reasons: ['x'] } },
+      ]),
+    ]);
+
+    expect(baselineVerdict(archive, BASE_SHA).reason).toContain('crates/a/');
+  });
+});

@@ -145,11 +145,17 @@ const headGaps = (head: Metrics | null): string[] => {
   return [...uncollected, ...testEvidenceGaps(head), ...missingLanes(head)];
 };
 
-/** Base cells a verdict compares against; a base gap here means a comparison was not made. */
+/**
+ * Base cells a verdict compares against; a base gap here means a comparison was
+ * not made. A crate's coverage is not one of them: it is compared row by row
+ * and a missing side renders n/a, so a Rust job that failed on the base commit
+ * cannot make the JS comparison of an unrelated PR incomplete. The head side
+ * still counts it (`headGaps`).
+ */
 const comparedBaseCells = (base: Metrics) => [
-  ...base.components.map(
-    (component) => [`coverage/${component.root}`, component.coverage] as const
-  ),
+  ...base.components
+    .filter((component) => component.kind !== 'crate')
+    .map((component) => [`coverage/${component.root}`, component.coverage] as const),
   ['duplication', base.duplication] as const,
   ['frontendBundle', base.frontendBundle] as const,
   ['tests', base.tests] as const,
