@@ -2,18 +2,20 @@
 // into either "no attention signals" or a short list of concrete regressions,
 // so reviewers don't have to scan the detail tables.
 
-import { ALL_WORKSPACE_NAMES } from '../../lib/config';
-import type { Failable, Metrics } from '../collect/types';
+import type { Metrics } from '../collect/types';
+import { needsAttention } from '../model/states';
 import {
+  componentMeasurements,
   getBundle,
   getCircularDeps,
   getDuplication,
   getTestSuite,
   getTooling,
   getTotalLineCoverage,
+  globalMeasurements,
   sumTsErrors,
 } from './access';
-import { formatBytes, inlineCode, isError } from './format';
+import { formatBytes, inlineCode } from './format';
 
 // Ignore sub-0.1pp percentage drift and sub-10KiB gzip growth — both are
 // routine noise on unrelated changes and would make the verdict cry wolf.
@@ -64,7 +66,7 @@ const testSuiteItem = (head: Metrics | null): string | null => {
 };
 
 /**
- * Head-side collectors that returned an error instead of a measurement.
+ * Head-side measurements that are `unavailable`, `partial` or `stale` instead of `measured`.
  *
  * A metric that fails to collect does not merely go unreported — it disarms the
  * guard built on it. Every comparative item above returns null when either side
@@ -80,24 +82,11 @@ const testSuiteItem = (head: Metrics | null): string | null => {
  */
 const headCollectorErrors = (head: Metrics | null): string[] => {
   if (!head) return [];
-  const named: ReadonlyArray<readonly [string, Failable<unknown>]> = [
-    ['tests', head.tests],
-    ['tooling', head.tooling],
-    ['duplication', head.duplication],
-    ['circularDeps', head.circularDeps],
-    ['frontendBundle', head.frontendBundle],
-    ['dependencies', head.dependencies],
-  ];
-  const errors = named.filter(([, value]) => isError(value)).map(([name]) => name);
-  for (const workspace of ALL_WORKSPACE_NAMES) {
-    const workspaceNamed: ReadonlyArray<readonly [string, Failable<unknown>]> = [
-      [`coverage/${workspace}`, head.coverage[workspace]],
-      [`tsErrors/${workspace}`, head.tsErrors[workspace]],
-      [`loc/${workspace}`, head.loc[workspace]],
-    ];
-    errors.push(...workspaceNamed.filter(([, value]) => isError(value)).map(([name]) => name));
-  }
-  return errors;
+  // `unsupported` is a definition ("no lane for this component"), not a failure,
+  // so it never reads as an uncollected metric.
+  return [...globalMeasurements(head), ...componentMeasurements(head)]
+    .filter(([, cell]) => needsAttention(cell))
+    .map(([name]) => name);
 };
 
 /**

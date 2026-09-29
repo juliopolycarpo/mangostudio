@@ -2,25 +2,40 @@
 // piped command execution, and the current commit SHA.
 
 import { ROOT_DIR } from '../../lib/config';
-import type { Failable } from './types';
+import { type Measurement, measured, unavailable } from '../model/states';
 
 /** Write a namespaced diagnostic line to stderr (keeps stdout pure JSON). */
 export const stderrLog = (message: string): void => {
   process.stderr.write(`[qa-gate] ${message}\n`);
 };
 
+const escapeAnnotation = (text: string): string =>
+  text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+
 /**
- * Run a collector, returning its value or an `{ error }` placeholder so one
- * failing metric never aborts the whole report.
- * // Usage: const loc = await safe('loc', () => measureLoc('apps/api'));
+ * GitHub Actions `::error::` annotations, one per message, so a failure shows
+ * on the run summary instead of only in the log. Written to stderr because
+ * stdout carries the envelope JSON.
+ * // Usage: process.stderr.write(errorAnnotations('QA registry', ['tools/ is unowned']))
  */
-export const safe = async <T>(label: string, fn: () => Promise<T>): Promise<Failable<T>> => {
+export const errorAnnotations = (title: string, messages: readonly string[]): string =>
+  messages
+    .map((message) => `::error title=${escapeAnnotation(title)}::${escapeAnnotation(message)}\n`)
+    .join('');
+
+/**
+ * Run a collector, returning `measured(value)` or an explicit `unavailable`
+ * measurement carrying the error, so one failing metric never aborts the whole
+ * report and never reads as zero.
+ * // Usage: const dupes = await measure('duplication', collectDuplication);
+ */
+export const measure = async <T>(label: string, fn: () => Promise<T>): Promise<Measurement<T>> => {
   try {
-    return await fn();
+    return measured(await fn());
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     stderrLog(`${label} failed: ${message}`);
-    return { error: message };
+    return unavailable(message);
   }
 };
 

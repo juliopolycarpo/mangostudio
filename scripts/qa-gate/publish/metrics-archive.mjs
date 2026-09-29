@@ -4,7 +4,8 @@
 // treats it as hostile bytes: it never writes to disk, bounds every read and
 // inflate, and yields a base SHA only when it is exactly a 40-character
 // lowercase hex string. Everything else — bad zip, missing entry, bad JSON,
-// null or malformed baseSha, placeholder metrics — becomes an explicit
+// null or malformed baseSha, unavailable/partial/stale metrics, another schema
+// version — becomes an explicit
 // "unavailable" with a reason, never a guess. Full schema validation stays in
 // render-report.ts.
 
@@ -150,38 +151,88 @@ export function recordedBaseSha(archive) {
   return unavailable(`head envelope baseSha ${shown} is not a 40-character lowercase hex SHA`);
 }
 
-/** Paths of collector-error placeholders (`{ error: string }`) inside `node`. */
-function placeholderPaths(node, path, found) {
+/** Schema version this reader understands; mirrors QA_METRICS_SCHEMA_VERSION in metrics-envelope.ts (pinned by test). */
+export const QA_METRICS_SCHEMA_VERSION = 4;
+
+/** States that carry a complete, trustworthy value. `unsupported` is a definition, not a gap. */
+const COMPLETE_STATES = new Set(['measured', 'unsupported']);
+
+const MAX_REPORTED_INCOMPLETE = 5;
+
+/** Key for a child node: a component's root (or id) reads better than an array index. */
+function childKey(child, key) {
+  if (Array.isArray(child) || child === null || typeof child !== 'object') return key;
+  if (typeof child.root === 'string') return child.root;
+  return typeof child.id === 'string' ? child.id : key;
+}
+
+/**
+ * Paths of measurements whose `state` is not complete (`unavailable`, `partial`,
+ * `stale`, or anything unknown). A measurement is any object with a string
+ * `state`; its `value` is data and is never searched.
+ */
+function incompletePaths(node, path, found) {
   if (node === null || typeof node !== 'object') return found;
-  if (typeof node.error === 'string') {
-    found.push(path);
+  if (typeof node.state === 'string') {
+    if (!COMPLETE_STATES.has(node.state)) found.push(`${path}=${node.state}`);
     return found;
   }
   for (const [key, child] of Object.entries(node)) {
-    placeholderPaths(child, `${path}/${key}`, found);
+    incompletePaths(child, `${path}/${childKey(child, key)}`, found);
   }
   return found;
 }
 
-const MAX_REPORTED_PLACEHOLDERS = 5;
+const usable = { reason: null, incomparable: false };
+const rejected = (reason) => ({ reason, incomparable: false });
 
 /**
- * Why a main baseline artifact must not be used, or null when it is complete:
- * readable, recorded for exactly `baseSha`, and carrying a real measurement for
- * every metric. An envelope with collector-error placeholders is partial — its
- * missing metrics would otherwise read as a baseline that was measured.
+ * Decide whether a main baseline artifact may be used.
  *
- * // Usage: baselineIncompleteReason(archive, baseSha) // => null | 'partial: metrics/tests'
+ * `{ reason: null }` means complete: readable, recorded under the schema
+ * version this reader knows, recorded for exactly `baseSha`, and every metric
+ * `measured` or `unsupported`. Otherwise `reason` says why not. An envelope
+ * recorded under another schema version (v3 and older are historical) is
+ * `incomparable: true` with an explicit reason, decided before any other field
+ * is trusted, so it never reads as a missing baseline.
+ *
+ * // Usage: baselineVerdict(archive, baseSha) // => { reason: null, incomparable: false }
  */
-export function baselineIncompleteReason(archive, baseSha) {
+export function baselineVerdict(archive, baseSha) {
   const { envelope, reason } = parseEnvelope(archive);
-  if (!envelope) return reason;
+  if (!envelope) return rejected(reason);
+  const version = envelope.schemaVersion;
+  if (Number.isInteger(version) && version !== QA_METRICS_SCHEMA_VERSION) {
+    return {
+      reason: `qa-metrics artifact is incomparable: recorded under schema version ${version}, expected ${QA_METRICS_SCHEMA_VERSION}; older envelopes are historical and are not read`,
+      incomparable: true,
+    };
+  }
+  if (version !== QA_METRICS_SCHEMA_VERSION) {
+    const shown = String(JSON.stringify(version)).slice(0, 80);
+    return rejected(
+      `qa-metrics artifact schemaVersion ${shown} is not the integer ${QA_METRICS_SCHEMA_VERSION}`
+    );
+  }
   if (envelope.headSha !== baseSha) {
     const shown = String(JSON.stringify(envelope.headSha)).slice(0, 80);
-    return `qa-metrics artifact headSha ${shown} does not match base ${baseSha}`;
+    return rejected(`qa-metrics artifact headSha ${shown} does not match base ${baseSha}`);
   }
-  const missing = placeholderPaths(envelope.metrics, 'metrics', []);
-  if (missing.length === 0) return null;
-  const listed = missing.slice(0, MAX_REPORTED_PLACEHOLDERS).join(', ');
-  return `qa-metrics artifact is partial: ${missing.length} metric(s) failed to collect (${listed})`;
+  if (envelope.metrics === null || typeof envelope.metrics !== 'object') {
+    return rejected('qa-metrics artifact has no metrics object');
+  }
+  const missing = incompletePaths(envelope.metrics, 'metrics', []);
+  if (missing.length === 0) return usable;
+  const listed = missing.slice(0, MAX_REPORTED_INCOMPLETE).join(', ');
+  return rejected(
+    `qa-metrics artifact is partial: ${missing.length} metric(s) not fully measured (${listed})`
+  );
+}
+
+/**
+ * Why a main baseline artifact must not be used, or null when it is complete.
+ * // Usage: baselineIncompleteReason(archive, baseSha) // => null | 'qa-metrics artifact is partial: …'
+ */
+export function baselineIncompleteReason(archive, baseSha) {
+  return baselineVerdict(archive, baseSha).reason;
 }

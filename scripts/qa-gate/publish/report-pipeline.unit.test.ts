@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
 import { CI_JOBS_MAX_ITEMS } from '../ci-durations';
-import { QA_METRICS_ARTIFACT_NAME as TS_ARTIFACT_NAME } from '../metrics-envelope';
+import {
+  QA_METRICS_SCHEMA_VERSION,
+  QA_METRICS_ARTIFACT_NAME as TS_ARTIFACT_NAME,
+} from '../metrics-envelope';
+import { unavailable } from '../model/states';
 import { makeMetrics } from '../testing/metrics-fixture';
 import { buildZip } from '../testing/zip-fixture';
 import {
@@ -164,14 +168,23 @@ const mainRun = (id: number, overrides: Partial<FakeRun> = {}): FakeRun => ({
 
 /** A qa-metrics artifact zip whose envelope records `baseSha`, as the collector writes it. */
 const metricsArchive = (baseSha: string | null = BASE_SHA): Uint8Array =>
-  buildZip([{ name: 'metrics.json', content: JSON.stringify({ schemaVersion: 3, baseSha }) }]);
-
-/** The qa-metrics archive a main-push run uploads for `sha`. */
-const baselineArchive = (sha: string, metrics: object = makeMetrics(sha)): Uint8Array =>
   buildZip([
     {
       name: 'metrics.json',
-      content: JSON.stringify({ schemaVersion: 3, headSha: sha, baseSha: null, metrics }),
+      content: JSON.stringify({ schemaVersion: QA_METRICS_SCHEMA_VERSION, baseSha }),
+    },
+  ]);
+
+/** The qa-metrics archive a main-push run uploads for `sha`. */
+const baselineArchive = (
+  sha: string,
+  metrics: object = makeMetrics(sha),
+  schemaVersion: number = QA_METRICS_SCHEMA_VERSION
+): Uint8Array =>
+  buildZip([
+    {
+      name: 'metrics.json',
+      content: JSON.stringify({ schemaVersion, headSha: sha, baseSha: null, metrics }),
     },
   ]);
 
@@ -492,13 +505,13 @@ describe('baseline resolution', () => {
     ],
     ['truncated', () => baselineArchive(BASE_SHA).slice(0, 60), 'unreadable'],
     [
-      'partial (collector-error placeholders)',
+      'partial (an unavailable metric)',
       () =>
         baselineArchive(
           BASE_SHA,
-          makeMetrics(BASE_SHA, { frontendBundle: { error: 'frontend dist missing' } })
+          makeMetrics(BASE_SHA, { frontendBundle: unavailable('frontend dist missing') })
         ),
-      'partial: 1 metric(s) failed to collect (metrics/frontendBundle)',
+      'partial: 1 metric(s) not fully measured (metrics/frontendBundle=unavailable)',
     ],
     [
       'recorded for a different sha',
@@ -518,7 +531,7 @@ describe('baseline resolution', () => {
   });
 
   it('falls through a partial newest run to an older complete run', async () => {
-    const partial = makeMetrics(BASE_SHA, { circularDeps: { error: 'madge crashed' } });
+    const partial = makeMetrics(BASE_SHA, { circularDeps: unavailable('madge crashed') });
     const github = baselineFixture({
       baselineRuns: [mainRun(91, { conclusion: 'failure' }), mainRun(90)],
       artifactsByRun: { 42: [artifact(1)], 91: [artifact(3)], 90: [artifact(2)] },
@@ -534,6 +547,63 @@ describe('baseline resolution', () => {
     expect(result.reportContext.baseArtifact).toEqual({ found: true, reason: null });
     expect(result.baseArchive).toEqual(baselineArchive(BASE_SHA));
     expect(result.ciDurations.base.runId).toBe(90);
+  });
+
+  // A v3 baseline exists but is historical. The report must say it is
+  // incomparable, not that no baseline was found.
+  it('reports a v3-only baseline as incomparable, never as a missing main CI run', async () => {
+    const github = baselineFixture({
+      archives: { 1: metricsArchive(), 2: baselineArchive(BASE_SHA, makeMetrics(BASE_SHA), 3) },
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.baseArchive).toBeNull();
+    expect(result.reportContext.baseArtifact).toEqual({
+      found: false,
+      reason: expect.stringContaining('is incomparable: recorded under schema version 3'),
+      incomparable: true,
+    });
+    expect(result.reportContext.baseArtifact.reason).not.toContain('no completed');
+    expect(result.ciDurations.base.runId).toBe(90);
+  });
+
+  it('prefers an older v4 run over a newer v3 run for the same base', async () => {
+    const github = baselineFixture({
+      baselineRuns: [mainRun(91), mainRun(90)],
+      artifactsByRun: { 42: [artifact(1)], 91: [artifact(3)], 90: [artifact(2)] },
+      archives: {
+        1: metricsArchive(),
+        3: baselineArchive(BASE_SHA, makeMetrics(BASE_SHA), 3),
+        2: baselineArchive(BASE_SHA),
+      },
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.reportContext.baseArtifact).toEqual({ found: true, reason: null });
+    expect(result.ciDurations.base.runId).toBe(90);
+  });
+
+  it('keeps the partial reason, not incomparable, when a partial v4 run sits beside a v3 run', async () => {
+    const partial = makeMetrics(BASE_SHA, { circularDeps: unavailable('madge crashed') });
+    const github = baselineFixture({
+      baselineRuns: [mainRun(91), mainRun(90)],
+      artifactsByRun: { 42: [artifact(1)], 91: [artifact(3)], 90: [artifact(2)] },
+      archives: {
+        1: metricsArchive(),
+        3: baselineArchive(BASE_SHA, partial),
+        2: baselineArchive(BASE_SHA, makeMetrics(BASE_SHA), 3),
+      },
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.reportContext.baseArtifact.incomparable).toBeUndefined();
+    // The actionable reason is shown, not the older schema's.
+    expect(result.reportContext.baseArtifact.reason).toBe(
+      `main CI run 91 for base ${BASE_SHA}: qa-metrics artifact is partial: 1 metric(s) not fully measured (metrics/circularDeps=unavailable)`
+    );
   });
 
   it('never accepts a run whose head sha differs from the recorded base', async () => {

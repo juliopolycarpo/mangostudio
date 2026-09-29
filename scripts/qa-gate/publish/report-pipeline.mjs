@@ -16,7 +16,7 @@
 // The baseline archive is a main-push artifact, but it is still read (for
 // completeness only) as untrusted bytes by the same bounded reader.
 
-import { baselineIncompleteReason, recordedBaseSha } from './metrics-archive.mjs';
+import { baselineVerdict, recordedBaseSha } from './metrics-archive.mjs';
 
 /** Artifact name shared with the collector (pinned to metrics-envelope.ts by test). */
 export const QA_METRICS_ARTIFACT_NAME = 'qa-metrics';
@@ -108,14 +108,26 @@ async function findBaseline(github, context, baseSha) {
       reason: `no completed, non-cancelled main CI run found for base ${baseSha}`,
     };
   }
-  let reason = null;
+  const rejections = [];
   for (const run of runs) {
     const download = await downloadMetricsArchive(github, context, run.id);
-    const rejected = download.reason ?? baselineIncompleteReason(download.archive, baseSha);
-    if (!rejected) return { run, archive: download.archive, reason: null };
-    reason = `main CI run ${run.id} for base ${baseSha}: ${rejected}`;
+    const verdict = download.reason
+      ? { reason: download.reason, incomparable: false }
+      : baselineVerdict(download.archive, baseSha);
+    if (!verdict.reason) return { run, archive: download.archive, reason: null };
+    rejections.push({ run, verdict });
   }
-  return { run: runs[0], archive: null, reason };
+  // Report the newest rejection that is not merely an older schema: a partial or
+  // unreadable v4 run is the actionable reason, and an older v3 run must not hide
+  // it. `incomparable` is set only when every candidate was recorded under another
+  // schema version, so the report can say so instead of promising a future baseline.
+  const shown = rejections.find(({ verdict }) => !verdict.incomparable) ?? rejections[0];
+  return {
+    run: runs[0],
+    archive: null,
+    reason: `main CI run ${shown.run.id} for base ${baseSha}: ${shown.verdict.reason}`,
+    incomparable: rejections.every(({ verdict }) => verdict.incomparable),
+  };
 }
 
 const boundedText = (value, maxLength, fallback) => {
@@ -237,7 +249,11 @@ export async function resolveReportInputs({ github, context }) {
       : { run: null, archive: null, reason: unavailableReason },
     findPreviousPullRequestRun(github, context, run, pullRequest),
   ]);
-  const base = { archive: baseline.archive, reason: baseline.reason };
+  const base = {
+    archive: baseline.archive,
+    reason: baseline.reason,
+    incomparable: baseline.incomparable === true,
+  };
   const [headDurations, baseDurations, previousDurations] = await Promise.all([
     collectCiDurations(github, context, run.id),
     baseline.run
@@ -267,7 +283,12 @@ export async function resolveReportInputs({ github, context }) {
       baseShaRecorded: recorded.sha !== null,
       runUrl: run.html_url,
       headArtifact: { found: head.archive !== null, reason: head.reason },
-      baseArtifact: { found: base.archive !== null, reason: base.reason },
+      baseArtifact: {
+        found: base.archive !== null,
+        reason: base.reason,
+        // Only present when true, so healthy and missing baselines keep their shape.
+        ...(base.incomparable ? { incomparable: true } : {}),
+      },
     },
   };
 }

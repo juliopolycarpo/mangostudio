@@ -1,21 +1,72 @@
-// Lines-of-code measurement: counts tracked .ts/.tsx source, classifying each
-// line as code, comment, or blank.
+// Static lines-of-code measurement: counts tracked files per component and
+// class (production / test / generated / fixture / config / docs), splitting
+// each file's lines into code, comment and blank.
+//
+// A file that cannot be read never lowers a total silently: the component
+// becomes `partial`, the counts cover only the files that were read (so
+// `files` and the line totals always agree), and each unreadable path is
+// recorded as a reason.
 
-import { join } from 'node:path';
-import { ROOT_DIR } from '../../lib/config';
-import { runCapture, stderrLog } from './support';
-import type { LocBucket } from './types';
+import { basename, extname } from 'node:path/posix';
 
-const SOURCE_EXT_RE = /\.(ts|tsx)$/;
-const EXCLUDED_PATH_FRAGMENTS = ['/dist/', '/coverage/', '/.tanstack/', '/node_modules/'];
-const EXCLUDED_FILENAMES = new Set(['routeTree.gen.ts']);
+import { LOC_CLASSES, type LocBucket, type LocClass, type LocStats } from '../model/metrics';
+import { type Measurement, measured, partial } from '../model/states';
+import { stderrLog } from './support';
 
-const isSourceFile = (relPath: string): boolean => {
-  if (!SOURCE_EXT_RE.test(relPath)) return false;
-  if (EXCLUDED_PATH_FRAGMENTS.some((fragment) => relPath.includes(fragment))) return false;
-  const fileName = relPath.split('/').pop() ?? '';
-  if (EXCLUDED_FILENAMES.has(fileName)) return false;
-  return true;
+/** Source languages with `//` and `/* *\/` comments; lines are split three ways. */
+const CODE_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.mts',
+  '.cts',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.rs',
+]);
+const CONFIG_EXTENSIONS = new Set(['.json', '.jsonc', '.toml', '.yml', '.yaml']);
+const DOCS_EXTENSIONS = new Set(['.md', '.mdx', '.mdc']);
+/** Data-like files count non-blank lines as code; there is no comment syntax to split on. */
+const LINE_ONLY_EXTENSIONS = new Set([...CONFIG_EXTENSIONS, ...DOCS_EXTENSIONS, '.xml', '.txt']);
+
+const GENERATED_SEGMENTS = new Set(['generated', '__generated__', '.tanstack']);
+const GENERATED_FILE_RE = /(\.gen\.|\.generated\.)/;
+const GENERATED_FILENAMES = new Set(['bun.lock', 'Cargo.lock']);
+const FIXTURE_SEGMENTS = new Set(['fixtures', '__fixtures__', 'testdata']);
+const TEST_SEGMENTS = new Set(['tests', '__tests__', 'e2e', 'testing']);
+const TEST_FILE_RE = /\.(test|spec)\.[^/]+$/;
+
+export interface FileClass {
+  readonly class: LocClass;
+  /** True when the file's lines split into code/comment/blank. */
+  readonly commentAware: boolean;
+}
+
+/**
+ * Class of a tracked file, or null when it is outside the LoC scope (binary
+ * assets, shell scripts, stylesheets: no counting rule exists for them).
+ * // Usage: classifyFile('apps/api/tests/unit/a.test.ts')?.class // 'test'
+ */
+export const classifyFile = (path: string): FileClass | null => {
+  const ext = extname(path);
+  const name = basename(path);
+  const isCode = CODE_EXTENSIONS.has(ext);
+  const isLineOnly =
+    LINE_ONLY_EXTENSIONS.has(ext) || name.startsWith('Dockerfile') || GENERATED_FILENAMES.has(name);
+  if (!isCode && !isLineOnly) return null;
+
+  const segments = path.split('/').slice(0, -1);
+  const commentAware = isCode;
+  const of = (fileClass: LocClass): FileClass => ({ class: fileClass, commentAware });
+  if (GENERATED_FILENAMES.has(name) || GENERATED_FILE_RE.test(name)) return of('generated');
+  if (segments.some((segment) => GENERATED_SEGMENTS.has(segment))) return of('generated');
+  if (segments.some((segment) => FIXTURE_SEGMENTS.has(segment))) return of('fixture');
+  if (TEST_FILE_RE.test(name) || segments.some((segment) => TEST_SEGMENTS.has(segment))) {
+    return of('test');
+  }
+  if (DOCS_EXTENSIONS.has(ext) || ext === '.txt') return of('docs');
+  return of(isCode ? 'production' : 'config');
 };
 
 interface LineCounts {
@@ -24,8 +75,13 @@ interface LineCounts {
   readonly blank: number;
 }
 
-const countLines = async (relPath: string): Promise<LineCounts> => {
-  const text = await Bun.file(join(ROOT_DIR, relPath)).text();
+/**
+ * Split text into code, comment and blank lines. Comment-aware files treat
+ * `//`, block comments and leading `*` as comments; others count every
+ * non-blank line as code.
+ * // Usage: countLines('// a\nconst x = 1;\n\n', true) // { code: 1, comment: 1, blank: 2 }
+ */
+export const countLines = (text: string, commentAware: boolean): LineCounts => {
   let code = 0;
   let comment = 0;
   let blank = 0;
@@ -34,6 +90,10 @@ const countLines = async (relPath: string): Promise<LineCounts> => {
     const line = rawLine.trim();
     if (line === '') {
       blank++;
+      continue;
+    }
+    if (!commentAware) {
+      code++;
       continue;
     }
     if (inBlockComment) {
@@ -55,46 +115,57 @@ const countLines = async (relPath: string): Promise<LineCounts> => {
   return { code, comment, blank };
 };
 
-/** Count LoC for every tracked source file under a workspace directory. */
-export const measureLoc = async (workspaceDir: string): Promise<LocBucket> => {
-  const { stdout, exitCode, stderr } = await runCapture(['git', 'ls-files', workspaceDir]);
-  if (exitCode !== 0) throw new Error(`git ls-files ${workspaceDir} failed: ${stderr.trim()}`);
-  const sources = stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(isSourceFile);
+const emptyBucket = (): LocBucket => ({ files: 0, code: 0, comment: 0, blank: 0, total: 0 });
 
-  let totalCode = 0;
-  let totalComment = 0;
-  let totalBlank = 0;
-  for (const file of sources) {
-    try {
-      const counts = await countLines(file);
-      totalCode += counts.code;
-      totalComment += counts.comment;
-      totalBlank += counts.blank;
-    } catch (err) {
-      stderrLog(`Skipped ${file}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  return {
-    files: sources.length,
-    code: totalCode,
-    comment: totalComment,
-    blank: totalBlank,
-    total: totalCode + totalComment + totalBlank,
-  };
+const addToBucket = (bucket: LocBucket, counts: LineCounts): LocBucket => ({
+  files: bucket.files + 1,
+  code: bucket.code + counts.code,
+  comment: bucket.comment + counts.comment,
+  blank: bucket.blank + counts.blank,
+  total: bucket.total + counts.code + counts.comment + counts.blank,
+});
+
+/** Files listed in a partial reason before the rest is summarised. */
+const MAX_LISTED_UNREADABLE = 10;
+
+const unreadableReasons = (unreadable: readonly string[], counted: number): string[] => {
+  const listed = unreadable.slice(0, MAX_LISTED_UNREADABLE);
+  const summary = `${unreadable.length} of ${counted} counted file(s) unreadable; totals cover only the files that were read`;
+  const rest = unreadable.length - listed.length;
+  return [summary, ...listed, ...(rest > 0 ? [`… and ${rest} more`] : [])];
 };
 
-/** Sum a set of per-workspace LoC buckets into a single total. */
-export const sumLocBuckets = (buckets: readonly LocBucket[]): LocBucket =>
-  buckets.reduce<LocBucket>(
-    (acc, entry) => ({
-      files: acc.files + entry.files,
-      code: acc.code + entry.code,
-      comment: acc.comment + entry.comment,
-      blank: acc.blank + entry.blank,
-      total: acc.total + entry.total,
-    }),
-    { files: 0, code: 0, comment: 0, blank: 0, total: 0 }
-  );
+/**
+ * Count one component's tracked files. `readText` is injected so tests can
+ * fake unreadable files; production passes a repository-rooted reader.
+ * // Usage: await measureComponentLoc(files, (path) => Bun.file(join(ROOT_DIR, path)).text())
+ */
+export const measureComponentLoc = async (
+  files: readonly string[],
+  readText: (path: string) => Promise<string>
+): Promise<Measurement<LocStats>> => {
+  const stats: Record<LocClass, LocBucket> = Object.fromEntries(
+    LOC_CLASSES.map((fileClass) => [fileClass, emptyBucket()])
+  ) as Record<LocClass, LocBucket>;
+  const unreadable: string[] = [];
+  let counted = 0;
+
+  for (const path of files) {
+    const fileClass = classifyFile(path);
+    if (fileClass === null) continue;
+    counted++;
+    try {
+      const counts = countLines(await readText(path), fileClass.commentAware);
+      stats[fileClass.class] = addToBucket(stats[fileClass.class], counts);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      unreadable.push(`${path}: ${message}`);
+    }
+  }
+
+  if (unreadable.length > 0) {
+    stderrLog(`${unreadable.length} of ${counted} counted file(s) unreadable: ${unreadable[0]}`);
+    return partial(stats, unreadableReasons(unreadable, counted));
+  }
+  return measured(stats);
+};

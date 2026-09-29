@@ -19,8 +19,9 @@
 
 import { listShardDirs, type ShardSummary } from '../ci/merge-test-shards';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
-import { safe } from './collect/support';
-import type { CoverageSummary, Failable, TestMetricsFragment } from './collect/types';
+import { resolveSourceSha } from './collect/provenance';
+import { getCommitSha, measure } from './collect/support';
+import type { CoverageSummary, Measurement, TestMetricsFragment } from './collect/types';
 import { readWorkspaceCoverageSummary } from './coverage-summary';
 import { buildTestSuiteStats, readLaneResults } from './junit-results';
 import type { UnhandledErrors } from './unhandled-errors';
@@ -106,16 +107,19 @@ const collectSuiteStats = async () =>
     summary.durationSeconds
   );
 
-const coverage: Record<string, Failable<CoverageSummary>> = {};
+const coverage: Record<string, Measurement<CoverageSummary>> = {};
 for (const workspace of ALL_WORKSPACE_NAMES) {
-  coverage[workspace] = await safe(`coverage:${workspace}`, () =>
+  coverage[workspace] = await measure(`coverage:${workspace}`, () =>
     readWorkspaceCoverageSummary(workspace)
   );
 }
 
 const fragment: TestMetricsFragment = {
-  tests: await safe('tests', collectSuiteStats),
-  coverage: coverage as TestMetricsFragment['coverage'],
+  // The commit this job measured, so the collector can tell a fragment from
+  // another commit (stale) from one that never arrived.
+  sourceSha: resolveSourceSha(process.env, getCommitSha()),
+  tests: await measure('tests', collectSuiteStats),
+  coverage,
 };
 
 process.stdout.write(`${JSON.stringify(fragment, null, 2)}\n`);

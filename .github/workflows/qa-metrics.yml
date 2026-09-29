@@ -10,6 +10,12 @@ name: QA Metrics
 
 on:
   workflow_call:
+    inputs:
+      test_result:
+        description: Result of the Test job (success, failure, cancelled, skipped) that produced the test fragment.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -30,7 +36,8 @@ jobs:
 
       - name: Download test metrics fragment
         # continue-on-error: without the fragment the collector still emits an
-        # envelope whose tests entry is an explicit collector error.
+        # envelope whose tests and coverage are `unavailable`, with the Test
+        # job's result (QA_TEST_RESULT) as the reason.
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -39,7 +46,7 @@ jobs:
 
       - name: Download frontend dist
         # continue-on-error: without the dist the collector still emits an
-        # envelope whose bundle entry is an explicit collector error.
+        # envelope whose bundle entry is `unavailable`.
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -52,6 +59,7 @@ jobs:
           QA_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           QA_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           QA_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          QA_TEST_RESULT: ${{ inputs.test_result }}
         run: |
           set -euo pipefail
           fragment="./qa-test-metrics/test-metrics.json"

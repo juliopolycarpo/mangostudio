@@ -1,9 +1,17 @@
-// Coverage comparison table (per workspace × metric).
+// Coverage comparison table (per component × metric). Components with no
+// coverage lane (`unsupported` on both sides) get no rows: they have nothing
+// to compare, and the section would otherwise be mostly n/a.
 
-import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../../lib/config';
 import type { Metrics } from '../collect/types';
 import type { CoverageBucket } from '../parse-lcov';
-import { COVERAGE_KEYS, type CoverageKey, getCoverageBucket } from './access';
+import {
+  COVERAGE_KEYS,
+  type CoverageKey,
+  componentLabel,
+  componentRows,
+  findComponent,
+  getCoverageBucket,
+} from './access';
 import { formatNumber, formatPct, NA, renderDelta } from './format';
 
 // A bucket with a null pct is a legitimate 0/0 ("n/a (0/0)"), distinct from a
@@ -18,25 +26,30 @@ const renderCoverageCell = (bucket: CoverageBucket | null): string => {
 const renderCoverageRow = (
   base: Metrics | null,
   head: Metrics | null,
-  workspace: WorkspaceName,
+  id: string,
+  label: string,
   key: CoverageKey
 ): string => {
-  const baseBucket = getCoverageBucket(base?.coverage?.[workspace], key);
-  const headBucket = getCoverageBucket(head?.coverage?.[workspace], key);
+  const baseBucket = getCoverageBucket(findComponent(base, id)?.coverage, key);
+  const headBucket = getCoverageBucket(findComponent(head, id)?.coverage, key);
   const baseCell = renderCoverageCell(baseBucket);
   const headCell = renderCoverageCell(headBucket);
   const delta = renderDelta(baseBucket?.pct ?? null, headBucket?.pct ?? null, {
     higherIsBetter: true,
     suffix: 'pp',
   });
-  return `| ${workspace} | ${key} | ${baseCell} | ${headCell} | ${delta} |`;
+  return `| ${label} | ${key} | ${baseCell} | ${headCell} | ${delta} |`;
 };
 
 export const renderCoverageSection = (base: Metrics | null, head: Metrics | null): string => {
   const rows: string[] = [];
-  for (const workspace of ALL_WORKSPACE_NAMES) {
+  for (const component of componentRows(base, head)) {
+    const onLane = [findComponent(base, component.id), findComponent(head, component.id)].some(
+      (side) => side !== null && side.coverage.state !== 'unsupported'
+    );
+    if (!onLane) continue;
     for (const key of COVERAGE_KEYS) {
-      rows.push(renderCoverageRow(base, head, workspace, key));
+      rows.push(renderCoverageRow(base, head, component.id, componentLabel(component), key));
     }
   }
   return [
@@ -44,7 +57,7 @@ export const renderCoverageSection = (base: Metrics | null, head: Metrics | null
     '',
     '_API/shared branches and statements are source-derived from LCOV line hits because Bun LCOV does not emit branch or statement records._',
     '',
-    '| Workspace | Metric | Base | Head | Δ |',
+    '| Component | Metric | Base | Head | Δ |',
     '|---|---|---|---|---|',
     ...rows,
     '',

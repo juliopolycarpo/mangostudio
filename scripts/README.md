@@ -136,13 +136,40 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   that balance the next run's split, and fail the run if two shards claimed the
   same file. That is the observable symptom of shards reading different timings,
   which means they did not cover the suite between them while all exiting 0.
-- `collect.ts` + `collect/*` — merge the test fragment with LoC, bundle,
-  dependency, duplication, and tooling metrics into the versioned `qa-metrics`
-  envelope (`metrics-envelope.ts`), uploaded for PR heads and main baselines.
-  In CI, bundle stats measure the frontend `dist` artifact from the Build job
-  (`QA_FRONTEND_DIST`); local runs build the frontend when that env var is unset.
-- `metrics-envelope.ts` — TypeBox schema + provenance validation the publisher
-  applies to untrusted artifact JSON (size cap, shape, repository/SHA/PR match).
+- `collect.ts` + `collect/*` — discover the repository's components and merge
+  the test fragment with per-component static LoC, coverage and type-check
+  results plus bundle, dependency, duplication, and tooling metrics into the v4
+  `qa-metrics` envelope (`metrics-envelope.ts`), uploaded for PR heads and main
+  baselines. In CI, bundle stats measure the frontend `dist` artifact from the
+  Build job (`QA_FRONTEND_DIST`); local runs build the frontend when that env
+  var is unset. Provenance (`sourceSha`, producer, run id and attempt) comes from
+  `GITHUB_SHA`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`; a local run gets
+  placeholder run identity, a CI run with a missing value fails.
+  - `collect/registry.ts` — the component registry: `package.json` workspaces,
+    `Cargo.toml` `[workspace].members` (parsed, not `cargo metadata`: the
+    pinned `rust-toolchain.toml` makes a rustup-proxied cargo download a
+    toolchain in a Bun-only lane) and the `scripts/` mapping. Ownership is
+    longest-root-prefix, so nested roots count once (the excluded
+    `crates/mango-protocol/fuzz` workspace belongs to `mango-protocol`). A tracked
+    file no component owns, and is not in `NON_COMPONENT_DIRECTORIES`, fails
+    integrity: a new top-level directory is an error to fix, never files dropped
+    from the totals.
+  - `collect/loc.ts` — static LoC per component and class (production, test,
+    generated, fixture, config, docs). An unreadable file makes the component
+    `partial` with the path as the reason; it never lowers a total silently.
+- `model/*` — the schema-first v4 model (TypeBox, types derived with `Static<>`).
+  Every measurement is a `Measurement<T>` in one of five explicit states:
+  `measured`, `partial` (lower bound plus reasons), `stale`, `unavailable` and
+  `unsupported` (no value: never a zero, never a success). A zero denominator is
+  `pct: null` (n/a). Future PRs extend `Component` with more measurements
+  (per-lane tests, per-file function coverage, per-crate Rust coverage).
+- `metrics-envelope.ts` — schema version, parse/validate for untrusted artifacts
+  (size cap, shape, consistency, repository/SHA/PR match) and the serializer the
+  collector emits through. An envelope of another schema version (v3 and older
+  are historical) throws `IncomparableEnvelopeError`: it is never read and never
+  produces a delta.
+- `load-metrics.ts` — loads one artifact for the renderer; a v3 baseline reads as
+  incomparable rather than as an unavailable baseline.
 - `render-report.ts` + `report-document.ts` + `render/*` + `commit-log.ts` —
   render the two comments (`--part metrics|commits`, one process each so a
   failure in one never blocks the other): the QA comparison (verdict headline,
@@ -155,8 +182,10 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   `actions/github-script` imports it.
 - `publish/metrics-archive.mjs` — bounded in-memory reads of a qa-metrics
   archive: the head's recorded `baseSha` (only a 40-hex SHA is accepted) and
-  whether a main baseline is complete (no collector-error placeholders, exact
-  SHA). Anything else makes the baseline unavailable.
+  whether a main baseline is complete (schema v4, exact SHA, every metric
+  `measured` or `unsupported`; an `unavailable`, `partial` or `stale` metric makes
+  it partial). Another schema version is reported as incomparable, not as a
+  missing baseline. Anything else makes the baseline unavailable.
 - `publish/managed-comments.mjs` — publisher that updates each comment in
   place by its own marker (update-or-create), removes duplicates per marker,
   deletes legacy comments (the retired combined report included) only after

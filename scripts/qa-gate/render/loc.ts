@@ -1,23 +1,32 @@
-// Lines-of-code comparison table (per workspace + total).
+// Lines-of-code comparison table (per discovered component + total). The
+// headline counts authored source (production + test); a component whose
+// count is partial, stale or unavailable shows its state instead of a number,
+// and no delta is computed against it.
 
-import type { WorkspaceName } from '../../lib/config';
-import type { Metrics } from '../collect/types';
-import { getLoc, WORKSPACE_ORDER } from './access';
+import type { LocBucket, Metrics } from '../collect/types';
+import { componentLabel, componentRows, findComponent, getLoc, TOTAL } from './access';
 import { formatNumber, NA, renderDelta } from './format';
+
+const formatLoc = (loc: LocBucket): string =>
+  `${formatNumber(loc.files)} files / ${formatNumber(loc.code)} lines`;
+
+const renderLocCell = (metrics: Metrics | null, id: string): string => {
+  if (!metrics) return NA;
+  const loc = getLoc(metrics, id);
+  if (loc) return formatLoc(loc);
+  if (id === TOTAL) return `${NA} (incomplete)`;
+  const component = findComponent(metrics, id);
+  return component ? `${NA} (${component.loc.state})` : NA;
+};
 
 const renderLocRow = (
   base: Metrics | null,
   head: Metrics | null,
-  workspace: WorkspaceName | 'total'
+  id: string,
+  label: string
 ): string => {
-  const baseLoc = getLoc(base, workspace);
-  const headLoc = getLoc(head, workspace);
-  const baseCell = baseLoc
-    ? `${formatNumber(baseLoc.files)} files / ${formatNumber(baseLoc.code)} lines`
-    : NA;
-  const headCell = headLoc
-    ? `${formatNumber(headLoc.files)} files / ${formatNumber(headLoc.code)} lines`
-    : NA;
+  const baseLoc = getLoc(base, id);
+  const headLoc = getLoc(head, id);
   const codeDelta = renderDelta(baseLoc?.code, headLoc?.code, {
     higherIsBetter: false,
     precision: 0,
@@ -26,15 +35,20 @@ const renderLocRow = (
     higherIsBetter: false,
     precision: 0,
   });
-  return `| ${workspace === 'total' ? '**total**' : workspace} | ${baseCell} | ${headCell} | files ${fileDelta} • code ${codeDelta} |`;
+  return `| ${label} | ${renderLocCell(base, id)} | ${renderLocCell(head, id)} | files ${fileDelta} • code ${codeDelta} |`;
 };
 
 export const renderLocSection = (base: Metrics | null, head: Metrics | null): string =>
   [
     '### Lines of Code',
     '',
-    '| Workspace | Base | Head | Δ |',
+    '_Authored source: production and test files of every discovered component. Generated, fixture, config and docs lines are recorded in the envelope but not counted here._',
+    '',
+    '| Component | Base | Head | Δ |',
     '|---|---|---|---|',
-    ...WORKSPACE_ORDER.map((workspace) => renderLocRow(base, head, workspace)),
+    ...componentRows(base, head).map((component) =>
+      renderLocRow(base, head, component.id, componentLabel(component))
+    ),
+    renderLocRow(base, head, TOTAL, '**total**'),
     '',
   ].join('\n');

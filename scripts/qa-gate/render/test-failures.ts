@@ -1,8 +1,9 @@
 // Visible failure lead for the PR QA report and the Test job step summary.
 // Green runs return an empty string so existing coverage-first output is unchanged.
 
-import type { Failable, TestSuiteStats } from '../collect/types';
-import { formatNumber, inlineCode, isError } from './format';
+import type { Measurement, TestSuiteStats } from '../collect/types';
+import { measuredValue } from '../model/states';
+import { formatNumber, inlineCode } from './format';
 
 export const TESTING_DOC_UNHANDLED_ERRORS_URL =
   'https://github.com/juliopolycarpo/mangostudio/blob/main/docs/reference/testing.md#unhandled-errors-with-green-test-counts';
@@ -45,12 +46,13 @@ const renderHeadline = (
 
 /**
  * Markdown block that leads a failed run's QA report / step summary.
- * Returns '' when the suite passed, stats are missing, or they are a collector error.
+ * Returns '' when the suite passed or the stats are not a fully measured value.
  */
 export const renderTestFailureLead = (
-  tests: Failable<TestSuiteStats> | null | undefined
+  measurement: Measurement<TestSuiteStats> | null | undefined
 ): string => {
-  if (!tests || isError(tests) || !suiteFailed(tests)) return '';
+  const tests = measuredValue(measurement);
+  if (!tests || !suiteFailed(tests)) return '';
 
   const lines = ['## Test failures', ''];
 

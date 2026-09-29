@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { Metrics } from './collect/types';
+import { measured, partial, stale, unavailable } from './model/states';
 import { QA_METRICS_MARKER, renderDocument } from './render/document';
-import { makeCoverageSummary, makeMetrics } from './testing/metrics-fixture';
+import {
+  makeComponents,
+  makeCoverageSummary,
+  makeLocStats,
+  makeMetrics,
+} from './testing/metrics-fixture';
 
 const makeMetricsWithFrontendLines = (sha: string, lineCoverage: number): Metrics =>
   makeMetrics(sha, {
-    coverage: {
-      frontend: makeCoverageSummary(lineCoverage),
-      api: makeCoverageSummary(),
-      shared: makeCoverageSummary(),
-    },
+    components: makeComponents({
+      'apps/frontend': { coverage: measured(makeCoverageSummary(lineCoverage)) },
+    }),
   });
 
 describe('QA gate document renderer', () => {
@@ -39,7 +43,7 @@ describe('QA gate document renderer', () => {
 
   it('leads a failed unhandled-error run with headlines before coverage tables', () => {
     const head = makeMetrics('abcdef1234', {
-      tests: {
+      tests: measured({
         exitCode: 1,
         durationSeconds: 165,
         passed: 1_150,
@@ -56,7 +60,7 @@ describe('QA gate document renderer', () => {
             originatedIn: 'tests/unit/features/library/backup-list.test.tsx',
           },
         ],
-      },
+      }),
     });
     const comment = renderDocument(makeMetrics('0123456789'), head);
     const failuresAt = comment.indexOf('## Test failures');
@@ -73,11 +77,9 @@ describe('QA gate document renderer', () => {
     const naBucket = { total: 0, covered: 0, pct: null };
     const metricsWithNaBranches = (sha: string): Metrics =>
       makeMetrics(sha, {
-        coverage: {
-          frontend: makeCoverageSummary(),
-          api: { ...makeCoverageSummary(), branches: naBucket },
-          shared: makeCoverageSummary(),
-        },
+        components: makeComponents({
+          'apps/api': { coverage: measured({ ...makeCoverageSummary(), branches: naBucket }) },
+        }),
       });
 
     const comment = renderDocument(
@@ -85,13 +87,15 @@ describe('QA gate document renderer', () => {
       metricsWithNaBranches('abcdef1234')
     );
 
-    expect(comment).toContain('| api | branches | n/a (0/0) | n/a (0/0) | n/a |');
+    expect(comment).toContain('| apps/api | branches | n/a (0/0) | n/a (0/0) | n/a |');
   });
 
   it('surfaces head regressions in the verdict headline', () => {
     const comment = renderDocument(
       makeMetrics('0123456789'),
-      makeMetrics('abcdef1234', { tooling: { checkExitCode: 1, failedTasks: ['typecheck'] } })
+      makeMetrics('abcdef1234', {
+        tooling: measured({ checkExitCode: 1, failedTasks: ['typecheck'] }),
+      })
     );
 
     expect(comment).toContain('⚠️ **Needs attention:** repo check failing: `typecheck`');
@@ -112,8 +116,8 @@ describe('QA gate document renderer', () => {
     const comment = renderDocument(
       null,
       makeMetrics('abcdef1234', {
-        duplication: { error: injection },
-        tooling: { checkExitCode: 1, failedTasks: ['`<script>`'] },
+        duplication: unavailable(injection),
+        tooling: measured({ checkExitCode: 1, failedTasks: ['`<script>`'] }),
       })
     );
 
@@ -121,5 +125,65 @@ describe('QA gate document renderer', () => {
     expect(comment).not.toContain('\n## fake heading');
     expect(comment).toContain("boom' <img src=x onerror=alert(1)> ## fake heading");
     expect(comment).toContain("`'<script>'`");
+  });
+
+  it('renders a row per discovered component, including one only the head has', () => {
+    const head = makeMetrics('abcdef1234', {
+      components: [
+        ...makeComponents(),
+        {
+          ...makeComponents()[3],
+          id: 'crate:mangostudio-launcher',
+          name: 'mangostudio-launcher',
+          root: 'crates/mangostudio-launcher',
+        },
+      ],
+    });
+
+    const comment = renderDocument(makeMetrics('0123456789'), head);
+
+    expect(comment).toContain(
+      '| crates/mango-protocol | 1 files / 100 lines | 1 files / 100 lines |'
+    );
+    expect(comment).toContain('| crates/mangostudio-launcher | n/a | 1 files / 100 lines |');
+    expect(comment).toContain('| **total** | 4 files / 400 lines | 5 files / 500 lines |');
+  });
+
+  it('gives components without a coverage lane no coverage rows', () => {
+    const comment = renderDocument(makeMetrics('0123456789'), makeMetrics('abcdef1234'));
+
+    expect(comment).toContain('| apps/api | lines |');
+    expect(comment).not.toContain('| crates/mango-protocol | lines |');
+  });
+
+  it('shows a partial LoC count as n/a with no delta and never as a lower total', () => {
+    const head = makeMetrics('abcdef1234', {
+      components: makeComponents({
+        'apps/api': { loc: partial(makeLocStats(60), 'apps/api/a.ts: EACCES') },
+      }),
+    });
+
+    const comment = renderDocument(makeMetrics('0123456789'), head);
+
+    expect(comment).toContain(
+      '| apps/api | 1 files / 100 lines | n/a (partial) | files n/a • code n/a |'
+    );
+    expect(comment).toContain('| **total** | 4 files / 400 lines | n/a (incomplete) |');
+    expect(comment).toContain('- head/loc/apps/api: `partial: apps/api/a.ts: EACCES`');
+  });
+
+  it('lists stale and unavailable data in the notes but never unsupported cells', () => {
+    const head = makeMetrics('abcdef1234', {
+      tests: stale('fragment measured another commit'),
+      components: makeComponents({
+        'apps/shared': { coverage: unavailable('lcov missing') },
+      }),
+    });
+
+    const comment = renderDocument(makeMetrics('0123456789'), head);
+
+    expect(comment).toContain('- head/tests: `stale: fragment measured another commit`');
+    expect(comment).toContain('- head/coverage/apps/shared: `unavailable: lcov missing`');
+    expect(comment).not.toContain('unsupported');
   });
 });

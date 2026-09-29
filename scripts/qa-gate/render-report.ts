@@ -14,23 +14,13 @@
 import { cliffArgs } from '../lib/changelog';
 import { ROOT_DIR } from '../lib/config';
 import { type CiDurationComparison, parseCiDurationComparison } from './ci-durations';
-import type { Metrics } from './collect/types';
 import { COMMIT_LOG_FORMAT, parseCommitLog, renderCommitsSection } from './commit-log';
-import {
-  type EnvelopeParseOptions,
-  type ExpectedEnvelope,
-  parseQaMetricsEnvelope,
-} from './metrics-envelope';
+import { type ArtifactStatus, loadMetrics } from './load-metrics';
 import {
   composeCommitsReport,
   composeMetricsReport,
   renderChangelogForComment,
 } from './report-document';
-
-interface ArtifactStatus {
-  readonly found: boolean;
-  readonly reason: string | null;
-}
 
 /** Trusted values the publisher resolved from the GitHub API (never from artifacts). */
 interface ReportContext {
@@ -84,27 +74,6 @@ const parseArgs = (
     basePath: flagValue('--base'),
     ciPath: flagValue('--ci'),
   };
-};
-
-const loadMetrics = async (
-  path: string | null,
-  artifact: ArtifactStatus,
-  expected: ExpectedEnvelope,
-  side: 'head' | 'base',
-  options: EnvelopeParseOptions = {}
-): Promise<{ metrics: Metrics | null; note: string | null }> => {
-  if (!artifact.found) return { metrics: null, note: artifact.reason ?? 'artifact not found' };
-  if (!path || !(await Bun.file(path).exists())) {
-    return { metrics: null, note: 'artifact payload could not be extracted' };
-  }
-  try {
-    const envelope = parseQaMetricsEnvelope(await Bun.file(path).text(), expected, options);
-    return { metrics: envelope.metrics, note: null };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    stderr(`${side} metrics rejected: ${message}`);
-    return { metrics: null, note: message };
-  }
 };
 
 const runCaptured = (cmd: readonly string[]): string | null => {
@@ -170,7 +139,8 @@ const renderMetricsPart = async (
     // The publisher resolved the base from the head envelope itself, so it must match exactly.
     // Without a recorded base (`baseSha` is only the live tip, which can advance after head
     // collection, #516) there is nothing to compare against.
-    { enforceBaseSha: context.baseShaRecorded === true }
+    { enforceBaseSha: context.baseShaRecorded === true },
+    stderr
   );
   const base = await loadMetrics(
     paths.basePath,
@@ -181,7 +151,9 @@ const renderMetricsPart = async (
       baseSha: null,
       prNumber: null,
     },
-    'base'
+    'base',
+    {},
+    stderr
   );
   const ci = await loadCiDurations(paths.ciPath);
 
@@ -192,6 +164,7 @@ const renderMetricsPart = async (
       runUrl: context.runUrl,
       headNote: head.note,
       baseNote: base.note,
+      baseIncomparable: base.incomparable,
     },
     base.metrics,
     head.metrics,

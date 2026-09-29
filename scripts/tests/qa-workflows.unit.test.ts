@@ -73,6 +73,17 @@ describe('unprivileged collection side', () => {
     );
   });
 
+  test("the Test job's result reaches the collector through an env var, not an inline expression", () => {
+    const ci = readText('.github/workflows/ci.yml');
+    const qaMetrics = readText('.github/workflows/qa-metrics.yml');
+
+    expect(ci).toContain('test_result: ${{ needs.test.result }}');
+    expect(qaMetrics).toContain('test_result:');
+    expect(qaMetrics).toContain('QA_TEST_RESULT: ${{ inputs.test_result }}');
+    // Only the env mapping interpolates it: never a script body (zizmor template-injection).
+    expect(qaMetrics.split('inputs.test_result').length - 1).toBe(1);
+  });
+
   test('qa-metrics measures the build job artifact rather than rebuilding', () => {
     const build = readText('.github/workflows/build.yml');
     const qaMetrics = readText('.github/workflows/qa-metrics.yml');
