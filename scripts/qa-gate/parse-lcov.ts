@@ -10,6 +10,8 @@ export interface CoverageSummary {
   readonly functions: CoverageBucket;
   readonly statements: CoverageBucket | null;
   readonly branches: CoverageBucket | null;
+  /** LLVM source regions (Rust only); absent for the JS lanes. */
+  readonly regions?: CoverageBucket | null;
 }
 
 /**

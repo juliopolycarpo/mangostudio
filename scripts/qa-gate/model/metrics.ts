@@ -36,12 +36,21 @@ const CoverageBucketSchema = Type.Refine(
     `coverage bucket covered=${bucket.covered} total=${bucket.total} pct=${bucket.pct} is inconsistent; expected covered <= total, pct null when total is 0, otherwise pct = covered/total*100`
 );
 
+/**
+ * Coverage of one component. A `null` bucket means the dimension is not defined
+ * for that component's producer (the collector does not measure it), which is
+ * different from a `0/0` bucket: Bun's LCOV has no branch or statement records
+ * and the JS lanes have no regions, while `cargo llvm-cov` has regions but no
+ * statements, and no branch data unless it is asked for (it is not).
+ * `regions` is absent from envelopes recorded before Rust coverage existed.
+ */
 export const CoverageSummarySchema = Type.Object(
   {
     lines: CoverageBucketSchema,
     functions: CoverageBucketSchema,
     statements: Type.Union([CoverageBucketSchema, Type.Null()]),
     branches: Type.Union([CoverageBucketSchema, Type.Null()]),
+    regions: Type.Optional(Type.Union([CoverageBucketSchema, Type.Null()])),
   },
   { additionalProperties: false }
 );
