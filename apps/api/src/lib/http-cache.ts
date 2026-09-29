@@ -37,3 +37,25 @@ export function matchesEtag(header: string | null, etag: string): boolean {
     .map((candidate) => candidate.trim().replace(/^W\//, ''))
     .some((candidate) => candidate === '*' || candidate === etag);
 }
+
+/**
+ * Whether a conditional GET for a representation with `etag` and `mtimeMs` can
+ * be answered 304.
+ *
+ * `If-None-Match` wins when present: RFC 9110 §13.1.3 says a recipient must
+ * ignore `If-Modified-Since` then. The mtime is truncated to whole seconds
+ * before comparing, because `Last-Modified` is sent at second precision — a
+ * raw millisecond compare would make the echoed date look older than the file
+ * and never match.
+ *
+ * @example
+ * if (isNotModified(request.headers, fileEtag(stats), stats.mtimeMs)) return new Response(null, { status: 304 });
+ */
+export function isNotModified(headers: Headers, etag: string, mtimeMs: number): boolean {
+  const ifNoneMatch = headers.get('if-none-match');
+  if (ifNoneMatch !== null) return matchesEtag(ifNoneMatch, etag);
+
+  const since = Date.parse(headers.get('if-modified-since') ?? '');
+  if (Number.isNaN(since)) return false;
+  return Math.floor(mtimeMs / 1000) * 1000 <= since;
+}

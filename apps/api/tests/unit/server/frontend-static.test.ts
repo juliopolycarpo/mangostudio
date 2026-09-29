@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { staticPlugin } from '@elysia/static';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { Elysia, NotFound } from 'elysia';
@@ -17,6 +16,7 @@ import Value from 'typebox/value';
 import type { App } from '../../../src/app';
 import { contentEtag } from '../../../src/lib/http-cache';
 import { errorHandler } from '../../../src/plugins/error-handler';
+import { createUploadedFileRoutes } from '../../../src/routes/uploaded-files';
 import {
   registerEmbeddedFrontend,
   resetEmbeddedFrontend,
@@ -246,12 +246,13 @@ describe('registerFrontend from the filesystem', () => {
 
     const app = new Elysia()
       .error(NotFound, ({ request }) => frontendNotFound(request))
-      .use(staticPlugin({ assets: uploadsDir, prefix: '/uploads' }))
+      .use(createUploadedFileRoutes(uploadsDir))
       .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, frontendDir);
 
-    // `staticPlugin` enumerates its directory asynchronously, so both its
-    // routes and the `onError` fallback chained after it land on a later tick.
+    // The frontend's `/assets` plugin enumerates its directory asynchronously,
+    // so both its routes and the `onError` fallback chained after it land on a
+    // later tick.
     // A request issued before that resolves sees a half-registered app — which
     // is a real property of this wiring worth knowing during a plugin swap, and
     // a race that silently rewrites every assertion below if it is not awaited.
@@ -338,7 +339,7 @@ describe('registerFrontend from the filesystem', () => {
     expect(served.status).toBe(200);
     expect(await served.text()).toBe(UPLOAD_BYTES);
 
-    // `/uploads/*` sits in `ignorePatterns` and in `isSpaRoute`'s exclusions.
+    // `/uploads/*` is its own route and sits in `isSpaRoute`'s exclusions.
     // A missing upload must stay a 404: answering it with the SPA shell would
     // hand an <html> document to an <img> tag.
     const missing = await get('/uploads/missing.png');
@@ -403,6 +404,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
   async function startFilesystemServer(): Promise<{
     get: (path: string, headers?: Record<string, string>) => Promise<Response>;
     frontendDir: string;
+    uploadsDir: string;
     stop: () => Promise<void>;
   }> {
     const frontendDir = mkdtempSync(join(tmpdir(), 'listen-frontend-'));
@@ -419,6 +421,11 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
     app.all(`${SHADOWED_SHAPE}/*`, ({ path }) => `wildcard:${path}`);
     app.get(`${SURVIVING_SHAPE}/*`, ({ path }) => `wildcard:${path}`);
+    // The real uploads route, so its wildcard shares the native table with the
+    // shapes above exactly as it does in `app.ts`.
+    const uploadsDir = mkdtempSync(join(tmpdir(), 'listen-uploads-'));
+    temporaryDirs.push(uploadsDir);
+    app.use(createUploadedFileRoutes(uploadsDir));
     registerFrontend(app as unknown as App, frontendDir);
     await app.modules;
 
@@ -428,6 +435,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       get: (path: string, headers?: Record<string, string>) =>
         fetch(`${origin}${path}`, { headers }),
       frontendDir,
+      uploadsDir,
       stop: async () => {
         await app.stop();
       },
@@ -444,6 +452,22 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
         expect(response.status).toBe(200);
         expect(await response.text()).toBe(`wildcard:${path}`);
       }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves an upload written after listen, and 404s a missing one', async () => {
+    const server = await startFilesystemServer();
+    try {
+      writeFileSync(join(server.uploadsDir, 'photo.png'), UPLOAD_BYTES);
+
+      const served = await server.get('/uploads/photo.png');
+      expect(`${served.status} ${await served.text()}`).toBe(`200 ${UPLOAD_BYTES}`);
+
+      const missing = await server.get('/uploads/missing.png');
+      expect(missing.status).toBe(404);
+      expect(await missing.text()).not.toBe(INDEX_HTML);
     } finally {
       await server.stop();
     }

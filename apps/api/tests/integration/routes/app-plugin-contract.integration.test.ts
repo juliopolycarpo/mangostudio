@@ -16,8 +16,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { app } from '../../../src/app';
 import { getConfig, loadConfigForTest } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
@@ -63,19 +63,10 @@ async function openApiDocument(): Promise<OpenApiDocument> {
  * discarded: they churn on every unrelated edit, and the question this fixture
  * answers is only "is every route still published under the same path and
  * method".
- *
- * `/uploads` is excluded because `@elysia/static` derives its routes from
- * whatever is on disk when the plugin is registered — it publishes a `/uploads/*`
- * wildcard when the directory is absent and nothing when it is populated. That
- * makes its footprint a property of the machine rather than of the API, so
- * pinning it would fail on any checkout whose uploads directory differs. The
- * prefix's real behavior is asserted separately below and in
- * `tests/unit/server/frontend-static.test.ts`.
  */
 function routeInventory(document: OpenApiDocument): Record<string, string[]> {
   const inventory: Record<string, string[]> = {};
   for (const path of Object.keys(document.paths).sort()) {
-    if (path === '/uploads' || path.startsWith('/uploads/')) continue;
     const methods = Object.keys(document.paths[path] ?? {})
       .filter((key) => HTTP_METHODS.has(key.toLowerCase()))
       .map((key) => key.toLowerCase())
@@ -348,15 +339,26 @@ describe('file-serving prefixes', () => {
   });
 
   it('leaves the uploads prefix unclaimed by any API route', async () => {
-    // `staticPlugin` enumerates its directory once at registration, so serving
-    // a real file is covered where the plugin can be mounted over a fixture
-    // directory (`frontend-static.test.ts`). What the composed app has to
-    // guarantee is narrower and just as easy to break: nothing else answers
-    // here, so a real upload is never shadowed.
+    // Serving a real file is covered where the route can be mounted over a
+    // fixture directory (`tests/unit/routes/uploaded-files.test.ts`). What the
+    // composed app has to guarantee is narrower and just as easy to break:
+    // nothing else answers here, so a real upload is never shadowed.
     const response = await app.handle(new Request('http://localhost/uploads/not-there.png'));
 
     expect(response.status).toBe(404);
     expect(response.headers.get('content-type') ?? '').not.toContain('text/html');
+  });
+
+  it('answers a missing upload with the API error shape', async () => {
+    // The route has to sit after the API's global error handler, which only
+    // reaches routes declared after it. Declared ahead of it, a miss falls
+    // through to Elysia's default problem document instead.
+    for (const path of ['/uploads/not-there.png', '/uploads/..%2fsecret.txt', '/uploads']) {
+      const response = await app.handle(new Request(`http://localhost${path}`));
+      expect(`${path} -> ${response.status} ${await response.text()}`).toBe(
+        `${path} -> 404 ${JSON.stringify({ error: 'Not found', code: ERROR_CODES.NOT_FOUND })}`
+      );
+    }
   });
 });
 
@@ -405,14 +407,6 @@ describe('root WebSocket transport', () => {
     // route plugin. `app.handle` cannot see them, so the assertion has to
     // listen on the composed app rather than rebuild a root that happens to
     // pass the same object.
-    // The static plugin enumerates its assets directory when the server starts,
-    // not when it is registered. The shared `afterEach` deletes the whole test
-    // sandbox — uploads directory included — so by the time this runs, the
-    // directory `app.ts` was configured to serve is gone and the listen fails
-    // asynchronously: a port is still assigned, and the failure only shows up
-    // as the connection below being reset.
-    mkdirSync(getConfig().uploads.dir, { recursive: true });
-
     const port = await listenOnEphemeralPort(app);
 
     try {
