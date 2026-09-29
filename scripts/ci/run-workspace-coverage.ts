@@ -22,11 +22,14 @@
 //     lanes run. Whether a file exists is the entire merge-input decision
 //     below, so a slice an earlier local run left behind would otherwise be
 //     merged in as this run's coverage.
-//   - Zero slices is not an error here. It is what a shard whose slice held no
-//     file from this workspace legitimately produces, and merge-test-shards.ts
-//     already treats that as legitimate one level up. `mergeLcovFiles` throws
-//     on an empty input set — correct for the shard merge, which knows how
-//     many shards ran, and wrong here.
+//   - Zero slices from lanes that all exited 0 is not an error here. It is what
+//     a shard whose slice held no file from this workspace legitimately
+//     produces. (merge-test-shards.ts then owes that shard's report and names
+//     it as missing; every workspace has far more files than shards, so a
+//     shard with none does not occur.) `mergeLcovFiles` throws on an empty
+//     input set, so the empty case is handled before it. A lane that *failed*
+//     and left no slice is different: the merge is skipped and the slice
+//     named, so a partial merge cannot pass as the workspace's coverage.
 //   - The lanes run sequentially and are not detached. The watchdog above kills
 //     by process group and has to reach them, and interleaving two lanes'
 //     output would break the property that the log's last line names the file
@@ -62,6 +65,8 @@ export interface WorkspaceCoverageResult {
   readonly lanes: readonly LaneRun[];
   /** Slices that existed after the lanes ran and went into the merge. */
   readonly mergedSlices: number;
+  /** Why the merge did not happen or failed; absent when it did not fail. */
+  readonly mergeError?: string;
 }
 
 export interface WorkspaceCoverageOptions {
@@ -113,6 +118,28 @@ const runLane = async (lane: CoverageLane, cwd: string): Promise<LaneRun> => {
   }
 };
 
+/**
+ * The slices a failed lane should have written and did not: a lane that could
+ * not start, crashed or was killed. A lane that exited 0 with no slice is a
+ * shard slice with no file from this workspace, which is legitimate; a failed
+ * lane with none is a hole, and merging around it would stage a complete-looking
+ * lower LCOV for the workspace.
+ * // Usage: const owed = await missingSlicesOfFailedLanes(lanes, runs, rootDir);
+ */
+export const missingSlicesOfFailedLanes = async (
+  lanes: readonly CoverageLane[],
+  runs: readonly LaneRun[],
+  rootDir: string
+): Promise<readonly string[]> => {
+  const owed: string[] = [];
+  for (const [index, lane] of lanes.entries()) {
+    const exitCode = runs[index]?.exitCode ?? 0;
+    if (exitCode === 0 || (await Bun.file(join(rootDir, lane.lcovPath)).exists())) continue;
+    owed.push(`lane '${lane.id}' exited ${exitCode} and wrote no slice at ${lane.lcovPath}`);
+  }
+  return owed;
+};
+
 /** Merge the slices that exist, returning how many there were. */
 const mergeExistingSlices = async (
   stagedPath: string,
@@ -130,7 +157,9 @@ const mergeExistingSlices = async (
 /**
  * Run a workspace's coverage lanes and merge their slices. Runs every lane
  * regardless of the ones before it, so a red run still produces the JUnit
- * reports and the merged LCOV the shard uploads.
+ * reports and the merged LCOV the shard uploads. The exception is a failed lane
+ * that left no slice: the merge is skipped and `mergeError` names the slice,
+ * so no partial LCOV is staged as the workspace's coverage.
  * // Usage: const { exitCode } = await runWorkspaceCoverage({ lanes: lanesForWorkspace('api'), cwd: WORKSPACES.api.path, stagedLcovPath: SHARDED_LCOV_PATHS.api });
  */
 export const runWorkspaceCoverage = async (
@@ -146,13 +175,19 @@ export const runWorkspaceCoverage = async (
   for (const lane of options.lanes) lanes.push(await runLane(lane, options.cwd));
 
   let mergedSlices = 0;
-  let mergeFailed = false;
+  let mergeError: string | undefined;
   try {
+    const owed = await missingSlicesOfFailedLanes(options.lanes, lanes, rootDir);
+    if (owed.length > 0) {
+      throw new Error(
+        `${owed.join('; ')}. Not merging the remaining slices into ${options.stagedLcovPath}: ` +
+          'a partial merge would read as complete, lower coverage.'
+      );
+    }
     mergedSlices = await mergeExistingSlices(stagedPath, slicePaths);
   } catch (caught) {
-    mergeFailed = true;
-    const message = caught instanceof Error ? caught.message : String(caught);
-    process.stderr.write(`Merging ${options.stagedLcovPath} failed: ${message}\n`);
+    mergeError = caught instanceof Error ? caught.message : String(caught);
+    process.stderr.write(`Merging ${options.stagedLcovPath} failed: ${mergeError}\n`);
   }
 
   // One line per lane, because the lanes stream into a shared job log: without
@@ -173,7 +208,12 @@ export const runWorkspaceCoverage = async (
   // the merge is downstream of it. A zero-slice run is not a failure at all, so
   // it must not mask a lane that did fail either.
   const failed = lanes.find((lane) => lane.exitCode !== 0);
-  return { exitCode: failed?.exitCode ?? (mergeFailed ? 1 : 0), lanes, mergedSlices };
+  return {
+    exitCode: failed?.exitCode ?? (mergeError === undefined ? 0 : 1),
+    lanes,
+    mergedSlices,
+    ...(mergeError === undefined ? {} : { mergeError }),
+  };
 };
 
 const USAGE = 'Usage: bun ./scripts/ci/run-workspace-coverage.ts --workspace=<name>\n';
