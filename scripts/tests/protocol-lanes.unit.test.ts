@@ -960,6 +960,21 @@ describe('the fuzz workspace lockfile', () => {
     expect(steps[guard]).toContain('--all-features');
   });
 
+  test('protocol-fuzz pins the glibc target instead of the cargo-fuzz build triple', () => {
+    // cargo-fuzz defaults `--target` to the triple it was compiled for, and the only prebuilt
+    // Linux binary install-action can fetch is x86_64-unknown-linux-musl. Without the pin every
+    // target builds for musl, where the sanitizer refuses a static libc and no `std` is installed.
+    const steps = extractStepBlocks(
+      extractJobBlock(readText('.github/workflows/protocol-fuzz.yml'), 'fuzz')
+    );
+    const fuzz = steps.find((step) => step.includes('cargo +nightly fuzz run'));
+    expect(fuzz, 'no `cargo +nightly fuzz run` step in protocol-fuzz.yml').toBeDefined();
+    expect(
+      fuzz,
+      'expected `cargo +nightly fuzz run --target x86_64-unknown-linux-gnu` | received no --target pin'
+    ).toMatch(/cargo \+nightly fuzz run\s+--target x86_64-unknown-linux-gnu\b/);
+  });
+
   test('release-prepare refreshes the fuzz lock along with the root one', () => {
     // The fuzz lock records mango-protocol's version, so a bump that only runs
     // `cargo update -w` at the root leaves `cargo metadata --locked` failing on it.
