@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
-import { countCircularDeps } from './circular';
+import { circularRoots, countCircularDeps } from './circular';
+import type { ComponentSpec } from './registry';
 
 /** Named fake of madge: cycles per root, recording which roots were asked. */
 const makeFakeMadge = (cyclesByRoot: Readonly<Record<string, unknown>>) => {
@@ -63,5 +64,26 @@ describe('countCircularDeps', () => {
     await expect(countCircularDeps(['apps/api'], run)).rejects.toThrow(
       'madge output for apps/api is {"error":"boom"}; expected a JSON array of cycles'
     );
+  });
+});
+
+describe('circularRoots', () => {
+  const spec = (kind: ComponentSpec['kind'], name: string, root: string): ComponentSpec => ({
+    id: `${kind}:${name}`,
+    kind,
+    name,
+    root,
+    hasTsconfig: false,
+  });
+
+  it('selects the JS workspaces and scripts, and never a crate', () => {
+    const roots = circularRoots([
+      spec('workspace', 'api', 'apps/api'),
+      spec('crate', 'mango-protocol', 'crates/mango-protocol'),
+      spec('scripts', 'scripts', 'scripts'),
+      spec('workspace', 'protocol', 'packages/protocol'),
+    ]);
+
+    expect(roots).toEqual(['apps/api', 'scripts', 'packages/protocol']);
   });
 });

@@ -20,7 +20,7 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { collectFrontendBundle } from './collect/bundle';
-import { countCircularDeps } from './collect/circular';
+import { circularRoots, countCircularDeps } from './collect/circular';
 import { collectComponents } from './collect/components';
 import { collectDependencyStats } from './collect/dependencies';
 import { collectDuplication } from './collect/duplication';
@@ -107,9 +107,7 @@ const buildMetrics = async (
     generatedAt: new Date().toISOString(),
     components,
     duplication: await measure('duplication', collectDuplication),
-    circularDeps: await measure('circularDeps', () =>
-      countCircularDeps(specs.filter((spec) => spec.kind === 'workspace').map((spec) => spec.root))
-    ),
+    circularDeps: await measure('circularDeps', () => countCircularDeps(circularRoots(specs))),
     frontendBundle: await measure('frontendBundle', collectFrontendBundle),
     dependencies: await measure('dependencies', collectDependencyStats),
     tests: testMetrics.tests,
