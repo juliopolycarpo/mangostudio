@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       distribution: ${{ steps.changed.outputs.distribution }}
+      rust: ${{ steps.rust.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,6 +70,31 @@ jobs:
           else
             echo "distribution=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - id: rust
+        name: Classify Rust-relevant paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        # The same predicate Cargo Shim's own `changes` job applies, from the
+        # same manifest (scripts/lib/rust-lanes.ts), so the instrumented Rust
+        # test run and the Rust lanes agree on what a Rust change is. It reads
+        # the file the step above wrote, which is empty-checked there. Every
+        # push and manual run measures: main-push envelopes are the baselines a
+        # later Rust change is compared with, so they cannot skip.
+        # Dependency-free script; runs without `bun install`.
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/rust-lanes"
+          grep '^rust=' "$RUNNER_TEMP/rust-lanes" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/rust-lanes"
 
   distribution-identity:
     name: Resolve distribution identity
@@ -142,21 +168,36 @@ jobs:
     with:
       runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
 
+  rust-coverage:
+    # The Ubuntu Rust test run, instrumented for per-crate coverage; Cargo
+    # Shim keeps the macOS and Windows runs. Runs only when the changes job saw
+    # a Rust-relevant path (always on pushes), and the gate accepts its skip
+    # only under that same proof. The QA collector reads its artifact from this
+    # run; see the header of rust-coverage.yml.
+    name: Rust Coverage
+    needs: [changes]
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    uses: ./.github/workflows/rust-coverage.yml
+
   qa-metrics:
     # Report-only metrics envelope for the PR QA comment: PR runs produce the
-    # head side, main pushes produce the exact-SHA baselines. Runs after Test
-    # and Build to consume their artifacts (test fragment, frontend dist), and
-    # still runs when Test fails so the report can show the failing suite.
-    # Publishing happens in the separate privileged pr-qa-report.yml
-    # (workflow_run), never here.
+    # head side, main pushes produce the exact-SHA baselines. Runs after Test,
+    # Build and Rust Coverage to consume their artifacts (test fragment,
+    # frontend dist, llvm-cov export), and still runs when one fails so the
+    # report can show what failed. Publishing happens in the separate
+    # privileged pr-qa-report.yml (workflow_run), never here.
     name: QA Metrics
-    needs: [test, build]
+    needs: [test, build, changes, rust-coverage]
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     uses: ./.github/workflows/qa-metrics.yml
     with:
       # Lets the collector tell a canceled or failed Test job from a fragment
       # that never arrived, instead of reporting both as missing.
       test_result: ${{ needs.test.result }}
+      # A skipped Rust job is "not run on purpose" only when the changes job
+      # proved no Rust path changed; any other skip is a missing artifact.
+      rust_relevant: ${{ needs.changes.outputs.rust }}
+      rust_result: ${{ needs.rust-coverage.result }}
 
   smoke:
     # Boots the exact target artifacts produced once by distribution, then
@@ -194,7 +235,8 @@ jobs:
     # derive that set dynamically so a new mandatory lane cannot bypass it.
     # qa-metrics only runs for PRs and main pushes, so its skip is accepted
     # solely on workflow_dispatch; distribution and smoke skips are accepted
-    # only when the changes job proved no distribution-relevant path changed.
+    # only when the changes job proved no distribution-relevant path changed,
+    # and the Rust coverage skip only when it proved no Rust-relevant path did.
     name: Gate
     needs: [
       distribution-identity,
@@ -204,6 +246,7 @@ jobs:
       local-runtime,
       test,
       build,
+      rust-coverage,
       browser-smoke,
       qa-metrics,
       smoke,
@@ -239,11 +282,12 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}',
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4}',
             github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',
             needs.changes.outputs.distribution == 'false' && 'distribution' || '',
             needs.changes.outputs.distribution == 'false' && 'smoke' || '',
-            needs.changes.outputs.distribution == 'false' && 'smoke-container' || '') }}
+            needs.changes.outputs.distribution == 'false' && 'smoke-container' || '',
+            needs.changes.outputs.rust == 'false' && 'rust-coverage' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
 

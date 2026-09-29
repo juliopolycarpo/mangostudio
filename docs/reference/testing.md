@@ -1257,16 +1257,34 @@ ordinary shards instead of skipping.
   owns the paths that make the lane relevant, so a new Rust-backed test needs no workflow
   edit; `scripts/tests/rust-lanes.unit.test.ts` fails if one would be missed.
 
+## Rust Coverage In CI
+
+The Ubuntu run of the Rust workspace tests is instrumented: `rust-coverage.yml`
+(called from `ci.yml`) runs `cargo llvm-cov --no-report --workspace
+--all-targets --all-features --locked` on the plain libtest runner, and the QA
+report shows line, function and region coverage per crate (`mango-protocol`,
+`mangostudio`, `mangostudio-runtime`, `mangostudio-runtime-contract`). Branch
+coverage is not collected and doctests are not instrumented. See
+`docs/reference/ci.md` for where the job lives and why.
+
+Reproduce it locally with `cargo install cargo-llvm-cov --locked --version
+0.9.1`, `rustup component add llvm-tools-preview`, then `cargo llvm-cov
+--no-report --workspace --all-targets --all-features --locked` and `cargo
+llvm-cov report --json --summary-only`. Tests that spawn an instrumented binary
+with a cleared environment write `default_*.profraw` into the child's working
+directory (ignored by the repository) instead of the collected profile, so
+those children contribute no coverage.
+
 ## CI Artifact Retention
 
 CI artifacts fall into four retention classes; keep new uploads aligned with them:
 
-| Class               | Examples                                                                                                                           | Policy                                                 |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Job-to-job handoff  | `test-shard-<n>` (shard → merge), `qa-test-metrics` (test → qa-metrics), `local-runtime-linux-x64` (build → shards, browser smoke) | 1 day — consumed within the same run                   |
-| Failure diagnostics | `test-shard-<n>-log`, merged coverage, Playwright traces and report                                                                | 7–14 days, uploaded only `if: failure()`               |
-| Release assets      | staged binaries and packages in the release pipeline                                                                               | 30 days                                                |
-| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs                                                                                   | 90 days — exact-SHA baselines for future PR QA reports |
+| Class               | Examples                                                                                                                                             | Policy                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Job-to-job handoff  | `test-shard-<n>` (shard → merge), `qa-test-metrics` and `qa-rust-coverage` (→ qa-metrics), `local-runtime-linux-x64` (build → shards, browser smoke) | 1 day — consumed within the same run                   |
+| Failure diagnostics | `test-shard-<n>-log`, merged coverage, Playwright traces and report                                                                                  | 7–14 days, uploaded only `if: failure()`               |
+| Release assets      | staged binaries and packages in the release pipeline                                                                                                 | 30 days                                                |
+| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs                                                                                                     | 90 days — exact-SHA baselines for future PR QA reports |
 
 Green runs summarize their outcome in the step summary (`$GITHUB_STEP_SUMMARY`)
 instead of uploading success-only artifacts. The browser-smoke workflow keeps a

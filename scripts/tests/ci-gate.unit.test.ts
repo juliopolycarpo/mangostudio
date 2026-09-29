@@ -147,13 +147,29 @@ describe('CI / Gate aggregate', () => {
     // The placeholder count is pinned deliberately: `format` drops arguments it
     // has no slot for, so a fifth skip added without widening this would be
     // accepted silently and never allow the skip it was written for.
-    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3}',`);
+    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3} {4}',`);
     expect(gateBlock).toContain("github.event_name == 'workflow_dispatch' && 'qa-metrics'");
     expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'distribution'");
     expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'smoke'");
     expect(gateBlock).toContain(
       "needs.changes.outputs.distribution == 'false' && 'smoke-container'"
     );
+    expect(gateBlock).toContain("needs.changes.outputs.rust == 'false' && 'rust-coverage'");
+  });
+
+  test('the Rust coverage job runs only when the changes job saw a Rust path, and always on pushes', () => {
+    const changesBlock = extractJobBlock(workflow, 'changes');
+
+    expect(extractJobBlock(workflow, 'rust-coverage')).toContain(
+      `if: ${EXPR} needs.changes.outputs.rust == 'true' }}`
+    );
+    expect(parseNeedsList(extractJobBlock(workflow, 'rust-coverage'))).toEqual(['changes']);
+    expect(changesBlock).toContain(`rust: ${EXPR} steps.rust.outputs.rust }}`);
+    // The same manifest Cargo Shim classifies with; no second path list here.
+    expect(changesBlock).toContain(
+      'bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files"'
+    );
+    expect(changesBlock).toContain('echo "rust=true" >> "$GITHUB_OUTPUT"');
   });
 
   test('the distribution and smoke lanes run only when the changes job says so', () => {

@@ -11,16 +11,32 @@ os resultados das dependências via `scripts/ci/evaluate-gate.ts`. A proteção 
 branch e o Canary dependem desses nomes estáveis em vez de acompanhar nomes
 internos de jobs, formatos de matrix ou path filters.
 
-| Nome do check            | Workflow                                | Papel                                                                                                                           |
-| ------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `CI / Gate`              | `.github/workflows/ci.yml`              | Correção obrigatória de PR / `main`; o Canary também depende deste gate                                                         |
-| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Nome legado estável do workspace Rust; cobre build/test nas três plataformas, MSRV do launcher e resolução do workspace de fuzz |
-| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Sempre reporta; aceita o skip de cada lane de dry-run quando irrelevante                                                        |
+| Nome do check            | Workflow                                | Papel                                                                                                                                                                                                               |
+| ------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CI / Gate`              | `.github/workflows/ci.yml`              | Correção obrigatória de PR / `main`; o Canary também depende deste gate; aceita o skip de `rust-coverage` quando nenhum caminho relevante para Rust mudou                                                           |
+| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Nome legado estável do workspace Rust; cobre o build nas três plataformas, o teste simples no macOS e no Windows (o do Linux é o `Rust Coverage` do `CI / Gate`), MSRV do launcher e resolução do workspace de fuzz |
+| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Sempre reporta; aceita o skip de cada lane de dry-run quando irrelevante                                                                                                                                            |
 
 Os testes em `scripts/tests/ci-gate.unit.test.ts` derivam o `needs` esperado de
 cada gate a partir do texto do workflow: todo job exceto o próprio gate e
 qualquer job que já dependa do gate. Adicionar uma lane obrigatória sem
 conectá-la ao gate falha o teste.
+
+## Cobertura Rust
+
+A execução dos testes Rust no Ubuntu é o `.github/workflows/rust-coverage.yml`,
+chamado pelo `ci.yml` (não um passo do Cargo Shim): `cargo llvm-cov --no-report
+--workspace --all-targets --all-features --locked`, os mesmos flags do passo
+simples, no mesmo runner libtest, instrumentado. Ele vive no run do CI porque o
+coletor do QA só baixa artefatos do próprio run e o publicador privilegiado lê
+apenas o envelope `qa-metrics` desse run. Roda quando o job `changes` do
+`ci.yml` vê um caminho de `RUST_WORKSPACE_PATHS` (e sempre em pushes, para que
+todo envelope da `main` seja um baseline Rust); o `CI / Gate` só aceita o skip
+sob essa prova. Doctests, o run `--ignored` e a qualificação do binário real
+ficam no Cargo Shim, sem instrumentação. Lane pulada por irrelevância deixa os
+crates `unsupported` (não é lacuna); job devido que não entregou nada é
+`unavailable`; teste com falha é `partial`; crate sem dados de profile é
+`unavailable`, nunca 0%.
 
 ## Proteção de branch / checks obrigatórios
 

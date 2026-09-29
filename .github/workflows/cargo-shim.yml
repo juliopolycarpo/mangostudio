@@ -39,6 +39,7 @@ on:
       - "rust-toolchain.toml"
       - ".cargo/config.toml"
       - ".github/workflows/cargo-shim.yml"
+      - ".github/workflows/rust-coverage.yml"
       - ".github/actions/setup-zigbuild/**"
       - "apps/api/**"
       - "apps/shared/**"
@@ -132,7 +133,14 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - run: cargo test --workspace --all-targets --all-features --locked
+      # Ubuntu's copy of this run is `cargo llvm-cov` in rust-coverage.yml,
+      # called from ci.yml: same flags, same libtest runner, same test set,
+      # instrumented so the QA report can show per-crate coverage. It lives in
+      # the CI run because that is where the QA collector reads artifacts, and
+      # CI / Gate requires it there. macOS and Windows keep the plain run here.
+      - name: Run tests
+        if: matrix.os != 'ubuntu-latest'
+        run: cargo test --workspace --all-targets --all-features --locked
 
       # `--all-targets` above excludes doctests by definition, and the doc
       # comments across this workspace (`mangostudio-runtime`,
