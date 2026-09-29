@@ -1,147 +1,32 @@
-// Headline verdict for the QA-gate comment: distills every collected metric
-// into either "no attention signals" or a short list of concrete regressions,
-// so reviewers don't have to scan the detail tables.
+// Headline verdict for the QA-gate comment. The decision lives in
+// ../policy/verdict.ts; this file only words it: either "no attention signals",
+// a short list of concrete regressions and missing evidence, or an explicit
+// "unverified" when nothing regressed but the evidence is not all there.
 
 import type { Metrics } from '../collect/types';
-import { needsAttention } from '../model/states';
-import {
-  componentMeasurements,
-  getBundle,
-  getCircularDeps,
-  getDuplication,
-  getTestSuite,
-  getTooling,
-  getTotalLineCoverage,
-  globalMeasurements,
-  sumTsErrors,
-} from './access';
-import { formatBytes, inlineCode } from './format';
+import { evaluateVerdict, type Verdict } from '../policy/verdict';
+import { inlineCode } from './format';
 
-// Ignore sub-0.1pp percentage drift and sub-10KiB gzip growth — both are
-// routine noise on unrelated changes and would make the verdict cry wolf.
-const PERCENT_EPSILON_PP = 0.1;
-const BUNDLE_GROWTH_THRESHOLD_BYTES = 10 * 1024;
+const uncollectedItem = (verdict: Verdict): string[] =>
+  verdict.gaps.length > 0
+    ? [`metrics not collected: ${verdict.gaps.map(inlineCode).join(', ')}`]
+    : [];
 
-const coverageDropItem = (base: Metrics | null, head: Metrics | null): string | null => {
-  const basePct = getTotalLineCoverage(base)?.pct;
-  const headPct = getTotalLineCoverage(head)?.pct;
-  if (basePct == null || headPct == null) return null;
-  const drop = basePct - headPct;
-  if (drop < PERCENT_EPSILON_PP) return null;
-  return `line coverage −${drop.toFixed(2)}pp`;
-};
-
-const duplicationItem = (base: Metrics | null, head: Metrics | null): string | null => {
-  const basePct = getDuplication(base)?.percentage;
-  const headPct = getDuplication(head)?.percentage;
-  if (basePct == null || headPct == null) return null;
-  const growth = headPct - basePct;
-  if (growth < PERCENT_EPSILON_PP) return null;
-  return `duplication +${growth.toFixed(2)}pp`;
-};
-
-const bundleItem = (base: Metrics | null, head: Metrics | null): string | null => {
-  const baseGzip = getBundle(base)?.gzipBytes;
-  const headGzip = getBundle(head)?.gzipBytes;
-  if (baseGzip == null || headGzip == null) return null;
-  const growth = headGzip - baseGzip;
-  if (growth < BUNDLE_GROWTH_THRESHOLD_BYTES) return null;
-  return `bundle gzip +${formatBytes(growth)}`;
-};
-
-const testSuiteItem = (head: Metrics | null): string | null => {
-  const stats = getTestSuite(head);
-  if (!stats || stats.exitCode === 0 || stats.exitCode === null) return null;
-  if (stats.parseMiss) {
-    return `tests failing (exit ${stats.exitCode}; no failure counts could be parsed from the log)`;
-  }
-  const bits = [`exit ${stats.exitCode}`];
-  if (stats.errors) {
-    bits.push(`${stats.errors} unhandled error${stats.errors === 1 ? '' : 's'}`);
-  }
-  if (stats.failed) {
-    bits.push(`${stats.failed} failed`);
-  }
-  return `tests failing (${bits.join(', ')})`;
-};
+const attentionItems = (verdict: Verdict): string[] => [
+  ...uncollectedItem(verdict),
+  ...verdict.regressions,
+];
 
 /**
- * Head-side measurements that are `unavailable`, `partial` or `stale` instead of `measured`.
- *
- * A metric that fails to collect does not merely go unreported — it disarms the
- * guard built on it. Every comparative item above returns null when either side
- * is missing, so a broken collector reads exactly like a healthy one: the
- * headline says "no attention signals" precisely when nothing is being
- * measured. The collector notes carry the error text, but a note under a green
- * verdict is what let a bundle metric stay missing without anyone noticing.
- *
- * Head only. A base envelope is legitimately absent on a first run, on a forked
- * PR and before the first main-push baseline exists, and flagging those would
- * cry wolf on changes that broke nothing — `allComparisonsAvailable` already
- * hedges the healthy verdict for that case.
- */
-const headCollectorErrors = (head: Metrics | null): string[] => {
-  if (!head) return [];
-  // `unsupported` is a definition ("no lane for this component"), not a failure,
-  // so it never reads as an uncollected metric.
-  return [...globalMeasurements(head), ...componentMeasurements(head)]
-    .filter(([, cell]) => needsAttention(cell))
-    .map(([name]) => name);
-};
-
-/**
- * Collect the head-side regressions worth flagging in the headline.
+ * Collect the head-side items worth flagging in the headline: metrics that were
+ * not collected, then the concrete regressions.
  * // Usage: collectAttentionItems(base, head)
  */
-export const collectAttentionItems = (base: Metrics | null, head: Metrics | null): string[] => {
-  const items: string[] = [];
+export const collectAttentionItems = (base: Metrics | null, head: Metrics | null): string[] =>
+  attentionItems(evaluateVerdict(base, head));
 
-  const uncollected = headCollectorErrors(head);
-  if (uncollected.length > 0) {
-    items.push(`metrics not collected: ${uncollected.map(inlineCode).join(', ')}`);
-  }
-
-  const suiteItem = testSuiteItem(head);
-  if (suiteItem) items.push(suiteItem);
-
-  const tooling = getTooling(head);
-  if (tooling && tooling.checkExitCode !== 0) {
-    const failed =
-      tooling.failedTasks.length > 0 ? `: ${tooling.failedTasks.map(inlineCode).join(', ')}` : '';
-    items.push(`repo check failing${failed}`);
-  }
-
-  const tsErrors = sumTsErrors(head);
-  if (tsErrors != null && tsErrors > 0) {
-    items.push(`${tsErrors} TypeScript error${tsErrors === 1 ? '' : 's'}`);
-  }
-
-  const circular = getCircularDeps(head);
-  if (circular != null && circular > 0) {
-    items.push(`${circular} circular dependenc${circular === 1 ? 'y' : 'ies'}`);
-  }
-
-  for (const item of [
-    coverageDropItem(base, head),
-    duplicationItem(base, head),
-    bundleItem(base, head),
-  ]) {
-    if (item) items.push(item);
-  }
-
-  return items;
-};
-
-// True when every base↔head comparison had both sides; when false the healthy
-// verdict must not claim a clean comparison it never made (comparative items
-// return null both for "healthy" and for "side missing").
-const allComparisonsAvailable = (base: Metrics | null, head: Metrics | null): boolean =>
-  getTotalLineCoverage(base) != null &&
-  getTotalLineCoverage(head) != null &&
-  getDuplication(base) != null &&
-  getDuplication(head) != null &&
-  getBundle(base) != null &&
-  getBundle(head) != null;
+const withNotes = (line: string, verdict: Verdict): string =>
+  verdict.notes.length > 0 ? `${line} _(${verdict.notes.join('; ')})_` : line;
 
 /**
  * Render the one-line verdict shown at the top of the QA-gate comment.
@@ -151,12 +36,26 @@ export const renderVerdict = (base: Metrics | null, head: Metrics | null): strin
   if (!head) {
     return '⚠️ **Verdict unavailable** — head metrics were not collected; see collector errors below.';
   }
-  const items = collectAttentionItems(base, head);
+  const verdict = evaluateVerdict(base, head);
+  const items = attentionItems(verdict);
   if (items.length > 0) {
-    return `⚠️ **Needs attention:** ${items.join(' · ')}`;
+    return withNotes(`⚠️ **Needs attention:** ${items.join(' · ')}`, verdict);
   }
-  if (!allComparisonsAvailable(base, head)) {
-    return '✅ **No attention signals** — head metrics look healthy, but some base↔head comparisons were unavailable; see metric details and collector notes.';
+  if (verdict.outcome === 'incomplete') {
+    const gaps = verdict.baseGaps.map(inlineCode).join(', ');
+    return withNotes(
+      `⚠️ **Unverified** — the head metrics show no regressions, but the base is incomplete (${gaps}), so those comparisons were not made; see collector notes.`,
+      verdict
+    );
   }
-  return '✅ **No attention signals** — collected metrics look healthy against base.';
+  if (verdict.comparison !== 'complete') {
+    return withNotes(
+      '✅ **No attention signals** — head metrics look healthy, but some base↔head comparisons were unavailable; see metric details and collector notes.',
+      verdict
+    );
+  }
+  return withNotes(
+    '✅ **No attention signals** — collected metrics look healthy against base.',
+    verdict
+  );
 };

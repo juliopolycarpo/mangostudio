@@ -123,8 +123,15 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 - `collect-test-metrics.ts` — emit the test fragment (suite outcome, duration,
   failure counts and error headlines, coverage summaries) in the Test workflow's
   merge job, from the JUnit reports and coverage the eight shards produced.
-- `junit-results.ts` — count `<testcase>` outcomes per lane out of the shard
-  directories. Replaced 269 lines of runner-log regex.
+- `junit-results.ts` — parse `<testcase>` outcomes out of a JUnit report and say
+  whether the report is demonstrably whole. Replaced 269 lines of runner-log
+  regex.
+- `results/` — fold each lane's reports and process receipts across the expected
+  job set into one measurement per lane: `partial` for a lost, cut-off or
+  timed-out job, `unavailable` for nothing readable, retries deduplicated by
+  test identity. See `docs/reference/testing.md`.
+- `policy/` — the verdict as a pure function (`pass` / `fail` / `incomplete`)
+  with a truth-table test; `render/verdict.ts` only words it.
 - `unhandled-errors.ts` — the one signal JUnit cannot carry, for either runner:
   Vitest's reporter never receives the run's unhandled errors, and Bun's
   between-tests block never reaches its report either. Each shard extracts both
