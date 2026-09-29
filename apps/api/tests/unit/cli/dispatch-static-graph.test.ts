@@ -4,6 +4,7 @@ import { dirname, relative, resolve } from 'node:path';
 
 const API_SRC = resolve(import.meta.dir, '../../../src');
 const DISPATCH = resolve(API_SRC, 'cli/dispatch.ts');
+const RELEASE = resolve(API_SRC, 'services/runtime-client/runtime-connection-release.ts');
 const transpiler = new Bun.Transpiler({ loader: 'ts' });
 
 /**
@@ -51,5 +52,14 @@ describe('dispatch static import graph', () => {
       file.endsWith('runtime-client/runtime-connection-manager.ts')
     );
     expect(managerModules).toEqual([]);
+  });
+
+  // Dispatch reaches the release handle on every command, so the handle must
+  // stay dependency-free: an import added to it would pull its graph into
+  // `--version` without touching `dispatch.ts`.
+  test('the runtime connection release handle imports no other API module', () => {
+    expect(apiRelative(staticGraph(RELEASE))).toEqual([
+      'services/runtime-client/runtime-connection-release.ts',
+    ]);
   });
 });

@@ -54,13 +54,16 @@ describe('dispatch service', () => {
   test('routes `service` to the command rather than the unknown-command path', async () => {
     const exitSpy = spyOn(process, 'exit').mockImplementation(() => undefined as never);
     const stderrSpy = spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const { modules, loaded } = recordingCommandModules();
 
     try {
-      await dispatch(['service']);
+      await dispatch(['service'], noRelease, modules);
       expect(stderrSpy).toHaveBeenCalledWith(
         'Missing service action. Expected one of: install, uninstall, status, start, stop, restart\n'
       );
       expect(exitSpy).toHaveBeenCalledWith(1);
+      // The missing action is refused before the service module loads.
+      expect(loaded).toEqual([]);
     } finally {
       exitSpy.mockRestore();
       stderrSpy.mockRestore();
