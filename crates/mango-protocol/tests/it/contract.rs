@@ -6,8 +6,6 @@
 //! the session suite's own dedicated commit was.
 #![cfg(feature = "tokio")]
 
-mod support;
-
 use std::sync::Arc;
 
 use mango_protocol::catalog::{Catalog, CatalogEvent, CatalogMethod};
@@ -19,7 +17,7 @@ use mango_protocol::session::{Session, SessionOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use support::{RecordingGuard, within};
+use crate::support::{RecordingGuard, within};
 
 fn method(
     name: &str,

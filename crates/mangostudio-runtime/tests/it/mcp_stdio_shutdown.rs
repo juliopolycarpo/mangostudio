@@ -16,9 +16,7 @@ use mango_protocol::session::{Session, SessionOptions};
 use mango_protocol::transports::spawn::{LaunchedPeer, SpawnOptions, sanitized_env, spawn_port};
 use serde_json::{Value, json};
 
-mod support;
-
-use support::scratch::{ScratchDir, scratch_dir, scratch_path};
+use crate::support::scratch::{ScratchDir, scratch_dir, scratch_path};
 
 /// The Hub's end-of-stdin to SIGTERM grace.
 const HUB_TERMINATE_GRACE: Duration = Duration::from_secs(2);
@@ -71,7 +69,7 @@ async fn start_runtime(home: &ScratchDir) -> (Session, LaunchedPeer, tokio::task
     ])
     .with_env(env);
     let (port, launched) = spawn_port(options).expect("the runtime binary starts");
-    let (session, driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    let (session, driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
     tokio::time::timeout(Duration::from_secs(10), session.ready())
         .await
         .expect("expected the runtime handshake within ten seconds")

@@ -16,10 +16,8 @@ use mangostudio_runtime::transport::serve::run;
 use mangostudio_runtime_contract::strings::binding;
 use tokio_util::sync::CancellationToken;
 
-mod support;
-
-use support::CollectingLog;
-use support::scratch::{ScratchDir, scratch_dir};
+use crate::support::CollectingLog;
+use crate::support::scratch::{ScratchDir, scratch_dir};
 
 const TOKEN: &str = "test-serve-token";
 
@@ -88,7 +86,7 @@ async fn dial_bound(
     match connect_websocket(&url, &options, &deadline).await {
         Ok(port) => {
             let (session, _driver) =
-                Session::spawn(port, SessionOptions::new(support::peer("hub")));
+                Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
             match session.ready().await {
                 Ok(_) => Ok(session),
                 Err(_) => {
@@ -719,7 +717,7 @@ async fn serve_one_health_call(home: &std::path::Path, capabilities: serde_json:
     let port = connect_websocket(&format!("ws://{addr}/"), &options, &deadline)
         .await
         .expect("the dial reaches the listener");
-    let options = SessionOptions::new(support::peer("hub"))
+    let options = SessionOptions::new(crate::support::peer("hub"))
         .with_capabilities(capabilities.as_object().unwrap().clone());
     let (session, _driver) = Session::spawn(port, options);
     session.ready().await.expect("the handshake completes");

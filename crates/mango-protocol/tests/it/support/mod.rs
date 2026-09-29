@@ -1,8 +1,7 @@
 //! Named fakes shared by the session and contract integration tests.
 //!
-//! Each `tests/*.rs` binary compiles this module separately and only uses
-//! part of it, so an unused item or import here is expected rather than a
-//! mistake.
+//! Not every module of the `it` test binary uses all of this, so an unused
+//! item or import here is expected rather than a mistake.
 #![allow(dead_code, unused_imports)]
 
 use std::future::Future;

@@ -10,9 +10,7 @@ use mango_protocol::session::{Session, SessionOptions};
 use mango_protocol::transports::spawn::{SpawnOptions, sanitized_env, spawn_port};
 use mango_protocol::{PROTOCOL_VERSION, ProtocolVersion};
 
-mod support;
-
-use support::scratch::{ScratchDir, scratch_path};
+use crate::support::scratch::{ScratchDir, scratch_path};
 
 fn binary_path() -> String {
     env!("CARGO_BIN_EXE_mangostudio-runtime").to_string()
@@ -46,7 +44,7 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
     let options = SpawnOptions::new([binary_path(), "stdio".to_string()]).with_env(env);
     let (port, launched) = spawn_port(options).expect("the argv names a real binary");
 
-    let (session, driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    let (session, driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
     let remote = tokio::time::timeout(Duration::from_secs(10), session.ready())
         .await
         .expect("the child must say hello within the timeout")
@@ -56,7 +54,7 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
     assert!(launched.pid().is_some());
 
     // Release cleanly: the hub side closes, the child exits 0 (see the
-    // stdio consent tests in `tests/cli.rs` for the refusal path).
+    // stdio consent tests in `tests/it/cli.rs` for the refusal path).
     session
         .close(close_codes::RELEASED, Some("test done"))
         .await;
@@ -76,7 +74,7 @@ async fn a_hub_on_an_older_wire_minor_negotiates_down_and_is_served() {
     let options = SpawnOptions::new([binary_path(), "stdio".to_string()]).with_env(env);
     let (port, _launched) = spawn_port(options).expect("the argv names a real binary");
     let older = ProtocolVersion::new(PROTOCOL_VERSION.major, PROTOCOL_VERSION.minor - 1);
-    let options = SessionOptions::new(support::peer("hub")).with_protocol(older);
+    let options = SessionOptions::new(crate::support::peer("hub")).with_protocol(older);
     let (session, driver) = Session::spawn(port, options);
 
     let remote = tokio::time::timeout(Duration::from_secs(10), session.ready())
@@ -122,7 +120,7 @@ async fn a_hub_hello_identity_names_the_stdio_childs_next_audit_line() {
     let options = SpawnOptions::new([binary_path(), "stdio".to_string()]).with_env(env);
     let (port, _launched) = spawn_port(options).expect("the argv names a real binary");
     let capabilities = serde_json::json!({ "hub": { "user": "bob", "host": "desk" } });
-    let options = SessionOptions::new(support::peer("hub"))
+    let options = SessionOptions::new(crate::support::peer("hub"))
         .with_capabilities(capabilities.as_object().unwrap().clone());
     let (session, driver) = Session::spawn(port, options);
     tokio::time::timeout(Duration::from_secs(10), session.ready())
@@ -247,7 +245,7 @@ async fn end_of_input_lets_a_running_install_step_finish_past_the_handler_grace(
     let mut options = SpawnOptions::new([binary_path(), "stdio".to_string()]).with_env(env);
     options.terminate_grace = Duration::from_secs(60);
     let (port, launched) = spawn_port(options).expect("the argv names a real binary");
-    let (session, driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    let (session, driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
     tokio::time::timeout(Duration::from_secs(10), session.ready())
         .await
         .expect("the child must say hello within the timeout")

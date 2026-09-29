@@ -14,10 +14,8 @@ use mangostudio_runtime::transport::connect::{ConnectConfig, ConnectOutcome, Fix
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-mod support;
-
-use support::CollectingLog;
-use support::scratch::{ScratchDir, scratch_dir};
+use crate::support::CollectingLog;
+use crate::support::scratch::{ScratchDir, scratch_dir};
 
 fn scratch_home(name: &str) -> ScratchDir {
     scratch_dir(&format!("transport-connect-test-{name}"))
@@ -36,7 +34,7 @@ async fn fake_hub_closing_with(listener: TcpListener, code: u16) {
     )
     .await
     .unwrap();
-    let (session, _driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    let (session, _driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
     let _ = session.ready().await;
     session.close(code, Some("test hub closing")).await;
 }
@@ -61,7 +59,7 @@ async fn fake_hub_retrying_then_accepting(
     )
     .await
     .unwrap();
-    let (session, _driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    let (session, _driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
     session
         .ready()
         .await
@@ -315,7 +313,7 @@ async fn audited_hub_after_a_hello_with(capabilities: serde_json::Value) -> Stri
     )
     .await
     .unwrap();
-    let options = SessionOptions::new(support::peer("hub"))
+    let options = SessionOptions::new(crate::support::peer("hub"))
         .with_capabilities(capabilities.as_object().unwrap().clone());
     let (session, _driver) = Session::spawn(port, options);
     session.ready().await.expect("the handshake completes");
@@ -379,7 +377,8 @@ async fn fake_hub_refusing_then_closing_each_with(
         else {
             continue;
         };
-        let (session, _driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+        let (session, _driver) =
+            Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
         if session.ready().await.is_ok() {
             accepted.fetch_add(1, Ordering::SeqCst);
         }

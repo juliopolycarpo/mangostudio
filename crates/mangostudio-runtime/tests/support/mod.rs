@@ -1,8 +1,8 @@
 //! Named fakes and small helpers shared by this crate's integration tests.
 //!
-//! Each `tests/*.rs` binary compiles this module separately and only uses
+//! The `it` binary and the few standalone `tests/*.rs` targets each use only
 //! part of it, so an unused item or import here is expected rather than a
-//! mistake — mirrors `crates/mango-protocol/tests/support/mod.rs`.
+//! mistake — mirrors `crates/mango-protocol/tests/it/support/mod.rs`.
 #![allow(dead_code, unused_imports)]
 
 use std::future::Future;
@@ -40,7 +40,7 @@ pub use partially_granting_authorization::PartiallyGrantingAuthorization;
 pub use recording_audit::RecordingAudit;
 
 /// Bounds a future so a regression that hangs (rather than fails) still ends
-/// the test run. Mirrors `crates/mango-protocol/tests/support/mod.rs::within`.
+/// the test run. Mirrors `crates/mango-protocol/tests/it/support/mod.rs::within`.
 pub async fn within<T>(what: &str, future: impl Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(5), future)
         .await

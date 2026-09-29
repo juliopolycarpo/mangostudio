@@ -2,17 +2,14 @@
 //! known-but-unimplemented method answer byte-identical wire errors, and an
 //! empty registry still answers `rpc.discover` with the whole catalog.
 
-#[path = "support/mod.rs"]
-mod support;
-
 use std::sync::Arc;
 
+use crate::support::{serve_pair, within};
 use mango_protocol::error::codes;
 use mangostudio_runtime::ports::authorization::DenyingAuthorization;
 use mangostudio_runtime::registry::Registry;
 use mangostudio_runtime_contract::catalog::catalog;
 use serde_json::json;
-use support::{serve_pair, within};
 
 #[tokio::test]
 async fn an_unknown_method_and_a_known_unimplemented_method_answer_byte_identical_errors() {

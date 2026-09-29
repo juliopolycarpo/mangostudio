@@ -4,9 +4,7 @@
 
 use std::process::Command;
 
-mod support;
-
-use support::scratch::scratch_path;
+use crate::support::scratch::scratch_path;
 
 fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_mangostudio-runtime")
@@ -57,7 +55,7 @@ fn an_unrecognised_argument_exits_non_zero() {
     assert!(!output.status.success());
 }
 
-fn scratch_mango_home(name: &str) -> support::scratch::ScratchDir {
+fn scratch_mango_home(name: &str) -> crate::support::scratch::ScratchDir {
     scratch_path(&format!("runtime-binary-test-{name}"))
 }
 

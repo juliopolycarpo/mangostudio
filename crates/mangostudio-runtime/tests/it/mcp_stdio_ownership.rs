@@ -12,9 +12,7 @@ use mango_protocol::session::{Session, SessionOptions};
 use mango_protocol::transports::spawn::{SpawnOptions, sanitized_env, spawn_port};
 use serde_json::{Value, json};
 
-mod support;
-
-use support::scratch::{ScratchDir, scratch_dir, scratch_path};
+use crate::support::scratch::{ScratchDir, scratch_dir, scratch_path};
 
 struct Fixture {
     _work: ScratchDir,
@@ -76,7 +74,7 @@ async fn start_runtime(home: &ScratchDir) -> (Session, u32, tokio::task::JoinHan
     .with_env(env);
     let (port, launched) = spawn_port(options).expect("the runtime binary starts");
     let pid = launched.pid().expect("the runtime child has a pid");
-    let (session, driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    let (session, driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
     tokio::time::timeout(Duration::from_secs(10), session.ready())
         .await
         .expect("expected the runtime handshake within ten seconds")

@@ -26,9 +26,7 @@ use mangostudio_runtime_contract::strings::RUNTIME_UPDATE_EXIT_CODE;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
-mod support;
-
-use support::scratch::{ScratchDir, scratch_path};
+use crate::support::scratch::{ScratchDir, scratch_path};
 
 const TOKEN: &str = "update-restart-serve-token";
 const NEXT_VERSION: &str = "9.9.9-restart-test";
@@ -164,7 +162,7 @@ async fn dial(port: u16, serve: &RuntimeProcess) -> Session {
         let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
         if let Ok(port) = connect_websocket(&url, &options, &deadline).await {
             let (session, _driver) =
-                Session::spawn(port, SessionOptions::new(support::peer("hub")));
+                Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
             session
                 .ready()
                 .await
@@ -314,7 +312,7 @@ async fn a_committed_update_over_connect_exits_for_the_supervisor_to_restart() {
     )
     .await
     .expect("the runtime completes the WebSocket upgrade");
-    let (session, _driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    let (session, _driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
     session
         .ready()
         .await

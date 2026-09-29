@@ -20,6 +20,6 @@ fn main() -> ExitCode {
 
 // Exercising this binary's behaviour needs `CARGO_BIN_EXE_mangostudio-runtime`,
 // which Cargo only populates for an integration test crate (under `tests/`),
-// not for a unit test compiled into the binary itself — see `tests/cli.rs`.
+// not for a unit test compiled into the binary itself — see `tests/it/cli.rs`.
 // `cli::run`'s own dispatch and exit-code logic is unit-tested directly in
 // `src/cli.rs`.

@@ -60,7 +60,7 @@ capture them from: rewriting them by hand would turn "this build answers an old 
 Any implementation can load the files: they are plain JSON, published with every GitHub release.
 Load each case, feed the input to your decoder, and compare against the verdict. The TypeScript
 tests under `packages/protocol/tests/fixtures-*.test.ts` and the Rust test
-`crates/mango-protocol/tests/fixtures.rs` are the two reference harnesses.
+`crates/mango-protocol/tests/it/fixtures.rs` are the two reference harnesses.
 
 ## The round trip
 
@@ -145,13 +145,13 @@ child through `spawnPort` to prove the pipes are wired the way the suite assumes
 
 The Rust crate ships the suite behind its `testing` feature, as a `Fixture` trait with the same
 three members: `connect`, `chunked` and `connect_raw`. Its fixtures live in
-`crates/mango-protocol/tests/transport_*.rs`, one per transport — the in-process pair, the
+`crates/mango-protocol/tests/it/transport_*.rs`, one module per transport — the in-process pair, the
 NDJSON port over a pipe pair, a real local socket, and a real WebSocket at two message ceilings.
-`tests/conformance_drift.rs` asserts the Rust case list matches this file's TypeScript `it(...)`
+`tests/it/conformance_drift.rs` asserts the Rust case list matches this file's TypeScript `it(...)`
 names verbatim and in order, so a case added to one suite and not the other fails the build.
 
 The Rust launcher cannot run the suite either, for the same reason, and
-`tests/transport_spawn.rs` covers what a launcher alone can prove: the pipes carry a session, a
+`tests/it/transport_spawn.rs` covers what a launcher alone can prove: the pipes carry a session, a
 conforming child leaves on the end of its stdin, and one that ignores that is escalated past it.
 
 ## The interop lane
@@ -198,7 +198,7 @@ the codec and the session hold for inputs neither suite enumerates.
 
 ### Property tests
 
-`crates/mango-protocol/tests/properties.rs` uses `proptest` to check three round trips against
+`crates/mango-protocol/tests/it/properties.rs` uses `proptest` to check three round trips against
 arbitrary, schema-valid input rather than the corpus's fixed cases:
 
 - `decode_line(encode_line(f)) == f` for an arbitrary frame. The generators build a
@@ -211,7 +211,7 @@ arbitrary, schema-valid input rather than the corpus's fixed cases:
 - `negotiate(a, b)` and `negotiate(b, a)` agree on the effective minor, or both close with
   `4426`, for arbitrary major/minor pairs.
 
-Run it with `cargo test --test properties`; it is part of `cargo test --all-targets
+Run it with `cargo test --test it properties`; it is part of `cargo test --all-targets
 --all-features`, so `bun run protocol:test` already runs it. Case counts are kept modest (64 to 256 per
 property) so the suite finishes in well under a second.
 

@@ -15,9 +15,7 @@ use mangostudio_runtime::runtime_home::{
 };
 use serde_json::json;
 
-mod support;
-
-use support::scratch::{ScratchDir, scratch_path};
+use crate::support::scratch::{ScratchDir, scratch_path};
 
 fn fixture_home() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts-home")

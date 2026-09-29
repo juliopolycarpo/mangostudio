@@ -2,8 +2,6 @@
 //! teardown cases of `packages/protocol/src/session.test.ts`.
 #![cfg(feature = "tokio")]
 
-mod support;
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -22,7 +20,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-use support::{RawPeer, RefusingPort, ScriptedPort, within};
+use crate::support::{RawPeer, RefusingPort, ScriptedPort, within};
 
 fn peer(role: &str) -> PeerInfo {
     PeerInfo {

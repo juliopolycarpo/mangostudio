@@ -239,11 +239,12 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 
 ## bench/ — hermetic performance measurement
 
-| Script                 | Purpose                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------- |
-| `startup.ts`           | Median process-start → first healthy `GET /api/health` of a binary                    |
-| `runtime-handshake.ts` | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max |
-| `grep.ts`              | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel  |
+| Script                   | Purpose                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| `startup.ts`             | Median process-start → first healthy `GET /api/health` of a binary                    |
+| `runtime-handshake.ts`   | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max |
+| `grep.ts`                | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel  |
+| `rust-test-inventory.ts` | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log   |
 
 ```bash
 bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 10
@@ -279,6 +280,17 @@ latency. Run the same command on a base and a head binary on a quiet machine to 
 ```bash
 bun run scripts/bench/grep.ts target/release/mangostudio-runtime --runs 15
 bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
+```
+
+`rust-test-inventory.ts` proves a Rust test-target consolidation or a runner change lost no case:
+`capture` (libtest) and `capture-nextest` write every case keyed `<package>/<kind>/<binary>::<test>`,
+folding the modules of a consolidated `tests/it/main.rs` back under their former binary names, and
+`compare` exits 1 on a missing, added, or re-flagged (`#[ignore]`) case. `summarize` totals a
+libtest log's `test result:` lines.
+
+```bash
+bun run scripts/bench/rust-test-inventory.ts capture before.json
+bun run scripts/bench/rust-test-inventory.ts compare before.json after.json
 ```
 
 ## runtime-contract/ — the boundary as files
