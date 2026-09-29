@@ -90,6 +90,12 @@ jobs:
         # it, so a value carrying shell syntax would execute rather than be
         # read. EXTRA_ARGS is deliberately word-split — it is a list of
         # libFuzzer flags, and the matrix above is its only writer.
+        #
+        # `--target` is pinned because cargo-fuzz defaults it to the triple the
+        # cargo-fuzz binary itself was compiled for, and the only prebuilt Linux
+        # binary install-action can fetch is x86_64-unknown-linux-musl. Left to
+        # the default, every target builds for musl, where the sanitizer refuses
+        # a static libc and the minimal nightly has no musl `std`.
         env:
           EXTRA_ARGS: ${{ matrix.extra_args }}
           FEATURES: ${{ matrix.features }}
@@ -105,7 +111,8 @@ jobs:
             # shellcheck disable=SC2206 # a flag list, split on purpose
             extra=($EXTRA_ARGS)
           fi
-          cargo +nightly fuzz run "${features[@]}" "$TARGET" -- \
+          cargo +nightly fuzz run --target x86_64-unknown-linux-gnu \
+            "${features[@]}" "$TARGET" -- \
             -max_total_time=300 -timeout=30 "${extra[@]}"
       - name: Upload the corpus and any crashing input
         if: always()
