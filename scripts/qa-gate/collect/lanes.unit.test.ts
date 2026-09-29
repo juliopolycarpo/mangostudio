@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { LaneResult } from '../model/lanes';
-import { measured, presentValue, unavailable } from '../model/states';
+import { measured, presentValue, unavailable, unsupported } from '../model/states';
 import { lanesForComponentRoot } from '../results/lane-components';
 import { BASE_REPOSITORY_FILES, makeFakeRepository } from '../testing/fake-repository';
 import { expectState } from '../testing/measurement-assertions';
@@ -122,6 +122,7 @@ describe('collectComponents lanes', () => {
         requested.push(laneId);
         return deliver(laneId);
       },
+      deliveredRustCoverage: () => unsupported('no rust coverage in this fixture'),
       readCoverage: () => Promise.resolve(makeCoverageSummary()),
       countTsErrors: () => Promise.resolve(0),
     });

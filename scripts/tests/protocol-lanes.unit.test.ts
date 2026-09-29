@@ -239,6 +239,8 @@ describe('protocol lane selection', () => {
   // workspace-wide command in cargo-shim.yml's `workspace` job, a superset of the
   // `-p mango-protocol` task. `shimUbuntuOnly` marks the two it runs on Ubuntu
   // only, which protocol-ci.yml therefore repeats on macOS and Windows.
+  // `shimNonUbuntu` marks the one it runs on macOS and Windows only: Ubuntu's
+  // copy is the instrumented run in rust-coverage.yml (called from ci.yml).
   const shimWorkspace: Record<string, string> = {
     'protocol:clippy':
       'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings',
@@ -247,6 +249,7 @@ describe('protocol lane selection', () => {
     'protocol:doc': 'cargo doc --no-deps --workspace --all-features --locked',
   };
   const shimUbuntuOnly = new Set(['protocol:cargo-test-doc', 'protocol:doc']);
+  const shimNonUbuntu = new Set(['protocol:cargo-test']);
 
   const stepRunning = (job: string, command: string): string | undefined =>
     extractStepBlocks(job).find((step) => step.includes(`run: ${command}`));
@@ -290,6 +293,20 @@ describe('protocol lane selection', () => {
       shimStep,
       `${label}: expected cargo-shim workspace to run "${shimCommand}"`
     ).toBeDefined();
+    if (shimNonUbuntu.has(label)) {
+      expect(shimStep, `${label}: expected cargo-shim to leave Ubuntu to rust-coverage`).toContain(
+        "if: matrix.os != 'ubuntu-latest'"
+      );
+      expect(
+        readText('.github/workflows/rust-coverage.yml'),
+        `${label}: expected rust-coverage to run the Ubuntu copy instrumented`
+      ).toContain(`cargo llvm-cov --no-report ${shimCommand.replace('cargo test ', '')}`);
+      expect(
+        protocolStep,
+        `${label}: "${scoped}" duplicates cargo-shim; expected it only in cargo-shim`
+      ).toBeUndefined();
+      return;
+    }
     if (!shimUbuntuOnly.has(label)) {
       expect(shimStep, `${label}: expected cargo-shim to run it on every OS`).not.toContain('if:');
       expect(

@@ -24,6 +24,19 @@ export const makeCoverageSummary = (pct = 80): CoverageSummary => ({
   branches: { total: 100, covered: pct, pct },
 });
 
+/**
+ * A `cargo llvm-cov` summary where lines, functions and regions sit at `pct`;
+ * statements and branches are null (not collected for Rust).
+ * // Usage: makeRustCoverageSummary(90)
+ */
+export const makeRustCoverageSummary = (pct = 80): CoverageSummary => ({
+  lines: { total: 100, covered: pct, pct },
+  functions: { total: 100, covered: pct, pct },
+  regions: { total: 100, covered: pct, pct },
+  statements: null,
+  branches: null,
+});
+
 const emptyLocBucket = (): LocBucket => ({ files: 0, code: 0, comment: 0, blank: 0, total: 0 });
 
 /** Build LoC stats with `code` production lines in one file. // Usage: makeLocStats(120) */

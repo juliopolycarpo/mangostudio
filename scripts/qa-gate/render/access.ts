@@ -6,6 +6,7 @@
 import type {
   BundleStats,
   Component,
+  ComponentKind,
   CoverageSummary,
   DependencyStats,
   DuplicationStats,
@@ -22,8 +23,21 @@ import type { CoverageBucket } from '../parse-lcov';
 import { lanesForComponentRoot } from '../results/lane-components';
 import { inlineCode, NA } from './format';
 
-export const COVERAGE_KEYS = ['lines', 'statements', 'functions', 'branches'] as const;
+const COVERAGE_KEYS = ['lines', 'statements', 'functions', 'branches', 'regions'] as const;
 export type CoverageKey = (typeof COVERAGE_KEYS)[number];
+
+const JS_COVERAGE_KEYS: readonly CoverageKey[] = ['lines', 'statements', 'functions', 'branches'];
+const RUST_COVERAGE_KEYS: readonly CoverageKey[] = ['lines', 'functions', 'regions'];
+
+/**
+ * The coverage dimensions a component kind's producer defines, in row order.
+ * A JS workspace has no regions; a crate has no statements and, with
+ * `cargo llvm-cov` run without branch data, no branches: listing a row that
+ * can never hold a number would only add `n/a` noise.
+ * // Usage: coverageKeysFor('crate') // ['lines', 'functions', 'regions']
+ */
+export const coverageKeysFor = (kind: ComponentKind): readonly CoverageKey[] =>
+  kind === 'crate' ? RUST_COVERAGE_KEYS : JS_COVERAGE_KEYS;
 
 /** Row id for the aggregate across every component. */
 export const TOTAL = 'total';
@@ -116,10 +130,13 @@ export const getTooling = (metrics: Metrics | null): ToolingCheckStats | null =>
   measuredValue(metrics?.tooling);
 
 /**
- * Aggregate line coverage across every component that has a coverage lane
+ * Aggregate line coverage across every JS component that has a coverage lane
  * (covered/total + pct). `unsupported` components are skipped: they have no
  * lane, and counting them would switch the drop guard off for good. Any other
  * non-measured state makes the aggregate n/a rather than a lower number.
+ * Crates are never part of it: their lines come from a different tool and a
+ * run that does not measure them (no Rust change) must not shift the JS total
+ * the drop guard compares; each crate has its own per-crate row.
  * // Usage: getTotalLineCoverage(head)?.pct
  */
 export const getTotalLineCoverage = (metrics: Metrics | null): CoverageBucket | null => {
@@ -128,7 +145,7 @@ export const getTotalLineCoverage = (metrics: Metrics | null): CoverageBucket | 
   let total = 0;
   let lanes = 0;
   for (const component of metrics.components) {
-    if (component.coverage.state === 'unsupported') continue;
+    if (component.kind === 'crate' || component.coverage.state === 'unsupported') continue;
     const bucket = getCoverageBucket(component.coverage, 'lines');
     if (!bucket) return null;
     lanes++;

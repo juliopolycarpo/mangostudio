@@ -9,6 +9,7 @@ import {
   QA_METRICS_MAX_BYTES,
 } from '../qa-gate/metrics-envelope';
 import { readText } from './support/read-text';
+import { extractJobBlock } from './support/workflow-blocks';
 
 // Trust-boundary policy for the PR QA pipeline: workflows that execute
 // pull-request code must stay read-only, and the write-capable publisher must
@@ -19,6 +20,7 @@ const COLLECTION_WORKFLOWS = [
   '.github/workflows/ci.yml',
   '.github/workflows/test.yml',
   '.github/workflows/build.yml',
+  '.github/workflows/rust-coverage.yml',
   '.github/workflows/qa-metrics.yml',
 ] as const;
 
@@ -67,7 +69,9 @@ describe('unprivileged collection side', () => {
     const workflow = readText('.github/workflows/ci.yml');
 
     expect(workflow).toContain('uses: ./.github/workflows/qa-metrics.yml');
-    expect(workflow).toMatch(/qa-metrics:\n(.*\n)*?\s+needs: \[test, build\]/);
+    expect(workflow).toMatch(
+      /qa-metrics:\n(.*\n)*?\s+needs: \[test, build, changes, rust-coverage\]/
+    );
     expect(workflow).toContain(
       "!cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))"
     );
@@ -93,7 +97,83 @@ describe('unprivileged collection side', () => {
     expect(qaMetrics).toContain('name: frontend-dist');
     expect(qaMetrics).toContain('QA_FRONTEND_DIST: ./frontend-dist');
     expect(qaMetrics).not.toContain('cache-scoped');
-    expect(ci).toContain('needs: [test, build]');
+    expect(ci).toContain('needs: [test, build, changes, rust-coverage]');
+  });
+
+  test('qa-metrics still runs when Rust Coverage is skipped: its condition holds a status-check function', () => {
+    // A job whose `needs` include a skipped job is skipped too, unless its `if`
+    // contains a status-check function (`!cancelled()` counts). Without it a
+    // docs-only PR would get no envelope, and CI / Gate would fail on the skip.
+    const block = extractJobBlock(readText('.github/workflows/ci.yml'), 'qa-metrics');
+
+    expect(block).toContain('needs: [test, build, changes, rust-coverage]');
+    expect(block).toMatch(/if: \$\{\{ !cancelled\(\) && /);
+  });
+
+  test("the Rust job's relevance and result reach the collector through env vars, not inline expressions", () => {
+    const ci = readText('.github/workflows/ci.yml');
+    const qaMetrics = readText('.github/workflows/qa-metrics.yml');
+
+    expect(ci).toContain('rust_relevant: ${{ needs.changes.outputs.rust }}');
+    expect(ci).toContain('rust_result: ${{ needs.rust-coverage.result }}');
+    expect(qaMetrics).toContain('QA_RUST_RELEVANT: ${{ inputs.rust_relevant }}');
+    expect(qaMetrics).toContain('QA_RUST_RESULT: ${{ inputs.rust_result }}');
+    // Only the env mappings interpolate them: never a script body (zizmor template-injection).
+    expect(qaMetrics.split('inputs.rust_relevant').length - 1).toBe(1);
+    expect(qaMetrics.split('inputs.rust_result').length - 1).toBe(1);
+  });
+
+  test('qa-metrics reads the Rust coverage artifact of its own run, downloaded as data', () => {
+    const qaMetrics = readText('.github/workflows/qa-metrics.yml');
+    const rustCoverage = readText('.github/workflows/rust-coverage.yml');
+
+    expect(rustCoverage).toContain('name: qa-rust-coverage');
+    expect(qaMetrics).toContain('name: qa-rust-coverage');
+    // Same-run download: no `run-id`, so it can never read another run's bytes.
+    expect(qaMetrics).not.toContain('run-id:');
+    expect(qaMetrics).toContain('--rust-coverage ./qa-rust-coverage');
+  });
+});
+
+describe('rust-coverage.yml (instrumented ubuntu Rust tests, PR code)', () => {
+  const workflow = readText('.github/workflows/rust-coverage.yml');
+  const shim = readText('.github/workflows/cargo-shim.yml');
+
+  test('is a reusable workflow with contents: read only and no privileged trigger', () => {
+    expect(workflow).toContain('on:\n  workflow_call:\n\npermissions:\n  contents: read\n\njobs:');
+    expect(workflow).not.toContain('pull_request_target');
+    expect(workflow).not.toContain('secrets:');
+    expect(workflow).not.toMatch(/: write\b/);
+  });
+
+  test('installs cargo-llvm-cov at an exact version through the SHA-pinned install action', () => {
+    expect(workflow).toMatch(
+      /uses: taiki-e\/install-action@[0-9a-f]{40} # v[\d.]+\n\s+with:\n\s+tool: cargo-llvm-cov@\d+\.\d+\.\d+\n/
+    );
+    expect(workflow).toContain('rustup component add llvm-tools-preview');
+  });
+
+  test('runs exactly the test set the plain Ubuntu step ran, with the libtest runner', () => {
+    const plain = shim.match(/cargo test (--workspace --all-targets --all-features --locked)/)?.[1];
+
+    expect(plain, 'the plain cargo test step in cargo-shim.yml').toBeDefined();
+    expect(workflow).toContain(`cargo llvm-cov --no-report ${plain}`);
+    expect(workflow).not.toContain('nextest');
+  });
+
+  test('exports the receipt even when the tests failed, never when the run was cancelled', () => {
+    expect(workflow).toMatch(
+      /name: Export coverage and receipt\n\s+if: \$\{\{ !cancelled\(\) \}\}/
+    );
+    expect(workflow).toMatch(/name: Upload Rust coverage\n\s+if: \$\{\{ !cancelled\(\) \}\}/);
+    expect(workflow).toContain('retention-days: 1');
+  });
+
+  test('cargo-shim keeps the plain run on macOS and Windows only', () => {
+    expect(shim).toMatch(
+      /- name: Run tests\n\s+if: matrix\.os != 'ubuntu-latest'\n\s+run: cargo test --workspace --all-targets --all-features --locked/
+    );
+    expect(shim.match(/cargo test --workspace --all-targets/g)).toHaveLength(1);
   });
 });
 

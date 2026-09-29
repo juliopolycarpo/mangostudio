@@ -15,6 +15,10 @@
 // the suite runs exactly once per report. Without the flag, coverage is read
 // from local artifacts (dev convenience) and the suite outcome is marked as
 // unavailable.
+//
+// Rust crate coverage comes from the CI Rust coverage job's artifact
+// (`--rust-coverage <dir>`: the llvm-cov export and its receipt), decided
+// together with QA_RUST_RELEVANT and QA_RUST_RESULT; see rust-coverage/inputs.ts.
 
 import { join } from 'node:path';
 
@@ -43,13 +47,17 @@ import { readWorkspaceCoverageSummary } from './coverage-summary';
 import { type QaMetricsEnvelope, serializeQaMetricsEnvelope } from './metrics-envelope';
 import { QA_METRICS_SCHEMA_VERSION } from './model/envelope';
 import type { ProducerAbsence } from './model/states';
+import { readBoundedText, rustCoverageInputs } from './rust-coverage/inputs';
 
-const parseTestMetricsPath = (argv: readonly string[]): string | null => {
-  const flagIndex = argv.indexOf('--test-metrics');
+const USAGE =
+  'Usage: bun ./scripts/qa-gate/collect.ts [--test-metrics <path>] [--rust-coverage <dir>]\n';
+
+const parsePathFlag = (argv: readonly string[], flag: string): string | null => {
+  const flagIndex = argv.indexOf(flag);
   if (flagIndex === -1) return null;
   const path = argv[flagIndex + 1];
   if (!path || path.startsWith('--')) {
-    process.stderr.write('Usage: bun ./scripts/qa-gate/collect.ts [--test-metrics <path>]\n');
+    process.stderr.write(USAGE);
     process.exit(1);
   }
   return path;
@@ -80,7 +88,8 @@ const listTrackedFiles = async (): Promise<string[]> => {
 
 const buildMetrics = async (
   sourceSha: string,
-  testMetrics: TestMetricsInputs
+  testMetrics: TestMetricsInputs,
+  rustCoverageDir: string | null
 ): Promise<Metrics> => {
   const trackedFiles = await listTrackedFiles();
   // Throws RegistryIntegrityError: a file no component owns must fail the run,
@@ -93,11 +102,22 @@ const buildMetrics = async (
       throw err;
     }
   );
+  const rustCoverage = await rustCoverageInputs(
+    {
+      dir: rustCoverageDir,
+      relevant: optionalEnv('QA_RUST_RELEVANT') ?? undefined,
+      result: optionalEnv('QA_RUST_RESULT') ?? undefined,
+    },
+    sourceSha,
+    specs.filter((spec) => spec.kind === 'crate').map((spec) => spec.root),
+    readBoundedText
+  );
   const components = await collectComponents(specs, {
     trackedFiles,
     readText: readRepoText,
     deliveredCoverage: testMetrics.deliveredCoverage,
     deliveredLanes: testMetrics.deliveredLanes,
+    deliveredRustCoverage: rustCoverage,
     readCoverage: readWorkspaceCoverageSummary,
     countTsErrors,
   });
@@ -143,7 +163,8 @@ const provenance = readProvenance(process.env, {
   checkoutHead: getCommitSha(),
   producerVersion: rootManifest.version ?? '0.0.0',
 });
-const testMetricsPath = parseTestMetricsPath(process.argv.slice(2));
+const testMetricsPath = parsePathFlag(process.argv.slice(2), '--test-metrics');
+const rustCoverageDir = parsePathFlag(process.argv.slice(2), '--rust-coverage');
 // In CI the Test job's result says why a fragment is absent (canceled, failed,
 // skipped). No result at all is a local run: no flag reads coverage from disk.
 const absence = producerAbsence(process.env.QA_TEST_RESULT);
@@ -156,7 +177,7 @@ const envelope: QaMetricsEnvelope = {
   baseSha: optionalEnv('QA_BASE_SHA'),
   headSha: optionalEnv('QA_HEAD_SHA') ?? provenance.sourceSha,
   provenance,
-  metrics: await buildMetrics(provenance.sourceSha, testMetrics),
+  metrics: await buildMetrics(provenance.sourceSha, testMetrics, rustCoverageDir),
 };
 
 process.stdout.write(serializeQaMetricsEnvelope(envelope));

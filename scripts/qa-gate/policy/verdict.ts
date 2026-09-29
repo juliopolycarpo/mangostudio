@@ -27,7 +27,7 @@ import {
   globalMeasurements,
   sumTsErrors,
 } from '../render/access';
-import { formatBytes, inlineCode } from '../render/format';
+import { formatBytes, inlineCode, PERCENT_EPSILON_PP } from '../render/format';
 import { laneFailureItem, missingLanes, recoveredFailuresNote } from './lanes';
 
 export type VerdictOutcome = 'pass' | 'fail' | 'incomplete';
@@ -56,9 +56,9 @@ export interface Verdict {
   readonly notes: readonly string[];
 }
 
-// Ignore sub-0.1pp percentage drift and sub-10KiB gzip growth — both are
-// routine noise on unrelated changes and would make the verdict cry wolf.
-const PERCENT_EPSILON_PP = 0.1;
+// Ignore sub-0.1pp percentage drift (PERCENT_EPSILON_PP) and sub-10KiB gzip
+// growth — both are routine noise on unrelated changes and would make the
+// verdict cry wolf.
 const BUNDLE_GROWTH_THRESHOLD_BYTES = 10 * 1024;
 
 const coverageDropItem = (base: Metrics | null, head: Metrics | null): string | null => {
@@ -145,11 +145,17 @@ const headGaps = (head: Metrics | null): string[] => {
   return [...uncollected, ...testEvidenceGaps(head), ...missingLanes(head)];
 };
 
-/** Base cells a verdict compares against; a base gap here means a comparison was not made. */
+/**
+ * Base cells a verdict compares against; a base gap here means a comparison was
+ * not made. A crate's coverage is not one of them: it is compared row by row
+ * and a missing side renders n/a, so a Rust job that failed on the base commit
+ * cannot make the JS comparison of an unrelated PR incomplete. The head side
+ * still counts it (`headGaps`).
+ */
 const comparedBaseCells = (base: Metrics) => [
-  ...base.components.map(
-    (component) => [`coverage/${component.root}`, component.coverage] as const
-  ),
+  ...base.components
+    .filter((component) => component.kind !== 'crate')
+    .map((component) => [`coverage/${component.root}`, component.coverage] as const),
   ['duplication', base.duplication] as const,
   ['frontendBundle', base.frontendBundle] as const,
   ['tests', base.tests] as const,

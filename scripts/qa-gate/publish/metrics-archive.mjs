@@ -167,6 +167,15 @@ function childKey(child, key) {
 }
 
 /**
+ * A crate's coverage comes from one CI job on one platform. When that job did
+ * not deliver on a main push (a flaky test, a failed tool download, a cold-cache
+ * timeout) the crate's own rows show n/a; it must not make the baseline of every
+ * JS and docs PR on that commit unusable, so the cell is left out of the
+ * completeness check. Everything else a crate carries is still checked.
+ */
+const isCrateCoverage = (node, key) => node.kind === 'crate' && key === 'coverage';
+
+/**
  * Paths of measurements whose `state` is not complete (`unavailable`, `partial`,
  * `stale`, or anything unknown). A measurement is any object with a string
  * `state`; its `value` is data and is never searched.
@@ -178,6 +187,7 @@ function incompletePaths(node, path, found) {
     return found;
   }
   for (const [key, child] of Object.entries(node)) {
+    if (isCrateCoverage(node, key)) continue;
     incompletePaths(child, `${path}/${childKey(child, key)}`, found);
   }
   return found;
@@ -191,7 +201,8 @@ const rejected = (reason) => ({ reason, incomparable: false });
  *
  * `{ reason: null }` means complete: readable, recorded under the schema
  * version this reader knows, recorded for exactly `baseSha`, and every metric
- * `measured` or `unsupported`. Otherwise `reason` says why not. An envelope
+ * `measured` or `unsupported` (a crate's coverage excepted). Otherwise `reason`
+ * says why not. An envelope
  * recorded under another schema version (v3 and older are historical) is
  * `incomparable: true` with an explicit reason, decided before any other field
  * is trusted, so it never reads as a missing baseline.

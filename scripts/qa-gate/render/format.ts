@@ -45,10 +45,18 @@ export const formatBytes = (value: number): string => {
   return `${(kib / 1024).toFixed(2)} MiB`;
 };
 
+/**
+ * Percentage-point drift below this is noise, not a change worth colouring:
+ * the verdict ignores it, and so do the per-crate coverage rows.
+ */
+export const PERCENT_EPSILON_PP = 0.1;
+
 export interface DeltaOptions {
   readonly higherIsBetter: boolean;
   readonly suffix?: string;
   readonly precision?: number;
+  /** Render the change neutral (⚪) instead of good or bad; the direction and size still show. */
+  readonly neutral?: boolean;
 }
 
 /** Render a base→head numeric delta with a good/bad tag and direction arrow. */
@@ -65,7 +73,7 @@ export const renderDelta = (
   const magnitude = `${sign}${diff.toFixed(precision).replace(/\.00$/, '')}${opts.suffix ?? ''}`;
   const isGood = opts.higherIsBetter ? diff > 0 : diff < 0;
   const arrow = diff > 0 ? '▲' : '▼';
-  const tag = isGood ? '🟢' : '🔴';
+  const tag = opts.neutral ? '⚪' : isGood ? '🟢' : '🔴';
   return `${tag} ${arrow} ${magnitude}`;
 };
 

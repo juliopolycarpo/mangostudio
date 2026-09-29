@@ -162,6 +162,14 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
     file no component owns, and is not in `NON_COMPONENT_DIRECTORIES`, fails
     integrity: a new top-level directory is an error to fix, never files dropped
     from the totals.
+  - `rust-coverage/*` — per-crate Rust coverage from the CI Rust coverage job's
+    artifact (`--rust-coverage <dir>`: the `cargo llvm-cov` export plus a receipt
+    naming the commit and the test exit code). `inputs.ts` decides the state
+    before reading anything (`QA_RUST_RELEVANT` false is `unsupported`, a due job
+    that delivered nothing is `unavailable`); `resolve.ts` attributes each file to
+    the crate whose root owns it. A crate with no profile data or 0 executed
+    lines is `unavailable`, a non-zero test exit is `partial`, another commit is
+    `stale`; none is ever a zero.
   - `collect/loc.ts` — static LoC per component and class (production, test,
     generated, fixture, config, docs). An unreadable file makes the component
     `partial` with the path as the reason; it never lowers a total silently.
@@ -170,7 +178,7 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   `measured`, `partial` (lower bound plus reasons), `stale`, `unavailable` and
   `unsupported` (no value: never a zero, never a success). A zero denominator is
   `pct: null` (n/a). Future PRs extend `Component` with more measurements
-  (per-lane tests, per-file function coverage, per-crate Rust coverage).
+  (per-file function coverage).
 - `metrics-envelope.ts` — schema version, parse/validate for untrusted artifacts
   (size cap, shape, consistency, repository/SHA/PR match) and the serializer the
   collector emits through. An envelope of another schema version (v3 and older

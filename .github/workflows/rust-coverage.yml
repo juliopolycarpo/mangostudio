@@ -1,0 +1,97 @@
+name: Rust Coverage
+
+# The Ubuntu Rust test run, instrumented. It replaces the plain
+# `cargo test --workspace --all-targets` step cargo-shim.yml used to run on
+# Ubuntu (macOS and Windows keep theirs there), so the suite still runs once
+# per platform: the same libtest runner and the same test set, only built with
+# LLVM coverage instrumentation. Doctests, the `--ignored` fixture run and the
+# real-binary qualification stay in cargo-shim.yml, uninstrumented.
+#
+# It lives in the CI run, not in Cargo Shim, because the QA collector
+# (qa-metrics.yml, called from ci.yml) can only download artifacts of its own
+# run, and the privileged publisher (pr-qa-report.yml) reads only that run's
+# qa-metrics envelope. An artifact from a sibling workflow run would need
+# either a polling wait inside the unprivileged collector or a second
+# privileged reader of PR-produced bytes; here the numbers reach the publisher
+# only inside the envelope it already bounds and validates.
+#
+# Runs PR code, so it holds `contents: read` and nothing else. It never uses
+# any privileged PR trigger and has no secrets.
+#
+# The job uploads two files and no verdict: `llvm-cov.json` (per-file line,
+# function and region counts) and `receipt.json` (the commit measured and the
+# test run's exit code). scripts/qa-gate/rust-coverage/ turns them into one
+# coverage measurement per crate. The receipt is written even when tests fail,
+# so a red run still reports partial coverage instead of none.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: Rust tests with coverage (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      # Added here, not to rust-toolchain.toml: every other lane and every
+      # contributor checkout would download the component for nothing.
+      - run: rustup component add llvm-tools-preview
+
+      # Instrumented builds land in `target/llvm-cov-target`, so this is its
+      # own cache entry rather than a reuse of the plain lanes'.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          shared-key: rust-coverage
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      # Version-pinned here and hash-pinned through the action, which verifies
+      # the release checksum from its own manifest.
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-llvm-cov@0.9.1
+
+      # The same flags as the plain step; `--no-report` defers the report so a
+      # failing test still leaves its profile data for the export below. The
+      # exit code is kept in RUNNER_TEMP (outside the uploaded directory) for
+      # the receipt, and the step still fails with it.
+      - name: Run tests with coverage
+        run: |
+          status=0
+          cargo llvm-cov --no-report --workspace --all-targets --all-features --locked || status=$?
+          echo "$status" > "$RUNNER_TEMP/tests-exit-code"
+          exit "$status"
+
+      # Without the exit-code file (the run was killed before it wrote it) or
+      # without profile data this step fails and uploads nothing, which the
+      # collector reports as unavailable rather than as coverage.
+      - name: Export coverage and receipt
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p qa-rust-coverage
+          tests_exit_code="$(cat "$RUNNER_TEMP/tests-exit-code")"
+          cargo llvm-cov report --json --summary-only --output-path qa-rust-coverage/llvm-cov.json
+          printf '{"sourceSha":"%s","testsExitCode":%s}\n' "$GITHUB_SHA" "$tests_exit_code" > qa-rust-coverage/receipt.json
+
+      - name: Upload Rust coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qa-rust-coverage
+          path: qa-rust-coverage/
+          if-no-files-found: ignore
+          retention-days: 1
