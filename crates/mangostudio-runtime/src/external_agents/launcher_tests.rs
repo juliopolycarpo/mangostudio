@@ -381,6 +381,30 @@ mod unix {
         );
     }
 
+    /// A runtime started under `nohup`, or as a background job of a non-interactive shell, has
+    /// `SIGINT` ignored, and `execve` would hand that to every vendor CLI it launches, so the
+    /// Hub's interrupt did nothing. Re-runs [`interrupt_delivers_sigint_to_a_running_child`] in
+    /// this same test binary started by a shell that ignores `SIGINT` first, so no other test in
+    /// this process sees the ignored signal.
+    #[test]
+    fn interrupt_reaches_a_child_when_the_runtime_ignores_sigint() {
+        let inner =
+            "external_agents::launcher::tests::unix::interrupt_delivers_sigint_to_a_running_child";
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", "trap '' INT; exec \"$0\" --exact \"$1\" --nocapture"])
+            .arg(std::env::current_exe().expect("the test binary path exists"))
+            .arg(inner)
+            .output()
+            .expect("the shell that ignores SIGINT starts");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "expected a child to trap the SIGINT sent while the runtime ignores it | received {}:\n{stdout}\n{stderr}",
+            output.status,
+        );
+    }
+
     #[tokio::test]
     async fn interrupt_after_exit_is_not_delivered() {
         let directory = scratch_dir("agent-launcher-interrupt-exited");
