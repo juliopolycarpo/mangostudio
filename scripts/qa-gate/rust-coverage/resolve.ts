@@ -64,16 +64,16 @@ const relativePath = (filename: string, checkoutRoot: string): string | null => 
 
 const isUnder = (path: string, root: string): boolean => path.startsWith(`${root}/`);
 
-/** Files owned by `root`: those under it and under no deeper crate root. */
-const filesOf = (
-  files: ReadonlyMap<string, FileCounts>,
+/** The paths owned by `root`: those under it and under no deeper crate root. */
+const ownedPaths = (
+  paths: Iterable<string>,
   root: string,
   crateRoots: readonly string[]
-): FileCounts[] => {
+): string[] => {
   const deeper = crateRoots.filter((other) => other !== root && isUnder(other, root));
-  return [...files.entries()]
-    .filter(([path]) => isUnder(path, root) && !deeper.some((other) => isUnder(path, other)))
-    .map(([, counts]) => counts);
+  return [...paths].filter(
+    (path) => isUnder(path, root) && !deeper.some((other) => isUnder(path, other))
+  );
 };
 
 type Dimension = keyof FileCounts;
@@ -116,14 +116,28 @@ const summarize = (root: string, files: readonly FileCounts[]): Measurement<Cove
   });
 };
 
-const indexByPath = (report: LlvmCovExport): Map<string, FileCounts> => {
+interface IndexedFiles {
+  readonly files: ReadonlyMap<string, FileCounts>;
+  /** Paths that appeared more than once across the export's bundles. */
+  readonly duplicates: readonly string[];
+}
+
+/**
+ * Index the export by repository-relative path. A path repeated across bundles
+ * is recorded, not merged: the two records may describe the same lines, so
+ * neither summing nor picking one is known to be right (the first is kept).
+ */
+const indexByPath = (report: LlvmCovExport): IndexedFiles => {
   const root = posix.dirname(report.cargo_llvm_cov.manifest_path);
   const files = new Map<string, FileCounts>();
+  const duplicates = new Set<string>();
   for (const file of report.data.flatMap((bundle) => bundle.files)) {
     const path = relativePath(file.filename, root);
-    if (path !== null) files.set(path, file.summary);
+    if (path === null) continue;
+    if (files.has(path)) duplicates.add(path);
+    else files.set(path, file.summary);
   }
-  return files;
+  return { files, duplicates: [...duplicates] };
 };
 
 /**
@@ -157,19 +171,30 @@ export const resolveRustCoverage = (
     );
   }
 
-  const files = indexByPath(report.value);
+  const { files, duplicates } = indexByPath(report.value);
   const exitCode = receipt.value.testsExitCode;
   return (root) => {
-    const owned = filesOf(files, root, crateRoots);
+    const owned = ownedPaths(files.keys(), root, crateRoots).map(
+      (path) => files.get(path) as FileCounts
+    );
     if (owned.length === 0) {
       return unavailable(
         `${root}: no instrumented source file in the llvm-cov export; expected the crate's tests to leave profile data`
       );
     }
     const cell = summarize(root, owned);
-    if (cell.state !== 'measured' || exitCode === 0) return cell;
-    return partial(cell.value, [
-      `instrumented test run exited ${exitCode}: only the test binaries that ran contributed profile data, so coverage is a lower bound`,
-    ]);
+    if (cell.state !== 'measured') return cell;
+    const reasons = [
+      ...ownedPaths(duplicates, root, crateRoots).map(
+        (path) =>
+          `${path} appears more than once in the llvm-cov export; the export is inconsistent, so the crate's counts may be double-counted or incomplete`
+      ),
+      ...(exitCode === 0
+        ? []
+        : [
+            `instrumented test run exited ${exitCode}: only the test binaries that ran contributed profile data, so coverage is a lower bound`,
+          ]),
+    ];
+    return reasons.length === 0 ? cell : partial(cell.value, reasons);
   };
 };

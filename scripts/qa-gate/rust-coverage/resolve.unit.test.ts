@@ -95,6 +95,43 @@ describe('resolveRustCoverage', () => {
     ).toBe(50);
   });
 
+  describe('a path repeated across data bundles', () => {
+    const withDuplicate = (exitCode = 0) => {
+      const whole = JSON.parse(exportJson(TWO_CRATE_FILES));
+      const files = whole.data[0].files;
+      // The same alpha file again in a second bundle, with different counts.
+      const repeated = {
+        ...files[0],
+        summary: { ...files[0].summary, lines: { count: 99, covered: 1 } },
+      };
+      const doubled = { ...whole, data: [{ files }, { files: [repeated] }] };
+      return resolveRustCoverage(
+        { export: JSON.stringify(doubled), receipt: receiptJson(RUST_SHA, exitCode) },
+        RUST_SHA,
+        TWO_CRATE_ROOTS
+      );
+    };
+
+    it('makes the owning crate partial, naming the file, instead of overwriting or summing', () => {
+      const cell = expectState(withDuplicate()('crates/alpha'), 'partial');
+
+      expect(cell.reasons[0]).toContain('crates/alpha/src/lib.rs appears more than once');
+      // The first record is kept: neither the overwrite (99) nor a sum (109).
+      expect(cell.value.lines.total).toBe(20);
+    });
+
+    it('leaves every other crate measured', () => {
+      expectState(withDuplicate()('crates/beta'), 'measured');
+    });
+
+    it('keeps the test-exit reason next to the duplicate reason', () => {
+      const cell = expectState(withDuplicate(101)('crates/alpha'), 'partial');
+
+      expect(cell.reasons).toHaveLength(2);
+      expect(cell.reasons.join('\n')).toContain('exited 101');
+    });
+  });
+
   it('ignores files outside the measured checkout, such as registry sources', () => {
     const coverage = resolve({
       ...TWO_CRATE_FILES,
