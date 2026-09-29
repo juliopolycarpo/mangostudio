@@ -1,24 +1,37 @@
-// Circular dependency count across workspaces via madge --circular --json.
+// Circular dependency count across the discovered JS workspaces via
+// madge --circular --json.
 
-import { ALL_WORKSPACE_NAMES } from '../../lib/config';
 import { runCapture } from './support';
 
-/** Total number of circular dependency cycles across all workspaces. */
-export const countCircularDeps = async (): Promise<number> => {
+type Run = (cmd: readonly string[]) => Promise<{ readonly stdout: string }>;
+
+/**
+ * Total number of circular dependency cycles across the given component roots.
+ * `run` is injected so tests can fake madge.
+ * // Usage: await countCircularDeps(['apps/api', 'packages/protocol'])
+ */
+export const countCircularDeps = async (
+  roots: readonly string[],
+  run: Run = runCapture
+): Promise<number> => {
   const counts = await Promise.all(
-    ALL_WORKSPACE_NAMES.map(async (workspace) => {
-      const { stdout } = await runCapture([
+    roots.map(async (root) => {
+      const { stdout } = await run([
         'bunx',
         'madge',
         '--circular',
         '--extensions',
         'ts,tsx',
         '--json',
-        `apps/${workspace}`,
+        root,
       ]);
-      const trimmed = stdout.trim() || '[]';
-      const parsed = JSON.parse(trimmed) as unknown;
-      return Array.isArray(parsed) ? parsed.length : 0;
+      const parsed = JSON.parse(stdout.trim() || '[]') as unknown;
+      if (!Array.isArray(parsed)) {
+        throw new Error(
+          `madge output for ${root} is ${JSON.stringify(parsed)}; expected a JSON array of cycles`
+        );
+      }
+      return parsed.length;
     })
   );
   return counts.reduce((sum, count) => sum + count, 0);

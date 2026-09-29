@@ -93,7 +93,9 @@ const buildMetrics = async (
     generatedAt: new Date().toISOString(),
     components,
     duplication: await measure('duplication', collectDuplication),
-    circularDeps: await measure('circularDeps', countCircularDeps),
+    circularDeps: await measure('circularDeps', () =>
+      countCircularDeps(specs.filter((spec) => spec.kind === 'workspace').map((spec) => spec.root))
+    ),
     frontendBundle: await measure('frontendBundle', collectFrontendBundle),
     dependencies: await measure('dependencies', collectDependencyStats),
     tests: testMetrics.tests,
