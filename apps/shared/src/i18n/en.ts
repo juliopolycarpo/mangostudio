@@ -2155,6 +2155,11 @@ export const messages: Messages = {
     locationSettings: {
       description:
         'Only the directories switched on here are scanned. This applies to every machine; the state beside each one is what the selected machine reports.',
+      /**
+       * Shown instead of the switches until the hub has detected which agent
+       * CLIs are installed: the enablement it would show is a placeholder.
+       */
+      detecting: 'Detecting installed agents…',
       scan: 'Scan',
       /** Accessible name: every row's switch reads "Scan" on screen. */
       scanLocation: 'Scan {location}',

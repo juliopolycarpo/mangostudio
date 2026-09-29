@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   type AppSettings,
-  AppSettingsSchema,
+  type AppSettingsResponse,
+  AppSettingsResponseSchema,
   DEFAULT_APP_SETTINGS,
   onboardingFor,
 } from '@mangostudio/shared/app-settings';
@@ -31,6 +32,15 @@ let otherUser: UserFixture;
 
 let restoreAuth: (() => void) | null = null;
 
+/**
+ * What a new user reads. Never pending here: the test preload pins the
+ * library-location defaults, so no agent-CLI detection is ever outstanding.
+ */
+const DEFAULT_ANSWER: AppSettingsResponse = {
+  ...DEFAULT_APP_SETTINGS,
+  libraryLocationDefaultsPending: false,
+};
+
 beforeEach(() => {
   testUser = makeTestIdentity('app-settings-user', 'App Settings User');
   otherUser = makeTestIdentity('app-settings-other-user', 'Other App Settings User');
@@ -50,8 +60,8 @@ describe('settings app settings routes', () => {
     const payload = (await response.json()) as AppSettings;
 
     expect(response.status).toBe(200);
-    expect(Value.Check(AppSettingsSchema, payload)).toBe(true);
-    expect(payload).toEqual(DEFAULT_APP_SETTINGS);
+    expect(Value.Check(AppSettingsResponseSchema, payload)).toBe(true);
+    expect(payload).toEqual(DEFAULT_ANSWER);
   });
 
   it('persists app settings per user', async () => {
@@ -105,7 +115,7 @@ describe('settings app settings routes', () => {
     const payload = (await response.json()) as AppSettings;
 
     expect(response.status).toBe(200);
-    expect(Value.Check(AppSettingsSchema, payload)).toBe(true);
+    expect(Value.Check(AppSettingsResponseSchema, payload)).toBe(true);
     expect(payload).toMatchObject({
       globalImageQuality: '4K',
       thinkingEnabled: true,
@@ -142,7 +152,7 @@ describe('settings app settings routes', () => {
     const otherPayload = (await otherResponse.json()) as AppSettings;
 
     expect(otherResponse.status).toBe(200);
-    expect(otherPayload).toEqual(DEFAULT_APP_SETTINGS);
+    expect(otherPayload).toEqual(DEFAULT_ANSWER);
   });
 
   it('normalizes malformed persisted JSON to defaults', async () => {
@@ -168,7 +178,7 @@ describe('settings app settings routes', () => {
     const payload = (await response.json()) as AppSettings;
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual(DEFAULT_APP_SETTINGS);
+    expect(payload).toEqual(DEFAULT_ANSWER);
   });
 
   it('accepts a PUT body missing the workspace library scope and normalizes on save', async () => {
@@ -196,7 +206,7 @@ describe('settings app settings routes', () => {
     const payload = (await response.json()) as AppSettings;
 
     expect(response.status).toBe(200);
-    expect(Value.Check(AppSettingsSchema, payload)).toBe(true);
+    expect(Value.Check(AppSettingsResponseSchema, payload)).toBe(true);
     expect(payload.profileSettings.default.libraryLocations).toEqual(
       DEFAULT_APP_SETTINGS.profileSettings.default.libraryLocations
     );

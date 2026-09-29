@@ -176,6 +176,11 @@ export function ResourceDetail({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {candidates.isDetecting && (
+            <span className="text-on-surface-variant/60 text-xs" data-testid="detecting-agents">
+              {l.locationSettings.detecting}
+            </span>
+          )}
           <Button
             size="sm"
             variant="secondary"

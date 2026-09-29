@@ -31,7 +31,11 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
-import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
+import {
+  appSettingsKeys,
+  appSettingsQueryOptions,
+  keepLibraryDefaultsPending,
+} from '@/features/settings/app/queries';
 import { useI18n } from '@/hooks/use-i18n';
 
 export {
@@ -172,16 +176,21 @@ export function useGlobalSettings() {
 
   const saveSettings = useCallback(
     (updater: (current: AppSettings) => AppSettings) => {
-      const currentSettings = normalizeAppSettings(
-        queryClient.getQueryData<AppSettings>(appSettingsKeys.current()) ?? DEFAULT_APP_SETTINGS
-      );
+      const cachedSettings = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
+      const currentSettings = normalizeAppSettings(cachedSettings ?? DEFAULT_APP_SETTINGS);
 
-      rollbackRef.current ??= currentSettings;
+      // Both cache writes keep the "library defaults pending" flag the
+      // normalizer drops: until this edit's PUT answers (after detection), the
+      // library locations in the cache are still placeholders.
+      rollbackRef.current ??= keepLibraryDefaultsPending(cachedSettings, currentSettings);
       // Normalizing here is what keeps auto-save from ever sending an
       // out-of-range value: every clamp the schema declares is applied to the
       // local edit before it is queued.
       const nextSettings = normalizeAppSettings(updater(currentSettings));
-      queryClient.setQueryData(appSettingsKeys.current(), nextSettings);
+      queryClient.setQueryData(
+        appSettingsKeys.current(),
+        keepLibraryDefaultsPending(cachedSettings, nextSettings)
+      );
       pendingSaveRef.current = nextSettings;
       // Opens the echo window at the first keystroke, not at the PUT, so the
       // whole debounce is protected too.

@@ -179,6 +179,37 @@ describe('SkillsSettingsPage', () => {
     });
   });
 
+  it('never writes a source toggle over placeholder library defaults while detecting', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/skills', { body: SKILLS_RESPONSE });
+    // The hub has not detected its agent CLIs yet, and still has not on refetch.
+    fetchScenario.respondWithJson('GET', '/api/settings/app', {
+      body: { ...DEFAULT_APP_SETTINGS, libraryLocationDefaultsPending: true },
+    });
+
+    render(<SkillsSettingsPage />);
+
+    await screen.findAllByText('pdf-tools');
+    const agentsToggle = screen.getByLabelText('Agents', { selector: 'input' });
+    await user.click(agentsToggle);
+
+    const requestsTo = (method: string) =>
+      fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
+        const init = call[1] as RequestInit | undefined;
+        return (
+          (init?.method ?? 'GET') === method &&
+          new URL(String(call[0]), 'http://localhost').pathname === '/api/settings/app'
+        );
+      });
+    await waitFor(() => expect(requestsTo('GET').length).toBeGreaterThanOrEqual(1));
+    // The toggle re-enables once the refused write settles.
+    await waitFor(() => expect(agentsToggle).not.toBeDisabled());
+    expect(
+      requestsTo('PUT').length,
+      'expected PUT /api/settings/app while detecting: 0 | received: a write carrying the placeholder locations'
+    ).toBe(0);
+  });
+
   it('forces a library rescan from the visible refresh control', async () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/skills', { body: SKILLS_RESPONSE });

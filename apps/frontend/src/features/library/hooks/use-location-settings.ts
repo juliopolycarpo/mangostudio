@@ -12,8 +12,6 @@
  */
 
 import {
-  type AppSettings,
-  DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
   libraryLocationsPatch,
   normalizeAppSettings,
@@ -25,10 +23,11 @@ import {
   type LibraryLocationStatus,
   type ResourceKind,
 } from '@mangostudio/shared/library';
-import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { updateAppSettings } from '@/features/settings/app/api';
-import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
+import { appSettingsForLocationWrite, appSettingsKeys } from '@/features/settings/app/queries';
+import { useLibraryDefaultsDetection } from '@/features/settings/app/use-library-defaults-detection';
 import { libraryKeys, libraryLocationsQueryOptions } from '../queries';
 
 export interface LocationSetting {
@@ -50,6 +49,11 @@ interface LocationSettingGroup {
 export interface LocationSettingsState {
   readonly groups: readonly LocationSettingGroup[];
   readonly isPending: boolean;
+  /**
+   * True while the hub is still detecting installed agent CLIs: `groups` is
+   * then empty, because the enablement it would carry is a placeholder.
+   */
+  readonly defaultsPending: boolean;
   readonly error: unknown;
   readonly isSaving: boolean;
   readonly setEnabled: (locationId: LibraryLocationId, enabled: boolean) => void;
@@ -60,9 +64,8 @@ const LOCKED_LOCATIONS: ReadonlySet<LibraryLocationId> = new Set(ALWAYS_ENABLED_
 
 export function useLocationSettings(environmentId?: string): LocationSettingsState {
   const queryClient = useQueryClient();
-  const [locationsQuery, settingsQuery] = useQueries({
-    queries: [libraryLocationsQueryOptions(environmentId), appSettingsQueryOptions()],
-  });
+  const locationsQuery = useQuery(libraryLocationsQueryOptions(environmentId));
+  const { query: settingsQuery, defaultsPending } = useLibraryDefaultsDetection();
 
   const save = useMutation({
     mutationFn: async ({
@@ -72,11 +75,7 @@ export function useLocationSettings(environmentId?: string): LocationSettingsSta
       locationId: LibraryLocationId;
       enabled: boolean;
     }) => {
-      const cached =
-        queryClient.getQueryData<AppSettings>(appSettingsKeys.current()) ??
-        (await queryClient.fetchQuery(appSettingsQueryOptions())) ??
-        DEFAULT_APP_SETTINGS;
-      const locations = libraryLocationsFor(normalizeAppSettings(cached));
+      const locations = libraryLocationsFor(await appSettingsForLocationWrite(queryClient));
       // Only the locations travel: a settings tab editing an unrelated
       // preference must not have its value rolled back by this toggle.
       return updateAppSettings(
@@ -99,14 +98,15 @@ export function useLocationSettings(environmentId?: string): LocationSettingsSta
   const groups = useMemo(() => {
     const statuses = locationsQuery.data ?? [];
     const settings = settingsQuery.data;
-    if (settings === undefined) return [];
+    if (settings === undefined || defaultsPending) return [];
     const enabled = enabledLibraryLocations(libraryLocationsFor(settings), 'home');
     return groupByKind(statuses, enabled);
-  }, [locationsQuery.data, settingsQuery.data]);
+  }, [locationsQuery.data, settingsQuery.data, defaultsPending]);
 
   return {
     groups,
     isPending: locationsQuery.isPending || settingsQuery.isPending,
+    defaultsPending,
     error: locationsQuery.error ?? settingsQuery.error,
     isSaving: save.isPending,
     setEnabled: (locationId, enabled) => save.mutate({ locationId, enabled }),

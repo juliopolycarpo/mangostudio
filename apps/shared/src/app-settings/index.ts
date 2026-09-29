@@ -47,6 +47,8 @@ export {
   type AppSettings,
   type AppSettingsPutBody,
   AppSettingsPutBodySchema,
+  type AppSettingsResponse,
+  AppSettingsResponseSchema,
   AppSettingsSchema,
   type ChatDisplaySettings,
   ChatDisplaySettingsSchema,
