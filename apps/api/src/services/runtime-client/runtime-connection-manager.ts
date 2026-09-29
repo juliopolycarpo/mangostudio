@@ -45,6 +45,7 @@ import { connectSshRuntime } from './connect-ssh-runtime';
 import { type HubWorkspaceBinding, STAND_IN_USER_ID } from './hub-workspace-authority';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
+import { registerRuntimeConnectionRelease } from './runtime-connection-release';
 import {
   type RuntimeDiscoveryCache,
   runtimeDiscoveryCache,
@@ -1694,7 +1695,8 @@ function refuseDialInRuntime(
 let managerInstance: RuntimeConnectionManager | undefined;
 
 export function getRuntimeConnectionManager(): RuntimeConnectionManager {
-  managerInstance ??= new RuntimeConnectionManager({
+  if (managerInstance) return managerInstance;
+  managerInstance = new RuntimeConnectionManager({
     resolveEnvironment,
     connectors: {
       'in-process': createLocalRuntimeConnector(),
@@ -1707,6 +1709,9 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
     },
     publish: publishEnvironmentInvalidation,
   });
+  // The CLI releases connections through this handle rather than importing
+  // this module, so a command that never opened a runtime never loads it.
+  registerRuntimeConnectionRelease(closeAllRuntimeConnections);
   return managerInstance;
 }
 
@@ -1739,4 +1744,5 @@ export function setRuntimeConnectionManagerForTests(
   manager: RuntimeConnectionManager | undefined
 ): void {
   managerInstance = manager;
+  registerRuntimeConnectionRelease(closeAllRuntimeConnections);
 }

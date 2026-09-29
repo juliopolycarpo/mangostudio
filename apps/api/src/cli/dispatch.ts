@@ -3,7 +3,7 @@
  * turns an operator-facing error into a clean stderr message + non-zero exit.
  */
 
-import { closeAllRuntimeConnections } from '../services/runtime-client/runtime-connection-manager';
+import { releaseRuntimeConnections } from '../services/runtime-client/runtime-connection-release';
 import {
   parseDoctorArgs,
   parseEnvArgs,
@@ -56,7 +56,7 @@ const SERVER_COMMANDS: ReadonlySet<string> = new Set(['serve', '__serve']);
  */
 export async function dispatch(
   args: string[],
-  releaseRuntimes: () => Promise<void> = closeAllRuntimeConnections
+  releaseRuntimes: () => Promise<void> = releaseRuntimeConnections
 ): Promise<void> {
   const [command, ...rest] = args;
   const release = () =>
