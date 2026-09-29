@@ -377,6 +377,20 @@ describe('mergeTestShards', () => {
     );
   });
 
+  // Same count, wrong identities: shard 2 never uploaded and a stray shard 3
+  // did. The count alone would wave that through.
+  it('rejects a right-sized set with the wrong directories, naming both sides', async () => {
+    const shards = await makeTemp();
+    await writeShards(shards, [
+      { name: 'test-shard-1', lcovLines: [[1, 1]] },
+      { name: 'test-shard-3', lcovLines: [[1, 1]] },
+      { name: 'test-shard-frontend', lcovLines: [[1, 1]] },
+    ]);
+    await expect(mergeTestShards(shards, await makeTemp(), 3)).rejects.toThrow(
+      /found 3; missing: test-shard-2; unexpected: test-shard-3\./
+    );
+  });
+
   it('names the job directories that never uploaded', async () => {
     const shards = await makeTemp();
     await writeShards(shards, [
@@ -398,8 +412,15 @@ describe('mergeTestShards', () => {
         lcovLines: [[1, 1]],
         meta: { shard: 1, exitCode: 0, durationSeconds: 30 },
       },
+      {
+        name: 'test-shard-frontend',
+        lcovLines: [[1, 1]],
+        meta: { shard: 'frontend', exitCode: 0, durationSeconds: 30 },
+      },
     ]);
-    expect((await mergeTestShards(shards, output, 1)).shards).toBe(1);
+    const summary = await mergeTestShards(shards, output, 2);
+    expect(summary.shards).toBe(2);
+    expect(summary.coverageErrors).toBeUndefined();
   });
 });
 

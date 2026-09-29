@@ -98,13 +98,12 @@ const unshardedJobCount = unshardedLanes.length;
 const NUMBERED_SHARD = /^test-shard-\d+$/;
 
 /** Every artifact directory name a run with `expectedJobs` jobs must have uploaded. */
-const expectedJobNames = (expectedJobs: number, presentNames: readonly string[]): string[] => {
+const expectedJobNames = (expectedJobs: number): string[] => {
   const numbered = Math.max(expectedJobs - unshardedJobCount, 0);
   return [
     ...Array.from({ length: numbered }, (_, index) => `test-shard-${index + 1}`),
-    ...presentNames.filter((name) => NUMBERED_SHARD.test(name)),
     ...unshardedLanes.map((lane) => `test-shard-${lane.id}`),
-  ].filter((name, index, all) => all.indexOf(name) === index);
+  ];
 };
 
 /**
@@ -168,21 +167,25 @@ export const mergeTestShards = async (
   // still be green, and summarizeShardMeta would report a passing suite over
   // an incomplete file set.
   const presentNames = shardDirs.map((dir) => basename(dir));
-  if (expectedShards !== undefined && shardDirs.length !== expectedShards) {
-    const missing = expectedJobNames(expectedShards, presentNames).filter(
-      (name) => !presentNames.includes(name)
-    );
-    throw new ShardSetError(
-      `Expected ${expectedShards} test-job directories under ${shardsRoot} (the numbered shards ` +
-        `plus one job per unsharded lane), found ${shardDirs.length}` +
-        `${missing.length > 0 ? `; missing: ${missing.join(', ')}` : ''}. A job likely failed before ` +
-        'its upload step ran; merging a partial set would report incomplete coverage and test ' +
-        'counts as a green run.'
-    );
+  // The names must match, not only the count: a missing shard beside a stray
+  // one is the same count and the same incomplete file set.
+  const expectedNames = expectedShards === undefined ? null : expectedJobNames(expectedShards);
+  if (expectedNames) {
+    const missing = expectedNames.filter((name) => !presentNames.includes(name));
+    const unexpected = presentNames.filter((name) => !expectedNames.includes(name));
+    if (missing.length > 0 || unexpected.length > 0) {
+      throw new ShardSetError(
+        `Expected ${expectedShards} test-job directories under ${shardsRoot} (the numbered shards ` +
+          `plus one job per unsharded lane), found ${shardDirs.length}` +
+          `${missing.length > 0 ? `; missing: ${missing.join(', ')}` : ''}` +
+          `${unexpected.length > 0 ? `; unexpected: ${unexpected.join(', ')}` : ''}. ` +
+          'A job likely failed before its upload step ran; merging a partial set would report ' +
+          'incomplete coverage and test counts as a green run.'
+      );
+    }
   }
 
-  const jobNames =
-    expectedShards === undefined ? presentNames : expectedJobNames(expectedShards, presentNames);
+  const jobNames = expectedNames ?? presentNames;
   const coverageErrors: Record<string, string> = {};
   for (const [workspace, lcovPath] of Object.entries(SHARDED_LCOV_PATHS)) {
     const inputs: LcovShardInput[] = expectedLcovShards(workspace, jobNames).map((name) => ({
