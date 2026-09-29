@@ -1283,13 +1283,21 @@ const CHILD_DEFAULT_SIGNALS: [libc::c_int; 5] = [
 /// every path before a child starts, so no path relies on it.
 ///
 /// Only the target is touched. The runtime keeps its own dispositions, so its shutdown handling
-/// is unchanged. Async-signal-safe: `signal` and `sigprocmask` only, on the single-threaded
-/// post-fork path. Returns the `errno` of the failing call.
+/// is unchanged. Async-signal-safe: `sigaction` (with `SIG_DFL`, an empty mask, and no flags, so
+/// no BSD-versus-System V `signal` semantics apply) and `sigprocmask` only, on the
+/// single-threaded post-fork path. Returns the `errno` of the failing call.
 ///
 /// Usage: `if let Err(errno) = reset_inherited_signal_state() { exec_failed_and_exit(fd, errno) }`.
 unsafe fn reset_inherited_signal_state() -> Result<(), libc::c_int> {
+    let mut default_action: libc::sigaction = unsafe { std::mem::zeroed() };
+    default_action.sa_sigaction = libc::SIG_DFL;
+    default_action.sa_flags = 0;
+    if unsafe { libc::sigemptyset(&raw mut default_action.sa_mask) } != 0 {
+        return Err(unsafe { errno_raw() });
+    }
     for signal in CHILD_DEFAULT_SIGNALS {
-        if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
+        if unsafe { libc::sigaction(signal, &raw const default_action, std::ptr::null_mut()) } != 0
+        {
             return Err(unsafe { errno_raw() });
         }
     }

@@ -9,7 +9,9 @@
 //! before `execve`, the way `nohup` or a supervisor would leave it, so no other test in this
 //! process sees an ignored or blocked signal. The fixture runs children through the real
 //! `run_bounded_child` path, the guardian every runtime child (bounded, MCP, terminal, external
-//! agent) is started by, and reports which signals a child could not take.
+//! agent) is started by, and reports which signals a child could not take. For the blocked mask
+//! the child is this same test binary again, asking the kernel for its own mask, so the check
+//! needs neither `/proc` nor a shell (dash clears the mask itself).
 
 #![cfg(unix)]
 #![allow(
@@ -28,6 +30,10 @@ use nix::sys::signal::{SigHandler, SigSet, SigmaskHow, Signal, pthread_sigmask, 
 use tokio_util::sync::CancellationToken;
 
 const FIXTURE: &str = "MANGOSTUDIO_CHILD_SIGNAL_STATE_FIXTURE";
+/// Set only in the environment of the probe child the fixture starts.
+const PROBE: &str = "MANGOSTUDIO_CHILD_SIGNAL_STATE_PROBE";
+/// Prefix of the one stdout line the probe child prints: the blocked signals it found.
+const PROBE_REPORT: &str = "MANGOSTUDIO_BLOCKED_SIGNALS=";
 /// What a child must be able to trap, receive, and not have blocked.
 const SIGNALS: [Signal; 5] = [
     Signal::SIGHUP,
@@ -39,10 +45,6 @@ const SIGNALS: [Signal; 5] = [
 const TRAP_EXIT_CODE: i32 = 42;
 
 #[derive(Clone, Copy)]
-#[cfg_attr(
-    not(target_os = "linux"),
-    allow(dead_code, reason = "only Linux has /proc")
-)]
 enum Inherited {
     Ignored,
     Blocked,
@@ -53,8 +55,6 @@ fn a_child_can_take_every_signal_the_runtime_ignores() {
     assert_fixture_passes("ignored_fixture", Inherited::Ignored);
 }
 
-/// Reads the child's `SigBlk` from `/proc`, which only Linux has.
-#[cfg(target_os = "linux")]
 #[test]
 fn a_child_starts_with_no_signal_blocked_by_the_runtime() {
     assert_fixture_passes("blocked_fixture", Inherited::Blocked);
@@ -71,7 +71,7 @@ async fn ignored_fixture() {
         let name = trap_name(target);
         let script =
             format!("trap 'exit {TRAP_EXIT_CODE}' {name}\nkill -s {name} $$\nsleep 1\nexit 0");
-        let received = run_shell(&script).await.exit_code;
+        let received = run_child("/bin/sh", &["-c", &script], None).await.exit_code;
         if received != Some(TRAP_EXIT_CODE) {
             failures.push(format!("SIG{name}: exit code {received:?}"));
         }
@@ -84,29 +84,51 @@ async fn ignored_fixture() {
 }
 
 /// Runs in the re-executed binary only; a plain run of this binary skips it.
-#[cfg(target_os = "linux")]
 #[tokio::test(flavor = "current_thread")]
 async fn blocked_fixture() {
     if !is_fixture() {
         return;
     }
-    // Not a shell: dash clears the mask itself, which would hide what the runtime handed over.
-    let outcome = run_child("/bin/cat", &["/proc/self/status"]).await;
-    let status = String::from_utf8_lossy(&outcome.stdout);
-    let mask = status
+    let this_binary = std::env::current_exe().expect("the test binary path exists");
+    let probe_env = HashMap::from([(PROBE.to_owned(), "1".to_owned())]);
+    let outcome = run_child(
+        this_binary.to_str().expect("the test binary path is UTF-8"),
+        &["--exact", "blocked_probe_child", "--nocapture"],
+        Some(&probe_env),
+    )
+    .await;
+    let stdout = String::from_utf8_lossy(&outcome.stdout);
+    let blocked = stdout
         .lines()
-        .find_map(|line| line.strip_prefix("SigBlk:"))
-        .unwrap_or_else(|| panic!("expected a SigBlk line | received: {status:?}"));
-    let blocked = u64::from_str_radix(mask.trim(), 16)
-        .unwrap_or_else(|_| panic!("expected a hex SigBlk mask | received: {mask:?}"));
-    let inherited: Vec<_> = SIGNALS
-        .iter()
-        .filter(|target| blocked & (1 << (**target as i32 - 1)) != 0)
-        .collect();
+        .find_map(|line| line.strip_prefix(PROBE_REPORT))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a {PROBE_REPORT} line from the probe child | received: {stdout:?} (exit {:?})",
+                outcome.exit_code
+            )
+        });
     assert!(
-        inherited.is_empty(),
-        "expected a child with none of {SIGNALS:?} blocked | received SigBlk {blocked:#x} blocking {inherited:?}",
+        blocked.is_empty(),
+        "expected a child with none of {SIGNALS:?} blocked | received blocked: {blocked}",
     );
+}
+
+/// The child of `blocked_fixture`: prints which of [`SIGNALS`] its own mask blocks. A plain run
+/// of this binary skips it.
+#[test]
+fn blocked_probe_child() {
+    if std::env::var_os(PROBE).is_none() {
+        return;
+    }
+    let mut mask = SigSet::empty();
+    pthread_sigmask(SigmaskHow::SIG_BLOCK, None, Some(&mut mask))
+        .expect("the current signal mask can be read");
+    let blocked: Vec<_> = SIGNALS
+        .iter()
+        .filter(|target| mask.contains(**target))
+        .map(|target| target.as_str())
+        .collect();
+    println!("{PROBE_REPORT}{}", blocked.join(","));
 }
 
 fn is_fixture() -> bool {
@@ -161,11 +183,13 @@ fn give_fixture(inherited: Inherited, target: Signal) -> std::io::Result<()> {
     Ok(())
 }
 
-async fn run_shell(script: &str) -> ChildOutcome {
-    run_child("/bin/sh", &["-c", script]).await
-}
-
-async fn run_child(program: &str, args: &[&str]) -> ChildOutcome {
+/// Runs `program` through the runtime's guardian. `env` is the child's whole environment when
+/// `Some`, and the fixture's own when `None`.
+async fn run_child(
+    program: &str,
+    args: &[&str],
+    env: Option<&HashMap<String, String>>,
+) -> ChildOutcome {
     let budget = ChildBudget {
         deadline: Duration::from_secs(10),
         max_stdout_bytes: 8_192,
@@ -174,10 +198,10 @@ async fn run_child(program: &str, args: &[&str]) -> ChildOutcome {
     run_bounded_child(
         Path::new(program),
         args,
-        None::<&HashMap<String, String>>,
+        env,
         budget,
         &CancellationToken::new(),
     )
     .await
-    .expect("the shell starts and exits inside its deadline")
+    .expect("the child starts and exits inside its deadline")
 }
