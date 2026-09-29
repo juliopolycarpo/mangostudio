@@ -119,7 +119,7 @@ const summarize = (root: string, files: readonly FileCounts[]): Measurement<Cove
 const indexByPath = (report: LlvmCovExport): Map<string, FileCounts> => {
   const root = posix.dirname(report.cargo_llvm_cov.manifest_path);
   const files = new Map<string, FileCounts>();
-  for (const file of report.data[0]?.files ?? []) {
+  for (const file of report.data.flatMap((bundle) => bundle.files)) {
     const path = relativePath(file.filename, root);
     if (path !== null) files.set(path, file.summary);
   }
