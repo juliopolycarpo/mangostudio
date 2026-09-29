@@ -34,7 +34,7 @@ import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { activePageForPath } from '@/lib/active-page';
 import { AppContext } from '@/lib/app-context';
 import { isNewChatShortcut } from '@/lib/keyboard';
-import { useMotionPresets } from '@/lib/motion/use-motion-presets';
+import { useRouteEntrance } from '@/lib/motion/use-route-entrance';
 
 export const Route = createFileRoute('/_authenticated')({
   /**
@@ -94,7 +94,8 @@ function AuthenticatedLayout() {
   const currentPath = routerState.location.pathname;
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const commandPalette = useCommandPalette();
-  const { fade } = useMotionPresets();
+  const activePage = activePageForPath(currentPath);
+  const routeEntrance = useRouteEntrance(activePage);
   // Only chats with a workdir can have git state. `app.chats` holds its
   // identity between query updates, so memoizing here hands the hook the same
   // array on every one of this layout's per-token re-renders and it can bail
@@ -153,8 +154,6 @@ function AuthenticatedLayout() {
     void navigate({ to: '/login' });
     return null;
   }
-
-  const activePage = activePageForPath(currentPath);
 
   return (
     <AppContext value={app}>
@@ -223,6 +222,11 @@ function AuthenticatedLayout() {
             settings tabs — changes nothing here. Only a move between top-level
             destinations remounts this and plays the fade.
 
+            Except the first mount: the shell has only just painted, and
+            fading the first page up from opacity 0 would hold back the first
+            useful screen — the composer — for the whole fade. That "first"
+            is remembered here in the layout, not on this re-keyed element.
+
             No `AnimatePresence`: with one, the outgoing page would stay mounted
             for the length of its exit, holding a second copy of its queries and
             realtime subscriptions open. Re-keying instead unmounts it on the
@@ -236,10 +240,11 @@ function AuthenticatedLayout() {
             lightbox — none of which are portaled out. */}
         <motion.div
           key={activePage}
-          initial={fade.initial}
-          animate={fade.animate}
-          transition={fade.transition}
+          initial={routeEntrance.initial}
+          animate={routeEntrance.animate}
+          transition={routeEntrance.transition}
           className="flex-1 min-h-0 overflow-hidden flex flex-col"
+          data-testid="route-container"
         >
           <Suspense
             fallback={
