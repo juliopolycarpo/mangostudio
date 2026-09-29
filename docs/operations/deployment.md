@@ -245,6 +245,12 @@ server {
     ssl_certificate /etc/ssl/certs/your-cert.pem;
     ssl_certificate_key /etc/ssl/private/your-key.pem;
 
+    # Compress the frontend bundle and JSON. text/html is always included once
+    # gzip is on; text/event-stream is left out, so SSE stays uncompressed.
+    gzip on;
+    gzip_vary on;
+    gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
+
     location / {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
@@ -265,9 +271,49 @@ server {
 
 ```
 your-domain.com {
+    # Compress the frontend bundle and JSON. The list is explicit because the
+    # default one matches text/*, which also compresses SSE (text/event-stream)
+    # once an event is larger than 512 bytes.
+    encode zstd gzip {
+        match {
+            header Content-Type text/html*
+            header Content-Type text/css*
+            header Content-Type text/javascript*
+            header Content-Type application/javascript*
+            header Content-Type application/json*
+            header Content-Type image/svg+xml*
+        }
+    }
     reverse_proxy 127.0.0.1:3001
 }
 ```
+
+### Compression
+
+The hub serves the frontend bundle uncompressed and leaves compression to the proxy. Both
+examples above compress it: the main JavaScript file drops from about 1.8 MB to about 0.6 MB
+on the wire, which matters for remote access (a browser on the same machine gains little).
+Fonts and images are already compressed and are not listed.
+
+SSE responses (`text/event-stream`) are deliberately left uncompressed, so each event reaches
+the browser as soon as the hub sends it. If you extend either list, keep `text/event-stream`
+out of it, and keep `proxy_buffering off` in nginx.
+
+If another proxy, load balancer or CDN sits in front of nginx and adds a `Via` request header,
+nginx treats the request as proxied and skips gzip by default. Add `gzip_proxied any;` beside
+`gzip on;` in that setup.
+
+To check a deployment, request a hashed asset from the page with a `GET` and read the headers
+(`curl -I` sends `HEAD`, which the hub's asset routes do not answer):
+
+```bash
+curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' \
+  https://your-domain.com/assets/main-<hash>.js | grep -i '^content-encoding:'
+```
+
+A compressed response prints its `Content-Encoding: gzip` header (the case varies by proxy).
+No output (and `grep` exiting with 1) means the proxy sent the file uncompressed. To check
+Caddy's zstd path, send `Accept-Encoding: zstd` instead and expect `zstd`.
 
 ### Trusting proxy headers
 
