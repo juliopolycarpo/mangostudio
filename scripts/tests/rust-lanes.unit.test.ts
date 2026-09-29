@@ -139,6 +139,7 @@ describe('files a crate reads from outside crates/', () => {
       'spec/fixtures/1/',
       'scripts/tests/support/SHA256SUMS.sample',
       'packages/protocol/src/testing/conformance.ts',
+      'apps/shared/src/i18n/en.ts',
       'apps/shared/src/runtime-contract/generated/catalog.json',
       'Cargo.toml',
     ]) {
