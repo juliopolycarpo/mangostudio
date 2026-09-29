@@ -23,7 +23,7 @@ import {
 } from './report-document';
 
 /** Trusted values the publisher resolved from the GitHub API (never from artifacts). */
-interface ReportContext {
+export interface ReportContext {
   readonly repository: string;
   readonly prNumber: number;
   readonly headSha: string;
@@ -45,15 +45,16 @@ type ReportPart = (typeof REPORT_PARTS)[number];
 const USAGE =
   'Usage: bun ./scripts/qa-gate/render-report.ts <context.json> --part <metrics|commits> [--head <metrics.json>] [--base <metrics.json>] [--ci <ci-durations.json>]\n';
 
-const parseArgs = (
-  argv: readonly string[]
-): {
-  contextPath: string;
-  part: ReportPart;
-  headPath: string | null;
-  basePath: string | null;
-  ciPath: string | null;
-} => {
+interface ReportArgs {
+  readonly contextPath: string;
+  readonly part: ReportPart;
+  readonly headPath: string | null;
+  readonly basePath: string | null;
+  readonly ciPath: string | null;
+}
+
+/** The arguments, or the usage message naming what was received and what was expected. */
+const parseArgs = (argv: readonly string[]): ReportArgs | { readonly error: string } => {
   const [contextPath, ...rest] = argv;
   const flagValue = (flag: string): string | null => {
     const index = rest.indexOf(flag);
@@ -62,10 +63,9 @@ const parseArgs = (
   };
   const part = flagValue('--part');
   if (!contextPath || !REPORT_PARTS.includes(part as ReportPart)) {
-    process.stderr.write(
-      `${USAGE}Received --part ${JSON.stringify(part)}; expected one of ${REPORT_PARTS.join(', ')}.\n`
-    );
-    process.exit(1);
+    return {
+      error: `${USAGE}Received context ${JSON.stringify(contextPath ?? null)} and --part ${JSON.stringify(part)}; expected a context path and --part one of ${REPORT_PARTS.join(', ')}.\n`,
+    };
   }
   return {
     contextPath,
@@ -179,12 +179,70 @@ const renderCommitsPart = (context: ReportContext): string =>
     changelog: renderChangelog(context.baseSha, context.headSha),
   });
 
-const { contextPath, part, headPath, basePath, ciPath } = parseArgs(process.argv.slice(2));
-const context = JSON.parse(await Bun.file(contextPath).text()) as ReportContext;
+/** Everything `main` reads, renders or writes, so a test can run it without a checkout or git. */
+export interface RenderReportDeps {
+  /** Text of the context file at `path`. */
+  readonly readText: (path: string) => Promise<string>;
+  readonly renderMetrics: (
+    context: ReportContext,
+    paths: { headPath: string | null; basePath: string | null; ciPath: string | null }
+  ) => Promise<string>;
+  readonly renderCommits: (context: ReportContext) => string;
+  /** Writes the rendered markdown to stdout. */
+  readonly write: (text: string) => void;
+  /** Writes a usage error to stderr. */
+  readonly writeError: (text: string) => void;
+}
 
-const report =
-  part === 'metrics'
-    ? await renderMetricsPart(context, { headPath, basePath, ciPath })
-    : renderCommitsPart(context);
+/** The parsed context file, or the message naming the file and why it could not be used. */
+const readContext = async (
+  path: string,
+  deps: RenderReportDeps
+): Promise<ReportContext | { readonly error: string }> => {
+  try {
+    return JSON.parse(await deps.readText(path)) as ReportContext;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      error: `Cannot read a JSON report context from ${JSON.stringify(path)}: ${reason}\n`,
+    };
+  }
+};
 
-process.stdout.write(`${report}\n`);
+/**
+ * Render one managed comment part and write its markdown. Returns the process
+ * exit code: 0 after rendering, 1 for a missing context path, an unknown
+ * `--part`, or a context file that is missing or not JSON.
+ * // Usage: process.exitCode = await main(process.argv.slice(2), realDeps);
+ */
+export const main = async (argv: readonly string[], deps: RenderReportDeps): Promise<number> => {
+  const args = parseArgs(argv);
+  if ('error' in args) {
+    deps.writeError(args.error);
+    return 1;
+  }
+  const context = await readContext(args.contextPath, deps);
+  if ('error' in context) {
+    deps.writeError(context.error);
+    return 1;
+  }
+  const report =
+    args.part === 'metrics' ? await deps.renderMetrics(context, args) : deps.renderCommits(context);
+  deps.write(`${report}\n`);
+  return 0;
+};
+
+if (import.meta.main) {
+  // exitCode, not process.exit: a large report on a pipe must finish flushing first.
+  process.exitCode = await main(process.argv.slice(2), {
+    readText: (path) => Bun.file(path).text(),
+    renderMetrics: renderMetricsPart,
+    renderCommits: renderCommitsPart,
+    write: (text) => {
+      process.stdout.write(text);
+    },
+    writeError: (text) => {
+      process.stderr.write(text);
+    },
+  });
+}
