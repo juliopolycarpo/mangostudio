@@ -463,6 +463,42 @@ fn grep_pattern_error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "grep_pattern")
 }
 
+/// Matches one file may still contribute given the results collected so far.
+fn match_allowance(params: &GrepParams, collected: usize) -> usize {
+    params
+        .max_matches_per_file
+        .min(params.max_results.saturating_sub(collected))
+}
+
+/// Shared prologue of a file scan: the byte length worth reading, or `None`
+/// when the file is skipped.
+///
+/// A file is skipped when no match allowance is left, when its metadata cannot
+/// be read, or when it is not a regular, non-empty file within
+/// `max_file_size_bytes`. The metadata is taken lazily so an exhausted
+/// allowance costs no syscall.
+///
+/// # Example
+///
+/// ```ignore
+/// let Some(len) = scannable_len(params, matches.len(), || fs::metadata(path)) else {
+///     return Ok(false);
+/// };
+/// ```
+fn scannable_len(
+    params: &GrepParams,
+    collected: usize,
+    metadata: impl FnOnce() -> std::io::Result<fs::Metadata>,
+) -> Option<usize> {
+    if match_allowance(params, collected) == 0 {
+        return None;
+    }
+    let metadata = metadata().ok()?;
+    let len = metadata.len();
+    (metadata.is_file() && len > 0 && len <= params.max_file_size_bytes as u64)
+        .then_some(len as usize)
+}
+
 fn scan_file(
     absolute: &Path,
     display: &str,
@@ -472,23 +508,10 @@ fn scan_file(
     cancel: &CancellationToken,
     matches: &mut Vec<Value>,
 ) -> Result<bool, RemoteError> {
-    let allowance = params
-        .max_matches_per_file
-        .min(params.max_results.saturating_sub(matches.len()));
-    if allowance == 0 {
+    let Some(len) = scannable_len(params, matches.len(), || fs::metadata(absolute)) else {
         return Ok(false);
-    }
-    let metadata = match fs::metadata(absolute) {
-        Ok(metadata)
-            if metadata.is_file()
-                && metadata.len() > 0
-                && metadata.len() <= params.max_file_size_bytes as u64 =>
-        {
-            metadata
-        }
-        _ => return Ok(false),
     };
-    let observed = match read(policy, absolute, metadata.len() as usize, cancel) {
+    let observed = match read(policy, absolute, len, cancel) {
         Ok(observed) => observed,
         // The file may disappear or become unreadable after metadata checked it.
         // Bun's scanner treats that as an empty completed scan, not a failed grep.
@@ -512,23 +535,10 @@ fn scan_opened_file(
     cancel: &CancellationToken,
     matches: &mut Vec<Value>,
 ) -> Result<bool, RemoteError> {
-    let allowance = params
-        .max_matches_per_file
-        .min(params.max_results.saturating_sub(matches.len()));
-    if allowance == 0 {
+    let Some(len) = scannable_len(params, matches.len(), || file.metadata()) else {
         return Ok(false);
-    }
-    let metadata = match file.metadata() {
-        Ok(metadata)
-            if metadata.is_file()
-                && metadata.len() > 0
-                && metadata.len() <= params.max_file_size_bytes as u64 =>
-        {
-            metadata
-        }
-        _ => return Ok(false),
     };
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut bytes = Vec::with_capacity(len);
     let mut chunk = [0; 64 * 1024];
     loop {
         check_cancel(cancel)?;
@@ -568,9 +578,7 @@ fn scan_bytes(
     let content = String::from_utf8_lossy(&bytes);
     let regex = matcher.for_file(bytes.len())?;
     let matches_before_file = matches.len();
-    let allowance = params
-        .max_matches_per_file
-        .min(params.max_results.saturating_sub(matches.len()));
+    let allowance = match_allowance(params, matches.len());
     let mut more_matches = false;
     let mut file_matches = 0usize;
     for (index, line) in content.split('\n').enumerate() {
@@ -1154,6 +1162,35 @@ mod tests {
             include_dotfiles: false,
             path_policy: PathPolicy::default(),
         }
+    }
+
+    #[test]
+    fn scannable_len_admits_only_non_empty_regular_files_within_the_size_limit() {
+        let root = scratch_dir("filesystem-scannable-len");
+        fs::write(root.join("empty.txt"), "").unwrap();
+        fs::write(root.join("small.txt"), "abc").unwrap();
+        fs::write(root.join("large.txt"), "abcdef").unwrap();
+        let mut params = grep_params(&root, "x");
+        params.max_file_size_bytes = 4;
+        let len = |name: &str| scannable_len(&params, 0, || fs::metadata(root.join(name)));
+        assert_eq!(len("small.txt"), Some(3), "small regular file");
+        assert_eq!(len("empty.txt"), None, "empty file");
+        assert_eq!(len("large.txt"), None, "file past max_file_size_bytes");
+        assert_eq!(len("."), None, "directory");
+        assert_eq!(len("missing.txt"), None, "missing file");
+    }
+
+    #[test]
+    fn scannable_len_skips_without_reading_metadata_once_the_allowance_is_spent() {
+        let root = scratch_dir("filesystem-scannable-len-allowance");
+        let mut params = grep_params(&root, "x");
+        params.max_results = 2;
+        let unread = || -> std::io::Result<fs::Metadata> {
+            panic!("metadata read although the result allowance is exhausted")
+        };
+        assert_eq!(scannable_len(&params, 2, unread), None);
+        params.max_matches_per_file = 0;
+        assert_eq!(scannable_len(&params, 0, unread), None);
     }
 
     #[test]
