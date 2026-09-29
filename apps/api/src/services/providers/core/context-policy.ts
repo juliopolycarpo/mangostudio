@@ -250,8 +250,12 @@ export function getModelContextLimit(modelName: string): number {
 
   // Tier 3: legacy prefix heuristics for broad model families not in curated table
 
-  // OpenAI GPT-4o, GPT-4.1, GPT-5 → 1M
-  if (lower.startsWith('gpt-4o') || lower.startsWith('gpt-4.1') || lower.startsWith('gpt-5')) {
+  // OpenAI GPT-4o, GPT-4.1, GPT-5 and later → 1M
+  if (
+    lower.startsWith('gpt-4o') ||
+    lower.startsWith('gpt-4.1') ||
+    /^gpt-(?:[5-9]|\d{2,})/.test(lower)
+  ) {
     return 1_048_576;
   }
 
@@ -274,13 +278,14 @@ export function getModelContextLimit(modelName: string): number {
     return 1_048_576;
   }
 
-  // Claude 3+ and Claude 4 models → 200k
+  // Claude 3+ and Claude 4 models, and the named families (sonnet/opus/haiku/fable) → 200k
   if (
     lower.startsWith('claude-3') ||
     lower.startsWith('claude-4') ||
     lower.startsWith('claude-sonnet') ||
     lower.startsWith('claude-opus') ||
-    lower.startsWith('claude-haiku')
+    lower.startsWith('claude-haiku') ||
+    lower.startsWith('claude-fable')
   ) {
     return 200_000;
   }
