@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import type { WorkspaceName } from '../../lib/config';
 import type { CoverageSummary } from '../model/metrics';
-import { type Measurement, measured, stale } from '../model/states';
+import { type Measurement, measured, stale, unavailable } from '../model/states';
 import { BASE_REPOSITORY_FILES, makeFakeRepository } from '../testing/fake-repository';
 import { expectState } from '../testing/measurement-assertions';
 import { makeCoverageSummary } from '../testing/metrics-fixture';
@@ -23,6 +23,7 @@ const makeDeps = (
     trackedFiles: repo.trackedFiles,
     readText: repo.readText,
     deliveredCoverage: () => null,
+    deliveredLanes: () => unavailable('no lane results in this fixture'),
     readCoverage: (lane) => {
       calls.coverageReads.push(lane);
       return Promise.resolve(makeCoverageSummary(55));

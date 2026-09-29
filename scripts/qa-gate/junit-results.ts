@@ -1,5 +1,5 @@
-// Count test outcomes from the JUnit XML each lane writes, and fold the
-// per-shard files back into one per-workspace tally.
+// Count test outcomes from the JUnit XML each lane writes, and turn the folded
+// per-lane results (./results/) into the suite-level tally the fragment carries.
 //
 // This replaces parsing the runner log. Counts come from `<testcase>` elements
 // rather than the `<testsuites>` header, because producers disagree on the
@@ -14,31 +14,47 @@
 // ./unhandled-errors.ts instead.
 
 import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../lib/config';
-import { TEST_LANES, type TestLane } from '../lib/test-lanes';
-import type { TestErrorHeadline, TestSuiteStats } from './collect/types';
+import type { TestLane } from '../lib/test-lanes';
+import type { LaneResult, TestErrorHeadline, TestSuiteStats } from './collect/types';
+import { type Measurement, presentValue } from './model/states';
 import type { UnhandledErrors } from './unhandled-errors';
 
 const MAX_HEADLINES = 5;
 const MAX_HEADLINE_CHARS = 400;
 
+type CaseOutcome = 'passed' | 'failed' | 'skipped' | 'todo';
+
+/** One `<testcase>` with the identity that lets a repeated run of it be recognised. */
+export interface JunitCase {
+  /** `file|classname|name|line`: stable across reruns, distinct for same-titled tests on different lines. */
+  readonly identity: string;
+  readonly outcome: CaseOutcome;
+  /** The owning file, when the report names one. */
+  readonly file: string | null;
+  /** Present exactly for a failed case. */
+  readonly headline: TestErrorHeadline | null;
+}
+
 export interface JunitCounts {
   readonly tests: number;
   readonly passed: number;
   readonly failed: number;
+  /** Skipped cases, excluding `todo`. */
   readonly skipped: number;
+  /** Bun reports a todo as `<skipped message="TODO"/>`. */
+  readonly todo: number;
   /** Distinct files owning at least one failing case. */
   readonly failedFiles: readonly string[];
   readonly headlines: readonly TestErrorHeadline[];
+  /** Every case in document order; nothing is deduplicated within one report. */
+  readonly cases: readonly JunitCase[];
+  /**
+   * Why the document cannot be the whole report, or null when it is complete:
+   * no closing `</testsuites>`, a cut-off element, or a `tests` header that
+   * disagrees with the cases found. Counts from a truncated report are a lower bound.
+   */
+  readonly truncated: string | null;
 }
-
-const EMPTY_COUNTS: JunitCounts = {
-  tests: 0,
-  passed: 0,
-  failed: 0,
-  skipped: 0,
-  failedFiles: [],
-  headlines: [],
-};
 
 const NUMERIC_ENTITY_RE = /&#(\d+);/g;
 const HEX_ENTITY_RE = /&#x([0-9a-fA-F]+);/g;
@@ -89,18 +105,81 @@ const endOfOpenTag = (xml: string, start: number): number => {
 const clip = (text: string): string =>
   text.length <= MAX_HEADLINE_CHARS ? text : `${text.slice(0, MAX_HEADLINE_CHARS - 1)}…`;
 
+const TESTCASE_CLOSE = '</testcase>';
+const TESTSUITES_CLOSE = '</testsuites>';
+
+/** The root element's declared `tests` count, or null when the header does not carry one. */
+const declaredTests = (xml: string): number | null => {
+  const open = xml.indexOf('<testsuites');
+  if (open === -1) return null;
+  const end = endOfOpenTag(xml, open);
+  if (end === -1) return null;
+  const declared = Number(readAttributes(xml.slice(open, end)).tests);
+  return Number.isInteger(declared) && declared >= 0 ? declared : null;
+};
+
 /**
- * Count outcomes and collect failure headlines from one JUnit document.
+ * Whether the document is demonstrably the whole report. `endedInsideElement`
+ * is set by the scan when a `<testcase>` open tag or body ran off the end.
+ */
+const truncationReason = (
+  xml: string,
+  cases: number,
+  endedInsideElement: boolean
+): string | null => {
+  if (endedInsideElement) return 'a testcase element was cut off';
+  if (!xml.includes(TESTSUITES_CLOSE)) return `no closing ${TESTSUITES_CLOSE}`;
+  const declared = declaredTests(xml);
+  if (declared !== null && declared !== cases) {
+    return `header declares ${declared} tests but ${cases} testcases were found`;
+  }
+  return null;
+};
+
+const caseIdentity = (attributes: Readonly<Record<string, string>>): string =>
+  [
+    attributes.file ?? '',
+    attributes.classname ?? '',
+    attributes.name ?? '',
+    attributes.line ?? '',
+  ].join('|');
+
+const TODO_MARKER_RE = /<skipped[^>]*message="TODO"/;
+
+const outcomeOf = (body: string): CaseOutcome => {
+  if (body.includes('<failure')) return 'failed';
+  if (!body.includes('<skipped')) return 'passed';
+  return TODO_MARKER_RE.test(body) ? 'todo' : 'skipped';
+};
+
+const failureHeadline = (
+  attributes: Readonly<Record<string, string>>,
+  body: string,
+  originatedIn: string | null
+): TestErrorHeadline => {
+  const failureAt = body.indexOf('<failure');
+  const failureEnd = endOfOpenTag(body, failureAt);
+  const failureAttributes =
+    failureEnd === -1 ? {} : readAttributes(body.slice(failureAt, failureEnd));
+  const message = failureAttributes.message ?? failureAttributes.type ?? 'test failed';
+  return {
+    message: clip(`${attributes.name ?? 'test'}: ${message}`.trim()),
+    originatedIn: originatedIn ? clip(originatedIn) : null,
+  };
+};
+
+/**
+ * Count outcomes and collect failure headlines from one JUnit document. A
+ * document that is not demonstrably whole says so in `truncated`; its counts
+ * are then a lower bound, never a complete total.
  * // Usage: parseJunitXml(await Bun.file('.mango/artifacts/junit/api.xml').text());
  */
 export const parseJunitXml = (xml: string): JunitCounts => {
-  let tests = 0;
-  let passed = 0;
-  let failed = 0;
-  let skipped = 0;
+  const cases: JunitCase[] = [];
   const failedFiles = new Set<string>();
   const headlines: TestErrorHeadline[] = [];
   const seen = new Set<string>();
+  let endedInsideElement = false;
 
   let cursor = 0;
   while (true) {
@@ -108,135 +187,119 @@ export const parseJunitXml = (xml: string): JunitCounts => {
     if (open === -1) break;
 
     const openEnd = endOfOpenTag(xml, open);
-    if (openEnd === -1) break;
+    if (openEnd === -1) {
+      endedInsideElement = true;
+      break;
+    }
 
     const openTag = xml.slice(open, openEnd);
     const attributes = readAttributes(openTag);
-    const selfClosing = openTag.endsWith('/>');
-
     let body = '';
-    if (selfClosing) {
+    if (openTag.endsWith('/>')) {
       cursor = openEnd;
     } else {
-      const close = xml.indexOf('</testcase>', openEnd);
+      const close = xml.indexOf(TESTCASE_CLOSE, openEnd);
+      endedInsideElement ||= close === -1;
       body = close === -1 ? xml.slice(openEnd) : xml.slice(openEnd, close);
-      cursor = close === -1 ? xml.length : close + '</testcase>'.length;
+      cursor = close === -1 ? xml.length : close + TESTCASE_CLOSE.length;
     }
 
-    tests++;
-    const failureAt = body.indexOf('<failure');
-    if (failureAt !== -1) {
-      failed++;
-      const failureEnd = endOfOpenTag(body, failureAt);
-      const failureAttributes =
-        failureEnd === -1 ? {} : readAttributes(body.slice(failureAt, failureEnd));
-      // `file` is Bun's; the classic dialect puts the file in `classname`.
-      const originatedIn = attributes.file ?? attributes.classname ?? null;
-      if (originatedIn) failedFiles.add(originatedIn);
-      const message = failureAttributes.message ?? failureAttributes.type ?? 'test failed';
-      const headline = clip(`${attributes.name ?? 'test'}: ${message}`.trim());
-      const origin = originatedIn ? clip(originatedIn) : null;
-      const key = `${headline}\0${origin ?? ''}`;
-      if (headlines.length < MAX_HEADLINES && !seen.has(key)) {
-        seen.add(key);
-        headlines.push({ message: headline, originatedIn: origin });
-      }
-    } else if (body.includes('<skipped')) {
-      skipped++;
-    } else {
-      passed++;
+    const outcome = outcomeOf(body);
+    // `file` is Bun's; the classic dialect puts the file in `classname`.
+    const originatedIn = attributes.file ?? attributes.classname ?? null;
+    const headline = outcome === 'failed' ? failureHeadline(attributes, body, originatedIn) : null;
+    cases.push({ identity: caseIdentity(attributes), outcome, file: originatedIn, headline });
+    if (!headline) continue;
+
+    if (originatedIn) failedFiles.add(originatedIn);
+    const key = `${headline.message}\0${headline.originatedIn ?? ''}`;
+    if (headlines.length < MAX_HEADLINES && !seen.has(key)) {
+      seen.add(key);
+      headlines.push(headline);
     }
   }
 
-  return { tests, passed, failed, skipped, failedFiles: [...failedFiles], headlines };
+  const tally = (outcome: CaseOutcome): number =>
+    cases.filter((testCase) => testCase.outcome === outcome).length;
+
+  return {
+    tests: cases.length,
+    passed: tally('passed'),
+    failed: tally('failed'),
+    skipped: tally('skipped'),
+    todo: tally('todo'),
+    failedFiles: [...failedFiles],
+    headlines,
+    cases,
+    truncated: truncationReason(xml, cases.length, endedInsideElement),
+  };
 };
 
-const addCounts = (left: JunitCounts, right: JunitCounts): JunitCounts => ({
-  tests: left.tests + right.tests,
-  passed: left.passed + right.passed,
-  failed: left.failed + right.failed,
-  skipped: left.skipped + right.skipped,
-  // A file cannot span two shards, but a lane's own report can name it twice;
-  // the set keeps the count honest either way.
-  failedFiles: [...new Set([...left.failedFiles, ...right.failedFiles])],
-  headlines: [...left.headlines, ...right.headlines].slice(0, MAX_HEADLINES),
-});
-
-export interface LaneResult {
+/** One lane's fold: its registry entry and the measurement of its results. */
+export interface LaneOutcome {
   readonly lane: TestLane;
-  readonly counts: JunitCounts;
-  /** Number of shard files that existed for this lane. */
-  readonly reports: number;
+  readonly result: Measurement<LaneResult>;
 }
 
-/**
- * Read one lane's JUnit report out of every shard directory and sum them. A
- * shard that produced no file for the lane is skipped rather than treated as
- * zero: under `--shard` a lane whose slice was empty legitimately writes
- * nothing, and `reports` reports how many were found so a caller can tell that
- * apart from every shard failing to write.
- * // Usage: await readLaneResults(['shard-1', 'shard-2']);
- */
-export const readLaneResults = async (
-  shardDirs: readonly string[]
-): Promise<readonly LaneResult[]> =>
-  Promise.all(
-    TEST_LANES.map(async (lane) => {
-      let counts = EMPTY_COUNTS;
-      let reports = 0;
-      for (const dir of shardDirs) {
-        const file = Bun.file(`${dir}/${lane.junitPath}`);
-        if (!(await file.exists())) continue;
-        reports++;
-        counts = addCounts(counts, parseJunitXml(await file.text()));
-      }
-      return { lane, counts, reports };
-    })
-  );
+const NO_RESULT: LaneResult = {
+  passed: 0,
+  failed: 0,
+  skipped: 0,
+  todo: 0,
+  recovered: 0,
+  failedFiles: 0,
+  shards: { expected: 0, complete: 0 },
+  nonZeroExits: 0,
+  timedOut: 0,
+  retriedJobs: 0,
+  headlines: [],
+  recoveredFailures: [],
+};
+
+/** Sum one counter over every lane that has a value; an unavailable lane adds nothing. */
+const sumPresent = (outcomes: readonly LaneOutcome[], pick: (lane: LaneResult) => number): number =>
+  outcomes.reduce((sum, { result }) => sum + pick(presentValue(result) ?? NO_RESULT), 0);
 
 /** Fold lane results into the per-workspace pass counts the QA fragment carries. */
 const passCountsByWorkspace = (
-  results: readonly LaneResult[]
+  outcomes: readonly LaneOutcome[]
 ): Readonly<Record<WorkspaceName | 'root', number>> => {
   // Derived, never hand-listed: a workspace missing from this seed would make
   // `counts[lane.workspace] += n` produce NaN and serialize the total as null.
   const counts: Record<string, number> = Object.fromEntries(
     ['root', ...ALL_WORKSPACE_NAMES].map((workspace) => [workspace, 0])
   );
-  for (const { lane, counts: laneCounts } of results) {
-    counts[lane.workspace] += laneCounts.passed;
+  for (const { lane, result } of outcomes) {
+    counts[lane.workspace] += presentValue(result)?.passed ?? 0;
   }
   return counts as Readonly<Record<WorkspaceName | 'root', number>>;
 };
 
 /**
- * Build the QA fragment's tests entry from the lane reports plus the
- * unhandled errors JUnit cannot carry.
+ * Build the QA fragment's tests entry from the folded lanes plus the unhandled
+ * errors JUnit cannot carry. The counters are lower bounds whenever a lane is
+ * not `measured`; the caller states that with a `partial` measurement.
  *
  * Failure fields stay omitted on a green run so stored baselines and the
  * rendered report are unchanged by this switch. `parseMiss` keeps its meaning:
  * nothing structured explains the outcome — a non-zero exit with no JUnit
- * failures, or a configured lane that wrote no report at all (Bun can fail to
- * write JUnit and still exit 0).
- * // Usage: buildTestSuiteStats(await readLaneResults(dirs), errors, 0, 91);
+ * failures, or a configured lane that delivered no results at all (Bun can
+ * fail to write JUnit and still exit 0).
+ * // Usage: buildTestSuiteStats(outcomes, errors, 0, 91);
  */
 export const buildTestSuiteStats = (
-  results: readonly LaneResult[],
+  outcomes: readonly LaneOutcome[],
   unhandledErrors: UnhandledErrors,
   exitCode: number | null,
   durationSeconds: number | null
 ): TestSuiteStats => {
-  const passedByWorkspace = passCountsByWorkspace(results);
-  const failed = results.reduce((sum, result) => sum + result.counts.failed, 0);
+  const passedByWorkspace = passCountsByWorkspace(outcomes);
+  const failed = sumPresent(outcomes, (lane) => lane.failed);
   // Bun's `file` attribute is workspace-relative, so the same path in two
-  // lanes is two files. Namespace before counting so they do not collapse.
-  const failedFiles = new Set(
-    results.flatMap((result) =>
-      result.counts.failedFiles.map((file) => `${result.lane.id}:${file}`)
-    )
-  );
+  // lanes is two files; each lane already counts its own distinct files.
+  const failedFiles = sumPresent(outcomes, (lane) => lane.failedFiles);
   const headlines = [
-    ...results.flatMap((result) => result.counts.headlines),
+    ...outcomes.flatMap(({ result }) => presentValue(result)?.headlines ?? []),
     ...unhandledErrors.headlines,
   ].slice(0, MAX_HEADLINES);
 
@@ -248,25 +311,25 @@ export const buildTestSuiteStats = (
   };
 
   const hasFailureSignal =
-    failed > 0 || failedFiles.size > 0 || unhandledErrors.errors > 0 || headlines.length > 0;
-  // A lane with `reports === 0` is not an empty shard slice: every configured
-  // lane is expected to write at least one file across the shard set. Bun can
-  // print `JUnitReportFailed` and still exit 0, which would otherwise tally as
-  // a green suite of zero tests.
-  const missingLaneReports = results.some((result) => result.reports === 0);
+    failed > 0 || failedFiles > 0 || unhandledErrors.errors > 0 || headlines.length > 0;
+  // A lane with no readable result is not an empty shard slice: every
+  // configured lane is expected to deliver at least one report across the
+  // shard set. Bun can print `JUnitReportFailed` and still exit 0, which would
+  // otherwise tally as a green suite of zero tests.
+  const unreadableLane = outcomes.some(({ result }) => presentValue(result) === null);
 
   if (hasFailureSignal) {
     return {
       ...stats,
       failed,
-      failedFiles: failedFiles.size,
+      failedFiles,
       errors: unhandledErrors.errors,
       ...(headlines.length > 0 ? { headlines } : {}),
-      ...(missingLaneReports ? { parseMiss: true } : {}),
+      ...(unreadableLane ? { parseMiss: true } : {}),
     };
   }
 
-  if (missingLaneReports || (exitCode !== 0 && exitCode !== null)) {
+  if (unreadableLane || (exitCode !== 0 && exitCode !== null)) {
     return { ...stats, parseMiss: true };
   }
 

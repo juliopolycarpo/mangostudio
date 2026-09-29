@@ -130,6 +130,15 @@ describe('Test workflow merge job', () => {
     expect(merge).toContain('merge-test-shards.ts shards "$SHARD_COUNT"');
   });
 
+  test('passes the shard count to the test-metrics collector', () => {
+    // The collector derives the expected job set from the count. Without it a
+    // shard that never uploaded is invisible and its lanes would read as a
+    // smaller, complete total instead of `partial`.
+    expect(merge).toContain(
+      'collect-test-metrics.ts shard-summary.json shards "$SHARD_COUNT" > test-metrics.json'
+    );
+  });
+
   test('the coverage diagnostics upload keeps dot-directories', () => {
     // `.mango` is a dot-directory too, so this hits the same trap as the shard
     // upload: an empty artifact that reports success, exactly when someone is

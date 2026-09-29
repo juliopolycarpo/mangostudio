@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 import { laneById, TEST_LANES } from '../lib/test-lanes';
-import { buildTestSuiteStats, type LaneResult, parseJunitXml } from './junit-results';
+import { buildTestSuiteStats, type LaneOutcome, parseJunitXml } from './junit-results';
+import type { LaneResult } from './model/lanes';
+import { measured, partial, unavailable } from './model/states';
 
 // Both fixtures are real reporter output, not hand-written XML — a
 // hand-written fixture would quietly agree with the parser.
@@ -13,24 +15,30 @@ import { buildTestSuiteStats, type LaneResult, parseJunitXml } from './junit-res
 const fixture = (name: string): Promise<string> =>
   Bun.file(join(import.meta.dir, 'testing/fixtures', `${name}.xml`)).text();
 
-const laneResult = (
+const laneOutcome = (
   id: Parameters<typeof laneById>[0],
-  counts: LaneResult['counts'],
-  reports = 1
-): LaneResult => ({
+  overrides: Partial<LaneResult> = {},
+  state: 'measured' | 'unavailable' = 'measured'
+): LaneOutcome => ({
   lane: laneById(id),
-  counts,
-  reports,
-});
-
-const counts = (overrides: Partial<LaneResult['counts']> = {}): LaneResult['counts'] => ({
-  tests: 0,
-  passed: 0,
-  failed: 0,
-  skipped: 0,
-  failedFiles: [],
-  headlines: [],
-  ...overrides,
+  result:
+    state === 'unavailable'
+      ? unavailable(`no ${id} results`)
+      : measured({
+          passed: 0,
+          failed: 0,
+          skipped: 0,
+          todo: 0,
+          recovered: 0,
+          failedFiles: 0,
+          shards: { expected: 1, complete: 1 },
+          nonZeroExits: 0,
+          timedOut: 0,
+          retriedJobs: 0,
+          headlines: [],
+          recoveredFailures: [],
+          ...overrides,
+        }),
 });
 
 describe('parseJunitXml', () => {
@@ -89,10 +97,10 @@ describe('parseJunitXml', () => {
 });
 
 describe('buildTestSuiteStats', () => {
-  const green: readonly LaneResult[] = [
-    laneResult('api-unit', counts({ tests: 10, passed: 10 })),
-    laneResult('root', counts({ tests: 4, passed: 4 })),
-    laneResult('frontend', counts({ tests: 8, passed: 8 })),
+  const green: readonly LaneOutcome[] = [
+    laneOutcome('api-unit', { passed: 10 }),
+    laneOutcome('root', { passed: 4 }),
+    laneOutcome('frontend', { passed: 8 }),
   ];
 
   it('sums a green run per workspace and omits every failure field', () => {
@@ -108,19 +116,25 @@ describe('buildTestSuiteStats', () => {
     });
   });
 
+  it('folds both api lanes into the api counter while each lane keeps its own result', () => {
+    const stats = buildTestSuiteStats(
+      [laneOutcome('api-unit', { passed: 10 }), laneOutcome('api-integration', { passed: 5 })],
+      { errors: 0, headlines: [] },
+      0,
+      1
+    );
+    expect(stats.api).toBe(15);
+  });
+
   it('reports failures and their files', () => {
     const stats = buildTestSuiteStats(
       [
-        laneResult(
-          'api-unit',
-          counts({
-            tests: 10,
-            passed: 8,
-            failed: 2,
-            failedFiles: ['a.test.ts', 'b.test.ts'],
-            headlines: [{ message: 'a: boom', originatedIn: 'a.test.ts' }],
-          })
-        ),
+        laneOutcome('api-unit', {
+          passed: 8,
+          failed: 2,
+          failedFiles: 2,
+          headlines: [{ message: 'a: boom', originatedIn: 'a.test.ts' }],
+        }),
       ],
       { errors: 0, headlines: [] },
       1,
@@ -161,18 +175,15 @@ describe('buildTestSuiteStats', () => {
     expect(stats.failed).toBeUndefined();
   });
 
-  it('reports zero for a lane that produced no report at all', () => {
+  it('reports zero passed for a run with no lanes at all', () => {
     const stats = buildTestSuiteStats([], { errors: 0, headlines: [] }, 0, 0);
     expect(stats.passed).toBe(0);
     for (const lane of TEST_LANES) expect(stats[lane.workspace]).toBe(0);
   });
 
-  it('sets parseMiss when a configured lane wrote no JUnit report on a green exit', () => {
+  it('sets parseMiss when a configured lane delivered nothing on a green exit', () => {
     const stats = buildTestSuiteStats(
-      [
-        laneResult('api-unit', counts({ tests: 0, passed: 0 }), 0),
-        laneResult('root', counts({ tests: 4, passed: 4 })),
-      ],
+      [laneOutcome('api-unit', {}, 'unavailable'), laneOutcome('root', { passed: 4 })],
       { errors: 0, headlines: [] },
       0,
       91
@@ -182,25 +193,43 @@ describe('buildTestSuiteStats', () => {
     expect(stats.failed).toBeUndefined();
   });
 
+  it('counts a partial lane as its lower bound and does not set parseMiss for it', () => {
+    const stats = buildTestSuiteStats(
+      [
+        {
+          lane: laneById('shared'),
+          result: partial(
+            {
+              passed: 30,
+              failed: 0,
+              skipped: 0,
+              todo: 0,
+              recovered: 0,
+              failedFiles: 0,
+              shards: { expected: 8, complete: 7 },
+              nonZeroExits: 0,
+              timedOut: 0,
+              retriedJobs: 0,
+              headlines: [],
+              recoveredFailures: [],
+            },
+            'shard 3 lost'
+          ),
+        },
+      ],
+      { errors: 0, headlines: [] },
+      0,
+      91
+    );
+    expect(stats.shared).toBe(30);
+    expect(stats.parseMiss).toBeUndefined();
+  });
+
   it('counts the same relative path as two failed files when two lanes own it', () => {
     const stats = buildTestSuiteStats(
       [
-        laneResult(
-          'shared',
-          counts({
-            tests: 1,
-            failed: 1,
-            failedFiles: ['tests/unit/runtime-home.test.ts'],
-          })
-        ),
-        laneResult(
-          'frontend',
-          counts({
-            tests: 1,
-            failed: 1,
-            failedFiles: ['tests/unit/runtime-home.test.ts'],
-          })
-        ),
+        laneOutcome('shared', { failed: 1, failedFiles: 1 }),
+        laneOutcome('frontend', { failed: 1, failedFiles: 1 }),
       ],
       { errors: 0, headlines: [] },
       1,

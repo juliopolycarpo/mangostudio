@@ -3,8 +3,10 @@
 // component has no collector for is `unsupported`, never a missing key or a zero.
 
 import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../../lib/config';
+import type { LaneEntry, LaneResult } from '../model/lanes';
 import type { Component, CoverageSummary } from '../model/metrics';
 import { type Measurement, unsupported } from '../model/states';
+import { lanesForComponentRoot } from '../results/lane-components';
 import { measureComponentLoc } from './loc';
 import { type ComponentSpec, ownerOf } from './registry';
 import { measure } from './support';
@@ -14,6 +16,8 @@ export interface ComponentDeps {
   readonly readText: (path: string) => Promise<string>;
   /** Coverage the Test job delivered for a workspace lane, or null when it delivered none. */
   readonly deliveredCoverage: (workspace: WorkspaceName) => Measurement<CoverageSummary> | null;
+  /** The result the Test job delivered for a test lane (never a local read). */
+  readonly deliveredLanes: (laneId: string) => Measurement<LaneResult>;
   /** Local fallback when no fragment delivered a lane's coverage. */
   readonly readCoverage: (workspace: WorkspaceName) => Promise<CoverageSummary>;
   /** Number of TypeScript errors for the tsconfig under `root`. */
@@ -46,6 +50,13 @@ const tsErrorsOf = (spec: ComponentSpec, deps: ComponentDeps): Promise<Measureme
   return measure(`ts:${spec.name}`, () => deps.countTsErrors(spec.root));
 };
 
+/** The test lanes a component owns; empty when none is wired for it (e.g. a crate before its lane lands). */
+const lanesOf = (spec: ComponentSpec, deps: ComponentDeps): LaneEntry[] =>
+  lanesForComponentRoot(spec.root).map((lane) => ({
+    id: lane.id,
+    tests: deps.deliveredLanes(lane.id),
+  }));
+
 /**
  * Measure every discovered component. Files are assigned by longest root, so a
  * nested root is counted once, under the component that owns it.
@@ -71,6 +82,7 @@ export const collectComponents = async (
       loc: await measureComponentLoc(filesByComponent.get(spec.id) ?? [], deps.readText),
       coverage: await coverageOf(spec, deps),
       tsErrors: await tsErrorsOf(spec, deps),
+      lanes: lanesOf(spec, deps),
     });
   }
   return components;

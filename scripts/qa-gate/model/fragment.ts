@@ -5,6 +5,7 @@
 import Type, { type Static } from 'typebox';
 
 import { SHA_PATTERN } from './envelope';
+import { LANE_ID_PATTERN, LaneResultSchema } from './lanes';
 import { CoverageSummarySchema, TestSuiteStatsSchema } from './metrics';
 import { measurement } from './states';
 
@@ -12,6 +13,10 @@ export const TestMetricsFragmentSchema = Type.Object(
   {
     sourceSha: Type.String({ pattern: SHA_PATTERN }),
     tests: measurement(TestSuiteStatsSchema),
+    /** Per-lane test results keyed by lane id; absent only in fragments from before lanes existed. */
+    lanes: Type.Optional(
+      Type.Record(Type.String({ pattern: LANE_ID_PATTERN }), measurement(LaneResultSchema))
+    ),
     /** Coverage keyed by the workspace (or, later, crate) the lane measured. */
     coverage: Type.Record(
       Type.String({ pattern: '^[A-Za-z0-9_.-]{1,80}$' }),

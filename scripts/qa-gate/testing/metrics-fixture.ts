@@ -12,7 +12,9 @@ import type {
   Metrics,
 } from '../collect/types';
 import type { Provenance } from '../model/envelope';
+import type { LaneEntry, LaneResult } from '../model/lanes';
 import { type Measurement, measured, unsupported } from '../model/states';
+import { lanesForComponentRoot } from '../results/lane-components';
 
 /** Build a coverage summary where every bucket sits at `pct`. // Usage: makeCoverageSummary(82) */
 export const makeCoverageSummary = (pct = 80): CoverageSummary => ({
@@ -33,6 +35,36 @@ export const makeLocStats = (code = 100): LocStats => ({
   config: emptyLocBucket(),
   docs: emptyLocBucket(),
 });
+
+/** A fully delivered lane result: 100 passing tests over 8 complete shards. // Usage: makeLaneResult({ failed: 2 }) */
+export const makeLaneResult = (overrides: Partial<LaneResult> = {}): LaneResult => ({
+  passed: 100,
+  failed: 0,
+  skipped: 0,
+  todo: 0,
+  recovered: 0,
+  failedFiles: 0,
+  shards: { expected: 8, complete: 8 },
+  nonZeroExits: 0,
+  timedOut: 0,
+  retriedJobs: 0,
+  headlines: [],
+  recoveredFailures: [],
+  ...overrides,
+});
+
+/**
+ * Healthy lane entries for every lane the registry gives `root`, with per-lane
+ * overrides. // Usage: makeLanes('apps/api', { 'api-unit': unavailable('shard 3 lost') })
+ */
+export const makeLanes = (
+  root: string,
+  overrides: Readonly<Record<string, Measurement<LaneResult>>> = {}
+): LaneEntry[] =>
+  lanesForComponentRoot(root).map((lane) => ({
+    id: lane.id,
+    tests: overrides[lane.id] ?? measured(makeLaneResult()),
+  }));
 
 const COMPONENT_NAMES: Readonly<Record<string, readonly [ComponentKind, string]>> = {
   'apps/frontend': ['workspace', '@mangostudio/frontend'],
@@ -59,6 +91,7 @@ export const makeComponent = (root: string, overrides: Partial<Component> = {}):
     loc: measured(makeLocStats()),
     coverage: onLane ? measured(makeCoverageSummary()) : notOnLane('coverage'),
     tsErrors: onLane ? measured(0) : notOnLane('type-check'),
+    lanes: makeLanes(root),
     ...overrides,
   };
 };

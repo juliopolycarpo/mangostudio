@@ -7,6 +7,7 @@ import type { CoverageSummary } from '../model/metrics';
 import type { CoverageSummary as LcovCoverageSummary } from '../parse-lcov';
 
 export type { TestMetricsFragment } from '../model/fragment';
+export type { LaneResult } from '../model/lanes';
 export type {
   BundleStats,
   Component,
