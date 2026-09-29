@@ -22,6 +22,18 @@ export const inlineCode = (text: string): string =>
 export const escapeHtml = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+/**
+ * Backslash-escape backticks in untrusted plain text so they can never open a
+ * code span. Without this, a subject like "add `<T>`" renders its escaped
+ * entities literally (`&lt;T&gt;`) inside a code span, and an unmatched
+ * backtick swallows the text after it. Backslashes are escaped first so one
+ * already in the text cannot cancel the escape of the backtick after it. Do not
+ * use inside a code span or fenced block, where it would show literally.
+ * // Usage: escapeBackticks('use `a`') -> 'use \\`a\\`'
+ */
+export const escapeBackticks = (text: string): string =>
+  text.replace(/\\/g, '\\\\').replace(/`/g, '\\`');
+
 export const formatNumber = (value: number): string => value.toLocaleString('en-US');
 
 export const formatPct = (value: number): string => `${value.toFixed(2)}%`;
