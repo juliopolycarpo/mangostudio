@@ -504,7 +504,13 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
 
   const durationSeconds = Math.round((Date.now() - startedAt) / 1000);
   const shard = /^\d+$/.test(options.label) ? Number(options.label) : options.label;
-  await Bun.write(options.metaFile, `${JSON.stringify({ shard, exitCode, durationSeconds })}\n`);
+  // `attempts` is the receipt of a retry: a hang that a clean second attempt
+  // recovered still reports exit 0, and without this the QA report could not
+  // tell that the job ran twice.
+  await Bun.write(
+    options.metaFile,
+    `${JSON.stringify({ shard, exitCode, durationSeconds, attempts })}\n`
+  );
 
   const githubOutput = process.env.GITHUB_OUTPUT;
   if (githubOutput) {
