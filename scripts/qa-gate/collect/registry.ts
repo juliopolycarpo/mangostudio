@@ -64,7 +64,7 @@ export interface RegistryInput {
 }
 
 /** Where an integrity failure is fixed; named in the error so the fix is one click away. */
-export const REGISTRY_SOURCE = 'scripts/qa-gate/collect/registry.ts';
+const REGISTRY_SOURCE = 'scripts/qa-gate/collect/registry.ts';
 
 /** Thrown when discovery cannot account for every tracked file or manifest. */
 export class RegistryIntegrityError extends Error {
