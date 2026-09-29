@@ -25,12 +25,13 @@ import { collectComponents } from './collect/components';
 import { collectDependencyStats } from './collect/dependencies';
 import { collectDuplication } from './collect/duplication';
 import {
-  missingTestMetrics,
   NO_FRAGMENT,
   parseTestMetricsFragment,
+  producerAbsence,
   resolveTestMetrics,
   type TestMetricsInputs,
   unusableTestMetrics,
+  withheldTestMetrics,
 } from './collect/fragment';
 import { readProvenance } from './collect/provenance';
 import { discoverComponents } from './collect/registry';
@@ -41,6 +42,7 @@ import { countTsErrors } from './collect/typescript';
 import { readWorkspaceCoverageSummary } from './coverage-summary';
 import { type QaMetricsEnvelope, serializeQaMetricsEnvelope } from './metrics-envelope';
 import { QA_METRICS_SCHEMA_VERSION } from './model/envelope';
+import type { ProducerAbsence } from './model/states';
 
 const parseTestMetricsPath = (argv: readonly string[]): string | null => {
   const flagIndex = argv.indexOf('--test-metrics');
@@ -53,9 +55,13 @@ const parseTestMetricsPath = (argv: readonly string[]): string | null => {
   return path;
 };
 
-const loadTestMetrics = async (path: string, sourceSha: string): Promise<TestMetricsInputs> => {
+const loadTestMetrics = async (
+  path: string,
+  sourceSha: string,
+  absence: ProducerAbsence
+): Promise<TestMetricsInputs> => {
   const file = Bun.file(path);
-  if (!(await file.exists())) return missingTestMetrics(path);
+  if (!(await file.exists())) return withheldTestMetrics(absence, path);
   const parsed = parseTestMetricsFragment(await file.text());
   if ('error' in parsed) {
     stderrLog(`${path}: ${parsed.error}`);
@@ -115,6 +121,15 @@ const envPrNumber = (): number | null => {
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
 };
 
+const resolveInputs = (
+  path: string | null,
+  sourceSha: string,
+  absence: ProducerAbsence | null
+): Promise<TestMetricsInputs> | TestMetricsInputs => {
+  if (path) return loadTestMetrics(path, sourceSha, absence ?? 'missing');
+  return absence ? withheldTestMetrics(absence) : NO_FRAGMENT;
+};
+
 const rootManifest = JSON.parse(await Bun.file(join(ROOT_DIR, 'package.json')).text()) as {
   version?: string;
 };
@@ -123,9 +138,10 @@ const provenance = readProvenance(process.env, {
   producerVersion: rootManifest.version ?? '0.0.0',
 });
 const testMetricsPath = parseTestMetricsPath(process.argv.slice(2));
-const testMetrics = testMetricsPath
-  ? await loadTestMetrics(testMetricsPath, provenance.sourceSha)
-  : NO_FRAGMENT;
+// In CI the Test job's result says why a fragment is absent (canceled, failed,
+// skipped). No result at all is a local run: no flag reads coverage from disk.
+const absence = producerAbsence(process.env.QA_TEST_RESULT);
+const testMetrics = await resolveInputs(testMetricsPath, provenance.sourceSha, absence);
 
 const envelope: QaMetricsEnvelope = {
   schemaVersion: QA_METRICS_SCHEMA_VERSION,

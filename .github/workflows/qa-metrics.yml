@@ -10,6 +10,12 @@ name: QA Metrics
 
 on:
   workflow_call:
+    inputs:
+      test_result:
+        description: Result of the Test job (success, failure, cancelled, skipped) that produced the test fragment.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -52,6 +58,7 @@ jobs:
           QA_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           QA_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           QA_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          QA_TEST_RESULT: ${{ inputs.test_result }}
         run: |
           set -euo pipefail
           fragment="./qa-test-metrics/test-metrics.json"

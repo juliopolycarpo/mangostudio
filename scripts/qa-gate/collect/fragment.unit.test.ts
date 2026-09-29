@@ -13,12 +13,13 @@ import {
 import { expectState } from '../testing/measurement-assertions';
 import { makeCoverageSummary, makeMetrics } from '../testing/metrics-fixture';
 import {
-  missingTestMetrics,
   NO_FRAGMENT,
   parseTestMetricsFragment,
+  producerAbsence,
   resolveTestMetrics,
   type TestMetricsInputs,
   unusableTestMetrics,
+  withheldTestMetrics,
 } from './fragment';
 
 const SOURCE_SHA = 'a'.repeat(40);
@@ -134,16 +135,39 @@ describe('absent and unusable fragments', () => {
     ]);
   });
 
-  it('a fragment path that does not exist is unavailable for tests and every lane, not a disk read', () => {
-    const inputs = missingTestMetrics('./qa-test-metrics/test-metrics.json');
+  it.each(['missing', 'failed', 'canceled', 'skipped'] as const)(
+    'a fragment the producer never delivered (%s) is unavailable for tests and every lane, not a disk read',
+    (cause) => {
+      const inputs = withheldTestMetrics(cause, './qa-test-metrics/test-metrics.json');
 
-    const reasons = ['test metrics fragment ./qa-test-metrics/test-metrics.json not found'];
-    expect(expectState(inputs.tests, 'unavailable').reasons).toEqual(reasons);
-    expect(
-      expectState(
-        inputs.deliveredCoverage('frontend') ?? measured(makeCoverageSummary()),
-        'unavailable'
-      ).reasons
-    ).toEqual(reasons);
+      const reasons = [
+        `test metrics fragment ./qa-test-metrics/test-metrics.json not delivered: producer ${cause}`,
+      ];
+      expect(expectState(inputs.tests, 'unavailable').reasons).toEqual(reasons);
+      expect(expectState(laneCoverage(inputs, 'frontend'), 'unavailable').reasons).toEqual(reasons);
+    }
+  );
+
+  it('names the producer fate even when no fragment path was passed', () => {
+    expect(expectState(withheldTestMetrics('canceled').tests, 'unavailable').reasons).toEqual([
+      'test metrics fragment not delivered: producer canceled',
+    ]);
+  });
+});
+
+describe('producerAbsence', () => {
+  it.each([
+    ['cancelled', 'canceled'],
+    ['failure', 'failed'],
+    ['skipped', 'skipped'],
+    ['success', 'missing'],
+    ['something-new', 'missing'],
+  ])('maps needs.test.result %p to %p', (result, expected) => {
+    expect(producerAbsence(result)).toBe(expected as never);
+  });
+
+  it('reports no producer for an empty result, so a local run keeps reading coverage from disk', () => {
+    expect(producerAbsence('')).toBeNull();
+    expect(producerAbsence(undefined)).toBeNull();
   });
 });

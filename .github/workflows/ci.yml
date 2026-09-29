@@ -153,6 +153,10 @@ jobs:
     needs: [test, build]
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     uses: ./.github/workflows/qa-metrics.yml
+    with:
+      # Lets the collector tell a canceled or failed Test job from a fragment
+      # that never arrived, instead of reporting both as missing.
+      test_result: ${{ needs.test.result }}
 
   smoke:
     # Boots the exact target artifacts produced once by distribution, then

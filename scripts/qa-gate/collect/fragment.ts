@@ -9,7 +9,13 @@ import Value from 'typebox/value';
 import type { WorkspaceName } from '../../lib/config';
 import { type TestMetricsFragment, TestMetricsFragmentSchema } from '../model/fragment';
 import type { CoverageSummary, TestSuiteStats } from '../model/metrics';
-import { absentFromProducer, type Measurement, stale, unavailable } from '../model/states';
+import {
+  absentFromProducer,
+  type Measurement,
+  type ProducerAbsence,
+  stale,
+  unavailable,
+} from '../model/states';
 
 /** What the fragment contributes to the envelope. */
 export interface TestMetricsInputs {
@@ -78,10 +84,36 @@ export const unusableTestMetrics = (reason: string): TestMetricsInputs => ({
 });
 
 /**
- * A fragment path that was passed but does not exist: the Test job's output
- * never arrived, so tests and every lane are unavailable rather than read from
- * disk.
- * // Usage: missingTestMetrics('./qa-test-metrics/test-metrics.json')
+ * Fragment the Test job never delivered. Tests and every lane are unavailable
+ * with the producer's fate as the reason, rather than read from disk.
+ * // Usage: withheldTestMetrics('canceled', './qa-test-metrics/test-metrics.json')
  */
-export const missingTestMetrics = (path: string): TestMetricsInputs =>
-  unusableTestMetrics(`test metrics fragment ${path} not found`);
+export const withheldTestMetrics = (cause: ProducerAbsence, path?: string): TestMetricsInputs => {
+  const cell = absentFromProducer<never>(
+    path ? `test metrics fragment ${path}` : 'test metrics fragment',
+    cause
+  );
+  return { tests: cell, deliveredCoverage: () => cell };
+};
+
+/**
+ * Map the Test job's Actions result (`needs.test.result`) to what happened to
+ * its fragment. Null for an empty value (a local run, no producer to ask).
+ * A `success` with no fragment is still `missing`: the job ran but delivered nothing.
+ * // Usage: producerAbsence('cancelled') // 'canceled'
+ */
+export const producerAbsence = (result: string | undefined): ProducerAbsence | null => {
+  switch (result) {
+    case undefined:
+    case '':
+      return null;
+    case 'cancelled':
+      return 'canceled';
+    case 'failure':
+      return 'failed';
+    case 'skipped':
+      return 'skipped';
+    default:
+      return 'missing';
+  }
+};
