@@ -27,7 +27,7 @@ deliberately not one of the manifests below.
    ```
 
 2. Move every protocol manifest to the new version. The script rewrites
-   `packages/protocol/package.json` and the Cargo workspace version, refreshes `Cargo.lock` and
+   `packages/protocol/package.json`, the Cargo workspace version and the `[workspace.dependencies]` pins that track it, refreshes `Cargo.lock` and
    the fuzz workspace's own `crates/mango-protocol/fuzz/Cargo.lock`, and **prepends** the new section to `packages/protocol/CHANGELOG.md`. It runs on a maintainer's
    machine, not in CI.
 
@@ -57,10 +57,17 @@ deliberately not one of the manifests below.
    `bun run protocol:verify-package`, publishes to npm, publishes to crates.io, and creates the
    GitHub release with `spec/schema/1/*.json` attached.
 
-The version is one number across four manifests — `packages/protocol/package.json`, the root
-`Cargo.toml` `[workspace.package]` version, `Cargo.lock`, and the fuzz workspace's
-`crates/mango-protocol/fuzz/Cargo.lock`. `bun run protocol:check` fails when
-any of them drifts, and the workflow refuses a tag whose manifests disagree with it.
+The version is one number, kept in lockstep across:
+
+- `packages/protocol/package.json`;
+- the root `Cargo.toml` `[workspace.package]` version and the `[workspace.dependencies]` pin of
+  each protocol-versioned path crate;
+- those crates' entries in the root `Cargo.lock`;
+- the `mango-protocol` entry in the fuzz workspace's own `crates/mango-protocol/fuzz/Cargo.lock`.
+
+`readVersions` in `scripts/protocol/versions.ts` is the authoritative list.
+`bun run protocol:check` fails when any of them drifts, and the workflow refuses a tag whose
+checked version sites disagree with it.
 
 ## Packing: why publishing never happens from `packages/protocol`
 
