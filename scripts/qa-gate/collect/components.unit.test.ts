@@ -130,6 +130,18 @@ describe('collectComponents', () => {
     }
   });
 
+  it('says why each kind without a lane has no coverage, so the reason points at the fix', async () => {
+    const { deps } = makeDeps();
+
+    const components = await collectComponents(await specsOf(), deps);
+
+    const reasonOf = (name: string): string | undefined =>
+      expectState(byName(components, name).coverage, 'unsupported').reasons[0];
+    expect(reasonOf('scripts')).toContain('root `bun test scripts` lane runs without --coverage');
+    expect(reasonOf('beta')).toContain('Rust coverage is not collected');
+    expect(reasonOf('mangostudio')).toContain('scripts/lib/test-lanes.ts');
+  });
+
   it('runs the type-check only where a tsconfig is tracked', async () => {
     const { deps, calls } = makeDeps();
 

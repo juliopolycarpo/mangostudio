@@ -4,7 +4,7 @@
 
 import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../../lib/config';
 import type { LaneEntry, LaneResult } from '../model/lanes';
-import type { Component, CoverageSummary } from '../model/metrics';
+import type { Component, ComponentKind, CoverageSummary } from '../model/metrics';
 import { type Measurement, unsupported } from '../model/states';
 import { lanesForComponentRoot } from '../results/lane-components';
 import { measureComponentLoc } from './loc';
@@ -28,13 +28,24 @@ export interface ComponentDeps {
 export const coverageLane = (spec: ComponentSpec): WorkspaceName | null =>
   ALL_WORKSPACE_NAMES.find((lane) => spec.root === `apps/${lane}`) ?? null;
 
+/** Why a component with no JS coverage lane has none, by kind: the fix for each differs. */
+const NO_LANE_DETAIL: Readonly<Record<ComponentKind, string>> = {
+  scripts: 'the root `bun test scripts` lane runs without --coverage, so no LCOV is produced',
+  crate: 'Rust coverage is not collected, and the JS LCOV lanes do not measure crates',
+  workspace: 'no `bun test --coverage` lane is declared for it in scripts/lib/test-lanes.ts',
+};
+
 const coverageOf = (
   spec: ComponentSpec,
   deps: ComponentDeps
 ): Promise<Measurement<CoverageSummary>> => {
   const lane = coverageLane(spec);
   if (lane === null) {
-    return Promise.resolve(unsupported(`no coverage lane is wired for ${spec.kind} ${spec.name}`));
+    return Promise.resolve(
+      unsupported(
+        `no coverage lane is wired for ${spec.kind} ${spec.name}: ${NO_LANE_DETAIL[spec.kind]}`
+      )
+    );
   }
   const delivered = deps.deliveredCoverage(lane);
   if (delivered) return Promise.resolve(delivered);
