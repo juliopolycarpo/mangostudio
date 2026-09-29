@@ -198,6 +198,11 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'deepseek-r1-distill-qwen-32b': 65_536,
   'deepseek-r1-distill-llama-70b': 65_536,
   'deepseek-reasoner': 65_536,
+  // OpenAI GPT-5.x smaller / Codex models — max input, below the total window
+  'gpt-5.4-mini': 272_000,
+  'gpt-5.3-codex': 272_000,
+  'codex-mini-latest': 200_000,
+  'gpt-oss': 131_072,
   // Anthropic Claude 3.x
   'claude-3-opus-20240229': 200_000,
   'claude-3-sonnet-20240229': 200_000,

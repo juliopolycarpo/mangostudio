@@ -69,6 +69,13 @@ describe('getModelContextLimit', () => {
     expect(getModelContextLimit('gpt-10')).toBe(1_048_576);
   });
 
+  it('returns the documented input limit for smaller GPT and Codex API models', () => {
+    expect(getModelContextLimit('gpt-5.4-mini')).toBe(272_000);
+    expect(getModelContextLimit('gpt-5.3-codex')).toBe(272_000);
+    expect(getModelContextLimit('codex-mini-latest')).toBe(200_000);
+    expect(getModelContextLimit('gpt-oss-120b')).toBe(131_072);
+  });
+
   it('keeps the default for gpt-image models', () => {
     expect(getModelContextLimit('gpt-image-2')).toBe(128_000);
   });
