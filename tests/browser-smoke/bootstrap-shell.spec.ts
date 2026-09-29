@@ -1,11 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { dismissWorkdirPicker } from './support/workdir-picker';
 
 /**
  * A refused shell request, in a real browser: the model catalog fails, the
  * shell's navigation stays up with the bootstrap panel in place of the page,
  * nothing retries it behind the person's back, and the panel's retry asks for
- * the catalog once and brings the page back.
+ * the catalog once and brings back the page navigated to meanwhile.
  *
  * The unit lanes pin the loader and the content region separately; only a
  * browser runs the real router, its intent preloads and every observer the
@@ -59,7 +58,6 @@ test('a refused catalog keeps navigation up and recovers through the retry', asy
     `expected catalog requests after one retry: ${refusedRequests + 1} | received: ${catalogRequests}`
   ).toBe(refusedRequests + 1);
 
-  await dismissWorkdirPicker(page, 5_000);
-  await page.getByRole('button', { name: 'Chat', exact: true }).filter({ visible: true }).click();
-  await expect(page.getByTestId('composer')).toBeVisible({ timeout: 20_000 });
+  // The page the person navigated to while the panel stood in for it.
+  await expect(page.getByRole('heading', { name: 'Gallery', level: 1 })).toBeVisible();
 });
