@@ -17,6 +17,7 @@ import { QueryClient } from '@tanstack/react-query';
 import {
   appSettingsForLocationWrite,
   appSettingsKeys,
+  keepLibraryDefaultsPending,
   libraryLocationDefaultsPending,
 } from '../../../../src/features/settings/app/queries';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -92,5 +93,21 @@ describe('appSettingsForLocationWrite', () => {
     await expect(appSettingsForLocationWrite(queryClient)).rejects.toThrow(
       'expected app settings with detected library-location defaults | received: libraryLocationDefaultsPending: true'
     );
+  });
+});
+
+describe('keepLibraryDefaultsPending', () => {
+  it('re-applies the flag a normalizer dropped when the source was pending', () => {
+    expect(keepLibraryDefaultsPending(PENDING_ANSWER, DETECTED_SETTINGS)).toEqual({
+      ...DETECTED_SETTINGS,
+      libraryLocationDefaultsPending: true,
+    });
+  });
+
+  it('leaves settings untouched when the source was detected or absent', () => {
+    expect(keepLibraryDefaultsPending(DEFAULT_APP_SETTINGS, DETECTED_SETTINGS)).toBe(
+      DETECTED_SETTINGS
+    );
+    expect(keepLibraryDefaultsPending(undefined, DETECTED_SETTINGS)).toBe(DETECTED_SETTINGS);
   });
 });

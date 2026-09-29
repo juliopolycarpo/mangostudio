@@ -3,7 +3,7 @@ import type { AppSettings, AppSettingsPutBody } from '@mangostudio/shared/app-se
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
 import { en } from '@mangostudio/shared/i18n';
 import type { WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { act, flushAsyncRender, renderHook, screen, waitFor } from '../../support/harness/render';
 import {
   advanceTimersByTimeAsync,
@@ -32,7 +32,9 @@ mock.module('../../../src/lib/api-client', () => ({
 // Static imports are evaluated before any statement above runs, so the hook
 // has to come in afterwards or it binds the real api-client.
 const { useGlobalSettings } = await import('../../../src/hooks/use-global-settings');
-const { appSettingsQueryOptions } = await import('../../../src/features/settings/app/queries');
+const { appSettingsKeys, appSettingsQueryOptions, libraryLocationDefaultsPending } = await import(
+  '../../../src/features/settings/app/queries'
+);
 
 type MockGetResult = Awaited<ReturnType<typeof mockGet>>;
 type MockPutResult = Awaited<ReturnType<typeof mockPut>>;
@@ -650,5 +652,74 @@ describe('useGlobalSettings', () => {
 
     expect(mockPut.mock.calls[0]?.[0]).not.toHaveProperty('profileSettings');
     expect(mockPut.mock.calls[0]?.[0]).toMatchObject({ thinkingEnabled: true });
+  });
+});
+
+describe('useGlobalSettings while library defaults are pending', () => {
+  beforeEach(() => {
+    mockGet.mockReset();
+    mockPut.mockReset();
+    mockGet.mockResolvedValue(
+      mockQueryResult({ ...DEFAULT_APP_SETTINGS, libraryLocationDefaultsPending: true })
+    );
+  });
+
+  function renderWithCache() {
+    return renderHook(() => ({ settings: useGlobalSettings(), queryClient: useQueryClient() }));
+  }
+
+  function cachedPending(queryClient: ReturnType<typeof useQueryClient>): boolean {
+    return libraryLocationDefaultsPending(
+      queryClient.getQueryData<AppSettings>(appSettingsKeys.current())
+    );
+  }
+
+  it('keeps the cache flagged pending through an optimistic edit, and never sends the flag', async () => {
+    let answerPut: ((result: MockPutResult) => void) | undefined;
+    mockPut.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answerPut = resolve;
+        })
+    );
+    const { result } = renderWithCache();
+    await waitFor(() => expect(cachedPending(result.current.queryClient)).toBe(true));
+
+    act(() => result.current.settings.setTextSystemPrompt('edited while detecting'));
+    await waitFor(() =>
+      expect(result.current.settings.promptSettings.textSystemPrompt).toBe('edited while detecting')
+    );
+
+    expect(
+      cachedPending(result.current.queryClient),
+      'expected cache after optimistic edit: pending | received: detected (placeholder locations would read as real)'
+    ).toBe(true);
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0]).not.toHaveProperty('libraryLocationDefaultsPending');
+
+    // The PUT answers after detection, so its answer clears the flag.
+    act(() => answerPut?.(mockMutationResult(DEFAULT_APP_SETTINGS)));
+    await waitFor(() => expect(cachedPending(result.current.queryClient)).toBe(false));
+  });
+
+  it('rolls a failed save back to a cache that is still pending', async () => {
+    mockPut.mockResolvedValue(
+      mockMutationResult(null, { value: { error: 'detection failed before the write' } })
+    );
+    const { result } = renderWithCache();
+    await waitFor(() => expect(cachedPending(result.current.queryClient)).toBe(true));
+
+    act(() => result.current.settings.setTextSystemPrompt('lost edit'));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(result.current.settings.promptSettings.textSystemPrompt).toBe(
+        DEFAULT_APP_SETTINGS.promptSettings.textSystemPrompt
+      )
+    );
+
+    expect(
+      cachedPending(result.current.queryClient),
+      'expected cache after rollback: pending | received: detected (the placeholder snapshot lost its flag)'
+    ).toBe(true);
   });
 });

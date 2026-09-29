@@ -50,6 +50,23 @@ export function libraryLocationDefaultsPending(settings: object | undefined): bo
 }
 
 /**
+ * Carries the pending flag of `source` over to `settings`. For a client-side
+ * rewrite of the cache (an optimistic edit, its rollback) that normalized the
+ * flag away: dropped, it would make placeholder library-location defaults read
+ * as detected until the next refetch, and a location write would store them.
+ *
+ * @example
+ * queryClient.setQueryData(key, keepLibraryDefaultsPending(cached, nextSettings));
+ */
+export function keepLibraryDefaultsPending(
+  source: object | undefined,
+  settings: AppSettings
+): AppSettings | AppSettingsResponse {
+  if (!libraryLocationDefaultsPending(source)) return settings;
+  return { ...settings, libraryLocationDefaultsPending: true };
+}
+
+/**
  * The app settings a library-location write may build its full location map
  * on. Never the pending placeholder: every location in that map travels as an
  * explicit value, so writing it would store the placeholder for good. Refetches
