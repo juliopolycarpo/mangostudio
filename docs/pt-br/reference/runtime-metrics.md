@@ -25,6 +25,19 @@ tempos como relativos):
 O LTO fat custa cerca de 50% a mais de build que o thin por mais 9% de tamanho. O runtime é
 construído uma vez por alvo de release no CI, então o download menor vence.
 
+Medido de novo em 2026-09-29 em `02aca80f`, no mesmo tipo de máquina, agora com todos os núcleos
+(`CARGO_BUILD_JOBS` sem valor), um diretório de target limpo por build e três builds intercalados
+por perfil (medianas):
+
+| Perfil                                   | Tempo de build | CPU de usuário | Tamanho sem símbolos | Pico de RSS do runtime |
+| ---------------------------------------- | -------------: | -------------: | -------------------: | ---------------------: |
+| `lto = "thin"`, 1 CGU, strip             |          360 s |         1155 s |             28,91 MB |                +~3 MiB |
+| `lto = "fat"`, 1 CGU, strip (o entregue) |          491 s |         1045 s |             26,28 MB |                      — |
+
+O thin ainda faz o build cerca de 27% mais rápido, mas entrega um binário 10% maior e soma cerca de
+3 MiB ao pico de RSS de cada processo do runtime, sem diferença mensurável de latência. O fat fica:
+builds de release são jobs raros de CI, enquanto tamanho e memória chegam a toda instalação.
+
 ## Tamanho do binário por alvo
 
 Artefatos do `runtime-build.yml`, descompactados, os dois construídos sobre a mesma fonte de

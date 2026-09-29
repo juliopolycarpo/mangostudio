@@ -25,6 +25,19 @@ times as relative):
 Fat LTO costs about 50% more build time than thin for another 9% of size. The runtime is
 built once per release target in CI, so the smaller download wins.
 
+Re-measured on 2026-09-29 at `02aca80f` on the same kind of machine, this time with all cores
+(`CARGO_BUILD_JOBS` unset), a clean target directory per build and three interleaved builds per
+profile (medians):
+
+| Profile                               | Build time | User CPU | Stripped size | Runtime peak RSS |
+| ------------------------------------- | ---------: | -------: | ------------: | ---------------: |
+| `lto = "thin"`, 1 CGU, strip          |      360 s |   1155 s |      28.91 MB |          +~3 MiB |
+| `lto = "fat"`, 1 CGU, strip (shipped) |      491 s |   1045 s |      26.28 MB |                — |
+
+Thin still builds about 27% faster, but ships a 10% larger binary and adds about 3 MiB of peak
+RSS to every runtime process, with no measurable latency difference. Fat stays: release builds
+are rare CI jobs, while size and memory reach every install.
+
 ## Binary size per target
 
 `runtime-build.yml` artifacts, uncompressed, both built on the same `feat/rust-runtime` source
