@@ -77,7 +77,10 @@ describe('resolveTestMetrics', () => {
 
     expect(expectState(inputs.tests, 'measured').value.passed).toBe(1_157);
     expect(measuredValue(inputs.deliveredCoverage('api'))?.lines.pct).toBe(77);
-    expect(inputs.deliveredCoverage('frontend')).toBeNull();
+    // A lane the fragment delivered nothing for is unavailable, never read from local disk.
+    expect(expectState(laneCoverage(inputs, 'frontend'), 'unavailable').reasons).toEqual([
+      'fragment delivered no coverage for frontend',
+    ]);
   });
 
   it('marks every delivered value stale when the fragment measured another commit', () => {

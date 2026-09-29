@@ -20,7 +20,7 @@ import {
 /** What the fragment contributes to the envelope. */
 export interface TestMetricsInputs {
   readonly tests: Measurement<TestSuiteStats>;
-  /** Coverage the fragment delivered for a lane; null means fall back to a local read. */
+  /** Coverage the fragment delivered for a lane; null (only with no fragment at all) means read locally. */
   readonly deliveredCoverage: (lane: WorkspaceName) => Measurement<CoverageSummary> | null;
 }
 
@@ -64,7 +64,10 @@ export const resolveTestMetrics = (
   if (fragment.sourceSha === sourceSha) {
     return {
       tests: fragment.tests,
-      deliveredCoverage: (lane) => fragment.coverage[lane] ?? null,
+      // A delivered fragment is the whole answer: a lane it lacks is unavailable,
+      // never a reason to read stale coverage from disk.
+      deliveredCoverage: (lane) =>
+        fragment.coverage[lane] ?? unavailable(`fragment delivered no coverage for ${lane}`),
     };
   }
   const reason = `test metrics fragment measured ${fragment.sourceSha}, envelope measures ${sourceSha}`;

@@ -600,6 +600,10 @@ describe('baseline resolution', () => {
     const result = publishable(await resolveReportInputs({ github, context }));
 
     expect(result.reportContext.baseArtifact.incomparable).toBeUndefined();
+    // The actionable reason is shown, not the older schema's.
+    expect(result.reportContext.baseArtifact.reason).toBe(
+      `main CI run 91 for base ${BASE_SHA}: qa-metrics artifact is partial: 1 metric(s) not fully measured (metrics/circularDeps=unavailable)`
+    );
   });
 
   it('never accepts a run whose head sha differs from the recorded base', async () => {

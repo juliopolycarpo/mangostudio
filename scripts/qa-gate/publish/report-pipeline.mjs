@@ -108,26 +108,25 @@ async function findBaseline(github, context, baseSha) {
       reason: `no completed, non-cancelled main CI run found for base ${baseSha}`,
     };
   }
-  let verdict = { reason: null, incomparable: false };
-  let rejectedRun = runs[0];
-  let allIncomparable = true;
+  const rejections = [];
   for (const run of runs) {
     const download = await downloadMetricsArchive(github, context, run.id);
-    verdict = download.reason
+    const verdict = download.reason
       ? { reason: download.reason, incomparable: false }
       : baselineVerdict(download.archive, baseSha);
     if (!verdict.reason) return { run, archive: download.archive, reason: null };
-    rejectedRun = run;
-    allIncomparable = allIncomparable && verdict.incomparable;
+    rejections.push({ run, verdict });
   }
-  // `incomparable` is set only when every candidate was recorded under another
-  // schema version, so the report can say so instead of promising a future
-  // baseline; a partial v4 candidate keeps its own reason.
+  // Report the newest rejection that is not merely an older schema: a partial or
+  // unreadable v4 run is the actionable reason, and an older v3 run must not hide
+  // it. `incomparable` is set only when every candidate was recorded under another
+  // schema version, so the report can say so instead of promising a future baseline.
+  const shown = rejections.find(({ verdict }) => !verdict.incomparable) ?? rejections[0];
   return {
     run: runs[0],
     archive: null,
-    reason: `main CI run ${rejectedRun.id} for base ${baseSha}: ${verdict.reason}`,
-    incomparable: allIncomparable,
+    reason: `main CI run ${shown.run.id} for base ${baseSha}: ${shown.verdict.reason}`,
+    incomparable: rejections.every(({ verdict }) => verdict.incomparable),
   };
 }
 
