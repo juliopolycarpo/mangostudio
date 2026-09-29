@@ -11,6 +11,7 @@ import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
+import { createJsonResponseEncoder } from '../../../lib/compiled-json-response';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { parseQueryInt } from '../../../utils/query';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
@@ -34,6 +35,14 @@ import { EnvironmentSelectionError, updateChatUseCase } from '../application/upd
 import { ChatNotFoundError } from '../domain/chat-ownership';
 import { RunnerKindImmutableError } from '../infrastructure/chat-repository';
 
+/**
+ * The chat list is the largest response on the first screen and grows with
+ * history, so it is encoded through a compiled validator rather than the
+ * framework's per-item interpreted check. The route still declares
+ * `ChatListSchema` for OpenAPI and client types.
+ */
+const encodeChatList = createJsonResponseEncoder(ChatListSchema);
+
 function apiError(error: string, code: string): ApiErrorResponse {
   return { error, code };
 }
@@ -43,8 +52,8 @@ export const chatRoutes = (app: Elysia) =>
     app
       .use(requireAuth)
       /** List all chats for the authenticated user ordered by most recently updated. */
-      .get('/', { response: { 200: ChatListSchema } }, ({ user }) => {
-        return listChatsUseCase(user?.id ?? '', getDb());
+      .get('/', { response: { 200: ChatListSchema } }, async ({ user }) => {
+        return encodeChatList(await listChatsUseCase(user?.id ?? '', getDb()));
       })
 
       /** Create a new chat for the authenticated user. */
