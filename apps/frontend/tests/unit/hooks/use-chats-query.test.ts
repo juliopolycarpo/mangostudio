@@ -152,6 +152,50 @@ describe('useCreateChatMutation', () => {
     await drainCapabilityInvalidation();
   });
 
+  it('leaves a chat list that never loaded failed instead of seeding it with the new chat', async () => {
+    const newChat = createMockChat({
+      id: 'chat-new',
+      title: 'My Chat',
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    mockPost.mockResolvedValue(ok(newChat));
+
+    const { result } = renderHook(() => {
+      const mutation = useCreateChatMutation();
+      const queryClient = useQueryClient();
+      return { mutation, queryClient };
+    });
+
+    // The list the bootstrap could not load: failed, and never held data.
+    await act(async () => {
+      await result.current.queryClient
+        .fetchQuery({
+          queryKey: chatKeys.lists(),
+          queryFn: () => Promise.reject(new Error('refused')),
+          retry: false,
+        })
+        .catch(() => undefined);
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({ title: 'My Chat' });
+    });
+
+    // Seeding it would read as "this account has one chat" and clear the
+    // bootstrap panel that offers the retry for the real list.
+    const state = result.current.queryClient.getQueryState(chatKeys.lists());
+    expect(
+      state?.data,
+      `expected never-loaded chat list data: undefined | received: ${JSON.stringify(state?.data)}`
+    ).toBeUndefined();
+    expect(state?.status).toBe('error');
+    expect<unknown>(result.current.queryClient.getQueryData(chatKeys.detail(newChat.id))).toEqual(
+      newChat
+    );
+    await drainCapabilityInvalidation();
+  });
+
   it('throws when the API returns an error', async () => {
     mockPost.mockResolvedValue(fail('Unauthorized'));
 
