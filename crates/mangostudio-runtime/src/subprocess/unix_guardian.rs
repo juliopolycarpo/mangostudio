@@ -1247,6 +1247,9 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     {
         exec_failed_and_exit(fds.exec_error_write, unsafe { errno_raw() });
     }
+    if let Err(error) = unsafe { reset_inherited_signal_state() } {
+        exec_failed_and_exit(fds.exec_error_write, error);
+    }
     let mut error = libc::ENOENT;
     for program in &spec.programs {
         unsafe { libc::execve(program.as_ptr(), spec.argv.as_ptr(), spec.envp.as_ptr()) };
@@ -1256,6 +1259,48 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
         }
     }
     exec_failed_and_exit(fds.exec_error_write, error)
+}
+
+/// Signals the runtime itself sends to a child (`SIGINT`, `SIGTERM`), or that a shell, agent CLI,
+/// or pipeline expects to arrive with the default action (`SIGHUP`, `SIGQUIT`, `SIGPIPE`).
+const CHILD_DEFAULT_SIGNALS: [libc::c_int; 5] = [
+    libc::SIGHUP,
+    libc::SIGINT,
+    libc::SIGQUIT,
+    libc::SIGTERM,
+    libc::SIGPIPE,
+];
+
+/// Gives the target the signal state of a freshly started program, not the runtime's.
+///
+/// `execve` keeps an ignored disposition and the blocked-signal mask. A runtime started under
+/// `nohup`, as a background job of a non-interactive shell, or by a supervisor that ignores
+/// `SIGINT` would otherwise hand that to every child, and the Hub's interrupt (`SIGINT` to the
+/// target's group) would silently do nothing. The same holds for `SIGQUIT`, `SIGHUP`, and a
+/// blocked mask. Rust's runtime also ignores `SIGPIPE`, which `std::process::Command` undoes but
+/// this raw fork path did not. A signal the runtime handles itself (its shutdown handler takes
+/// `SIGINT` and `SIGTERM`) is already reset by `execve`, but that handler is not installed on
+/// every path before a child starts, so no path relies on it.
+///
+/// Only the target is touched. The runtime keeps its own dispositions, so its shutdown handling
+/// is unchanged. Async-signal-safe: `signal` and `sigprocmask` only, on the single-threaded
+/// post-fork path. Returns the `errno` of the failing call.
+///
+/// Usage: `if let Err(errno) = reset_inherited_signal_state() { exec_failed_and_exit(fd, errno) }`.
+unsafe fn reset_inherited_signal_state() -> Result<(), libc::c_int> {
+    for signal in CHILD_DEFAULT_SIGNALS {
+        if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
+            return Err(unsafe { errno_raw() });
+        }
+    }
+    let mut empty = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+    if unsafe { libc::sigemptyset(empty.as_mut_ptr()) } != 0
+        || unsafe { libc::sigprocmask(libc::SIG_SETMASK, empty.as_ptr(), std::ptr::null_mut()) }
+            != 0
+    {
+        return Err(unsafe { errno_raw() });
+    }
+    Ok(())
 }
 
 unsafe fn exec_failed_and_exit(exec_error: RawFd, error: libc::c_int) -> ! {
