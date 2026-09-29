@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
-import type { BunRuntimeProvenance } from './bun-cross-runtime';
 import { NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import {
   ALL_BINARY_TARGETS,
@@ -19,6 +18,32 @@ import {
  */
 const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 3;
 export const DISTRIBUTION_MANIFEST_FILE = 'distribution-manifest.json';
+
+/**
+ * Which Bun ended up inside one target's binaries.
+ *
+ * Part of the manifest's recorded shape, so it lives here rather than in
+ * `bun-cross-runtime.ts`, which produces it and imports this module.
+ *
+ * A foreign runtime cannot be executed here to ask its revision, so the two
+ * sources answer with what each can actually prove: the host's own target is
+ * compiled against the running Bun and reports its revision exactly, while a
+ * fetched one is identified by the digest that was verified before it was used.
+ */
+export interface BunRuntimeProvenance {
+  readonly source: 'host' | 'channel';
+  /** Full 40-character revision. Known only for the running Bun. */
+  readonly revision: string | null;
+  /** SHA-256 of the verified channel asset. Null for the host's own runtime. */
+  readonly sha256: string | null;
+  /**
+   * The channel tag moved while this asset was downloading: the digest published
+   * when the listing was read did not match the bytes that arrived, and a fresh
+   * listing did. Harmless on its own, and the reason binaries from one build can
+   * carry different Bun commits.
+   */
+  readonly tagAdvanced: boolean;
+}
 
 interface DistributionFile {
   readonly path: string;
