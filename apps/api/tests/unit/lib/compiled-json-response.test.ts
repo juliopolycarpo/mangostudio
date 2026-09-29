@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { ValidationError } from 'elysia';
 import Type, { type TSchema } from 'typebox';
+import { Validator as CompileValidator } from 'typebox/compile';
+import { Validator as SchemaValidator } from 'typebox/schema';
 import {
   type CompiledCheck,
   createJsonResponseEncoder,
@@ -37,6 +39,20 @@ class CountingCompilers implements JsonResponseCompilers {
     return typeboxJsonResponseCompilers.mirror(schema);
   }
 }
+
+describe('typeboxJsonResponseCompilers', () => {
+  it('compiles with the typebox/schema compiler Elysia builds response validators with', () => {
+    const check = typeboxJsonResponseCompilers.compile(ListSchema);
+
+    const origin =
+      check instanceof SchemaValidator
+        ? 'typebox/schema'
+        : check instanceof CompileValidator
+          ? 'typebox/compile'
+          : 'unknown';
+    expect(origin).toBe('typebox/schema');
+  });
+});
 
 describe('createJsonResponseEncoder', () => {
   it('serializes a valid value as a JSON response', async () => {

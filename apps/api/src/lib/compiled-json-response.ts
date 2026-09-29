@@ -15,7 +15,8 @@
  * and with the same packages: a compiled `Check` against the same schema, the
  * `exact-mirror` clean that drops keys the schema does not declare, then
  * `Response.json`. A value that fails the check throws Elysia's own response
- * `ValidationError`, so the error handler answers exactly as before.
+ * `ValidationError`, with errors listed by `typebox/value` as Elysia lists
+ * them, so the error handler answers exactly as before.
  *
  * Compilation happens on the first call, not at import, so hub startup does
  * not pay for it.
@@ -24,12 +25,12 @@
 import { ValidationError } from 'elysia';
 import createMirror from 'exact-mirror';
 import type { Static, TSchema } from 'typebox';
-import { Compile } from 'typebox/compile';
+import { Compile } from 'typebox/schema';
+import { Errors } from 'typebox/value';
 
-/** The compiled check an encoder runs; the shape `typebox/compile` returns. */
+/** The compiled check an encoder runs; the shape `typebox/schema` returns. */
 export interface CompiledCheck {
   Check(value: unknown): boolean;
-  Errors(value: unknown): unknown[];
 }
 
 /** Builders the encoder compiles with; injectable so tests can observe them. */
@@ -38,7 +39,10 @@ export interface JsonResponseCompilers {
   mirror(schema: TSchema): (value: unknown) => unknown;
 }
 
-/** The production builders: the same TypeBox compiler and mirror Elysia uses. */
+/**
+ * The production builders: the `typebox/schema` compiler Elysia builds its
+ * response validators with, and `exact-mirror` driven by that same compiler.
+ */
 export const typeboxJsonResponseCompilers: JsonResponseCompilers = {
   compile: (schema) => Compile(schema),
   mirror: (schema) => createMirror(schema, { Compile }),
@@ -62,7 +66,7 @@ export function createJsonResponseEncoder<Schema extends TSchema>(
     compiled ??= { check: compilers.compile(schema), clean: compilers.mirror(schema) };
     const { check, clean } = compiled;
     if (!check.Check(value)) {
-      throw new ValidationError('response', value, () => check.Errors(value), schema);
+      throw new ValidationError('response', value, () => Errors(schema, value), schema);
     }
     return Response.json(clean(value));
   };
