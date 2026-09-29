@@ -9,6 +9,7 @@ import {
   QA_METRICS_MAX_BYTES,
 } from '../qa-gate/metrics-envelope';
 import { readText } from './support/read-text';
+import { extractJobBlock } from './support/workflow-blocks';
 
 // Trust-boundary policy for the PR QA pipeline: workflows that execute
 // pull-request code must stay read-only, and the write-capable publisher must
@@ -97,6 +98,16 @@ describe('unprivileged collection side', () => {
     expect(qaMetrics).toContain('QA_FRONTEND_DIST: ./frontend-dist');
     expect(qaMetrics).not.toContain('cache-scoped');
     expect(ci).toContain('needs: [test, build, changes, rust-coverage]');
+  });
+
+  test('qa-metrics still runs when Rust Coverage is skipped: its condition holds a status-check function', () => {
+    // A job whose `needs` include a skipped job is skipped too, unless its `if`
+    // contains a status-check function (`!cancelled()` counts). Without it a
+    // docs-only PR would get no envelope, and CI / Gate would fail on the skip.
+    const block = extractJobBlock(readText('.github/workflows/ci.yml'), 'qa-metrics');
+
+    expect(block).toContain('needs: [test, build, changes, rust-coverage]');
+    expect(block).toMatch(/if: \$\{\{ !cancelled\(\) && /);
   });
 
   test("the Rust job's relevance and result reach the collector through env vars, not inline expressions", () => {
