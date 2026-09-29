@@ -503,10 +503,15 @@ record (a lazily parsed region another shard exercised). Zero-hit padding from
 those other records stays out so the denominator does not inflate. Same corpus:
 **97.86% lines against 97.86%**.
 
-What the merge cannot make exact is **function** coverage. Bun emits only the
-`FNF:`/`FNH:` totals, never per-function `FN:`/`FNDA:` records, so the union of
-hit functions across shards is not recoverable; the merge reports the best
-shard's count, clamped to the total, which is a lower bound. Measured on
+What the merge cannot make exact is **function** coverage. When the reports
+carry `FN:`/`FNDA:` records the merge unions them by function identity (a
+function hit in two shards counts once), but Bun emits only the `FNF:`/`FNH:`
+totals (checked on 1.4.2 against every shard artifact of a CI run), so for its
+LCOV the union of hit functions is not recoverable; the merge reports the best
+shard's count, clamped to the total, which is a lower bound. **Function coverage
+for the sharded workspaces (api, shared) is therefore a lower bound until Bun
+emits `FN:` records.** It never sums the shards' totals, so a function is not
+double-counted. Measured on
 `apps/runtime` against its own unsharded run:
 
 | Shards | Lines   | Functions |
@@ -526,6 +531,26 @@ coverage carries an enforced gate (see [Coverage](#coverage)), and a gate on a
 number the merge can only approximate would drift with the shard count rather
 than with the tests. Its single whole-run LCOV rides the same merge machinery
 as a one-input degenerate case — a copy.
+
+The merge is also strict about what it is given. Which job directories owe a
+workspace a report comes from the lane registry (`expectedLcovShards` in
+`scripts/ci/merge-test-shards.ts`): a sharded workspace expects one from every
+numbered shard, the frontend one from `test-shard-frontend` alone. A missing,
+unreadable, empty or truncated report fails that workspace's merge naming the
+shard, deletes any earlier merged file, and reaches the QA envelope as
+`unavailable` with that reason — never a lower complete-looking number. The
+merge is order-independent: the same set of shard reports writes the same bytes
+in any order. The same rule holds one level down: if an api lane fails and
+leaves no slice (it could not start, crashed or was killed),
+`scripts/ci/run-workspace-coverage.ts` names the missing slice and stages no
+partial LCOV, and the frontend floor check
+(`scripts/qa-gate/enforce-coverage-thresholds.ts`) fails on a missing, empty or
+truncated frontend report instead of enforcing floors against it. A shard whose
+slice holds no file from a workspace writes no LCOV at all (Bun 1.4.2 writes none
+for a zero-file shard), so it now fails the merge as a missing report; every
+workspace has far more test files than shards, so that does not occur today. A shard report carries no commit stamp, so staleness is not
+detectable per shard; the fragment-level `sourceSha` check catches a fragment
+from another commit.
 
 > **One transitional report.** The PR QA report compares a head against a
 > `main` baseline. The first PRs after sharding landed compare a sharded head

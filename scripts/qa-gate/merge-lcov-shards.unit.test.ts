@@ -1,6 +1,16 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { formatLcov, mergeLcovRecords, parseLcovRecords } from './merge-lcov-shards';
+import {
+  findLcovProblem,
+  formatLcov,
+  LcovMergeError,
+  mergeLcovFiles,
+  mergeLcovRecords,
+  parseLcovRecords,
+} from './merge-lcov-shards';
 import { parseLcovSummary } from './parse-lcov';
 
 const record = (
@@ -227,5 +237,307 @@ describe('formatLcov', () => {
   it('round-trips through the parser', () => {
     const original = mergeLcovRecords([parseLcovRecords(record('src/a.ts', [1, 1], [[7, 2]]))]);
     expect(parseLcovRecords(formatLcov(original))).toEqual(original);
+  });
+});
+
+/** A record that carries `FN:`/`FNDA:` identities, as gcov-style producers emit them. */
+const fnRecord = (
+  sourcePath: string,
+  functions: ReadonlyArray<[line: number, name: string, hits: number]>,
+  lines: ReadonlyArray<[line: number, hits: number]> = [[1, 1]]
+): string =>
+  [
+    'TN:',
+    `SF:${sourcePath}`,
+    ...functions.map(([line, name]) => `FN:${line},${name}`),
+    ...functions.map(([, name, hits]) => `FNDA:${hits},${name}`),
+    `FNF:${functions.length}`,
+    `FNH:${functions.filter(([, , hits]) => hits > 0).length}`,
+    ...lines.map(([line, hits]) => `DA:${line},${hits}`),
+    `LF:${lines.length}`,
+    `LH:${lines.filter(([, hits]) => hits > 0).length}`,
+    'end_of_record',
+  ].join('\n');
+
+const mergedFunctions = (...reports: string[]) => {
+  const [merged] = mergeLcovRecords(reports.map((report) => parseLcovRecords(report)));
+  return { found: merged?.functionsFound, hit: merged?.functionsHit };
+};
+
+describe('function coverage per function identity', () => {
+  it('counts a function hit in two shards once', () => {
+    const merged = mergedFunctions(
+      fnRecord('src/a.ts', [[1, 'parse', 3]]),
+      fnRecord('src/a.ts', [[1, 'parse', 2]])
+    );
+    expect(merged).toEqual({ found: 1, hit: 1 });
+  });
+
+  it('unions the functions different shards hit instead of keeping the best shard', () => {
+    const merged = mergedFunctions(
+      fnRecord('src/a.ts', [
+        [1, 'parse', 4],
+        [5, 'render', 0],
+      ]),
+      fnRecord('src/a.ts', [
+        [1, 'parse', 0],
+        [5, 'render', 2],
+      ])
+    );
+    // A shard-max lower bound would report 1 of 2 here.
+    expect(merged).toEqual({ found: 2, hit: 2 });
+  });
+
+  it('keeps a function only a non-shape shard exercised, and drops its zero-hit padding', () => {
+    const shape = fnRecord(
+      'src/a.ts',
+      [[1, 'parse', 1]],
+      [
+        [1, 1],
+        [2, 1],
+      ]
+    );
+    const other = fnRecord('src/a.ts', [
+      [1, 'parse', 0],
+      [9, 'lazy', 2],
+      [12, 'never', 0],
+    ]);
+    expect(mergedFunctions(shape, other)).toEqual({ found: 2, hit: 2 });
+  });
+
+  it('writes FN/FNDA back so a second merge hop keeps the identities', () => {
+    const once = mergeLcovRecords([
+      parseLcovRecords(fnRecord('src/a.ts', [[1, 'parse', 1]])),
+      parseLcovRecords(fnRecord('src/a.ts', [[1, 'parse', 0]])),
+    ]);
+    const lcov = formatLcov(once);
+    expect(lcov).toContain('FN:1,parse');
+    expect(lcov).toContain('FNDA:1,parse');
+    expect(parseLcovRecords(lcov)).toEqual(once);
+  });
+
+  it('reads the FN:<start>,<end>,<name> form under the same identity', () => {
+    const [parsed] = parseLcovRecords(
+      'SF:src/a.ts\nFN:1,4,parse\nFNDA:2,parse\nFNF:1\nFNH:1\nDA:1,2\nend_of_record\n'
+    );
+    expect([...(parsed?.functionHits ?? [])]).toEqual([['1,parse', 2]]);
+  });
+
+  // Bun emits FNF/FNH only. There is no identity to union, so the merge stays
+  // the documented lower bound rather than inventing one.
+  it('falls back to the best shard, clamped, for records that carry only totals', () => {
+    const merged = mergedFunctions(
+      record('src/a.ts', [4, 3], [[1, 1]]),
+      record('src/a.ts', [4, 2], [[1, 1]])
+    );
+    expect(merged).toEqual({ found: 4, hit: 3 });
+  });
+});
+
+describe('merge order independence', () => {
+  // Same hit count, different coverable sets: keeping "the first record seen"
+  // made LF depend on which shard was listed first.
+  const tied = [
+    record(
+      'src/a.ts',
+      [5, 1],
+      [
+        [1, 1],
+        [2, 1],
+        [3, 0],
+      ]
+    ),
+    record(
+      'src/a.ts',
+      [2, 1],
+      [
+        [1, 1],
+        [2, 1],
+      ]
+    ),
+    record('src/b.ts', [1, 1], [[1, 1]]),
+  ];
+
+  const permutations = <T>(items: readonly T[]): T[][] =>
+    items.length <= 1
+      ? [[...items]]
+      : items.flatMap((item, index) =>
+          permutations(items.filter((_, other) => other !== index)).map((rest) => [item, ...rest])
+        );
+
+  it('writes the same LCOV for every shard order', () => {
+    const outputs = permutations(tied).map((order) =>
+      formatLcov(mergeLcovRecords(order.map((report) => parseLcovRecords(report))))
+    );
+    expect(new Set(outputs).size).toBe(1);
+  });
+
+  it('breaks a tie on hit count toward the larger coverable set', () => {
+    const [merged] = mergeLcovRecords(tied.slice(0, 2).map((report) => parseLcovRecords(report)));
+    expect(merged?.lineHits.size).toBe(3);
+    expect(merged?.functionsFound).toBe(5);
+  });
+
+  it('sorts records by source path whatever order the shards listed them in', () => {
+    const merged = mergeLcovRecords([
+      parseLcovRecords(record('src/b.ts', [1, 1], [[1, 1]])),
+      parseLcovRecords(record('src/a.ts', [1, 1], [[1, 1]])),
+    ]);
+    expect(merged.map((entry) => entry.sourcePath)).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+});
+
+describe('findLcovProblem', () => {
+  const complete = record('src/a.ts', [1, 1], [[1, 1]]);
+
+  it('accepts a complete report', () => {
+    expect(findLcovProblem(`${complete}\n`)).toBeNull();
+  });
+
+  it.each([
+    ['empty', '', 'report is empty'],
+    ['whitespace only', '\n  \n', 'report is empty'],
+    ['without any SF record', 'TN:\n', 'report has no SF records'],
+    [
+      'cut off before the last end_of_record',
+      complete.replace('\nend_of_record', ''),
+      'truncated: record for src/a.ts has no end_of_record',
+    ],
+    [
+      'with two records and no end_of_record between them',
+      'SF:src/a.ts\nDA:1,1\nSF:src/b.ts\nDA:1,1\nend_of_record\n',
+      'truncated: record for src/a.ts has no end_of_record',
+    ],
+    ['with a non-numeric hit count', 'SF:a.ts\nDA:1,x\nend_of_record\n', 'malformed line "DA:1,x"'],
+    ['with a non-numeric total', 'SF:a.ts\nFNF:many\nend_of_record\n', 'malformed line "FNF:many"'],
+  ])('rejects a report that is %s', (_label, text, expected) => {
+    expect(findLcovProblem(text)).toBe(expected);
+  });
+});
+
+describe('mergeLcovFiles', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  const workspace = async (): Promise<string> => {
+    const dir = await mkdtemp(join(tmpdir(), 'mango-lcov-merge-'));
+    dirs.push(dir);
+    return dir;
+  };
+
+  const report = async (dir: string, name: string, text: string) => {
+    const path = join(dir, name, 'lcov.info');
+    await Bun.write(path, text);
+    return { shard: name, path };
+  };
+
+  const complete = (hits: number): string =>
+    `${record('src/a.ts', [1, hits > 0 ? 1 : 0], [[1, hits]])}\n`;
+
+  const failure = async (promise: Promise<unknown>): Promise<LcovMergeError> => {
+    try {
+      await promise;
+    } catch (caught) {
+      if (caught instanceof LcovMergeError) return caught;
+      throw new Error(`expected LcovMergeError | received: ${String(caught)}`);
+    }
+    throw new Error('expected LcovMergeError | received: the merge succeeded');
+  };
+
+  it('fails on a missing shard report naming the shard, and writes nothing', async () => {
+    const dir = await workspace();
+    const out = join(dir, 'out.lcov');
+    const present = await report(dir, 'test-shard-1', complete(1));
+
+    const error = await failure(
+      mergeLcovFiles(out, [present, { shard: 'test-shard-2', path: join(dir, 'gone.lcov') }])
+    );
+
+    expect(error.message).toContain('shard test-shard-2: missing report at');
+    expect(error.message).not.toContain('shard test-shard-1');
+    expect(await Bun.file(out).exists()).toBe(false);
+  });
+
+  it('removes a previous output so a failed merge cannot leave last run coverage behind', async () => {
+    const dir = await workspace();
+    const out = join(dir, 'out.lcov');
+    await Bun.write(out, complete(1));
+
+    await failure(mergeLcovFiles(out, [{ shard: 'test-shard-3', path: join(dir, 'gone.lcov') }]));
+
+    expect(await Bun.file(out).exists()).toBe(false);
+  });
+
+  it('fails on a truncated shard report naming the shard', async () => {
+    const dir = await workspace();
+    const good = await report(dir, 'test-shard-1', complete(1));
+    const cut = await report(dir, 'test-shard-2', complete(1).replace('end_of_record\n', ''));
+
+    const error = await failure(mergeLcovFiles(join(dir, 'out.lcov'), [good, cut]));
+
+    expect(error.problems).toEqual([
+      {
+        shard: 'test-shard-2',
+        problem: 'truncated: record for src/a.ts has no end_of_record',
+      },
+    ]);
+  });
+
+  it('fails on an empty shard report rather than merging it as zero coverage', async () => {
+    const dir = await workspace();
+    const good = await report(dir, 'test-shard-1', complete(1));
+    const empty = await report(dir, 'test-shard-2', '');
+
+    const error = await failure(mergeLcovFiles(join(dir, 'out.lcov'), [good, empty]));
+
+    expect(error.problems).toEqual([{ shard: 'test-shard-2', problem: 'report is empty' }]);
+  });
+
+  it('names every unusable shard, not only the first', async () => {
+    const dir = await workspace();
+    const empty = await report(dir, 'test-shard-1', '');
+    const missing = { shard: 'test-shard-2', path: join(dir, 'gone.lcov') };
+
+    const error = await failure(mergeLcovFiles(join(dir, 'out.lcov'), [empty, missing]));
+
+    expect(error.problems.map((problem) => problem.shard)).toEqual([
+      'test-shard-1',
+      'test-shard-2',
+    ]);
+  });
+
+  it('writes byte-identical output for every shard order', async () => {
+    const dir = await workspace();
+    const first = await report(dir, 'test-shard-1', complete(0));
+    const second = await report(dir, 'test-shard-2', complete(3));
+    const third = await report(dir, 'test-shard-3', complete(1));
+    const outputs = new Set<string>();
+    for (const order of [
+      [first, second, third],
+      [third, second, first],
+      [second, third, first],
+    ]) {
+      const out = join(dir, `out-${outputs.size}.lcov`);
+      expect(await mergeLcovFiles(out, order)).toBe(3);
+      outputs.add(await Bun.file(out).text());
+    }
+    expect(outputs.size).toBe(1);
+  });
+
+  it('accepts plain paths and reports them as the shard name', async () => {
+    const dir = await workspace();
+
+    const error = await failure(mergeLcovFiles(join(dir, 'out.lcov'), [join(dir, 'nope.lcov')]));
+
+    expect(error.problems[0]?.shard).toBe(join(dir, 'nope.lcov'));
+  });
+
+  it('refuses an empty input set', async () => {
+    const dir = await workspace();
+    await expect(mergeLcovFiles(join(dir, 'out.lcov'), [])).rejects.toThrow(
+      /No shard LCOV inputs were given/
+    );
   });
 });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   type CoverageLane,
   lanesForWorkspace,
+  missingSlicesOfFailedLanes,
   runWorkspaceCoverage,
   type WorkspaceCoverageOptions,
 } from '../ci/run-workspace-coverage';
@@ -164,8 +165,10 @@ describe('runWorkspaceCoverage', () => {
 
   // A lane whose script does not exist exits non-zero through `bun run` rather
   // than throwing, but either way it must be recorded as a failed lane and the
-  // lanes after it must still run.
-  it('records a lane whose script is missing without skipping the rest', async () => {
+  // lanes after it must still run. Its slice is a hole, though: merging only the
+  // other lane would stage a complete-looking, lower LCOV for the workspace, so
+  // the merge is skipped and the missing slice is named.
+  it('records a lane whose script is missing, still runs the rest, and stages no partial LCOV', async () => {
     const { dir, options } = await workspaceWith([
       { id: 'integration', source: 'b.ts', exitCode: 0 },
     ]);
@@ -178,8 +181,57 @@ describe('runWorkspaceCoverage', () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(result.lanes.map((lane) => lane.id)).toEqual(['unit', 'integration']);
+    expect(result.mergedSlices).toBe(0);
+    expect(result.mergeError).toContain("lane 'unit' exited");
+    expect(result.mergeError).toContain('wrote no slice at coverage/unit/lcov.info');
+    expect(await stagedText(dir)).toBe('');
+  });
+
+  it('names every failed lane that left no slice', async () => {
+    const { dir, options } = await workspaceWith([
+      { id: 'unit', source: 'none', exitCode: 2 },
+      { id: 'integration', source: 'none', exitCode: 5 },
+    ]);
+
+    const result = await runWorkspaceCoverage(options);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.mergeError).toContain("lane 'unit' exited 2");
+    expect(result.mergeError).toContain("lane 'integration' exited 5");
+    expect(await stagedText(dir)).toBe('');
+  });
+
+  it('does not report a merge error when a lane exited 0 with no slice', async () => {
+    const { options } = await workspaceWith([
+      { id: 'unit', source: 'none', exitCode: 0 },
+      { id: 'integration', source: 'b.ts', exitCode: 0 },
+    ]);
+
+    const result = await runWorkspaceCoverage(options);
+
+    expect(result.mergeError).toBeUndefined();
     expect(result.mergedSlices).toBe(1);
-    expect(await stagedText(dir)).toContain('SF:b.ts');
+  });
+});
+
+describe('missingSlicesOfFailedLanes', () => {
+  it('lists only failed lanes with no slice on disk', async () => {
+    const dir = await makeTemp();
+    await Bun.write(join(dir, 'coverage/b/lcov.info'), 'x');
+    const lanes: CoverageLane[] = ['a', 'b', 'c'].map((id) => ({
+      id,
+      coverageScript: id,
+      lcovPath: `coverage/${id}/lcov.info`,
+    }));
+    const runs = [
+      { id: 'a', exitCode: 1, durationMs: 0 },
+      { id: 'b', exitCode: 1, durationMs: 0 },
+      { id: 'c', exitCode: 0, durationMs: 0 },
+    ];
+
+    expect(await missingSlicesOfFailedLanes(lanes, runs, dir)).toEqual([
+      "lane 'a' exited 1 and wrote no slice at coverage/a/lcov.info",
+    ]);
   });
 });
 
