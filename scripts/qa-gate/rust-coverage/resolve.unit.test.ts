@@ -74,6 +74,27 @@ describe('resolveRustCoverage', () => {
     expect(measuredValue(coverage('crates/alpha/inner'))?.lines.total).toBe(4);
   });
 
+  it('counts the files of every data bundle, not only the first', () => {
+    const whole = JSON.parse(exportJson(TWO_CRATE_FILES));
+    const [first, ...rest] = whole.data[0].files;
+    const split = { ...whole, data: [{ files: [first] }, { files: rest }] };
+
+    const coverage = resolveRustCoverage(
+      { export: JSON.stringify(split), receipt: receiptJson(RUST_SHA, 0) },
+      RUST_SHA,
+      TWO_CRATE_ROOTS
+    );
+
+    expect(
+      measuredValue(coverage('crates/alpha'))?.lines.total,
+      'alpha instrumented lines summed over both data bundles'
+    ).toBe(20);
+    expect(
+      measuredValue(coverage('crates/beta'))?.lines.total,
+      'beta instrumented lines summed over both data bundles'
+    ).toBe(50);
+  });
+
   it('ignores files outside the measured checkout, such as registry sources', () => {
     const coverage = resolve({
       ...TWO_CRATE_FILES,

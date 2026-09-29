@@ -30,7 +30,7 @@ const LlvmCovExportSchema = Type.Object({
   }),
   data: Type.Array(Type.Object({ files: Type.Array(FileRecordSchema, { maxItems: 50_000 }) }), {
     minItems: 1,
-    maxItems: 1,
+    maxItems: 8,
   }),
 });
 
