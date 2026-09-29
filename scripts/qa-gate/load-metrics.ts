@@ -15,6 +15,8 @@ import {
 export interface ArtifactStatus {
   readonly found: boolean;
   readonly reason: string | null;
+  /** True when the publisher found a baseline recorded under another schema version. */
+  readonly incomparable?: boolean;
 }
 
 export interface LoadedMetrics {
@@ -43,7 +45,9 @@ export const loadMetrics = async (
   options: EnvelopeParseOptions = {},
   log: (message: string) => void = () => undefined
 ): Promise<LoadedMetrics> => {
-  if (!artifact.found) return unavailable(artifact.reason ?? 'artifact not found');
+  if (!artifact.found) {
+    return unavailable(artifact.reason ?? 'artifact not found', artifact.incomparable === true);
+  }
   if (!path || !(await Bun.file(path).exists())) {
     return unavailable('artifact payload could not be extracted');
   }

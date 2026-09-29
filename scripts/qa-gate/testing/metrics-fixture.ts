@@ -11,6 +11,7 @@ import type {
   LocStats,
   Metrics,
 } from '../collect/types';
+import type { Provenance } from '../model/envelope';
 import { type Measurement, measured, unsupported } from '../model/states';
 
 /** Build a coverage summary where every bucket sits at `pct`. // Usage: makeCoverageSummary(82) */
@@ -77,6 +78,14 @@ const DEFAULT_COMPONENT_ROOTS = [
 export const makeComponents = (
   patches: Readonly<Record<string, Partial<Component>>> = {}
 ): Component[] => DEFAULT_COMPONENT_ROOTS.map((root) => makeComponent(root, patches[root]));
+
+/** Provenance for an envelope measured at `sourceSha`. // Usage: makeProvenance(headSha) */
+export const makeProvenance = (sourceSha: string): Provenance => ({
+  sourceSha,
+  producer: { name: 'mangostudio/qa-gate-collect', version: '0.1.1' },
+  runId: 4242,
+  runAttempt: 1,
+});
 
 /** Build a healthy Metrics document; override fields per test. // Usage: makeMetrics('sha', { circularDeps: measured(2) }) */
 export const makeMetrics = (sha: string, overrides: Partial<Metrics> = {}): Metrics => ({

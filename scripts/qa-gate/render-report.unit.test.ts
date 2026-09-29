@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { QA_METRICS_SCHEMA_VERSION, type QaMetricsEnvelope } from './metrics-envelope';
-import { makeMetrics } from './testing/metrics-fixture';
+import { measured } from './model/states';
+import { makeMetrics, makeProvenance } from './testing/metrics-fixture';
 
 const HEAD_SHA = `${'a'.repeat(39)}1`;
 const BASE_SHA = `${'b'.repeat(39)}2`;
@@ -17,6 +18,7 @@ const headEnvelope = (): QaMetricsEnvelope => ({
   prNumber: 7,
   baseSha: BASE_SHA,
   headSha: HEAD_SHA,
+  provenance: makeProvenance(HEAD_SHA),
   metrics: makeMetrics(HEAD_SHA),
 });
 
@@ -27,6 +29,7 @@ const baselineEnvelope = (sha: string, overrides: Partial<QaMetricsEnvelope> = {
   prNumber: null,
   baseSha: null,
   headSha: sha,
+  provenance: makeProvenance(sha),
   metrics: makeMetrics(sha),
   ...overrides,
 });
@@ -34,6 +37,7 @@ const baselineEnvelope = (sha: string, overrides: Partial<QaMetricsEnvelope> = {
 interface ArtifactStatus {
   readonly found: boolean;
   readonly reason: string | null;
+  readonly incomparable?: boolean;
 }
 
 const FOUND: ArtifactStatus = { found: true, reason: null };
@@ -93,7 +97,15 @@ describe('render-report baseline handling', () => {
 
   it('renders a valid complete failed-run baseline as a real comparison', async () => {
     const failing = makeMetrics(BASE_SHA, {
-      tests: { ...makeMetrics(BASE_SHA).tests, exitCode: 1, passed: 1_000 } as never,
+      tests: measured({
+        exitCode: 1,
+        durationSeconds: 240,
+        passed: 1_000,
+        root: 4,
+        frontend: 230,
+        api: 770,
+        shared: 96,
+      }),
     });
     const report = await render({
       text: JSON.stringify(baselineEnvelope(BASE_SHA, { metrics: failing })),
@@ -134,6 +146,37 @@ describe('render-report baseline handling', () => {
     });
 
     expectUnavailable(report, `metrics headSha ${OTHER_SHA} does not match ${BASE_SHA}`);
+  });
+
+  const expectIncomparable = (report: string) => {
+    expect(report).toContain('Baseline incomparable');
+    expect(report).not.toContain('Baseline unavailable');
+    expect(report).not.toContain('first green CI run');
+    expect(report).toContain('**LoC (code):** n/a');
+    expect(report).not.toContain('= 0');
+  };
+
+  it('says incomparable, with no deltas, for a v3 baseline body', async () => {
+    const v3 = { ...baselineEnvelope(BASE_SHA), schemaVersion: 3 };
+    const report = await render({ text: JSON.stringify(v3), artifact: FOUND });
+
+    expectIncomparable(report);
+    expect(report).toContain('schema version 3 is incomparable with expected');
+  });
+
+  it('says incomparable when the publisher already found only a v3 baseline', async () => {
+    const report = await render({
+      text: null,
+      artifact: {
+        found: false,
+        reason:
+          'main CI run 90 for base x: qa-metrics artifact is incomparable: recorded under schema version 3',
+        incomparable: true,
+      },
+    });
+
+    expectIncomparable(report);
+    expect(report).toContain('recorded under schema version 3');
   });
 });
 
