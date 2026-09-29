@@ -28,9 +28,19 @@ Controls global preferences that apply across all providers and tools.
 **API:**
 
 ```
-GET  /api/settings/app    → Returns AppSettings
-PUT  /api/settings/app    → Merges a patch and returns normalized AppSettings
+GET  /api/settings/app    → Returns AppSettingsResponse (AppSettings + libraryLocationDefaultsPending)
+PUT  /api/settings/app    → Merges a patch and returns normalized AppSettingsResponse
 ```
+
+Which library locations default to on is detected from the agent CLIs installed
+on the hub's machine, and the first detection after a hub start can take
+seconds. `GET` never waits for it: until a detected value exists it answers the
+saved settings over static placeholder defaults with
+`libraryLocationDefaultsPending: true`, and publishes an `app` settings
+invalidation to each user it answered that way once detection lands. Clients
+must not show or write back library-location enablement while the flag is set.
+`PUT` always waits for detection, so its answer is never pending and a write
+never stores the placeholder.
 
 Settings are stored as a single JSON blob in the `settingsJson` column. On read, `normalizeAppSettings()` handles partial or malformed data by falling back to defaults for any missing or invalid fields.
 

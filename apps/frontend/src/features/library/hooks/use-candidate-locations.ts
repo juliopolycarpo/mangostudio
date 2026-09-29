@@ -6,7 +6,9 @@
  * from "the answer has not arrived": the enabled-location set lives in app
  * settings, and treating "not loaded yet" as "nothing is enabled" would
  * silently drop every destination outside MangoStudio's own directories, which
- * `enabledLibraryLocations` always keeps on.
+ * `enabledLibraryLocations` always keeps on. The same holds while the hub is
+ * still detecting installed agent CLIs: the enablement it answers with then is
+ * a placeholder, so the answer stays unresolved until detection lands.
  *
  * // Usage: const candidates = useCandidateLocations(locations, 'skill');
  */
@@ -18,9 +20,8 @@ import {
   type LibraryLocationStatus,
   type ResourceKind,
 } from '@mangostudio/shared/library';
-import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { appSettingsQueryOptions } from '@/features/settings/app/queries';
+import { useLibraryDefaultsDetection } from '@/features/settings/app/use-library-defaults-detection';
 import { propagationCandidateLocationIds } from '../format';
 
 export interface CandidateLocations {
@@ -28,18 +29,22 @@ export interface CandidateLocations {
   readonly locationIds: LibraryLocationId[];
   /** False while the settings record the answer depends on is still missing. */
   readonly isResolved: boolean;
+  /** True while unresolved only because the hub is detecting installed agent CLIs. */
+  readonly isDetecting: boolean;
 }
 
-const UNRESOLVED: CandidateLocations = { locationIds: [], isResolved: false };
+const UNRESOLVED: CandidateLocations = { locationIds: [], isResolved: false, isDetecting: false };
+const DETECTING: CandidateLocations = { locationIds: [], isResolved: false, isDetecting: true };
 
 export function useCandidateLocations(
   locations: readonly LibraryLocationStatus[],
   kind: ResourceKind | undefined
 ): CandidateLocations {
-  const appSettings = useQuery(appSettingsQueryOptions()).data;
+  const { settings: appSettings, defaultsPending } = useLibraryDefaultsDetection();
   const libraryLocations = appSettings ? libraryLocationsFor(appSettings) : undefined;
 
   return useMemo(() => {
+    if (defaultsPending) return DETECTING;
     if (kind === undefined || libraryLocations === undefined) return UNRESOLVED;
 
     return {
@@ -50,6 +55,7 @@ export function useCandidateLocations(
         enabledLibraryLocations(libraryLocations, 'home')
       ),
       isResolved: true,
+      isDetecting: false,
     };
-  }, [locations, kind, libraryLocations]);
+  }, [locations, kind, libraryLocations, defaultsPending]);
 }

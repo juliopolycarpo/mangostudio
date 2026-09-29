@@ -40,6 +40,17 @@ export function LocationSettings() {
     );
   }
 
+  // Before the loading check: while detecting, the settings have arrived but
+  // their enablement is a placeholder, so no row may render it as real.
+  if (settings.defaultsPending) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <LibraryPageState variant="loading" title={l.locationSettings.detecting} />
+      </div>
+    );
+  }
+
   if (settings.isPending && settings.groups.length === 0) {
     return (
       <div className="space-y-4">

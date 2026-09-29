@@ -28,9 +28,19 @@ Controlam preferências globais que valem para todos os provedores e tools.
 **API:**
 
 ```
-GET  /api/settings/app    → Retorna AppSettings
-PUT  /api/settings/app    → Mescla um patch e retorna AppSettings normalizado
+GET  /api/settings/app    → Retorna AppSettingsResponse (AppSettings + libraryLocationDefaultsPending)
+PUT  /api/settings/app    → Mescla um patch e retorna AppSettingsResponse normalizado
 ```
+
+Quais locais da biblioteca vêm ligados por padrão é detectado a partir das CLIs
+de agente instaladas na máquina do hub, e a primeira detecção após o hub iniciar
+pode levar segundos. O `GET` nunca espera por ela: enquanto não existe um valor
+detectado, responde as configurações salvas sobre defaults provisórios estáticos
+com `libraryLocationDefaultsPending: true` e, quando a detecção termina, publica
+uma invalidação `app` de configurações para cada usuário que recebeu essa
+resposta. Clientes não devem exibir nem regravar a habilitação de locais da
+biblioteca enquanto a flag estiver ligada. O `PUT` sempre espera a detecção,
+então sua resposta nunca é provisória e uma escrita nunca grava o placeholder.
 
 **O corpo do PUT é um patch, não um snapshot.** Todo campo é opcional; o
 servidor sobrepõe o que chega ao registro que já tem e depois normaliza. Duas

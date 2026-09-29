@@ -126,6 +126,11 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
               <Button variant="ghost" size="sm" onClick={matrix.clearSelection}>
                 {l.matrix.clearSelection}
               </Button>
+              {candidates.isDetecting && (
+                <span className="text-on-surface-variant/60 text-xs" data-testid="detecting-agents">
+                  {l.locationSettings.detecting}
+                </span>
+              )}
               <Button
                 size="sm"
                 onClick={() => setWizardKeys([...matrix.selected])}

@@ -3,8 +3,6 @@
  */
 
 import {
-  type AppSettings,
-  DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
   libraryLocationsPatch,
   normalizeAppSettings,
@@ -14,7 +12,7 @@ import type { SkillDescriptor, SkillListResponse } from '@mangostudio/shared/ski
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-invalidation';
 import { updateAppSettings } from '@/features/settings/app/api';
-import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
+import { appSettingsForLocationWrite, appSettingsKeys } from '@/features/settings/app/queries';
 import { rescanLibrary, updateSkillSetting } from '../api';
 import { skillSettingsKeys, skillSettingsListQueryOptions } from '../queries';
 
@@ -77,11 +75,9 @@ export function useToggleSkillSource() {
 
   return useMutation({
     mutationFn: async ({ source, enabled }: { source: SkillSourceKey; enabled: boolean }) => {
-      const cached =
-        queryClient.getQueryData<AppSettings>(appSettingsKeys.current()) ??
-        (await queryClient.fetchQuery(appSettingsQueryOptions())) ??
-        DEFAULT_APP_SETTINGS;
-      const locations = libraryLocationsFor(normalizeAppSettings(cached));
+      // Never the pending placeholder: every location in the map below
+      // travels as an explicit value.
+      const locations = libraryLocationsFor(await appSettingsForLocationWrite(queryClient));
 
       // Only the locations travel — see `libraryLocationsPatch`.
       return updateAppSettings(

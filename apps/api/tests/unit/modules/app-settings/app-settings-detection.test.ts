@@ -9,20 +9,34 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
   type LibraryLocationSettings,
+  libraryLocationsFor,
+  normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
+import {
+  type RealtimeInvalidateEvent,
+  SETTINGS_TOPIC,
+  type SettingsScope,
+} from '@mangostudio/shared/realtime';
 import { getDb } from '../../../../src/db/database';
 import {
   getAppSettings,
+  readAppSettings,
   setLibraryLocationDefaultsForTest,
   setLibraryLocationDetectionForTest,
   updateAppSettings,
   warmUpLibraryLocationDefaults,
+  writeAppSettings,
 } from '../../../../src/modules/app-settings/application/app-settings-service';
 import {
+  createDetectedLibraryDefaults,
   DETECTED_DEFAULTS_TTL_MS,
   defaultsForDetectedAgents,
 } from '../../../../src/modules/app-settings/application/detected-library-defaults';
 import { LOCAL_PROBE_SCOPE } from '../../../../src/modules/environments/application/probing-service';
+import {
+  createRealtimeBus,
+  setRealtimeBusForTests,
+} from '../../../../src/services/realtime/realtime-bus';
 import {
   FakeAgentCliProbing,
   installedAgentCli,
@@ -259,5 +273,179 @@ describe('app settings agent-CLI detection', () => {
 
     expect(locationsOf(settings)).toEqual(DEFAULT_LIBRARY_LOCATION_SETTINGS);
     expect(probing.probeCount).toBe(0);
+  });
+});
+
+type SettingsInvalidateEvent = Extract<RealtimeInvalidateEvent, { topic: typeof SETTINGS_TOPIC }>;
+
+/** Every `settings` scope list published to these users, in publish order, per user. */
+function recordSettingsInvalidations(userIds: readonly string[]): {
+  readonly scopesFor: (userId: string) => (readonly SettingsScope[] | undefined)[];
+  readonly release: () => void;
+} {
+  const bus = createRealtimeBus();
+  setRealtimeBusForTests(bus);
+  const events = new Map<string, RealtimeInvalidateEvent[]>();
+  const releases = userIds.map((userId) =>
+    bus.subscribe(userId, (event) => {
+      events.set(userId, [...(events.get(userId) ?? []), event]);
+    })
+  );
+  return {
+    scopesFor: (userId) =>
+      (events.get(userId) ?? [])
+        .filter((event): event is SettingsInvalidateEvent => event.topic === SETTINGS_TOPIC)
+        .map((event) => event.scopes),
+    release: () => {
+      for (const release of releases) release();
+      setRealtimeBusForTests(undefined);
+    },
+  };
+}
+
+describe('app settings read that never waits for detection', () => {
+  let releaseBus: (() => void) | null = null;
+
+  afterEach(() => {
+    releaseBus?.();
+    releaseBus = null;
+  });
+
+  it('answers before the first detection, flagged pending, and starts one scan', async () => {
+    const read = readAppSettings(getDb(), nextUserId());
+
+    expect(
+      await settlesWithoutTheProbe(read),
+      'expected settings read: settled before detection | received: still waiting on the scan'
+    ).toBe(true);
+    expect((await read).libraryLocationDefaultsPending).toBe(true);
+    expect(probing.probeCount, `expected probe count: 1 | received: ${probing.probeCount}`).toBe(1);
+  });
+
+  it('tells every user answered pending to refetch once, then answers the detected defaults', async () => {
+    const first = nextUserId();
+    const second = nextUserId();
+    const recorder = recordSettingsInvalidations([first, second]);
+    releaseBus = recorder.release;
+
+    await readAppSettings(getDb(), first);
+    await readAppSettings(getDb(), first);
+    await readAppSettings(getDb(), second);
+    expect(recorder.scopesFor(first), 'expected no invalidation before detection lands').toEqual(
+      []
+    );
+
+    probing.resolveProbe(0, [installedAgentCli('codex')]);
+    await settlesWithoutTheProbe(Promise.resolve());
+
+    expect(
+      [recorder.scopesFor(first), recorder.scopesFor(second)],
+      'expected one app invalidation per user answered pending'
+    ).toEqual([[['app']], [['app']]]);
+    const after = await readAppSettings(getDb(), first);
+    expect(after.libraryLocationDefaultsPending).toBe(false);
+    expect(locationsOf(after)).toEqual(CODEX_DEFAULTS);
+    expect(probing.probeCount).toBe(1);
+  });
+
+  it('notifies nobody when detection fails, and the waiting users on the next success', async () => {
+    const userId = nextUserId();
+    const recorder = recordSettingsInvalidations([userId]);
+    releaseBus = recorder.release;
+
+    await readAppSettings(getDb(), userId);
+    probing.rejectProbe(0, new Error('runtime handshake timed out'));
+    await settlesWithoutTheProbe(Promise.resolve());
+    expect(
+      recorder.scopesFor(userId),
+      'expected no invalidation after a failed scan: a refetch would only start another'
+    ).toEqual([]);
+
+    expect((await readAppSettings(getDb(), userId)).libraryLocationDefaultsPending).toBe(true);
+    expect(probing.probeCount, 'expected the next read to retry detection').toBe(2);
+    probing.resolveProbe(1, [installedAgentCli('codex')]);
+    await settlesWithoutTheProbe(Promise.resolve());
+
+    expect(recorder.scopesFor(userId)).toEqual([['app']]);
+  });
+
+  it('answers the detected defaults when detection lands during the read', async () => {
+    const read = readAppSettings(getDb(), nextUserId());
+    probing.resolveProbe(0, [installedAgentCli('codex')]);
+    const settings = await read;
+
+    expect(
+      settings.libraryLocationDefaultsPending,
+      'expected pending: false once detection landed mid-read | received: true (the client would miss the invalidation already sent)'
+    ).toBe(false);
+    expect(locationsOf(settings)).toEqual(CODEX_DEFAULTS);
+  });
+
+  it('makes a write while pending persist the detected defaults, not the placeholder', async () => {
+    const userId = nextUserId();
+    expect((await readAppSettings(getDb(), userId)).libraryLocationDefaultsPending).toBe(true);
+
+    const write = writeAppSettings(getDb(), userId, { thinkingEnabled: false });
+    expect(
+      await settlesWithoutTheProbe(write),
+      'expected write: pending until detection | received: persisted over the placeholder'
+    ).toBe(false);
+    probing.resolveProbe(0, [installedAgentCli('codex')]);
+    const answer = await write;
+
+    expect(answer.libraryLocationDefaultsPending).toBe(false);
+    const row = await getDb()
+      .selectFrom('user_app_settings')
+      .select('settingsJson')
+      .where('userId', '=', userId)
+      .executeTakeFirstOrThrow();
+    // Read back over the placeholder: only a location the row itself stores
+    // can differ from it, so this cannot pass by re-deriving the detected value.
+    const stored = libraryLocationsFor(
+      normalizeAppSettings(JSON.parse(row.settingsJson), DEFAULT_LIBRARY_LOCATION_SETTINGS)
+    );
+    expect(stored, 'expected stored library locations: the detected Codex defaults').toEqual(
+      CODEX_DEFAULTS
+    );
+    expect(probing.probeCount).toBe(1);
+  });
+
+  it('never flags pending nor scans while a test override pins the defaults', async () => {
+    setLibraryLocationDefaultsForTest(DEFAULT_LIBRARY_LOCATION_SETTINGS);
+
+    const settings = await readAppSettings(getDb(), nextUserId());
+
+    expect(settings.libraryLocationDefaultsPending).toBe(false);
+    expect(probing.probeCount).toBe(0);
+  });
+});
+
+describe('detected library defaults peek', () => {
+  it('returns null while nothing was detected, joins the running scan, then the value', async () => {
+    const defaults = createDetectedLibraryDefaults({ probing, logger, now: () => nowMs });
+
+    expect(defaults.peek()).toBeNull();
+    expect(defaults.peek()).toBeNull();
+    expect(probing.probeCount, `expected probe count: 1 | received: ${probing.probeCount}`).toBe(1);
+
+    probing.resolveProbe(0, [installedAgentCli('codex')]);
+    await settlesWithoutTheProbe(Promise.resolve());
+    expect(defaults.peek()).toEqual(CODEX_DEFAULTS);
+  });
+
+  it('logs a detection listener that throws without failing the scan', async () => {
+    const defaults = createDetectedLibraryDefaults({
+      probing,
+      logger,
+      onDetected: () => {
+        throw new Error('listener exploded');
+      },
+    });
+
+    const current = defaults.current();
+    probing.resolveProbe(0, [installedAgentCli('codex')]);
+
+    expect(await current).toEqual(CODEX_DEFAULTS);
+    expect(logger.events('warn')).toEqual(['detection_listener_failed']);
   });
 });

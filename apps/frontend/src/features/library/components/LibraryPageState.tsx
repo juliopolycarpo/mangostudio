@@ -21,10 +21,12 @@ export function LibraryPageState({ variant, title, hint, onRetry }: LibraryPageS
   if (variant === 'loading') {
     return (
       <div
-        className="flex min-h-40 items-center justify-center text-on-surface-variant"
+        className="flex min-h-40 flex-col items-center justify-center gap-3 text-on-surface-variant"
         data-testid="library-loading"
+        role={title ? 'status' : undefined}
       >
-        <LoaderCircle size={20} className="animate-spin" />
+        <LoaderCircle size={20} className="animate-spin" aria-hidden={title ? true : undefined} />
+        {title && <p className="text-sm">{title}</p>}
       </div>
     );
   }

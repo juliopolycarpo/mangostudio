@@ -2174,6 +2174,11 @@ export const messages = {
     locationSettings: {
       description:
         'Só os diretórios ligados aqui são varridos. Isso vale para todas as máquinas; o estado ao lado de cada um é o que a máquina selecionada relata.',
+      /**
+       * Exibido no lugar das chaves até o hub detectar quais CLIs de agente
+       * estão instaladas: a habilitação que mostraria é provisória.
+       */
+      detecting: 'Detectando agentes instalados…',
       scan: 'Varrer',
       /** Nome acessível: o switch de cada linha mostra só "Varrer" na tela. */
       scanLocation: 'Varrer {location}',

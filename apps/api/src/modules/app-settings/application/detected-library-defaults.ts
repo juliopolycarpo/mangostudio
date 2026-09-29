@@ -10,7 +10,9 @@
  *
  * - one shared in-flight probe, so concurrent callers never start parallel scans;
  * - stale-while-revalidate once a value exists, so only the very first
- *   computation is ever awaited by a reader;
+ *   computation is ever awaited by a reader — and the settings request does
+ *   not await even that one: it peeks, and answers "pending" until a detection
+ *   lands and `onDetected` tells its clients to refetch;
  * - a warm-up the server starts right after it listens, so that first
  *   computation is usually already done when the first request arrives.
  */
@@ -46,6 +48,12 @@ export interface DetectedLibraryDefaultsOptions {
   readonly logger: DiagnosticLogger;
   readonly now?: () => number;
   readonly ttlMs?: number;
+  /**
+   * Called after every probe that detects a value, once that value is what
+   * readers get. A failed probe never calls it. Exceptions it throws are
+   * logged and never fail the probe.
+   */
+  readonly onDetected?: () => void;
 }
 
 export interface DetectedLibraryDefaults {
@@ -62,6 +70,12 @@ export interface DetectedLibraryDefaults {
    * because persisting undetected defaults would store every location as off.
    */
   fresh(): Promise<LibraryLocationSettings>;
+  /**
+   * The value a reader that must not wait can use: the detected one (refreshed
+   * in the background past the TTL), or null while nothing was ever detected —
+   * in which case a probe is started, or the running one joined. Never awaits.
+   */
+  peek(): LibraryLocationSettings | null;
   /** Starts the first probe without awaiting it. Never rejects; failures are logged. */
   warmUp(): Promise<void>;
 }
@@ -102,6 +116,7 @@ export function createDetectedLibraryDefaults(
       .then((statuses) => {
         const value = defaultsForDetectedAgents(statuses);
         detected = { computedAtMs: now(), value };
+        notifyDetected();
         return value;
       })
       .finally(() => {
@@ -109,6 +124,14 @@ export function createDetectedLibraryDefaults(
       });
     inflight = probe;
     return probe;
+  };
+
+  const notifyDetected = (): void => {
+    try {
+      options.onDetected?.();
+    } catch (error) {
+      logger.warn('detection_listener_failed', { error });
+    }
   };
 
   const revalidate = (): void => {
@@ -120,6 +143,11 @@ export function createDetectedLibraryDefaults(
       if (!detected) return refresh();
       if (!isFresh(detected)) revalidate();
       return Promise.resolve(detected.value);
+    },
+
+    peek() {
+      if (!detected || !isFresh(detected)) revalidate();
+      return detected ? detected.value : null;
     },
 
     async fresh() {

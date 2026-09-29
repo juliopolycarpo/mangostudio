@@ -160,6 +160,27 @@ export const AppSettingsSchema = Type.Object({
 });
 
 /**
+ * What `GET` and `PUT /api/settings/app` answer: the settings plus whether the
+ * library-location defaults in them are real yet.
+ *
+ * Which locations default to on is detected from the agent CLIs installed on
+ * the hub's machine, and the very first detection after a hub start can take
+ * seconds. The read answers without waiting for it, so while
+ * `libraryLocationDefaultsPending` is true every library location the user
+ * never set explicitly carries a static placeholder, not a detected value.
+ * Clients must not show those as real nor write them back; the server
+ * publishes an `app` settings invalidation once detection lands. A `PUT`
+ * always waits for detection, so its answer is never pending.
+ *
+ * Kept out of `AppSettingsSchema` on purpose: the flag describes this answer,
+ * not a stored preference, so it must never reach a PUT body or the row.
+ */
+export const AppSettingsResponseSchema = Type.Object({
+  ...AppSettingsSchema.properties,
+  libraryLocationDefaultsPending: Type.Boolean(),
+});
+
+/**
  * A settings *patch*, not a snapshot.
  *
  * Every field is optional and the server merges what arrives over what it
@@ -203,4 +224,5 @@ export type CommitMessageSettings = Static<typeof CommitMessageSettingsSchema>;
 export type GitSettings = Static<typeof GitSettingsSchema>;
 export type ExternalApiSettings = Static<typeof ExternalApiSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;
+export type AppSettingsResponse = Static<typeof AppSettingsResponseSchema>;
 export type AppSettingsPutBody = Static<typeof AppSettingsPutBodySchema>;
