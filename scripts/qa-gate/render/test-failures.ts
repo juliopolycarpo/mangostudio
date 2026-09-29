@@ -2,7 +2,7 @@
 // Green runs return an empty string so existing coverage-first output is unchanged.
 
 import type { Measurement, TestSuiteStats } from '../collect/types';
-import { measuredValue } from '../model/states';
+import { presentValue } from '../model/states';
 import { formatNumber, inlineCode } from './format';
 
 export const TESTING_DOC_UNHANDLED_ERRORS_URL =
@@ -46,12 +46,13 @@ const renderHeadline = (
 
 /**
  * Markdown block that leads a failed run's QA report / step summary.
- * Returns '' when the suite passed or the stats are not a fully measured value.
+ * Returns '' when the suite passed or there is no value at all. A `partial` suite still leads:
+ * its counters are a lower bound, but a failure in them is real.
  */
 export const renderTestFailureLead = (
   measurement: Measurement<TestSuiteStats> | null | undefined
 ): string => {
-  const tests = measuredValue(measurement);
+  const tests = presentValue(measurement);
   if (!tests || !suiteFailed(tests)) return '';
 
   const lines = ['## Test failures', ''];

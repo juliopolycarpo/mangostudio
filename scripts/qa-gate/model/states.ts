@@ -108,6 +108,15 @@ export const absentFromProducer = <T>(what: string, cause: ProducerAbsence): Mea
 export const measuredValue = <T>(cell: Measurement<T> | null | undefined): T | null =>
   cell?.state === 'measured' ? cell.value : null;
 
+/**
+ * The value of a `measured` or `partial` measurement (a partial value is a
+ * lower bound); null for every other state. Use it to detect failures, never
+ * to report a complete total.
+ * // Usage: presentValue(partial({ failed: 2 }, 'shard 3 lost'))?.failed // 2
+ */
+export const presentValue = <T>(cell: Measurement<T> | null | undefined): T | null =>
+  cell?.state === 'measured' || cell?.state === 'partial' ? cell.value : null;
+
 /** True for the states that mean data should have been there and was not trustworthy. */
 export const needsAttention = (cell: Measurement<unknown>): boolean =>
   cell.state === 'partial' || cell.state === 'stale' || cell.state === 'unavailable';

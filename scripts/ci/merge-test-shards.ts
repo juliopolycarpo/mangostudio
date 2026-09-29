@@ -33,6 +33,8 @@ export interface ShardMeta {
   readonly shard: number | string;
   readonly exitCode: number;
   readonly durationSeconds: number;
+  /** Watchdog attempts the job took; absent in receipts from before it was recorded. */
+  readonly attempts?: number;
 }
 
 export interface ShardSummary {

@@ -9,6 +9,7 @@ import type {
   CoverageSummary,
   DependencyStats,
   DuplicationStats,
+  LaneResult,
   LocBucket,
   LocStats,
   Measurement,
@@ -16,8 +17,9 @@ import type {
   TestSuiteStats,
   ToolingCheckStats,
 } from '../collect/types';
-import { measuredValue } from '../model/states';
+import { measuredValue, presentValue } from '../model/states';
 import type { CoverageBucket } from '../parse-lcov';
+import { lanesForComponentRoot } from '../results/lane-components';
 import { inlineCode, NA } from './format';
 
 export const COVERAGE_KEYS = ['lines', 'statements', 'functions', 'branches'] as const;
@@ -103,6 +105,13 @@ export const getDependencies = (metrics: Metrics | null): DependencyStats | null
 export const getTestSuite = (metrics: Metrics | null): TestSuiteStats | null =>
   measuredValue(metrics?.tests);
 
+/**
+ * The suite counters of a `measured` or `partial` run. A partial value is a
+ * lower bound: use it to detect failures, never to report a complete total.
+ */
+export const getTestSuiteEvidence = (metrics: Metrics | null): TestSuiteStats | null =>
+  presentValue(metrics?.tests);
+
 export const getTooling = (metrics: Metrics | null): ToolingCheckStats | null =>
   measuredValue(metrics?.tooling);
 
@@ -152,13 +161,74 @@ export const sumTsErrors = (metrics: Metrics | null): number | null => {
 
 type NamedMeasurement = readonly [string, Measurement<unknown>];
 
-/** The per-component measurements of a document as `[name, cell]`. */
+/** The per-component measurements of a document as `[name, cell]`, lane results included. */
 export const componentMeasurements = (metrics: Metrics): NamedMeasurement[] =>
   metrics.components.flatMap((component) => [
     [`coverage/${component.root}`, component.coverage] as const,
     [`tsErrors/${component.root}`, component.tsErrors] as const,
     [`loc/${component.root}`, component.loc] as const,
+    ...(component.lanes ?? []).map(
+      (lane) => [`lanes/${component.root}/${lane.id}`, lane.tests] as const
+    ),
   ]);
+
+/** One lane of one component; `cell` is null when the document carries no entry for it. */
+export interface LaneRow {
+  readonly component: Component;
+  readonly laneId: string;
+  readonly cell: Measurement<LaneResult> | null;
+}
+
+/**
+ * The lanes of every component: the ones the lane registry says the component
+ * owns (a missing entry is a null cell, so absence is visible) followed by any
+ * recorded lane the registry does not know.
+ * // Usage: laneRows(head).filter((row) => row.cell === null)
+ */
+export const laneRows = (metrics: Metrics | null): LaneRow[] =>
+  (metrics?.components ?? []).flatMap((component) => {
+    const recorded = new Map((component.lanes ?? []).map((lane) => [lane.id, lane.tests]));
+    const expected: string[] = lanesForComponentRoot(component.root).map((lane) => lane.id);
+    const ids = [...expected, ...[...recorded.keys()].filter((id) => !expected.includes(id))];
+    return ids.map((laneId) => ({ component, laneId, cell: recorded.get(laneId) ?? null }));
+  });
+
+/** Outcome counts summed over a set of lanes, with whether every lane was fully measured. */
+export interface LaneTally {
+  readonly passed: number;
+  readonly failed: number;
+  readonly skipped: number;
+  readonly todo: number;
+  readonly recovered: number;
+  /** True only when at least one lane exists and every one was `measured`. */
+  readonly complete: boolean;
+  /** Lanes that contributed a value (measured or partial). */
+  readonly withValue: number;
+}
+
+/**
+ * Sum lane cells. Counts from a `partial` lane are included as a lower bound and
+ * flip `complete` to false; an unavailable or absent lane adds nothing and does
+ * too, so a total can never read as complete over missing lanes.
+ * // Usage: tallyLanes(laneRows(head).map((row) => row.cell))
+ */
+export const tallyLanes = (cells: readonly (Measurement<LaneResult> | null)[]): LaneTally => {
+  const tally = { passed: 0, failed: 0, skipped: 0, todo: 0, recovered: 0, withValue: 0 };
+  for (const cell of cells) {
+    const lane = presentValue(cell);
+    if (!lane) continue;
+    tally.passed += lane.passed;
+    tally.failed += lane.failed;
+    tally.skipped += lane.skipped;
+    tally.todo += lane.todo;
+    tally.recovered += lane.recovered;
+    tally.withValue++;
+  }
+  return {
+    ...tally,
+    complete: cells.length > 0 && cells.every((cell) => cell?.state === 'measured'),
+  };
+};
 
 /** The repository-wide measurements of a document as `[name, cell]`. */
 export const globalMeasurements = (metrics: Metrics): NamedMeasurement[] => [

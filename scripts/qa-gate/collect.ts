@@ -97,6 +97,7 @@ const buildMetrics = async (
     trackedFiles,
     readText: readRepoText,
     deliveredCoverage: testMetrics.deliveredCoverage,
+    deliveredLanes: testMetrics.deliveredLanes,
     readCoverage: readWorkspaceCoverageSummary,
     countTsErrors,
   });

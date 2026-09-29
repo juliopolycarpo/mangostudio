@@ -397,7 +397,7 @@ jobs:
       # shard-meta exit code.
       - name: Collect test metrics fragment
         if: ${{ !cancelled() }}
-        run: bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards > test-metrics.json
+        run: bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards "$SHARD_COUNT" > test-metrics.json
 
       # Handoff to the qa-metrics job in the same run; nothing consumes it
       # afterwards, so the shortest retention GitHub allows is enough.

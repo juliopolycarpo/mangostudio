@@ -8,6 +8,7 @@ import Value from 'typebox/value';
 
 import type { WorkspaceName } from '../../lib/config';
 import { type TestMetricsFragment, TestMetricsFragmentSchema } from '../model/fragment';
+import type { LaneResult } from '../model/lanes';
 import type { CoverageSummary, TestSuiteStats } from '../model/metrics';
 import {
   absentFromProducer,
@@ -22,6 +23,12 @@ export interface TestMetricsInputs {
   readonly tests: Measurement<TestSuiteStats>;
   /** Coverage the fragment delivered for a lane; null (only with no fragment at all) means read locally. */
   readonly deliveredCoverage: (lane: WorkspaceName) => Measurement<CoverageSummary> | null;
+  /**
+   * The result the Test job delivered for a test lane. Never null: a lane the
+   * fragment does not carry is unavailable, and there is no local fallback (a
+   * lane result is only meaningful next to its process receipt).
+   */
+  readonly deliveredLanes: (laneId: string) => Measurement<LaneResult>;
 }
 
 /**
@@ -51,6 +58,7 @@ export const parseTestMetricsFragment = (
 export const NO_FRAGMENT: TestMetricsInputs = {
   tests: absentFromProducer('test metrics fragment', 'missing'),
   deliveredCoverage: () => null,
+  deliveredLanes: () => absentFromProducer('test metrics fragment', 'missing'),
 };
 
 /**
@@ -68,10 +76,16 @@ export const resolveTestMetrics = (
       // never a reason to read stale coverage from disk.
       deliveredCoverage: (lane) =>
         fragment.coverage[lane] ?? unavailable(`fragment delivered no coverage for ${lane}`),
+      deliveredLanes: (laneId) =>
+        fragment.lanes?.[laneId] ?? unavailable(`fragment delivered no result for lane ${laneId}`),
     };
   }
   const reason = `test metrics fragment measured ${fragment.sourceSha}, envelope measures ${sourceSha}`;
-  return { tests: stale(reason), deliveredCoverage: () => stale(reason) };
+  return {
+    tests: stale(reason),
+    deliveredCoverage: () => stale(reason),
+    deliveredLanes: () => stale(reason),
+  };
 };
 
 /**
@@ -84,6 +98,7 @@ export const resolveTestMetrics = (
 export const unusableTestMetrics = (reason: string): TestMetricsInputs => ({
   tests: unavailable(reason),
   deliveredCoverage: () => unavailable(reason),
+  deliveredLanes: () => unavailable(reason),
 });
 
 /**
@@ -96,7 +111,7 @@ export const withheldTestMetrics = (cause: ProducerAbsence, path?: string): Test
     path ? `test metrics fragment ${path}` : 'test metrics fragment',
     cause
   );
-  return { tests: cell, deliveredCoverage: () => cell };
+  return { tests: cell, deliveredCoverage: () => cell, deliveredLanes: () => cell };
 };
 
 /**

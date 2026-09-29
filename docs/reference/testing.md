@@ -561,11 +561,55 @@ reporter first rather than assuming the XML grew an `errors` count.
 > contribute last run's counts. The QA collector also treats a configured lane
 > with no JUnit file across the shard set as `parseMiss`, so a missing report
 > cannot become a green suite of zero tests. Bun's `file` attribute is
-> workspace-relative; failed-file counts are namespaced by lane so
-> `apps/api` and `apps/shared` files with the same relative path stay
-> distinct. Invoking a workspace `test:coverage` script directly on a fresh
-> checkout skips the directory step; create it first if you care about the
-> report.
+> workspace-relative; failed-file counts are per lane so `apps/api` and
+> `apps/shared` files with the same relative path stay distinct. Invoking a
+> workspace `test:coverage` script directly on a fresh checkout skips the
+> directory step; create it first if you care about the report.
+
+#### Per-lane results and what makes a lane `partial`
+
+The QA report carries one result per lane (`root`, `api-unit`,
+`api-integration`, `shared`, `frontend`), rolled up per component and for the
+repository, not one number per workspace. The two API lanes stay separate
+because they run under opposite isolation settings and fail for different
+reasons. The pieces live in `scripts/qa-gate/results/`; they only read the JUnit
+reports and `shard-meta.json` receipts the run already wrote, and never run a
+test.
+
+- **Expected job set.** It comes from the lane registry and the workflow's shard
+  count (`collect-test-metrics.ts <summary> <shards-dir> <shard-count>`): the
+  numbered shards carry every sharded lane, each unsharded lane has its own
+  `test-shard-<lane>` job. Listing the directories that exist would hide a job
+  that died before its upload step.
+- **`partial`, never a smaller total.** A lane is `measured` only when every
+  expected job delivered a whole JUnit report and a process receipt that is not
+  a watchdog kill (exit 124). A missing report, a report cut off (no closing
+  `</testsuites>`, or a `tests` header that disagrees with the cases), a missing
+  receipt or a timeout makes it `partial`: the counts are a lower bound and the
+  report shows `≥`. A lane with nothing readable is `unavailable`, never zero.
+  Bun writes no report for an empty `--shard` slice, so a missing report is
+  treated as lost; every sharded lane has far more files than shards.
+- **Retries.** The current pipeline never puts two runs of a test into one
+  report: `scripts/test.ts` clears the JUnit directory on every start, so a
+  watchdog retry leaves only the final attempt, and Bun's per-test `retry`
+  option reports one passing case with no trace of the earlier failure. What the
+  fold does guarantee is that a test seen in more than one report (a duplicated
+  artifact, another runner) counts once, keyed on file, class, title and line;
+  the later run wins, and an earlier failure it no longer has is kept as
+  `recovered` with its message. Rows that share all four inside one report
+  (`it.each` with a fixed title) are never collapsed.
+- **Hang retried.** The watchdog records `attempts` in `shard-meta.json`. A hang
+  that a clean second attempt recovered still exits 0, so the lane row carries a
+  `note: N shard(s) ran twice` instead of reading as a first-try pass. It does not
+  change the lane's state or the verdict.
+- **Non-zero exits.** `shard-meta.json` is per job, not per lane, so a non-zero
+  exit cannot be pinned on one lane; the lane row shows it and the suite-level
+  verdict fails on it.
+
+The verdict policy is `scripts/qa-gate/policy/`: `pass` only when nothing
+regressed and every head metric is fully measured, `fail` for a concrete
+regression, `incomplete` for missing, partial or stale evidence or a partial
+base. `scripts/qa-gate/policy/verdict.unit.test.ts` is its truth table.
 
 ### Randomized order
 

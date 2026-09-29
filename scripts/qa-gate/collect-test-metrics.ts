@@ -5,31 +5,45 @@
 // `.mango/artifacts/coverage/`. collect.ts merges this fragment so the suite
 // never runs twice for one report.
 //
-// JUnit reports are read from every test-job directory *and* from the
-// repository root: on CI every lane writes inside the job that ran it (the
-// frontend's whole-suite report arrives via its own `test-shard-frontend`
-// artifact), while a local unsharded run writes straight into the checkout.
+// JUnit reports and process receipts (`shard-meta.json`) are read from the jobs
+// the lane registry says a complete run has: the numbered shards (count from the
+// workflow) plus one job per unsharded lane. A job that never uploaded, a
+// missing or cut-off report and a missing receipt each make the affected lanes
+// `partial`; see ./results/fold.ts. With no shards directory (a local unsharded
+// run) the checkout itself is the single job.
 //
 // The frontend coverage thresholds need no separate plumbing here: they are
 // enforced inside the lane's own `test:coverage` invocation
 // (enforce-coverage-thresholds.ts), so a miss is already a non-zero exit code
 // in that job's shard-meta.
 //
-// Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir]
+// Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir [shard-count]]
+
+import { basename } from 'node:path';
 
 import { listShardDirs, type ShardSummary } from '../ci/merge-test-shards';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
+import { TEST_LANES } from '../lib/test-lanes';
 import { resolveSourceSha } from './collect/provenance';
 import { getCommitSha, measure } from './collect/support';
-import type { CoverageSummary, Measurement, TestMetricsFragment } from './collect/types';
+import type {
+  CoverageSummary,
+  Measurement,
+  TestMetricsFragment,
+  TestSuiteStats,
+} from './collect/types';
 import { readWorkspaceCoverageSummary } from './coverage-summary';
-import { buildTestSuiteStats, readLaneResults } from './junit-results';
+import { buildTestSuiteStats, type LaneOutcome } from './junit-results';
+import { unavailable } from './model/states';
+import { collectLaneOutcomes, laneCells, suiteMeasurement } from './results/collect';
+import { readTextOrNull } from './results/evidence';
+import { type ExpectedJobSet, expectedLocalJobs, expectedShardJobs } from './results/expected-jobs';
 import type { UnhandledErrors } from './unhandled-errors';
 
-const [, , summaryPath, shardsRoot] = process.argv;
+const [, , summaryPath, shardsRoot, shardCountArg] = process.argv;
 if (!summaryPath) {
   process.stderr.write(
-    'Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir]\n'
+    'Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir [shard-count]]\n'
   );
   process.exit(1);
 }
@@ -86,6 +100,19 @@ const readShardSummary = async (path: string): Promise<ShardSummary> => {
   }
 };
 
+// Absent means "not stated" (a local run, or a caller that predates the count):
+// the shard set is then unverified rather than assumed complete.
+const parseShardCount = (raw: string | undefined): number | null => {
+  if (raw === undefined) return null;
+  const count = Number(raw);
+  if (Number.isInteger(count) && count >= 1) return count;
+  process.stderr.write(
+    `Invalid shard count ${JSON.stringify(raw)}; expected a positive integer.\n`
+  );
+  process.exit(1);
+};
+
+const shardCount = parseShardCount(shardCountArg);
 const summary = await readShardSummary(summaryPath);
 const exitCode = summary.exitCode;
 
@@ -97,15 +124,35 @@ const listShards = async (root: string): Promise<readonly string[]> => {
   }
 };
 
-const junitDirs = [ROOT_DIR, ...(shardsRoot ? await listShards(shardsRoot) : [])];
+// The expected job set comes from the lane registry plus the workflow's shard
+// count, never from the directories found: a job that died before its upload
+// step leaves no directory, and listing what exists would add up to a smaller,
+// complete-looking total. Without a shards directory this is a single-machine
+// run whose one job's receipt is the summary itself.
+const expectedJobSet = async (): Promise<ExpectedJobSet> => {
+  if (!shardsRoot) return expectedLocalJobs(ROOT_DIR);
+  const present = (await listShards(shardsRoot)).map((dir) => basename(dir));
+  return expectedShardJobs(shardsRoot, shardCount, present);
+};
 
-const collectSuiteStats = async () =>
-  buildTestSuiteStats(
-    await readLaneResults(junitDirs),
+const collectSuite = async (): Promise<{
+  readonly outcomes: readonly LaneOutcome[];
+  readonly suite: Measurement<TestSuiteStats>;
+}> => {
+  const outcomes = await collectLaneOutcomes({
+    jobSet: await expectedJobSet(),
+    lanes: TEST_LANES,
+    readText: readTextOrNull,
+    receiptOverride: shardsRoot ? undefined : { kind: 'read', exitCode },
+  });
+  const stats = buildTestSuiteStats(
+    outcomes,
     summary.unhandledErrors,
     exitCode,
     summary.durationSeconds
   );
+  return { outcomes, suite: suiteMeasurement(stats, outcomes) };
+};
 
 const coverage: Record<string, Measurement<CoverageSummary>> = {};
 for (const workspace of ALL_WORKSPACE_NAMES) {
@@ -114,11 +161,21 @@ for (const workspace of ALL_WORKSPACE_NAMES) {
   );
 }
 
+const collected = await measure('tests', collectSuite);
+// A collector failure leaves no lane result to trust: every lane is unavailable.
+const collectionFailure = unavailable<never>(
+  collected.state === 'measured' ? 'lane collection did not run' : collected.reasons
+);
+
 const fragment: TestMetricsFragment = {
   // The commit this job measured, so the collector can tell a fragment from
   // another commit (stale) from one that never arrived.
   sourceSha: resolveSourceSha(process.env, getCommitSha()),
-  tests: await measure('tests', collectSuiteStats),
+  tests: collected.state === 'measured' ? collected.value.suite : collectionFailure,
+  lanes:
+    collected.state === 'measured'
+      ? laneCells(collected.value.outcomes)
+      : Object.fromEntries(TEST_LANES.map((lane) => [lane.id, collectionFailure])),
   coverage,
 };
 

@@ -8,6 +8,7 @@
 
 import Type, { type Static } from 'typebox';
 
+import { ComponentLanesSchema, TestErrorHeadlineSchema } from './lanes';
 import { measurement } from './states';
 
 const count = Type.Integer({ minimum: 0 });
@@ -112,14 +113,6 @@ const DependencyStatsSchema = Type.Object(
   { additionalProperties: false }
 );
 
-const TestErrorHeadlineSchema = Type.Object(
-  {
-    message: Type.String({ maxLength: 400 }),
-    originatedIn: Type.Union([Type.String({ maxLength: 400 }), Type.Null()]),
-  },
-  { additionalProperties: false }
-);
-
 export const TestSuiteStatsSchema = Type.Object(
   {
     exitCode: Type.Union([Type.Integer(), Type.Null()]),
@@ -171,6 +164,12 @@ const ComponentSchema = Type.Refine(
       loc: measurement(LocStatsSchema),
       coverage: measurement(CoverageSummarySchema),
       tsErrors: measurement(count),
+      /**
+       * Per-lane test results. Optional only so baselines recorded before lanes
+       * existed still validate; the collector always writes it (empty when no
+       * lane is wired) and the policy treats its absence on a head as missing.
+       */
+      lanes: Type.Optional(ComponentLanesSchema),
     },
     { additionalProperties: false }
   ),
@@ -212,7 +211,7 @@ export type LocStats = Static<typeof LocStatsSchema>;
 export type DuplicationStats = Static<typeof DuplicationStatsSchema>;
 export type BundleStats = Static<typeof BundleStatsSchema>;
 export type DependencyStats = Static<typeof DependencyStatsSchema>;
-export type TestErrorHeadline = Static<typeof TestErrorHeadlineSchema>;
+export type { TestErrorHeadline } from './lanes';
 export type TestSuiteStats = Static<typeof TestSuiteStatsSchema>;
 export type ToolingCheckStats = Static<typeof ToolingCheckStatsSchema>;
 export type Component = Static<typeof ComponentSchema>;
