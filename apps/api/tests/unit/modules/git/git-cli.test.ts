@@ -123,6 +123,19 @@ describe('hub git CLI facade', () => {
     expect((error as GitCliError).aborted).toBe(false);
     expect((error as GitCliError).message).toContain('incomplete');
   });
+
+  it('keeps the argv it sent when the runtime refuses before launch', async () => {
+    // A pre-launch refusal (a deleted cwd, a preparation timeout) reaches the hub
+    // with `args: []`; the hub sent the argv and knows it.
+    useFailingRuntime(runtimeMissingCwdFailure('/gone'));
+
+    const error = await runGit(['rev-parse', '--show-toplevel'], { cwd: '/gone' }).catch(
+      (cause: unknown) => cause
+    );
+
+    expect(error).toBeInstanceOf(GitCliError);
+    expect((error as GitCliError).args).toEqual(['rev-parse', '--show-toplevel']);
+  });
 });
 
 /** The failure `crates/mangostudio-runtime/src/commands/service.rs` sends for a cwd that is gone. */
