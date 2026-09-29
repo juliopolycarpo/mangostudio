@@ -217,6 +217,10 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'claude-opus-4': 200_000,
   'claude-sonnet-4': 200_000,
   'claude-haiku-4': 200_000,
+  // Anthropic Claude 5.x — 1M standard window (models overview, 2026-09)
+  'claude-fable-5-1': 1_000_000,
+  'claude-opus-5-5': 1_000_000,
+  'claude-sonnet-5-5': 1_000_000,
 };
 
 /**

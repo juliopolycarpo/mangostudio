@@ -73,10 +73,14 @@ describe('getModelContextLimit', () => {
     expect(getModelContextLimit('gpt-image-2')).toBe(128_000);
   });
 
-  it('returns 200k for claude 5 and fable models', () => {
-    expect(getModelContextLimit('claude-opus-5-5')).toBe(200_000);
-    expect(getModelContextLimit('claude-sonnet-5-5')).toBe(200_000);
-    expect(getModelContextLimit('claude-fable-5-1')).toBe(200_000);
+  it('returns the documented 1M for claude fable 5.1, opus 5.5 and sonnet 5.5', () => {
+    expect(getModelContextLimit('claude-fable-5-1')).toBe(1_000_000);
+    expect(getModelContextLimit('claude-opus-5-5')).toBe(1_000_000);
+    expect(getModelContextLimit('claude-sonnet-5-5')).toBe(1_000_000);
+  });
+
+  it('keeps the conservative 200k for claude fable variants without a documented window', () => {
+    expect(getModelContextLimit('claude-fable-5')).toBe(200_000);
   });
 
   it('returns 200k for claude-3 models', () => {
