@@ -59,7 +59,10 @@ describe('getModelContextLimit', () => {
     expect(getModelContextLimit('gemini-2.0-flash')).toBe(1_048_576);
   });
 
-  it('returns 1M for gpt-6 and later models', () => {
+  it('returns 1M for gpt-5.6, gpt-6 and later models', () => {
+    expect(getModelContextLimit('gpt-5.6-luna')).toBe(1_048_576);
+    expect(getModelContextLimit('gpt-5.6-terra')).toBe(1_048_576);
+    expect(getModelContextLimit('gpt-5.6-sol')).toBe(1_048_576);
     expect(getModelContextLimit('gpt-6-luna')).toBe(1_048_576);
     expect(getModelContextLimit('gpt-6-sol')).toBe(1_048_576);
     expect(getModelContextLimit('gpt-6-astra')).toBe(1_048_576);
