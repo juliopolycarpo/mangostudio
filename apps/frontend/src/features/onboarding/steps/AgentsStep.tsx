@@ -59,7 +59,9 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
   // of the things setup exists to fix, so it must not be able to stop this page
   // from rendering. A failure reads as "no model", which is what it means for
   // the choice on offer.
-  const catalog = useQuery(catalogQueryOptions());
+  // Setup has no bootstrap panel to retry through, so a catalog that failed is
+  // asked for again whenever this step mounts.
+  const catalog = useQuery({ ...catalogQueryOptions(), retryOnMount: true });
   const hasModel = (catalog.data?.textModels.length ?? 0) > 0;
   const choose = (runner: ChatRunnerConfiguration) =>
     void onChange((current) => ({ ...current, runner }));

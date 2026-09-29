@@ -4087,6 +4087,12 @@ export const messages = {
       rateLimited: 'Vieram requisições demais deste endereço. Espere um momento e tente de novo.',
       retry: 'Tentar de novo',
       detail: 'Detalhes: {message}',
+      failed: 'Não carregado: {items}.',
+      responsibilities: {
+        chats: 'suas conversas',
+        catalog: 'a lista de modelos',
+        agents: 'as configurações de agentes',
+      },
     },
   },
 

@@ -6,7 +6,8 @@
 
 import { describe, expect, it } from 'bun:test';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import { screen } from '@testing-library/react';
+import { en } from '@mangostudio/shared/i18n';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import {
   BootstrapErrorPanel,
   errorDetail,
@@ -37,6 +38,59 @@ describe('BootstrapErrorPanel', () => {
     await renderWithRouter(<BootstrapErrorPanel error="gateway closed" />);
 
     expect(screen.getByRole('alert')).toHaveTextContent(/gateway closed/);
+  });
+});
+
+describe('BootstrapErrorPanel inside the shell', () => {
+  it('stands over the whole surface unless told otherwise', async () => {
+    await renderWithRouter(<BootstrapErrorPanel error={new Error('refused')} />);
+
+    expect(screen.getByRole('alert').parentElement).toHaveAttribute('data-placement', 'surface');
+    expect(screen.queryByTestId('bootstrap-error-failed')).toBeNull();
+  });
+
+  it('names every responsibility that did not load, in one sentence', async () => {
+    await renderWithRouter(
+      <BootstrapErrorPanel
+        error={new Error('refused')}
+        placement="content"
+        failed={['chats', 'agents']}
+      />
+    );
+
+    const { failed, responsibilities } = en.errors.bootstrap;
+    expect(screen.getByRole('alert').parentElement).toHaveAttribute('data-placement', 'content');
+    expect(screen.getByTestId('bootstrap-error-failed')).toHaveTextContent(
+      failed.replace('{items}', `${responsibilities.chats} and ${responsibilities.agents}`)
+    );
+  });
+
+  it('runs the retry it was given instead of re-running the route', async () => {
+    let retries = 0;
+    const { router } = await renderWithRouter(
+      <BootstrapErrorPanel
+        error={new Error('refused')}
+        placement="content"
+        failed={['catalog']}
+        onRetry={() => {
+          retries += 1;
+          return Promise.resolve();
+        }}
+      />
+    );
+    let invalidations = 0;
+    router.invalidate = () => {
+      invalidations += 1;
+      return Promise.resolve();
+    };
+
+    fireEvent.click(screen.getByTestId('bootstrap-error-retry'));
+
+    await waitFor(() => expect(retries).toBe(1));
+    expect(
+      invalidations,
+      `expected route re-runs from a scoped retry: 0 | received: ${invalidations}`
+    ).toBe(0);
   });
 });
 

@@ -34,6 +34,10 @@ export type ChatWithContext = Chat & { contextInfo?: ContextInfo | null };
 export const chatListQueryOptions = () =>
   queryOptions({
     queryKey: chatKeys.lists(),
+    // A shell bootstrap query: once refused, it is asked again by the bootstrap
+    // panel's retry, not by whichever component mounts next — that would retry
+    // a rate-limited request on every mount. See `features/bootstrap`.
+    retryOnMount: false,
     queryFn: async () => {
       const { data, error } = await client.api.chats.get();
       if (error) throw new ApiError(error.value);
