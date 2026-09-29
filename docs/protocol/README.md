@@ -34,9 +34,10 @@ bun run protocol:test    # the TypeScript suite, then cargo test and the interop
 ```
 
 The repository gate (`bun run check` / `bun run test`) runs only the TypeScript half of these —
-the Rust half is a 25-minute cold lane owned by the path-filtered
-`.github/workflows/protocol-ci.yml`. Run the two commands above before handing off a protocol
-change.
+the Rust half is a 25-minute cold lane, split between two path-filtered workflows:
+`.github/workflows/cargo-shim.yml` (fmt, clippy, tests, doctests and `cargo doc` for the whole Rust
+workspace) and `.github/workflows/protocol-ci.yml` (MSRV, feature powerset, interop, semver checks,
+schema equality). Run the two commands above before handing off a protocol change.
 
 Both degrade to the TypeScript half with a warning when `cargo` is not on PATH.
 

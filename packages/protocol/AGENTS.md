@@ -24,8 +24,11 @@ it.
 
 `bun run check` and `bun run test` run the **TypeScript half only** (`--ts-only`). The Rust half —
 Clippy over the feature powerset, `cargo doc`, the cross-language round trip — is a 25-minute cold
-lane, so it lives in the path-filtered `.github/workflows/protocol-ci.yml` rather than in every
-run of the repository gate.
+lane, so it stays out of every run of the repository gate. It is split across two path-filtered
+workflows: `.github/workflows/cargo-shim.yml` runs fmt, clippy, tests, doctests and `cargo doc` for
+the whole Rust workspace (the protocol crate included; `spec/**` and the other files the crates read
+select its rust lane), and `.github/workflows/protocol-ci.yml` runs what only the protocol needs —
+MSRV, the feature powerset, interop, semver checks, schema equality and the package lane.
 
 For any change under the paths above, run the full gate before handoff:
 
