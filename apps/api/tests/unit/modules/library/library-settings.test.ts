@@ -9,10 +9,10 @@ import { migrateLibraryLocationSettings } from '../../../../src/db/migrations/03
 import { migrateProfileScopedAppSettings } from '../../../../src/db/migrations/033_profile_scoped_app_settings';
 import { migrateScopedLibraryLocationSettings } from '../../../../src/db/migrations/034_scoped_library_location_settings';
 import {
-  defaultsForDetectedAgents,
   getAppSettings,
   setLibraryLocationDefaultsForTest,
 } from '../../../../src/modules/app-settings/application/app-settings-service';
+import { defaultsForDetectedAgents } from '../../../../src/modules/app-settings/application/detected-library-defaults';
 import { environmentProbingService } from '../../../../src/modules/environments/application/probing-service';
 
 function detected(targetId: AgentCliStatus['targetId']): AgentCliStatus {
