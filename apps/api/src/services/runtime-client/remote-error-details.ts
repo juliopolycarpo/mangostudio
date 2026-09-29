@@ -39,21 +39,6 @@ export function detailExitCode(error: RemoteError): number | null {
 }
 
 /**
- * The `details[key]` array of strings, or undefined unless every entry is one.
- *
- * All-or-nothing: a half-typed argv reported back to a user is more misleading
- * than the argv the caller already had.
- *
- * @example
- * detailStringArray(error, 'args') ?? args
- */
-export function detailStringArray(error: RemoteError, key: string): string[] | undefined {
-  const value = error.details?.[key];
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) return undefined;
-  return value;
-}
-
-/**
  * Whether a rejection is the caller hanging up rather than the runtime failing.
  *
  * Checked before `details`, because an aborted request never reached the peer

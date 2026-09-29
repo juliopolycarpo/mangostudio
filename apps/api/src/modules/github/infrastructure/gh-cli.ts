@@ -20,7 +20,6 @@ import {
   detailBoolean,
   detailExitCode,
   detailString,
-  detailStringArray,
   isAbortError,
 } from '../../../services/runtime-client/remote-error-details';
 import { exceedsWindowsCommandLine } from '../domain/gh-command-line';
@@ -358,8 +357,11 @@ function mapGhFailure(args: readonly string[], error: unknown): GhCliError {
     return new GhCliError(args, null, 'GitHub CLI command aborted.', true);
   }
   if (error instanceof RemoteError && detailString(error, 'kind') === 'gh_execution') {
+    // The argv is the one this hub sent. The runtime echoes it back, but a
+    // refusal raised before launch (a missing cwd, a preparation timeout)
+    // echoes an empty list, and an older runtime may do the same.
     return new GhCliError(
-      detailStringArray(error, 'args') ?? args,
+      args,
       detailExitCode(error),
       detailString(error, 'stderr') ?? error.message,
       detailBoolean(error, 'aborted'),

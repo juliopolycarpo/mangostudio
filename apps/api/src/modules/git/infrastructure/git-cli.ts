@@ -6,7 +6,6 @@ import {
   detailBoolean,
   detailExitCode,
   detailString,
-  detailStringArray,
   isAbortError,
 } from '../../../services/runtime-client/remote-error-details';
 
@@ -156,8 +155,11 @@ function mapGitFailure(args: readonly string[], error: unknown): GitCliError {
     return new GitCliError(args, null, 'Git command aborted.', true);
   }
   if (error instanceof RemoteError && detailString(error, 'kind') === 'git_execution') {
+    // The argv is the one this hub sent. The runtime echoes it back, but a
+    // refusal raised before launch (a missing cwd, a preparation timeout)
+    // echoes an empty list, and an older runtime may do the same.
     return new GitCliError(
-      detailStringArray(error, 'args') ?? args,
+      args,
       detailExitCode(error),
       detailString(error, 'stderr') ?? error.message,
       detailBoolean(error, 'aborted'),

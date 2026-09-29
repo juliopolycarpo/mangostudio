@@ -199,6 +199,28 @@ describe('hub gh CLI facade', () => {
     });
   });
 
+  it('keeps the argv it sent when the runtime refuses before launch', async () => {
+    // A pre-launch refusal (a deleted cwd, a preparation timeout) reaches the hub
+    // with `args: []`; the hub sent the argv and knows it.
+    const runtime = new FakeGhRuntime(TEST_MANIFEST, () =>
+      Promise.reject(
+        new RemoteError('INTERNAL', 'Invalid cwd "/gone"; expected an existing directory.', {
+          kind: 'gh_execution',
+          exitCode: null,
+          stderr: 'Invalid cwd "/gone"; expected an existing directory.',
+          stdout: '',
+          args: [],
+        })
+      )
+    );
+    runtime.install();
+
+    const error = await runGh(['repo', 'view'], { cwd: '/gone' }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(GhCliError);
+    expect((error as GhCliError).args).toEqual(['repo', 'view']);
+  });
+
   it('rejects a capture the runtime flagged incomplete instead of parsing it', async () => {
     const runtime = new FakeGhRuntime(TEST_MANIFEST, () =>
       Promise.resolve({ stdout: '{"nameWith', stderr: '', exitCode: 0, incomplete: true })
