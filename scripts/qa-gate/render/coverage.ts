@@ -2,7 +2,7 @@
 // coverage lane (`unsupported` on both sides) get no rows: they have nothing
 // to compare, and the section would otherwise be mostly n/a.
 
-import type { Metrics } from '../collect/types';
+import type { ComponentKind, Metrics } from '../collect/types';
 import type { CoverageBucket } from '../parse-lcov';
 import {
   type CoverageKey,
@@ -12,7 +12,7 @@ import {
   findComponent,
   getCoverageBucket,
 } from './access';
-import { formatNumber, formatPct, NA, renderDelta } from './format';
+import { formatNumber, formatPct, NA, PERCENT_EPSILON_PP, renderDelta } from './format';
 
 // A bucket with a null pct is a legitimate 0/0 ("n/a (0/0)"), distinct from a
 // missing bucket (bare "n/a"), which means the collector failed or the metric
@@ -23,12 +23,37 @@ const renderCoverageCell = (bucket: CoverageBucket | null): string => {
   return `${pct} (${formatNumber(bucket.covered)}/${formatNumber(bucket.total)})`;
 };
 
+/**
+ * Covered units a crate's count moves by between two runs of the same code
+ * (racy branches in the runtime's tests), measured at ±1 to ±3 regions.
+ */
+const CRATE_RUN_NOISE_COUNT = 3;
+
+/**
+ * Whether a crate's coverage change is within run-to-run noise: under the
+ * verdict's percentage-point epsilon, or a few covered units over an unchanged
+ * denominator (the instrumented total only moves when the code did). JS rows
+ * are deterministic, so they always colour.
+ * // Usage: isCrateCoverageNoise({ total: 1115, covered: 1111, pct: 99.64 }, { total: 1115, covered: 1108, pct: 99.37 }) // true
+ */
+const isCrateCoverageNoise = (
+  base: CoverageBucket | null,
+  head: CoverageBucket | null
+): boolean => {
+  if (!base || !head || base.pct === null || head.pct === null) return false;
+  if (Math.abs(head.pct - base.pct) < PERCENT_EPSILON_PP) return true;
+  return (
+    base.total === head.total && Math.abs(head.covered - base.covered) <= CRATE_RUN_NOISE_COUNT
+  );
+};
+
 const renderCoverageRow = (
   base: Metrics | null,
   head: Metrics | null,
   id: string,
   label: string,
-  key: CoverageKey
+  key: CoverageKey,
+  kind: ComponentKind
 ): string => {
   const baseBucket = getCoverageBucket(findComponent(base, id)?.coverage, key);
   const headBucket = getCoverageBucket(findComponent(head, id)?.coverage, key);
@@ -37,6 +62,7 @@ const renderCoverageRow = (
   const delta = renderDelta(baseBucket?.pct ?? null, headBucket?.pct ?? null, {
     higherIsBetter: true,
     suffix: 'pp',
+    neutral: kind === 'crate' && isCrateCoverageNoise(baseBucket, headBucket),
   });
   return `| ${label} | ${key} | ${baseCell} | ${headCell} | ${delta} |`;
 };
@@ -49,7 +75,9 @@ export const renderCoverageSection = (base: Metrics | null, head: Metrics | null
     );
     if (!onLane) continue;
     for (const key of coverageKeysFor(component.kind)) {
-      rows.push(renderCoverageRow(base, head, component.id, componentLabel(component), key));
+      rows.push(
+        renderCoverageRow(base, head, component.id, componentLabel(component), key, component.kind)
+      );
     }
   }
   return [

@@ -65,6 +65,67 @@ describe('renderCoverageSection for a crate', () => {
     expect(rowsOf(section, 'apps/api').some((row) => row.includes('| regions |'))).toBe(false);
   });
 
+  describe('run-to-run noise', () => {
+    // The contract crate's real region counts: 1111 of 1115 covered.
+    const regions = (total: number, covered: number) => ({
+      ...makeRustCoverageSummary(80),
+      regions: { total, covered, pct: Number(((covered / total) * 100).toFixed(2)) },
+    });
+    const regionRow = (baseCell: CoverageSummary, headCell: CoverageSummary) =>
+      rowsOf(
+        renderCoverageSection(
+          withCrate('base-sha', measured(baseCell)),
+          withCrate('head-sha', measured(headCell))
+        ),
+        CRATE
+      ).find((row) => row.includes('| regions |')) ?? '';
+
+    it.each([-3, -2, -1, 1, 2, 3])(
+      'renders a %i covered-region change over the same total neutral, not as a regression',
+      (delta) => {
+        const row = regionRow(regions(1115, 1111), regions(1115, 1111 + delta));
+
+        expect(row, `expected a neutral ⚪ row | received: ${row}`).toContain('⚪');
+        expect(row).not.toMatch(/🔴|🟢/);
+      }
+    );
+
+    it('renders a change under the verdict epsilon neutral even when the total moved', () => {
+      const row = regionRow(regions(11761, 11158), regions(11762, 11158));
+
+      expect(row).toContain('⚪');
+    });
+
+    it('still colours a change past the noise as a regression', () => {
+      const row = regionRow(regions(1115, 1111), regions(1115, 1100));
+
+      expect(row).toContain('🔴');
+    });
+
+    it('still colours a small drop when the instrumented total moved with the code', () => {
+      const row = regionRow(regions(1115, 1111), regions(1125, 1111));
+
+      expect(row).toContain('🔴');
+    });
+
+    it('does not soften a JS workspace row: JS coverage is deterministic', () => {
+      const js = (covered: number) => ({
+        ...makeCoverageSummary(80),
+        lines: { total: 1115, covered, pct: Number(((covered / 1115) * 100).toFixed(2)) },
+      });
+      const section = renderCoverageSection(
+        makeMetrics('base-sha', {
+          components: makeComponents({ 'apps/api': { coverage: measured(js(1000)) } }),
+        }),
+        makeMetrics('head-sha', {
+          components: makeComponents({ 'apps/api': { coverage: measured(js(998)) } }),
+        })
+      );
+
+      expect(rowsOf(section, 'apps/api')[0]).toContain('🔴');
+    });
+  });
+
   it('shows n/a, not zero, when the Rust lane did not run for the change', () => {
     const head = withCrate(
       'head-sha',

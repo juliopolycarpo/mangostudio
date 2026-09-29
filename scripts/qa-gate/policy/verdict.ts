@@ -27,7 +27,7 @@ import {
   globalMeasurements,
   sumTsErrors,
 } from '../render/access';
-import { formatBytes, inlineCode } from '../render/format';
+import { formatBytes, inlineCode, PERCENT_EPSILON_PP } from '../render/format';
 import { laneFailureItem, missingLanes, recoveredFailuresNote } from './lanes';
 
 export type VerdictOutcome = 'pass' | 'fail' | 'incomplete';
@@ -56,9 +56,9 @@ export interface Verdict {
   readonly notes: readonly string[];
 }
 
-// Ignore sub-0.1pp percentage drift and sub-10KiB gzip growth — both are
-// routine noise on unrelated changes and would make the verdict cry wolf.
-const PERCENT_EPSILON_PP = 0.1;
+// Ignore sub-0.1pp percentage drift (PERCENT_EPSILON_PP) and sub-10KiB gzip
+// growth — both are routine noise on unrelated changes and would make the
+// verdict cry wolf.
 const BUNDLE_GROWTH_THRESHOLD_BYTES = 10 * 1024;
 
 const coverageDropItem = (base: Metrics | null, head: Metrics | null): string | null => {
