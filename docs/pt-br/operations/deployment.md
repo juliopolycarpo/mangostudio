@@ -188,6 +188,12 @@ server {
     ssl_certificate /etc/ssl/certs/your-cert.pem;
     ssl_certificate_key /etc/ssl/private/your-key.pem;
 
+    # Comprime o bundle do frontend e JSON. text/html entra sempre que o gzip
+    # está ligado; text/event-stream fica de fora, então o SSE não é comprimido.
+    gzip on;
+    gzip_vary on;
+    gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
+
     location / {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
@@ -208,8 +214,40 @@ server {
 
 ```
 your-domain.com {
+    # Comprime o bundle do frontend e JSON. A lista é explícita porque a padrão
+    # casa text/*, o que também comprime SSE (text/event-stream) quando um
+    # evento passa de 512 bytes.
+    encode zstd gzip {
+        match {
+            header Content-Type text/html*
+            header Content-Type text/css*
+            header Content-Type text/javascript*
+            header Content-Type application/javascript*
+            header Content-Type application/json*
+            header Content-Type image/svg+xml*
+        }
+    }
     reverse_proxy 127.0.0.1:3001
 }
+```
+
+### Compressão
+
+O hub serve o bundle do frontend sem compressão e deixa a compressão para o proxy. Os dois
+exemplos acima comprimem: o arquivo JavaScript principal cai de cerca de 1,8 MB para cerca de
+0,6 MB na rede, o que importa no acesso remoto (um navegador na mesma máquina ganha pouco).
+Fontes e imagens já são comprimidas e não entram na lista.
+
+Respostas SSE (`text/event-stream`) ficam sem compressão de propósito, para que cada evento
+chegue ao navegador assim que o hub o envia. Se você ampliar alguma das listas, mantenha
+`text/event-stream` fora dela e mantenha `proxy_buffering off` no nginx.
+
+Para conferir um deploy, peça um asset com hash da página com `GET` e leia os headers
+(`curl -I` envia `HEAD`, que as rotas de assets do hub não respondem):
+
+```bash
+curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' \
+  https://your-domain.com/assets/main-<hash>.js | grep -i content-encoding
 ```
 
 ### Confiar nos headers de proxy
