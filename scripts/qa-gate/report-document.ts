@@ -50,7 +50,7 @@ const statusBlock = (status: ReportStatus): string => {
     lines.push(
       '',
       `> ℹ️ Baseline unavailable — base columns render as n/a: ${inlineCode(status.baseNote)}.`,
-      "> An exact baseline is published by the first green CI run on `main` whose commit is this PR's base."
+      '> The baseline is the metrics artifact of the completed, non-cancelled `main` CI run for the base commit this PR was tested against.'
     );
   }
   return lines.join('\n');

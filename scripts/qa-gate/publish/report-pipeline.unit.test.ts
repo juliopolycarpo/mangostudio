@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 
 import { CI_JOBS_MAX_ITEMS } from '../ci-durations';
 import { QA_METRICS_ARTIFACT_NAME as TS_ARTIFACT_NAME } from '../metrics-envelope';
+import { makeMetrics } from '../testing/metrics-fixture';
+import { buildZip } from '../testing/zip-fixture';
 import {
   CI_WORKFLOW_FILE,
   collectCiDurations,
@@ -13,6 +15,7 @@ import {
 
 const HEAD_SHA = 'fedcba9876543210fedcba9876543210fedcba98';
 const BASE_SHA = '0123456789abcdef0123456789abcdef01234567';
+const ADVANCED_BASE_SHA = '89abcdef0123456789abcdef0123456789abcdef';
 
 type ReportInputs = Awaited<ReturnType<typeof resolveReportInputs>>;
 
@@ -45,10 +48,21 @@ interface FakeJob {
   readonly completed_at: string | null;
 }
 
+interface FakeRun {
+  readonly id: number;
+  readonly head_sha: string;
+  readonly head_branch: string;
+  readonly event: string;
+  readonly status: string;
+  readonly conclusion: string | null;
+}
+
 interface FakeOptions {
   readonly pullRequests?: unknown[];
   readonly artifactsByRun?: Record<number, FakeArtifact[]>;
-  readonly baselineRuns?: Array<{ id: number; head_sha: string }>;
+  readonly baselineRuns?: FakeRun[];
+  /** A misbehaving API that ignores the `head_sha` filter. */
+  readonly ignoreHeadShaFilter?: boolean;
   readonly previousRuns?: unknown[];
   readonly archives?: Record<number, Uint8Array>;
   readonly jobsByRun?: Record<number, FakeJob[]>;
@@ -74,12 +88,22 @@ class FakeGithub {
       listWorkflowRuns: (params: Record<string, unknown>) => {
         this.workflowRunQueries.push(params);
         const runs = params.head_sha
-          ? (this.options.baselineRuns ?? []).filter((run) => run.head_sha === params.head_sha)
-          : (this.options.previousRuns ?? []);
-        return Promise.resolve({ data: { workflow_runs: runs } });
+          ? this.matchingBaselineRuns(params)
+          : this.options.previousRuns;
+        return Promise.resolve({ data: { workflow_runs: runs ?? [] } });
       },
     },
   };
+
+  /** Mirrors GitHub: `status` matches either the run status or its conclusion. */
+  private matchingBaselineRuns(params: Record<string, unknown>): FakeRun[] {
+    return (this.options.baselineRuns ?? []).filter(
+      (run) =>
+        (this.options.ignoreHeadShaFilter || run.head_sha === params.head_sha) &&
+        run.event === params.event &&
+        (run.status === params.status || run.conclusion === params.status)
+    );
+  }
 
   paginate = (route: unknown, params: Record<string, unknown>) => {
     if (route === this.rest.pulls.list) {
@@ -128,6 +152,29 @@ const artifact = (id: number, overrides: Partial<FakeArtifact> = {}): FakeArtifa
   ...overrides,
 });
 
+const mainRun = (id: number, overrides: Partial<FakeRun> = {}): FakeRun => ({
+  id,
+  head_sha: BASE_SHA,
+  head_branch: 'main',
+  event: 'push',
+  status: 'completed',
+  conclusion: 'success',
+  ...overrides,
+});
+
+/** A qa-metrics artifact zip whose envelope records `baseSha`, as the collector writes it. */
+const metricsArchive = (baseSha: string | null = BASE_SHA): Uint8Array =>
+  buildZip([{ name: 'metrics.json', content: JSON.stringify({ schemaVersion: 3, baseSha }) }]);
+
+/** The qa-metrics archive a main-push run uploads for `sha`. */
+const baselineArchive = (sha: string, metrics: object = makeMetrics(sha)): Uint8Array =>
+  buildZip([
+    {
+      name: 'metrics.json',
+      content: JSON.stringify({ schemaVersion: 3, headSha: sha, baseSha: null, metrics }),
+    },
+  ]);
+
 const job = (name: string, overrides: Partial<FakeJob> = {}): FakeJob => ({
   name,
   status: 'completed',
@@ -173,10 +220,10 @@ describe('resolveReportInputs', () => {
   it('resolves head and baseline archives with trusted provenance', async () => {
     const github = new FakeGithub({
       pullRequests: [openPr],
-      baselineRuns: [{ id: 90, head_sha: BASE_SHA }],
+      baselineRuns: [mainRun(90)],
       previousRuns: [{ id: 41, pull_requests: [{ number: 7 }] }],
       artifactsByRun: { 42: [artifact(1)], 90: [artifact(2)] },
-      archives: { 1: new Uint8Array([104]), 2: new Uint8Array([98]) },
+      archives: { 1: metricsArchive(), 2: baselineArchive(BASE_SHA) },
       jobsByRun: {
         42: [job('Test / Run tests')],
         90: [job('Test / Run tests')],
@@ -187,8 +234,8 @@ describe('resolveReportInputs', () => {
     const result = await resolveReportInputs({ github, context });
 
     expect(result.skip).toBeNull();
-    expect(result.headArchive).toEqual(new Uint8Array([104]));
-    expect(result.baseArchive).toEqual(new Uint8Array([98]));
+    expect(result.headArchive).toEqual(metricsArchive());
+    expect(result.baseArchive).toEqual(baselineArchive(BASE_SHA));
     expect(result.ciDurations).toEqual({
       base: {
         runId: 90,
@@ -238,7 +285,7 @@ describe('resolveReportInputs', () => {
         workflow_id: CI_WORKFLOW_FILE,
         head_sha: BASE_SHA,
         event: 'push',
-        status: 'success',
+        status: 'completed',
         per_page: 10,
       },
       {
@@ -256,6 +303,7 @@ describe('resolveReportInputs', () => {
       prNumber: 7,
       headSha: HEAD_SHA,
       baseSha: BASE_SHA,
+      baseShaRecorded: true,
       runUrl: 'https://example.test/runs/42',
       headArtifact: { found: true, reason: null },
       baseArtifact: { found: true, reason: null },
@@ -266,13 +314,16 @@ describe('resolveReportInputs', () => {
     const github = new FakeGithub({
       pullRequests: [openPr],
       artifactsByRun: { 42: [artifact(1)] },
+      archives: { 1: metricsArchive() },
     });
 
     const result = publishable(await resolveReportInputs({ github, context }));
 
     expect(result.baseArchive).toBeNull();
     expect(result.reportContext.baseArtifact.found).toBe(false);
-    expect(result.reportContext.baseArtifact.reason).toContain('no successful main CI run');
+    expect(result.reportContext.baseArtifact.reason).toContain(
+      `no completed, non-cancelled main CI run found for base ${BASE_SHA}`
+    );
   });
 
   it('rejects oversized artifacts before downloading them', async () => {
@@ -353,6 +404,214 @@ describe('resolveReportInputs', () => {
 
     expect(result.ciDurations.previous.runId).toBeNull();
     expect(result.ciDurations.previous.error).toContain('no previous successful CI run');
+  });
+});
+
+describe('baseline resolution', () => {
+  const baselineFixture = (options: Partial<FakeOptions> = {}) =>
+    new FakeGithub({
+      pullRequests: [openPr],
+      artifactsByRun: { 42: [artifact(1)], 90: [artifact(2)] },
+      archives: { 1: metricsArchive(), 2: baselineArchive(BASE_SHA) },
+      baselineRuns: [mainRun(90)],
+      ...options,
+    });
+
+  it('selects a failed main run that still has a metrics artifact for the exact base', async () => {
+    const github = baselineFixture({ baselineRuns: [mainRun(90, { conclusion: 'failure' })] });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.reportContext.baseArtifact).toEqual({ found: true, reason: null });
+    expect(result.baseArchive).toEqual(baselineArchive(BASE_SHA));
+    expect(github.downloadedArtifactIds).toEqual([1, 2]);
+    expect(result.ciDurations.base.runId).toBe(90);
+  });
+
+  it('never selects a canceled main run, even one that has an artifact', async () => {
+    const github = baselineFixture({ baselineRuns: [mainRun(90, { conclusion: 'cancelled' })] });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.baseArchive).toBeNull();
+    expect(result.reportContext.baseArtifact.found).toBe(false);
+    expect(result.reportContext.baseArtifact.reason).toContain('non-cancelled');
+    expect(github.downloadedArtifactIds).toEqual([1]);
+  });
+
+  it('skips a canceled run and falls through to an older run with an artifact', async () => {
+    const github = baselineFixture({
+      baselineRuns: [
+        mainRun(91, { conclusion: 'cancelled' }),
+        mainRun(90, { conclusion: 'failure' }),
+      ],
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.baseArchive).toEqual(baselineArchive(BASE_SHA));
+    expect(result.ciDurations.base.runId).toBe(90);
+  });
+
+  it('ignores runs that are still in progress', async () => {
+    const github = baselineFixture({
+      baselineRuns: [mainRun(90, { status: 'in_progress', conclusion: null })],
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.baseArchive).toBeNull();
+  });
+
+  it('is unavailable, never zero, when the baseline run has no artifact', async () => {
+    const github = baselineFixture({ artifactsByRun: { 42: [artifact(1)] } });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.baseArchive).toBeNull();
+    expect(result.reportContext.baseArtifact.found).toBe(false);
+    expect(result.reportContext.baseArtifact.reason).toContain('run has no qa-metrics artifact');
+  });
+
+  it('is unavailable when the baseline artifact expired', async () => {
+    const github = baselineFixture({
+      artifactsByRun: { 42: [artifact(1)], 90: [artifact(2, { expired: true })] },
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.baseArchive).toBeNull();
+    expect(github.downloadedArtifactIds).toEqual([1]);
+  });
+
+  it.each([
+    [
+      'schema-invalid (not JSON)',
+      () => buildZip([{ name: 'metrics.json', content: '{bad' }]),
+      'unreadable',
+    ],
+    ['truncated', () => baselineArchive(BASE_SHA).slice(0, 60), 'unreadable'],
+    [
+      'partial (collector-error placeholders)',
+      () =>
+        baselineArchive(
+          BASE_SHA,
+          makeMetrics(BASE_SHA, { frontendBundle: { error: 'frontend dist missing' } })
+        ),
+      'partial: 1 metric(s) failed to collect (metrics/frontendBundle)',
+    ],
+    [
+      'recorded for a different sha',
+      () => baselineArchive(ADVANCED_BASE_SHA),
+      `headSha "${ADVANCED_BASE_SHA}" does not match base ${BASE_SHA}`,
+    ],
+  ])('is unavailable, never zero, for a %s baseline artifact', async (_label, makeArchive, why) => {
+    const github = baselineFixture({ archives: { 1: metricsArchive(), 2: makeArchive() } });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.reportContext.baseArtifact).toEqual({
+      found: false,
+      reason: expect.stringContaining(why),
+    });
+    expect(result.baseArchive).toBeNull();
+  });
+
+  it('falls through a partial newest run to an older complete run', async () => {
+    const partial = makeMetrics(BASE_SHA, { circularDeps: { error: 'madge crashed' } });
+    const github = baselineFixture({
+      baselineRuns: [mainRun(91, { conclusion: 'failure' }), mainRun(90)],
+      artifactsByRun: { 42: [artifact(1)], 91: [artifact(3)], 90: [artifact(2)] },
+      archives: {
+        1: metricsArchive(),
+        3: baselineArchive(BASE_SHA, partial),
+        2: baselineArchive(BASE_SHA),
+      },
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.reportContext.baseArtifact).toEqual({ found: true, reason: null });
+    expect(result.baseArchive).toEqual(baselineArchive(BASE_SHA));
+    expect(result.ciDurations.base.runId).toBe(90);
+  });
+
+  it('never accepts a run whose head sha differs from the recorded base', async () => {
+    const github = baselineFixture({
+      baselineRuns: [mainRun(90, { head_sha: ADVANCED_BASE_SHA })],
+      ignoreHeadShaFilter: true,
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.baseArchive).toBeNull();
+    expect(github.downloadedArtifactIds).toEqual([1]);
+  });
+
+  it('never accepts a push run from a branch other than main', async () => {
+    const github = baselineFixture({ baselineRuns: [mainRun(90, { head_branch: 'feat/x' })] });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.baseArchive).toBeNull();
+  });
+
+  it('compares against the recorded base when the live PR base has advanced', async () => {
+    const github = baselineFixture({
+      pullRequests: [{ ...openPr, base: { sha: ADVANCED_BASE_SHA } }],
+      // A run exists for the live tip too; it must never be consulted.
+      baselineRuns: [mainRun(90), mainRun(95, { head_sha: ADVANCED_BASE_SHA })],
+      artifactsByRun: { 42: [artifact(1)], 90: [artifact(2)], 95: [artifact(3)] },
+      archives: {
+        1: metricsArchive(BASE_SHA),
+        2: baselineArchive(BASE_SHA),
+        3: baselineArchive(ADVANCED_BASE_SHA),
+      },
+    });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.reportContext.baseSha).toBe(BASE_SHA);
+    expect(result.baseArchive).toEqual(baselineArchive(BASE_SHA));
+    const baselineQuery = github.workflowRunQueries.find((query) => query.head_sha);
+    expect(baselineQuery?.head_sha).toBe(BASE_SHA);
+    expect(github.downloadedArtifactIds).toEqual([1, 2]);
+  });
+
+  it.each([
+    ['null recorded base', metricsArchive(null), 'is not a 40-character lowercase hex SHA'],
+    ['unreadable head archive', new Uint8Array([123]), 'unreadable'],
+  ])(
+    'renders the baseline unavailable for a %s, without a lookup',
+    async (_label, archive, why) => {
+      const github = baselineFixture({
+        pullRequests: [{ ...openPr, base: { sha: ADVANCED_BASE_SHA } }],
+        archives: { 1: archive, 2: baselineArchive(BASE_SHA) },
+      });
+
+      const result = publishable(await resolveReportInputs({ github, context }));
+
+      expect(result.baseArchive).toBeNull();
+      expect(result.reportContext.baseArtifact.found).toBe(false);
+      expect(result.reportContext.baseArtifact.reason).toContain(`baseline unavailable`);
+      expect(result.reportContext.baseArtifact.reason).toContain(why);
+      expect(github.workflowRunQueries.some((query) => query.head_sha)).toBe(false);
+      expect(github.downloadedArtifactIds).toEqual([1]);
+      // The live base only labels the commit range; it never selects a baseline.
+      expect(result.reportContext.baseSha).toBe(ADVANCED_BASE_SHA);
+    }
+  );
+
+  it('renders the baseline unavailable when the head has no artifact', async () => {
+    const github = baselineFixture({ artifactsByRun: {} });
+
+    const result = publishable(await resolveReportInputs({ github, context }));
+
+    expect(result.headArchive).toBeNull();
+    expect(result.baseArchive).toBeNull();
+    expect(result.reportContext.baseArtifact.reason).toContain(
+      'head qa-metrics artifact is unavailable'
+    );
   });
 });
 

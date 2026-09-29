@@ -12,6 +12,12 @@ name: PR QA Report
 # - qa-metrics artifacts are size-capped before and after download, extracted
 #   with `unzip -p | head -c` (no paths, no symlinks, hard byte bound), and
 #   schema-validated against API-resolved provenance before rendering,
+# - the one value read from artifact content on the publisher side is the
+#   head envelope's recorded `baseSha` (publish/metrics-archive.mjs). It is
+#   accepted only as a 40-hex SHA and only selects a baseline: the baseline
+#   run must be a completed, non-cancelled push run on `main` for exactly that
+#   SHA, so a forged value can only pick a real commit that was pushed to main
+#   and has its own CI run, never arbitrary content,
 # - commits and changelog are rendered from fetched git objects, not from
 #   anything the PR uploaded,
 # - each comment updates in place by its own marker and publishing is skipped

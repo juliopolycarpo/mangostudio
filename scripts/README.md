@@ -150,7 +150,13 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   changelog preview (each list expanded up to 5 items, folded above).
 - `publish/report-pipeline.mjs` — trusted-side input resolution (open-PR
   lookup by exact head SHA, size-capped artifact downloads, exact-base
-  baseline run lookup). Plain ESM so `actions/github-script` imports it.
+  baseline run lookup keyed by the base SHA the head envelope recorded at CI
+  time, accepting any completed non-cancelled main run). Plain ESM so
+  `actions/github-script` imports it.
+- `publish/metrics-archive.mjs` — bounded in-memory reads of a qa-metrics
+  archive: the head's recorded `baseSha` (only a 40-hex SHA is accepted) and
+  whether a main baseline is complete (no collector-error placeholders, exact
+  SHA). Anything else makes the baseline unavailable.
 - `publish/managed-comments.mjs` — publisher that updates each comment in
   place by its own marker (update-or-create), removes duplicates per marker,
   deletes legacy comments (the retired combined report included) only after
