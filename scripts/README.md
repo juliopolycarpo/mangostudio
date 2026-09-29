@@ -138,7 +138,8 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   from its own log.
 - `merge-lcov-shards.ts` — merge per-shard Bun LCOV. Not a concatenation and not
   a union; see `docs/reference/testing.md` for why the naive merge reports a
-  coverage regression that did not happen.
+  coverage regression that did not happen. Order-independent, and it fails
+  naming the shard when a report is missing, empty or truncated.
 - `../ci/merge-timings-shards.ts` — reassemble the per-shard `--timings` slices
   that balance the next run's split, and fail the run if two shards claimed the
   same file. That is the observable symptom of shards reading different timings,
