@@ -299,13 +299,21 @@ SSE responses (`text/event-stream`) are deliberately left uncompressed, so each 
 the browser as soon as the hub sends it. If you extend either list, keep `text/event-stream`
 out of it, and keep `proxy_buffering off` in nginx.
 
+If another proxy, load balancer or CDN sits in front of nginx and adds a `Via` request header,
+nginx treats the request as proxied and skips gzip by default. Add `gzip_proxied any;` beside
+`gzip on;` in that setup.
+
 To check a deployment, request a hashed asset from the page with a `GET` and read the headers
 (`curl -I` sends `HEAD`, which the hub's asset routes do not answer):
 
 ```bash
 curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' \
-  https://your-domain.com/assets/main-<hash>.js | grep -i content-encoding
+  https://your-domain.com/assets/main-<hash>.js | grep -i '^content-encoding:'
 ```
+
+A compressed response prints its `Content-Encoding: gzip` header (the case varies by proxy).
+No output (and `grep` exiting with 1) means the proxy sent the file uncompressed. To check
+Caddy's zstd path, send `Accept-Encoding: zstd` instead and expect `zstd`.
 
 ### Trusting proxy headers
 

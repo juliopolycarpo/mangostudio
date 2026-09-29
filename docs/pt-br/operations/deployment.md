@@ -242,13 +242,21 @@ Respostas SSE (`text/event-stream`) ficam sem compressão de propósito, para qu
 chegue ao navegador assim que o hub o envia. Se você ampliar alguma das listas, mantenha
 `text/event-stream` fora dela e mantenha `proxy_buffering off` no nginx.
 
+Se outro proxy, load balancer ou CDN ficar na frente do nginx e adicionar o header de requisição
+`Via`, o nginx trata a requisição como proxied e, por padrão, não aplica gzip. Nesse cenário,
+adicione `gzip_proxied any;` ao lado de `gzip on;`.
+
 Para conferir um deploy, peça um asset com hash da página com `GET` e leia os headers
 (`curl -I` envia `HEAD`, que as rotas de assets do hub não respondem):
 
 ```bash
 curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' \
-  https://your-domain.com/assets/main-<hash>.js | grep -i content-encoding
+  https://your-domain.com/assets/main-<hash>.js | grep -i '^content-encoding:'
 ```
+
+Uma resposta comprimida imprime o header `Content-Encoding: gzip` (a caixa varia conforme o
+proxy). Nenhuma saída (e o `grep` saindo com 1) significa que o proxy enviou o arquivo sem
+compressão. Para conferir o caminho zstd do Caddy, envie `Accept-Encoding: zstd` e espere `zstd`.
 
 ### Confiar nos headers de proxy
 
