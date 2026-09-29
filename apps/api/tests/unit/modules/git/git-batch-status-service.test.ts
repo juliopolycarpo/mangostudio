@@ -6,6 +6,7 @@ import {
   getBatchGitSummaries,
   WORKDIR_CONCURRENCY,
 } from '../../../../src/modules/git/application/git-batch-status-service';
+import { GitCliError } from '../../../../src/modules/git/infrastructure/git-cli';
 
 /** Enough workdirs that the bound has to hold some of them back. */
 const OVERSUBSCRIBED = WORKDIR_CONCURRENCY * 3;
@@ -25,6 +26,26 @@ function chat(id: string, workdir: string | null, environmentId = 'local'): GitS
 }
 
 const gitAlwaysAvailable = () => Promise.resolve(true);
+
+/** What the runtime answers when a chat's workdir was deleted from disk. */
+function missingWorkdirError(workdir: string): GitCliError {
+  return new GitCliError([], null, `Invalid cwd "${workdir}"; expected an existing directory.`);
+}
+
+/** Runs `body` with `console.warn` recorded instead of printed; returns each call's first argument. */
+async function recordWarnings(body: () => Promise<void>): Promise<unknown[]> {
+  const original = console.warn;
+  const warnings: unknown[] = [];
+  console.warn = (message?: unknown) => {
+    warnings.push(message);
+  };
+  try {
+    await body();
+  } finally {
+    console.warn = original;
+  }
+  return warnings;
+}
 
 describe('getBatchGitSummaries', () => {
   it('computes once per unique workdir and fans the summary out to every chat', async () => {
@@ -141,20 +162,46 @@ describe('getBatchGitSummaries', () => {
     expect(states.c).toEqual(summaryFor('/repo/three'));
   });
 
-  it('keeps the batch alive when one workdir fails', async () => {
-    const states = await getBatchGitSummaries({
-      chatIds: ['broken', 'healthy'],
-      chats: [chat('broken', '/repo/broken'), chat('healthy', '/repo/healthy')],
-      userId: 'user-1',
-      checkGitAvailable: gitAlwaysAvailable,
-      computeSummary: (workdir) =>
-        workdir === '/repo/broken'
-          ? Promise.reject(new Error('dubious ownership'))
-          : Promise.resolve(summaryFor(workdir)),
+  it('keeps the batch alive when one workdir fails, and reports the failure', async () => {
+    let states: Record<string, GitSummary> = {};
+    const warnings = await recordWarnings(async () => {
+      states = await getBatchGitSummaries({
+        chatIds: ['broken', 'healthy'],
+        chats: [chat('broken', '/repo/broken'), chat('healthy', '/repo/healthy')],
+        userId: 'user-1',
+        checkGitAvailable: gitAlwaysAvailable,
+        computeSummary: (workdir) =>
+          workdir === '/repo/broken'
+            ? Promise.reject(new Error('dubious ownership'))
+            : Promise.resolve(summaryFor(workdir)),
+      });
     });
 
     expect(states.broken).toBeUndefined();
     expect(states.healthy).toEqual(summaryFor('/repo/healthy'));
+    expect(warnings).toEqual(['[git] batch summary failed']);
+  });
+
+  it('leaves a chat whose workdir was deleted unanswered without warning', async () => {
+    // The sidebar refetches these badges on every focus and invalidation, so a
+    // deleted workdir is an expected, recurring state rather than a failure.
+    let states: Record<string, GitSummary> = {};
+    const warnings = await recordWarnings(async () => {
+      states = await getBatchGitSummaries({
+        chatIds: ['deleted', 'healthy'],
+        chats: [chat('deleted', '/repo/deleted'), chat('healthy', '/repo/healthy')],
+        userId: 'user-1',
+        checkGitAvailable: gitAlwaysAvailable,
+        computeSummary: (workdir) =>
+          workdir === '/repo/deleted'
+            ? Promise.reject(missingWorkdirError(workdir))
+            : Promise.resolve(summaryFor(workdir)),
+      });
+    });
+
+    expect(states.deleted).toBeUndefined();
+    expect(states.healthy).toEqual(summaryFor('/repo/healthy'));
+    expect(warnings).toEqual([]);
   });
 
   it('bounds workdir concurrency', async () => {

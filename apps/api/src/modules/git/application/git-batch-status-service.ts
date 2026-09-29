@@ -1,5 +1,10 @@
 import type { GitStatus, GitSummary } from '@mangostudio/shared/git';
-import { GitCliError, type GitRuntimeSelection, isGitAvailable } from '../infrastructure/git-cli';
+import {
+  GitCliError,
+  type GitRuntimeSelection,
+  isGitAvailable,
+  isMissingWorkdirError,
+} from '../infrastructure/git-cli';
 import { getRepoRoot, getRepoStatus } from './git-status-service';
 
 /**
@@ -131,11 +136,13 @@ export async function getBatchGitSummaries(
       if (!summary) return;
       for (const chatId of group.chatIds) summaries[chatId] = summary;
     } catch (error) {
-      // A cancelled request is the client hanging up; anything else leaves its
-      // chats unanswered without taking the rest of the batch down.
-      if (!(error instanceof GitCliError && error.aborted)) {
-        console.warn('[git] batch summary failed', { workdir: group.workdir, error });
-      }
+      // A cancelled request is the client hanging up, and a deleted workdir is
+      // a chat that outlived its directory — both recur on every refetch and
+      // have no badge to show. Anything else leaves its chats unanswered
+      // without taking the rest of the batch down.
+      if (error instanceof GitCliError && error.aborted) return;
+      if (isMissingWorkdirError(error)) return;
+      console.warn('[git] batch summary failed', { workdir: group.workdir, error });
     }
   });
 
