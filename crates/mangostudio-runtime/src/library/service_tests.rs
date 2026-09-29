@@ -6,7 +6,6 @@
 //! workers, capability truth).
 
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::cache::LibraryCache;
 use super::discovery::{LocationSettings, ScanDeps};
-use super::fs::{FileMeta, LibraryFs, NativeLibraryFs, ReadFailure};
+use super::fs::{DirEntries, FileMeta, LibraryFs, NativeLibraryFs, ReadFailure};
 use super::service::{
     LibraryService, PathEnvOnlyParams, PathEnvParams, ReadParams, ReadTreeParams, ScanParams,
 };
@@ -301,7 +300,7 @@ struct CountingFs {
 }
 
 impl LibraryFs for CountingFs {
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<OsString>> {
+    fn read_dir<'a>(&'a self, path: &Path) -> std::io::Result<DirEntries<'a>> {
         NativeLibraryFs.read_dir(path)
     }
     fn real_path(&self, path: &Path) -> std::io::Result<PathBuf> {
@@ -550,7 +549,7 @@ struct CancellingFs {
 }
 
 impl LibraryFs for CancellingFs {
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<OsString>> {
+    fn read_dir<'a>(&'a self, path: &Path) -> std::io::Result<DirEntries<'a>> {
         NativeLibraryFs.read_dir(path)
     }
     fn real_path(&self, path: &Path) -> std::io::Result<PathBuf> {

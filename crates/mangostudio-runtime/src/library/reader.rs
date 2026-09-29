@@ -10,7 +10,9 @@
 //! but cannot be listed contributes no rows and a diagnostic line, because
 //! the contract has no location-level slot to carry it (see `mod.rs`).
 
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
@@ -127,9 +129,12 @@ pub(crate) fn read_location_instances(
         return read_one_entry(location, &slug, &name, location_path, false, None, context);
     }
 
+    // Collected on purpose: a location listing has no entry cap, and one
+    // failing entry must still skip the whole location with a diagnostic.
     let listed = context
         .fs
         .read_dir(Path::new(location_path))
+        .and_then(|entries| entries.collect::<std::io::Result<Vec<_>>>())
         .and_then(|names| Ok((names, context.fs.real_path(Path::new(location_path))?)));
     let (names, canonical_location) = match listed {
         Ok(listed) => listed,
@@ -382,7 +387,7 @@ fn hash_file(
 }
 
 /// One leaf file of a directory instance.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Leaf {
     pub absolute: PathBuf,
     /// Posix-separated, relative to the instance root.
@@ -413,7 +418,7 @@ pub(crate) fn collect_leaf_files(
         fs,
         cancel,
         canonical_root,
-        visited: Vec::new(),
+        visited: VisitedDirs::default(),
         leaves: Vec::new(),
         total_bytes: 0,
     };
@@ -423,11 +428,34 @@ pub(crate) fn collect_leaf_files(
     Ok(leaves)
 }
 
+/// The canonical directories one walk has entered. Membership is by the
+/// path's own equality (`PathBuf`'s `Hash` is consistent with it on every
+/// platform), so a second arrival at one directory — a symlink cycle or a
+/// duplicate — is found in constant time however many directories precede it.
+struct VisitedDirs<K = PathBuf> {
+    seen: HashSet<K>,
+}
+
+impl<K> Default for VisitedDirs<K> {
+    fn default() -> Self {
+        Self {
+            seen: HashSet::new(),
+        }
+    }
+}
+
+impl<K: Hash + Eq> VisitedDirs<K> {
+    /// Records `canonical`; `false` when it was already recorded.
+    fn first_visit(&mut self, canonical: K) -> bool {
+        self.seen.insert(canonical)
+    }
+}
+
 struct Walk<'a> {
     fs: &'a dyn LibraryFs,
     cancel: &'a CancellationToken,
     canonical_root: PathBuf,
-    visited: Vec<PathBuf>,
+    visited: VisitedDirs,
     leaves: Vec<Leaf>,
     total_bytes: u64,
 }
@@ -440,11 +468,16 @@ impl Walk<'_> {
         }
         let io = |error: std::io::Error| WalkError::Unreadable(error.to_string());
         let canonical = self.fs.real_path(directory).map_err(io)?;
-        if !is_within(&self.canonical_root, &canonical) || self.visited.contains(&canonical) {
+        if !is_within(&self.canonical_root, &canonical) || !self.visited.first_visit(canonical) {
             return Err(WalkError::PathEscape);
         }
-        self.visited.push(canonical);
-        for name in self.fs.read_dir(directory).map_err(io)? {
+        // The listing is pulled one entry at a time, so the entry and byte
+        // caps below stop the walk before a huge directory is read in full.
+        // A failure part-way through the listing surfaces after the entries
+        // before it were visited, not before any of them.
+        let fs = self.fs;
+        for name in fs.read_dir(directory).map_err(io)? {
+            let name = name.map_err(io)?;
             check(self.cancel)?;
             let absolute = directory.join(&name);
             let relative = format!("{prefix}{}", name.to_string_lossy());
@@ -467,6 +500,37 @@ impl Walk<'_> {
             }
         }
         Ok(())
+    }
+}
+
+/// The relative names of every leaf that resolves to one canonical file,
+/// in leaf order. Lookup only: the hash pass walks its own sorted list, so
+/// nothing depends on the map's iteration order.
+struct AliasIndex<K = PathBuf> {
+    by_canonical: HashMap<K, Vec<String>>,
+}
+
+impl<K> Default for AliasIndex<K> {
+    fn default() -> Self {
+        Self {
+            by_canonical: HashMap::new(),
+        }
+    }
+}
+
+impl<K: Hash + Eq> AliasIndex<K> {
+    /// Records `relative` as one more name of `canonical`.
+    fn add(&mut self, canonical: K, relative: &str) {
+        self.by_canonical
+            .entry(canonical)
+            .or_default()
+            .push(relative.to_string());
+    }
+
+    /// Every name recorded for `canonical`, in the order they were added;
+    /// empty for a file no leaf resolves to.
+    fn names(&self, canonical: &K) -> &[String] {
+        self.by_canonical.get(canonical).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -535,13 +599,10 @@ fn hash_directory_contents(
 ) -> Result<CachedInstanceHash, WalkError> {
     let io = |error: std::io::Error| WalkError::Unreadable(error.to_string());
     let canonical_root = context.fs.real_path(path).map_err(io)?;
-    let mut aliases: Vec<(PathBuf, Vec<String>)> = Vec::new();
+    let mut aliases = AliasIndex::default();
     for leaf in leaves {
         let canonical = context.fs.real_path(&leaf.absolute).map_err(io)?;
-        match aliases.iter_mut().find(|(known, _)| *known == canonical) {
-            Some((_, names)) => names.push(leaf.relative.clone()),
-            None => aliases.push((canonical, vec![leaf.relative.clone()])),
-        }
+        aliases.add(canonical, &leaf.relative);
     }
 
     let win32 = context.platform == "win32";
@@ -569,12 +630,7 @@ fn hash_directory_contents(
                 .fs
                 .read_file(Some(&canonical_root), &canonical, MAX_LIBRARY_FILE_BYTES)?;
         let digest = whitespace_digest(&bytes);
-        let names = aliases
-            .iter()
-            .find(|(known, _)| *known == canonical)
-            .map(|(_, names)| names.as_slice())
-            .unwrap_or_default();
-        for name in names {
+        for name in aliases.names(&canonical) {
             whitespace.push((name.clone(), digest.clone()));
             if name == SKILL_ENTRYPOINT {
                 entrypoint = Some(text_decoder_decode(&bytes));
@@ -591,3 +647,7 @@ fn hash_directory_contents(
         display,
     })
 }
+
+#[cfg(test)]
+#[path = "reader_tests.rs"]
+mod tests;

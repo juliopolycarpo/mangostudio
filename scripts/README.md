@@ -20,7 +20,7 @@ scripts/
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
-├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts)
+├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts, library-walk.ts + its fixture plans)
 ├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge, Rust lane relevance and qualification selection)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)

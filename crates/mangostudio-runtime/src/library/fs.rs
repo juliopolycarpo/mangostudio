@@ -37,10 +37,24 @@ pub(crate) enum ReadFailure {
     Unreadable(String),
 }
 
+/// Entry names of one directory, produced lazily: a caller that stops
+/// early never pays for the rest of the listing. Each item is one entry
+/// name or the error that ended the listing at that entry.
+pub(crate) type DirEntries<'a> = Box<dyn Iterator<Item = std::io::Result<OsString>> + 'a>;
+
 /// See the module docs.
 pub(crate) trait LibraryFs: Send + Sync {
-    /// Entry names directly under `path`, in the order the OS lists them.
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<OsString>>;
+    /// Entry names directly under `path`, in the order the OS lists them,
+    /// streamed rather than collected so a walk bounded by an entry cap can
+    /// stop before a huge directory is read in full. Failing to open the
+    /// directory is the outer `Err`; a failure part-way through is an item.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let names = fs.read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+    /// ```
+    fn read_dir<'a>(&'a self, path: &Path) -> std::io::Result<DirEntries<'a>>;
     /// `realpath`.
     fn real_path(&self, path: &Path) -> std::io::Result<PathBuf>;
     /// `stat`, following symlinks.
@@ -60,10 +74,11 @@ pub(crate) trait LibraryFs: Send + Sync {
 pub(crate) struct NativeLibraryFs;
 
 impl LibraryFs for NativeLibraryFs {
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<OsString>> {
-        std::fs::read_dir(path)?
-            .map(|entry| entry.map(|entry| entry.file_name()))
-            .collect()
+    fn read_dir<'a>(&'a self, path: &Path) -> std::io::Result<DirEntries<'a>> {
+        let entries = std::fs::read_dir(path)?;
+        Ok(Box::new(
+            entries.map(|entry| entry.map(|entry| entry.file_name())),
+        ))
     }
 
     fn real_path(&self, path: &Path) -> std::io::Result<PathBuf> {
@@ -232,5 +247,27 @@ mod tests {
     fn relative_paths_join_segment_by_segment() {
         let joined = join_relative(Path::new("root"), "references/a.md");
         assert_eq!(joined, Path::new("root").join("references").join("a.md"));
+    }
+
+    #[test]
+    fn the_native_listing_streams_names_and_reports_an_unopenable_directory_up_front() {
+        let dir = crate::test_support::scratch_dir("library-fs-read-dir");
+        std::fs::write(dir.join("one.md"), b"1").unwrap();
+        std::fs::write(dir.join("two.md"), b"2").unwrap();
+        let mut names: Vec<_> = NativeLibraryFs
+            .read_dir(&dir)
+            .unwrap()
+            .collect::<std::io::Result<_>>()
+            .unwrap();
+        names.sort();
+        assert_eq!(names, [OsString::from("one.md"), OsString::from("two.md")]);
+        // The first entry is available without draining the rest.
+        assert!(NativeLibraryFs.read_dir(&dir).unwrap().next().is_some());
+        let missing = NativeLibraryFs.read_dir(&dir.join("absent"));
+        assert_eq!(
+            missing.err().map(|error| error.kind()),
+            Some(std::io::ErrorKind::NotFound),
+            "expected a missing directory to fail at open, not as a listing item"
+        );
     }
 }
