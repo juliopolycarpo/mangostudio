@@ -57,6 +57,31 @@ export class GitCliError extends Error {
 }
 
 /**
+ * The runtime refuses to launch Git in a cwd that is not an existing directory
+ * — `FreshLaunch::check` in `crates/mangostudio-runtime/src/commands/service.rs`
+ * — before Git runs, so the failure has no exit code and no structured reason;
+ * its message is the only thing that names it. Anchored on both ends so a Git
+ * stderr that merely mentions a cwd never matches.
+ */
+const MISSING_WORKDIR_PATTERN = /^Invalid cwd .+; expected an existing directory\.$/s;
+
+/**
+ * True when the runtime refused a Git call because its cwd no longer exists —
+ * typically a chat whose workdir was deleted from disk.
+ *
+ * @example
+ * if (isMissingWorkdirError(error)) return null; // nothing to report for a deleted workdir
+ */
+export function isMissingWorkdirError(error: unknown): boolean {
+  return (
+    error instanceof GitCliError &&
+    error.exitCode === null &&
+    !error.aborted &&
+    MISSING_WORKDIR_PATTERN.test(error.stderr)
+  );
+}
+
+/**
  * Runs Git via the runtime `git.exec` method and maps failures to GitCliError.
  *
  * Every Git call that reads repository state goes through here — status, diff,
