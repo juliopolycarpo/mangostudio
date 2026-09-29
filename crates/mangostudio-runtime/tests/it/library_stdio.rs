@@ -12,9 +12,7 @@ use mango_protocol::session::{Session, SessionClosure, SessionOptions};
 use mango_protocol::transports::spawn::{SpawnOptions, sanitized_env, spawn_port};
 use serde_json::{Value, json};
 
-mod support;
-
-use support::scratch::{ScratchDir, scratch_path};
+use crate::support::scratch::{ScratchDir, scratch_path};
 
 const SKILL: &str = "---\nname: SLUG\ndescription: A skill.\n---\nbody\n";
 
@@ -52,7 +50,7 @@ async fn spawn_runtime(
     ])
     .with_env(sanitized_env(variables));
     let (port, _launched) = spawn_port(options).expect("the argv names a real binary");
-    let (session, driver) = Session::spawn(port, SessionOptions::new(support::peer("hub")));
+    let (session, driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
     let remote = tokio::time::timeout(Duration::from_secs(10), session.ready())
         .await
         .expect("the child says hello within the timeout")

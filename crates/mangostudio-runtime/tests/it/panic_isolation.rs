@@ -4,11 +4,9 @@
 //! panicking request's `INTERNAL` carries neither the panic payload's text
 //! nor a path.
 
-#[path = "support/mod.rs"]
-mod support;
-
 use std::sync::Arc;
 
+use crate::support::{RecordingAudit, health_result, serve_pair, within};
 use mango_protocol::error::codes;
 use mangostudio_runtime::ports::audit::Outcome;
 use mangostudio_runtime::ports::authorization::DenyingAuthorization;
@@ -16,7 +14,6 @@ use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::registry::Registry;
 use serde::{Deserialize, Deserializer};
 use serde_json::json;
-use support::{RecordingAudit, health_result, serve_pair, within};
 
 /// `runtime.health`'s params schema declares no properties and no
 /// `additionalProperties: false`, so it accepts this extra field without

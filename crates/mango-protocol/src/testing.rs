@@ -1,6 +1,6 @@
 //! A reusable conformance suite: the session-level behaviour every transport
 //! must reproduce, exercised entirely through [`Fixture`] rather than this
-//! crate's own [`crate::port::MemoryPort`]. `tests/conformance.rs` runs it
+//! crate's own [`crate::port::MemoryPort`]. `tests/it/conformance.rs` runs it
 //! against the in-process pair; a transport crate built on this one runs the
 //! same cases against its own [`Fixture`] implementation via
 //! [`run_conformance_suite`].
@@ -79,7 +79,7 @@ impl RawConnection for NoRawConnection {
 /// # Example
 ///
 /// This crate's own in-process pair, implementing [`Fixture`] the same way
-/// `tests/conformance.rs` does, then running the full suite against it.
+/// `tests/it/conformance.rs` does, then running the full suite against it.
 ///
 /// ```
 /// # #[tokio::main(flavor = "current_thread")]
@@ -285,7 +285,7 @@ async fn settled() {
 
 /// Every case name this suite runs, in the order `packages/protocol/src/
 /// testing/conformance.ts` declares them, before [`Fixture::chunked`] and
-/// [`Fixture::supports_raw`] gate the last three. `tests/conformance_drift.rs`
+/// [`Fixture::supports_raw`] gate the last three. `tests/it/conformance_drift.rs`
 /// asserts this list, not the runner's control flow, matches that file's own
 /// `it(...)` names verbatim; [`run_conformance_suite`] asserts its own control
 /// flow matches this list, so the two checks cannot silently drift apart.
@@ -950,7 +950,7 @@ const CASE_TIMEOUT: Duration = Duration::from_secs(60);
 /// specification requires, and if the cases this run actually executed do
 /// not match [`CONFORMANCE_CASES`] filtered by [`Fixture::chunked`]/
 /// [`Fixture::supports_raw`] — a self-check that keeps this function's own
-/// control flow from drifting away from the list `tests/conformance_drift.rs`
+/// control flow from drifting away from the list `tests/it/conformance_drift.rs`
 /// checks against the TypeScript suite.
 pub async fn run_conformance_suite<F: Fixture>(fixture: &F) {
     let mut ran: Vec<&'static str> = Vec::with_capacity(CONFORMANCE_CASES.len());

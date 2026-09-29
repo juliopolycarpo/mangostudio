@@ -7,9 +7,6 @@
 //! happen: a panicking handler silently dropping its audit line, or a
 //! panicking sink turning an already-successful result into `INTERNAL`.
 
-#[path = "support/mod.rs"]
-mod support;
-
 use std::sync::Arc;
 
 use mango_protocol::error::codes;
@@ -20,11 +17,11 @@ use mangostudio_runtime::registry::Registry;
 use serde_json::json;
 use std::time::Duration;
 
-use mango_protocol::session::SessionOptions;
-use support::{
+use crate::support::{
     PanickingAudit, PanickingAuthorization, RecordingAudit, health_result, peer, serve_pair,
     serve_pair_with_runtime_options, within,
 };
+use mango_protocol::session::SessionOptions;
 
 #[tokio::test]
 async fn a_panicking_handler_still_produces_an_audit_entry() {
@@ -110,7 +107,8 @@ async fn a_schema_invalid_result_is_never_recorded_as_ok() {
 
     // `terminal.list` needs `shell`; grant it so the request reaches the
     // handler at all — this test is about the result check, not consent.
-    let (hub, _runtime) = serve_pair(registry, Arc::new(support::GrantingAuthorization)).await;
+    let (hub, _runtime) =
+        serve_pair(registry, Arc::new(crate::support::GrantingAuthorization)).await;
 
     let error = within("the request", hub.request("terminal.list", json!({})))
         .await
@@ -152,7 +150,7 @@ async fn a_panicking_audit_sink_leaves_a_successful_result_untouched_on_the_wire
 /// side of the pipeline, where it is the more important half: `334b28a2`
 /// named this exact case — a panicking sink turning an already-built
 /// `DENIED` into a redacted `INTERNAL` — as one of the two directions that
-/// bug fixed. Nothing in `tests/consent.rs` exercises a failing sink, only a
+/// bug fixed. Nothing in `tests/it/consent.rs` exercises a failing sink, only a
 /// healthy `RecordingAudit`, so this was unguarded until now. `serve()`
 /// builds `AuthorizationGuard` from the registry's own `Audit` port (see
 /// `serve.rs`), so a `PanickingAudit`-backed registry exercises it directly:

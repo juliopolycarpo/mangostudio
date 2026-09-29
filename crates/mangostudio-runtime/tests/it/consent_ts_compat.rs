@@ -1,6 +1,6 @@
 //! Proves this crate's consent resolution reads a `runtime.json` the
 //! TypeScript implementation actually wrote — the same compatibility claim
-//! `tests/ts_compat.rs` proves for the raw runtime-home layer, one level up:
+//! `tests/it/ts_compat.rs` proves for the raw runtime-home layer, one level up:
 //! not just "the bytes parse", but "the `allow` set this crate resolves
 //! from them is the one a TypeScript-written file actually grants".
 //!

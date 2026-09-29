@@ -291,7 +291,7 @@ mod tests {
     // `AuthorizationGuard`'s own behaviour needs a real `CallContext`, which
     // `mango_protocol` only ever constructs while dispatching an actual
     // request — there is no public constructor to hand-build one here. See
-    // `tests/consent.rs` for `AuthorizationGuard` exercised through a real
+    // `tests/it/consent.rs` for `AuthorizationGuard` exercised through a real
     // session, which is also where `DenyingAuthorization` is proved to deny
     // a capability-bearing method and pass a zero-capability one.
 

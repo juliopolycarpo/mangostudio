@@ -8,22 +8,19 @@
 //! where a claim is taken and where it is released actually holds together
 //! under `mango_protocol`'s real dispatch pipeline.
 
-#[path = "support/mod.rs"]
-mod support;
-
 use std::sync::Arc;
 
+use crate::support::{GrantingAuthorization, health_result, serve_pair, within};
 use mangostudio_runtime::ports::clock::SystemClock;
 use mangostudio_runtime::ports::exclusivity::{NotUpdating, UpdateExclusivityTracker};
 use mangostudio_runtime::registry::Registry;
 use mangostudio_runtime_contract::errors::RUNTIME_UPDATE_REFUSED;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use support::{GrantingAuthorization, health_result, serve_pair, within};
 
 /// A gate a handler blocks on until the test explicitly opens it, plus a
 /// one-shot signal fired the instant the handler starts running — the same
-/// two-part rendezvous `tests/panic_isolation.rs` uses, needed here for the
+/// two-part rendezvous `tests/it/panic_isolation.rs` uses, needed here for the
 /// same reason: proving two requests were genuinely in flight together
 /// rather than merely sequenced by luck.
 struct Rendezvous {

@@ -3,18 +3,19 @@
 //! zero-capability method through untouched; `GrantingAuthorization` and
 //! `PartiallyGrantingAuthorization` prove the guard actually consults its
 //! port's answer rather than passing every call by construction. See
-//! `tests/audit_isolation.rs` for `PanickingAuthorization` and
+//! `tests/it/audit_isolation.rs` for `PanickingAuthorization` and
 //! `PanickingAudit` exercised against this guard — that file is the home
 //! for every "a port panics" audit-recording test, on both the
 //! `Registry::implement` and `AuthorizationGuard` sides. The catalog tests at
 //! the end pin the capability split the guard reads from the embedded
 //! contract, where a read-only profile's "no writes" line is drawn.
 
-#[path = "support/mod.rs"]
-mod support;
-
 use std::sync::Arc;
 
+use crate::support::{
+    GrantingAuthorization, PartiallyGrantingAuthorization, RecordingAudit, health_result,
+    serve_pair, within,
+};
 use mango_protocol::error::codes;
 use mangostudio_runtime::consent::presets::consent_preset;
 use mangostudio_runtime::ports::audit::Outcome;
@@ -24,10 +25,6 @@ use mangostudio_runtime::registry::Registry;
 use mangostudio_runtime_contract::catalog::capabilities_of;
 use mangostudio_runtime_contract::manifest::ManifestProfile;
 use serde_json::json;
-use support::{
-    GrantingAuthorization, PartiallyGrantingAuthorization, RecordingAudit, health_result,
-    serve_pair, within,
-};
 
 #[tokio::test]
 async fn denying_authorization_refuses_a_capability_bearing_method_and_records_it() {

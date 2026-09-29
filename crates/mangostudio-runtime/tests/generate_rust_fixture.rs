@@ -1,7 +1,7 @@
 //! Regenerates `tests/fixtures/rust-home/`: a runtime home written by *this*
 //! crate, committed so `apps/api/tests/unit/cli/runtime-slot-probe-rust-home.test.ts`
 //! can prove the hub's slot probe reads it back with no error — the other
-//! direction of the compatibility claim `tests/ts_compat.rs` proves for
+//! direction of the compatibility claim `tests/it/ts_compat.rs` proves for
 //! TypeScript-written homes.
 //!
 //! Also writes one `audit.log` line with [`FileAudit`], under the same
