@@ -34,8 +34,8 @@ import {
   withheldTestMetrics,
 } from './collect/fragment';
 import { readProvenance } from './collect/provenance';
-import { discoverComponents } from './collect/registry';
-import { getCommitSha, measure, runCapture, stderrLog } from './collect/support';
+import { discoverComponents, RegistryIntegrityError } from './collect/registry';
+import { errorAnnotations, getCommitSha, measure, runCapture, stderrLog } from './collect/support';
 import { collectToolingStats } from './collect/tooling';
 import type { Metrics } from './collect/types';
 import { countTsErrors } from './collect/typescript';
@@ -85,7 +85,14 @@ const buildMetrics = async (
   const trackedFiles = await listTrackedFiles();
   // Throws RegistryIntegrityError: a file no component owns must fail the run,
   // not vanish from the totals.
-  const specs = await discoverComponents({ trackedFiles, readText: readRepoText });
+  const specs = await discoverComponents({ trackedFiles, readText: readRepoText }).catch(
+    (err: unknown) => {
+      if (err instanceof RegistryIntegrityError) {
+        process.stderr.write(errorAnnotations('QA component registry', err.problems));
+      }
+      throw err;
+    }
+  );
   const components = await collectComponents(specs, {
     trackedFiles,
     readText: readRepoText,

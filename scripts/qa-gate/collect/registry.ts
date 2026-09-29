@@ -63,10 +63,16 @@ export interface RegistryInput {
   readonly extraMappings?: readonly ExtraMapping[];
 }
 
+/** Where an integrity failure is fixed; named in the error so the fix is one click away. */
+export const REGISTRY_SOURCE = 'scripts/qa-gate/collect/registry.ts';
+
 /** Thrown when discovery cannot account for every tracked file or manifest. */
 export class RegistryIntegrityError extends Error {
   constructor(readonly problems: readonly string[]) {
-    super(`component registry integrity failed:\n- ${problems.join('\n- ')}`);
+    super(
+      `component registry integrity failed:\n- ${problems.join('\n- ')}\n` +
+        `To fix: add the directory to a workspace/crate root or the extra mappings, or list it in NON_COMPONENT_DIRECTORIES, in ${REGISTRY_SOURCE}`
+    );
     this.name = 'RegistryIntegrityError';
   }
 }

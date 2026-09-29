@@ -9,6 +9,20 @@ export const stderrLog = (message: string): void => {
   process.stderr.write(`[qa-gate] ${message}\n`);
 };
 
+const escapeAnnotation = (text: string): string =>
+  text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+
+/**
+ * GitHub Actions `::error::` annotations, one per message, so a failure shows
+ * on the run summary instead of only in the log. Written to stderr because
+ * stdout carries the envelope JSON.
+ * // Usage: process.stderr.write(errorAnnotations('QA registry', ['tools/ is unowned']))
+ */
+export const errorAnnotations = (title: string, messages: readonly string[]): string =>
+  messages
+    .map((message) => `::error title=${escapeAnnotation(title)}::${escapeAnnotation(message)}\n`)
+    .join('');
+
 /**
  * Run a collector, returning `measured(value)` or an explicit `unavailable`
  * measurement carrying the error, so one failing metric never aborts the whole

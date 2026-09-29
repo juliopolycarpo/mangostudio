@@ -122,6 +122,16 @@ describe('registry integrity', () => {
     expect(problems[0]).toContain('owned by no component');
   });
 
+  it('names the file to edit and the two ways to fix it in the error message', async () => {
+    const error = await discover({ ...BASE_REPOSITORY_FILES, 'tools/gen.ts': 'x' }).catch(
+      (err: unknown) => err
+    );
+
+    expect(error).toBeInstanceOf(RegistryIntegrityError);
+    expect((error as Error).message).toContain('scripts/qa-gate/collect/registry.ts');
+    expect((error as Error).message).toContain('NON_COMPONENT_DIRECTORIES');
+  });
+
   it('fails for a new top-level directory with tracked files, not silently dropping them', async () => {
     const problems = await integrityProblems(
       discover({ ...BASE_REPOSITORY_FILES, 'tools/gen.ts': 'export {};\n' })
