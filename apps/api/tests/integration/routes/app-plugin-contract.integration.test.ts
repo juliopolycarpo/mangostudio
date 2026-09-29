@@ -17,6 +17,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { app } from '../../../src/app';
 import { getConfig, loadConfigForTest } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
@@ -346,6 +347,18 @@ describe('file-serving prefixes', () => {
 
     expect(response.status).toBe(404);
     expect(response.headers.get('content-type') ?? '').not.toContain('text/html');
+  });
+
+  it('answers a missing upload with the API error shape', async () => {
+    // The route has to sit after the API's global error handler, which only
+    // reaches routes declared after it. Declared ahead of it, a miss falls
+    // through to Elysia's default problem document instead.
+    for (const path of ['/uploads/not-there.png', '/uploads/..%2fsecret.txt', '/uploads']) {
+      const response = await app.handle(new Request(`http://localhost${path}`));
+      expect(`${path} -> ${response.status} ${await response.text()}`).toBe(
+        `${path} -> 404 ${JSON.stringify({ error: 'Not found', code: ERROR_CODES.NOT_FOUND })}`
+      );
+    }
   });
 });
 

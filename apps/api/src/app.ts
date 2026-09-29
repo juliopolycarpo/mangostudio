@@ -167,8 +167,6 @@ export const app = new Elysia()
       allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
     })
   )
-  // Serve uploaded files, resolved per request rather than enumerated at startup
-  .use(createUploadedFileRoutes(UPLOADS_DIR))
   .use(createGeneratedImageRoutes(IMAGES_DIR))
   // Adds the negotiated `application/problem+json` media type to the generated
   // document, and classifies the spec route's own failures — `errorHandler` is
@@ -191,6 +189,11 @@ export const app = new Elysia()
     })
   )
   // Mount API
-  .use(api);
+  .use(api)
+  // Serve uploaded files, resolved per request rather than enumerated at
+  // startup. Declared after `api` on purpose: its global error handler only
+  // reaches routes declared after it, and that is what answers a missing
+  // upload with `ApiErrorResponse` instead of Elysia's default document.
+  .use(createUploadedFileRoutes(UPLOADS_DIR));
 
 export type App = typeof app;
