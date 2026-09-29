@@ -148,13 +148,24 @@ jobs:
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: cargo-hack
-      - run: cargo fmt --all -- --check
-      # Cargo Shim covers the whole workspace. Validate the SDK independently here.
-      - run: cargo clippy -p mango-protocol --all-targets --all-features --locked -- -D warnings
-      - run: cargo test -p mango-protocol --all-targets --all-features --locked
-      - run: cargo test -p mango-protocol --doc --all-features --locked
+      # Cargo Shim runs `cargo fmt --all`, then clippy and the tests of the whole
+      # workspace with `--all-features` (a superset of `-p mango-protocol
+      # --all-features`), on these same three OSes, whenever a path this crate
+      # compiles changes: the rust lane in scripts/lib/rust-lanes.ts, which
+      # scripts/tests/rust-lanes.unit.test.ts keeps in step with every file the
+      # crates include or read. Running them here too only paid twice. What
+      # follows is what Cargo Shim does not run.
       - run: cargo hack clippy -p mango-protocol --feature-powerset --all-targets --locked -- -D warnings
-      - run: cargo doc -p mango-protocol --no-deps --all-features --locked
+      # Cargo Shim runs the workspace doctests and `cargo doc` on Ubuntu only. The
+      # crate has `cfg`-gated transports (unix sockets, Windows named pipes) whose
+      # doctests and intra-doc links exist on one platform, so macOS and Windows
+      # keep their own copy.
+      - name: Run doctests
+        if: matrix.os != 'ubuntu-latest'
+        run: cargo test -p mango-protocol --doc --all-features --locked
+      - name: Build API docs (deny warnings)
+        if: matrix.os != 'ubuntu-latest'
+        run: cargo doc -p mango-protocol --no-deps --all-features --locked
         env:
           RUSTDOCFLAGS: -D warnings
 

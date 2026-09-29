@@ -16,7 +16,13 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
  * MSRV, musl clippy, fuzz metadata, fixture freshness) relevant: the cargo
  * workspace itself, and the TypeScript halves of the shapes it reads and
  * writes (the generated runtime contract, runtime-home slot shapes and the
- * schemas they import, and the library readers the runtime answers for).
+ * schemas they import, and the library readers the runtime answers for), and
+ * every file a crate reads from outside `crates/`: the protocol spec and
+ * fixtures its tests and doctests `include_str!`, the launcher's checksum
+ * sample, and the TypeScript conformance suite its drift test compares with.
+ * `rust-lanes.unit.test.ts` scans the crates and fails when one such input is
+ * missing here, unless it names another test that guards the same direction
+ * (the English catalog, which changes far too often to run the Rust lanes).
  * GitHub `paths` glob syntax.
  */
 export const RUST_WORKSPACE_PATHS = [
@@ -28,6 +34,9 @@ export const RUST_WORKSPACE_PATHS = [
   'apps/shared/src/environments/toolchain-schemas.ts',
   'apps/shared/src/library/**',
   'apps/shared/src/markdown/**',
+  'spec/**',
+  'scripts/tests/support/SHA256SUMS.sample',
+  'packages/protocol/src/testing/conformance.ts',
   'Cargo.toml',
   'Cargo.lock',
   'deny.toml',

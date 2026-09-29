@@ -235,6 +235,22 @@ describe('protocol lane selection', () => {
     ).not.toContain('protocol:feature-powerset');
   });
 
+  // Where CI runs each local protocol check. Every entry of `shimWorkspace` is one
+  // workspace-wide command in cargo-shim.yml's `workspace` job, a superset of the
+  // `-p mango-protocol` task. `shimUbuntuOnly` marks the two it runs on Ubuntu
+  // only, which protocol-ci.yml therefore repeats on macOS and Windows.
+  const shimWorkspace: Record<string, string> = {
+    'protocol:clippy':
+      'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings',
+    'protocol:cargo-test': 'cargo test --workspace --all-targets --all-features --locked',
+    'protocol:cargo-test-doc': 'cargo test --doc --workspace --all-features --locked',
+    'protocol:doc': 'cargo doc --no-deps --workspace --all-features --locked',
+  };
+  const shimUbuntuOnly = new Set(['protocol:cargo-test-doc', 'protocol:doc']);
+
+  const stepRunning = (job: string, command: string): string | undefined =>
+    extractStepBlocks(job).find((step) => step.includes(`run: ${command}`));
+
   test.each([
     ['protocol:clippy', ['--all-targets', '--all-features', '--locked', '-D', 'warnings']],
     ['protocol:doc', ['--no-deps', '--all-features', '--locked']],
@@ -256,30 +272,58 @@ describe('protocol lane selection', () => {
     expect(packageIndex, `${label}: missing package selection`).toBeGreaterThan(0);
     expect(command[packageIndex + 1]).toBe('mango-protocol');
     for (const flag of flags) expect(command, label).toContain(flag);
-
-    const rust = extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'rust');
-    expect(rust, `${label}: CI must run the same validation`).toContain(
-      `run: ${command.join(' ')}`
-    );
     if (label === 'protocol:doc') expect(task?.env).toEqual({ RUSTDOCFLAGS: '-D warnings' });
+
+    const scoped = command.join(' ');
+    const protocolRust = extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'rust');
+    const protocolStep = stepRunning(protocolRust, scoped);
+    const shimCommand = shimWorkspace[label];
+    if (!shimCommand) {
+      // Nothing in cargo-shim runs the feature powerset: protocol-ci owns it.
+      expect(protocolStep, `${label}: expected protocol-ci to run "${scoped}"`).toBeDefined();
+      return;
+    }
+
+    const shimJob = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
+    const shimStep = stepRunning(shimJob, shimCommand);
+    expect(
+      shimStep,
+      `${label}: expected cargo-shim workspace to run "${shimCommand}"`
+    ).toBeDefined();
+    if (!shimUbuntuOnly.has(label)) {
+      expect(shimStep, `${label}: expected cargo-shim to run it on every OS`).not.toContain('if:');
+      expect(
+        protocolStep,
+        `${label}: "${scoped}" duplicates cargo-shim; expected it only in cargo-shim`
+      ).toBeUndefined();
+      return;
+    }
+    expect(shimStep).toContain("if: matrix.os == 'ubuntu-latest'");
+    expect(protocolStep, `${label}: expected protocol-ci to keep macOS and Windows`).toContain(
+      "if: matrix.os != 'ubuntu-latest'"
+    );
+  });
+
+  test('protocol-ci leaves fmt to cargo-shim, which runs it on every OS', () => {
+    const protocolRust = extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'rust');
+    expect(stepRunning(protocolRust, 'cargo fmt --all -- --check')).toBeUndefined();
+    const shimJob = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
+    expect(stepRunning(shimJob, 'cargo fmt --all -- --check')).toBeDefined();
   });
 
   test('protocol scoping preserves workspace coverage', () => {
     const protocol = readText('.github/workflows/protocol-ci.yml');
-    const rust = extractJobBlock(protocol, 'rust');
-    expect(rust).toContain('RUSTDOCFLAGS: -D warnings');
+    expect(extractJobBlock(protocol, 'rust')).toContain('RUSTDOCFLAGS: -D warnings');
     expect(extractJobBlock(protocol, 'msrv')).toContain(
       'cargo +1.97.0 check --all-features --locked'
+    );
+    expect(extractJobBlock(protocol, 'interop')).toContain(
+      'cargo build --locked --example conformance_peer --features testing,websocket,spawn'
     );
 
     const workspace = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
     expect(workspace).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
-    expect(workspace).toContain(
-      'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings'
-    );
-    expect(workspace).toContain('cargo test --workspace --all-targets --all-features --locked');
-    expect(workspace).toContain('cargo test --doc --workspace --all-features --locked');
-    expect(workspace).toContain('cargo doc --no-deps --workspace --all-features --locked');
+    expect(workspace).toContain("if: needs.changes.outputs.rust == 'true'");
   });
 });
 

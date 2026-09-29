@@ -14,6 +14,7 @@ import {
   RUST_BINARY_RESOLVER,
   RUST_WORKSPACE_PATHS,
 } from '../lib/rust-lanes';
+import { extractCrateInputs, scanCrateInputs } from './support/crate-inputs';
 import { readText } from './support/read-text';
 import { extractOnBlock } from './support/workflow-blocks';
 
@@ -87,11 +88,19 @@ describe('classifyChangedPaths', () => {
     ['apps/api/src/services/tools/arg-parsing.ts', false, true],
     ['apps/api/src/modules/environments/application/environment-service.ts', false, true],
     ['apps/api/tests/support/rust-runtime-binary.ts', false, true],
+    ['apps/shared/src/i18n/pt-BR.ts', false, true],
     ['apps/shared/src/i18n/en.ts', false, true],
     ['scripts/lib/rust-lanes.ts', false, true],
     ['packages/protocol/src/session.ts', false, true],
+    // Files a crate reads from outside crates/: a change must run the crate.
+    ['spec/schema/1/protocol.json', true, true],
+    ['spec/fixtures/1/negotiation.json', true, true],
+    ['scripts/tests/support/SHA256SUMS.sample', true, true],
+    ['packages/protocol/src/testing/conformance.ts', true, true],
     ['apps/frontend/src/main.tsx', false, false],
     ['docs/reference/releasing.md', false, false],
+    ['docs/protocol/conformance.md', false, false],
+    ['scripts/protocol/check.ts', false, false],
   ] as const)('%s -> rust=%p qualification=%p', (path, rust, qualification) => {
     expect(classifyChangedPaths([path])).toEqual({ rust, qualification });
   });
@@ -107,6 +116,132 @@ describe('classifyChangedPaths', () => {
     expect(() => classifyChangedPaths(['', '  '])).toThrow(
       'rust-lanes: no changed paths to classify; expected at least one repository-relative path'
     );
+  });
+});
+
+/**
+ * Crate inputs that deliberately do NOT select the rust lane, each mapped to
+ * the test that guards the same direction in a lane that already runs on that
+ * path's edits. Adding to this list is a decision, not a fix: prefer a glob.
+ */
+const CRATE_INPUTS_COVERED_ELSEWHERE: Readonly<Record<string, string>> = {
+  // `every_key_in_the_table_is_one_the_frontend_ships` (Rust) guards
+  // Rust -> catalog whenever Rust changes; en.ts is edited on far more PRs than
+  // Rust is, so the catalog -> Rust direction lives in the shared lane instead.
+  'apps/shared/src/i18n/en.ts': 'apps/shared/tests/unit/i18n-rust-keys.test.ts',
+};
+
+describe('files a crate reads from outside crates/', () => {
+  test('every one selects the rust lane, so a change to it cannot skip the crate that reads it', () => {
+    const uncovered = scanCrateInputs(ROOT_DIR)
+      .filter((input) => !(input.path in CRATE_INPUTS_COVERED_ELSEWHERE))
+      // A trailing `/` names a directory the source appends a file name to.
+      .filter((input) => !classifyChangedPaths([input.path.replace(/\/$/, '/file')]).rust)
+      .map((input) => `${input.path} (read at ${input.source}:${input.line})`);
+    expect(
+      uncovered,
+      `expected rust lane to cover every crate input | received: rust=false for ${uncovered.join(', ')}`
+    ).toEqual([]);
+  });
+
+  test('an input excused from the lane is still found, still outside it, and its guard exists', () => {
+    const found = new Set(scanCrateInputs(ROOT_DIR).map((input) => input.path));
+    for (const [path, guard] of Object.entries(CRATE_INPUTS_COVERED_ELSEWHERE)) {
+      expect(found.has(path), `expected the scan to still find ${path} | received: gone`).toBe(
+        true
+      );
+      expect(
+        classifyChangedPaths([path]).rust,
+        `expected ${path} to stay outside the rust lane | received: rust=true, drop its entry from CRATE_INPUTS_COVERED_ELSEWHERE`
+      ).toBe(false);
+      expect(
+        Bun.file(join(ROOT_DIR, guard)).size,
+        `expected the guard for ${path} at ${guard} | received: missing or empty`
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  test('the scan finds the inputs known today, so a broken pattern cannot pass vacuously', () => {
+    const paths = new Set(scanCrateInputs(ROOT_DIR).map((input) => input.path));
+    for (const known of [
+      'spec/schema/1/protocol.json',
+      'spec/fixtures/1/catalog-example.json',
+      'spec/fixtures/1/',
+      'scripts/tests/support/SHA256SUMS.sample',
+      'packages/protocol/src/testing/conformance.ts',
+      'apps/shared/src/i18n/en.ts',
+      'apps/shared/src/runtime-contract/generated/catalog.json',
+      'Cargo.toml',
+    ]) {
+      expect(
+        paths,
+        `expected scan to find ${known} | received: ${[...paths].join(', ')}`
+      ).toContain(known);
+    }
+  });
+
+  test('every named input exists, so the scan reads real files', () => {
+    for (const input of scanCrateInputs(ROOT_DIR)) {
+      const path = join(ROOT_DIR, input.path);
+      expect(
+        Bun.file(path).size > 0 || readdirSync(path).length > 0,
+        `expected ${input.path} (read at ${input.source}:${input.line}) to exist | received: missing`
+      ).toBe(true);
+    }
+  });
+});
+
+describe('extractCrateInputs', () => {
+  const crate = 'crates/x';
+  const file = 'crates/x/src/a.rs';
+  const pathsOf = (text: string, at = file) =>
+    extractCrateInputs(at, text, crate).map((input) => input.path);
+
+  test('reads a bare include relative to the source file', () => {
+    expect(pathsOf('const S: &str = include_str!("../../../scripts/a.sample");')).toEqual([
+      'scripts/a.sample',
+    ]);
+  });
+
+  test('reads a manifest-dir include relative to the crate', () => {
+    const text = `include_bytes!(concat!(\n  env!("CARGO_MANIFEST_DIR"),\n  "/../../spec/a.bin"\n))`;
+    expect(pathsOf(text, 'crates/x/tests/t.rs')).toEqual(['spec/a.bin']);
+  });
+
+  test('keeps the directory when a macro parameter supplies the file name', () => {
+    const text = 'include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../spec/f/", $file))';
+    expect(pathsOf(text)).toEqual(['spec/f/']);
+  });
+
+  test('reads a doc-comment include, which a doctest compiles', () => {
+    const text =
+      '/// let t = include_str!(concat!(\n///     env!("CARGO_MANIFEST_DIR"),\n///     "/../../spec/d.json"\n/// ));';
+    expect(pathsOf(text)).toEqual(['spec/d.json']);
+  });
+
+  test('reads a run-time join onto the manifest dir, with no include macro', () => {
+    const text = 'Path::new(env!("CARGO_MANIFEST_DIR"))\n    .join("../../packages/p/a.ts");';
+    expect(pathsOf(text)).toEqual(['packages/p/a.ts']);
+  });
+
+  test('reads a concat! manifest path used at run time', () => {
+    const text = 'let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml");';
+    expect(pathsOf(text)).toEqual(['Cargo.toml']);
+  });
+
+  test('reads a #[path] attribute relative to the source file', () => {
+    const text = '#[path = "../../../shared/m.rs"]\nmod m;';
+    expect(pathsOf(text, 'crates/x/tests/support/mod.rs')).toEqual(['crates/shared/m.rs']);
+  });
+
+  test('ignores a generated OUT_DIR include and unrelated ../ literals', () => {
+    const text = 'include!(concat!(env!("OUT_DIR"), "/gen.rs")); let e = check("../secret");';
+    expect(pathsOf(text)).toEqual([]);
+  });
+
+  test('reports the line of the read', () => {
+    const [input] = extractCrateInputs(file, '\n\ninclude_str!("../../../a.txt");', crate);
+    expect(input?.line).toBe(3);
   });
 });
 
