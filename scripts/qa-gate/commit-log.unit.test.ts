@@ -175,6 +175,24 @@ describe('renderCommitsSection', () => {
     expect(outsideFence).not.toContain('<script>');
   });
 
+  it('keeps backticks in a subject from opening a code span in the list or heading', () => {
+    const ticky: CommitEntry = {
+      sha: 'ffff666ffff666ffff666ffff666ffff666ffff6',
+      subject: 'fix: `<T>` and ``x`` and a stray ` plus C:\\`',
+      message: 'fix: body',
+    };
+
+    const section = renderCommitsSection([ticky], RANGE);
+
+    const escaped = 'fix: \\`&lt;T&gt;\\` and \\`\\`x\\`\\` and a stray \\` plus C:\\\\\\`';
+    expect(section).toContain(`- \`ffff666\` ${escaped}`);
+    expect(section).toContain(`#### \`ffff666\` ${escaped}`);
+    // Only the two sha spans and the two range spans may remain as code spans.
+    const withoutFence = section.replace(/(`{4,})text[\s\S]*?\1/g, '');
+    const unescapedTicks = withoutFence.match(/(?<!\\)`/g) ?? [];
+    expect(unescapedTicks).toHaveLength(8);
+  });
+
   it('sizes the fence past backtick runs inside the body', () => {
     const fencey: CommitEntry = {
       sha: 'dddd444dddd444dddd444dddd444dddd444dddd4',
