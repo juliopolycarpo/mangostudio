@@ -18,6 +18,7 @@ import {
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getSourceFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
+import { warmUpLibraryLocationDefaults } from '../modules/app-settings/application/app-settings-service';
 import { onEnvironmentWithdrawn } from '../modules/environments/application/environment-service';
 import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
 import {
@@ -115,6 +116,11 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
     // never worth delaying startup for. No-ops instantly on every other
     // platform and whenever there is nothing pending.
     void runPruneRetry();
+    // Fire-and-forget: the settings request that gates the first screen needs
+    // the detected agent CLIs, and probing them spawns the Local runtime. Doing
+    // it now means that request usually finds the answer ready. Never under
+    // `bun test` either: it would spawn a runtime no test asked for.
+    void warmUpLibraryLocationDefaults();
   }
 
   registerShutdown();

@@ -3,64 +3,86 @@ import type {
   AppSettingsPutBody,
   LibraryLocationSettings,
 } from '@mangostudio/shared/app-settings';
-import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
-import type { AgentCliStatus } from '@mangostudio/shared/environments';
-import { LIBRARY_SCOPES } from '@mangostudio/shared/library';
-import {
-  LIBRARY_LOCATION_DEFINITIONS,
-  type LocationDefinition,
-} from '@mangostudio/shared/library/host';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';
-import {
-  environmentProbingService,
-  LOCAL_PROBE_SCOPE,
-} from '../../environments/application/probing-service';
+import { environmentProbingService } from '../../environments/application/probing-service';
 import { getSavedAppSettings, patchAppSettings } from '../infrastructure/app-settings-repository';
+import {
+  createDetectedLibraryDefaults,
+  type DetectedLibraryDefaults,
+  type DetectedLibraryDefaultsOptions,
+} from './detected-library-defaults';
 
-/**
- * Agent CLI detection stats every registry location synchronously and reads
- * each target's auth file, so it must not run per `getAppSettings` call — this
- * is the chat-turn hot path (turn context, capability inspection, skill
- * listing). The memo matches the runtime detector's own 30s cache, so a newly
- * installed CLI still surfaces on the same schedule it always did.
- */
-const DETECTED_DEFAULTS_TTL_MS = 30_000;
+const logger = createDiagnosticLogger('app-settings');
 
-let detectedDefaults: { readonly computedAtMs: number; readonly value: LibraryLocationSettings } = {
-  computedAtMs: Number.NEGATIVE_INFINITY,
-  value: DEFAULT_LIBRARY_LOCATION_SETTINGS,
-};
+function createDefaultDetection(): DetectedLibraryDefaults {
+  return createDetectedLibraryDefaults({ probing: environmentProbingService, logger });
+}
 
+let detection: DetectedLibraryDefaults = createDefaultDetection();
+let detectionOptionsForTest: DetectedLibraryDefaultsOptions | null = null;
 let libraryLocationDefaultsOverride: LibraryLocationSettings | null = null;
 
 /**
  * Which library locations default to enabled is derived from what is installed
  * on the machine. Tests set this so a suite does not depend on which agent
  * CLIs the developer happens to have. Pass null to restore real detection.
+ * Either way the detected value is forgotten, so the next read probes again.
+ *
+ * @example
+ * setLibraryLocationDefaultsForTest(DEFAULT_LIBRARY_LOCATION_SETTINGS);
  */
 export function setLibraryLocationDefaultsForTest(defaults: LibraryLocationSettings | null): void {
   libraryLocationDefaultsOverride = defaults;
-  detectedDefaults = {
-    computedAtMs: Number.NEGATIVE_INFINITY,
-    value: DEFAULT_LIBRARY_LOCATION_SETTINGS,
-  };
+  // A fresh memo, not a cleared one: a probe the old memo started can then
+  // settle only into the memo nothing reads any more.
+  detection = detectionOptionsForTest
+    ? createDetectedLibraryDefaults(detectionOptionsForTest)
+    : createDefaultDetection();
 }
 
-async function libraryLocationDefaults(): Promise<LibraryLocationSettings> {
-  if (libraryLocationDefaultsOverride !== null) return libraryLocationDefaultsOverride;
+/**
+ * Runs detection through the given probing service, clock and logger instead
+ * of the hub's own Local runtime. Pass null to restore the real one. Only
+ * takes effect while `setLibraryLocationDefaultsForTest(null)` is in force.
+ *
+ * @example
+ * setLibraryLocationDetectionForTest({ probing: new FakeAgentCliProbing(), logger });
+ */
+export function setLibraryLocationDetectionForTest(
+  options: DetectedLibraryDefaultsOptions | null
+): void {
+  detectionOptionsForTest = options;
+  setLibraryLocationDefaultsForTest(libraryLocationDefaultsOverride);
+}
 
-  const nowMs = Date.now();
-  if (nowMs - detectedDefaults.computedAtMs < DETECTED_DEFAULTS_TTL_MS) {
-    return detectedDefaults.value;
+/**
+ * Starts agent-CLI detection so the first settings request finds it done.
+ * Fire-and-forget right after the server listens: it never rejects, and a
+ * failure only logs, leaving the next read to probe again.
+ *
+ * @example
+ * void warmUpLibraryLocationDefaults();
+ */
+export function warmUpLibraryLocationDefaults(): Promise<void> {
+  if (libraryLocationDefaultsOverride !== null) return Promise.resolve();
+  return detection.warmUp();
+}
+
+function libraryLocationDefaults(): Promise<LibraryLocationSettings> {
+  if (libraryLocationDefaultsOverride !== null) {
+    return Promise.resolve(libraryLocationDefaultsOverride);
   }
+  return detection.current();
+}
 
-  const value = defaultsForDetectedAgents(
-    await environmentProbingService.listAgentCliStatuses(LOCAL_PROBE_SCOPE)
-  );
-  detectedDefaults = { computedAtMs: nowMs, value };
-  return value;
+function libraryLocationDefaultsForWrite(): Promise<LibraryLocationSettings> {
+  if (libraryLocationDefaultsOverride !== null) {
+    return Promise.resolve(libraryLocationDefaultsOverride);
+  }
+  return detection.fresh();
 }
 
 export async function getAppSettings(db: Kysely<Database>, userId: string): Promise<AppSettings> {
@@ -91,35 +113,8 @@ export async function updateAppSettings(
     db,
     userId,
     patch,
-    await libraryLocationDefaults()
+    await libraryLocationDefaultsForWrite()
   );
   publishSettingsInvalidation(userId, 'app');
   return persistedSettings;
-}
-
-export function defaultsForDetectedAgents(
-  statuses: readonly AgentCliStatus[]
-): LibraryLocationSettings {
-  const detectedTargetIds = new Set(
-    statuses.flatMap((status) => (status.effective ? [status.targetId] : []))
-  );
-  detectedTargetIds.add('mangostudio');
-
-  const isDetected = (location: LocationDefinition): boolean => {
-    const externalReaders = location.readBy.filter((targetId) => targetId !== 'mangostudio');
-    const controllingTargets =
-      externalReaders.length > 0 ? externalReaders : (['mangostudio'] as const);
-    return controllingTargets.some((targetId) => detectedTargetIds.has(targetId));
-  };
-
-  return Object.fromEntries(
-    LIBRARY_SCOPES.map((scope) => [
-      scope,
-      Object.fromEntries(
-        LIBRARY_LOCATION_DEFINITIONS.filter((location) => location.scope === scope).map(
-          (location) => [location.id, isDetected(location)]
-        )
-      ),
-    ])
-  ) as LibraryLocationSettings;
 }
