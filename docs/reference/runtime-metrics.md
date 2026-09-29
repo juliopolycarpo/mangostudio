@@ -29,12 +29,13 @@ Re-measured on 2026-09-29 at `02aca80f` on the same kind of machine, this time w
 (`CARGO_BUILD_JOBS` unset), a clean target directory per build and three interleaved builds per
 profile (medians):
 
-| Profile                               | Build time | User CPU | Stripped size | Runtime peak RSS |
-| ------------------------------------- | ---------: | -------: | ------------: | ---------------: |
-| `lto = "thin"`, 1 CGU, strip          |      360 s |   1155 s |      28.91 MB |          +~3 MiB |
-| `lto = "fat"`, 1 CGU, strip (shipped) |      491 s |   1045 s |      26.28 MB |                — |
+| Profile                               | Build time | User CPU | Stripped size | Runtime peak RSS (Δ vs fat) |
+| ------------------------------------- | ---------: | -------: | ------------: | --------------------------: |
+| `lto = "thin"`, 1 CGU, strip          |      360 s |   1155 s |      28.91 MB |                     +~3 MiB |
+| `lto = "fat"`, 1 CGU, strip (shipped) |      491 s |   1045 s |      26.28 MB |                           — |
 
-Thin still builds about 27% faster, but ships a 10% larger binary and adds about 3 MiB of peak
+Thin still builds about 27% faster in wall time (it spends more total CPU, spread across more
+parallel codegen), but ships a 10% larger binary and adds about 3 MiB of peak
 RSS to every runtime process, with no measurable latency difference. Fat stays: release builds
 are rare CI jobs, while size and memory reach every install.
 

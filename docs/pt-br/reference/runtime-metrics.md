@@ -29,12 +29,13 @@ Medido de novo em 2026-09-29 em `02aca80f`, no mesmo tipo de máquina, agora com
 (`CARGO_BUILD_JOBS` sem valor), um diretório de target limpo por build e três builds intercalados
 por perfil (medianas):
 
-| Perfil                                   | Tempo de build | CPU de usuário | Tamanho sem símbolos | Pico de RSS do runtime |
-| ---------------------------------------- | -------------: | -------------: | -------------------: | ---------------------: |
-| `lto = "thin"`, 1 CGU, strip             |          360 s |         1155 s |             28,91 MB |                +~3 MiB |
-| `lto = "fat"`, 1 CGU, strip (o entregue) |          491 s |         1045 s |             26,28 MB |                      — |
+| Perfil                                   | Tempo de build | CPU de usuário | Tamanho sem símbolos | Pico de RSS do runtime (Δ vs fat) |
+| ---------------------------------------- | -------------: | -------------: | -------------------: | --------------------------------: |
+| `lto = "thin"`, 1 CGU, strip             |          360 s |         1155 s |             28,91 MB |                           +~3 MiB |
+| `lto = "fat"`, 1 CGU, strip (o entregue) |          491 s |         1045 s |             26,28 MB |                                 — |
 
-O thin ainda faz o build cerca de 27% mais rápido, mas entrega um binário 10% maior e soma cerca de
+O thin ainda faz o build cerca de 27% mais rápido em tempo real (gasta mais CPU no total, espalhada
+por mais geração de código em paralelo), mas entrega um binário 10% maior e soma cerca de
 3 MiB ao pico de RSS de cada processo do runtime, sem diferença mensurável de latência. O fat fica:
 builds de release são jobs raros de CI, enquanto tamanho e memória chegam a toda instalação.
 
