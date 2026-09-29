@@ -1,6 +1,7 @@
-// Circular dependency count across the discovered JS workspaces via
-// madge --circular --json.
+// Circular dependency count across the discovered JS workspaces and the
+// Bun-native scripts/ tree via madge --circular --json.
 
+import type { ComponentSpec } from './registry';
 import { runCapture } from './support';
 
 type Run = (
@@ -8,6 +9,16 @@ type Run = (
 ) => Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>;
 
 const MAX_STDERR_SHOWN = 300;
+
+/**
+ * Roots madge can scan: every JS workspace and the Bun-native `scripts/` tree.
+ * Crates are Rust and have no import graph for madge to read.
+ * // Usage: countCircularDeps(circularRoots(specs))
+ */
+export const circularRoots = (specs: readonly ComponentSpec[]): string[] =>
+  specs
+    .filter((spec) => spec.kind === 'workspace' || spec.kind === 'scripts')
+    .map((spec) => spec.root);
 
 /**
  * Total number of circular dependency cycles across the given component roots.

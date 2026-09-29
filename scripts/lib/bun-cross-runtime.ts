@@ -18,7 +18,10 @@ import { chmod, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import { ROOT_DIR } from './config';
-import { assertSafeDistributionArchiveEntries } from './distribution-manifest';
+import {
+  assertSafeDistributionArchiveEntries,
+  type BunRuntimeProvenance,
+} from './distribution-manifest';
 import { captureCommand } from './exec';
 import type { BinaryTarget, ReleasePlatformId } from './release-targets';
 
@@ -198,29 +201,6 @@ export function hostReleasePlatform(): ReleasePlatformId | null {
     default:
       return null;
   }
-}
-
-/**
- * Which Bun ended up inside one target's binaries.
- *
- * A foreign runtime cannot be executed here to ask its revision, so the two
- * sources answer with what each can actually prove: the host's own target is
- * compiled against the running Bun and reports its revision exactly, while a
- * fetched one is identified by the digest that was verified before it was used.
- */
-export interface BunRuntimeProvenance {
-  readonly source: 'host' | 'channel';
-  /** Full 40-character revision. Known only for the running Bun. */
-  readonly revision: string | null;
-  /** SHA-256 of the verified channel asset. Null for the host's own runtime. */
-  readonly sha256: string | null;
-  /**
-   * The channel tag moved while this asset was downloading: the digest published
-   * when the listing was read did not match the bytes that arrived, and a fresh
-   * listing did. Harmless on its own, and the reason binaries from one build can
-   * carry different Bun commits.
-   */
-  readonly tagAdvanced: boolean;
 }
 
 /** Provenance recorded beside a cached runtime, so a cache hit answers too. */
