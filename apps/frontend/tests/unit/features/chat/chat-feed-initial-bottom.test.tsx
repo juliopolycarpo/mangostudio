@@ -16,7 +16,6 @@ import { act, fireEvent, render } from '../../../support/harness/render';
 
 const { ChatFeed } = await import('../../../../src/features/chat/components/ChatFeed');
 
-const VIEWPORT_PX = 400;
 /** ChatFeed's own estimate; a row that measures this tall moves nothing. */
 const ESTIMATED_ROW_PX = 150;
 
@@ -36,11 +35,14 @@ interface Observation {
  */
 class FakeTranscriptLayout {
   rowHeight: RowHeight = () => ESTIMATED_ROW_PX;
+  /** The port's height; the window is exactly as tall, as in a full-height app. */
+  viewportPx = 400;
   private scrollTopPx = 0;
   private dispatchedScrollTopPx = 0;
   private readonly observers = new Set<FakeLayoutResizeObserver>();
   private readonly originals = new Map<string, PropertyDescriptor | undefined>();
   private readonly originalResizeObserver = globalThis.ResizeObserver;
+  private originalInnerHeight: PropertyDescriptor | undefined;
 
   install(): void {
     const layout = this;
@@ -51,7 +53,7 @@ class FakeTranscriptLayout {
     });
     this.stub('clientHeight', {
       get(this: HTMLElement) {
-        return layout.isPort(this) ? VIEWPORT_PX : layout.heightOf(this);
+        return layout.isPort(this) ? layout.viewportPx : layout.heightOf(this);
       },
     });
     this.stub('scrollHeight', {
@@ -72,6 +74,11 @@ class FakeTranscriptLayout {
         if (typeof options.top === 'number') this.scrollTop = options.top;
       },
     });
+    this.originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      get: () => layout.viewportPx,
+    });
     const Observer = class extends FakeLayoutResizeObserver {
       constructor(callback: ResizeObserverCallback) {
         super(callback, layout);
@@ -88,6 +95,11 @@ class FakeTranscriptLayout {
     }
     globalThis.ResizeObserver = this.originalResizeObserver;
     window.ResizeObserver = this.originalResizeObserver;
+    if (this.originalInnerHeight) {
+      Object.defineProperty(window, 'innerHeight', this.originalInnerHeight);
+    } else {
+      delete (window as unknown as Record<string, unknown>).innerHeight;
+    }
   }
 
   register(observer: FakeLayoutResizeObserver): void {
@@ -100,11 +112,11 @@ class FakeTranscriptLayout {
 
   /** The largest `scrollTop` the port can hold right now. */
   maxScrollTop(port: HTMLElement): number {
-    return Math.max(0, this.contentHeight(port) - VIEWPORT_PX);
+    return Math.max(0, this.contentHeight(port) - this.viewportPx);
   }
 
   heightOf(element: HTMLElement): number {
-    if (this.isPort(element)) return VIEWPORT_PX;
+    if (this.isPort(element)) return this.viewportPx;
     const index = element.getAttribute('data-index');
     if (index !== null) return this.rowHeight(Number(index));
     return Number.parseFloat(element.style.height) || 0;
@@ -292,7 +304,7 @@ function viewportIsCovered(layout: FakeTranscriptLayout, port: HTMLElement): str
   const top = Math.min(...rows.map((row) => row.start));
   const bottom = Math.max(...rows.map((row) => row.start + layout.rowHeight(row.index)));
   const visibleTop = port.scrollTop;
-  const visibleBottom = visibleTop + VIEWPORT_PX;
+  const visibleBottom = visibleTop + layout.viewportPx;
   if (top <= visibleTop && bottom >= visibleBottom) return 'covered';
   return `rows span ${top}-${bottom}px, viewport ${visibleTop}-${visibleBottom}px`;
 }
@@ -345,6 +357,32 @@ describe('ChatFeed opening position', () => {
 
     expect(positionOf(layout, port)).toBe('at the bottom');
     expect(viewportIsCovered(layout, port)).toBe('covered');
+  });
+
+  // The opening jump is what corrects the virtualizer's estimated offset: the
+  // `scroll` event it queues carries the real one. A chat whose estimate fits
+  // the port never moves `scrollTop`, so no such event ever comes.
+  it('shows every row of a short chat that fits a tall window', () => {
+    layout.viewportPx = 1200;
+    const { port } = openFeed('a', makeMessages('a', 7));
+    layout.settle(port);
+
+    const indexes = renderedRows(port).map((row) => row.index);
+    expect(`rows rendered: ${indexes.join(',')}`).toBe('rows rendered: 0,1,2,3,4,5,6');
+    expect(positionOf(layout, port)).toBe('at the bottom');
+  });
+
+  it('shows every row when rows measure short enough for the whole chat to fit', () => {
+    layout.viewportPx = 1200;
+    layout.rowHeight = () => 40;
+    const { port } = openFeed('a', makeMessages('a', 12));
+    layout.settle(port);
+
+    const indexes = renderedRows(port).map((row) => row.index);
+    expect(`rows rendered: ${indexes.join(',')}`).toBe(
+      `rows rendered: ${Array.from({ length: 12 }, (_, index) => index).join(',')}`
+    );
+    expect(positionOf(layout, port)).toBe('at the bottom');
   });
 
   it('stays at the bottom when the newest rows grow after they first render', () => {

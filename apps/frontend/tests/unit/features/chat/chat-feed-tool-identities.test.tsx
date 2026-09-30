@@ -14,6 +14,7 @@
 import { describe, expect, it, jest, mock } from 'bun:test';
 import type { Message } from '@mangostudio/shared';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
+import { useId } from 'react';
 import { flushAsyncRender, render } from '../../../support/harness/render';
 
 // The virtualizer depends on DOM layout measurements not available in happy-dom.
@@ -33,23 +34,33 @@ mock.module('@tanstack/react-virtual', () => ({
 }));
 
 /**
- * Counts every mount of `useToolIdentities`, standing in for the real
- * react-query + realtime-invalidation hook it replaces here. A class rather
- * than a closure so the count survives being read from outside the mock
- * factory, the same shape `create-fetch-scenario.ts` uses for its own fakes.
+ * Counts the components that call `useToolIdentities`, standing in for the
+ * real react-query + realtime-invalidation hook it replaces here. Each caller
+ * is one observer however often it re-renders, so callers are told apart by
+ * `useId()` rather than counted per call. A class rather than a closure so the
+ * count survives being read from outside the mock factory, the same shape
+ * `create-fetch-scenario.ts` uses for its own fakes.
  */
 class ToolIdentitiesObserverCounter {
-  mounts = 0;
+  private readonly callers = new Set<string>();
 
-  recordMount(): void {
-    this.mounts += 1;
+  get mounts(): number {
+    return this.callers.size;
+  }
+
+  recordCaller(callerId: string): void {
+    this.callers.add(callerId);
+  }
+
+  reset(): void {
+    this.callers.clear();
   }
 }
 
 const observerCounter = new ToolIdentitiesObserverCounter();
 
-function fakeUseToolIdentities() {
-  observerCounter.recordMount();
+function useFakeToolIdentities() {
+  observerCounter.recordCaller(useId());
   return {
     identities: {},
     resolve: (kind: 'agent' | 'mcp', id: string, fallbackName?: string) => {
@@ -71,7 +82,7 @@ function fakeUseToolIdentities() {
 }
 
 mock.module('@/features/environments/identity/use-tool-identities', () => ({
-  useToolIdentities: fakeUseToolIdentities,
+  useToolIdentities: useFakeToolIdentities,
 }));
 
 // After the mock, never before: a static import is evaluated first and would
@@ -92,7 +103,7 @@ function makeAssistantMessage(id: string): Message {
 
 describe('ChatFeed tool-identities observer count', () => {
   it('registers exactly one observer for a multi-row feed', async () => {
-    observerCounter.mounts = 0;
+    observerCounter.reset();
     const messages = [
       makeAssistantMessage('msg-1'),
       makeAssistantMessage('msg-2'),

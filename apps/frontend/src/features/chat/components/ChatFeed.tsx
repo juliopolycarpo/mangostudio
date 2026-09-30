@@ -2,7 +2,7 @@ import type { Message } from '@mangostudio/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
@@ -67,18 +67,23 @@ export function ChatFeed({
 
   // A transcript opens at its newest message, so the virtualizer starts there
   // too: its first range is the bottom rows, not the top rows it used to lay
-  // out — markdown and all — only for the follow to scroll them away. It is
-  // read once, on the first render, and the estimate sits past the real
-  // bottom by about a viewport; the follow hook's opening jump is what moves
-  // the element, and the scroll event that jump queues is what corrects this
-  // offset to the real one before the first paint. A chat switch that keeps
-  // this feed mounted does not re-read it and still lands through that jump.
+  // out — markdown and all — only for the follow to scroll them away. It starts
+  // from wherever the port actually is once the follow hook's opening jump has
+  // run, so it waits one commit for that: the first commit renders no rows
+  // either way (the port has no size yet), and reading the real position
+  // rather than an estimate needs no later `scroll` event to correct it —
+  // which a chat short enough to fit the port would never send. A chat switch
+  // that keeps this feed mounted does not re-read it and still lands through
+  // the hook's jump.
+  const [portPositioned, setPortPositioned] = useState(false);
+  const readPortOffset = useCallback(() => parentRef.current?.scrollTop ?? 0, [parentRef]);
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement,
     getItemKey,
     estimateSize,
-    initialOffset: messages.length * ESTIMATED_ROW_HEIGHT_PX,
+    enabled: portPositioned,
+    initialOffset: readPortOffset,
     // While the view sits at the end, a row that changes size keeps the end in
     // place rather than the rows above it. Without this, bottom rows growing
     // in place (the markdown renderer landing, say) only extend the content
@@ -90,6 +95,14 @@ export function ChatFeed({
     anchorTo: 'end',
     overscan: ROW_OVERSCAN,
   });
+  // Declared after the follow hook, so it runs after the opening jump.
+  useLayoutEffect(() => setPortPositioned(true), []);
+  // A disabled virtualizer reports no size, so until it starts the transcript
+  // takes the size it will estimate once it does: the opening jump then lands
+  // where the virtualizer's own first layout puts the bottom.
+  const totalSize = portPositioned
+    ? rowVirtualizer.getTotalSize()
+    : messages.length * ESTIMATED_ROW_HEIGHT_PX;
 
   return (
     <section
@@ -103,7 +116,7 @@ export function ChatFeed({
         <div
           ref={contentRef}
           style={{
-            height: `${rowVirtualizer.getTotalSize()}px`,
+            height: `${totalSize}px`,
             width: '100%',
             position: 'relative',
           }}
