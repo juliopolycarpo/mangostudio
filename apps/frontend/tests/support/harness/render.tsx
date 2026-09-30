@@ -11,6 +11,7 @@ import { ToastProvider } from '../../../src/components/ui/Toast';
 import { registerCapabilityInvalidationSources } from '../../../src/features/chat/hooks/capability-invalidation';
 import { I18nProvider } from '../../../src/hooks/use-i18n';
 import { ThemeProvider } from '../../../src/hooks/use-theme';
+import { inMemoryLocaleDictionaries } from '../mocks/fake-locale-dictionaries';
 
 const createTestQueryClient = () => {
   const queryClient = new QueryClient({
@@ -33,7 +34,7 @@ function render(ui: React.ReactElement, options?: Omit<RenderOptions, 'wrapper'>
     wrapper: ({ children }) => (
       <QueryClientProvider client={testQueryClient}>
         <ThemeProvider>
-          <I18nProvider>
+          <I18nProvider dictionaries={inMemoryLocaleDictionaries}>
             <ToastProvider>{children}</ToastProvider>
           </I18nProvider>
         </ThemeProvider>
@@ -52,7 +53,7 @@ function renderHook<Result, Props>(
     wrapper: ({ children }) => (
       <QueryClientProvider client={testQueryClient}>
         <ThemeProvider>
-          <I18nProvider>
+          <I18nProvider dictionaries={inMemoryLocaleDictionaries}>
             <ToastProvider>{children}</ToastProvider>
           </I18nProvider>
         </ThemeProvider>

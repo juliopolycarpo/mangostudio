@@ -113,6 +113,12 @@
                   "@mangostudio/shared/i18n": {
                     "allowImportNames": ["Locale", "Messages", "defaultLocale"],
                     "message": "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests."
+                  },
+                  "@mangostudio/shared/i18n/en": {
+                    "message": "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()."
+                  },
+                  "@mangostudio/shared/i18n/pt-BR": {
+                    "message": "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()."
                   }
                 }
               }
@@ -166,7 +172,11 @@
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
     },
     {
-      "includes": ["apps/frontend/src/hooks/use-i18n.tsx", "apps/frontend/tests/**/*.{ts,tsx}"],
+      "includes": [
+        "apps/frontend/src/hooks/use-i18n.tsx",
+        "apps/frontend/src/lib/locale-dictionaries.ts",
+        "apps/frontend/tests/**/*.{ts,tsx}"
+      ],
       "linter": { "rules": { "style": { "noRestrictedImports": "off" } } }
     },
     {
