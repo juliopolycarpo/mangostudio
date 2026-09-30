@@ -79,6 +79,15 @@ export function ChatFeed({
     getItemKey,
     estimateSize,
     initialOffset: messages.length * ESTIMATED_ROW_HEIGHT_PX,
+    // While the view sits at the end, a row that changes size keeps the end in
+    // place rather than the rows above it. Without this, bottom rows growing
+    // in place (the markdown renderer landing, say) only extend the content
+    // below the view until the follow hook catches the resize a frame later,
+    // and the virtualizer's own compensation — computed from the offset it
+    // read before the hook's jump — can undo that jump. With it, both writers
+    // aim at the bottom. It does not follow on its own: appending never
+    // scrolls here (`followOnAppend` stays off), the hook owns that.
+    anchorTo: 'end',
     overscan: ROW_OVERSCAN,
   });
 

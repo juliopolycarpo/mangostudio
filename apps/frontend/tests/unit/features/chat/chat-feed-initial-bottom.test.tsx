@@ -6,7 +6,8 @@
  * the feed depends on it: `scrollTop` clamps to the scrollable range, every
  * change of the clamped position queues a `scroll` event, and a frame
  * dispatches that event before it delivers ResizeObserver notifications for
- * boxes whose size actually changed — the order a browser runs them in.
+ * boxes whose size actually changed, in creation order and under the depth
+ * rule — the order a browser runs them in.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -110,8 +111,13 @@ class FakeTranscriptLayout {
   }
 
   /**
-   * Runs one rendering update: the queued `scroll` event first, then every
-   * ResizeObserver whose target changed size since it last reported.
+   * Runs one rendering update the way a browser orders it: the queued `scroll`
+   * event first, then ResizeObserver delivery. Each delivery pass gathers every
+   * observer's changed boxes before any callback runs, calls the observers in
+   * creation order, and — the depth rule — only looks at boxes deeper than the
+   * shallowest one it just reported on its next pass. A shallower box that
+   * changed meanwhile waits for the next frame, which is what a frame paints
+   * around.
    */
   flushFrame(port: HTMLElement): void {
     act(() => {
@@ -121,8 +127,17 @@ class FakeTranscriptLayout {
         fireEvent.scroll(port);
       }
     });
-    for (const observer of [...this.observers]) {
-      act(() => observer.deliverChanges());
+    let shallowestReported = -1;
+    for (let pass = 0; pass < 10; pass++) {
+      const batches = [...this.observers]
+        .map((observer) => ({ observer, entries: observer.gatherChanges(shallowestReported) }))
+        .filter((batch) => batch.entries.length > 0);
+      if (batches.length === 0) return;
+      const depths = batches.flatMap((batch) =>
+        batch.entries.map((entry) => depthOf(entry.target))
+      );
+      shallowestReported = Math.min(...depths);
+      for (const batch of batches) act(() => batch.observer.deliver(batch.entries));
     }
   }
 
@@ -184,10 +199,12 @@ class FakeLayoutResizeObserver {
     this.layout.unregister(this);
   }
 
-  deliverChanges(): void {
+  /** Records and returns the boxes deeper than `belowDepth` whose size changed. */
+  gatherChanges(belowDepth: number): ResizeObserverEntry[] {
     const entries: ResizeObserverEntry[] = [];
     for (const observation of this.observations) {
       if (!observation.target.isConnected) continue;
+      if (depthOf(observation.target) <= belowDepth) continue;
       const size = this.layout.heightOf(observation.target as HTMLElement);
       if (size === observation.lastSize) continue;
       observation.lastSize = size;
@@ -200,8 +217,19 @@ class FakeLayoutResizeObserver {
         contentRect: { height: size, width: 800 } as DOMRectReadOnly,
       });
     }
-    if (entries.length > 0) this.callback(entries, this as unknown as ResizeObserver);
+    return entries;
   }
+
+  deliver(entries: ResizeObserverEntry[]): void {
+    this.callback(entries, this as unknown as ResizeObserver);
+  }
+}
+
+/** How many ancestors an element has; ResizeObserver orders its passes by it. */
+function depthOf(element: Element): number {
+  let depth = 0;
+  for (let node = element.parentElement; node; node = node.parentElement) depth++;
+  return depth;
 }
 
 /** Collects the index of every transcript row the feed ever mounts. */
@@ -324,11 +352,17 @@ describe('ChatFeed opening position', () => {
     layout.settle(port);
 
     // A lazily loaded renderer (the markdown chunk) re-lays the bottom rows out
-    // taller a moment after the transcript first painted.
+    // taller a moment after the transcript first painted. Every frame after
+    // that is one the reader sees, so each has to be at the bottom — not just
+    // the one the layout eventually settles on.
     layout.rowHeight = (index) => (index >= 55 ? 320 : ESTIMATED_ROW_PX);
-    layout.settle(port);
+    const frames: string[] = [];
+    for (let frame = 0; frame < 5; frame++) {
+      layout.flushFrame(port);
+      frames.push(positionOf(layout, port));
+    }
 
-    expect(positionOf(layout, port)).toBe('at the bottom');
+    expect(frames).toEqual(Array.from({ length: 5 }, () => 'at the bottom'));
     expect(viewportIsCovered(layout, port)).toBe('covered');
   });
 });
@@ -365,6 +399,19 @@ describe('ChatFeed follow after opening', () => {
 
     expect(`reader at ${port.scrollTop}px`).toBe('reader at 1000px');
     expect(queryByTitle('Scroll to bottom')).not.toBeNull();
+  });
+
+  it('leaves a reader who scrolled up in place when a message is appended', () => {
+    const { port, rerender } = openFeed('a', makeMessages('a', 60));
+    layout.settle(port);
+    fireEvent.wheel(port);
+    port.scrollTop = 1000;
+    layout.flushFrame(port);
+
+    rerender(<ChatFeed chatId="a" messages={makeMessages('a', 61)} />);
+    layout.settle(port);
+
+    expect(`reader at ${port.scrollTop}px`).toBe('reader at 1000px');
   });
 
   it('lands at the bottom of the next chat when the feed stays mounted across a switch', () => {
