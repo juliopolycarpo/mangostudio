@@ -10,7 +10,8 @@ import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
 import { useChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
 import { ChatMessageRow } from './ChatMessageRow';
 
-const ESTIMATED_ROW_HEIGHT_PX = 150;
+/** The height the virtualizer assumes for a row it has not measured yet. */
+export const ESTIMATED_ROW_HEIGHT_PX = 150;
 const ROW_OVERSCAN = 5;
 
 /** Centered empty state shown when a chat has no messages yet. */

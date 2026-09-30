@@ -12,12 +12,12 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { Message } from '@mangostudio/shared';
+import { en } from '@mangostudio/shared/i18n';
 import { act, fireEvent, render } from '../../../support/harness/render';
 
-const { ChatFeed } = await import('../../../../src/features/chat/components/ChatFeed');
-
-/** ChatFeed's own estimate; a row that measures this tall moves nothing. */
-const ESTIMATED_ROW_PX = 150;
+const { ChatFeed, ESTIMATED_ROW_HEIGHT_PX } = await import(
+  '../../../../src/features/chat/components/ChatFeed'
+);
 
 type RowHeight = (index: number) => number;
 
@@ -34,7 +34,7 @@ interface Observation {
  * tall as `rowHeight(index)` says.
  */
 class FakeTranscriptLayout {
-  rowHeight: RowHeight = () => ESTIMATED_ROW_PX;
+  rowHeight: RowHeight = () => ESTIMATED_ROW_HEIGHT_PX;
   /** The port's height; the window is exactly as tall, as in a full-height app. */
   viewportPx = 400;
   private scrollTopPx = 0;
@@ -359,9 +359,10 @@ describe('ChatFeed opening position', () => {
     expect(viewportIsCovered(layout, port)).toBe('covered');
   });
 
-  // The opening jump is what corrects the virtualizer's estimated offset: the
-  // `scroll` event it queues carries the real one. A chat whose estimate fits
-  // the port never moves `scrollTop`, so no such event ever comes.
+  // The virtualizer starts from the port's real position, read once the
+  // opening jump has run, not from an estimated end offset. An estimated start
+  // would wait on a `scroll` event to correct it, and a chat whose estimate
+  // fits the port never moves `scrollTop`, so no such event ever comes.
   it('shows every row of a short chat that fits a tall window', () => {
     layout.viewportPx = 1200;
     const { port } = openFeed('a', makeMessages('a', 7));
@@ -393,7 +394,7 @@ describe('ChatFeed opening position', () => {
     // taller a moment after the transcript first painted. Every frame after
     // that is one the reader sees, so each has to be at the bottom — not just
     // the one the layout eventually settles on.
-    layout.rowHeight = (index) => (index >= 55 ? 320 : ESTIMATED_ROW_PX);
+    layout.rowHeight = (index) => (index >= 55 ? 320 : ESTIMATED_ROW_HEIGHT_PX);
     const frames: string[] = [];
     for (let frame = 0; frame < 5; frame++) {
       layout.flushFrame(port);
@@ -416,7 +417,7 @@ describe('ChatFeed follow after opening', () => {
     const { port, rerender } = openFeed('a', streaming('Hel'));
     layout.settle(port);
 
-    layout.rowHeight = (index) => (index === 60 ? 900 : ESTIMATED_ROW_PX);
+    layout.rowHeight = (index) => (index === 60 ? 900 : ESTIMATED_ROW_HEIGHT_PX);
     rerender(<ChatFeed chatId="a" messages={streaming('Hello, a much longer answer')} />);
     layout.settle(port);
 
@@ -431,12 +432,12 @@ describe('ChatFeed follow after opening', () => {
     port.scrollTop = 1000;
     layout.flushFrame(port);
 
-    layout.rowHeight = (index) => (index === 60 ? 900 : ESTIMATED_ROW_PX);
+    layout.rowHeight = (index) => (index === 60 ? 900 : ESTIMATED_ROW_HEIGHT_PX);
     rerender(<ChatFeed chatId="a" messages={streaming('Hello, a much longer answer')} />);
     layout.settle(port);
 
     expect(`reader at ${port.scrollTop}px`).toBe('reader at 1000px');
-    expect(queryByTitle('Scroll to bottom')).not.toBeNull();
+    expect(queryByTitle(en.chat.scrollToBottom)).not.toBeNull();
   });
 
   it('leaves a reader who scrolled up in place when a message is appended', () => {
