@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { useQueryClient } from '@tanstack/react-query';
 import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
-import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
+import { EMPTY_MODEL_CATALOG, LOADING_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
 // No Bun equivalent for `vi.mocked` — the `jest.fn()` handle created here is
@@ -38,13 +38,22 @@ describe('useModelCatalog', () => {
     mockGet.mockReset();
   });
 
-  it('returns the initial empty catalog state', () => {
-    mockGet.mockResolvedValue(mockResult(EMPTY_MODEL_CATALOG));
+  it('reports a loading catalog, not an empty one, until the hub answers', async () => {
+    mockGet.mockResolvedValue(mockResult({ ...EMPTY_MODEL_CATALOG, status: 'ready' }));
 
     const { result } = renderHook(() => useModelCatalog());
 
-    expect(result.current.catalog).toEqual(EMPTY_MODEL_CATALOG);
+    // The shell renders before this request lands; "no models" would be a lie.
+    expect(
+      result.current.catalog.status,
+      `expected catalog status before the first answer: loading | received: ${result.current.catalog.status}`
+    ).toBe('loading');
+    expect(result.current.catalog).toEqual(LOADING_MODEL_CATALOG);
+    expect(result.current.isResolved).toBe(false);
     expect(result.current.isLoading).toBe(true);
+
+    await waitFor(() => expect(result.current.isResolved).toBe(true));
+    expect(result.current.catalog.status).toBe('ready');
   });
 
   it.each([
@@ -109,6 +118,7 @@ describe('useModelCatalog', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.catalog).toEqual(EMPTY_MODEL_CATALOG);
+    expect(result.current.isResolved, 'expected a refused catalog to stay unresolved').toBe(false);
   });
 
   it('supports manual refresh', async () => {

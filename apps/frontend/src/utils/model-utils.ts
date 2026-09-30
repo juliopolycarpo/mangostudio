@@ -11,6 +11,21 @@ export const EMPTY_MODEL_CATALOG: ModelCatalogResponse = {
   discoveredImageModels: [],
 };
 
+/**
+ * The catalog as its readers see it before the hub has answered.
+ *
+ * The shell no longer waits for the catalog before its first screen, so there
+ * is a window where the composer is up without it. Reported as `loading`
+ * rather than as the idle empty catalog: the model selector then reads
+ * "Loading models" and stays disabled, instead of claiming there are none.
+ *
+ * @example getModelSelectorPlaceholder(LOADING_MODEL_CATALOG, labels) // labels.loading
+ */
+export const LOADING_MODEL_CATALOG: ModelCatalogResponse = {
+  ...EMPTY_MODEL_CATALOG,
+  status: 'loading',
+};
+
 export function hasModelOption(modelId: string | undefined, options: ModelOption[]): boolean {
   return Boolean(modelId) && options.some((option) => option.modelId === modelId);
 }

@@ -47,6 +47,12 @@ interface ChatPageProps {
   imageToolIntent: boolean;
   onImageToolIntentChange: (active: boolean) => void;
   activeModel?: string | null;
+  /**
+   * True while the model catalog has not answered. The page renders without
+   * it, but nothing that would run a MangoStudio model — a send, an answer to
+   * a question, a resume, a compaction — goes out until it has.
+   */
+  isModelResolving?: boolean;
   selectedAgentId?: string;
   agents?: ReadonlyArray<AgentProfile>;
   isAgentListLoading?: boolean;
@@ -131,6 +137,7 @@ export function ChatPage({
   imageToolIntent,
   onImageToolIntentChange,
   activeModel = null,
+  isModelResolving = false,
   selectedAgentId = 'default',
   agents = [],
   isAgentListLoading = false,
@@ -171,11 +178,16 @@ export function ChatPage({
     },
     [chatId]
   );
+  // An external runner never reads the catalog, so only MangoStudio's turns wait.
+  const awaitingModel = isModelResolving && composer?.runner?.kind !== 'external';
+  // A compaction names the current model whatever runs the turns, so it waits
+  // either way — including the automatic one, which retries once this clears.
+  const contextActionBlocked = isContextActionPending || isModelResolving;
   const contextControls = useChatContextControls({
     chatId,
     contextInfo,
     contextSettings,
-    isContextActionPending,
+    isContextActionPending: contextActionBlocked,
     onCompactCurrentChat,
     onStartSummarizedChat,
   });
@@ -202,7 +214,11 @@ export function ChatPage({
               onUsePrompt: handleUsePrompt,
             }}
             onQuestionSubmit={
-              isGenerating || disabled || contextControls.requiresDecision || isContextActionPending
+              isGenerating ||
+              disabled ||
+              contextControls.requiresDecision ||
+              isContextActionPending ||
+              awaitingModel
                 ? undefined
                 : onSubmit
             }
@@ -220,7 +236,7 @@ export function ChatPage({
           {contextControls.requiresDecision && (
             <ChatContextDecisionNotice
               warningMessage={contextControls.warningMessage}
-              isPending={isContextActionPending}
+              isPending={contextActionBlocked}
               onCompact={() => void contextControls.handleCompactClick()}
               onStartSummarizedChat={() => void contextControls.handleSummarizedChatClick()}
               onContinue={contextControls.handleContinue}
@@ -231,7 +247,7 @@ export function ChatPage({
               key={interruptedTurn.messageId}
               messageId={interruptedTurn.messageId}
               checkpoint={interruptedTurn.checkpoint}
-              disabled={disabled || isGenerating}
+              disabled={disabled || isGenerating || awaitingModel}
               onResume={onResumeInterruptedTurn}
               onDismiss={onDismissInterruptedTurn}
             />
@@ -246,7 +262,9 @@ export function ChatPage({
             onSubmit={onSubmit}
             chatId={chatId}
             disabled={disabled}
-            submitDisabled={contextControls.requiresDecision || isContextActionPending}
+            submitDisabled={
+              contextControls.requiresDecision || isContextActionPending || awaitingModel
+            }
             isGenerating={isGenerating}
             onStop={onStop}
             thinkingEnabled={thinkingEnabled}

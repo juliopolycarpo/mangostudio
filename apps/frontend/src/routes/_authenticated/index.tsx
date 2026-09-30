@@ -59,6 +59,7 @@ function ChatRoute() {
       imageToolIntent={app.imageToolIntent}
       onImageToolIntentChange={app.setImageToolIntent}
       activeModel={app.activeModel}
+      isModelResolving={app.isModelResolving}
       selectedAgentId={app.selectedAgentId ?? undefined}
       agents={app.agents}
       isAgentListLoading={app.isAgentListLoading}

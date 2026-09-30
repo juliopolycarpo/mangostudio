@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setTestSession } from '../../support/setup/auth-client-stub';
 
@@ -133,5 +133,43 @@ describe('ChatPage context warning', () => {
       />
     );
     expect(screen.getByTestId('pinned-todos')).toHaveTextContent('chat-1');
+  });
+});
+
+describe('ChatPage before the model catalog answers', () => {
+  const quiet = { ...DEFAULT_CONTEXT_SETTINGS, compactionBehavior: 'off' as const };
+
+  it('lets the prompt be typed but not sent until the model resolves', async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderChatPage({ contextSettings: quiet, isModelResolving: true });
+
+    await user.type(screen.getByRole('textbox'), 'hello{Enter}');
+
+    const sends = (props.onSubmit as ReturnType<typeof jest.fn>).mock.calls.length;
+    expect(sends, `expected sends with an unresolved model: 0 | received: ${sends}`).toBe(0);
+    expect(screen.getByRole('textbox')).toHaveValue('hello');
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send to be disabled while the catalog has not answered'
+    ).toBeDisabled();
+
+    rerender(<ChatPage {...props} isModelResolving={false} />);
+
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('holds an automatic compaction until the model resolves, then runs it', async () => {
+    const auto = {
+      ...DEFAULT_CONTEXT_SETTINGS,
+      compactionBehavior: 'auto_compact_current_chat' as const,
+    };
+    const { props, rerender } = renderChatPage({ contextSettings: auto, isModelResolving: true });
+
+    const early = (props.onCompactCurrentChat as ReturnType<typeof jest.fn>).mock.calls.length;
+    expect(early, `expected compactions with an unresolved model: 0 | received: ${early}`).toBe(0);
+
+    rerender(<ChatPage {...props} isModelResolving={false} />);
+
+    await waitFor(() => expect(props.onCompactCurrentChat).toHaveBeenCalledTimes(1));
   });
 });
