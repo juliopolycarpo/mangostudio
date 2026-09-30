@@ -31,6 +31,8 @@ export function ChatFallbackNotice({ notice }: ChatFallbackNoticeProps) {
 interface ChatContextDecisionNoticeProps {
   readonly warningMessage: string;
   readonly isPending: boolean;
+  /** The model has not resolved: Compact and New chat wait, Continue does not. */
+  readonly isModelResolving?: boolean;
   readonly onCompact: () => void;
   readonly onStartSummarizedChat: () => void;
   readonly onContinue: () => void;
@@ -39,6 +41,7 @@ interface ChatContextDecisionNoticeProps {
 export function ChatContextDecisionNotice({
   warningMessage,
   isPending,
+  isModelResolving = false,
   onCompact,
   onStartSummarizedChat,
   onContinue,
@@ -57,6 +60,7 @@ export function ChatContextDecisionNotice({
           continueLabel={t.chat.context.continueAction}
           pendingLabel={t.chat.context.compactPending}
           isPending={isPending}
+          modelActionsDisabled={isModelResolving}
           onCompact={onCompact}
           onStartSummarizedChat={onStartSummarizedChat}
           onContinue={onContinue}

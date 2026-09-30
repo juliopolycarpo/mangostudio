@@ -234,4 +234,42 @@ describe('ChatPage before the model catalog answers', () => {
       'expected Send enabled for an external runner with nothing waiting on the catalog'
     ).toBeEnabled();
   });
+
+  it('lets an external runner continue past the warning while the catalog loads', async () => {
+    const user = userEvent.setup();
+    renderChatPage({ isModelResolving: true, composer: EXTERNAL_COMPOSER });
+
+    await user.type(screen.getByRole('textbox'), 'hello');
+
+    const continueButton = screen.getByRole('button', { name: 'Continue anyway' });
+    expect(
+      continueButton,
+      'expected Continue enabled while only the catalog is loading'
+    ).toBeEnabled();
+    // Disabled, but not dressed as a compaction in flight: none is running.
+    expect(
+      screen.getByRole('button', { name: 'Compact and continue' }),
+      'expected Compact disabled, with its own label, while the model has not resolved'
+    ).toBeDisabled();
+
+    await user.click(continueButton);
+
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send enabled for an external runner once the warning is continued'
+    ).toBeEnabled();
+  });
+
+  it('still holds a MangoStudio turn after continuing past the warning while the catalog loads', async () => {
+    const user = userEvent.setup();
+    renderChatPage({ isModelResolving: true });
+
+    await user.type(screen.getByRole('textbox'), 'hello');
+    await user.click(screen.getByRole('button', { name: 'Continue anyway' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send disabled for MangoStudio until the model resolves'
+    ).toBeDisabled();
+  });
 });

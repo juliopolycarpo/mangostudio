@@ -10,7 +10,13 @@ interface ContextWarningCalloutProps {
   newChatLabel: string;
   continueLabel: string;
   pendingLabel: string;
+  /** A context action is running: every choice waits for it. */
   isPending: boolean;
+  /**
+   * Compact and New chat name the current model, so they wait for it to
+   * resolve. Continue does not, and stays available.
+   */
+  modelActionsDisabled?: boolean;
   onCompact: () => void;
   onStartSummarizedChat: () => void;
   onContinue: () => void;
@@ -25,10 +31,12 @@ export function ContextWarningCallout({
   continueLabel,
   pendingLabel,
   isPending,
+  modelActionsDisabled = false,
   onCompact,
   onStartSummarizedChat,
   onContinue,
 }: ContextWarningCalloutProps) {
+  const modelActionBlocked = isPending || modelActionsDisabled;
   return (
     <Card variant="solid" padded={false} className="border-warning/20 bg-warning/8 p-4">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -44,7 +52,7 @@ export function ContextWarningCallout({
           <Button
             variant="primary"
             size="sm"
-            disabled={isPending}
+            disabled={modelActionBlocked}
             loading={isPending}
             onClick={onCompact}
           >
@@ -54,7 +62,7 @@ export function ContextWarningCallout({
           <Button
             variant="secondary"
             size="sm"
-            disabled={isPending}
+            disabled={modelActionBlocked}
             onClick={onStartSummarizedChat}
           >
             <FileText size={14} />

@@ -238,7 +238,8 @@ export function ChatPage({
           {contextControls.requiresDecision && (
             <ChatContextDecisionNotice
               warningMessage={contextControls.warningMessage}
-              isPending={contextActionBlocked}
+              isPending={isContextActionPending}
+              isModelResolving={isModelResolving}
               onCompact={() => void contextControls.handleCompactClick()}
               onStartSummarizedChat={() => void contextControls.handleSummarizedChatClick()}
               onContinue={contextControls.handleContinue}
