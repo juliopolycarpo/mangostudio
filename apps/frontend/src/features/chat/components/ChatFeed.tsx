@@ -65,11 +65,20 @@ export function ChatFeed({
   const getItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages]);
   const estimateSize = useCallback(() => ESTIMATED_ROW_HEIGHT_PX, []);
 
+  // A transcript opens at its newest message, so the virtualizer starts there
+  // too: its first range is the bottom rows, not the top rows it used to lay
+  // out — markdown and all — only for the follow to scroll them away. It is
+  // read once, on the first render, and the estimate sits past the real
+  // bottom by about a viewport; the follow hook's opening jump is what moves
+  // the element, and the scroll event that jump queues is what corrects this
+  // offset to the real one before the first paint. A chat switch that keeps
+  // this feed mounted does not re-read it and still lands through that jump.
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement,
     getItemKey,
     estimateSize,
+    initialOffset: messages.length * ESTIMATED_ROW_HEIGHT_PX,
     overscan: ROW_OVERSCAN,
   });
 
