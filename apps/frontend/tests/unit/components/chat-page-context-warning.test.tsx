@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
+import {
+  type ExternalAgentDescriptor,
+  NO_EXTERNAL_AGENT_CAPABILITIES,
+} from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setTestSession } from '../../support/setup/auth-client-stub';
@@ -136,6 +140,23 @@ describe('ChatPage context warning', () => {
   });
 });
 
+/** A signed-in, installed Codex runner: one that can host a turn right now. */
+function signedInCodex(): ExternalAgentDescriptor {
+  return {
+    targetId: 'codex',
+    environmentId: 'local',
+    installed: true,
+    authState: 'signed-in',
+    capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+    supportedConfigurations: [],
+  };
+}
+
+const EXTERNAL_COMPOSER = {
+  runner: { kind: 'external', targetId: 'codex' },
+  externalDescriptor: signedInCodex(),
+} as const;
+
 describe('ChatPage before the model catalog answers', () => {
   const quiet = { ...DEFAULT_CONTEXT_SETTINGS, compactionBehavior: 'off' as const };
 
@@ -171,5 +192,46 @@ describe('ChatPage before the model catalog answers', () => {
     rerender(<ChatPage {...props} isModelResolving={false} />);
 
     await waitFor(() => expect(props.onCompactCurrentChat).toHaveBeenCalledTimes(1));
+  });
+
+  it('holds an external turn while a deferred automatic compaction waits for the model', async () => {
+    const user = userEvent.setup();
+    const auto = {
+      ...DEFAULT_CONTEXT_SETTINGS,
+      compactionBehavior: 'auto_compact_current_chat' as const,
+    };
+    const { props, rerender } = renderChatPage({
+      contextSettings: auto,
+      isModelResolving: true,
+      composer: EXTERNAL_COMPOSER,
+    });
+
+    await user.type(screen.getByRole('textbox'), 'hello{Enter}');
+
+    const sends = (props.onSubmit as ReturnType<typeof jest.fn>).mock.calls.length;
+    expect(sends, `expected external sends before the compaction ran: 0 | received: ${sends}`).toBe(
+      0
+    );
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send disabled while the automatic compaction waits on the catalog'
+    ).toBeDisabled();
+
+    rerender(<ChatPage {...props} isModelResolving={false} />);
+
+    await waitFor(() => expect(props.onCompactCurrentChat).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('does not hold an external turn when no automatic action is waiting', async () => {
+    const user = userEvent.setup();
+    renderChatPage({ contextSettings: quiet, isModelResolving: true, composer: EXTERNAL_COMPOSER });
+
+    await user.type(screen.getByRole('textbox'), 'hello');
+
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send enabled for an external runner with nothing waiting on the catalog'
+    ).toBeEnabled();
   });
 });

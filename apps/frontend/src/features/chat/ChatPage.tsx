@@ -191,6 +191,12 @@ export function ChatPage({
     onCompactCurrentChat,
     onStartSummarizedChat,
   });
+  // The automatic action above is held until the model resolves; a turn started
+  // meanwhile — even on an external runner — would run before it, or alongside
+  // it once the catalog lands.
+  const autoContextActionDeferred = isModelResolving && contextControls.isAutoActionDue;
+  const turnsHeldForModel = awaitingModel || autoContextActionDeferred;
+  const turnsHeld = isContextActionPending || turnsHeldForModel;
   const railShowsTodos = workspaceSettings.sidePanel.visiblePanelIds.includes('todos');
 
   return (
@@ -214,11 +220,7 @@ export function ChatPage({
               onUsePrompt: handleUsePrompt,
             }}
             onQuestionSubmit={
-              isGenerating ||
-              disabled ||
-              contextControls.requiresDecision ||
-              isContextActionPending ||
-              awaitingModel
+              isGenerating || disabled || contextControls.requiresDecision || turnsHeld
                 ? undefined
                 : onSubmit
             }
@@ -247,7 +249,7 @@ export function ChatPage({
               key={interruptedTurn.messageId}
               messageId={interruptedTurn.messageId}
               checkpoint={interruptedTurn.checkpoint}
-              disabled={disabled || isGenerating || awaitingModel}
+              disabled={disabled || isGenerating || turnsHeldForModel}
               onResume={onResumeInterruptedTurn}
               onDismiss={onDismissInterruptedTurn}
             />
@@ -262,9 +264,7 @@ export function ChatPage({
             onSubmit={onSubmit}
             chatId={chatId}
             disabled={disabled}
-            submitDisabled={
-              contextControls.requiresDecision || isContextActionPending || awaitingModel
-            }
+            submitDisabled={contextControls.requiresDecision || turnsHeld}
             isGenerating={isGenerating}
             onStop={onStop}
             thinkingEnabled={thinkingEnabled}
