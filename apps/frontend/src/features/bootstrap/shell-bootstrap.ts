@@ -12,13 +12,25 @@
  *   takes navigation down with it; the layout swaps its content region for the
  *   bootstrap panel instead and retries only what failed.
  *
+ * Only the chat list is waited for before the first screen, because it names
+ * the chat that screen opens — and its first transcript page is asked for the
+ * moment it does. The catalog and agent settings are started alongside it but
+ * not awaited: the catalog waits on provider discovery after a hub restart,
+ * and nothing about the shell or the transcript depends on it. Their readers
+ * show their own loading states, and the composer does not send until the
+ * catalog has answered.
+ *
  * Authentication failures are neither: they leave through the auth boundary
  * (a redirect to `/login`), never through a generic error panel.
  */
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { EnsureQueryDataOptions, QueryClient, QueryKey } from '@tanstack/react-query';
-import { type ChatWithContext, chatListQueryOptions } from '@/features/chat/queries';
+import {
+  type ChatWithContext,
+  chatListQueryOptions,
+  messagesQueryOptions,
+} from '@/features/chat/queries';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { ApiError } from '@/lib/utils';
@@ -38,11 +50,18 @@ export type ShellSettlement<TData> =
   | { readonly ok: true; readonly data: TData }
   | { readonly ok: false; readonly error: unknown };
 
-/** What the layout loader learned from settling every shell responsibility. */
+/** What the layout loader learned from the data the first screen waits for. */
 export interface ShellBootstrapOutcome {
-  /** The chat list when it loaded; the loader seeds the first transcript from it. */
+  /** The chat list when it loaded; its first chat's transcript is already requested. */
   readonly chats: readonly ChatWithContext[] | undefined;
-  /** The first authentication failure among the responsibilities, if any. */
+  /**
+   * The chat list's authentication failure, if it had one.
+   *
+   * Only the awaited responsibility can report one here. A catalog or agent
+   * settings request refused for the session settles after the loader has
+   * returned; it leaves through the API client's login redirect instead, and
+   * the layout renders nothing protected while that runs.
+   */
   readonly authFailure: unknown;
 }
 
@@ -114,26 +133,43 @@ export async function settleShellQuery<TData, TKey extends QueryKey>(
 }
 
 /**
- * Settles every shell responsibility side by side.
+ * Starts the shell responsibilities the first screen does not wait for.
+ *
+ * Deliberately not awaited: each settles into the query cache on its own,
+ * where its readers show a loading state until it lands and the bootstrap
+ * panel takes over if it is refused. `settleShellQuery` never rejects, so
+ * nothing here can surface as an unhandled rejection.
+ *
+ * @example startDeferredShellQueries(queryClient); // returns immediately
+ */
+function startDeferredShellQueries(queryClient: QueryClient): void {
+  void settleShellQuery(queryClient, catalogQueryOptions());
+  void settleShellQuery(queryClient, agentSettingsListQueryOptions());
+}
+
+/**
+ * Loads what the first screen needs, and starts the rest without waiting.
+ *
+ * Waits for the chat list alone, then for the first chat's transcript page,
+ * which is chained from it so it is in flight while the catalog may still be
+ * waiting on provider discovery. A refused transcript is left to the chat
+ * page, which asks again when it mounts.
  *
  * Never throws: a refused request is left failed in the query cache, where the
- * layout reads it, and an authentication failure is handed back for the caller
- * to redirect on.
+ * layout reads it, and the chat list's authentication failure is handed back
+ * for the caller to redirect on.
  *
  * @example const { chats, authFailure } = await loadShellBootstrap(queryClient);
  */
 export async function loadShellBootstrap(queryClient: QueryClient): Promise<ShellBootstrapOutcome> {
-  const settled = await Promise.all([
-    settleShellQuery(queryClient, chatListQueryOptions()),
-    settleShellQuery(queryClient, catalogQueryOptions()),
-    settleShellQuery(queryClient, agentSettingsListQueryOptions()),
-  ]);
-  const [chats] = settled;
-  const authFailure = settled.find((result) => !result.ok && isAuthFailure(result.error));
-  return {
-    chats: chats.ok ? chats.data : undefined,
-    authFailure: authFailure && !authFailure.ok ? authFailure.error : undefined,
-  };
+  startDeferredShellQueries(queryClient);
+  const chats = await settleShellQuery(queryClient, chatListQueryOptions());
+  if (!chats.ok) {
+    return { chats: undefined, authFailure: isAuthFailure(chats.error) ? chats.error : undefined };
+  }
+  const firstChatId = chats.data[0]?.id;
+  if (firstChatId) await queryClient.prefetchInfiniteQuery(messagesQueryOptions(firstChatId));
+  return { chats: chats.data, authFailure: undefined };
 }
 
 /**

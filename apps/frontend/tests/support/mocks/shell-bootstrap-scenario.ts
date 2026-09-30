@@ -47,7 +47,7 @@ function pathOf(input: RequestInfo | URL): string {
 }
 
 /**
- * A hub that answers every bootstrap request, until told to refuse one.
+ * A hub that answers every bootstrap request, until told to refuse or hold one.
  *
  * @example
  * const hub = createShellBootstrapHub().refuse('catalog', 'server-error').install();
@@ -58,6 +58,18 @@ export function createShellBootstrapHub() {
   const scenario = createFetchScenario();
   scenario.respondWithJson('GET', FIRST_CHAT_MESSAGES_PATH, {
     body: { messages: [], nextCursor: null },
+  });
+  // Requests to a held path wait here until released — a hub still busy with
+  // provider discovery answers late, not never, and not differently.
+  const holds = new Map<string, { gate: Promise<void>; release: () => void }>();
+  const answerNow = scenario.fetchMock.getMockImplementation();
+  if (!answerNow)
+    throw new Error(
+      '[shell-bootstrap-hub] expected the fetch scenario to install an implementation'
+    );
+  scenario.fetchMock.mockImplementation(async (input, init) => {
+    await holds.get(pathOf(input))?.gate;
+    return answerNow(input, init);
   });
 
   const hub = {
@@ -75,6 +87,19 @@ export function createShellBootstrapHub() {
       scenario.respondWithJson('GET', SHELL_PATHS[key], REFUSALS[refusal]);
       return hub;
     },
+    /**
+     * Holds a responsibility's answers until the returned release is called.
+     * The request itself is still counted the moment it is made.
+     */
+    hold(key: ShellPathKey): () => void {
+      const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+      const path = SHELL_PATHS[key];
+      holds.set(path, { gate, release });
+      return () => {
+        holds.delete(path);
+        release();
+      };
+    },
     /** How many times a path was requested, whatever the answer. */
     requestCount(key: ShellPathKey | typeof FIRST_CHAT_MESSAGES_PATH): number {
       const path = key === FIRST_CHAT_MESSAGES_PATH ? key : SHELL_PATHS[key];
@@ -85,6 +110,9 @@ export function createShellBootstrapHub() {
       return hub;
     },
     restore() {
+      // Nothing may stay parked on a hold into the next test.
+      for (const { release } of holds.values()) release();
+      holds.clear();
       scenario.restore();
     },
   };
