@@ -28,8 +28,9 @@ interface I18nProviderProps {
  * Provides the active locale and its dictionary to `useI18n()`.
  *
  * The startup locale's dictionary is normally already loaded by the time this
- * mounts (`preloadStartupLocale()` starts it before the first render, and the
- * router runs its loaders before this root component renders). Until it
+ * mounts: `preloadStartupLocale()` starts it before the first render, while
+ * the session request is still in flight. Waiting here never delays the
+ * router's own loading, which starts outside this component. Until it
  * settles, a spinner renders instead of English text that would flip to
  * Portuguese a moment later. A runtime switch keeps the current dictionary on
  * screen until the next one arrives, and a failed load renders the eager one.
