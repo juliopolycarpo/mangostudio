@@ -35,6 +35,8 @@
     "./contracts": "./src/contracts/index.ts",
     "./test-utils": "./src/test-utils/index.ts",
     "./i18n": "./src/i18n/index.ts",
+    "./i18n/en": "./src/i18n/en.ts",
+    "./i18n/pt-BR": "./src/i18n/pt-BR.ts",
     "./markdown": "./src/markdown/index.ts",
     "./mcp": "./src/mcp/index.ts",
     "./mcp/content-mapping": "./src/mcp/content-mapping.ts",
