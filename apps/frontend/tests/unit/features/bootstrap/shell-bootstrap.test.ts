@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { QueryClient } from '@tanstack/react-query';
+import { waitFor } from '@testing-library/react';
 import {
   isAuthFailure,
   isRateLimited,
@@ -17,10 +18,12 @@ import {
   settleShellQuery,
 } from '../../../../src/features/bootstrap/shell-bootstrap';
 import { chatListQueryOptions } from '../../../../src/features/chat/queries';
+import { agentSettingsListQueryOptions } from '../../../../src/features/settings/agents/queries';
 import { catalogQueryOptions } from '../../../../src/hooks/use-model-catalog';
 import { ApiError } from '../../../../src/lib/utils';
 import {
   createShellBootstrapHub,
+  FIRST_CHAT_MESSAGES_PATH,
   type ShellBootstrapHub,
 } from '../../../support/mocks/shell-bootstrap-scenario';
 
@@ -124,15 +127,87 @@ describe('loadShellBootstrap', () => {
 
     expect(outcome.chats).toBeUndefined();
     expect(outcome.authFailure).toBeUndefined();
-    expect(queryClient.getQueryState(catalogQueryOptions().queryKey)?.status).toBe('success');
+    // Started, not awaited: it lands after the loader has returned.
+    await waitFor(() =>
+      expect(queryClient.getQueryState(catalogQueryOptions().queryKey)?.status).toBe('success')
+    );
   });
 
-  it('reports an authentication failure for the caller to redirect on', async () => {
-    hub = createShellBootstrapHub().refuse('agents', 'unauthorized').install();
+  it('reports the chat list authentication failure for the caller to redirect on', async () => {
+    hub = createShellBootstrapHub().refuse('chats', 'unauthorized').install();
 
     const outcome = await loadShellBootstrap(newQueryClient());
 
     expect(isAuthFailure(outcome.authFailure)).toBe(true);
+  });
+
+  it('returns with the first transcript requested while the catalog and agent settings are still out', async () => {
+    hub = createShellBootstrapHub().install();
+    const releaseCatalog = hub.hold('catalog');
+    const releaseAgents = hub.hold('agents');
+    const queryClient = newQueryClient();
+    let returned = false;
+
+    const loading = loadShellBootstrap(queryClient).then((outcome) => {
+      returned = true;
+      return outcome;
+    });
+
+    // A hub still discovering providers answers the catalog late; the first
+    // screen and its transcript must not wait on that.
+    await waitFor(() => {
+      const messages = hub?.requestCount(FIRST_CHAT_MESSAGES_PATH) ?? 0;
+      expect(
+        messages,
+        `expected first-transcript requests before the catalog answers: 1 | received: ${messages}`
+      ).toBe(1);
+    });
+    await waitFor(() =>
+      expect(returned, 'expected the loader to return while the catalog is still held').toBe(true)
+    );
+    expect(hub.requestCount('catalog'), 'expected the catalog to be started, once').toBe(1);
+    expect(hub.requestCount('agents'), 'expected agent settings to be started, once').toBe(1);
+    expect(queryClient.getQueryState(catalogQueryOptions().queryKey)?.data).toBeUndefined();
+
+    releaseCatalog();
+    releaseAgents();
+    const outcome = await loading;
+    expect(outcome.chats?.map((chat) => chat.id)).toEqual(['chat-1']);
+    await waitFor(() =>
+      expect(queryClient.getQueryState(agentSettingsListQueryOptions().queryKey)?.status).toBe(
+        'success'
+      )
+    );
+  });
+
+  it('does not wait for a deferred responsibility that the session refuses', async () => {
+    hub = createShellBootstrapHub().refuse('agents', 'unauthorized').install();
+    const queryClient = newQueryClient();
+
+    const outcome = await loadShellBootstrap(queryClient);
+
+    // Settled after the loader returned: the API client's 401 redirect and the
+    // layout's auth check own it, not this outcome.
+    expect(
+      outcome.authFailure,
+      'expected no auth failure from the loader for a responsibility it does not await'
+    ).toBeUndefined();
+    await waitFor(() =>
+      expect(
+        isAuthFailure(queryClient.getQueryState(agentSettingsListQueryOptions().queryKey)?.error)
+      ).toBe(true)
+    );
+  });
+
+  it('asks for no transcript when there is no chat to open', async () => {
+    hub = createShellBootstrapHub().install();
+    const queryClient = newQueryClient();
+    queryClient.setQueryData(chatListQueryOptions().queryKey, []);
+
+    const outcome = await loadShellBootstrap(queryClient);
+
+    expect(outcome.chats).toEqual([]);
+    expect(hub.requestCount(FIRST_CHAT_MESSAGES_PATH)).toBe(0);
   });
 });
 

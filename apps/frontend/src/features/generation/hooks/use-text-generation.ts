@@ -107,6 +107,13 @@ function isExternalAgentUnavailableReason(value: string): value is ExternalAgent
 interface UseTextGenerationOptions {
   chats: ReturnType<typeof useChats>;
   getActiveModel: () => string;
+  /**
+   * True while the model catalog has not answered, so `getActiveModel()` names
+   * no model yet. A MangoStudio turn is refused until it has; an external
+   * runner's turn does not use the catalog and is unaffected. Omitted means
+   * resolved.
+   */
+  isModelResolving?: boolean;
   systemPrompt: string;
   promptSettings?: PromptSettings;
   optimistic: ReturnType<typeof useOptimisticMessages>;
@@ -253,6 +260,7 @@ function applyStreamMessageUpdate(
 export function useTextGeneration({
   chats,
   getActiveModel,
+  isModelResolving = false,
   systemPrompt,
   promptSettings,
   optimistic,
@@ -401,6 +409,9 @@ export function useTextGeneration({
   const runTurn = useCallback(
     async ({ prompt, toolIntent, attachmentIds, recovery, review }: RunTurnOptions) => {
       if (stream.abortControllerRef.current) return;
+      // Before anything is created or shown: the composer already refuses this,
+      // and this is the backstop for any other way a turn can be started.
+      if (isModelResolving && !getExternalRunnerTargetId?.()) return;
       setModelUnavailable(null);
       stream.setIsGenerating(true);
 
@@ -749,6 +760,7 @@ export function useTextGeneration({
     [
       chats,
       getActiveModel,
+      isModelResolving,
       systemPrompt,
       promptSettings,
       t,

@@ -17,7 +17,6 @@ import { BootstrapShellContent } from '@/features/bootstrap/BootstrapShellConten
 import { isAuthFailure, loadShellBootstrap } from '@/features/bootstrap/shell-bootstrap';
 import { useShellBootstrap } from '@/features/bootstrap/use-shell-bootstrap';
 import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
-import { messagesQueryOptions } from '@/features/chat/queries';
 import { CommandPaletteHost } from '@/features/command-palette/CommandPaletteHost';
 import { useCommandPalette } from '@/features/command-palette/use-command-palette';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
@@ -77,24 +76,26 @@ export const Route = createFileRoute('/_authenticated')({
     }
   },
   /**
-   * The shell's own data, each piece settled on its own.
+   * The shell's own data, each piece settled on its own — and only the chat
+   * list waited for.
    *
    * App settings is not here: `beforeLoad` already holds it, because the gate
-   * cannot be decided without it. What is left is what the pages read, and a
-   * refused request among it must not take navigation down with it — so this
-   * never throws for one. The failure stays in the query cache, where the
+   * cannot be decided without it. The chat list names the chat the first
+   * screen opens, so it is awaited, and that chat's transcript is requested
+   * the moment it lands. The model catalog and agent settings start alongside
+   * it without holding the first screen back: after a hub restart the catalog
+   * waits on provider discovery. Their readers show loading states, and the
+   * composer does not send until the catalog has answered.
+   *
+   * A refused request among them must not take navigation down with it — so
+   * this never throws for one. The failure stays in the query cache, where the
    * layout reads it and swaps the page for the bootstrap panel. Only a
    * rejected session leaves here, through the auth boundary.
    */
   loader: async ({ context: { queryClient }, location }) => {
-    const { chats, authFailure } = await loadShellBootstrap(queryClient);
+    const { authFailure } = await loadShellBootstrap(queryClient);
     if (authFailure) {
       redirect({ to: '/login', search: { redirect: location.href }, throw: true });
-    }
-
-    const initialChatId = chats?.[0]?.id;
-    if (initialChatId) {
-      await queryClient.prefetchInfiniteQuery(messagesQueryOptions(initialChatId));
     }
   },
   component: AuthenticatedLayout,

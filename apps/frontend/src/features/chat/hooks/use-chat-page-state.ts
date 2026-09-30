@@ -58,6 +58,9 @@ export function useChatContextControls({
     !!contextInfo && contextInfo.estimatedUsageRatio >= contextSettings.dangerThreshold;
   const isCritical =
     !!contextInfo && contextInfo.estimatedUsageRatio >= contextSettings.hardStopThreshold;
+  const isAutoBehavior =
+    contextSettings.compactionBehavior === 'auto_compact_current_chat' ||
+    contextSettings.compactionBehavior === 'continue_with_summary_new_chat';
   const requiresDecision =
     hasContextWarning &&
     contextSettings.compactionBehavior === 'ask' &&
@@ -92,15 +95,13 @@ export function useChatContextControls({
       }
     };
 
-    if (
-      contextSettings.compactionBehavior === 'auto_compact_current_chat' ||
-      contextSettings.compactionBehavior === 'continue_with_summary_new_chat'
-    ) {
+    if (isAutoBehavior) {
       handledAutoWarningKeyRef.current = warningKey;
       void runAutoAction();
     }
   }, [
     contextSettings.compactionBehavior,
+    isAutoBehavior,
     hasContextWarning,
     isContextActionPending,
     onCompactCurrentChat,
@@ -133,6 +134,12 @@ export function useChatContextControls({
 
   return {
     requiresDecision,
+    /**
+     * The context warning is up and the settings answer it automatically. A
+     * caller holding the automatic action back (see `isContextActionPending`)
+     * reads this to hold turns too, so none starts before the action has run.
+     */
+    isAutoActionDue: hasContextWarning && warningKey !== null && isAutoBehavior,
     warningMessage,
     handleCompactClick,
     handleSummarizedChatClick,

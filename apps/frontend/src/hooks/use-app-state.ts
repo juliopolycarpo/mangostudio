@@ -21,6 +21,7 @@ export function useAppState() {
   const currentChat = chats.currentChat;
   const modelState = useActiveChatModel({
     catalog: catalog.catalog,
+    isCatalogResolved: catalog.isResolved,
     settings,
     currentTextModel: currentChat?.textModel,
   });
@@ -70,6 +71,7 @@ export function useAppState() {
   const textGen = useTextGeneration({
     chats,
     getActiveModel: modelState.getActiveModel,
+    isModelResolving: modelState.isModelResolving,
     systemPrompt: settings.globalTextSystemPrompt,
     promptSettings: settings.promptSettings,
     optimistic,
@@ -122,6 +124,7 @@ export function useAppState() {
     activeModels: modelState.activeModels,
     activeModel: modelState.activeModel,
     isModelSelectorDisabled: modelState.isModelSelectorDisabled,
+    isModelResolving: modelState.isModelResolving,
     contextInfo: textGen.contextInfo,
     threadUsage: textGen.threadUsage,
     fallbackNotice: textGen.fallbackNotice,

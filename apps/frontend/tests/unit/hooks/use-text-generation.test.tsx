@@ -1925,3 +1925,44 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     ]);
   });
 });
+
+describe('useTextGeneration — a catalog that has not answered yet', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+    mockGenerateChatTitle.mockReset();
+  });
+
+  it('refuses a MangoStudio turn while the model is still resolving', async () => {
+    const props = makeProps({ isModelResolving: true, getActiveModel: () => '' });
+    mockStream.mockImplementation(makeStreamFn([{ type: 'done', done: true }]));
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    await act(async () => {
+      await result.current.handleRespond('sent before the catalog');
+    });
+
+    const streams = mockStream.mock.calls.length;
+    expect(
+      streams,
+      `expected turn streams opened with an unresolved model: 0 | received: ${streams}`
+    ).toBe(0);
+    expect(result.current.isGenerating).toBe(false);
+  });
+
+  it('lets an external runner turn through, since it never reads the catalog', async () => {
+    const props = makeProps({
+      isModelResolving: true,
+      getActiveModel: () => '',
+      getExternalRunnerTargetId: () => 'codex',
+    });
+    mockStream.mockImplementation(makeStreamFn([{ type: 'done', done: true }]));
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    await act(async () => {
+      await result.current.handleRespond('sent to the vendor');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(mockStream.mock.calls.length, 'expected the external turn to open its stream').toBe(1);
+  });
+});

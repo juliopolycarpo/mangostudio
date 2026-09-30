@@ -81,11 +81,10 @@ describe('BootstrapShellContent', () => {
 
     await renderRegion(queryClient);
 
+    // The catalog is not awaited by the loader; its refusal lands after.
+    const panel = await screen.findByTestId('bootstrap-error');
     expect(screen.queryByTestId('page')).toBeNull();
-    expect(screen.getByTestId('bootstrap-error').parentElement).toHaveAttribute(
-      'data-placement',
-      'content'
-    );
+    expect(panel.parentElement).toHaveAttribute('data-placement', 'content');
     expect(screen.getByTestId('bootstrap-error-failed')).toHaveTextContent(
       en.errors.bootstrap.failed.replace('{items}', en.errors.bootstrap.responsibilities.catalog)
     );
@@ -103,6 +102,11 @@ describe('BootstrapShellContent', () => {
 
     await renderRegion(queryClient);
 
+    await waitFor(() =>
+      expect(screen.getByTestId('bootstrap-error-failed')).toHaveTextContent(
+        en.errors.bootstrap.responsibilities.catalog
+      )
+    );
     const lead = screen.getByTestId('bootstrap-error').querySelector('h1 + p')?.textContent;
     expect(
       lead,
@@ -115,6 +119,7 @@ describe('BootstrapShellContent', () => {
     const queryClient = newQueryClient();
     await loadShellBootstrap(queryClient);
     await renderRegion(queryClient);
+    await screen.findByTestId('bootstrap-error-retry');
     hub.answer('catalog');
 
     fireEvent.click(screen.getByTestId('bootstrap-error-retry'));
@@ -129,7 +134,7 @@ describe('BootstrapShellContent', () => {
     expect(
       counts,
       `expected requests after one retry: catalog 2, others 1 | received: ${JSON.stringify(counts)}`
-    ).toEqual({ catalog: 2, chats: 1, agents: 1, messages: 0 });
+    ).toEqual({ catalog: 2, chats: 1, agents: 1, messages: 1 });
     expect(writes(), 'expected no writes from a retry').toEqual([]);
   });
 
@@ -162,6 +167,10 @@ describe('useShellBootstrap', () => {
     hub = createShellBootstrapHub().refuse('catalog', 'server-error').install();
     const queryClient = newQueryClient();
     await loadShellBootstrap(queryClient);
+    // The loader does not await the catalog; let its refusal land first.
+    await waitFor(() =>
+      expect(queryClient.getQueryState(catalogQueryOptions().queryKey)?.errorUpdateCount).toBe(1)
+    );
     const hook = renderWithClient(queryClient);
 
     // A refetch of a query with no data resets it to `pending` and clears its
@@ -181,6 +190,38 @@ describe('useShellBootstrap', () => {
       hook.current.failed,
       `expected failed responsibilities during a retry: ["catalog"] | received: ${JSON.stringify(hook.current.failed)}`
     ).toEqual(['catalog']);
+  });
+
+  it('shows the page while the catalog is still loading, and does not call that a failure', async () => {
+    hub = createShellBootstrapHub().install();
+    const release = hub.hold('catalog');
+    const queryClient = newQueryClient();
+    void loadShellBootstrap(queryClient);
+    await waitFor(() =>
+      expect(queryClient.getQueryState(chatListQueryOptions().queryKey)?.status).toBe('success')
+    );
+
+    await renderRegion(queryClient);
+
+    expect(screen.getByTestId('page')).toBeInTheDocument();
+    expect(screen.queryByTestId('bootstrap-error')).toBeNull();
+    release();
+  });
+
+  it('flags a deferred authentication failure that lands after the loader returned', async () => {
+    hub = createShellBootstrapHub().refuse('agents', 'unauthorized').install();
+    const queryClient = newQueryClient();
+    await loadShellBootstrap(queryClient);
+
+    const hook = renderWithClient(queryClient);
+
+    await waitFor(() =>
+      expect(
+        hook.current.isAuthFailure,
+        'expected a refused agent-settings session to be flagged as an auth failure'
+      ).toBe(true)
+    );
+    expect(hook.current.failed).toEqual(['agents']);
   });
 
   it('flags an authentication failure so the layout shows nothing protected', async () => {

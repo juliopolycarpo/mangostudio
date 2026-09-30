@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
-import { screen } from '@testing-library/react';
+import {
+  type ExternalAgentDescriptor,
+  NO_EXTERNAL_AGENT_CAPABILITIES,
+} from '@mangostudio/shared/external-agents';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { setTestSession } from '../../support/setup/auth-client-stub';
 
@@ -133,5 +137,139 @@ describe('ChatPage context warning', () => {
       />
     );
     expect(screen.getByTestId('pinned-todos')).toHaveTextContent('chat-1');
+  });
+});
+
+/** A signed-in, installed Codex runner: one that can host a turn right now. */
+function signedInCodex(): ExternalAgentDescriptor {
+  return {
+    targetId: 'codex',
+    environmentId: 'local',
+    installed: true,
+    authState: 'signed-in',
+    capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+    supportedConfigurations: [],
+  };
+}
+
+const EXTERNAL_COMPOSER = {
+  runner: { kind: 'external', targetId: 'codex' },
+  externalDescriptor: signedInCodex(),
+} as const;
+
+describe('ChatPage before the model catalog answers', () => {
+  const quiet = { ...DEFAULT_CONTEXT_SETTINGS, compactionBehavior: 'off' as const };
+
+  it('lets the prompt be typed but not sent until the model resolves', async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderChatPage({ contextSettings: quiet, isModelResolving: true });
+
+    await user.type(screen.getByRole('textbox'), 'hello{Enter}');
+
+    const sends = (props.onSubmit as ReturnType<typeof jest.fn>).mock.calls.length;
+    expect(sends, `expected sends with an unresolved model: 0 | received: ${sends}`).toBe(0);
+    expect(screen.getByRole('textbox')).toHaveValue('hello');
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send to be disabled while the catalog has not answered'
+    ).toBeDisabled();
+
+    rerender(<ChatPage {...props} isModelResolving={false} />);
+
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('holds an automatic compaction until the model resolves, then runs it', async () => {
+    const auto = {
+      ...DEFAULT_CONTEXT_SETTINGS,
+      compactionBehavior: 'auto_compact_current_chat' as const,
+    };
+    const { props, rerender } = renderChatPage({ contextSettings: auto, isModelResolving: true });
+
+    const early = (props.onCompactCurrentChat as ReturnType<typeof jest.fn>).mock.calls.length;
+    expect(early, `expected compactions with an unresolved model: 0 | received: ${early}`).toBe(0);
+
+    rerender(<ChatPage {...props} isModelResolving={false} />);
+
+    await waitFor(() => expect(props.onCompactCurrentChat).toHaveBeenCalledTimes(1));
+  });
+
+  it('holds an external turn while a deferred automatic compaction waits for the model', async () => {
+    const user = userEvent.setup();
+    const auto = {
+      ...DEFAULT_CONTEXT_SETTINGS,
+      compactionBehavior: 'auto_compact_current_chat' as const,
+    };
+    const { props, rerender } = renderChatPage({
+      contextSettings: auto,
+      isModelResolving: true,
+      composer: EXTERNAL_COMPOSER,
+    });
+
+    await user.type(screen.getByRole('textbox'), 'hello{Enter}');
+
+    const sends = (props.onSubmit as ReturnType<typeof jest.fn>).mock.calls.length;
+    expect(sends, `expected external sends before the compaction ran: 0 | received: ${sends}`).toBe(
+      0
+    );
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send disabled while the automatic compaction waits on the catalog'
+    ).toBeDisabled();
+
+    rerender(<ChatPage {...props} isModelResolving={false} />);
+
+    await waitFor(() => expect(props.onCompactCurrentChat).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('does not hold an external turn when no automatic action is waiting', async () => {
+    const user = userEvent.setup();
+    renderChatPage({ contextSettings: quiet, isModelResolving: true, composer: EXTERNAL_COMPOSER });
+
+    await user.type(screen.getByRole('textbox'), 'hello');
+
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send enabled for an external runner with nothing waiting on the catalog'
+    ).toBeEnabled();
+  });
+
+  it('lets an external runner continue past the warning while the catalog loads', async () => {
+    const user = userEvent.setup();
+    renderChatPage({ isModelResolving: true, composer: EXTERNAL_COMPOSER });
+
+    await user.type(screen.getByRole('textbox'), 'hello');
+
+    const continueButton = screen.getByRole('button', { name: 'Continue anyway' });
+    expect(
+      continueButton,
+      'expected Continue enabled while only the catalog is loading'
+    ).toBeEnabled();
+    // Disabled, but not dressed as a compaction in flight: none is running.
+    expect(
+      screen.getByRole('button', { name: 'Compact and continue' }),
+      'expected Compact disabled, with its own label, while the model has not resolved'
+    ).toBeDisabled();
+
+    await user.click(continueButton);
+
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send enabled for an external runner once the warning is continued'
+    ).toBeEnabled();
+  });
+
+  it('still holds a MangoStudio turn after continuing past the warning while the catalog loads', async () => {
+    const user = userEvent.setup();
+    renderChatPage({ isModelResolving: true });
+
+    await user.type(screen.getByRole('textbox'), 'hello');
+    await user.click(screen.getByRole('button', { name: 'Continue anyway' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Send' }),
+      'expected Send disabled for MangoStudio until the model resolves'
+    ).toBeDisabled();
   });
 });
