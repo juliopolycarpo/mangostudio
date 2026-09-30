@@ -4105,6 +4105,12 @@ export const messages: Messages = {
       rateLimited: 'Too many requests came from this address. Wait a moment and try again.',
       retry: 'Try again',
       detail: 'Details: {message}',
+      failed: 'Not loaded: {items}.',
+      responsibilities: {
+        chats: 'your chats',
+        catalog: 'the model list',
+        agents: 'agent settings',
+      },
     },
   },
 

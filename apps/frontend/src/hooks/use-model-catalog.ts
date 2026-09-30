@@ -18,6 +18,10 @@ export const catalogQueryOptions = () =>
       return data as ModelCatalogResponse;
     },
     staleTime: 1000 * 60 * 55, // 55 minutes
+    // A shell bootstrap query: once refused, it is asked again by the bootstrap
+    // panel's retry, not by whichever component mounts next — that would retry
+    // a rate-limited request on every mount. See `features/bootstrap`.
+    retryOnMount: false,
     gcTime: 1000 * 60 * 60 * 2, // 2 hours
   });
 

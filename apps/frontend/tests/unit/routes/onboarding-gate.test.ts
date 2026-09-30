@@ -12,7 +12,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { DEFAULT_APP_SETTINGS, withOnboarding } from '@mangostudio/shared/app-settings';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { DEFAULT_ONBOARDING_STATE } from '@mangostudio/shared/onboarding';
+import { ApiError } from '../../../src/lib/utils';
 import { Route as AuthenticatedRoute } from '../../../src/routes/_authenticated';
 
 interface GateContext {
@@ -88,6 +90,23 @@ describe('the first-run gate on the authenticated layout', () => {
     );
 
     expect(error).toBe(failure);
+  });
+
+  it('sends a rejected session to sign in rather than to the retry panel', async () => {
+    const rejected = new ApiError({ error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED });
+
+    // An expired session is an authentication outcome: a retry panel would
+    // ask the person to repeat a request that cannot succeed until they sign in.
+    const error = await enter(rejected, '/gallery').then(
+      () => null,
+      (thrown: unknown) => thrown
+    );
+
+    expect(
+      redirectOf(error).to,
+      `expected a rejected settings read to redirect to: /login | received: ${String(redirectOf(error).to ?? error)}`
+    ).toBe('/login');
+    expect(redirectOf(error).search?.redirect).toBe('/gallery');
   });
 
   it('preserves a destination that carries a query string', async () => {

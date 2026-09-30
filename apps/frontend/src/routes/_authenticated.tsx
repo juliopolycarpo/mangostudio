@@ -13,8 +13,11 @@ import { BootstrapErrorPanel } from '@/components/layout/BootstrapErrorPanel';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
+import { BootstrapShellContent } from '@/features/bootstrap/BootstrapShellContent';
+import { isAuthFailure, loadShellBootstrap } from '@/features/bootstrap/shell-bootstrap';
+import { useShellBootstrap } from '@/features/bootstrap/use-shell-bootstrap';
 import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
-import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
+import { messagesQueryOptions } from '@/features/chat/queries';
 import { CommandPaletteHost } from '@/features/command-palette/CommandPaletteHost';
 import { useCommandPalette } from '@/features/command-palette/use-command-palette';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
@@ -25,12 +28,10 @@ import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalW
 import { HeaderQuotaPill } from '@/features/external-agents/HeaderQuotaPill';
 import { RunnerSelectorContainer } from '@/features/external-agents/RunnerSelectorContainer';
 import { environmentAlerts } from '@/features/home/lib/environment-health';
-import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { WorkspaceBreadcrumb } from '@/features/workspace/components/WorkspaceBreadcrumb';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useAppState } from '@/hooks/use-app-state';
-import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { activePageForPath } from '@/lib/active-page';
 import { AppContext } from '@/lib/app-context';
 import { isNewChatShortcut } from '@/lib/keyboard';
@@ -50,7 +51,9 @@ export const Route = createFileRoute('/_authenticated')({
    * `/welcome` is a sibling route, not a child, so this cannot redirect to
    * itself. A settings request that fails throws instead of redirecting: the
    * `errorComponent` below offers a retry, and guessing "not set up" from a
-   * failed read would restart a wizard the person already finished.
+   * failed read would restart a wizard the person already finished. The one
+   * exception is a rejected session, which is an authentication outcome and
+   * goes to `/login` like the check above it.
    */
   beforeLoad: async ({ context, location }) => {
     if (!context.auth.isAuthenticated) {
@@ -61,23 +64,35 @@ export const Route = createFileRoute('/_authenticated')({
       });
     }
 
-    const settings = await context.queryClient.ensureQueryData(appSettingsQueryOptions());
+    const settings = await context.queryClient
+      .ensureQueryData(appSettingsQueryOptions())
+      .catch((error: unknown) => {
+        if (isAuthFailure(error)) {
+          redirect({ to: '/login', search: { redirect: location.href }, throw: true });
+        }
+        throw error;
+      });
     if (!isOnboardingComplete(onboardingFor(settings))) {
       redirect({ to: '/welcome', search: { redirect: location.href }, throw: true });
     }
   },
-  loader: async ({ context: { queryClient } }) => {
-    const chatsPromise = queryClient.ensureQueryData(chatListQueryOptions());
+  /**
+   * The shell's own data, each piece settled on its own.
+   *
+   * App settings is not here: `beforeLoad` already holds it, because the gate
+   * cannot be decided without it. What is left is what the pages read, and a
+   * refused request among it must not take navigation down with it — so this
+   * never throws for one. The failure stays in the query cache, where the
+   * layout reads it and swaps the page for the bootstrap panel. Only a
+   * rejected session leaves here, through the auth boundary.
+   */
+  loader: async ({ context: { queryClient }, location }) => {
+    const { chats, authFailure } = await loadShellBootstrap(queryClient);
+    if (authFailure) {
+      redirect({ to: '/login', search: { redirect: location.href }, throw: true });
+    }
 
-    await Promise.all([
-      chatsPromise,
-      queryClient.ensureQueryData(catalogQueryOptions()),
-      queryClient.ensureQueryData(appSettingsQueryOptions()),
-      queryClient.ensureQueryData(agentSettingsListQueryOptions()),
-    ]);
-
-    const chats = await chatsPromise;
-    const initialChatId = chats[0]?.id;
+    const initialChatId = chats?.[0]?.id;
     if (initialChatId) {
       await queryClient.prefetchInfiniteQuery(messagesQueryOptions(initialChatId));
     }
@@ -120,6 +135,7 @@ function AuthenticatedLayout() {
   // forking, session adoption and summarize-to-new-chat write through the same
   // endpoint.
   const chatHasTurns = useChatHasTurns(app.currentChatId);
+  const bootstrap = useShellBootstrap();
 
   // New chat keeps its own chord rather than living in the palette's registry:
   // it is the one action worth reaching without reading a list first. Some
@@ -154,6 +170,11 @@ function AuthenticatedLayout() {
     void navigate({ to: '/login' });
     return null;
   }
+
+  // A session the server rejected on a retry: the API client is already on its
+  // way to `/login`, and nothing protected stays on screen under a generic
+  // error while it gets there.
+  if (bootstrap.isAuthFailure) return null;
 
   return (
     <AppContext value={app}>
@@ -246,15 +267,18 @@ function AuthenticatedLayout() {
           className="flex-1 min-h-0 overflow-hidden flex flex-col"
           data-testid="route-container"
         >
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-full">
-                <Spinner size="lg" />
-              </div>
-            }
-          >
-            <Outlet />
-          </Suspense>
+          {/* A shell request that failed replaces the page, not the shell. */}
+          <BootstrapShellContent bootstrap={bootstrap}>
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center h-full">
+                  <Spinner size="lg" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </BootstrapShellContent>
         </motion.div>
 
         {/* Mounted once, above every page: the send it gates can be raised from

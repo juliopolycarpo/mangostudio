@@ -34,6 +34,10 @@ export type ChatWithContext = Chat & { contextInfo?: ContextInfo | null };
 export const chatListQueryOptions = () =>
   queryOptions({
     queryKey: chatKeys.lists(),
+    // A shell bootstrap query: once refused, it is asked again by the bootstrap
+    // panel's retry, not by whichever component mounts next — that would retry
+    // a rate-limited request on every mount. See `features/bootstrap`.
+    retryOnMount: false,
     queryFn: async () => {
       const { data, error } = await client.api.chats.get();
       if (error) throw new ApiError(error.value);
@@ -41,13 +45,20 @@ export const chatListQueryOptions = () =>
     },
   });
 
+/**
+ * Applies a mutation's result to every cached chat list that holds one.
+ *
+ * A list that never loaded is left alone: seeding it from `[]` would turn a
+ * refused chat list into a successful one holding only the chat just touched —
+ * hiding every other chat and the bootstrap panel that offers the retry.
+ */
 function updateChatListCache(
   queryClient: QueryClient,
   updater: (current: ReadonlyArray<ChatWithContext>) => Array<ChatWithContext>
 ) {
   queryClient.setQueriesData<ReadonlyArray<ChatWithContext>>(
     { queryKey: chatKeys.lists() },
-    (current) => updater(current ?? [])
+    (current) => (current === undefined ? undefined : updater(current))
   );
 }
 
