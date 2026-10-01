@@ -447,16 +447,17 @@ jobs:
       # missing DLL surfaces only as an NTSTATUS exit code, so no Linux run
       # can stand in for them: this job is the only CI lane that runs them. A
       # hosted runner is where the compiled and patched fake exes are safe to
-      # run.
+      # run. The npm tarball case runs here too: it needs the Git GNU tar that
+      # the runner puts ahead of System32 on PATH, which no Linux lane has.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
 
-      - name: Verify the failed version probe diagnostics
+      - name: Verify the failed version probe diagnostics and the npm tarball extraction
         shell: bash
         env:
           MANGOSTUDIO_TEST_NATIVE_FAKES: "1"
-        run: bun test --timeout 60000 scripts/tests/install-ps1-layout.unit.test.ts -t 'failed version probe'
+        run: bun test --timeout 60000 scripts/tests/install-ps1-layout.unit.test.ts -t 'failed version probe|npm tarball extraction'
 
   dry-run-cargo:
     name: Cargo publish dry run

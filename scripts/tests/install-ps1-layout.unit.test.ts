@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 // Same matrix as install-sh-layout.unit.test.ts, run against the real host
 // PowerShell (powershell.exe on PATH via WSL interop) instead of bash.
@@ -1132,6 +1132,79 @@ describe('install.ps1 failed version probe (fake mangostudio.exe)', () => {
       expect(result.stderr).toContain('expected: it starts | received:');
       expect(existsSync(join(l.rootLinux, EXPECTED))).toBe(false);
       expect(existsSync(join(l.binLinux, 'mangostudio.cmd'))).toBe(false);
+    },
+    90000
+  );
+});
+
+describe('install.ps1 npm tarball extraction', () => {
+  // `-Local <file>.tgz` goes through tar.exe with a `C:\` path. GNU tar (Git's
+  // usr\bin, which is ahead of System32 on a GitHub-hosted windows-latest
+  // runner) reads `C:` as a remote host and fails with "Cannot connect to C:
+  // resolve failed"; the bsdtar in System32 does not. The installer must not
+  // depend on which one PATH finds first. The archive holds a placeholder
+  // mangostudio.exe, so a successful extraction ends at the version probe
+  // ("expected: it starts"), which is how this case tells the two apart.
+  const EXPECTED = '9.9.9';
+  const TAR_FAILURE = /tar\.exe failed to extract[^\n]*|tar: [^\n]*/i;
+
+  function systemTar(): string {
+    return IS_WINDOWS
+      ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+      : 'tar';
+  }
+
+  /** The directory of a GNU tar that Windows would find ahead of System32, or null when there is none. */
+  function gnuTarDirectory(): string | null {
+    if (!IS_WINDOWS) return null;
+    const found = sh(['where.exe', 'tar.exe']).stdout.split(/\r?\n/).filter(Boolean);
+    for (const candidate of found) {
+      const banner = sh([candidate, '--version']).stdout;
+      if (/GNU tar/i.test(banner)) return dirname(candidate);
+    }
+    return null;
+  }
+
+  /** A tarball whose package/mangostudio.exe is a placeholder, created with the system tar so it works on any host. */
+  function buildPlaceholderTarball(linuxDir: string): string {
+    const srcDir = join(linuxDir, 'npm-src');
+    mkdirSync(join(srcDir, 'package'), { recursive: true });
+    writeFileSync(join(srcDir, 'package', 'mangostudio.exe'), 'this is not a program');
+    const tgzPath = join(linuxDir, 'mangostudio-npm.tgz');
+    const result = sh([systemTar(), '-czf', tgzPath, '-C', srcDir, 'package']);
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `expected ${systemTar()} to create ${tgzPath} | received exit ${result.exitCode}: ${result.stderr}`
+      );
+    }
+    return toWindowsPath(tgzPath);
+  }
+
+  test.skipIf(!POWERSHELL)(
+    'extracts a local .tgz even when a GNU tar is first on PATH',
+    () => {
+      const gnuDir = gnuTarDirectory();
+      // The hosted Windows runner is the lane this case exists for; a runner
+      // image that loses its GNU tar would otherwise turn the case into a
+      // test of nothing.
+      if (IS_WINDOWS && process.env.GITHUB_ACTIONS === 'true' && gnuDir === null) {
+        throw new Error('expected a GNU tar.exe on the hosted runner PATH | received: none');
+      }
+      const l = layout();
+      const tarball = buildPlaceholderTarball(l.linuxDir);
+      const env = gnuDir
+        ? { ...l.env, Path: `${gnuDir};${process.env.Path ?? process.env.PATH ?? ''}` }
+        : l.env;
+
+      const result = run(l.scriptPath, ['-Local', tarball, '-Version', EXPECTED], env);
+
+      const tarFailure = TAR_FAILURE.exec(result.stderr)?.[0] ?? '<none>';
+      expect(
+        tarFailure,
+        `expected tar.exe to extract the .tgz | received: ${tarFailure} (GNU tar first on PATH: ${gnuDir ?? 'no GNU tar found'})`
+      ).toBe('<none>');
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(`expected version: ${EXPECTED} | received: <none>`);
     },
     90000
   );

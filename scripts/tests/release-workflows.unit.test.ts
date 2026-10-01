@@ -813,7 +813,7 @@ describe('release workflow binary gate', () => {
 
     // Linux skips install-ps1-layout.unit.test.ts for want of a Windows
     // PowerShell, so this job is the only place the fake-binary cases run.
-    expect(windowsBlock).toContain("-t 'failed version probe'");
+    expect(windowsBlock).toContain("-t 'failed version probe|npm tarball extraction'");
     expect(windowsBlock).toContain('scripts/tests/install-ps1-layout.unit.test.ts');
     expect(windowsBlock).toContain('MANGOSTUDIO_TEST_NATIVE_FAKES: "1"');
 
