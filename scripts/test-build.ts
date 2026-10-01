@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
 import { extractTarArchive } from './lib/archive';
 import { pumpStream } from './lib/child-streams';
+import { collectContentEncodingProblems } from './lib/content-encoding-smoke';
 import {
   DISTRIBUTION_MANIFEST_FILE,
   readDistributionManifest,
@@ -561,6 +562,24 @@ function canBindChatGptCallbackPort(): boolean {
   }
 }
 
+/**
+ * The compressed representations, as the compiled binary puts them on the wire.
+ *
+ * Every `fetch` above negotiates and decodes transparently, so none of them can tell a
+ * binary that serves precompressed copies from one that serves only identity, or one that
+ * serves a corrupt copy. This asks the shell and one hashed script and stylesheet for gzip,
+ * Brotli, identity, and a refusal of every coding through a client that decodes nothing.
+ * Only the compiled binary embeds the copies; unit fixtures serve them from disk.
+ */
+async function smokeContentEncodings(port: number): Promise<void> {
+  const { paths, problems } = await collectContentEncodingProblems(`http://127.0.0.1:${port}`);
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`     ${problem}`);
+    fail(`Content-encoding negotiation: ${problems.length} problem(s), listed above`);
+  }
+  pass(`gzip, br and identity are served raw and agree on ${paths.join(', ')}`);
+}
+
 async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
@@ -654,6 +673,8 @@ async function smokeTest(): Promise<void> {
         fail(`/ with a stale validator returned ${upgraded.status}, expected 200`);
       pass('/ shell ETag is content-derived and revalidates correctly');
     }
+
+    await smokeContentEncodings(PORT);
 
     // /index.html → 200 HTML
     {
