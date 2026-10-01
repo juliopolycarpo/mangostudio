@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +9,37 @@ import {
   selectBuildWorkspaces,
 } from '../lib/build';
 import { readText } from './support/read-text';
+
+/** A module whose functions nest five levels deep, so a bytecode depth of 2 has something to skip. */
+function nestedFunctionsSource(): string {
+  const lines = ['export function outer(a: number): number[] {'];
+  for (let i = 0; i < 40; i++) {
+    lines.push(
+      `  function f${i}(x: number) { function g${i}(y: number) { function h${i}(z: number) {` +
+        ` function k${i}(w: number) { return w + ${i} + x + y + z; } return k${i}(z) * 2; }` +
+        ` return h${i}(y) + 1; } return g${i}(x) + ${i}; }`
+    );
+  }
+  const calls = Array.from({ length: 40 }, (_, i) => `f${i}(a)`).join(', ');
+  lines.push(`  return [${calls}];`, '}', 'console.log(outer(1).length);');
+  return `${lines.join('\n')}\n`;
+}
+
+/** Compile the nested fixture for this host with the given flags; returns the executable's path and size. */
+function compileNestedFixture(dir: string, name: string, flags: string[]) {
+  const entry = join(dir, 'entry.ts');
+  writeFileSync(entry, nestedFunctionsSource());
+  const outfile = join(dir, name);
+  const result = Bun.spawnSync({
+    cmd: ['bun', 'build', entry, '--compile', ...flags, '--outfile', outfile],
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `compile with ${JSON.stringify(flags)} exited ${result.exitCode}: ${result.stderr.toString()}`
+    );
+  }
+  return { outfile, bytes: statSync(outfile).size };
+}
 
 describe('build script', () => {
   test('keeps only build-capable workspaces', () => {
@@ -82,20 +114,47 @@ describe('build script', () => {
     expect(defines).toContain('process.env.BUILD_PLATFORM_ID="linux-x64-musl"');
   });
 
-  test('compiles every standalone binary to ESM bytecode with external sourcemaps', () => {
+  test('compiles every standalone binary to depth-2 ESM bytecode with external sourcemaps', () => {
     // Bytecode without `--format=esm` falls back to CommonJS, which rejects
     // the hub entry's top-level `await` and fails the compile.
     expect(binaryCompileFlags('production')).toEqual([
       '--bytecode',
+      '--bytecode-depth=2',
       '--format=esm',
       '--sourcemap=external',
       '--minify',
     ]);
     expect(binaryCompileFlags('development')).toEqual([
       '--bytecode',
+      '--bytecode-depth=2',
       '--format=esm',
       '--sourcemap=external',
     ]);
+  });
+
+  test('the depth flag changes what Bun compiles, and the compiled executable still runs', () => {
+    // Bun accepts a misspelled `--bytecode-depth` without complaint and compiles at the
+    // default depth, so the flag array alone does not prove the depth took effect.
+    const dir = mkdtempSync(join(tmpdir(), 'mangostudio-bytecode-depth-'));
+    try {
+      const flags = binaryCompileFlags('production');
+      const shallow = compileNestedFixture(dir, 'shallow', flags);
+      const full = compileNestedFixture(
+        dir,
+        'full',
+        flags.filter((flag) => !flag.startsWith('--bytecode-depth'))
+      );
+      const run = Bun.spawnSync({ cmd: [shallow.outfile], cwd: dir });
+
+      expect(
+        shallow.bytes < full.bytes,
+        `expected the depth-limited executable smaller than the all-levels one | received: ${shallow.bytes} B vs ${full.bytes} B`
+      ).toBe(true);
+      expect(run.exitCode).toBe(0);
+      expect(run.stdout.toString().trim()).toBe('40');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('uses the binary alias for standalone smoke builds', () => {

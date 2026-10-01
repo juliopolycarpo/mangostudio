@@ -51,10 +51,15 @@ export function binaryCompileDefines(context: BinaryCompileDefines): string[] {
  * hub's `--version` went from 427 ms to 148 ms on linux-x64, median of 20), at the cost
  * of a larger binary. Bytecode defaults to CommonJS output, which rejects the
  * entry's top-level `await`, so `--format=esm` is required with it.
- * // Usage: binaryCompileFlags('production') // → ['--bytecode', '--format=esm', '--sourcemap=external', '--minify']
+ *
+ * `--bytecode-depth=2` precompiles each module's top-level code and two levels of nested
+ * functions; anything deeper is compiled from source the first time it runs. Bun's default
+ * is every level. The depth is a package-size trade, not a speed one: see "Hub binary:
+ * bytecode" in `docs/reference/runtime-metrics.md` for what it saves and costs.
+ * // Usage: binaryCompileFlags('production') // → ['--bytecode', '--bytecode-depth=2', '--format=esm', '--sourcemap=external', '--minify']
  */
 export function binaryCompileFlags(buildType: string): string[] {
-  const flags = ['--bytecode', '--format=esm', '--sourcemap=external'];
+  const flags = ['--bytecode', '--bytecode-depth=2', '--format=esm', '--sourcemap=external'];
   if (buildType === 'production') flags.push('--minify');
   return flags;
 }
