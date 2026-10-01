@@ -7,6 +7,15 @@ import {
   GeneratedImageArtifactSchema,
 } from './schemas';
 
+/*
+ * This file sits beside `schemas.ts` rather than in it on purpose. The derived
+ * `Message` type needs `MessagePart` from `types/agent-events`, which imports
+ * the `generation` and `mcp` schemas, and both of those import `chat/schemas`.
+ * Defining `MessageSchema` in `chat/schemas.ts` closes that loop twice and fails
+ * the workspace's `circular` check. Everything it can take from `schemas.ts`
+ * (attachments, generated images) it imports from there.
+ */
+
 /**
  * One stored message part, as the transcript sends it.
  *
