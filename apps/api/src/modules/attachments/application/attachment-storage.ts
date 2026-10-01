@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join, parse } from 'node:path';
 import { getConfig } from '../../../lib/config';
 
@@ -48,6 +49,17 @@ export function buildAttachmentStoragePath(
 export async function writeAttachmentFile(path: string, buffer: ArrayBuffer): Promise<void> {
   mkdirSync(parse(path).dir, { recursive: true });
   await Bun.write(path, buffer);
+}
+
+/**
+ * Remove a file written by {@link writeAttachmentFile}. A file that is already
+ * gone is not an error; any other failure rejects.
+ *
+ * @example
+ * await removeAttachmentFile(storagePath.absolutePath);
+ */
+export async function removeAttachmentFile(path: string): Promise<void> {
+  await rm(path, { force: true });
 }
 
 export function sanitizePathSegment(value: string): string {

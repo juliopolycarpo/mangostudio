@@ -15,6 +15,7 @@ import { registerFileTypeDetector } from '../lib/file-type-detector';
 import { createDiagnosticLogger } from '../lib/logger';
 import {
   buildAttachmentStoragePath,
+  removeAttachmentFile,
   writeAttachmentFile,
 } from '../modules/attachments/application/attachment-storage';
 import {
@@ -36,6 +37,18 @@ const uploadLogger = createDiagnosticLogger('upload');
 
 // Ensure uploads directory exists at module load
 mkdirSync(UPLOADS_DIR, { recursive: true });
+
+/** Remove the file this request wrote; a failure is logged, never thrown. */
+async function discardUploadedFile(absolutePath: string): Promise<void> {
+  try {
+    await removeAttachmentFile(absolutePath);
+  } catch (cleanupError) {
+    uploadLogger.error('orphan_cleanup_failed', {
+      path: absolutePath,
+      error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+    });
+  }
+}
 
 export const uploadRoutes = (app: Elysia) =>
   app.group('/upload', (app) =>
@@ -167,7 +180,10 @@ export const uploadRoutes = (app: Elysia) =>
                 createdAt: uploadedAt,
               },
               db
-            );
+            ).catch(async (insertError: unknown) => {
+              await discardUploadedFile(storagePath.absolutePath);
+              throw insertError;
+            });
 
             return { attachment };
           } catch (err) {
