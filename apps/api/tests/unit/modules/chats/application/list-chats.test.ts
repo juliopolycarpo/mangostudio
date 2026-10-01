@@ -101,6 +101,15 @@ describe('listChatsUseCase', () => {
       lastContextState: JSON.stringify({ ...JSON.parse(snapshot()), lastUpdatedAt: undefined }),
       lastProviderState: envelope(),
     });
+    // An empty string and valid JSON that is not an object are unreadable, not absent.
+    const notObjects = { 'p-empty-string': '', 'p-json-null': 'null', 'p-json-zero': '0' };
+    let offset = 0;
+    for (const [id, lastContextState] of Object.entries(notObjects)) {
+      await seedChat(user.id, id, BASE_TIME - 1 - offset++, {
+        lastContextState,
+        lastProviderState: envelope(),
+      });
+    }
 
     const received = await listChatsUseCase(user.id, getDb());
     const expected = await fullRowReference(user.id);
@@ -113,6 +122,9 @@ describe('listChatsUseCase', () => {
       'p-unreadable',
       'p-unreadable-null',
       'p-stale-shape',
+      'p-empty-string',
+      'p-json-null',
+      'p-json-zero',
     ]);
     const contexts = Object.fromEntries(received.map((chat) => [chat.id, chat.contextInfo?.mode]));
     expect(contexts).toEqual({
@@ -123,6 +135,9 @@ describe('listChatsUseCase', () => {
       'p-unreadable': 'stateful',
       'p-unreadable-null': undefined,
       'p-stale-shape': 'stateful',
+      'p-empty-string': 'stateful',
+      'p-json-null': 'stateful',
+      'p-json-zero': 'stateful',
     });
     expect(
       JSON.stringify(received),
