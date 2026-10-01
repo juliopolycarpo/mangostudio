@@ -5,17 +5,7 @@
     "build": {
       "outputs": ["dist/**"]
     },
-    // The three test lanes start `bun test` through scripts/with-test-home.ts,
-    // which moves HOME and pins the toolchain homes to the real ones. Turbo's
-    // strict environment drops these variables, so without the pass-through the
-    // launcher cannot see a non-default location and falls back to the
-    // `~/.cargo`, `~/.rustup` and `~/.bun` defaults. Pass-through keeps them
-    // out of the cache key: they steer where tools live, not what a test sees.
     "test:unit": {
-      // Only this lane is cached. The launcher lives outside the workspace, so
-      // it has to be named, or a change to it is served a stale cached pass.
-      // `$TURBO_DEFAULT$` stays because an explicit list replaces the tracked
-      // package files.
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/scripts/with-test-home.ts",

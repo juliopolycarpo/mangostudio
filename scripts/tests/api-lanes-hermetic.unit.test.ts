@@ -162,6 +162,14 @@ describe('preload abort', () => {
  * `CARGO_HOME` / `RUSTUP_HOME` / `BUN_INSTALL` never reaches the launcher that
  * pins them. `turbo run --dry=json` is Turbo's own answer, after it has merged
  * the root and workspace task definitions.
+ *
+ * Why `apps/api/turbo.json` is shaped the way it is (it stays comment-free, strict
+ * JSON, so every tool parses it):
+ * - Only `test:unit` is cached. The launcher lives outside the workspace, so it
+ *   is named in `inputs` through `$TURBO_ROOT$`; `$TURBO_DEFAULT$` stays because
+ *   an explicit list replaces the tracked package files.
+ * - The toolchain homes are `passThroughEnv`, not `env`: they steer where tools
+ *   live, not what a test sees, so they must stay out of the cache key.
  */
 describe('Turbo task definitions of the API lanes', () => {
   /** The variables the launcher pins to the developer's real locations. */
