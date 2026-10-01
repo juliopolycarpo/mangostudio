@@ -11,14 +11,41 @@
 /** URL path (e.g. '/assets/index-abc.js') → embedded file path servable via Bun.file(). */
 export type EmbeddedFrontendFiles = Readonly<Record<string, string>>;
 
+/** Codings a precompressed copy can be stored in. */
+export type EmbeddedContentCoding = 'br' | 'gzip';
+
+/**
+ * Identity URL path → coding → embedded path of that file's precompressed copy.
+ *
+ * Kept apart from `EmbeddedFrontendFiles` on purpose: every key of that map is a
+ * public route and a line in the doctor's file count, and a `.br` copy is
+ * neither. Only files worth compressing appear here.
+ */
+export type EmbeddedFrontendEncodings = Readonly<
+  Record<string, Readonly<Partial<Record<EmbeddedContentCoding, string>>>>
+>;
+
 /** Sentinel frontendDir recorded in server state when assets are embedded. */
 export const EMBEDDED_FRONTEND_DIR = '<embedded>';
 
 let embeddedFrontend: EmbeddedFrontendFiles | null = null;
+let embeddedEncodings: EmbeddedFrontendEncodings = {};
 
-/** Register the embedded frontend manifest. // Usage: registerEmbeddedFrontend(embeddedFrontend) */
-export function registerEmbeddedFrontend(files: EmbeddedFrontendFiles): void {
+/**
+ * Register the embedded frontend manifest and, optionally, its precompressed copies.
+ * // Usage: registerEmbeddedFrontend(embeddedFrontend, embeddedFrontendEncodings)
+ */
+export function registerEmbeddedFrontend(
+  files: EmbeddedFrontendFiles,
+  encodings: EmbeddedFrontendEncodings = {}
+): void {
   embeddedFrontend = files;
+  embeddedEncodings = encodings;
+}
+
+/** The embedded precompressed copies; empty when none were built or running from source. */
+export function getEmbeddedFrontendEncodings(): EmbeddedFrontendEncodings {
+  return embeddedEncodings;
 }
 
 /** The embedded frontend manifest, or null when running from source. */
@@ -29,4 +56,5 @@ export function getEmbeddedFrontend(): EmbeddedFrontendFiles | null {
 /** Test seam: clear the registry so the filesystem path can be exercised. */
 export function resetEmbeddedFrontend(): void {
   embeddedFrontend = null;
+  embeddedEncodings = {};
 }

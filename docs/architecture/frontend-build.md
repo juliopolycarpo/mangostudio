@@ -184,7 +184,7 @@ bundled into more than one chunk.
 
 | Mode      | When                                       | Behaviour                                                                               |
 | --------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |
-| Embedded  | the binary registered an embedded manifest | one explicit `GET` per embedded asset                                                   |
+| Embedded  | the binary registered an embedded manifest | one explicit `GET` per embedded asset, negotiating precompressed copies                 |
 | Directory | `dist/index.html` exists on disk           | `@elysia/static` on `/assets`, everything else resolved per request in the SPA fallback |
 | API-only  | neither                                    | a plain 404 for non-`/api` paths                                                        |
 
@@ -217,6 +217,48 @@ to the shell; malformed escapes and decoded traversal forms also fail with a 404
 `over a listening server` suite in `apps/api/tests/unit/server/frontend-static.test.ts` binds
 a real port; extend it rather than adding another `handle()`-driven case.
 
+### Precompressed representations (embedded mode only)
+
+The binary ships a gzip and a Brotli copy of every compressible text asset, and the server
+picks one from `Accept-Encoding`. It never compresses a response: the CPU cost is paid once, at
+build time, by `scripts/lib/precompress-assets.ts` (gzip level 9, Brotli quality 11 in generic
+mode, both deterministic). A file gets a copy only if it is a text format (`.js`, `.css`,
+`.html`, `.json`, `.svg`, `.webmanifest`, `.txt`, `.xml`), is at least 256 B, and the copy saves
+at least 128 B and 5 %; fonts and images are never tried.
+
+- **Storage.** `writeEmbedModules` writes the copies under `.mango/out/embed/variants/`, never
+  into `dist/`: `dist/` also feeds the `frontend-dist` tarball and the bundle report. The
+  manifest's second export, `embeddedFrontendEncodings`, maps an identity URL path to its
+  copies. They are deliberately not keys of `embeddedFrontend`: every key there is a public
+  route and a line in `doctor`'s file count.
+- **Negotiation.** `apps/api/src/server/accept-encoding.ts` implements RFC 9110 §12.5.3: weights,
+  `q=0`, `*`, `x-gzip`, case-insensitivity. No header or an empty one means identity. Highest
+  weight wins and a tie goes to Brotli. An implicit identity never outranks a coding the client
+  asked for. A client that refuses identity and everything on offer (`identity;q=0`, `*;q=0`)
+  still gets identity, never a `406`: the RFC lets a server ignore the header, and those
+  requests were answered before copies existed. A malformed member (bad token or weight) is
+  ignored, not a `400`, and a coding listed twice keeps its first weight. A variant that was
+  never built falls back to identity.
+- **Headers.** An asset that has copies always sends `Vary: Accept-Encoding`, folded into the
+  `Vary` Elysia already holds so CORS's `Vary: Origin` survives (a `Response` carrying its own
+  `Vary` replaces it). Every representation advertises the original `Content-Type` (the copy's
+  own extension would map to an opaque type), its own length, and its own strong content-hash
+  `ETag`, so a validator for one never revalidates another. Hashed assets without copies stay
+  validator-free; with copies they carry one, because two representations need telling apart.
+  Cache policy is unchanged: hashed assets `immutable`, the shell and `/config.js` `no-cache`.
+- **HEAD** is answered for embedded assets and the SPA shell with the metadata GET would send.
+  It arrives in the not-found fallback, since HEAD never matches a literal GET route; API and
+  upload paths still decline there. Directory mode and uploads still answer HEAD with 404.
+- **Range** is Bun's: over the stored bytes of the selected representation. Bun ignores
+  `If-Range`, for identity files too, so the per-copy `ETag` does not protect a resume. Bun does
+  not slice the virtual files of a compiled binary, which answers `200` with the whole
+  representation.
+- **Directory mode** has no copies (`dist/` carries none) and `/assets` stays on
+  `@elysia/static`, so it answers identity whatever the client asks for, with no `Vary`.
+- **Cost.** About 2.5 MB of copies (198 files) grow the executable and the release archive by
+  roughly the same amount; the `Base`/`Head` table in the PR that introduced this holds the
+  measured numbers.
+
 `/assets/*` is immutable (`max-age=31536000`) in both modes because its filenames are
 content-hashed; unhashed root files get `max-age=86400` with an ETag, matching what the static
 plugin used to add for them. `index.html` is `no-cache` — it must revalidate so an upgraded
@@ -228,8 +270,9 @@ content cannot change within one binary anyway.
 ## The standalone binary
 
 `scripts/lib/embed-frontend.ts` generates two throwaway modules under `.mango/out/embed/`
-(gitignored): a manifest that imports every file in `dist/` with Bun's `type: 'file'` loader,
-and an entry that registers the manifest before booting the real CLI. `bun build --compile`
+(gitignored): a manifest that imports every file in `dist/` — and each precompressed copy, see
+above — with Bun's `type: 'file'` loader, and an entry that registers the manifest before
+booting the real CLI. `bun build --compile`
 embeds the bytes and rewrites each import to an embedded path that `Bun.file()` can serve.
 
 This is why the dev-mode build sits behind a **module boundary**, not a runtime

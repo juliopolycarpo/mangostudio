@@ -403,6 +403,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
 
   async function startFilesystemServer(): Promise<{
     get: (path: string, headers?: Record<string, string>) => Promise<Response>;
+    origin: string;
     frontendDir: string;
     uploadsDir: string;
     stop: () => Promise<void>;
@@ -434,6 +435,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     return {
       get: (path: string, headers?: Record<string, string>) =>
         fetch(`${origin}${path}`, { headers }),
+      origin,
       frontendDir,
       uploadsDir,
       stop: async () => {
@@ -666,6 +668,26 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       const changed = await server.get('/', { 'If-None-Match': '"stale"' });
       expect(changed.status).toBe(200);
       expect(await changed.text()).toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  // Precompressed copies exist only inside a compiled binary. A directory
+  // install serves the bytes it has, so a client that asks for Brotli still gets
+  // identity — with no `Vary`, because nothing about the answer depends on it.
+  test('answers identity whatever Accept-Encoding asks for', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const path of ['/', '/favicon.ico', '/assets/index-AbCd1234.js']) {
+        const response = await fetch(`${server.origin}${path}`, {
+          headers: { 'Accept-Encoding': 'br, gzip' },
+          decompress: false,
+        });
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-encoding')).toBeNull();
+        expect(response.headers.get('vary')).toBeNull();
+      }
     } finally {
       await server.stop();
     }
