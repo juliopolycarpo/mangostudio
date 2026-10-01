@@ -587,7 +587,7 @@ smoke_or_fail() {
   message="expected version: ${expected} | received: ${actual:-<none>}"
   if [ "$status" -ne 0 ]; then
     message="${message}
-  probe: ${dir}/mangostudio --version | expected: exit status: 0 |received: exit status: ${status}"
+  probe: ${dir}/mangostudio --version | expected: exit status: 0 | received: exit status: ${status}"
   fi
   if [ -n "$stderr_text" ]; then
     message="${message}

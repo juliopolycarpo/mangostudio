@@ -404,7 +404,7 @@ describe('install.sh layout', () => {
       loaderLine
     );
     expect(result.stderr, 'expected installer error to include the probe exit status').toContain(
-      'exit status: 127'
+      'expected: exit status: 0 | received: exit status: 127'
     );
     expect(result.stderr, 'expected installer error to include the apk hint').toContain(
       'apk add libstdc++'
