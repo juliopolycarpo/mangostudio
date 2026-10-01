@@ -206,6 +206,33 @@ describe('read-ahead window', () => {
   });
 });
 
+describe('read-ahead when the reader pauses', () => {
+  it('drops the page the scroll window wanted, and asks for the same page again when the reader resumes', async () => {
+    serve(220);
+    const { result } = renderTranscript();
+    await opened(result);
+    await idle.runIdle();
+    await waitFor(() => expect(result.current.messages).toHaveLength(100));
+    api.holdOlder();
+
+    await scrollUpIntoOlderPage(40);
+    await waitFor(() => expectOlderRequests(2));
+    // The reader stops: the page nobody is waiting for is aborted.
+    await waitFor(() => expect(`aborted: ${api.aborted.length}`).toBe('aborted: 1'), {
+      timeout: 3_000,
+    });
+    expectTranscript(result.current.messages, 'msg-121 .. msg-220 (100)');
+
+    await scrollUpIntoOlderPage(40);
+    await waitFor(() => expectOlderRequests(3));
+
+    const cursors = api.olderRequests.map((request) => new URL(request, 'http://x').search);
+    expect(
+      `pages asked: ${cursors.at(-1) === cursors.at(-2) ? 'the same page again' : 'a different page'}`
+    ).toBe('pages asked: the same page again');
+  });
+});
+
 describe('read-ahead is additive', () => {
   it('opens on the newest messages, and stays usable, with the read-ahead request held open forever', async () => {
     serve(220);
