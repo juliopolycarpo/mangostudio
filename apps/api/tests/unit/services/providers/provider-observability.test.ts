@@ -252,4 +252,40 @@ describe('observability snapshot flush dirty tracking', () => {
     const afterRetry = await readPersistedSdkClientHits();
     expect(afterRetry, `expected persisted hits after retry: 2 | received: ${afterRetry}`).toBe(2);
   });
+
+  it('persists the newest state when a second flush starts while the first is still writing', async () => {
+    await flushObservabilitySnapshot();
+    recordProviderCacheHit('openai-compatible', 'sdk-client');
+
+    const firstFlush = flushObservabilitySnapshot();
+    recordProviderCacheHit('openai-compatible', 'sdk-client');
+    const secondFlush = flushObservabilitySnapshot();
+    await Promise.all([firstFlush, secondFlush]);
+
+    const persisted = await readPersistedSdkClientHits();
+    expect(persisted, `expected persisted hits: 2 | received: ${persisted}`).toBe(2);
+  });
+
+  it('does not keep the pre-reset snapshot as clean when a reset lands during a held write', async () => {
+    await flushObservabilitySnapshot();
+    recordProviderCacheHit('openai-compatible', 'sdk-client');
+
+    const fake = fakeSnapshotWrite('hold');
+    try {
+      const firstFlush = flushObservabilitySnapshot();
+      await fake.reached;
+      resetProviderObservability();
+      fake.release();
+      await firstFlush;
+    } finally {
+      fake.restore();
+    }
+    await flushObservabilitySnapshot();
+
+    const persisted = await readPersistedSdkClientHits();
+    expect(
+      persisted,
+      `expected persisted hits after reset: undefined | received: ${persisted}`
+    ).toBe(undefined);
+  });
 });
