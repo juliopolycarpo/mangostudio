@@ -73,7 +73,11 @@ import {
   persistTextTurnStart,
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../domain/external-turn-retry-policy';
+import {
+  classifySubmissionFailure,
+  DEFAULT_RETRY_POLICY,
+  type RetryPolicy,
+} from '../domain/external-turn-retry-policy';
 import { ExternalTurnTranscript } from '../domain/external-turn-transcript';
 import { sealAttemptsForMessage } from '../infrastructure/external-turn-attempt-repository';
 import { cacheExternalAccountLimitsBestEffort } from './external-account-limits';
@@ -1402,6 +1406,16 @@ async function resolveSteerOutcome(
     // argument the hub itself chose.
     if (error instanceof Error && error.name === 'ToolArgumentError') {
       return { accepted: false, reasonCode: 'session-lost' };
+    }
+    // The request provably never reached a vendor, so this is a refusal like
+    // any other: it settles through the caller's rejection path and the id's
+    // outcome is final. Any other failure leaves delivery unknown and is
+    // rethrown untouched; how that is recorded is an open owner decision.
+    if (classifySubmissionFailure(error) === 'not-submitted') {
+      // The closest closed reason that stays true: the turn may well still be
+      // running, so `turn-already-completed` would say it had finished, and
+      // `session-lost` would claim a loss the hub cannot prove.
+      return { accepted: false, reasonCode: 'turn-not-steerable' };
     }
     throw error;
   }

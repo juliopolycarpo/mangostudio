@@ -407,6 +407,81 @@ describe('InputBar — mid-turn steering', () => {
       scenario.restore();
     }
   });
+  /** The request bodies the scenario saw, in order. */
+  function steerBodies(scenario: ReturnType<typeof createFetchScenario>) {
+    return scenario.fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse(String(init?.body)) as { clientMessageId: string; text: string }
+    );
+  }
+
+  it('resends a steer the server refused under a fresh id', async () => {
+    const scenario = createFetchScenario();
+    scenario
+      .respondWithJson('POST', '/api/chats/chat-1/external-agent/steer', {
+        status: 409,
+        body: { accepted: false, reasonCode: 'turn-not-steerable' },
+      })
+      .install();
+
+    try {
+      const user = userEvent.setup();
+      renderInputBar({
+        chatId: 'chat-1',
+        runner: EXTERNAL_RUNNER,
+        externalDescriptor: steerableDescriptor(),
+        isGenerating: true,
+        disabled: true,
+      });
+
+      await user.type(screen.getByRole('textbox'), 'switch to plan mode');
+      await user.click(screen.getByRole('button', { name: 'Steer' }));
+      await screen.findByRole('status');
+      await user.type(screen.getByRole('textbox'), 'switch to plan mode');
+      await user.click(screen.getByRole('button', { name: 'Steer' }));
+      await waitFor(() => expect(scenario.fetchMock).toHaveBeenCalledTimes(2));
+
+      const [first, second] = steerBodies(scenario);
+      // A refusal is final for its id, so a resend must not reuse it.
+      expect(second?.clientMessageId).not.toBe(first?.clientMessageId);
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it('resends a steer that failed without an answer under the same id', async () => {
+    const scenario = createFetchScenario();
+    scenario
+      .respondWithJson('POST', '/api/chats/chat-1/external-agent/steer', {
+        status: 500,
+        body: { error: 'runtime disconnected mid-call' },
+      })
+      .install();
+
+    try {
+      const user = userEvent.setup();
+      renderInputBar({
+        chatId: 'chat-1',
+        runner: EXTERNAL_RUNNER,
+        externalDescriptor: steerableDescriptor(),
+        isGenerating: true,
+        disabled: true,
+      });
+
+      await user.type(screen.getByRole('textbox'), 'switch to plan mode');
+      await user.click(screen.getByRole('button', { name: 'Steer' }));
+      await screen.findByRole('status');
+      await user.click(screen.getByRole('button', { name: 'Steer' }));
+      await waitFor(() => expect(scenario.fetchMock).toHaveBeenCalledTimes(2));
+
+      const [first, second] = steerBodies(scenario);
+      // Delivery is unknown, so the server must see the same id and answer the
+      // first attempt's outcome instead of dispatching a second steer.
+      expect(second).toEqual(first);
+      expect(screen.getByRole('textbox')).toHaveValue('switch to plan mode');
+    } finally {
+      scenario.restore();
+    }
+  });
 });
 
 describe('InputBar — external thread usage', () => {

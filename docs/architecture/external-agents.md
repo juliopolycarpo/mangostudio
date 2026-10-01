@@ -591,6 +591,14 @@ answered from cheapest to most expensive: a missing live turn, a session's own c
 stale `nativeTurnId`, and a `clientMessageId` reused with different text are all decided by the hub
 without a runtime round trip; only Codex's own turn state needs one.
 
+A request the hub's own session or the runtime proves never reached the vendor
+(`classifySubmissionFailure` says `not-submitted`) is answered as an ordinary `turn-not-steerable`
+rejection, so the caller may resend under a new id. Any other failure — the hub's deadline passing,
+the connection closing under the call, or an error the runtime answered — leaves delivery unknown:
+the original failure is rethrown, the id stays cached so it is never dispatched twice, and the
+record is left as it was written. How an unknown delivery is recorded is an open owner decision, as
+is how a late acknowledgement is corrected once the turn's final write has passed.
+
 That same durable write is charged against the turn's byte and event budget, exactly like a vendor
 event — a steer is up to 1 MiB and the caller may attempt as many as it likes, so without a charge
 it would be a second, uncapped way to grow the message `EXTERNAL_TURN_PAYLOAD_MAX_BYTES` exists to
