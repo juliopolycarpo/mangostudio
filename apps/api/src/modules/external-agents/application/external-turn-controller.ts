@@ -1196,6 +1196,11 @@ export function createExternalTurnController(
     };
   }
 
+  /** Whether `live` is no longer the turn that may still be steered for `chatId`. */
+  function hasEnded(live: LiveExternalTurn, chatId: string): boolean {
+    return live.terminating || live.transcript.terminated || liveTurns.get(chatId) !== live;
+  }
+
   const instance: ExternalTurnController = {
     start,
     async answerApproval(input) {
@@ -1276,6 +1281,21 @@ export function createExternalTurnController(
             // it: the turn is over, the same as any other budget breach.
             live.terminate(recorded.terminal);
             live.cancelVendorAfter(recorded.terminal);
+            return { accepted: false, reasonCode: 'turn-already-completed' };
+          }
+
+          // The entry guard held when the write started, not when it resolved:
+          // a cancel or any other terminal path can land while it was awaited.
+          // The correction is in-memory only — the turn's final write is still
+          // to come and carries it.
+          if (hasEnded(live, input.chatId)) {
+            live.transcript.resolveSteerRejected(input.clientMessageId, 'turn-already-completed');
+            live.observer?.onSteer?.({
+              clientMessageId: input.clientMessageId,
+              text: input.text,
+              status: 'rejected',
+              reasonCode: 'turn-already-completed',
+            });
             return { accepted: false, reasonCode: 'turn-already-completed' };
           }
 
