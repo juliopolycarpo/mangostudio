@@ -1271,7 +1271,10 @@ export function createExternalTurnController(
             // retry reuses this rejected attempt. Left `accepted`, the next
             // checkpoint or the finalization would persist a delivery that
             // did not happen. The caller still sees the original failure.
-            live.transcript.resolveSteerRejected(input.clientMessageId, 'turn-already-completed');
+            // `turn-not-steerable` is the closest closed reason that stays
+            // true: the turn may well still be running, so `turn-already-
+            // completed` would tell the user it had finished.
+            live.transcript.resolveSteerRejected(input.clientMessageId, 'turn-not-steerable');
             throw error;
           }
           if (recorded.terminal) {

@@ -217,7 +217,9 @@ function isSteerCheckpoint(builder: {
   );
 }
 
-function gateSteerCheckpoint(mode: { readonly fail: Error } | { readonly hold: true }) {
+function gateSteerCheckpoint(
+  mode: { readonly fail: Error } | { readonly hold: true; readonly thenFail?: Error }
+) {
   const reached = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
   const original = UpdateQueryBuilder.prototype.execute;
@@ -228,7 +230,9 @@ function gateSteerCheckpoint(mode: { readonly fail: Error } | { readonly hold: t
     intercepted = true;
     reached.resolve();
     if ('fail' in mode) return Promise.reject(mode.fail);
-    return released.promise.then(() => original.call(this));
+    return released.promise.then(() =>
+      mode.thenFail ? Promise.reject(mode.thenFail) : original.call(this)
+    );
   } as typeof original);
   const gate: SteerCheckpointGate = {
     reached: reached.promise,
@@ -1283,7 +1287,7 @@ describe('external turn controller', () => {
       if (part.status === 'accepted') {
         throw new Error(`expected steer status: not accepted | received: ${part.status}`);
       }
-      expect(part).toMatchObject({ status: 'rejected', reasonCode: 'turn-already-completed' });
+      expect(part).toMatchObject({ status: 'rejected', reasonCode: 'turn-not-steerable' });
     });
 
     it('does not dispatch a steer whose required checkpoint resolves after a cancel', async () => {
@@ -1333,6 +1337,41 @@ describe('external turn controller', () => {
         reasonCode: 'turn-already-completed',
       });
       expect(turnPartOf(stored.parts).terminalReason).toBe('cancelled-by-user');
+    });
+
+    it('keeps a steer undispatched and not accepted when its held checkpoint fails after a cancel', async () => {
+      const databaseFailure = new Error('steer checkpoint database failure after cancel');
+      const gate = gateSteerCheckpoint({ hold: true, thenFail: databaseFailure });
+      const { runtime, controller } = harness({ steerTerminationGraceMs: 20 });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const steering = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'too late',
+      });
+      const outcome = steering.then(
+        () => undefined,
+        (error: unknown) => error
+      );
+      await gate.reached;
+      expect(cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled')).toBe(true);
+      await waitFor(() => runtime.calls.cancel.length === 1, 'the cancel to reach the runtime');
+      await new Promise((resolve) => setTimeout(resolve, 60));
+
+      gate.release();
+      expect(await outcome).toBe(databaseFailure);
+      const result = await running;
+
+      expect(runtime.calls.steer).toHaveLength(0);
+      expect(result.reason).toBe('cancelled-by-user');
+      const part = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      if (part.status === 'accepted') {
+        throw new Error(`expected steer status: not accepted | received: ${part.status}`);
+      }
+      expect(part.status).toBe('rejected');
     });
 
     it('finalizes without waiting out a hung steer acknowledgement', async () => {
