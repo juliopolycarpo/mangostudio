@@ -1063,6 +1063,23 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getStatus('user-2', 'buildbox').state).toBe('disconnected');
   });
 
+  it('releases connections once when shutdown runs twice', async () => {
+    // `doctor` releases the runtime itself and `dispatch` releases again after
+    // the command returns, so the second call must find nothing left to close.
+    let closeCalls = 0;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(fakeConnection(() => closeCalls++)) },
+    });
+
+    await manager.getClient('user-1', 'devbox');
+    await manager.closeAll();
+    await manager.closeAll();
+
+    expect(closeCalls).toBe(1);
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('disconnected');
+  });
+
   it('contains a superseded connection whose teardown rejects', async () => {
     // `close` now reaches the runtime's own teardown, and an external-agent
     // session owns vendor process trees that can refuse to reap. Nothing awaits
