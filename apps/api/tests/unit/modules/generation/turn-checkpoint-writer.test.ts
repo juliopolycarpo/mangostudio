@@ -17,6 +17,8 @@ interface RecordedWrite {
   readonly sequence: number;
   readonly partCount: number;
   readonly checkpointedAt: number;
+  readonly status: string;
+  readonly reasonCode: string | undefined;
 }
 
 interface PendingWrite {
@@ -70,6 +72,8 @@ class HeldCheckpointDb {
       sequence: checkpoint.sequence,
       partCount: (JSON.parse(values.parts) as MessagePart[]).length,
       checkpointedAt: checkpoint.checkpointedAt,
+      status: checkpoint.status,
+      reasonCode: checkpoint.reasonCode,
     };
     this.writes.push(write);
     const failure = this.failNext;
@@ -341,6 +345,20 @@ describe('TurnCheckpointWriter', () => {
     await writer.flush();
     expect(db.writes).toHaveLength(1);
     expect(db.writes[0]?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS);
+  });
+
+  it('writes a status or reason code passed without force at call time', async () => {
+    const { db, checkpoint, writer, append } = setup();
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+
+    expect(await writer.checkpoint({ status: 'interrupted', reasonCode: 'user_cancelled' })).toBe(
+      true
+    );
+
+    expect(db.writes.map((write) => [write.status, write.reasonCode])).toEqual([
+      ['interrupted', 'user_cancelled'],
+    ]);
+    expect(checkpoint.status).toBe('interrupted');
   });
 
   it('skips calls below the throttle without scheduling a write', async () => {

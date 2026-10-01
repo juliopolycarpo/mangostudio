@@ -100,8 +100,8 @@ export class TurnCheckpointWriter {
   }
 
   /**
-   * Request a checkpoint. A forced call resolves to whether its write landed.
-   * A best-effort call resolves to `true` when it passed the throttle and was
+   * Request a checkpoint. A forced call, or one that sets `status` or
+   * `reasonCode`, resolves to whether its write landed. A best-effort call resolves to `true` when it passed the throttle and was
    * accepted (it is written later, merged with any newer accepted snapshots,
    * and `flush()` waits for it); `false` means the throttle skipped it.
    */
@@ -115,7 +115,11 @@ export class TurnCheckpointWriter {
 
     this.lastTextLength = content.text.length;
     this.lastWrittenAt = now;
-    if (force) return this.writeRequired(content, now, options);
+    // A status or reason code is state the recovery path reads, so it is never
+    // deferred: such a call is written as a required checkpoint even without `force`.
+    if (force || options.status !== undefined || options.reasonCode !== undefined) {
+      return this.writeRequired(content, now, options);
+    }
 
     // Sequence and timestamp advance per accepted call so the persisted
     // sequence counts checkpoints, however many writes they were merged into.
