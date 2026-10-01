@@ -586,6 +586,78 @@ describe('propagation apply — decisions', () => {
     expect(existsSync(skillPath('claude-skills'))).toBe(false);
   });
 
+  it('refuses to keep a divergence whose reported hash cannot be stored before writing anything', async () => {
+    // `gh` would be written; `other` is divergent but one runtime-reported hash is
+    // far larger than a digest. Recording it fails, and that must happen while
+    // planning, not after `gh` has landed.
+    writeSkill('mango-skills', 'mine\n');
+    makeDirectories('claude-skills');
+    for (const [location, body] of [
+      ['mango-skills', 'one'],
+      ['agents-skills', 'two'],
+    ] as const) {
+      const dir = join(home, location === 'mango-skills' ? '.mango' : '.agents', 'skills', 'other');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'SKILL.md'), `---\nname: other\ndescription: Other\n---\n${body}\n`);
+    }
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh', 'skill:other'],
+      targetLocationIds: ['claude-skills'],
+    };
+    const real = await preview(request);
+    const oversized = 'x'.repeat(500);
+    const taken: PropagationPreview = {
+      ...real,
+      entries: real.entries.map((entry) =>
+        entry.resourceKey === 'skill:other'
+          ? {
+              ...entry,
+              sourceGroups: entry.sourceGroups.map((group, index) =>
+                index === 0 ? { ...group, contentHash: oversized } : group
+              ),
+            }
+          : entry
+      ),
+    };
+    const [gh, other] = [...taken.entries].sort((a, b) =>
+      a.resourceKey.localeCompare(b.resourceKey)
+    );
+    if (!gh || !other)
+      throw new Error(`Expected two preview entries, received ${taken.entries.length}.`);
+
+    const writes: RuntimeLibraryApplyParams[] = [];
+    const failure = applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        adoptAll(gh, winnerFrom(gh, 'mango-skills')),
+        {
+          resourceKey: other.resourceKey,
+          resolution: 'keep-per-location',
+          destinations: other.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action: 'skip' as const,
+          })),
+        },
+      ]),
+      applyDeps({
+        preview: () => Promise.resolve(taken),
+        runtimeApply: (params) => {
+          writes.push(params);
+          return refuseLibraryApply(params);
+        },
+      })
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('content hash of 500 characters: expected at most 128'),
+    });
+    expect(writes).toHaveLength(0);
+    expect(existsSync(skillPath('claude-skills'))).toBe(false);
+  });
+
   it('refuses a decision that leaves an offered destination undecided', async () => {
     writeSkill('mango-skills', 'winner\n');
     makeDirectories('claude-skills', 'cursor-skills');

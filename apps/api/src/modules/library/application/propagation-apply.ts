@@ -55,7 +55,7 @@ import { defaultAdapterRegistry } from './adapters/registry';
 import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
-import { recordDivergenceAck } from './conflict-resolution';
+import { assertBoundedHashes, recordDivergenceAck } from './conflict-resolution';
 import { resetLibraryCachesForEnvironments } from './environment-library-service';
 import { previewLibraryPropagation } from './propagation-preview';
 
@@ -743,10 +743,11 @@ function planAcknowledgement(
       `"${entry.resourceKey}" cannot both keep its divergence and write to a destination.`
     );
   }
-  return {
-    resourceKey: entry.resourceKey,
-    contentHashes: entry.sourceGroups.map((group) => group.contentHash),
-  };
+  const contentHashes = entry.sourceGroups.map((group) => group.contentHash);
+  // These came from each machine's runtime. Checked here so an unstorable
+  // acknowledgement is refused before the writes, not after them.
+  assertBoundedHashes(entry.resourceKey, contentHashes);
+  return { resourceKey: entry.resourceKey, contentHashes };
 }
 
 interface ResolvedWinner {

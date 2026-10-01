@@ -150,11 +150,17 @@ export async function acknowledgeDivergence(
  * does not control, so what it persists is bounded: a runtime that reports
  * transport-sized strings must not turn into database growth. Real digests are
  * 64 hex characters; the cap leaves room without trusting the peer.
+ *
+ * The apply path runs this while planning, ahead of every write: it is the
+ * check that cannot be allowed to fail once bytes have landed.
+ *
+ * @example
+ * assertBoundedHashes('skill:gh', [hashA, hashB]);
  */
 const MAX_ACK_HASHES = 64;
 const MAX_ACK_HASH_LENGTH = 128;
 
-function assertBoundedHashes(resourceKey: string, contentHashes: readonly string[]): void {
+export function assertBoundedHashes(resourceKey: string, contentHashes: readonly string[]): void {
   if (contentHashes.length > MAX_ACK_HASHES) {
     throw new LibraryRequestError(
       422,
