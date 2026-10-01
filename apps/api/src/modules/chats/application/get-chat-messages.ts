@@ -9,13 +9,16 @@ import { extractContextInfo } from './list-chats';
 export interface GetChatMessagesInput {
   chatId: string;
   userId: string;
-  /** Opaque `nextCursor` of the previous page; throws `InvalidTranscriptCursorError` otherwise. */
+  /**
+   * Opaque `nextCursor` of the previous page. Omit it for the first page; any present
+   * value, including an empty string, that is not a cursor throws `InvalidTranscriptCursorError`.
+   */
   cursor?: string;
   limit?: number;
 }
 
 export async function getChatMessagesUseCase(input: GetChatMessagesInput, db: Kysely<Database>) {
-  const cursor = input.cursor ? decodeTranscriptCursor(input.cursor) : undefined;
+  const cursor = input.cursor === undefined ? undefined : decodeTranscriptCursor(input.cursor);
   await assertChatOwnership(input.chatId, input.userId, db);
 
   const { messages, nextCursor } = await listByChatId(
