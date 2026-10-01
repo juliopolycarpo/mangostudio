@@ -30,6 +30,7 @@ import {
   setRealtimeBusForTests,
 } from '../../../src/services/realtime/realtime-bus';
 import { insertTestChat, insertTestUser } from '../../support/factories';
+import { gitFixtureEnv } from '../../support/git-fixture-env';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
@@ -78,12 +79,7 @@ async function createTempRepo(): Promise<string> {
 async function runFixtureGit(cwd: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(['git', ...args], {
     cwd,
-    env: {
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-      GIT_TERMINAL_PROMPT: '0',
-      LC_ALL: 'C',
-    },
+    env: gitFixtureEnv(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

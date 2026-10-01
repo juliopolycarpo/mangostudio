@@ -21,6 +21,7 @@ import { getDb } from '../../../src/db/database';
 import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
 import { insertTestChat, insertTestUser } from '../../support/factories';
+import { gitFixtureEnv } from '../../support/git-fixture-env';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
@@ -64,12 +65,7 @@ async function createTempRepo(): Promise<string> {
 async function fixtureGit(cwd: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(['git', ...args], {
     cwd,
-    env: {
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-      GIT_TERMINAL_PROMPT: '0',
-      LC_ALL: 'C',
-    },
+    env: gitFixtureEnv(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

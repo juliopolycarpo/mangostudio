@@ -18,6 +18,7 @@ import {
 } from '../../../src/services/realtime/realtime-bus';
 import { createTargetPaths } from '../../../src/services/runtime-client/target-paths';
 import { insertTestChat, insertTestUser } from '../../support/factories';
+import { gitFixtureEnv } from '../../support/git-fixture-env';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const hasGit = Bun.which('git') !== null;
@@ -36,12 +37,7 @@ type TestApp = ReturnType<typeof createAuthenticatedApiTestApp>['app'];
 async function runFixtureGit(cwd: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(['git', ...args], {
     cwd,
-    env: {
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-      GIT_TERMINAL_PROMPT: '0',
-      LC_ALL: 'C',
-    },
+    env: gitFixtureEnv(),
     stdout: 'pipe',
     stderr: 'pipe',
   });
