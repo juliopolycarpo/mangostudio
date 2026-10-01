@@ -233,6 +233,16 @@ describe('GET /chats/:id/messages?order=desc', () => {
     expectRows(chatId, second, '21-70');
   });
 
+  it('sends rows in the same wire shape as asc: a transcript that fits one page is the same bytes', async () => {
+    const chatId = await newChat();
+    await seedTranscript(chatId, 5);
+
+    const asc = await (await rawGet(chatId, pageQuery('asc', null, PAGE_SIZE))).text();
+    const desc = await (await rawGet(chatId, pageQuery('desc', null, PAGE_SIZE))).text();
+
+    expect(desc).toBe(asc);
+  });
+
   it('returns an empty first page for an empty chat', async () => {
     const chatId = await newChat();
 
