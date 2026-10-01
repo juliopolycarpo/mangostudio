@@ -81,6 +81,25 @@ function buildReleaseArchive(dir: string, name: string, printedVersion: string):
   return archivePath;
 }
 
+/** A release archive whose mangostudio prints `stderr` and exits `exitCode` — a hub the OS cannot start. */
+function buildFailingArchive(
+  dir: string,
+  name: string,
+  failure: { readonly stderr: string; readonly exitCode: number }
+): string {
+  const srcDir = join(dir, `src-failing-${name}`);
+  mkdirSync(srcDir, { recursive: true });
+  writeFileSync(
+    join(srcDir, 'mangostudio'),
+    `#!/bin/sh\nprintf '%s\\n' '${failure.stderr}' >&2\nexit ${failure.exitCode}\n`
+  );
+  chmodSync(join(srcDir, 'mangostudio'), 0o755);
+  const archivePath = join(dir, name);
+  const result = Bun.spawnSync({ cmd: ['tar', '-czf', archivePath, '-C', srcDir, 'mangostudio'] });
+  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
+  return archivePath;
+}
+
 /** An npm platform tarball: members live under package/, per pack-npm.ts. */
 function buildNpmTarball(dir: string, printedVersion: string): string {
   const srcDir = join(dir, 'npm-src');
@@ -354,6 +373,77 @@ describe('install.sh layout', () => {
     expect(readlinkSync(join(root, 'current'))).toBe('0.1.0');
     const stillGood = Bun.spawnSync({ cmd: [join(root, '0.1.0', 'mangostudio'), '--version'] });
     expect(stillGood.stdout.toString().trim()).toBe('0.1.0');
+  });
+
+  test('a smoke mismatch with a clean exit and no stderr keeps the original one-line error', () => {
+    const { workDir, env } = layout();
+    const bad = buildReleaseArchive(workDir, `mangostudio-9.9.9-${PLATFORM}.tar.gz`, '9.9.9');
+
+    const result = run(['--local', bad, '--version', '0.1.0'], env);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe('Error: expected version: 0.1.0 | received: 9.9.9\n');
+  });
+
+  test('a hub the musl loader cannot start surfaces the loader output, exit status and the apk hint', () => {
+    const { workDir, root, env } = layout();
+    const good = buildReleaseArchive(workDir, `mangostudio-0.5.0-${PLATFORM}.tar.gz`, '0.5.0');
+    run(['--local', good], env);
+    const loaderLine =
+      'Error loading shared library libstdc++.so.6: No such file or directory (needed by /x/mangostudio)';
+    const broken = buildFailingArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, {
+      stderr: loaderLine,
+      exitCode: 127,
+    });
+
+    const result = run(['--local', broken, '--version', '0.1.0'], env);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Error: expected version: 0.1.0 | received: <none>');
+    expect(result.stderr, 'expected installer error to include loader output').toContain(
+      loaderLine
+    );
+    expect(result.stderr, 'expected installer error to include the probe exit status').toContain(
+      'exit status: 127'
+    );
+    expect(result.stderr, 'expected installer error to include the apk hint').toContain(
+      'apk add libstdc++'
+    );
+    expect(readlinkSync(join(root, 'current'))).toBe('0.5.0');
+    expect(existsSync(join(root, '0.1.0'))).toBe(false);
+  });
+
+  test('a hub that fails for another reason shows its stderr and status without the apk hint', () => {
+    const { workDir, root, env } = layout();
+    const broken = buildFailingArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, {
+      stderr: 'panic: corrupt embedded frontend',
+      exitCode: 3,
+    });
+
+    const result = run(['--local', broken, '--version', '0.1.0'], env);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('expected version: 0.1.0 | received: <none>');
+    expect(result.stderr).toContain('panic: corrupt embedded frontend');
+    expect(result.stderr).toContain('exit status: 3');
+    expect(result.stderr).not.toContain('apk add');
+    expect(existsSync(join(root, 'current'))).toBe(false);
+  });
+
+  test('a glibc loader error is shown but never gets the apk hint', () => {
+    const { workDir, env } = layout();
+    const glibcLine =
+      'mangostudio: error while loading shared libraries: libstdc++.so.6: cannot open shared object file';
+    const broken = buildFailingArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, {
+      stderr: glibcLine,
+      exitCode: 127,
+    });
+
+    const result = run(['--local', broken, '--version', '0.1.0'], env);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(glibcLine);
+    expect(result.stderr).not.toContain('apk add');
   });
 
   test('an archive missing mangostudio fails and leaves no .install-* scratch directory behind', () => {
