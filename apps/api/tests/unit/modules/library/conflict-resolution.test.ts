@@ -265,6 +265,37 @@ describe('recordDivergenceAck', () => {
     expect(repository.rows.size).toBe(0);
   });
 
+  it('refuses a content hash larger than a digest could be', async () => {
+    const repository = memoryRepository();
+    const failure = recordDivergenceAck(
+      'user-1',
+      { resourceKey: 'skill:gh', contentHashes: ['hash-a', 'x'.repeat(4096)] },
+      deps(repository)
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('content hash of 4096 characters: expected at most 128'),
+    });
+    expect(repository.rows.size).toBe(0);
+  });
+
+  it('refuses more versions than the acknowledgement wire accepts', async () => {
+    const repository = memoryRepository();
+    const hashes = Array.from({ length: 65 }, (_, index) => `hash-${index}`);
+    const failure = recordDivergenceAck(
+      'user-1',
+      { resourceKey: 'skill:gh', contentHashes: hashes },
+      deps(repository)
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('expected at most 64 distinct content hashes, received 65'),
+    });
+    expect(repository.rows.size).toBe(0);
+  });
+
   it('refuses a malformed resource key', async () => {
     const failure = recordDivergenceAck(
       'user-1',

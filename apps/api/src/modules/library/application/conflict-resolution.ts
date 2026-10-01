@@ -146,6 +146,31 @@ export async function acknowledgeDivergence(
 }
 
 /**
+ * The hashes recorded here were read through a machine's runtime, which the hub
+ * does not control, so what it persists is bounded: a runtime that reports
+ * transport-sized strings must not turn into database growth. Real digests are
+ * 64 hex characters; the cap leaves room without trusting the peer.
+ */
+const MAX_ACK_HASHES = 64;
+const MAX_ACK_HASH_LENGTH = 128;
+
+function assertBoundedHashes(resourceKey: string, contentHashes: readonly string[]): void {
+  if (contentHashes.length > MAX_ACK_HASHES) {
+    throw new LibraryRequestError(
+      422,
+      `Library resource "${resourceKey}" reports too many versions to acknowledge: expected at most ${MAX_ACK_HASHES} distinct content hashes, received ${contentHashes.length}.`
+    );
+  }
+  const oversized = contentHashes.find((hash) => hash.length > MAX_ACK_HASH_LENGTH);
+  if (oversized !== undefined) {
+    throw new LibraryRequestError(
+      422,
+      `Library resource "${resourceKey}" reports a content hash of ${oversized.length} characters: expected at most ${MAX_ACK_HASH_LENGTH}, starting "${oversized.slice(0, 16)}".`
+    );
+  }
+}
+
+/**
  * Records an acknowledgement for versions that were already verified: the apply
  * path acknowledges the source groups its own forced preview just built from
  * every selected machine's runtime, and that preview is pinned to the request by
@@ -174,6 +199,7 @@ export async function recordDivergenceAck(
       `Library resource "${request.resourceKey}" is not divergent: expected at least 2 distinct content hashes, received ${contentHashes.length}.`
     );
   }
+  assertBoundedHashes(request.resourceKey, contentHashes);
   return await storeAcknowledgement(deps, userId, profileId, request.resourceKey, contentHashes);
 }
 
