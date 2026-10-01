@@ -377,6 +377,32 @@ describe('a reader who joins a read-ahead that then fails', () => {
   });
 });
 
+describe('a read-ahead that failed', () => {
+  it('stays off for its own chat however many other chats failed since', async () => {
+    serve(220);
+    api.alsoServe('chat-2', 220);
+    api.refuseOlder(500);
+    const view = renderTranscript();
+    await opened(view.result);
+    await idle.runIdle();
+    await waitFor(() => expectOlderRequests(1));
+    await waitFor(() => expect(view.result.current.queryClient.isFetching()).toBe(0));
+
+    view.rerender({ chatId: 'chat-2', paused: false });
+    await waitFor(() => expect(view.result.current.status).toBe('success'));
+    await idle.runIdle();
+    await waitFor(() => expectOlderRequests(2));
+    await waitFor(() => expect(view.result.current.queryClient.isFetching()).toBe(0));
+
+    // Back in the first chat, still without a page landed there: no new ask.
+    view.rerender({ chatId: CHAT_ID, paused: false });
+    await waitFor(() => expect(view.result.current.status).toBe('success'));
+    await idle.runIdle();
+    await waitFor(() => expect(view.result.current.queryClient.isFetching()).toBe(0));
+    expectOlderRequests(2);
+  });
+});
+
 describe('read-ahead ends with the transcript', () => {
   it('aborts the page in flight when the transcript unmounts, and asks for nothing more', async () => {
     serve(220);
@@ -465,6 +491,24 @@ describe('a refresh after a turn with read-ahead buffered pages', () => {
       'requests to refresh 3 buffered pages: 2'
     );
     expect(`rows kept: ${view.result.current.messages.length}`).toBe('rows kept: 152');
+  });
+
+  it('ends the request of a read-ahead in flight when the transcript refetches, not only its result', async () => {
+    serve(220);
+    api.holdOlder();
+    const view = renderTranscript();
+    await opened(view.result);
+    await idle.runIdle();
+    await waitFor(() => expectOlderRequests(1));
+
+    act(() => {
+      void view.result.current.queryClient.invalidateQueries({
+        queryKey: messageKeys.list(CHAT_ID),
+      });
+    });
+
+    await waitFor(() => expect(`aborted: ${api.aborted.length}`).toBe('aborted: 1'));
+    expectOlderRequests(1);
   });
 
   it('cancels a read-ahead in flight when the transcript refetches, and stays consistent', async () => {

@@ -140,6 +140,7 @@ export function ChatFeed({
   const loadOlder = older?.load;
   const hasOlder = older?.hasMore ?? false;
   const olderFailed = older?.failed ?? false;
+  const transcriptBusy = older?.ahead?.busy ?? false;
   const requestOlderNearTop = useCallback(() => {
     const port = parentRef.current;
     if (!loadOlder || !hasOlder || !port) return;
@@ -149,10 +150,13 @@ export function ChatFeed({
   // one: the chat opening short enough that nothing scrolls, a page landing
   // that still leaves the reader near the top, a refetch ending. After a failed
   // page it stays quiet, or a dead connection would be asked again as fast as
-  // it refuses; the reader scrolling is what tries again.
+  // it refuses; the reader scrolling is what tries again. While the transcript
+  // is being fetched an ask would do nothing, so it waits for the fetch to end:
+  // `transcriptBusy` going false is what re-asks a reader left at the top by a
+  // refetch.
   useEffect(() => {
-    if (!olderFailed) requestOlderNearTop();
-  }, [olderFailed, requestOlderNearTop, messages.length]);
+    if (!olderFailed && !transcriptBusy) requestOlderNearTop();
+  }, [olderFailed, transcriptBusy, requestOlderNearTop, messages.length]);
   // Older pages are also fetched ahead of the reader, after the newest page has
   // rendered; see `useTranscriptReadAhead`. It reads the reader's place from the
   // virtualizer at the moment it decides, not from a render.

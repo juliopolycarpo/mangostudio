@@ -10,12 +10,14 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
+import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { FakeTranscriptLayout } from '../../../support/harness/fake-transcript-layout';
 import { act, fireEvent, render, waitFor } from '../../../support/harness/render';
 import { FakeIdleScheduler } from '../../../support/mocks/fake-idle-scheduler';
 import { FakeTranscriptApi } from '../../../support/mocks/fake-transcript-api';
 
 const { ChatFeed } = await import('../../../../src/features/chat/components/ChatFeed');
+const { messageKeys } = await import('../../../../src/features/chat/queries');
 const { useChatPageMessages } = await import(
   '../../../../src/features/chat/hooks/use-chat-page-state'
 );
@@ -25,6 +27,8 @@ const CHAT_ID = 'chat-1';
 let layout: FakeTranscriptLayout;
 let idle: FakeIdleScheduler;
 let api: FakeTranscriptApi;
+/** The query client the feed under test runs on, for a test that refetches. */
+const captured: { queryClient?: QueryClient; busy?: boolean } = {};
 
 beforeEach(() => {
   layout = new FakeTranscriptLayout();
@@ -41,6 +45,8 @@ afterEach(() => {
 /** What the chat page does: the transcript query feeding the feed. */
 function TranscriptFeed({ isGenerating = false }: { isGenerating?: boolean }) {
   const { messages, older, status } = useChatPageMessages({ chatId: CHAT_ID });
+  captured.queryClient = useQueryClient();
+  captured.busy = older.ahead?.busy ?? false;
   if (status !== 'success') return null;
   return (
     <ChatFeed chatId={CHAT_ID} messages={messages} older={older} isGenerating={isGenerating} />
@@ -179,5 +185,35 @@ describe('ChatFeed read-ahead is additive', () => {
 
     expect(`older requests: ${api.olderRequests.length}`).toBe('older requests: 0');
     expect(`idle callbacks waiting: ${idle.pending}`).toBe('idle callbacks waiting: 0');
+  });
+
+  it('asks for the older page again when a refetch that was in the way ends with the reader at the top', async () => {
+    const { port } = await openTranscript(220);
+    await idle.runIdle();
+    await waitFor(() =>
+      expect(`older requests: ${api.olderRequests.length}`).toBe('older requests: 1')
+    );
+    await eventually(() => expect(captured.queryClient?.isFetching()).toBe(0));
+    const queryClient = captured.queryClient as QueryClient;
+
+    // A refetch is running when the reader reaches the top: the ask has to wait.
+    api.hold();
+    act(() => {
+      void queryClient.invalidateQueries({ queryKey: messageKeys.list(CHAT_ID) });
+    });
+    await eventually(() =>
+      expect(`feed sees a fetch: ${captured.busy}`).toBe('feed sees a fetch: true')
+    );
+    port.scrollTop = 0;
+    fireEvent.wheel(port, { deltaY: -400 });
+    layout.flushFrame(port);
+    expect(`older requests: ${api.olderRequests.length}`).toBe('older requests: 1');
+
+    // When it ends, the reader is still at the top and the page is asked for
+    // without another gesture.
+    api.release();
+    await eventually(() =>
+      expect(`older requests: ${api.olderRequests.length}`).toBe('older requests: 2')
+    );
   });
 });

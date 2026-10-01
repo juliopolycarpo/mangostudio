@@ -119,7 +119,8 @@ export function useChatPageMessages({ chatId, seedContextInfo }: UseChatPageMess
 
   const queryKey = useMemo(() => messageKeys.list(chatId ?? ''), [chatId]);
   const backgroundRef = useRef<BackgroundRun | null>(null);
-  const failedAtRef = useRef<{ chatId: string | null; pages: number } | null>(null);
+  // The page count at which the last read-ahead of each chat failed.
+  const failedAtRef = useRef(new Map<string, number>());
 
   // A refetch is not a place to start a page: it would be built from the cache
   // the refetch is about to replace. The load simply waits; the feed asks again
@@ -145,8 +146,7 @@ export function useChatPageMessages({ chatId, seedContextInfo }: UseChatPageMess
     const cache = state?.data;
     if (!cache || state.fetchStatus !== 'idle' || state.status === 'error') return false;
     if (cache.pages.at(-1)?.nextCursor == null) return false;
-    const failedAt = failedAtRef.current;
-    if (failedAt?.chatId === chatId && failedAt.pages === cache.pages.length) return false;
+    if (failedAtRef.current.get(chatId) === cache.pages.length) return false;
     const query = queryClient.getQueryCache().find({ queryKey, exact: true });
     if (!query) return false;
 
@@ -165,7 +165,7 @@ export function useChatPageMessages({ chatId, seedContextInfo }: UseChatPageMess
       if (backgroundRef.current === run) backgroundRef.current = null;
       if (!run.failed) return;
       const pages = queryClient.getQueryData<MessagesCache>(queryKey)?.pages.length ?? 0;
-      failedAtRef.current = { chatId, pages };
+      failedAtRef.current.set(chatId, pages);
     });
     return true;
   }, [chatId, queryClient, queryKey, fetchNextPage]);
