@@ -11,12 +11,20 @@ import {
 } from '../../../../src/modules/library/application/environment-library-service';
 import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 
-function makeManifest(environmentId: string, library = true) {
+type FixturePathStyle = 'posix' | 'win32';
+
+// The fixture environments are remote machines with their own path style; the
+// hub's `process.platform` says nothing about them, so it must not leak in here.
+function makeManifest(
+  environmentId: string,
+  library = true,
+  pathStyle: FixturePathStyle = 'posix'
+) {
   return {
-    platform: process.platform,
-    arch: process.arch,
-    pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
-    homeDir: `/tmp/${environmentId}`,
+    platform: pathStyle === 'win32' ? 'win32' : 'linux',
+    arch: 'x64',
+    pathStyle,
+    homeDir: pathStyle === 'win32' ? `C:\\Users\\${environmentId}` : `/tmp/${environmentId}`,
     shells: [],
     git: { available: false },
     features: {
@@ -160,6 +168,74 @@ describe('createEnvironmentLibraryService', () => {
     expect(content?.content).toBe('# Skill');
     expect(readParams?.locationId).toBe('mango-skills');
     expect(readParams?.path).toBe(`${instancePath}/SKILL.md`);
+  });
+
+  // The path is evaluated by the runtime that owns the library, so it is
+  // joined in that machine's style, never the hub's `node:path` flavour.
+  it.each([
+    {
+      style: 'posix' as const,
+      instancePath: '/tmp/remote-posix/skills/gh',
+      expected: '/tmp/remote-posix/skills/gh/SKILL.md',
+    },
+    {
+      style: 'win32' as const,
+      instancePath: 'C:\\Users\\remote-win\\.mango\\skills\\gh',
+      expected: 'C:\\Users\\remote-win\\.mango\\skills\\gh\\SKILL.md',
+    },
+  ])('joins a skill content path in the $style style the runtime reported', async (fixture) => {
+    const { style, instancePath, expected } = fixture;
+    let readPath: string | undefined;
+    const environmentId = `remote-${style}`;
+    const resource = {
+      ref: { kind: 'skill' as const, slug: 'gh' },
+      key: 'skill:gh',
+      instances: [
+        {
+          locationId: 'mango-skills' as const,
+          path: instancePath,
+          modifiedAtMs: 1,
+          format: 'markdown-frontmatter' as const,
+          title: 'gh',
+          description: 'gh',
+          valid: true as const,
+          contentHash: 'hash',
+          sizeBytes: 1,
+        },
+      ],
+      coverage: [],
+      divergence: 'single' as const,
+      whitespaceOnlyDivergence: false,
+      contentGroups: [],
+    };
+    const client = {
+      manifest: makeManifest(environmentId, true, style),
+      library: {
+        read: (params: { path: string }) => {
+          readPath = params.path;
+          return Promise.resolve({
+            content: '# Skill',
+            truncated: false,
+            sizeBytes: 7,
+            denied: false,
+          });
+        },
+      },
+    } as unknown as RuntimeClient;
+    const service = createEnvironmentLibraryService({
+      resolveClient: () => Promise.resolve(client),
+    });
+
+    await service.readContent(
+      getDb(),
+      { userId: `library-env-path-style-${style}-user`, environmentId },
+      resource,
+      'mango-skills'
+    );
+
+    expect(readPath, `expected remote library path: ${expected} | received: ${readPath}`).toBe(
+      expected
+    );
   });
 
   // Parity with the pre-relocation route: a scan can report an instance whose

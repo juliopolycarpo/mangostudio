@@ -258,7 +258,11 @@ export function createEnvironmentLibraryService(
       // The location is named, not resolved: the runtime turns it into a root
       // against its own layout, so the hub never guesses where another
       // machine's agent homes are.
-      const contentPath = libraryContentPath(resource.ref.kind, instance.path);
+      const contentPath = libraryContentPath(
+        resource.ref.kind,
+        instance.path,
+        client.manifest.pathStyle
+      );
       const result = await client.library.read(
         {
           path: contentPath,
