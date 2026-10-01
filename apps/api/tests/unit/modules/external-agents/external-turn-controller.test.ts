@@ -1173,7 +1173,13 @@ describe('external turn controller', () => {
       await expect(controller.steer(input)).rejects.toThrow('runtime disconnected mid-call');
       expect(runtime.calls.steer).toHaveLength(1);
 
+      // A later checkpoint snapshots the transcript again.
       runtime.emit({ type: 'text_delta', text: 'still working' });
+      runtime.emit({
+        type: 'activity_started',
+        callId: 'call-1',
+        activity: { name: 'shell', kind: 'command', title: 'ls' },
+      });
       await waitForStoredText('still working');
       expectSteerNotAccepted(steerPartOf((await readAssistantRow()).parts, 'steer-1'));
 

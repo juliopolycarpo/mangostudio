@@ -73,7 +73,11 @@ import {
   persistTextTurnStart,
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../domain/external-turn-retry-policy';
+import {
+  classifySubmissionFailure,
+  DEFAULT_RETRY_POLICY,
+  type RetryPolicy,
+} from '../domain/external-turn-retry-policy';
 import { ExternalTurnTranscript } from '../domain/external-turn-transcript';
 import { sealAttemptsForMessage } from '../infrastructure/external-turn-attempt-repository';
 import { cacheExternalAccountLimitsBestEffort } from './external-account-limits';
@@ -1314,7 +1318,13 @@ export function createExternalTurnController(
             return { accepted: false, reasonCode: 'turn-already-completed' };
           }
 
-          const outcome = await resolveSteerOutcome(live, input);
+          let outcome: ExternalAgentSteerResult;
+          try {
+            outcome = await resolveSteerOutcome(live, input);
+          } catch (error) {
+            await settleUnknownSteerDelivery(live, input);
+            throw error;
+          }
           if (!outcome.accepted) {
             live.transcript.resolveSteerRejected(input.clientMessageId, outcome.reasonCode);
             await live.writer.writeRequired();
@@ -1403,8 +1413,53 @@ async function resolveSteerOutcome(
     if (error instanceof Error && error.name === 'ToolArgumentError') {
       return { accepted: false, reasonCode: 'session-lost' };
     }
+    // The request provably never reached a vendor: a refusal like any other,
+    // so it settles through the caller's rejection path and the id's outcome
+    // is final. Every other failure is delivery-unknown and is rethrown for
+    // `settleUnknownSteerDelivery`.
+    if (classifySubmissionFailure(error) === 'not-submitted') {
+      return { accepted: false, reasonCode: STEER_UNDELIVERED_REASON };
+    }
     throw error;
   }
+}
+
+/**
+ * The closed reason a steer that did not (or may not) arrive reports.
+ *
+ * `turn-not-steerable` is the closest one that stays true: the turn may well
+ * still be running, so `turn-already-completed` would say it had finished, and
+ * `session-lost` would claim a loss the hub cannot prove.
+ */
+const STEER_UNDELIVERED_REASON = 'turn-not-steerable' satisfies ExternalSteerRejectionReason;
+
+/**
+ * Settles a steer whose runtime call threw, so delivery is unknown.
+ *
+ * The part was recorded `accepted` before the call; left there, a reload or a
+ * later checkpoint would claim a delivery nobody learned. The closed outcome
+ * set has no "unknown", so it is corrected to the rejection that stays true,
+ * and the caller still receives the original failure. The attempt stays cached
+ * on purpose: the runtime may have received it, so a same-id retry must not be
+ * dispatched again.
+ *
+ * A write that cannot persist the correction is swallowed so it never masks
+ * the dispatch failure: the in-memory correction still rides every later
+ * checkpoint and the finalization. After the turn's final write the update
+ * matches no generating row, the same limit a late rejection already has.
+ */
+async function settleUnknownSteerDelivery(
+  live: Pick<LiveExternalTurn, 'transcript' | 'writer' | 'observer'>,
+  input: { readonly clientMessageId: string; readonly text: string }
+): Promise<void> {
+  live.transcript.resolveSteerRejected(input.clientMessageId, STEER_UNDELIVERED_REASON);
+  await live.writer.writeRequired().catch(() => undefined);
+  live.observer?.onSteer?.({
+    clientMessageId: input.clientMessageId,
+    text: input.text,
+    status: 'rejected',
+    reasonCode: STEER_UNDELIVERED_REASON,
+  });
 }
 
 /**
