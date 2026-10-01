@@ -541,8 +541,17 @@ function Expand-NpmTarball([string]$ArchivePath, [string]$DestinationPath) {
   if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
   New-Item -ItemType Directory -Force $stagingDir | Out-Null
 
+  # The system tar (bsdtar, shipped with Windows 10 1803+), not whichever
+  # tar.exe PATH finds first: a GNU tar ahead of it (Git's usr\bin, as on a
+  # GitHub-hosted runner) reads the "C:" of an archive path as a remote host.
+  $tar = 'tar.exe'
+  if ($env:SystemRoot) {
+    $systemTar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (Test-Path -LiteralPath $systemTar) { $tar = $systemTar }
+  }
+
   try {
-    & tar.exe -xzf $ArchivePath -C $stagingDir
+    & $tar -xzf $ArchivePath -C $stagingDir
     if ($LASTEXITCODE -ne 0) { Fail "tar.exe failed to extract $ArchivePath" }
 
     $packageDir = Join-Path $stagingDir 'package'
