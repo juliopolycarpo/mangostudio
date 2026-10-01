@@ -10,6 +10,11 @@ import { boolToInt, parseStyleParams, serializeStyleParams } from '../../../db/s
 import type { Database } from '../../../db/types';
 import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/attachment-repository';
 import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
+import {
+  decodeMessageParts,
+  readMessageParts,
+  warnCorruptMessageParts,
+} from './message-parts-codec';
 
 export interface CreateMessageData {
   id: string;
@@ -121,26 +126,32 @@ function mapMessage(
     ...row,
     isGenerating: row.isGenerating === 1,
     styleParams: parseStyleParams(row.styleParams),
-    parts: row.parts ? (JSON.parse(row.parts) as MessagePart[]) : undefined,
+    parts: readMessageParts(row),
     generatedImages,
     attachments,
   };
 }
 
-function sliceRowsAfterCompactionBoundary<T extends { parts: string | null }>(rows: T[]): T[] {
+/**
+ * Every row this returns was decoded here, so this is where a corrupt `parts`
+ * cell on a history read is logged once; the callers below decode quietly.
+ */
+function sliceRowsAfterCompactionBoundary<T extends { id: string; parts: string | null }>(
+  rows: T[]
+): T[] {
   for (let index = rows.length - 1; index >= 0; index--) {
-    const rawParts = rows[index].parts;
-    if (!rawParts) continue;
-
-    try {
-      const parts = JSON.parse(rawParts) as MessagePart[];
-      const hasBoundary = parts.some(
-        (part) => part.type === 'system_event' && CONTEXT_BOUNDARY_EVENTS.has(part.event)
-      );
-      if (hasBoundary) return rows.slice(index);
-    } catch {
-      // Ignore malformed parts and fall back to the full history window.
+    const decoded = decodeMessageParts(rows[index].parts);
+    if (decoded.kind === 'corrupt') {
+      // Fall back to the full history window for this row.
+      warnCorruptMessageParts(rows[index].id, decoded.shape);
+      continue;
     }
+    if (decoded.kind === 'absent') continue;
+
+    const hasBoundary = decoded.parts.some(
+      (part) => part.type === 'system_event' && CONTEXT_BOUNDARY_EVENTS.has(part.event)
+    );
+    if (hasBoundary) return rows.slice(index);
   }
 
   return rows;
@@ -288,11 +299,14 @@ export async function loadRichHistory(
 
   const rows = sliceRowsAfterCompactionBoundary((await q.execute()).reverse());
 
+  // A corrupt message stays in the history as plain text (`parts` undefined): its
+  // `text` is the same denormalized copy `loadHistory` sends, and dropping the
+  // turn would break the user/assistant alternation providers expect.
   return rows.map((row) => ({
     id: row.id,
     role: row.role,
     text: row.text,
-    parts: row.parts ? (JSON.parse(row.parts) as MessagePart[]) : undefined,
+    parts: readMessageParts(row, { quiet: true }),
     providerState: row.providerState ?? null,
     modelName: row.modelName ?? null,
   }));
