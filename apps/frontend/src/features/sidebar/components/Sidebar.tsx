@@ -378,11 +378,16 @@ export function Sidebar({
                            * On a coarse pointer there is no hover to reveal
                            * anything, so both stay up: the row is a full-width
                            * sheet there and has the space.
+                           *
+                           * Bounded to a share of the row, and allowed to shrink
+                           * inside it, so a long branch gives way to the title
+                           * rather than taking the whole row: the branch label
+                           * truncates first, the runner chip never does.
                            */}
-                          <span className="flex shrink-0 items-center gap-1.5 pr-4 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
+                          <span className="flex min-w-0 max-w-[40%] shrink items-center gap-1.5 overflow-hidden pr-4 font-mono text-[10px] text-on-surface-variant/70 group-hover:hidden group-focus-within:hidden">
                             {gitSummary ? <GitSummaryBadge summary={gitSummary} /> : null}
                             <StatusDot tone="neutral" className={badge.dotClassName} />
-                            {badge.label}
+                            <span className="shrink-0">{badge.label}</span>
                           </span>
                           {/*
                            * `group-focus-within` is what makes these reachable:
