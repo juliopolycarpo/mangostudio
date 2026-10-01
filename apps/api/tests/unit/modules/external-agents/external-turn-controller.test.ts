@@ -1290,6 +1290,40 @@ describe('external turn controller', () => {
       expect(part).toMatchObject({ status: 'rejected', reasonCode: 'turn-not-steerable' });
     });
 
+    it('does not let a concurrent steer persist a failed steer as accepted', async () => {
+      const databaseFailure = new Error('steer checkpoint database failure');
+      gateSteerCheckpoint({ fail: databaseFailure });
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const first = controller
+        .steer({ userId, chatId, clientMessageId: 'steer-1', text: 'first' })
+        .then(
+          () => undefined,
+          (error: unknown) => error
+        );
+      const second = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-2',
+        text: 'second',
+      });
+      expect(await first).toBe(databaseFailure);
+      expect(await second).toEqual({ accepted: true });
+
+      // Before any later checkpoint or the finalization: what a reload or a
+      // crash right now would show.
+      const durable = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      if (durable.status === 'accepted') {
+        throw new Error(`expected durable steer-1 status: rejected | received: ${durable.status}`);
+      }
+      expect(runtime.calls.steer.map((call) => call.clientMessageId)).toEqual(['steer-2']);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
     it('does not dispatch a steer whose required checkpoint resolves after a cancel', async () => {
       const gate = gateSteerCheckpoint({ hold: true });
       const notifications: unknown[] = [];
