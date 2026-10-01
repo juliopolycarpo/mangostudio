@@ -101,6 +101,28 @@ export function createUnifiedModelCatalogService(
   const refreshPromises = new Map<string, Promise<ModelCatalogResponse>>();
   const dirtySnapshots = new Set<string>();
 
+  // Invalidation generations. An operation captures `epoch` when it starts and
+  // may only write cache state while no invalidation of its user happened since.
+  // `invalidatedAt` is capped like the other maps; `evictedFloor` remembers the
+  // newest evicted entry so a forgotten invalidation can only discard a write.
+  let epoch = 0;
+  let evictedFloor = 0;
+  const invalidatedAt = new Map<string, number>();
+
+  function markInvalidated(userId: string): void {
+    invalidatedAt.delete(userId);
+    invalidatedAt.set(userId, ++epoch);
+    if (invalidatedAt.size <= MAX_CATALOG_ENTRIES) return;
+    const oldest = invalidatedAt.entries().next().value;
+    if (!oldest) return;
+    invalidatedAt.delete(oldest[0]);
+    evictedFloor = Math.max(evictedFloor, oldest[1]);
+  }
+
+  function isCurrent(userId: string, startedAt: number): boolean {
+    return startedAt >= evictedFloor && startedAt >= (invalidatedAt.get(userId) ?? 0);
+  }
+
   /** Single insertion point for snapshots so every path respects the entry cap. */
   function storeSnapshot(userId: string, snapshot: ModelCatalogResponse): void {
     snapshots.set(userId, snapshot);
@@ -142,26 +164,46 @@ export function createUnifiedModelCatalogService(
     return enabled;
   }
 
-  async function recalculateSnapshot(userId: string): Promise<void> {
+  interface RecalculateOptions {
+    /** Catalog to filter; defaults to the user's cached catalog read after the metadata await. */
+    catalog?: ModelOption[];
+    /** Stamp the snapshot as freshly synced, after the metadata read completes. */
+    markSynced?: boolean;
+  }
+
+  /**
+   * Rebuilds a user's snapshot from the enabled-model metadata and returns it.
+   * The result is cached only when no invalidation of the user happened since
+   * `startedAt`; a superseded operation still returns its own result.
+   */
+  async function recalculateSnapshot(
+    userId: string,
+    startedAt: number,
+    options: RecalculateOptions = {}
+  ): Promise<ModelCatalogResponse> {
     const enabledIds = await getEnabledModelIds(userId);
-    const fullCatalog = fullCatalogs.get(userId) || [];
-    const snap = getSnapshot(userId);
+    const fullCatalog = options.catalog ?? fullCatalogs.get(userId) ?? [];
+    const snap = snapshots.get(userId) ?? createEmptySnapshot();
 
     const discoveredText = fullCatalog.filter((m) => m.capabilities?.text);
     const discoveredImage = fullCatalog.filter((m) => m.capabilities?.image);
 
-    storeSnapshot(userId, {
+    const next: ModelCatalogResponse = {
       ...snap,
       configured: true,
       status: 'ready',
-      lastSyncedAt: snap.lastSyncedAt,
+      lastSyncedAt: options.markSynced ? now() : snap.lastSyncedAt,
       allModels: fullCatalog,
       discoveredTextModels: discoveredText,
       discoveredImageModels: discoveredImage,
       textModels: discoveredText.filter((m) => enabledIds.has(m.modelId)),
       imageModels: discoveredImage.filter((m) => enabledIds.has(m.modelId)),
-    });
+    };
+    if (!isCurrent(userId, startedAt)) return next;
+
+    storeSnapshot(userId, next);
     dirtySnapshots.delete(userId);
+    return next;
   }
 
   function getCachedModel(userId: string, modelId: string): ModelOption | undefined {
@@ -176,7 +218,8 @@ export function createUnifiedModelCatalogService(
     const inflight = refreshPromises.get(userId);
     if (inflight) return inflight;
 
-    const promise = (async () => {
+    const startedAt = epoch;
+    const run = async (): Promise<ModelCatalogResponse> => {
       try {
         // Deprecated providers stay registered but advertise nothing: a chat
         // still carrying one of their model ids must resolve to a named
@@ -204,15 +247,14 @@ export function createUnifiedModelCatalogService(
           // rejected providers (no connector or timeout) are silently skipped
         }
 
-        fullCatalogs.set(userId, allModels);
-        evictOldest(fullCatalogs);
-        await recalculateSnapshot(userId);
-
-        const snap = getSnapshot(userId);
-        snap.lastSyncedAt = now();
-        storeSnapshot(userId, snap);
-
-        return snap;
+        if (isCurrent(userId, startedAt)) {
+          fullCatalogs.set(userId, allModels);
+          evictOldest(fullCatalogs);
+        }
+        return await recalculateSnapshot(userId, startedAt, {
+          catalog: allModels,
+          markSynced: true,
+        });
       } catch (error) {
         const cachedSnapshot = snapshots.get(userId);
         const cachedCatalog = fullCatalogs.get(userId);
@@ -226,12 +268,16 @@ export function createUnifiedModelCatalogService(
           status: 'error',
           error: message,
         };
-        storeSnapshot(userId, snap);
+        if (isCurrent(userId, startedAt)) storeSnapshot(userId, snap);
         return snap;
-      } finally {
-        refreshPromises.delete(userId);
       }
-    })();
+    };
+
+    // Release the in-flight slot only while it still holds this promise: an
+    // invalidation or recalculation may have handed it to a newer refresh.
+    const promise: Promise<ModelCatalogResponse> = run().finally(() => {
+      if (refreshPromises.get(userId) === promise) refreshPromises.delete(userId);
+    });
 
     refreshPromises.set(userId, promise);
     return promise;
@@ -268,12 +314,13 @@ export function createUnifiedModelCatalogService(
         return refreshCatalog(userId);
       }
 
+      let recalculated: ModelCatalogResponse | undefined;
       if (!snapshots.has(userId) || dirtySnapshots.has(userId)) {
-        await recalculateSnapshot(userId);
+        recalculated = await recalculateSnapshot(userId, epoch);
       }
 
       refreshInBackground(userId);
-      return getSnapshot(userId);
+      return recalculated ?? getSnapshot(userId);
     },
 
     getCachedModelMetadata(
@@ -308,6 +355,7 @@ export function createUnifiedModelCatalogService(
      * new connector.
      */
     invalidate(userId: string): void {
+      markInvalidated(userId);
       fullCatalogs.delete(userId);
       snapshots.delete(userId);
       refreshPromises.delete(userId);
