@@ -22,8 +22,15 @@ describe('transcript cursor', () => {
     expect(encodeTranscriptCursor(cursor)).toBe('1700000000000:42');
   });
 
+  it('reads a bare numeric timestamp from the previous format as after every row of it', () => {
+    expect(decodeTranscriptCursor('1700000000000')).toEqual({
+      timestamp: 1_700_000_000_000,
+      rowid: Number.MAX_SAFE_INTEGER,
+    });
+  });
+
   it.each([
-    ['a bare numeric timestamp from the previous format', '1700000000000'],
+    ['a bare numeric timestamp beyond the safe integer range', '9999999999999999'],
     ['an empty rowid', '1700000000000:'],
     ['a negative rowid', '1700000000000:-1'],
     ['a fractional timestamp', '1.5:3'],
