@@ -517,6 +517,27 @@ describe('runDoctor runtime child lifetime', () => {
     expect(exited).toBe(false);
     expectReaped(spawner.allReaped());
   });
+
+  it('prints the report and surfaces a release that fails instead of exiting', async () => {
+    const lines: string[] = [];
+    let exited = -1;
+
+    const outcome = runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({ fs: NOTHING }),
+        log: (msg) => lines.push(msg),
+        exit: (code) => {
+          exited = code;
+        },
+        releaseRuntimes: () => Promise.reject(new Error('runtime child did not exit')),
+      }
+    );
+
+    await expect(outcome).rejects.toThrow('runtime child did not exit');
+    expect(lines.join('\n')).toContain('failure(s).');
+    expect(exited).toBe(-1);
+  });
 });
 
 describe('runDoctor Installed via / Update rows', () => {
