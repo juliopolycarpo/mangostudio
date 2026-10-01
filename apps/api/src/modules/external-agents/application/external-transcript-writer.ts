@@ -9,50 +9,93 @@ import type { ExternalTurnTranscript } from '../domain/external-turn-transcript'
 
 const logger = createDiagnosticLogger('external-turn-controller');
 
+function deferToMacrotask(run: () => void): void {
+  setTimeout(run, 0);
+}
+
 /**
- * Serializes the incremental writes for one assistant row.
+ * Orders the incremental writes for one external assistant row.
  *
  * Same cadence as the internal turn — a character interval and a time interval,
  * with forced writes at durable boundaries — so a dropped connection leaves a
  * readable prefix rather than an empty message, and a delta stream does not turn
  * into one write per token.
+ *
+ * Writes come in two kinds. A forced write (`write({ force: true })`, a tool or
+ * permission boundary) and a {@link writeRequired} (a steering receipt) are
+ * required: each is queued in call order and never replaced or merged. A
+ * throttled delta write is best-effort: it only records that the latest state is
+ * dirty, and one trailing write persists that state. A required write supersedes
+ * a dirty best-effort snapshot because it carries newer state.
+ *
+ * Every write serializes the transcript when it runs, not when it is queued.
+ * Deltas that arrive while an earlier write is held therefore share one
+ * serialization, and a write queued behind one that failed persists the state
+ * with that failure's correction already applied.
+ *
+ * A trailing write that lands after the turn's final row is a no-op: the update
+ * is guarded by `isGenerating = 1`, so a late timer cannot overwrite it.
+ *
+ * @example
+ * const writer = new ExternalTranscriptWriter(db, messageId, transcript, Date.now);
+ * void writer.write(); // best-effort: accepted, written on a later tick
+ * void writer.write({ force: true }); // required boundary, ordered
+ * await writer.writeRequired(); // resolves once written, rejects if the write fails
+ * await writer.flush(); // everything accepted so far is on disk
  */
 export class ExternalTranscriptWriter {
   #lastTextLength = 0;
   #lastWrittenAt: number;
   #pending: Promise<void> = Promise.resolve();
+  /** A best-effort snapshot was accepted and no write has taken it yet. */
+  #dirty = false;
+  /**
+   * Identifies the trailing best-effort write chained on `#pending` but not
+   * started. A required write clears it so the stale task cannot run ahead of it.
+   */
+  #ticket: object | null = null;
+  #timerArmed = false;
 
+  /**
+   * @param defer Starts `run` on a later macrotask. Best-effort snapshots wait
+   *   here so deltas that arrive meanwhile share one write. Defaults to
+   *   `setTimeout(run, 0)`.
+   */
   constructor(
     private readonly db: Kysely<Database>,
     private readonly messageId: string,
     private readonly transcript: ExternalTurnTranscript,
-    private readonly now: () => number
+    private readonly now: () => number,
+    private readonly defer: (run: () => void) => void = deferToMacrotask
   ) {
     this.#lastWrittenAt = now();
   }
 
+  /**
+   * Requests a write. A forced call is queued in order and resolves once it is
+   * written, whether or not it succeeded (a failure is logged). A best-effort
+   * call resolves immediately: the throttle decides whether it is accepted, its
+   * write happens later and `flush()` waits for it.
+   */
   write(options: { readonly force?: boolean } = {}): Promise<void> {
     const at = this.now();
     const text = this.transcript.text;
-    if (options.force !== true && !this.#shouldWrite(text.length, at)) return this.#pending;
+    const force = options.force === true;
+    if (!force && !this.#shouldWrite(text.length, at)) return Promise.resolve();
 
     this.#lastTextLength = text.length;
     this.#lastWrittenAt = at;
-    this.#pending = this.#pending
-      .then(() => this.#persistSnapshot())
-      .then(
-        () => undefined,
-        (error: unknown) => {
-          // Best effort, exactly like the internal turn's checkpoint writer: a
-          // transient database error must neither abort the live turn nor
-          // reject every write chained behind it.
-          logger.warn('checkpoint_write_failed', {
-            messageId: this.messageId,
-            error: String(error),
-          });
-        }
-      );
-    return this.#pending;
+    if (!force) {
+      this.#dirty = true;
+      this.#armTrailingWrite();
+      return Promise.resolve();
+    }
+    // Best effort at the turn level, exactly like the internal turn's checkpoint
+    // writer: a transient database error must neither abort the live turn nor
+    // reject every write chained behind it.
+    return this.#enqueueRequired().then(undefined, (error: unknown) => {
+      logger.warn('checkpoint_write_failed', { messageId: this.messageId, error: String(error) });
+    });
   }
 
   /**
@@ -67,6 +110,29 @@ export class ExternalTranscriptWriter {
    * await writer.writeRequired(() => transcript.resolveSteerRejected(id, 'not-supported'));
    */
   writeRequired(onFailure?: () => void): Promise<void> {
+    return this.#enqueueRequired(onFailure);
+  }
+
+  /**
+   * Resolves once every write accepted so far, including the trailing
+   * best-effort one, is on disk. A required write queued while this waits
+   * supersedes the waiting best-effort task and lands after it, so the wait
+   * continues until nothing newer is queued.
+   */
+  async flush(): Promise<void> {
+    if (this.#dirty) this.#queueTrailingWrite();
+    let tail: Promise<void>;
+    do {
+      tail = this.#pending;
+      await tail;
+    } while (tail !== this.#pending);
+  }
+
+  #enqueueRequired(onFailure?: () => void): Promise<void> {
+    // This write carries state at least as new as any snapshot still waiting.
+    const supersededDirty = this.#dirty;
+    this.#dirty = false;
+    this.#ticket = null;
     const required = this.#pending
       .then(() => this.#persistSnapshot())
       .then(
@@ -75,11 +141,14 @@ export class ExternalTranscriptWriter {
           // Runs before the queue recovers, so a write chained behind this one
           // snapshots the transcript with the correction already applied.
           onFailure?.();
+          // The snapshot this write absorbed never reached disk; the trailing
+          // write that takes it serializes when it runs.
+          if (supersededDirty) this.#markDirty();
           throw error;
         }
       );
-    // Keep subsequent best-effort checkpoints usable if this required write
-    // failed; the steering caller still receives the original rejection.
+    // Keep subsequent writes usable if this one failed; a steering caller still
+    // receives the original rejection.
     this.#pending = required.then(
       () => undefined,
       (error: unknown) => {
@@ -92,14 +161,47 @@ export class ExternalTranscriptWriter {
     return required;
   }
 
-  flush(): Promise<void> {
-    return this.#pending;
+  #markDirty(): void {
+    this.#dirty = true;
+    this.#armTrailingWrite();
+  }
+
+  #armTrailingWrite(): void {
+    if (this.#timerArmed || this.#ticket) return;
+    this.#timerArmed = true;
+    this.defer(() => {
+      this.#timerArmed = false;
+      if (this.#dirty) this.#queueTrailingWrite();
+    });
+  }
+
+  #queueTrailingWrite(): void {
+    if (this.#ticket) return;
+    const ticket = {};
+    this.#ticket = ticket;
+    // The snapshot is taken when this write starts, not now: everything accepted
+    // while an earlier write was held collapses into this one.
+    this.#pending = this.#pending.then(async () => {
+      if (this.#ticket !== ticket) return;
+      this.#ticket = null;
+      if (!this.#dirty) return;
+      this.#dirty = false;
+      try {
+        await this.#persistSnapshot();
+      } catch (error) {
+        logger.warn('checkpoint_write_failed', {
+          messageId: this.messageId,
+          error: String(error),
+        });
+      }
+    });
   }
 
   /**
    * Serialized when the write runs, not when it is queued: a write queued behind
    * one that failed would otherwise persist a snapshot that predates the
-   * failure's correction.
+   * failure's correction. `isGenerating = 1` keeps a late write from touching a
+   * row the turn's final write already sealed.
    */
   #persistSnapshot() {
     const text = this.transcript.text;
