@@ -150,24 +150,29 @@ describe('GET /chats/:id/messages cursor validation and shape', () => {
     return app.handle(new Request(`http://localhost/chats/${chatId}/messages?${query}`));
   }
 
-  it('refuses a bare numeric cursor with an ApiErrorResponse', async () => {
+  it('keeps paging from a bare numeric cursor issued before the upgrade', async () => {
     const chatId = await newChat();
-    await insertMessages(chatId, tiedRows('legacy', 3));
+    await insertMessages(chatId, [
+      { id: 'legacy-1', timestamp: TIED_TIMESTAMP },
+      { id: 'legacy-2', timestamp: TIED_TIMESTAMP + 1 },
+      { id: 'legacy-3', timestamp: TIED_TIMESTAMP + 2 },
+    ]);
 
-    const response = await rawGet(chatId, `limit=2&cursor=${TIED_TIMESTAMP}`);
-    const body = (await response.json()) as { error: string; code: string };
+    const page = await fetchPage(chatId, String(TIED_TIMESTAMP), 2);
 
-    expect(`status ${response.status} code ${body.code}`).toBe('status 400 code VALIDATION');
-    expect(body.error).toContain(`"${TIED_TIMESTAMP}"`);
-    expect(body.error).toContain('expected shape: <timestamp>:<rowid>');
+    expect(page.messages.map((message) => message.id)).toEqual(['legacy-2', 'legacy-3']);
+    expect(page.nextCursor).toBeNull();
   });
 
   it('refuses a malformed cursor instead of restarting from the first page', async () => {
     const chatId = await newChat();
 
     const response = await rawGet(chatId, 'cursor=not-a-cursor');
+    const body = (await response.json()) as { error: string; code: string };
 
-    expect(response.status).toBe(400);
+    expect(`status ${response.status} code ${body.code}`).toBe('status 400 code VALIDATION');
+    expect(body.error).toContain('"not-a-cursor"');
+    expect(body.error).toContain('expected shape: <timestamp>:<rowid>');
   });
 
   it('does not expose the paging rowid on returned messages', async () => {

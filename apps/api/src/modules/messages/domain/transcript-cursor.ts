@@ -9,6 +9,7 @@ export interface TranscriptCursor {
 }
 
 const CURSOR_PATTERN = /^(\d{1,16}):(\d{1,16})$/;
+const LEGACY_CURSOR_PATTERN = /^\d{1,16}$/;
 
 export const TRANSCRIPT_CURSOR_SHAPE = '<timestamp>:<rowid>';
 
@@ -33,15 +34,28 @@ export function encodeTranscriptCursor(cursor: TranscriptCursor): string {
 }
 
 /**
- * Decodes a cursor produced by {@link encodeTranscriptCursor}. A bare numeric
- * timestamp (the previous cursor format) is refused: it cannot say which of
- * several rows sharing that timestamp were already returned.
+ * Decodes a cursor produced by {@link encodeTranscriptCursor}.
+ *
+ * A bare numeric timestamp (the format servers issued before the cursor
+ * carried a rowid) is still accepted, best effort, so a browser tab loaded
+ * before an upgrade keeps paging instead of failing until reload. It is read as
+ * "after every row of that timestamp" (rowid `Number.MAX_SAFE_INTEGER`), which
+ * is exactly what the old `timestamp > cursor` filter did: rows tied with the
+ * last row returned may be skipped, but none are repeated. Anything else that
+ * does not match `<timestamp>:<rowid>` throws.
  *
  * @example
  * decodeTranscriptCursor('1700000000000:42'); // { timestamp: 1700000000000, rowid: 42 }
- * decodeTranscriptCursor('1700000000000'); // throws InvalidTranscriptCursorError
+ * decodeTranscriptCursor('1700000000000'); // { timestamp: 1700000000000, rowid: 9007199254740991 }
+ * decodeTranscriptCursor('abc'); // throws InvalidTranscriptCursorError
  */
 export function decodeTranscriptCursor(value: string): TranscriptCursor {
+  if (LEGACY_CURSOR_PATTERN.test(value)) {
+    const timestamp = Number(value);
+    if (!Number.isSafeInteger(timestamp)) throw new InvalidTranscriptCursorError(value);
+    return { timestamp, rowid: Number.MAX_SAFE_INTEGER };
+  }
+
   const match = CURSOR_PATTERN.exec(value);
   if (!match) throw new InvalidTranscriptCursorError(value);
 

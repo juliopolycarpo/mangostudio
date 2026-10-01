@@ -264,8 +264,9 @@ export const ListChatMessagesQuerySchema = Type.Object({
   limit: Type.Optional(Type.String()),
   /**
    * The `nextCursor` of the previous page, passed back unchanged. The value is
-   * opaque: it encodes the position of the last row returned, and a bare
-   * timestamp from an older server is rejected with a 400.
+   * opaque: it encodes the position of the last row returned. A bare
+   * timestamp from an older server is still read as a best-effort position;
+   * any other value that is not a cursor this server issued is rejected with a 400.
    */
   cursor: Type.Optional(Type.String()),
 });
