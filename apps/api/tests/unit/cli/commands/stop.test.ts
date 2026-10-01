@@ -132,5 +132,33 @@ describe('runStop', () => {
         `expected server state file after a stop that left the pid alive on win32: present | received: ${received}`
       ).toBe('present');
     });
+
+    it('keeps the file of a successor hub that wrote it while stop waited on win32', async () => {
+      const controller = new FakeProcessController([42]);
+      const stateFile = new FakeServerStateFile(STATE);
+      const successor: ServerState = { ...STATE, pid: 77 };
+      let now = 0;
+      await runStop({
+        platform: 'win32',
+        readState: stateFile.readState,
+        removeState: stateFile.removeState,
+        controller,
+        log: () => undefined,
+        error: () => undefined,
+        exit: () => undefined,
+        now: () => now,
+        sleep: (ms) => {
+          now += ms;
+          controller.die(42);
+          stateFile.write(successor);
+          return Promise.resolve();
+        },
+      });
+
+      expect(
+        stateFile.pid,
+        `expected server state file pid after stop on win32 with a successor: 77 | received: ${stateFile.pid}`
+      ).toBe(77);
+    });
   });
 });
