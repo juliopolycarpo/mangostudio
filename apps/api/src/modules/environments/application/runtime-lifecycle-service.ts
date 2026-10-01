@@ -67,6 +67,7 @@ import {
   type LoadedRuntimeAsset,
   loadRuntimeReleaseBytes,
   pinnedRuntimeDigest,
+  RUNTIME_CACHE_DIR_NAME,
   RuntimeAssetLoadError,
   runtimeDigestSidecarPath,
 } from '../domain/runtime-release-fetch';
@@ -1459,7 +1460,7 @@ export function buildSetupCommand(
 
 /** The hub's cache directory for one version — the one documented location. */
 function runtimeCacheDir(version: string): string {
-  return join(getHomeMangoDir(), 'runtime-cache', version);
+  return join(getHomeMangoDir(), RUNTIME_CACHE_DIR_NAME, version);
 }
 
 /**

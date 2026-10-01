@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
@@ -86,6 +86,8 @@ export async function loadRuntimeReleaseBytes(
     readonly cacheDir?: (version: string) => string;
     readonly readBytes?: (path: string) => Promise<Uint8Array | null>;
     readonly writeCache?: (path: string, bytes: Uint8Array) => Promise<void>;
+    /** The file system the post-download cache prune runs on; tests pass a recording fake. */
+    readonly cacheFs?: RuntimeCacheFs;
     readonly localBuildPath?: (platformId: string) => string;
     /** Cancels an in-flight checksum or asset download; checked between hops, not mid-byte-stream. */
     readonly signal?: AbortSignal;
@@ -93,7 +95,8 @@ export async function loadRuntimeReleaseBytes(
 ): Promise<LoadedRuntimeAsset> {
   const signal = overrides.signal;
   const version = overrides.version ?? getVersion();
-  const cacheDir = overrides.cacheDir ?? ((v) => join(getHomeMangoDir(), 'runtime-cache', v));
+  const cacheDir =
+    overrides.cacheDir ?? ((v) => join(getHomeMangoDir(), RUNTIME_CACHE_DIR_NAME, v));
   const readBytes =
     overrides.readBytes ??
     (async (path) => {
@@ -143,6 +146,7 @@ export async function loadRuntimeReleaseBytes(
     cacheDir,
     readBytes,
     writeCache,
+    ...(overrides.cacheFs ? { cacheFs: overrides.cacheFs } : {}),
     ...(signal ? { signal } : {}),
   };
 
@@ -192,6 +196,7 @@ interface AssetLoad {
   readonly cacheDir: (version: string) => string;
   readonly readBytes: (path: string) => Promise<Uint8Array | null>;
   readonly writeCache: (path: string, bytes: Uint8Array) => Promise<void>;
+  readonly cacheFs?: RuntimeCacheFs;
   readonly signal?: AbortSignal;
 }
 
@@ -248,7 +253,7 @@ async function loadAsset(
       .writeCache(runtimeDigestSidecarPath(cachePath), new TextEncoder().encode(actual))
       .catch(() => undefined);
   }
-  await pruneRuntimeCache(versionDir, cacheVersion).catch(() => undefined);
+  await pruneRuntimeCache(versionDir, cacheVersion, load.cacheFs).catch(() => undefined);
   return { bytes, digest: actual, cached, offlineCache: false };
 }
 
@@ -400,28 +405,82 @@ export function pinnedRuntimeDigest(text: string): string | undefined {
 }
 
 /**
+ * The file-system operations {@link pruneRuntimeCache} performs, so a caller can
+ * observe what a prune would remove without removing it.
+ */
+export interface RuntimeCacheFs {
+  readonly readdir: (path: string) => Promise<string[]>;
+  readonly remove: (path: string) => Promise<void>;
+}
+
+const nodeRuntimeCacheFs: RuntimeCacheFs = {
+  readdir: (path) => readdir(path),
+  remove: (path) => rm(path, { force: true, recursive: true }),
+};
+
+/** The directory under the mango home that holds one directory per hub version. */
+export const RUNTIME_CACHE_DIR_NAME = 'runtime-cache';
+
+/**
+ * The names the cache gives its own version directories: `1.2.3` and
+ * `1.2.3-canary.gabc1234`. Also what a version must look like before a prune
+ * may be rooted at its directory: it is a single, non-empty directory name.
+ */
+const CACHE_VERSION_DIR = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+/**
+ * The cache root a prune may remove from, or a throw: `currentVersionDir` must be
+ * `<...>/runtime-cache/<currentVersion>` with a version that looks like a cache
+ * version directory. A cache directory that is anything else — a filesystem
+ * root, a home directory, `~/.mango`, a project — is never pruned.
+ */
+function ownedCacheRoot(currentVersionDir: string, currentVersion: string): string {
+  const cacheRoot = dirname(currentVersionDir);
+  const owned =
+    CACHE_VERSION_DIR.test(currentVersion) &&
+    basename(currentVersionDir) === currentVersion &&
+    basename(cacheRoot) === RUNTIME_CACHE_DIR_NAME;
+  if (owned) return cacheRoot;
+  throw new Error(
+    `pruneRuntimeCache refused to prune the parent of ${JSON.stringify(currentVersionDir)} | expected: <...>/${RUNTIME_CACHE_DIR_NAME}/<version> where <version> matches ${CACHE_VERSION_DIR} (like 1.2.3 or 1.2.3-canary.gabc1234) and names the directory | received: version ${JSON.stringify(currentVersion)}, cache root ${JSON.stringify(cacheRoot)}`
+  );
+}
+
+/**
  * Keeps the hub cache at current + previous version directories only — same rule
  * as slot version GC in {@link pushRuntimeBinary}.
+ *
+ * Removal is positively contained: `currentVersionDir` must be
+ * `<...>/runtime-cache/<currentVersion>` (see {@link ownedCacheRoot}), and only
+ * direct children of that `runtime-cache` directory whose names look like a
+ * version directory are ever candidates. Anything else — a stray file, a
+ * directory the cache did not create — is left alone, and a mistaken cache
+ * directory such as `/unused`, a home directory or `~/.mango` throws, naming
+ * the value and the shape, before anything is listed.
+ *
+ * `fs` is injectable so a test can record the removals instead of performing them.
+ * // Usage: await pruneRuntimeCache(join(home, '.mango', 'runtime-cache', '1.2.0'), '1.2.0')
  */
 export async function pruneRuntimeCache(
   currentVersionDir: string,
-  currentVersion: string
+  currentVersion: string,
+  fs: RuntimeCacheFs = nodeRuntimeCacheFs
 ): Promise<void> {
-  const cacheRoot = dirname(currentVersionDir);
+  const cacheRoot = ownedCacheRoot(currentVersionDir, currentVersion);
   let entries: string[];
   try {
-    entries = await readdir(cacheRoot);
+    entries = await fs.readdir(cacheRoot);
   } catch {
     return;
   }
 
   const others = entries
-    .filter((name) => name !== currentVersion)
+    .filter((name) => name !== currentVersion && CACHE_VERSION_DIR.test(name))
     .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
   const keepPrevious = others[0];
   for (const name of others) {
     if (name === keepPrevious) continue;
-    await rm(join(cacheRoot, name), { force: true, recursive: true }).catch(() => undefined);
+    await fs.remove(join(cacheRoot, name)).catch(() => undefined);
   }
 }
 
