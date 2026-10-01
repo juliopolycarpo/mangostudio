@@ -23,6 +23,12 @@ interface RunServerStopCommandOptions {
   successMessage: (pid: number) => string;
   failureMessage: (pid: number) => string;
   removeStateAfterSignal?: boolean;
+  /**
+   * Remove the state file once the pid is confirmed gone. For a signal the hub
+   * cannot catch, so its own cleanup never ran; a pid that outlives the wait
+   * keeps its file, since that file is the only way left to find it.
+   */
+  removeStateWhenStopped?: boolean;
 }
 
 function resolveServerShutdownDeps(
@@ -49,6 +55,7 @@ export async function runServerStopCommand({
   successMessage,
   failureMessage,
   removeStateAfterSignal = false,
+  removeStateWhenStopped = false,
 }: RunServerStopCommandOptions): Promise<void> {
   const d = resolveServerShutdownDeps(deps);
   const state = await d.readState();
@@ -69,7 +76,7 @@ export async function runServerStopCommand({
     sleep: d.sleep,
   });
 
-  if (removeStateAfterSignal) {
+  if (removeStateAfterSignal || (removeStateWhenStopped && stopped)) {
     await d.removeState();
   }
 
