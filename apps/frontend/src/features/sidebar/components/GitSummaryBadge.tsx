@@ -25,7 +25,12 @@ export function GitSummaryBadge({ summary }: { summary: GitSummary }) {
   const sync = drifted ? formatMessage(t.git.remote.syncSummary, counts) : null;
   const syncLabel = drifted ? formatMessage(t.sidebar.git.sync, counts) : null;
   return (
-    <span className="flex min-w-0 items-center gap-1" data-testid="git-summary-badge">
+    // `overflow-hidden`: when the row bounds this badge, what does not fit is
+    // clipped at its own edge instead of painting over the runner label next to it.
+    <span
+      className="flex min-w-0 items-center gap-1 overflow-hidden"
+      data-testid="git-summary-badge"
+    >
       <GitBranch size={10} aria-hidden="true" className="shrink-0" />
       <span className="max-w-24 truncate" title={branch}>
         {branch}
