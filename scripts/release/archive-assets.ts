@@ -2,7 +2,7 @@
 // Assemble the GitHub Release asset set with stable names and flat archive roots.
 
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -157,7 +157,28 @@ async function archiveFrontend(plan: FrontendArchivePlan): Promise<void> {
   ]);
 }
 
+/**
+ * Throw naming the build step when the standalone README.md is absent.
+ *
+ * `build.ts` writes it last, only after every platform has compiled and its runtime has passed
+ * verification, so its absence means that step failed or never ran. It is checked before the
+ * binaries: a failed build can leave a runtime that failed verification, and archiving that is
+ * worse than stopping, while a bare "missing README" reads as a packaging fault and hides the
+ * build error that caused it.
+ */
+function assertBuildCompleted(readmePath: string): void {
+  if (existsSync(readmePath)) return;
+  throw new Error(
+    `Missing standalone README.md: ${readmePath}\n` +
+      '  expected: the output directory of a completed `bun run build --binary`, which writes ' +
+      'README.md only after every platform has built and its runtime has passed verification\n' +
+      `  received: ${dirname(readmePath)} without it, so that build failed or did not run; ` +
+      'fix the first error it reported and rerun it before archiving'
+  );
+}
+
 function assertPlatformInputs(plan: PlatformArchivePlan): void {
+  assertBuildCompleted(plan.readmePath);
   assertFile(plan.binaryPath, `${plan.platform.arch} binary`);
   assertFile(plan.runtimeBinaryPath, `${plan.platform.arch} runtime binary`);
   assertFile(plan.readmePath, 'standalone README.md');

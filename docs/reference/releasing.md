@@ -182,6 +182,12 @@ carries only the main binary silently loses out-of-process environments.
 `scripts/release/archive-assets.ts` assembles the full set; `scripts/lib/release-assets.ts`
 defines the naming contract and is covered by unit tests.
 
+`bun run build --binary` writes the standalone `README.md` last, only after every platform has
+compiled and its runtime passed verification, and the archive step reads its absence as an unfinished
+build: it stops naming the missing file and that build step rather than packaging what a failed
+build left behind. A build deletes the README from an earlier run as it starts, so a stale one never
+vouches for a build that failed.
+
 ### How the runtime binary is built
 
 The hub is Bun-compiled; `mangostudio-runtime` is the cargo binary from

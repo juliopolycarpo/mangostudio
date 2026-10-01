@@ -7,6 +7,7 @@ import {
   binaryCompileDefines,
   binaryCompileFlags,
   createTurboBuildCommand,
+  discardStandaloneReadme,
   selectBuildWorkspaces,
 } from './lib/build';
 import {
@@ -658,6 +659,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   const frontendDist = join(ROOT_DIR, 'apps/frontend/dist');
 
   mkdirSync(outDir, { recursive: true });
+  if (!options.dryRun) discardStandaloneReadme(outDir);
 
   console.log(`📦 Building MangoStudio v${options.version}`);
   console.log(`📅 Build time: ${buildTime}`);
@@ -745,6 +747,9 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   console.log('📊 Build summary:');
   console.log(`✅ ${successCount} platform(s) built successfully`);
 
+  // Before the README is written, on purpose: `archive-assets.ts` treats its absence as "this
+  // build did not finish". A failed platform can leave a staged runtime that failed verification,
+  // so writing it here would let the archive step package that runtime.
   if (failedCount > 0) {
     console.log(`❌ ${failedCount} platform(s) failed`);
     process.exit(1);
