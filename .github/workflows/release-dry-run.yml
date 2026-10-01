@@ -71,7 +71,7 @@ jobs:
             exit 1
           fi
 
-          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|\.github/workflows/runtime-build\.yml$|scripts/release/|scripts/install/|scripts/build(-runtime)?\.ts$|scripts/lib/|packages/cli/|crates/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo/config\.toml$|\.github/actions/setup-zigbuild/|Dockerfile$)'
+          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|\.github/workflows/runtime-build\.yml$|scripts/release/|scripts/install/|scripts/tests/install-ps1-layout\.unit\.test\.ts$|scripts/build(-runtime)?\.ts$|scripts/lib/|packages/cli/|crates/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo/config\.toml$|\.github/actions/setup-zigbuild/|Dockerfile$)'
           if grep -Eq "$release_pattern" "$RUNNER_TEMP/changed-files"; then
             echo "release=true" >> "$GITHUB_OUTPUT"
           else
@@ -440,6 +440,23 @@ jobs:
             Write-Error "-Uninstall left the install root behind"
             exit 1
           }
+
+      # The version-probe failure cases run install.ps1 against a fake
+      # mangostudio.exe that cannot start. Windows PowerShell 5.1 turns the
+      # first stderr line of a native command into a terminating error and a
+      # missing DLL surfaces only as an NTSTATUS exit code, so no Linux run
+      # can stand in for them: this job is the only CI lane that runs them. A
+      # hosted runner is where the compiled and patched fake exes are safe to
+      # run.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Verify the failed version probe diagnostics
+        shell: bash
+        env:
+          MANGOSTUDIO_TEST_NATIVE_FAKES: "1"
+        run: bun test --timeout 60000 scripts/tests/install-ps1-layout.unit.test.ts -t 'failed version probe'
 
   dry-run-cargo:
     name: Cargo publish dry run
