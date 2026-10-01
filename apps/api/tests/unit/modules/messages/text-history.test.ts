@@ -75,3 +75,59 @@ describe('text history loading', () => {
     expect(history.map((turn) => turn.text)).toEqual(['chat-mode turn', 'agent-mode turn']);
   });
 });
+
+describe('text history ordering across rows sharing a timestamp', () => {
+  const TIED_TIMESTAMP = 1_700_000_000_000;
+  const ROW_COUNT = 12;
+  const TIE_GROUP_SIZE = 3;
+
+  /** Inserts m00..m11 in order; every three consecutive rows share one timestamp. */
+  async function seedTiedChat(): Promise<string> {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const rows = Array.from({ length: ROW_COUNT }, (_, index) => ({
+      id: `tie-${chat.id}-m${String(index).padStart(2, '0')}`,
+      chatId: chat.id,
+      role: 'user' as const,
+      text: `m${String(index).padStart(2, '0')}`,
+      timestamp: TIED_TIMESTAMP + Math.floor(index / TIE_GROUP_SIZE),
+      isGenerating: 0,
+      interactionMode: 'agent' as const,
+    }));
+    await getDb().insertInto('messages').values(rows).execute();
+    return chat.id;
+  }
+
+  function expectTexts(received: string[], expected: string[]) {
+    if (received.join(' ') === expected.join(' ')) return;
+    throw new Error(
+      `expected history window: ${expected.join(' ')} | received: ${received.join(' ')}`
+    );
+  }
+
+  // A limit of 5 splits the tie group m06..m08: the window must keep the
+  // newest rows (m07, m08), not the oldest, and read in insertion order.
+  const EXPECTED_WINDOW = ['m07', 'm08', 'm09', 'm10', 'm11'];
+
+  it('keeps the newest tied rows when a limit splits a tie group', async () => {
+    const chatId = await seedTiedChat();
+
+    const history = await loadHistory(chatId, { limit: 5 }, getDb());
+
+    expectTexts(
+      history.map((turn) => turn.text),
+      EXPECTED_WINDOW
+    );
+  });
+
+  it('keeps the newest tied rows in the rich history the agent loop replays', async () => {
+    const chatId = await seedTiedChat();
+
+    const history = await loadRichHistory(chatId, { limit: 5 }, getDb());
+
+    expectTexts(
+      history.map((turn) => turn.text),
+      EXPECTED_WINDOW
+    );
+  });
+});
