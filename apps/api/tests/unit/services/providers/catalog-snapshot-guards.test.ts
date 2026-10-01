@@ -253,6 +253,74 @@ describe('catalog snapshot eviction order', () => {
   });
 });
 
+/** Fails with `expected <label>: <expected> | received: <actual>` for boolean outcomes. */
+function expectRetained(label: string, received: boolean): void {
+  if (received) return;
+  throw new Error(`expected ${label} retained: true | received: ${received}`);
+}
+
+describe('catalog eviction follows recency of refresh', () => {
+  const HOT_USER = 'hot-user';
+  const ONE_SHOT_BATCH = 600;
+
+  /** Inserts `count` distinct users once each, so each only ever has a single write. */
+  async function visitOneShotUsers(
+    service: { getUnifiedModelCatalog(userId: string): Promise<unknown> },
+    prefix: string,
+    count: number
+  ): Promise<void> {
+    for (let i = 0; i < count; i++) await service.getUnifiedModelCatalog(`${prefix}-${i}`);
+  }
+
+  it('keeps a user refreshed after the cap is approached ahead of one-shot users', async () => {
+    const snapshotStore = new Map<string, ModelCatalogResponse>();
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => [],
+      listAllSecretMetadataFn: () => Promise.resolve([]),
+      snapshotStore,
+    });
+
+    // The hot user is inserted first, so by insertion order it is the oldest entry.
+    await service.refresh(HOT_USER);
+    await visitOneShotUsers(service, 'early', ONE_SHOT_BATCH);
+    await service.refresh(HOT_USER);
+    await visitOneShotUsers(service, 'late', ONE_SHOT_BATCH);
+
+    expectRetained('hot user snapshot', snapshotStore.has(HOT_USER));
+    expectCount('snapshots', MAX_CATALOG_ENTRIES, snapshotStore.size);
+  });
+
+  it('keeps the provider model list of a refreshed user ahead of one-shot users', async () => {
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => ['gemini'],
+      getProviderFn: () => textProvider(),
+      listAllSecretMetadataFn: () => Promise.resolve(metadataRows([TEXT_MODEL.modelId])),
+    });
+
+    await service.refresh(HOT_USER);
+    await visitOneShotUsers(service, 'early', ONE_SHOT_BATCH);
+    await service.refresh(HOT_USER);
+    await visitOneShotUsers(service, 'late', ONE_SHOT_BATCH);
+
+    const cached = service.getCachedModelCapabilities(HOT_USER, TEXT_MODEL.modelId);
+    expectRetained('hot user model list', cached !== undefined);
+  });
+
+  it('still evicts a user that was only ever written once', async () => {
+    const snapshotStore = new Map<string, ModelCatalogResponse>();
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => [],
+      listAllSecretMetadataFn: () => Promise.resolve([]),
+      snapshotStore,
+    });
+
+    await visitOneShotUsers(service, 'cold', MAX_CATALOG_ENTRIES + 1);
+
+    expect(snapshotStore.has('cold-0')).toBe(false);
+    expect(snapshotStore.has(`cold-${MAX_CATALOG_ENTRIES}`)).toBe(true);
+  });
+});
+
 describe('catalog invalidation generation bound', () => {
   /** Invalidates enough other users to push the oldest generation entries out of the bounded map. */
   function churnInvalidations(service: { invalidate(userId: string): void }): void {
