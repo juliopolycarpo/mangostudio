@@ -41,7 +41,7 @@ function deferToMacrotask(run: () => void): void {
  * void writer.write(); // best-effort: accepted, written on a later tick
  * void writer.write({ force: true }); // required boundary, ordered
  * await writer.writeRequired(); // resolves once written, rejects if the write fails
- * await writer.flush(); // everything accepted so far is on disk
+ * await writer.flush(); // nothing accepted is still waiting to be written
  */
 export class ExternalTranscriptWriter {
   #lastTextLength = 0;
@@ -114,18 +114,22 @@ export class ExternalTranscriptWriter {
   }
 
   /**
-   * Resolves once every write accepted so far, including the trailing
-   * best-effort one, is on disk. A required write queued while this waits
-   * supersedes the waiting best-effort task and lands after it, so the wait
-   * continues until nothing newer is queued.
+   * Resolves once nothing accepted is waiting to be written: every write queued
+   * so far has settled and no best-effort snapshot is dirty. State accepted
+   * while this waits, and the snapshot a failed required write handed back,
+   * are written before it resolves. A write that fails is logged, not retried,
+   * so the wait ends even when the database keeps failing. Settled means the
+   * write finished, not that it succeeded.
    */
   async flush(): Promise<void> {
-    if (this.#dirty) this.#queueTrailingWrite();
-    let tail: Promise<void>;
-    do {
-      tail = this.#pending;
+    for (;;) {
+      if (this.#dirty) this.#queueTrailingWrite();
+      const tail = this.#pending;
       await tail;
-    } while (tail !== this.#pending);
+      // A delta accepted or a failure re-marking state during the wait only
+      // sets the dirty flag; it does not extend the chain this loop awaited.
+      if (tail === this.#pending && !this.#dirty) return;
+    }
   }
 
   #enqueueRequired(onFailure?: () => void): Promise<void> {
