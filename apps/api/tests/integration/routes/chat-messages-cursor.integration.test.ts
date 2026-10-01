@@ -1,0 +1,144 @@
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { getDb } from '../../../src/db/database';
+import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
+import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
+import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+
+const TIED_TIMESTAMP = 1_700_000_000_000;
+const PAGE_SIZE = 50;
+
+interface PageBody {
+  messages: { id: string }[];
+  nextCursor: string | null;
+}
+
+let TEST_USER!: UserFixture;
+let restoreAuth: (() => void) | null = null;
+
+beforeAll(async () => {
+  TEST_USER = await insertTestUser();
+});
+
+afterEach(() => {
+  restoreAuth?.();
+  restoreAuth = null;
+});
+
+async function insertMessages(chatId: string, rows: { id: string; timestamp: number }[]) {
+  await getDb()
+    .insertInto('messages')
+    .values(
+      rows.map((row) => ({
+        id: row.id,
+        chatId,
+        role: 'user' as const,
+        text: row.id,
+        timestamp: row.timestamp,
+        isGenerating: 0,
+        interactionMode: 'chat' as const,
+      }))
+    )
+    .execute();
+}
+
+/**
+ * Seeds `count` rows sharing one timestamp. Ids are generated in descending
+ * order so the insertion order (rowid) and the id order disagree.
+ */
+function tiedRows(prefix: string, count: number, timestamp = TIED_TIMESTAMP) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `${prefix}-${String(count - index).padStart(3, '0')}`,
+    timestamp,
+  }));
+}
+
+async function newChat(): Promise<string> {
+  const chat = await insertTestChat(TEST_USER.id);
+  return chat.id;
+}
+
+async function fetchPage(chatId: string, cursor?: string | null, limit = PAGE_SIZE) {
+  const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+  restoreAuth = restore;
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) query.set('cursor', cursor);
+  const response = await app.handle(
+    new Request(`http://localhost/chats/${chatId}/messages?${query}`)
+  );
+  if (response.status !== 200) {
+    throw new Error(`expected status: 200 | received: ${response.status}`);
+  }
+  return (await response.json()) as PageBody;
+}
+
+async function readAll(chatId: string, limit = PAGE_SIZE): Promise<string[]> {
+  const ids: string[] = [];
+  let cursor: string | null = null;
+  do {
+    const page: PageBody = await fetchPage(chatId, cursor, limit);
+    ids.push(...page.messages.map((message) => message.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+  return ids;
+}
+
+function expectSize(label: string, expected: number, received: number) {
+  if (expected === received) return;
+  throw new Error(`expected ${label}: ${expected} messages | received: ${received}`);
+}
+
+describe('GET /chats/:id/messages tie-safe cursor', () => {
+  it('returns every row of a 60-row timestamp tie across two pages', async () => {
+    const chatId = await newChat();
+    await insertMessages(chatId, tiedRows('tie', 60));
+
+    const first = await fetchPage(chatId);
+    expectSize('first page', 50, first.messages.length);
+
+    const second = await fetchPage(chatId, first.nextCursor);
+    expectSize('second page', 10, second.messages.length);
+    expect(second.nextCursor).toBeNull();
+
+    const ids = [...first.messages, ...second.messages].map((message) => message.id);
+    expect(new Set(ids).size).toBe(60);
+  });
+
+  it('returns tied rows in the order an unpaged read returns them', async () => {
+    const chatId = await newChat();
+    await insertMessages(chatId, tiedRows('order', 60));
+
+    const unpaged = await fetchPage(chatId, null, 100);
+    const paged = await readAll(chatId, 7);
+
+    expect(paged).toEqual(unpaged.messages.map((message) => message.id));
+  });
+
+  it('returns rows inserted between pages exactly once', async () => {
+    const chatId = await newChat();
+    await insertMessages(chatId, tiedRows('ins', 60));
+
+    const first = await fetchPage(chatId);
+    await insertMessages(chatId, tiedRows('late', 5));
+    const second = await fetchPage(chatId, first.nextCursor);
+
+    const ids = [...first.messages, ...second.messages].map((message) => message.id);
+    expectSize('combined pages', 65, ids.length);
+    expect(new Set(ids).size).toBe(65);
+  });
+
+  it('keeps paging when the cursor row and later rows are deleted between pages', async () => {
+    const chatId = await newChat();
+    await insertMessages(chatId, tiedRows('del', 60));
+
+    const first = await fetchPage(chatId);
+    const lastSeen = first.messages.at(-1)?.id ?? '';
+    const unpaged = (await fetchPage(chatId, null, 100)).messages.map((message) => message.id);
+    const deleted = [lastSeen, unpaged[52], unpaged[55]];
+    await getDb().deleteFrom('messages').where('id', 'in', deleted).execute();
+
+    const second = await fetchPage(chatId, first.nextCursor);
+
+    const expectedRest = unpaged.slice(PAGE_SIZE).filter((id) => !deleted.includes(id));
+    expect(second.messages.map((message) => message.id)).toEqual(expectedRest);
+  });
+});
