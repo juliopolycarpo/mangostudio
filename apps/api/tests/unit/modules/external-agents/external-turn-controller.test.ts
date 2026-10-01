@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from 'bun:test';
 import type {
   ExternalAgentAttachment,
   ExternalAgentConfiguration,
@@ -11,6 +11,7 @@ import type {
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
+import { UpdateQueryBuilder } from 'kysely';
 import { getDb } from '../../../../src/db/database';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
 import { createExternalCommandCatalogCache } from '../../../../src/modules/external-agents/application/external-command-catalog-cache';
@@ -128,6 +129,7 @@ function startTurn(
   overrides: {
     readonly chatId?: string;
     readonly attachments?: readonly ExternalAgentAttachment[];
+    readonly observer?: { readonly onSteer?: (steer: unknown) => void };
   } = {}
 ): Promise<ExternalTurnResult> {
   return controller.start(
@@ -140,6 +142,7 @@ function startTurn(
       vendorAccountFingerprint: 'account-a',
       credentialHomeFingerprint: 'sha256:home-a',
       ...(overrides.attachments ? { attachments: overrides.attachments } : {}),
+      ...(overrides.observer ? { observer: overrides.observer } : {}),
     },
     getDb()
   );
@@ -189,6 +192,53 @@ function steerPartOf(parts: readonly MessagePart[], clientMessageId: string): Ex
   return part;
 }
 
+/**
+ * Named fake for the one database write a steer waits on: the first message
+ * update whose parts carry an `external_steer`. Every other statement, and every
+ * later steer checkpoint, runs against the real database untouched.
+ */
+interface SteerCheckpointGate {
+  /** Settles once the controller has issued the required steer checkpoint. */
+  readonly reached: Promise<void>;
+  /** Lets a held checkpoint run and settle (a no-op for a failing gate). */
+  readonly release: () => void;
+  readonly restore: () => void;
+}
+
+let activeSteerGate: SteerCheckpointGate | undefined;
+
+function isSteerCheckpoint(builder: {
+  compile(): { sql: string; parameters: readonly unknown[] };
+}) {
+  const { sql, parameters } = builder.compile();
+  if (!sql.startsWith('update "messages"')) return false;
+  return parameters.some(
+    (value) => typeof value === 'string' && value.includes('"external_steer"')
+  );
+}
+
+function gateSteerCheckpoint(mode: { readonly fail: Error } | { readonly hold: true }) {
+  const reached = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const original = UpdateQueryBuilder.prototype.execute;
+  let intercepted = false;
+  const spy: Mock<typeof original> = spyOn(UpdateQueryBuilder.prototype, 'execute');
+  spy.mockImplementation(function (this: UpdateQueryBuilder<never, never, never, never>) {
+    if (intercepted || !isSteerCheckpoint(this)) return original.call(this);
+    intercepted = true;
+    reached.resolve();
+    if ('fail' in mode) return Promise.reject(mode.fail);
+    return released.promise.then(() => original.call(this));
+  } as typeof original);
+  const gate: SteerCheckpointGate = {
+    reached: reached.promise,
+    release: () => released.resolve(),
+    restore: () => spy.mockRestore(),
+  };
+  activeSteerGate = gate;
+  return gate;
+}
+
 beforeEach(async () => {
   const user = await insertTestUser();
   userId = user.id;
@@ -198,6 +248,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  activeSteerGate?.release();
+  activeSteerGate?.restore();
+  activeSteerGate = undefined;
   restoreRealtimeBus();
 });
 
@@ -1205,6 +1258,81 @@ describe('external turn controller', () => {
 
       runtime.emit({ type: 'completed' });
       await running;
+    });
+
+    it('keeps a steer whose required checkpoint failed undispatched and not accepted', async () => {
+      const databaseFailure = new Error('steer checkpoint database failure');
+      gateSteerCheckpoint({ fail: databaseFailure });
+      const notifications: unknown[] = [];
+      const { runtime, controller } = harness();
+      const running = startTurn(controller, {
+        observer: { onSteer: (steer) => void notifications.push(steer) },
+      });
+      await waitForTurnStart(runtime);
+
+      const input = { userId, chatId, clientMessageId: 'steer-1', text: 'switch to plan mode' };
+      await expect(controller.steer(input)).rejects.toBe(databaseFailure);
+      await expect(controller.steer(input)).rejects.toBe(databaseFailure);
+      expect(runtime.calls.steer).toHaveLength(0);
+      expect(notifications).toHaveLength(0);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+
+      const part = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      if (part.status === 'accepted') {
+        throw new Error(`expected steer status: not accepted | received: ${part.status}`);
+      }
+      expect(part).toMatchObject({ status: 'rejected', reasonCode: 'turn-already-completed' });
+    });
+
+    it('does not dispatch a steer whose required checkpoint resolves after a cancel', async () => {
+      const gate = gateSteerCheckpoint({ hold: true });
+      const notifications: unknown[] = [];
+      const { runtime, controller } = harness({ steerTerminationGraceMs: 20 });
+      const running = startTurn(controller, {
+        observer: { onSteer: (steer) => void notifications.push(steer) },
+      });
+      await waitForTurnStart(runtime);
+
+      const steering = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'too late',
+      });
+      await gate.reached;
+      expect(runtime.calls.steer).toHaveLength(0);
+
+      expect(cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled')).toBe(true);
+      await waitFor(() => runtime.calls.cancel.length === 1, 'the cancel to reach the runtime');
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(runtime.calls.steer).toHaveLength(0);
+
+      gate.release();
+      const outcome = await steering;
+      const result = await running;
+
+      const dispatched = runtime.calls.steer.length;
+      if (dispatched !== 0) {
+        throw new Error(`expected runtime steer calls after cancel: 0 | received: ${dispatched}`);
+      }
+      expect(outcome).toEqual({ accepted: false, reasonCode: 'turn-already-completed' });
+      expect(notifications).toEqual([
+        {
+          clientMessageId: 'steer-1',
+          text: 'too late',
+          status: 'rejected',
+          reasonCode: 'turn-already-completed',
+        },
+      ]);
+      expect(result.reason).toBe('cancelled-by-user');
+      const stored = await readAssistantRow();
+      expect(steerPartOf(stored.parts, 'steer-1')).toMatchObject({
+        status: 'rejected',
+        reasonCode: 'turn-already-completed',
+      });
+      expect(turnPartOf(stored.parts).terminalReason).toBe('cancelled-by-user');
     });
 
     it('finalizes without waiting out a hung steer acknowledgement', async () => {
