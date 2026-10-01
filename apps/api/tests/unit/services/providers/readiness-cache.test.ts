@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { createReadinessCache } from '../../../../src/services/providers/core/readiness-cache';
 
+function expectCount(label: string, expected: number, received: number): void {
+  if (expected === received) return;
+  throw new Error(`expected ${label}: ${expected} | received: ${received}`);
+}
+
 describe('createReadinessCache', () => {
   it('deduplicates concurrent loads for the same key', async () => {
     let calls = 0;
@@ -98,6 +103,61 @@ describe('createReadinessCache', () => {
     const refreshed = await cache.get('user-1 model-a', load);
 
     expect(refreshed).toBe('value-2');
+  });
+
+  it('lets a third caller join the replacement load when the cleared load settles', async () => {
+    const cache = createReadinessCache<string>();
+    const releases: Array<(value: string) => void> = [];
+    let thirdLoaderCalls = 0;
+
+    const heldLoader = () =>
+      new Promise<string>((resolve) => {
+        releases.push(resolve);
+      });
+    const thirdLoader = () => {
+      thirdLoaderCalls += 1;
+      return Promise.resolve('third');
+    };
+
+    const first = cache.get('user-1 model-a', heldLoader);
+    cache.clearWhere((key) => key.startsWith('user-1 '));
+    const second = cache.get('user-1 model-a', heldLoader);
+
+    releases[0]?.('first');
+    expect(await first).toBe('first');
+
+    const third = cache.get('user-1 model-a', thirdLoader);
+    expectCount('third-loader calls', 0, thirdLoaderCalls);
+
+    releases[1]?.('second');
+    expect(await second).toBe('second');
+    expect(await third).toBe('second');
+  });
+
+  it('does not let a cleared load write after its replacement already settled', async () => {
+    const cache = createReadinessCache<string>();
+    const releases: Array<(value: string) => void> = [];
+    const heldLoader = () =>
+      new Promise<string>((resolve) => {
+        releases.push(resolve);
+      });
+
+    const cleared = cache.get('user-1 model-a', heldLoader);
+    cache.clearWhere((key) => key.startsWith('user-1 '));
+    const replacement = cache.get('user-1 model-a', heldLoader);
+
+    releases[1]?.('new');
+    expect(await replacement).toBe('new');
+    releases[0]?.('old');
+    expect(await cleared).toBe('old');
+
+    let laterLoaderCalls = 0;
+    const later = await cache.get('user-1 model-a', () => {
+      laterLoaderCalls += 1;
+      return Promise.resolve('later');
+    });
+    expect(later).toBe('new');
+    expectCount('later-loader calls', 0, laterLoaderCalls);
   });
 
   it('reports hits and misses through optional callbacks', async () => {
