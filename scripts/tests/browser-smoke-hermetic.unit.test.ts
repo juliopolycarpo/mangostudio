@@ -13,7 +13,6 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import config from '../../playwright.config';
 import { removeSmokeHome, SMOKE_HOME_ENV } from '../../tests/browser-smoke/support/smoke-home';
 
 /** Env keys that place hub state; each must resolve inside the temporary home. */
@@ -24,6 +23,11 @@ const HOME_KEYS = [
   'UPLOADS_DIR',
   'CHECKPOINTS_DIR',
 ] as const;
+
+// Importing the config creates the temporary home (unless a runner published
+// one). Note whether this process made it, so only that directory is removed.
+const publishedBefore = process.env[SMOKE_HOME_ENV];
+const { default: config } = await import('../../playwright.config');
 
 type WebServer = Exclude<NonNullable<typeof config.webServer>, readonly unknown[]>;
 
@@ -55,9 +59,11 @@ function canonical(path: string): string {
 }
 
 describe('browser smoke lane hermeticity', () => {
-  // Importing the config creates the temporary home; Bun's test runner exits
-  // without running the 'exit' hook that removes it in a Playwright run.
+  // Bun's test runner exits without running the 'exit' hook that removes the
+  // home a Playwright run creates, so remove the one this import created. A
+  // directory somebody exported as MANGO_SMOKE_HOME is theirs and stays.
   afterAll(() => {
+    if (publishedBefore) return;
     const created = process.env[SMOKE_HOME_ENV];
     if (created) removeSmokeHome(created);
     delete process.env[SMOKE_HOME_ENV];
