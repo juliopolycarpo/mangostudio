@@ -130,7 +130,7 @@ fixtures.
 ## Hub binary: bytecode
 
 The hub is not a cargo build, but it ships beside the runtime, so its startup and size are
-recorded here too. `scripts/build.ts` compiles it with `--bytecode --format=esm` (bytecode
+recorded here too. `scripts/build.ts` compiles it with `--bytecode --bytecode-depth=2 --format=esm` (bytecode
 alone emits CommonJS, which rejects the entry's top-level `await`). JSC then loads
 precompiled bytecode instead of parsing the minified bundle on every start.
 
@@ -149,6 +149,28 @@ median of 15 runs of `scripts/bench/startup.ts`; `--version` is the median of 20
 Every target grows by the same ~17.7 MB of bytecode (`bun build --compile` of the same embed
 entry for the other seven targets). The external `.map` is unchanged in shape, and stack
 traces still resolve to original source lines.
+
+### Bytecode depth
+
+`--bytecode-depth=2` is a package-size setting, not a speed one. Bun's default compiles every
+level of nested function ahead of time; depth 2 compiles each module's top-level code, the
+functions it declares, and the functions those declare, and leaves anything deeper to be
+compiled from source the first time it runs. The table above was measured at the default depth.
+
+The depth is named in `binaryCompileFlags` (`scripts/lib/build.ts`) and pinned by
+`scripts/tests/build.unit.test.ts`, which also compiles a deeply nested fixture with and without
+the flag: Bun accepts a misspelled `--bytecode-depth` without complaint and compiles at the
+default depth, so the flag array alone does not prove the setting took effect.
+
+| Measure (linux-x64, Bun 1.4.2, `ee3075b6` plus this change, n=1) | Default depth |     Depth 2 |     Change |
+| ---------------------------------------------------------------- | ------------: | ----------: | ---------: |
+| Hub executable (bytes)                                           |   117,040,608 | 114,173,408 | −2,867,200 |
+
+The executable size is a deterministic byte count. The archive is compressed, so it shrinks by
+less (1,329,177 bytes against a debug cargo runtime), and its percentage depends on the runtime
+inside it: measure that with the release runtime (`--runtime-dir`). No start-up claim is made for depth 2: compare it against the
+default with `scripts/bench/startup.ts` on a quiet host, since the code it skips precompiling is
+code that parses on first use.
 
 ## Re-measuring
 

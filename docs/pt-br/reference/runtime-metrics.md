@@ -133,7 +133,7 @@ para testes Rust e fixtures congeladas.
 
 O hub não é um build do cargo, mas é distribuído ao lado do runtime, então seu tempo de
 inicialização e tamanho também ficam registrados aqui. O `scripts/build.ts` o compila com
-`--bytecode --format=esm` (bytecode sozinho emite CommonJS, que rejeita o `await` de nível
+`--bytecode --bytecode-depth=2 --format=esm` (bytecode sozinho emite CommonJS, que rejeita o `await` de nível
 superior do entry). O JSC passa a carregar bytecode pré-compilado em vez de analisar o bundle
 minificado a cada inicialização.
 
@@ -152,6 +152,29 @@ mediana de 15 execuções de `scripts/bench/startup.ts`; `--version` é a median
 Todos os alvos crescem os mesmos ~17,7 MB de bytecode (`bun build --compile` do mesmo entry
 embutido para os outros sete alvos). O `.map` externo mantém o formato, e os stack traces
 continuam apontando para as linhas do código original.
+
+### Profundidade do bytecode
+
+`--bytecode-depth=2` é um ajuste de tamanho do pacote, não de velocidade. O padrão do Bun compila
+antecipadamente todos os níveis de funções aninhadas; a profundidade 2 compila o código de nível
+superior de cada módulo, as funções que ele declara e as funções que essas declaram, e deixa o
+que está mais fundo para ser compilado a partir do código-fonte na primeira vez que executa. A
+tabela acima foi medida na profundidade padrão.
+
+A profundidade está em `binaryCompileFlags` (`scripts/lib/build.ts`) e é fixada por
+`scripts/tests/build.unit.test.ts`, que também compila um fixture com funções muito aninhadas com
+e sem a flag: o Bun aceita `--bytecode-depth` escrito errado sem reclamar e compila na profundidade
+padrão, então o array de flags sozinho não prova que o ajuste teve efeito.
+
+| Medida (linux-x64, Bun 1.4.2, `ee3075b6` mais esta mudança, n=1) | Profundidade padrão | Profundidade 2 |   Variação |
+| ---------------------------------------------------------------- | ------------------: | -------------: | ---------: |
+| Executável do hub (bytes)                                        |         117,040,608 |    114,173,408 | −2,867,200 |
+
+O tamanho do executável é uma contagem de bytes determinística. O arquivo é comprimido, então encolhe
+menos (1.329.177 bytes com um runtime cargo de debug), e o percentual depende do runtime dentro
+dele: meça com o runtime de release (`--runtime-dir`). Nenhuma afirmação de inicialização é feita para a
+profundidade 2: compare com o padrão usando `scripts/bench/startup.ts` em um host quieto, já que o
+código que deixa de ser pré-compilado é código analisado no primeiro uso.
 
 ## Como medir de novo
 
