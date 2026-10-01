@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
@@ -43,6 +43,22 @@ describe('resolveApiUrlOverride', () => {
     expect(warnings).toEqual([]);
   });
 });
+
+/**
+ * Named fake for the rollback's removal of a failed bundle: refuses every call
+ * the way a locked file does on Windows, and records what it was asked to
+ * remove. Nothing on disk changes, so the test needs no permission tricks.
+ */
+class RefusingRemoval {
+  readonly attempts: string[] = [];
+
+  readonly remove = (path: string): void => {
+    this.attempts.push(path);
+    throw Object.assign(new Error(`EBUSY: resource busy or locked, rmdir '${path}'`), {
+      code: 'EBUSY',
+    });
+  };
+}
 
 describe('publishDist', () => {
   test('replaces the previous directory and removes files absent from the new build', async () => {
@@ -206,28 +222,46 @@ describe('publishDist', () => {
       await writeFile(join(dist, 'index.html'), 'old');
 
       // The branch where `dist` exists but is *not* a successful publish: the
-      // sidecar failed, and the rollback's own `rmSync(dist)` failed too. A
-      // read-only parent is what makes that removal fail. Cleanup must read
-      // this as "leave the backup alone", never as "the backup is redundant" —
-      // it holds the only copy of the previous bundle.
-      await expect(
-        publishDist(staged, dist, async () => {
-          await chmod(root, 0o555);
-          throw new Error('sidecar failed');
-        })
-      ).rejects.toThrow(AggregateError);
+      // sidecar failed, and the rollback's own removal of the failed bundle
+      // failed too. Cleanup must read this as "leave the backup alone", never
+      // as "the backup is redundant" — it holds the only copy of the previous
+      // bundle.
+      const removal = new RefusingRemoval();
+      const failure = await publishDist(
+        staged,
+        dist,
+        () => Promise.reject(new Error('sidecar failed')),
+        removal.remove
+      ).catch((error: unknown) => error);
 
-      // What the CLI entrypoint does next on a failed build, with the directory
-      // still in the state that broke the rollback.
+      if (!(failure instanceof AggregateError)) {
+        throw new Error(
+          `expected publishDist to reject with: AggregateError | received: ${failure}`
+        );
+      }
+      if (removal.attempts.length !== 1) {
+        throw new Error(
+          `expected rollback removal attempts: 1 | received: ${JSON.stringify(removal.attempts)}`
+        );
+      }
+
+      // What the CLI entrypoint does next on a failed build, with `dist` still
+      // holding the failed bundle.
       removeTempPaths();
 
-      await chmod(root, 0o755);
       const backups = (await readdir(root)).filter((entry) => entry.startsWith('.dist-backup-'));
-      expect(backups).toHaveLength(1);
-      expect(await readFile(join(root, backups[0] as string, 'index.html'), 'utf8')).toBe('old');
+      if (backups.length !== 1) {
+        throw new Error(
+          `expected .dist-backup-* directories after cleanup: 1 | received: ${backups.length}`
+        );
+      }
+      const backup = join(root, backups[0] as string);
+      expect(await readFile(join(backup, 'index.html'), 'utf8')).toBe('old');
       expect(await readFile(join(dist, 'index.html'), 'utf8')).toBe('new');
+      // The operator has to be told where the previous bundle is.
+      expect(failure.message).toContain(backup);
     } finally {
-      await chmod(root, 0o755);
+      removeTempPaths();
       await rm(root, { recursive: true, force: true });
     }
   });
