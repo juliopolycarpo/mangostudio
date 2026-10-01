@@ -250,6 +250,7 @@ export const chatRoutes = (app: Elysia) =>
                 userId: user?.id ?? '',
                 cursor: query.cursor,
                 limit: query.limit ? parseQueryInt(query.limit, 50) : undefined,
+                order: query.order,
               },
               getDb()
             );

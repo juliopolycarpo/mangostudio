@@ -1,4 +1,4 @@
-import type { ContextInfo } from '@mangostudio/shared/chat';
+import type { ContextInfo, MessagesOrder } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { decodeTranscriptCursor } from '../../messages/domain/transcript-cursor';
@@ -15,15 +15,19 @@ export interface GetChatMessagesInput {
    */
   cursor?: string;
   limit?: number;
+  /** `asc` (the default) pages from the oldest end, `desc` from the newest. */
+  order?: MessagesOrder;
 }
 
 export async function getChatMessagesUseCase(input: GetChatMessagesInput, db: Kysely<Database>) {
-  const cursor = input.cursor === undefined ? undefined : decodeTranscriptCursor(input.cursor);
+  const order = input.order ?? 'asc';
+  const cursor =
+    input.cursor === undefined ? undefined : decodeTranscriptCursor(input.cursor, order);
   await assertChatOwnership(input.chatId, input.userId, db);
 
   const { messages, nextCursor } = await listByChatId(
     input.chatId,
-    { cursor, limit: input.limit },
+    { cursor, limit: input.limit, order },
     db
   );
 

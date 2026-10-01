@@ -109,4 +109,21 @@ describe('loadHistory', () => {
     expect(secondPage.messages.map((message) => message.id)).toEqual(['ms-msg-3']);
     expect(secondPage.nextCursor).toBeNull();
   });
+
+  it('pages newest first with the oldest returned message as the next cursor, each page chronological', async () => {
+    const db = getDb();
+    const firstPage = await listByChatId(CHAT_ID, { limit: 2, order: 'desc' }, db);
+
+    expect(firstPage.messages.map((message) => message.id)).toEqual(['ms-msg-2', 'ms-msg-3']);
+    expect(firstPage.nextCursor).toStartWith(`${firstPage.messages[0]?.timestamp}:`);
+
+    const secondPage = await listByChatId(
+      CHAT_ID,
+      { limit: 2, order: 'desc', cursor: decodeTranscriptCursor(firstPage.nextCursor ?? '') },
+      db
+    );
+
+    expect(secondPage.messages.map((message) => message.id)).toEqual(['ms-msg-1']);
+    expect(secondPage.nextCursor).toBeNull();
+  });
 });

@@ -46,6 +46,8 @@ export {
   GeneratedImageArtifactSchema,
   type ListChatMessagesQuery,
   ListChatMessagesQuerySchema,
+  type MessagesOrder,
+  MessagesOrderSchema,
   type SummarizeToNewChatBody,
   SummarizeToNewChatBodySchema,
   type UpdateChatBody,

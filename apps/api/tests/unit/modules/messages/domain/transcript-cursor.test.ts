@@ -29,6 +29,24 @@ describe('transcript cursor', () => {
     });
   });
 
+  it('reads a bare numeric timestamp as before every row of it when paging newest first', () => {
+    expect(decodeTranscriptCursor('1700000000000', 'desc')).toEqual({
+      timestamp: 1_700_000_000_000,
+      rowid: 0,
+    });
+  });
+
+  it.each(['asc', 'desc'] as const)('reads a full position the same under order=%s', (order) => {
+    expect(decodeTranscriptCursor('1700000000000:42', order)).toEqual({
+      timestamp: 1_700_000_000_000,
+      rowid: 42,
+    });
+  });
+
+  it('rejects a malformed cursor under order=desc with the same error', () => {
+    expect(() => decodeTranscriptCursor('abc', 'desc')).toThrow(InvalidTranscriptCursorError);
+  });
+
   it.each([
     ['a fractional timestamp', 1.5],
     ['a negative timestamp', -5],

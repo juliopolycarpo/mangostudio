@@ -1,4 +1,4 @@
-import type { ChatAttachment } from '@mangostudio/shared/chat';
+import type { ChatAttachment, MessagesOrder } from '@mangostudio/shared/chat';
 import type {
   GalleryItem,
   GeneratedImageArtifact,
@@ -100,6 +100,8 @@ interface RichTurn {
 interface ListByChatOptions {
   cursor?: TranscriptCursor;
   limit?: number;
+  /** `asc` (the default) reads from the oldest row, `desc` from the newest. */
+  order?: MessagesOrder;
 }
 
 interface ListHistoryOptions {
@@ -213,16 +215,24 @@ export async function updateMessage(
 }
 
 /**
- * Pages a chat transcript oldest first, ordered by `(timestamp, rowid)`.
+ * Pages a chat transcript by `(timestamp, rowid)`: from the oldest row with
+ * `order: 'asc'` (the default), from the newest with `order: 'desc'`.
  *
  * `timestamp` is not unique (a user turn and its reply can share a
  * millisecond), so `rowid` breaks ties in insertion order and the cursor
  * carries both values. Any index serving the order must end in `timestamp`
  * after `chatId`; SQLite appends `rowid` to every index.
  *
+ * Both orders return each page chronological, oldest row first. `nextCursor`
+ * is the position of the page's edge that faces the unread rows: the last row
+ * for `asc`, the first (oldest) row for `desc`. Reading `desc`, the rows before
+ * the cursor come next, so a page boundary that splits a timestamp tie is
+ * crossed without repeating or skipping a row.
+ *
  * @example
  * const page = await listByChatId(chatId, { limit: 50 }, db);
  * const next = await listByChatId(chatId, { limit: 50, cursor: decodeTranscriptCursor(page.nextCursor) }, db);
+ * const newest = await listByChatId(chatId, { limit: 50, order: 'desc' }, db);
  */
 export async function listByChatId(
   chatId: string,
@@ -230,30 +240,40 @@ export async function listByChatId(
   db: Kysely<Database>
 ): Promise<{ messages: MappedMessage[]; nextCursor: string | null }> {
   const limit = opts.limit ?? 50;
+  const newestFirst = opts.order === 'desc';
+  const direction = newestFirst ? 'desc' : 'asc';
 
   let q = db
     .selectFrom('messages')
     .selectAll()
     .select(sql<number>`rowid`.as('rowid'))
     .where('chatId', '=', chatId)
-    .orderBy('timestamp', 'asc')
-    .orderBy(sql`rowid`, 'asc');
+    .orderBy('timestamp', direction)
+    .orderBy(sql`rowid`, direction);
 
   if (opts.cursor) {
     const { timestamp, rowid } = opts.cursor;
-    q = q.where(sql<boolean>`(timestamp, rowid) > (${timestamp}, ${rowid})`);
+    q = q.where(
+      newestFirst
+        ? sql<boolean>`(timestamp, rowid) < (${timestamp}, ${rowid})`
+        : sql<boolean>`(timestamp, rowid) > (${timestamp}, ${rowid})`
+    );
   }
 
   const fetched = await q.limit(limit + 1).execute();
 
+  // The look-ahead row proves another page exists and is not part of this one.
+  // `fetched` is in query order, so its last row is the edge facing that page.
   let nextCursor: string | null = null;
   if (fetched.length > limit) {
     fetched.pop();
-    const last = fetched.at(-1);
-    nextCursor = last
-      ? encodeTranscriptCursor({ timestamp: last.timestamp, rowid: last.rowid })
+    const edge = fetched.at(-1);
+    nextCursor = edge
+      ? encodeTranscriptCursor({ timestamp: edge.timestamp, rowid: edge.rowid })
       : null;
   }
+  // A page is chronological whichever end it was cut from.
+  if (newestFirst) fetched.reverse();
 
   // `rowid` is a paging detail and must not leak into the mapped message.
   const rows = fetched.map(({ rowid: _rowid, ...row }) => row);
