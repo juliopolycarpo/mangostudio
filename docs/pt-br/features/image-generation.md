@@ -90,9 +90,11 @@ A galeria em `apps/frontend/src/features/gallery/GalleryPage.tsx` oferece:
 ### Query Da Galeria
 
 ```typescript
-listGeneratedImagesForGallery(userId, { cursor, limit });
-// Retorna: { items: GalleryItem[], nextCursor?: string }
+listGeneratedImagesForGallery(userId, { cursor, limit }, db);
+// Retorna: GalleryEntry<GalleryItem>[] — até limit + 1 entradas, cada uma { item, source: 'artifact', rowid }
 ```
+
+O repositório retorna entradas brutas, não uma página. O `listGalleryUseCase` as mescla com as mensagens de imagem legadas sob uma única ordem total (`createdAt` decrescente, depois a origem, depois `rowid` decrescente), corta em `limit` e monta a página `{ items, nextCursor }`. O cursor é `<artifact|message>:<createdAt>:<rowid>`; um timestamp numérico puro de um servidor antigo ainda é aceito, e um cursor vazio ou malformado é rejeitado com 400.
 
 ## Imagens Geradas Vs Uploads
 
