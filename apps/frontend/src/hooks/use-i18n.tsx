@@ -1,6 +1,15 @@
 import type { Locale, Messages } from '@mangostudio/shared/i18n';
 import type { ReactNode } from 'react';
-import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  use,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { StartupSpinner } from '@/components/layout/StartupSpinner';
 import {
   detectLocale,
@@ -34,6 +43,9 @@ interface I18nProviderProps {
  * settles, a spinner renders instead of English text that would flip to
  * Portuguese a moment later. A runtime switch keeps the current dictionary on
  * screen until the next one arrives, and a failed load renders the eager one.
+ * `document.documentElement.lang` follows the dictionary on screen, not the
+ * saved preference, so it is `en` after a failed load and while the startup
+ * spinner shows (the `index.html` default).
  *
  * Usage: `<I18nProvider><App /></I18nProvider>`
  */
@@ -54,6 +66,11 @@ export function I18nProvider({ children, dictionaries = localeDictionaries }: I1
       cancelled = true;
     };
   }, [active, dictionaries, startupLocale]);
+
+  const renderedLocale = active?.locale;
+  useLayoutEffect(() => {
+    if (renderedLocale) document.documentElement.lang = renderedLocale;
+  }, [renderedLocale]);
 
   const changeLocale = useCallback(
     (next: Locale) => {
