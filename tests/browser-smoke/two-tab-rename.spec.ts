@@ -10,16 +10,22 @@ import { dismissWorkdirPicker } from './support/workdir-picker';
  * activity invalidation to the owner's sockets and to nobody else's.
  */
 
-const SYNC_TIMEOUT_MS = 5_000;
+// Generous on purpose: the reload marker and the socket count, not this bound,
+// are what tell "the hub signalled the tab" from "the tab started over".
+const SYNC_TIMEOUT_MS = 15_000;
+const SUBSCRIBE_TIMEOUT_MS = 20_000;
 const NO_RELOAD_MARKER = '__twoTabRenameNoReload';
-const QUIET_MS = 1_500;
-const QUIET_LIMIT_MS = 15_000;
+const QUIET_MS = 2_500;
+const QUIET_LIMIT_MS = 20_000;
 const SMOKE_PASSWORD = 'smoke-pass-123';
 
 /** What a page's realtime socket has done, observed from the outside. */
 interface RealtimeProbe {
-  /** Resolves once the hub has acknowledged the page's subscription to the activity topic. */
-  readonly subscribed: Promise<void>;
+  /**
+   * Resolves once the hub has acknowledged the page's subscription to the
+   * activity topic; rejects, naming `label`, after `SUBSCRIBE_TIMEOUT_MS`.
+   */
+  subscribed(label: string): Promise<void>;
   /** How many realtime sockets the page has opened; a second one is a reconnect. */
   opened(): number;
   /** How many `invalidate` frames for the activity topic have arrived. */
@@ -33,26 +39,37 @@ interface RealtimeProbe {
  * @example
  * const probe = watchRealtime(page);
  * await page.goto('/');
- * await probe.subscribed;
+ * await probe.subscribed('first tab');
  */
 function watchRealtime(page: Page): RealtimeProbe {
   let received = 0;
   let sockets = 0;
-  let markSubscribed: () => void = () => undefined;
-  const subscribed = new Promise<void>((resolve) => {
-    markSubscribed = resolve;
-  });
+  let ack = false;
 
   page.on('websocket', (socket) => {
     sockets += 1;
     socket.on('framereceived', ({ payload }) => {
       const text = typeof payload === 'string' ? payload : payload.toString('utf8');
-      if (text.includes('"subscribed"') && text.includes('"activity"')) markSubscribed();
+      if (text.includes('"subscribed"') && text.includes('"activity"')) ack = true;
       if (text.includes('"invalidate"') && text.includes('"activity"')) received += 1;
     });
   });
 
-  return { subscribed, opened: () => sockets, invalidations: () => received };
+  return {
+    async subscribed(label) {
+      const deadline = Date.now() + SUBSCRIBE_TIMEOUT_MS;
+      while (!ack) {
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `expected ${label} activity subscription ack within ${SUBSCRIBE_TIMEOUT_MS} ms | received: none (${sockets} socket(s) opened)`
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    },
+    opened: () => sockets,
+    invalidations: () => received,
+  };
 }
 
 /** The chat-list row whose title is exactly `title`, in the page's sidebar. */
@@ -92,11 +109,16 @@ async function createChat(page: Page, title: string): Promise<string> {
   return ((await created.json()) as { id: string }).id;
 }
 
-async function openShell(page: Page, probe: RealtimeProbe, title: string): Promise<void> {
+async function openShell(
+  page: Page,
+  probe: RealtimeProbe,
+  title: string,
+  label: string
+): Promise<void> {
   await page.goto('/');
   await dismissWorkdirPicker(page);
   await expect(sidebarRow(page, title)).toBeVisible({ timeout: 20_000 });
-  await probe.subscribed;
+  await probe.subscribed(label);
 }
 
 /**
@@ -140,7 +162,9 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
   context,
   browser,
 }) => {
-  test.setTimeout(60_000);
+  // Above the sum of the bounded waits below, so a slow runner reaches one of
+  // their named failures instead of the generic test timeout.
+  test.setTimeout(180_000);
   const stamp = Date.now();
   const ownTitle = `Two-tab rename ${stamp}`;
   const renamedTitle = `Two-tab renamed ${stamp}`;
@@ -160,14 +184,15 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
       strangerListRequests.push(request.method());
   });
   let chatId: string | undefined;
+  let strangerChatId: string | undefined;
 
   try {
     chatId = await createChat(first, ownTitle);
-    await createChat(strangerPage, strangerTitle);
+    strangerChatId = await createChat(strangerPage, strangerTitle);
 
-    await openShell(first, probes.first, ownTitle);
-    await openShell(second, probes.second, ownTitle);
-    await openShell(strangerPage, probes.stranger, strangerTitle);
+    await openShell(first, probes.first, ownTitle, 'first tab');
+    await openShell(second, probes.second, ownTitle, 'second tab');
+    await openShell(strangerPage, probes.stranger, strangerTitle, 'other user tab');
 
     // Every shell is still settling: a landing creates a chat, which signals
     // its account's sockets. Only what arrives after that goes quiet can be
@@ -232,8 +257,37 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
       probes.stranger.invalidations(),
       `expected other user's activity invalidate frames after the rename: ${strangerBefore} | received: ${probes.stranger.invalidations()}`
     ).toBe(strangerBefore);
+
+    // The negative checks above only mean something if that tab's socket was
+    // alive and listening the whole time. Prove it: a write of the other
+    // account's own must reach it.
+    const renamedByOwner = await strangerPage.request.put(`/api/chats/${strangerChatId}`, {
+      data: { title: `${strangerTitle} (touched)` },
+    });
+    expect(
+      renamedByOwner.ok(),
+      `expected other user's own chat update: 2xx | received: ${renamedByOwner.status()}`
+    ).toBe(true);
+    await expect
+      .poll(() => probes.stranger.invalidations(), {
+        message: `expected other user's activity invalidate frames after its own update: > ${strangerBefore} | received: none (socket not listening)`,
+        timeout: SYNC_TIMEOUT_MS,
+      })
+      .toBeGreaterThan(strangerBefore);
   } finally {
-    if (chatId) await first.request.delete(`/api/chats/${chatId}`);
+    const removed = await Promise.all([
+      chatId ? first.request.delete(`/api/chats/${chatId}`) : undefined,
+      strangerChatId ? strangerPage.request.delete(`/api/chats/${strangerChatId}`) : undefined,
+    ]);
+    // Soft, so a failed cleanup never hides the failure that led here. The
+    // other account itself stays: the hub runs on a throwaway home.
+    for (const response of removed) {
+      if (response) {
+        expect
+          .soft(response.ok(), `expected chat cleanup: 2xx | received: ${response.status()}`)
+          .toBe(true);
+      }
+    }
     await stranger.close();
     await second.close();
   }
