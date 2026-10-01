@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'bun:test';
-import { createReadinessCache } from '../../../../src/services/providers/core/readiness-cache';
+import {
+  createReadinessCache,
+  createReadinessCacheKey,
+} from '../../../../src/services/providers/core/readiness-cache';
 
 function expectCount(label: string, expected: number, received: number): void {
   if (expected === received) return;
   throw new Error(`expected ${label}: ${expected} | received: ${received}`);
 }
+
+describe('createReadinessCacheKey', () => {
+  it('joins user and model with a NUL separator', () => {
+    const received = createReadinessCacheKey('user-1', 'model-a');
+
+    expect(received).toBe('user-1\u0000model-a');
+    expect(received.length).toBe('user-1'.length + 1 + 'model-a'.length);
+  });
+
+  it('keeps the separator when no model is named', () => {
+    expect(createReadinessCacheKey('user-1')).toBe('user-1\u0000');
+  });
+});
 
 describe('createReadinessCache', () => {
   it('deduplicates concurrent loads for the same key', async () => {
@@ -68,6 +84,26 @@ describe('createReadinessCache', () => {
 
     expect(refreshed).toBe('value-3');
     expect(untouched).toBe('value-2');
+  });
+
+  it('clearByUserPrefix clears exactly the named user, including unmodelled keys', async () => {
+    let calls = 0;
+    const cache = createReadinessCache<string>();
+
+    const load = () => {
+      calls += 1;
+      return Promise.resolve(`value-${calls}`);
+    };
+
+    await cache.get(createReadinessCacheKey('user-1', 'model-a'), load);
+    await cache.get(createReadinessCacheKey('user-1'), load);
+    await cache.get(createReadinessCacheKey('user-10', 'model-a'), load);
+
+    cache.clearByUserPrefix('user-1');
+
+    expect(await cache.get(createReadinessCacheKey('user-1', 'model-a'), load)).toBe('value-4');
+    expect(await cache.get(createReadinessCacheKey('user-1'), load)).toBe('value-5');
+    expect(await cache.get(createReadinessCacheKey('user-10', 'model-a'), load)).toBe('value-3');
   });
 
   /**
