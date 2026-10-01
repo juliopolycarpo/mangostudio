@@ -1,5 +1,13 @@
 import { tmpdir } from 'node:os';
-import { type APIResponse, expect, type Page, type Route, test } from '@playwright/test';
+import {
+  type APIResponse,
+  type Browser,
+  type BrowserContext,
+  expect,
+  type Page,
+  type Route,
+  test,
+} from '@playwright/test';
 
 /**
  * A chat longer than one page opens on its NEWEST messages and loads older ones
@@ -20,6 +28,13 @@ import { type APIResponse, expect, type Page, type Route, test } from '@playwrig
 const TOTAL = 130;
 const PAGE_SIZE = 50;
 const SEED_CONCURRENCY = 10;
+const SMOKE_PASSWORD = 'smoke-pass-123';
+/** The longest any single condition below is waited on. */
+const WAIT_MS = 15_000;
+/** Fifty rows of about 150 px are 19 turns of the wheel; this is the bound, not the pace. */
+const MAX_WHEEL_TURNS = 60;
+/** How often one message may be refused by the limiter before the spec gives up. */
+const MAX_LIMITER_RETRIES = 3;
 /** What the app itself may ask of the limiter between seeding and the end of the spec. */
 const PAGE_LOAD_REQUESTS = 150;
 /** A prepended page may not move the row the reader was looking at by more than this. */
@@ -96,7 +111,7 @@ async function expectEdgeVisible(
       received,
       `expected ${edge} message visible: ${expected} | received: ${received} (${when})`
     ).toBe(expected);
-  }).toPass({ timeout: 20_000 });
+  }).toPass({ timeout: WAIT_MS });
 }
 
 /** Moves the pointer over the transcript and turns the wheel: a reader's gesture. */
@@ -152,7 +167,7 @@ async function createChat(page: Page, title: string): Promise<string> {
  * failing on it.
  */
 async function postMessage(page: Page, chatId: string, position: number): Promise<void> {
-  for (;;) {
+  for (let refused = 0; refused <= MAX_LIMITER_RETRIES; refused++) {
     const response = await page.request.post('/api/messages', {
       data: {
         id: `${chatId}-${label(position)}`,
@@ -172,6 +187,9 @@ async function postMessage(page: Page, chatId: string, position: number): Promis
     const retryAfterSeconds = Number(response.headers()['retry-after'] ?? 1);
     await new Promise((resolve) => setTimeout(resolve, Math.max(1, retryAfterSeconds) * 1000));
   }
+  throw new Error(
+    `expected ${label(position)} stored within ${MAX_LIMITER_RETRIES} limiter windows | received: 429 each time`
+  );
 }
 
 async function seedMessages(page: Page, chatId: string, from: number, to: number) {
@@ -225,7 +243,7 @@ type OlderPageHold = ReturnType<typeof holdOlderPages>;
  * none to ask for because the first message is already in view.
  */
 async function scrollUpUntilRequested(page: Page, hold: OlderPageHold): Promise<void> {
-  for (let turn = 0; turn < 100 && !hold.requested(); turn++) {
+  for (let turn = 0; turn < MAX_WHEEL_TURNS && !hold.requested(); turn++) {
     const view = await readView(page);
     if (visibleLabels(view).includes(label(1))) return;
     if ((view?.scrollTop ?? 1) <= 0) break;
@@ -233,7 +251,8 @@ async function scrollUpUntilRequested(page: Page, hold: OlderPageHold): Promise<
     await wheel(page, -400);
     await expect
       .poll(
-        async () => hold.requested() || ((await readView(page))?.scrollTop ?? before) !== before
+        async () => hold.requested() || ((await readView(page))?.scrollTop ?? before) !== before,
+        { message: 'expected the wheel to move the transcript up', timeout: WAIT_MS }
       )
       .toBe(true);
   }
@@ -241,6 +260,7 @@ async function scrollUpUntilRequested(page: Page, hold: OlderPageHold): Promise<
     .poll(async () => hold.requested() || visibleLabels(await readView(page)).includes(label(1)), {
       message:
         'expected an older page requested at the top of the loaded rows | received: no request',
+      timeout: WAIT_MS,
     })
     .toBe(true);
 }
@@ -282,11 +302,57 @@ async function traceRow(page: Page, text: string): Promise<() => Promise<number[
     );
 }
 
+/**
+ * Signs up an account of the spec's own, in a context of its own, and finishes
+ * its first-run setup so its pages open on the chat shell rather than on
+ * `/welcome`. The suite's shared account is not used: this spec leaves a
+ * 130-message chat behind, and another spec running in parallel (workers are not
+ * limited outside CI) must neither see it in its chat list nor be seen by it.
+ */
+async function newSignedInContext(browser: Browser, run: string): Promise<BrowserContext> {
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const signup = await context.request.post('/api/auth/sign-up/email', {
+    data: {
+      name: 'Transcript Paging',
+      email: `transcript-paging-${run}@test.local`,
+      password: SMOKE_PASSWORD,
+    },
+  });
+  noteLimiter(signup);
+  expect(signup.ok(), `expected signup: 2xx | received: ${signup.status()}`).toBe(true);
+  const setup = await context.request.put('/api/settings/app', {
+    data: {
+      profileSettings: {
+        default: {
+          onboarding: { welcomeAcknowledged: true, skippedSteps: [], completedAt: Date.now() },
+        },
+      },
+    },
+  });
+  noteLimiter(setup);
+  expect(setup.ok(), `expected first-run setup: 2xx | received: ${setup.status()}`).toBe(true);
+  return context;
+}
+
 test('a 130-message chat opens on its newest messages and loads older ones on demand', async ({
-  page,
+  browser,
 }, testInfo) => {
-  test.setTimeout(120_000);
+  // Above the sum of the waits that can really stack: two limiter windows
+  // (before seeding and before opening, about a minute each), the open, three
+  // older pages (a request and a landing each) and the refetch, every one of
+  // them capped at WAIT_MS: 2 x 61 + 8 x 15 = 242 s. Each wheel turn between
+  // them resolves in milliseconds, or fails by name at the cap.
+  test.setTimeout(300_000);
   const run = `${Date.now()}-${testInfo.repeatEachIndex}`;
+  const context = await newSignedInContext(browser, run);
+  try {
+    await readTranscriptNewestFirst(await context.newPage(), run);
+  } finally {
+    await context.close();
+  }
+});
+
+async function readTranscriptNewestFirst(page: Page, run: string): Promise<void> {
   const title = `Transcript paging ${run}`;
   const otherTitle = `Transcript paging other ${run}`;
 
@@ -329,7 +395,10 @@ test('a 130-message chat opens on its newest messages and loads older ones on de
       .poll(
         async () =>
           (await readView(page))?.visible.find((row) => row.text === anchor.text)?.index ?? -1,
-        { message: `expected ${anchor.text} to move down when an older page lands` }
+        {
+          message: `expected ${anchor.text} to move down when an older page lands`,
+          timeout: WAIT_MS,
+        }
       )
       .toBeGreaterThan(anchor.index);
 
@@ -367,6 +436,7 @@ test('a 130-message chat opens on its newest messages and loads older ones on de
     await expect
       .poll(async () => (await readView(page))?.scrollTop ?? before, {
         message: 'expected the wheel to move the transcript down',
+        timeout: WAIT_MS,
       })
       .toBeGreaterThan(before);
   }
@@ -385,4 +455,4 @@ test('a 130-message chat opens on its newest messages and loads older ones on de
   await openChat(page, otherTitle);
   await openChat(page, title);
   await expectEdgeVisible(page, 'last', label(TOTAL + 1), 'after the refetch');
-});
+}
