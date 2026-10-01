@@ -101,11 +101,17 @@ export function createUnifiedModelCatalogService(
   const refreshPromises = new Map<string, Promise<ModelCatalogResponse>>();
   const dirtySnapshots = new Set<string>();
 
+  /** Single insertion point for snapshots so every path respects the entry cap. */
+  function storeSnapshot(userId: string, snapshot: ModelCatalogResponse): void {
+    snapshots.set(userId, snapshot);
+    evictOldest(snapshots);
+  }
+
   function getSnapshot(userId: string): ModelCatalogResponse {
     const existing = snapshots.get(userId);
     if (existing) return existing;
     const fresh = createEmptySnapshot();
-    snapshots.set(userId, fresh);
+    storeSnapshot(userId, fresh);
     return fresh;
   }
 
@@ -144,7 +150,7 @@ export function createUnifiedModelCatalogService(
     const discoveredText = fullCatalog.filter((m) => m.capabilities?.text);
     const discoveredImage = fullCatalog.filter((m) => m.capabilities?.image);
 
-    snapshots.set(userId, {
+    storeSnapshot(userId, {
       ...snap,
       configured: true,
       status: 'ready',
@@ -204,8 +210,7 @@ export function createUnifiedModelCatalogService(
 
         const snap = getSnapshot(userId);
         snap.lastSyncedAt = now();
-        snapshots.set(userId, snap);
-        evictOldest(snapshots);
+        storeSnapshot(userId, snap);
 
         return snap;
       } catch (error) {
@@ -221,7 +226,7 @@ export function createUnifiedModelCatalogService(
           status: 'error',
           error: message,
         };
-        snapshots.set(userId, snap);
+        storeSnapshot(userId, snap);
         return snap;
       } finally {
         refreshPromises.delete(userId);
