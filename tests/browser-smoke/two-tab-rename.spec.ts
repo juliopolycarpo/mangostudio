@@ -11,6 +11,7 @@ import { dismissWorkdirPicker } from './support/workdir-picker';
  */
 
 const SYNC_TIMEOUT_MS = 5_000;
+const NO_RELOAD_MARKER = '__twoTabRenameNoReload';
 const QUIET_MS = 1_500;
 const QUIET_LIMIT_MS = 15_000;
 const SMOKE_PASSWORD = 'smoke-pass-123';
@@ -19,6 +20,8 @@ const SMOKE_PASSWORD = 'smoke-pass-123';
 interface RealtimeProbe {
   /** Resolves once the hub has acknowledged the page's subscription to the activity topic. */
   readonly subscribed: Promise<void>;
+  /** How many realtime sockets the page has opened; a second one is a reconnect. */
+  opened(): number;
   /** How many `invalidate` frames for the activity topic have arrived. */
   invalidations(): number;
 }
@@ -34,12 +37,14 @@ interface RealtimeProbe {
  */
 function watchRealtime(page: Page): RealtimeProbe {
   let received = 0;
+  let sockets = 0;
   let markSubscribed: () => void = () => undefined;
   const subscribed = new Promise<void>((resolve) => {
     markSubscribed = resolve;
   });
 
   page.on('websocket', (socket) => {
+    sockets += 1;
     socket.on('framereceived', ({ payload }) => {
       const text = typeof payload === 'string' ? payload : payload.toString('utf8');
       if (text.includes('"subscribed"') && text.includes('"activity"')) markSubscribed();
@@ -47,7 +52,7 @@ function watchRealtime(page: Page): RealtimeProbe {
     });
   });
 
-  return { subscribed, invalidations: () => received };
+  return { subscribed, opened: () => sockets, invalidations: () => received };
 }
 
 /** The chat-list row whose title is exactly `title`, in the page's sidebar. */
@@ -176,6 +181,12 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
     );
     const strangerRequestsBefore = strangerListRequests.length;
     const before = probes.second.invalidations();
+    const socketsBefore = probes.second.opened();
+    // A reload would drop this; it is how the spec tells "the hub signalled the
+    // tab" from "the tab started over".
+    await second.evaluate((marker) => {
+      (window as unknown as Record<string, unknown>)[marker] = true;
+    }, NO_RELOAD_MARKER);
     const strangerBefore = probes.stranger.invalidations();
 
     const startedAt = Date.now();
@@ -190,6 +201,18 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
     const elapsed = Date.now() - startedAt;
     test.info().annotations.push({ type: 'sync-ms', description: String(elapsed) });
     await expect(sidebarRow(second, ownTitle)).toHaveCount(0);
+    const survived = await second.evaluate(
+      (marker) => (window as unknown as Record<string, unknown>)[marker] === true,
+      NO_RELOAD_MARKER
+    );
+    expect(
+      survived,
+      'expected second tab: same document after the rename | received: reloaded'
+    ).toBe(true);
+    expect(
+      probes.second.opened(),
+      `expected second tab realtime sockets: ${socketsBefore} (no reconnect) | received: ${probes.second.opened()}`
+    ).toBe(socketsBefore);
     expect(
       probes.second.invalidations(),
       'expected second tab: an activity invalidate frame after the rename | received: none'
