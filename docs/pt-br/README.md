@@ -40,6 +40,10 @@ curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/downloa
 mangostudio setup           # segredo, serviço, início e abre o navegador
 ```
 
+Em um Alpine (musl) puro, rode `apk add bash curl libstdc++` antes: o instalador é um
+script bash, e o hub linka `libstdc++` dinamicamente. Sem ele a verificação de versão do
+instalador falha com a mensagem do loader e esta mesma dica.
+
 `setup` é o único comando de que uma instalação nova precisa: gera um segredo de
 autenticação se não houver, pergunta se o hub deve continuar rodando depois do
 logout, inicia (ou reaproveita um já em execução) e abre. Por SSH ele imprime o

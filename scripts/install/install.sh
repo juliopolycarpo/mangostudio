@@ -535,17 +535,79 @@ extract_archive() {
   printf '%s\n' "$tmp_install"
 }
 
+# The one-line remedy for a hub the musl loader could not start, or nothing.
+# Keyed on musl's own loader message ("Error loading shared library <lib>: No
+# such file or directory"), so a glibc host or an unrelated failure gets no
+# apk advice. $1 is the probe's stderr.
+missing_library_hint() {
+  local line lib='' package
+  while IFS= read -r line; do
+    case "$line" in
+      *'Error loading shared library '*': No such file or directory'*)
+        lib="${line#*Error loading shared library }"
+        lib="${lib%%:*}"
+        break
+        ;;
+    esac
+  done <<EOF
+$1
+EOF
+  [ -n "$lib" ] || return 0
+
+  case "$lib" in
+    libstdc++*) package='libstdc++' ;;
+    libgcc_s*) package='libgcc' ;;
+    *) package='' ;;
+  esac
+
+  if [ -n "$package" ]; then
+    printf 'hint: %s is not installed; on Alpine run: apk add %s\n' "$lib" "$package"
+  else
+    printf 'hint: %s is not installed; install the package that provides it\n' "$lib"
+  fi
+}
+
 # Run "<dir>/mangostudio --version" and compare to what we meant to install,
 # before the pointer moves. remove_on_failure=1 for a directory this run just
 # created (fresh install/local/canary); 0 for --use/--rollback, which reuse a
-# directory that predates this run.
+# directory that predates this run. A probe that exits non-zero or writes to
+# stderr has its status and stderr appended to the error, so the reason the
+# hub did not run (a missing shared library, say) reaches the user.
 smoke_or_fail() {
-  local dir="$1" expected="$2" remove_on_failure="$3" actual
-  actual="$("${dir}/mangostudio" --version 2>/dev/null)" || actual=''
+  local dir="$1" expected="$2" remove_on_failure="$3" actual status
+  local scratch stderr_text message hint
+  scratch="$(mktemp -d)"
+  printf '0\n' >"${scratch}/status"
+  # stderr goes through a pipe, never to disk: the reader keeps the first ten
+  # lines and drains the rest, so a hub that floods stderr cannot fill /tmp.
+  stderr_text="$(
+    { "${dir}/mangostudio" --version 2>&1 >"${scratch}/stdout" ||
+      printf '%s\n' "$?" >"${scratch}/status"; } | { head -n 10; cat >/dev/null; }
+  )"
+  status="$(cat "${scratch}/status")"
+  actual="$(cat "${scratch}/stdout")"
+  rm -rf "$scratch"
+  [ "$status" -ne 0 ] && actual=''
   [ "$actual" = "$expected" ] && return 0
 
   [ "$remove_on_failure" = '1' ] && rm -rf "$dir"
-  fail "expected version: ${expected} | received: ${actual:-<none>}"
+  message="expected version: ${expected} | received: ${actual:-<none>}"
+  if [ "$status" -ne 0 ]; then
+    message="${message}
+  probe: ${dir}/mangostudio --version | expected: exit status: 0 | received: exit status: ${status}"
+  fi
+  if [ -n "$stderr_text" ]; then
+    # Continuation lines line up under the first so the block reads as one.
+    stderr_text="$(printf '%s\n' "$stderr_text" | sed '2,$s/^/          /')"
+    message="${message}
+  stderr: ${stderr_text}"
+  fi
+  hint="$(missing_library_hint "$stderr_text")"
+  if [ -n "$hint" ]; then
+    message="${message}
+  ${hint}"
+  fi
+  fail "$message"
 }
 
 # --- Actions -------------------------------------------------------------
