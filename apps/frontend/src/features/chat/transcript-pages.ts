@@ -42,7 +42,10 @@ const MAX_CATCH_UP_PAGES = 4;
  * With `background`, the read is read-ahead: it never throws. An aborted or
  * failed read leaves the cache exactly as it is and reports the failure through
  * `background.onFailure`, so the query never enters an error state, is not
- * retried, and nothing shows that the read-ahead existed.
+ * retried, and nothing shows that the read-ahead existed. Once the reader is
+ * waiting on the page (`isReaderWaiting`), a failure that is not an abort is
+ * thrown like any reader-requested page's: swallowing it would leave the reader
+ * at the top with no indicator, no error and no retry.
  *
  * @example
  * const next = await loadOlderPage(() => query.state.data, fetchPage, { signal, onFailure });
@@ -50,7 +53,11 @@ const MAX_CATCH_UP_PAGES = 4;
 export async function loadOlderPage(
   readCache: () => MessagesCache | undefined,
   fetchPage: FetchMessagesPage,
-  background?: { readonly signal: AbortSignal; readonly onFailure: () => void }
+  background?: {
+    readonly signal: AbortSignal;
+    readonly isReaderWaiting: () => boolean;
+    readonly onFailure: () => void;
+  }
 ): Promise<MessagesCache> {
   const started = readCache();
   const cursor = started?.pages.at(-1)?.nextCursor ?? null;
@@ -61,7 +68,9 @@ export async function loadOlderPage(
     page = await fetchPage(cursor, background?.signal);
   } catch (error) {
     if (!background) throw error;
-    if (!background.signal.aborted) background.onFailure();
+    if (background.signal.aborted) return readCache() ?? started;
+    if (background.isReaderWaiting()) throw error;
+    background.onFailure();
     return readCache() ?? started;
   }
 

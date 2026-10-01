@@ -345,6 +345,38 @@ describe('read-ahead is additive', () => {
   });
 });
 
+describe('a reader who joins a read-ahead that then fails', () => {
+  it('sees the failure and can ask again, instead of waiting at the top with nothing shown', async () => {
+    serve(220);
+    api.holdOlder();
+    api.refuseOlder(429);
+    const { result } = renderTranscript();
+    await opened(result);
+    await idle.runIdle();
+    await waitFor(() => expectOlderRequests(1));
+
+    // The reader reaches the top while the read-ahead page is still in flight...
+    act(() => {
+      result.current.older.load();
+    });
+    await waitFor(() => expect(result.current.older.isLoading).toBe(true));
+
+    // ...and the hub refuses it: this is the reader's page now, so it is a failure.
+    api.release();
+    await waitFor(() =>
+      expect(`older failed: ${result.current.older.failed}`).toBe('older failed: true')
+    );
+    expect(`loading older: ${result.current.older.isLoading}`).toBe('loading older: false');
+
+    // Scrolling asks again, and the page loads once the hub recovers.
+    api.stopRefusing();
+    act(() => {
+      result.current.older.load();
+    });
+    await waitFor(() => expectTranscript(result.current.messages, 'msg-121 .. msg-220 (100)'));
+  });
+});
+
 describe('read-ahead ends with the transcript', () => {
   it('aborts the page in flight when the transcript unmounts, and asks for nothing more', async () => {
     serve(220);

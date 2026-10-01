@@ -127,11 +127,14 @@ export function wantsOlderPage(input: {
 /**
  * A background fetch of one older page, as the query's persister sees it.
  * Aborting `controller` ends the request; `failed` is set when it did not
- * complete for any other reason.
+ * complete for any other reason. `readerWaiting` is set when the reader reached
+ * the top while the page was in flight: the page is theirs now, so a failure is
+ * theirs to see and retry, not a background one to swallow.
  */
 export interface BackgroundRun {
   readonly controller: AbortController;
   failed: boolean;
+  readerWaiting: boolean;
 }
 
 const pendingRuns = new WeakMap<object, BackgroundRun>();

@@ -244,6 +244,7 @@ const boundedTranscriptRefetch = (chatId: string) =>
         (cursor, signal) => fetchMessagesPage(chatId, cursor, signal),
         background && {
           signal: background.controller.signal,
+          isReaderWaiting: () => background.readerWaiting,
           onFailure: () => {
             background.failed = true;
           },

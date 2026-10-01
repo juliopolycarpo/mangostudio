@@ -128,7 +128,9 @@ export function useChatPageMessages({ chatId, seedContextInfo }: UseChatPageMess
   const load = useCallback(() => {
     if (!chatId || !hasNextPage) return;
     if (queryClient.isFetching({ queryKey, exact: true }) > 0) {
-      if (backgroundRef.current) markWaiting();
+      if (!backgroundRef.current) return;
+      backgroundRef.current.readerWaiting = true;
+      markWaiting();
       return;
     }
     markWaiting();
@@ -148,10 +150,17 @@ export function useChatPageMessages({ chatId, seedContextInfo }: UseChatPageMess
     const query = queryClient.getQueryCache().find({ queryKey, exact: true });
     if (!query) return false;
 
-    const run: BackgroundRun = { controller: new AbortController(), failed: false };
+    const run: BackgroundRun = {
+      controller: new AbortController(),
+      failed: false,
+      readerWaiting: false,
+    };
     backgroundRef.current = run;
     registerBackgroundRun(query, run);
     void fetchNextPage({ cancelRefetch: false }).finally(() => {
+      // A refetch can cancel the fetch without ending the request: make sure
+      // nothing keeps running once the run is over (a no-op when it finished).
+      run.controller.abort();
       dropBackgroundRun(query, run);
       if (backgroundRef.current === run) backgroundRef.current = null;
       if (!run.failed) return;

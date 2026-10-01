@@ -250,6 +250,7 @@ describe('loadOlderPage', () => {
 
     const next = await loadOlderPage(() => current, failing, {
       signal: new AbortController().signal,
+      isReaderWaiting: () => false,
       onFailure: () => {
         failures++;
       },
@@ -270,6 +271,7 @@ describe('loadOlderPage', () => {
 
     const next = await loadOlderPage(() => current, aborted, {
       signal: controller.signal,
+      isReaderWaiting: () => false,
       onFailure: () => {
         failures++;
       },
@@ -277,5 +279,42 @@ describe('loadOlderPage', () => {
 
     expect(next).toBe(current);
     expect(`failures reported: ${failures}`).toBe('failures reported: 0');
+  });
+
+  it('throws a failure the reader is waiting on, instead of swallowing it as a background one', async () => {
+    const failing: FetchMessagesPage = () => Promise.reject(new Error('boom'));
+    let failures = 0;
+
+    await expect(
+      loadOlderPage(() => cache(page(71, 120)), failing, {
+        signal: new AbortController().signal,
+        isReaderWaiting: () => true,
+        onFailure: () => {
+          failures++;
+        },
+      })
+    ).rejects.toThrow('boom');
+    expect(`failures reported: ${failures}`).toBe('failures reported: 0');
+  });
+
+  it('still leaves the cache alone when a fetch the reader waits on is aborted by leaving the chat', async () => {
+    const current = cache(page(71, 120));
+    const controller = new AbortController();
+    const aborted: FetchMessagesPage = () => {
+      controller.abort();
+      return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+    };
+
+    let failures = 0;
+    const next = await loadOlderPage(() => current, aborted, {
+      signal: controller.signal,
+      isReaderWaiting: () => true,
+      onFailure: () => {
+        failures++;
+      },
+    });
+    expect(`failures reported: ${failures}`).toBe('failures reported: 0');
+
+    expect(next).toBe(current);
   });
 });

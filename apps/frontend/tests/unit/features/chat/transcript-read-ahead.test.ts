@@ -216,7 +216,7 @@ describe('scheduleIdle', () => {
 describe('background runs', () => {
   it('hands a registered run to the fetch that claims it, once', () => {
     const query = {};
-    const run = { controller: new AbortController(), failed: false };
+    const run = { controller: new AbortController(), failed: false, readerWaiting: false };
     registerBackgroundRun(query, run);
 
     expect(takeBackgroundRun(query)).toBe(run);
@@ -224,13 +224,16 @@ describe('background runs', () => {
   });
 
   it('does not hand a run to a different query', () => {
-    registerBackgroundRun({}, { controller: new AbortController(), failed: false });
+    registerBackgroundRun(
+      {},
+      { controller: new AbortController(), failed: false, readerWaiting: false }
+    );
     expect(takeBackgroundRun({})).toBeUndefined();
   });
 
   it('forgets a run that never claimed its fetch', () => {
     const query = {};
-    const run = { controller: new AbortController(), failed: false };
+    const run = { controller: new AbortController(), failed: false, readerWaiting: false };
     registerBackgroundRun(query, run);
     dropBackgroundRun(query, run);
 
@@ -239,8 +242,8 @@ describe('background runs', () => {
 
   it('does not drop a newer run when an older one is dropped', () => {
     const query = {};
-    const older = { controller: new AbortController(), failed: false };
-    const newer = { controller: new AbortController(), failed: false };
+    const older = { controller: new AbortController(), failed: false, readerWaiting: false };
+    const newer = { controller: new AbortController(), failed: false, readerWaiting: false };
     registerBackgroundRun(query, newer);
     dropBackgroundRun(query, older);
 
