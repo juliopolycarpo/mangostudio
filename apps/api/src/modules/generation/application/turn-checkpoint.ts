@@ -172,7 +172,9 @@ export class TurnCheckpointWriter {
     const ticket = {};
     this.bestEffortTicket = ticket;
     // The snapshot is taken when this write starts, not now: everything accepted
-    // while an earlier write was held collapses into this one.
+    // while an earlier write was held collapses into this one. It can therefore
+    // include parts pushed after the accepted call: newer, consistent state
+    // stored under the older `checkpointedAt` and the sequence counted so far.
     this.pendingWrite = this.pendingWrite.then(async () => {
       if (this.bestEffortTicket !== ticket) return;
       this.bestEffortTicket = null;
