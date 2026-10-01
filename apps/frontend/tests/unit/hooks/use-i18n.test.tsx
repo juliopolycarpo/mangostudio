@@ -4,7 +4,7 @@
  * dictionary arrives, and a failed load renders English.
  */
 
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import { act, render, screen } from '@testing-library/react';
 import { I18nProvider, useI18n } from '../../../src/hooks/use-i18n';
@@ -64,8 +64,23 @@ async function settle(): Promise<void> {
   });
 }
 
+/** The attribute `index.html` ships before hydration. */
+const SHELL_DOCUMENT_LANGUAGE = 'en';
+
+function expectDocumentLanguage(expected: string): void {
+  const received = document.documentElement.lang;
+  expect(received, `expected document language: ${expected} | received: ${received}`).toBe(
+    expected
+  );
+}
+
+beforeEach(() => {
+  document.documentElement.lang = SHELL_DOCUMENT_LANGUAGE;
+});
+
 afterEach(() => {
   localStorage.removeItem(LOCALE_STORAGE_KEY);
+  document.documentElement.lang = SHELL_DOCUMENT_LANGUAGE;
 });
 
 describe('I18nProvider', () => {
@@ -193,5 +208,65 @@ describe('I18nProvider', () => {
     await settle();
 
     expect(shown()).toEqual({ text: en.auth.loginButton, locale: 'en' });
+  });
+
+  it('sets the document language to the Portuguese dictionary once it renders', async () => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+    const { store, ptLoader } = storeWithFakePtLoader();
+
+    renderProbe(store);
+    ptLoader.resolveNext(ptBR);
+    await settle();
+
+    expectDocumentLanguage('pt-BR');
+  });
+
+  it('keeps the document language at en for the English startup dictionary', () => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
+    const { store } = storeWithFakePtLoader();
+
+    renderProbe(store);
+
+    expectDocumentLanguage('en');
+  });
+
+  it('keeps the document language at the fallback when the startup dictionary fails', async () => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+    const { store, ptLoader } = storeWithFakePtLoader();
+
+    renderProbe(store);
+    ptLoader.rejectNext(new Error('Failed to fetch dynamically imported module'));
+    await settle();
+
+    expectDocumentLanguage('en');
+  });
+
+  it('updates the document language only when a runtime switch renders', async () => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
+    const { store, ptLoader } = storeWithFakePtLoader();
+    renderProbe(store);
+
+    act(() => screen.getByRole('button', { name: 'to-pt' }).click());
+    expectDocumentLanguage('en');
+
+    ptLoader.resolveNext(ptBR);
+    await settle();
+    expectDocumentLanguage('pt-BR');
+
+    act(() => screen.getByRole('button', { name: 'to-en' }).click());
+    await settle();
+    expectDocumentLanguage('en');
+  });
+
+  it('leaves the document language alone when a runtime switch fails to load', async () => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'en');
+    const { store, ptLoader } = storeWithFakePtLoader();
+    renderProbe(store);
+
+    act(() => screen.getByRole('button', { name: 'to-pt' }).click());
+    ptLoader.rejectNext(new Error('offline'));
+    await settle();
+
+    expectDocumentLanguage('en');
   });
 });
