@@ -4,6 +4,21 @@
   "tasks": {
     "build": {
       "outputs": ["dist/**"]
+    },
+    "test:unit": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/with-test-home.ts",
+        "$TURBO_ROOT$/scripts/lib/test-home.ts",
+        "$TURBO_ROOT$/scripts/lib/temp-home.ts"
+      ],
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "BUN_INSTALL", "BUN_INSTALL_CACHE_DIR"]
+    },
+    "test:integration": {
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "BUN_INSTALL", "BUN_INSTALL_CACHE_DIR"]
+    },
+    "test:coverage": {
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "BUN_INSTALL", "BUN_INSTALL_CACHE_DIR"]
     }
   }
 }
