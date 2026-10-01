@@ -1,6 +1,7 @@
 import type { Message } from '@mangostudio/shared';
 import { Loader2 } from 'lucide-react';
 import { WorkspaceHub, type WorkspaceHubProps } from '@/features/home/WorkspaceHub';
+import type { OlderMessages } from '../hooks/use-chat-page-state';
 import { ChatFeed } from './ChatFeed';
 
 type MessageQueryStatus = 'pending' | 'error' | 'success';
@@ -8,6 +9,8 @@ type MessageQueryStatus = 'pending' | 'error' | 'success';
 interface ChatPageContentProps {
   readonly chatId: string | null;
   readonly messages: Message[];
+  /** Loads the messages above the ones in `messages`; see `ChatFeed`. */
+  readonly older: OlderMessages;
   readonly status: MessageQueryStatus;
   /** Everything the empty-state hub needs; unused once the chat has messages. */
   readonly hub: WorkspaceHubProps;
@@ -18,6 +21,7 @@ interface ChatPageContentProps {
 export function ChatPageContent({
   chatId,
   messages,
+  older,
   status,
   hub,
   onQuestionSubmit,
@@ -32,7 +36,14 @@ export function ChatPageContent({
     return <WorkspaceHub {...hub} />;
   }
 
-  return <ChatFeed chatId={chatId} messages={messages} onQuestionSubmit={onQuestionSubmit} />;
+  return (
+    <ChatFeed
+      chatId={chatId}
+      messages={messages}
+      older={older}
+      onQuestionSubmit={onQuestionSubmit}
+    />
+  );
 }
 
 function ChatLoadingState() {

@@ -1,13 +1,16 @@
 import type { Message } from '@mangostudio/shared';
-import type { MessagesPage } from '@mangostudio/shared/chat';
-import type { InfiniteData } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { messageKeys } from '@/features/chat/queries';
+import type { MessagesCache } from '@/features/chat/transcript-pages';
 
-type MessagesCache = InfiniteData<MessagesPage, string | null>;
-
-/** Provides optimistic cache mutations for in-flight message updates. */
+/**
+ * Provides optimistic cache mutations for in-flight message updates.
+ *
+ * The transcript cache holds its NEWEST page first and each page chronological
+ * (see `MessagesCache`), so the live turn — the user's message and the reply
+ * being streamed — always belongs to `pages[0]`, appended at its end.
+ */
 export function useOptimisticMessages() {
   const queryClient = useQueryClient();
 

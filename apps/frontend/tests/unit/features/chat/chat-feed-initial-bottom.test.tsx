@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { Message } from '@mangostudio/shared';
 import { en } from '@mangostudio/shared/i18n';
+import type { OlderMessages } from '../../../../src/features/chat/hooks/use-chat-page-state';
 import { act, fireEvent, render } from '../../../support/harness/render';
 
 const { ChatFeed, ESTIMATED_ROW_HEIGHT_PX } = await import(
@@ -163,7 +164,9 @@ class FakeTranscriptLayout {
   }
 
   private contentHeight(port: HTMLElement): number {
-    const content = port.querySelector<HTMLElement>(':scope > div');
+    // The transcript wrapper is the child that carries an inline height; the
+    // loading indicator before it is a zero-height overlay with none.
+    const content = port.querySelector<HTMLElement>(':scope > div[style]');
     return content ? Number.parseFloat(content.style.height) || 0 : 0;
   }
 
@@ -324,8 +327,8 @@ afterEach(() => {
   layout.uninstall();
 });
 
-function openFeed(chatId: string, messages: Message[]) {
-  const view = render(<ChatFeed chatId={chatId} messages={messages} />);
+function openFeed(chatId: string, messages: Message[], older?: OlderMessages) {
+  const view = render(<ChatFeed chatId={chatId} messages={messages} older={older} />);
   const port = view.container.querySelector('section');
   if (!port) {
     throw new Error('expected ChatFeed to render its <section> scroll port | received none');
@@ -466,5 +469,141 @@ describe('ChatFeed follow after opening', () => {
 
     expect(positionOf(layout, port)).toBe('at the bottom');
     expect(renderedRows(port).some((row) => row.index === 44)).toBe(true);
+  });
+});
+
+/** A named stand-in for the transcript's older-page handle: it only counts asks. */
+function fakeOlder(overrides: Partial<OlderMessages> = {}) {
+  const asks = { count: 0 };
+  const older: OlderMessages = {
+    hasMore: true,
+    isLoading: false,
+    failed: false,
+    load: () => {
+      asks.count++;
+    },
+    ...overrides,
+  };
+  return { older, asks };
+}
+
+/** Where the row showing `text` sits relative to the top of the view, or `missing`. */
+function offsetInView(port: HTMLElement, text: string): number | 'missing' {
+  const row = [...port.querySelectorAll<HTMLElement>('[data-index]')].find((element) =>
+    element.textContent?.includes(text)
+  );
+  if (!row) return 'missing';
+  const start = Number(/translateY\((-?[\d.]+)px\)/.exec(row.style.transform)?.[1] ?? Number.NaN);
+  return start - port.scrollTop;
+}
+
+function olderMessages(chatId: string, count: number): Message[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `${chatId}-older${index}`,
+    chatId,
+    role: 'user',
+    text: `Older ${index}`,
+    timestamp: index - count,
+  }));
+}
+
+describe('ChatFeed loading older messages', () => {
+  it('does not ask for older messages while the reader is at the bottom', () => {
+    const { older, asks } = fakeOlder();
+    const { port } = openFeed('a', makeMessages('a', 60), older);
+    layout.settle(port);
+
+    expect(`older asks at the bottom: ${asks.count}`).toBe('older asks at the bottom: 0');
+  });
+
+  it('asks once the reader scrolls near the top', () => {
+    const { older, asks } = fakeOlder();
+    const { port } = openFeed('a', makeMessages('a', 60), older);
+    layout.settle(port);
+
+    fireEvent.wheel(port);
+    port.scrollTop = 0;
+    layout.flushFrame(port);
+
+    expect(asks.count).toBeGreaterThan(0);
+  });
+
+  it('does not ask when there is nothing older to load', () => {
+    const { older, asks } = fakeOlder({ hasMore: false });
+    const { port } = openFeed('a', makeMessages('a', 60), older);
+    layout.settle(port);
+
+    fireEvent.wheel(port);
+    port.scrollTop = 0;
+    layout.flushFrame(port);
+
+    expect(`older asks with nothing older: ${asks.count}`).toBe('older asks with nothing older: 0');
+  });
+
+  it('asks on open when the chat is too short to scroll, so the viewport fills', () => {
+    layout.viewportPx = 1200;
+    const { older, asks } = fakeOlder();
+    const { port } = openFeed('a', makeMessages('a', 4), older);
+    layout.settle(port);
+
+    expect(asks.count).toBeGreaterThan(0);
+  });
+
+  it('does not retry a failed page on its own', () => {
+    layout.viewportPx = 1200;
+    const { older, asks } = fakeOlder({ failed: true });
+    const { port } = openFeed('a', makeMessages('a', 4), older);
+    layout.settle(port);
+
+    expect(`older asks after a failure: ${asks.count}`).toBe('older asks after a failure: 0');
+  });
+
+  it('retries a failed page when the reader scrolls near the top again', () => {
+    const { older, asks } = fakeOlder({ failed: true });
+    const { port } = openFeed('a', makeMessages('a', 60), older);
+    layout.settle(port);
+
+    fireEvent.wheel(port);
+    port.scrollTop = 0;
+    layout.flushFrame(port);
+
+    expect(asks.count).toBeGreaterThan(0);
+  });
+
+  it('says that earlier messages are loading, without moving any message', () => {
+    const { older } = fakeOlder();
+    const { port, rerender, queryByText } = openFeed('a', makeMessages('a', 60), older);
+    layout.settle(port);
+    const before = offsetInView(port, 'Note 58');
+    expect(queryByText(en.chat.feed.loadingOlder)).toBeNull();
+
+    rerender(
+      <ChatFeed chatId="a" messages={makeMessages('a', 60)} older={{ ...older, isLoading: true }} />
+    );
+    layout.settle(port);
+
+    expect(queryByText(en.chat.feed.loadingOlder)).not.toBeNull();
+    expect(`Note 58 at ${offsetInView(port, 'Note 58')}`).toBe(`Note 58 at ${before}`);
+  });
+
+  it('keeps the reader on the same message when an older page is prepended', () => {
+    const { older } = fakeOlder();
+    const { port, rerender } = openFeed('a', makeMessages('a', 60), older);
+    layout.settle(port);
+    fireEvent.wheel(port);
+    port.scrollTop = 1200;
+    layout.flushFrame(port);
+    layout.settle(port);
+    const before = offsetInView(port, 'Note 8');
+    rerender(
+      <ChatFeed
+        chatId="a"
+        messages={[...olderMessages('a', 50), ...makeMessages('a', 60)]}
+        older={older}
+      />
+    );
+    layout.settle(port);
+
+    expect(`Note 8 at ${offsetInView(port, 'Note 8')}`).toBe(`Note 8 at ${before}`);
   });
 });

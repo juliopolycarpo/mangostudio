@@ -1,18 +1,24 @@
 import type { Message } from '@mangostudio/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, Sparkles } from 'lucide-react';
+import { ArrowDown, Loader2, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import { type UIEvent, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
 import { useChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
+import type { OlderMessages } from '../hooks/use-chat-page-state';
 import { ChatMessageRow } from './ChatMessageRow';
 
 /** The height the virtualizer assumes for a row it has not measured yet. */
 export const ESTIMATED_ROW_HEIGHT_PX = 150;
 const ROW_OVERSCAN = 5;
+/**
+ * How close to the top of what is loaded the reader gets before the next older
+ * page is requested: far enough that a page usually lands before they arrive.
+ */
+const LOAD_OLDER_WITHIN_PX = 3 * ESTIMATED_ROW_HEIGHT_PX;
 
 /** Centered empty state shown when a chat has no messages yet. */
 function EmptyFeed() {
@@ -37,10 +43,18 @@ function EmptyFeed() {
 export function ChatFeed({
   chatId,
   messages,
+  older,
   onQuestionSubmit,
 }: {
   chatId: string | null;
+  /** The loaded messages, chronological: the newest page is at the end. */
   messages: Message[];
+  /**
+   * Loads the messages above `messages`. The feed calls `load()` whenever the
+   * reader is near the top of what is loaded; absent for a transcript that has
+   * nothing older to load.
+   */
+  older?: OlderMessages;
   /** Present only while question cards may be answered (no generation running). */
   onQuestionSubmit?: (prompt: string) => void;
 }) {
@@ -105,13 +119,53 @@ export function ChatFeed({
     ? rowVirtualizer.getTotalSize()
     : messages.length * ESTIMATED_ROW_HEIGHT_PX;
 
+  // Reads where the port is *now*, not where this render saw it: the opening
+  // jump and a chat switch both move it after the render that scheduled this.
+  // Rows prepended above the reader are kept in place by the virtualizer
+  // (`anchorTo: 'end'` re-anchors on the row at the top of the view), so a page
+  // landing does not itself bring the reader back within reach of the next one.
+  const loadOlder = older?.load;
+  const hasOlder = older?.hasMore ?? false;
+  const olderFailed = older?.failed ?? false;
+  const requestOlderNearTop = useCallback(() => {
+    const port = parentRef.current;
+    if (!loadOlder || !hasOlder || !port) return;
+    if (port.scrollTop <= LOAD_OLDER_WITHIN_PX) loadOlder();
+  }, [loadOlder, hasOlder, parentRef]);
+  // A scroll event covers the reader moving; this covers everything that is not
+  // one: the chat opening short enough that nothing scrolls, a page landing
+  // that still leaves the reader near the top, a refetch ending. After a failed
+  // page it stays quiet, or a dead connection would be asked again as fast as
+  // it refuses; the reader scrolling is what tries again.
+  useEffect(() => {
+    if (!olderFailed) requestOlderNearTop();
+  }, [olderFailed, requestOlderNearTop, messages.length]);
+  const handleFeedScroll = useCallback(
+    (event: UIEvent<HTMLElement>) => {
+      handleScroll(event);
+      requestOlderNearTop();
+    },
+    [handleScroll, requestOlderNearTop]
+  );
+
   return (
     <section
       ref={parentRef}
-      onScroll={handleScroll}
+      onScroll={handleFeedScroll}
       className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 hide-scrollbar max-w-5xl mx-auto w-full"
     >
       {messages.length === 0 && <EmptyFeed />}
+
+      {/* Out of flow (zero height, stuck to the top): an in-flow row would push
+          every message down when it appears and again when it goes. */}
+      {older?.isLoading && (
+        <div className="sticky top-0 z-10 flex h-0 justify-center pointer-events-none">
+          <output className="glass-elevated flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30">
+            <Loader2 size={13} className="animate-spin" />
+            {t.chat.feed.loadingOlder}
+          </output>
+        </div>
+      )}
 
       {messages.length > 0 && (
         <div

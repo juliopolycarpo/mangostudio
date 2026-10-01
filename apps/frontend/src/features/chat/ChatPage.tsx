@@ -162,7 +162,7 @@ export function ChatPage({
   isForkingRunner = false,
   migrationRunnerAvailable = false,
 }: ChatPageProps) {
-  const { messages, status } = useChatPageMessages({ chatId, seedContextInfo });
+  const { messages, status, older } = useChatPageMessages({ chatId, seedContextInfo });
   // Reads the same query as `messages` above; this is the conservative framing
   // (an unloaded transcript locks) rather than a bare `messages.length > 0`.
   const hasTurns = useChatHasTurns(chatId);
@@ -206,6 +206,7 @@ export function ChatPage({
           <ChatPageContent
             chatId={chatId}
             messages={messages}
+            older={older}
             status={status}
             hub={{
               chatId,
