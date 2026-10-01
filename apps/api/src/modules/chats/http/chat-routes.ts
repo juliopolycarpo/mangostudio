@@ -4,10 +4,17 @@ import {
   CompactChatBodySchema,
   CreateChatBodySchema,
   GenerateChatTitleBodySchema,
+  ListChatMessagesQuerySchema,
+  type MessagesPage,
+  MessagesPageSchema,
   SummarizeToNewChatBodySchema,
   UpdateChatBodySchema,
 } from '@mangostudio/shared/chat';
-import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import {
+  type ApiErrorResponse,
+  ApiErrorResponseSchema,
+  ERROR_CODES,
+} from '@mangostudio/shared/errors';
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
@@ -16,6 +23,7 @@ import { requireAuth } from '../../../plugins/auth-middleware';
 import { parseQueryInt } from '../../../utils/query';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
+import { InvalidTranscriptCursorError } from '../../messages/domain/transcript-cursor';
 import { WorkdirValidationError } from '../../workspaces/application/workdir-validation';
 import {
   compactChatUseCase,
@@ -227,26 +235,37 @@ export const chatRoutes = (app: Elysia) =>
         '/:id/messages',
         {
           params: t.Object({ id: t.String() }),
-          query: t.Object({
-            limit: t.Optional(t.String()),
-            cursor: t.Optional(t.String()),
-          }),
+          query: ListChatMessagesQuerySchema,
+          response: {
+            200: MessagesPageSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+          },
         },
-        async ({ params, query, user, set }) => {
+        async ({ params, query, user, set }): Promise<ApiErrorResponse | MessagesPage> => {
           try {
-            return await getChatMessagesUseCase(
+            const page = await getChatMessagesUseCase(
               {
                 chatId: params.id,
                 userId: user?.id ?? '',
-                cursor: query.cursor ? parseQueryInt(query.cursor, 0) : undefined,
+                cursor: query.cursor,
                 limit: query.limit ? parseQueryInt(query.limit, 50) : undefined,
               },
               getDb()
             );
+            // Stored rows carry `null` for an absent optional column where the
+            // shared `Message` interface says `undefined`; the wire shape has
+            // always been the stored one, so the page is asserted rather than
+            // remapped here.
+            return page as MessagesPage;
           } catch (err) {
+            if (err instanceof InvalidTranscriptCursorError) {
+              set.status = 400;
+              return apiError(err.message, ERROR_CODES.VALIDATION);
+            }
             if (err instanceof ChatNotFoundError) {
               set.status = 404;
-              return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+              return apiError('Chat not found', ERROR_CODES.NOT_FOUND);
             }
             throw err;
           }
