@@ -57,6 +57,18 @@ const stageMuslPlatforms = (outDir: string, arches: readonly ReleasePlatformId[]
   }
 };
 
+/**
+ * The output directory `build.ts` leaves when a runtime fails verification: both binaries are
+ * staged (the runtime is copied before it is checked) but the README is only written once every
+ * platform has built and passed.
+ */
+const stageFailedVerificationBuild = (outDir: string, arch: ReleasePlatformId): void => {
+  const sourceDir = join(outDir, arch);
+  mkdirSync(sourceDir, { recursive: true });
+  writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
+  writeFileSync(join(sourceDir, 'mangostudio-runtime'), 'runtime that failed verification');
+};
+
 const stageFrontendDist = (rootDir: string): void => {
   const distDir = join(rootDir, 'apps', 'frontend', 'dist');
   mkdirSync(join(distDir, 'assets'), { recursive: true });
@@ -154,6 +166,30 @@ describe.serial('archiveReleaseAssets', () => {
     });
 
     await expect(archiveReleaseAssets(plan)).rejects.toThrow(/runtime binary/);
+  });
+
+  test('names the earlier build step when the README was never written', async () => {
+    const rootDir = makeTempDir();
+    const outDir = join(rootDir, 'out');
+    stageFailedVerificationBuild(outDir, 'linux-x64');
+    const plan = createReleaseAssetPlan({
+      version: '1.2.3',
+      rootDir,
+      outDir,
+      assetsDir: join(rootDir, 'release-assets'),
+      onlyPlatform: 'linux-x64',
+    });
+
+    const message = await archiveReleaseAssets(plan).then(
+      () => 'archived a build that never finished',
+      (caught: unknown) => (caught instanceof Error ? caught.message : String(caught))
+    );
+
+    expect(message, 'message must name the missing file').toContain(join(outDir, 'README.md'));
+    expect(
+      message,
+      `expected a message naming the failed build step | received: ${message}`
+    ).toContain('bun run build --binary');
   });
 
   test('writes every archive and checksum manifest with bounded parallelism', async () => {
