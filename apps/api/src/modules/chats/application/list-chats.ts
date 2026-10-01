@@ -62,26 +62,29 @@ function extractLegacyContextInfo(providerState: string | null | undefined): Con
  */
 export async function listChatsUseCase(userId: string, db: Kysely<Database>) {
   const rows = await listByUserId(userId, db);
-  const contexts = new Map<string, ContextInfo | null>();
-  const unreadable: string[] = [];
+  const contexts: Array<ContextInfo | null> = new Array(rows.length).fill(null);
+  const unreadable: number[] = [];
 
-  for (const row of rows) {
+  rows.forEach((row, index) => {
     const snapshot = parsePersistedContextSnapshot(row.lastContextState);
     if (snapshot) {
-      contexts.set(row.id, snapshotContextInfo(snapshot));
-      continue;
+      contexts[index] = snapshotContextInfo(snapshot);
+      return;
     }
     if (row.lastContextState !== null) {
-      unreadable.push(row.id);
-      continue;
+      unreadable.push(index);
+      return;
     }
-    contexts.set(row.id, extractLegacyContextInfo(row.lastProviderState));
-  }
+    contexts[index] = extractLegacyContextInfo(row.lastProviderState);
+  });
 
   if (unreadable.length > 0) {
-    const states = await listProviderStatesByIds(userId, unreadable, db);
-    for (const id of unreadable) contexts.set(id, extractLegacyContextInfo(states.get(id)));
+    const ids = unreadable.map((index) => rows[index]?.id ?? '');
+    const states = await listProviderStatesByIds(userId, ids, db);
+    for (const index of unreadable) {
+      contexts[index] = extractLegacyContextInfo(states.get(rows[index]?.id ?? ''));
+    }
   }
 
-  return rows.map((row) => toPublicChat(row, contexts.get(row.id) ?? null));
+  return rows.map((row, index) => toPublicChat(row, contexts[index] ?? null));
 }
