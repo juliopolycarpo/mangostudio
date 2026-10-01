@@ -24,7 +24,11 @@ import type { LinuxPlatformId } from '@mangostudio/shared/runtime-home';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { throwIfAborted } from './cancellation';
-import { loadRuntimeReleaseBytes, RuntimeAssetLoadError } from './runtime-release-fetch';
+import {
+  loadRuntimeReleaseBytes,
+  RUNTIME_CACHE_DIR_NAME,
+  RuntimeAssetLoadError,
+} from './runtime-release-fetch';
 import { resolveRuntimeRelease } from './runtime-release-resolution';
 import { localRuntimeBuildCommand, localRuntimeBuildPath } from './wsl-runtime-release';
 
@@ -154,7 +158,12 @@ export async function resolveContainerRuntimeBinary(
   }
 
   const release = resolveRuntimeRelease(deps.version, platformId);
-  const cached = join(deps.mangoHome, 'runtime-cache', deps.version, release.runtimeAssetName);
+  const cached = join(
+    deps.mangoHome,
+    RUNTIME_CACHE_DIR_NAME,
+    deps.version,
+    release.runtimeAssetName
+  );
 
   let asset: Awaited<ReturnType<typeof loadRuntimeReleaseBytes>>;
   try {

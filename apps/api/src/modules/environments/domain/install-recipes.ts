@@ -428,6 +428,7 @@ const BUN_UNINSTALL_ARGV = platformArgv(
       // `${root}` is delimited deliberately: PowerShell parses a bare `$root:`
       // as a drive-qualified variable and refuses to compile the script.
       'if (-not (Test-Path -LiteralPath "$root\\uninstall.ps1")) { ' +
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: literal PowerShell `${root}` delimiter for the target shell, not a JS placeholder
         'Write-Error "refusing to remove ${root}: no uninstall.ps1 inside it"; exit 1 }',
       '& "$root\\uninstall.ps1"',
     ].join('; ')

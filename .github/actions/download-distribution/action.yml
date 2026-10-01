@@ -45,9 +45,10 @@ runs:
       env:
         DOWNLOAD_DIR: ${{ runner.temp }}/mango-distribution
       run: |
-        # No `-u`: bash 3.2 (the macOS runners' /bin/bash) treats ${#arr[@]} on
-        # an empty array as an unbound variable, which would abort before the
-        # "found 0" diagnostic below ever prints.
+        # No `-u`: bash 3.2 (the macOS runners' /bin/bash) treats "${arr[@]}" on
+        # an empty array as an unbound variable. The count form ${#arr[@]} used
+        # below is safe there; `-u` stays off so a later full expansion of a
+        # possibly-empty array cannot abort before the "found 0" diagnostic.
         set -eo pipefail
         shopt -s nullglob
         # Both shapes: target bundles are stored tars, scoped bundles are
