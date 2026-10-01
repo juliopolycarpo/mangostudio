@@ -347,6 +347,43 @@ describe('TurnCheckpointWriter', () => {
     expect(db.writes[0]?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS);
   });
 
+  it('keeps a flush barrier open until the forced write that superseded its snapshot lands', async () => {
+    const { db, manual, writer, append } = setup();
+    db.hold();
+
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+    manual.fire();
+    await tick();
+    // The first write is held. Accept newer state, flush it behind the held
+    // write, then let a forced checkpoint supersede that queued snapshot.
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+    let flushed = false;
+    const flush = writer.flush().then(() => {
+      flushed = true;
+    });
+    append(5);
+    const forced = writer.checkpoint({ force: true });
+
+    db.releaseOldest();
+    await tick();
+
+    // The forced write has started and is held: flush must still be waiting for it.
+    expect({ flushed, writesStarted: db.writes.length, inFlight: db.inFlight.length }).toEqual({
+      flushed: false,
+      writesStarted: 2,
+      inFlight: 1,
+    });
+
+    db.releaseAll();
+    await flush;
+    expect(await forced).toBe(true);
+    expect(db.writes[db.writes.length - 1]?.text.length).toBe(
+      CHECKPOINT_TEXT_INTERVAL_CHARS * 2 + 5
+    );
+  });
+
   it('writes a status or reason code passed without force at call time', async () => {
     const { db, checkpoint, writer, append } = setup();
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);

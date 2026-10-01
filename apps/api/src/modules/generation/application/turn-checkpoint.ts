@@ -129,10 +129,19 @@ export class TurnCheckpointWriter {
     return Promise.resolve(true);
   }
 
-  /** Resolve once every checkpoint accepted so far, including the trailing best-effort one, is written. */
-  flush(): Promise<void> {
+  /**
+   * Resolve once every checkpoint accepted so far, including the trailing
+   * best-effort one, is written. A required write queued while this waits
+   * supersedes the waiting best-effort task and lands after it, so the wait
+   * continues until nothing newer is queued.
+   */
+  async flush(): Promise<void> {
     if (this.bestEffortDirty) this.queueBestEffortWrite();
-    return this.pendingWrite;
+    let tail: Promise<void>;
+    do {
+      tail = this.pendingWrite;
+      await tail;
+    } while (tail !== this.pendingWrite);
   }
 
   async prepareFinal(
