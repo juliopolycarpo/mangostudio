@@ -212,7 +212,8 @@ describe('generated image persistence', () => {
       db
     );
 
-    const galleryItems = await listGeneratedImagesForGallery(owner.id, { limit: 10 }, db);
+    const galleryEntries = await listGeneratedImagesForGallery(owner.id, { limit: 10 }, db);
+    const galleryItems = galleryEntries.map((entry) => entry.item);
 
     expect(galleryItems.map((item) => item.id)).toEqual([
       `owner-artifact-new-${suffix}`,

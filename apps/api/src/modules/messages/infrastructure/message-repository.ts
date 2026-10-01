@@ -10,6 +10,7 @@ import { boolToInt, parseStyleParams, serializeStyleParams } from '../../../db/s
 import type { Database } from '../../../db/types';
 import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/attachment-repository';
 import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
+import { type GalleryCursor, type GalleryEntry, tiedRowidCeiling } from '../domain/gallery-cursor';
 import { encodeTranscriptCursor, type TranscriptCursor } from '../domain/transcript-cursor';
 import {
   decodeMessageParts,
@@ -108,7 +109,8 @@ interface ListHistoryOptions {
 }
 
 interface ListGalleryOptions {
-  cursor?: number;
+  /** Position of the last image of the previous page; only later ones are returned. */
+  cursor?: GalleryCursor;
   limit?: number;
 }
 
@@ -355,11 +357,21 @@ export async function verifyMessageOwnership(
   return !!msg && msg.userId === userId;
 }
 
+/**
+ * Lists the legacy gallery images (an `ai` message carrying `imageUrl` with no
+ * `generated_images` row) newest first, ordered by `(timestamp, rowid)`
+ * descending: `timestamp` is not unique, so the message `rowid` breaks the tie
+ * in insertion order. Entries carry the `rowid` and the `message` source for
+ * the merged gallery cursor.
+ *
+ * @example
+ * const entries = await listLegacyGalleryImages(userId, { limit: 50, cursor }, db);
+ */
 export async function listLegacyGalleryImages(
   userId: string,
   opts: ListGalleryOptions,
   db: Kysely<Database>
-): Promise<GalleryItem[]> {
+): Promise<GalleryEntry<GalleryItem>[]> {
   const limit = opts.limit ?? 50;
 
   let query = db
@@ -372,6 +384,7 @@ export async function listLegacyGalleryImages(
       'ai.timestamp',
       'ai.modelName',
       'ai.generationTime',
+      sql<number>`ai.rowid`.as('rowid'),
       (eb) =>
         eb
           .selectFrom('messages as user_msg')
@@ -397,10 +410,14 @@ export async function listLegacyGalleryImages(
         )
       )
     )
-    .orderBy('ai.timestamp', 'desc');
+    .orderBy('ai.timestamp', 'desc')
+    .orderBy(sql`ai.rowid`, 'desc');
 
   if (opts.cursor) {
-    query = query.where('ai.timestamp', '<', opts.cursor);
+    const ceiling = tiedRowidCeiling('message', opts.cursor);
+    query = query.where(
+      sql<boolean>`(ai.timestamp, ai.rowid) < (${opts.cursor.createdAt}, ${ceiling})`
+    );
   }
 
   const rows = await query.limit(limit + 1).execute();
@@ -408,13 +425,17 @@ export async function listLegacyGalleryImages(
   return rows
     .filter((row): row is typeof row & { imageUrl: string } => row.imageUrl !== null)
     .map((row) => ({
-      id: row.id,
-      messageId: row.id,
-      imageUrl: row.imageUrl,
-      prompt: row.prompt ?? 'Generated Image',
-      chatId: row.chatId,
-      createdAt: row.timestamp,
-      modelName: row.modelName ?? undefined,
-      generationTime: row.generationTime ?? undefined,
+      item: {
+        id: row.id,
+        messageId: row.id,
+        imageUrl: row.imageUrl,
+        prompt: row.prompt ?? 'Generated Image',
+        chatId: row.chatId,
+        createdAt: row.timestamp,
+        modelName: row.modelName ?? undefined,
+        generationTime: row.generationTime ?? undefined,
+      },
+      source: 'message',
+      rowid: row.rowid,
     }));
 }

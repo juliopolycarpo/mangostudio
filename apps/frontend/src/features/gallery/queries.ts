@@ -1,4 +1,4 @@
-import type { GalleryItem } from '@mangostudio/shared';
+import type { GalleryPage } from '@mangostudio/shared/chat';
 import { infiniteQueryOptions, useInfiniteQuery } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
@@ -15,7 +15,7 @@ export const galleryListQueryOptions = () =>
       const query = pageParam ? { cursor: pageParam, limit: '20' } : { limit: '20' };
       const { data, error } = await client.api.messages.images.get({ query });
       if (error) throw new ApiError(error.value);
-      return data as { items: GalleryItem[]; nextCursor: string | null };
+      return data satisfies GalleryPage;
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,

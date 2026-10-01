@@ -425,7 +425,7 @@ describe('GET /messages/images', () => {
         generationTime: '1.4s',
       },
     ]);
-    expect(firstPage.nextCursor).toBe(String(baseTimestamp + 41));
+    expect(firstPage.nextCursor).toMatch(new RegExp(`^artifact:${baseTimestamp + 41}:\\d+$`));
 
     const secondResponse = await app.handle(
       new Request(`http://localhost/messages/images?limit=2&cursor=${firstPage.nextCursor}`)
