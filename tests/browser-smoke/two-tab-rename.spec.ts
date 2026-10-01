@@ -81,8 +81,11 @@ function sidebarRow(page: Page, title: string) {
 }
 
 /**
- * Signs up a second account in a context of its own and finishes its first-run
- * setup, so its pages open on the chat shell rather than on `/welcome`.
+ * Signs up an account of the spec's own in a context of its own and finishes
+ * its first-run setup, so its pages open on the chat shell rather than on
+ * `/welcome`. The suite's shared account is not used: another spec running in
+ * parallel (workers are not limited outside CI) would publish activity signals
+ * to its sockets, which could satisfy the positive check without the rename.
  */
 async function newSignedInContext(browser: Browser, name: string): Promise<BrowserContext> {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
@@ -158,8 +161,6 @@ async function renameInSidebar(page: Page, from: string, to: string): Promise<vo
 }
 
 test('a rename in one tab reaches the same user’s other tab, and no other user’s', async ({
-  page: first,
-  context,
   browser,
 }) => {
   // Above the sum of the bounded waits below, so a slow runner reaches one of
@@ -170,7 +171,9 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
   const renamedTitle = `Two-tab renamed ${stamp}`;
   const strangerTitle = `Other user chat ${stamp}`;
 
-  const second = await context.newPage();
+  const owner = await newSignedInContext(browser, 'rename-owner');
+  const first = await owner.newPage();
+  const second = await owner.newPage();
   const stranger = await newSignedInContext(browser, 'other-user');
   const strangerPage = await stranger.newPage();
   const probes = {
@@ -280,7 +283,7 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
       strangerChatId ? strangerPage.request.delete(`/api/chats/${strangerChatId}`) : undefined,
     ]);
     // Soft, so a failed cleanup never hides the failure that led here. The
-    // other account itself stays: the hub runs on a throwaway home.
+    // two accounts themselves stay: the hub runs on a throwaway home.
     for (const response of removed) {
       if (response) {
         expect
@@ -289,6 +292,6 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
       }
     }
     await stranger.close();
-    await second.close();
+    await owner.close();
   }
 });
