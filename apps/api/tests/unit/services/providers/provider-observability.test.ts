@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { getDb } from '../../../../src/db/database';
 import {
   flushObservabilitySnapshot,
   getProviderObservabilityLogs,
@@ -131,5 +132,159 @@ describe('provider observability store', () => {
     expect(
       metrics.providers[0]?.caches.find((entry) => entry.cacheName === 'sdk-client')
     ).toMatchObject({ hits: 1 });
+  });
+});
+
+/** Reads the persisted `sdk-client` hit count for `openai-compatible`, or undefined when absent. */
+async function readPersistedSdkClientHits(): Promise<number | undefined> {
+  const row = await getDb()
+    .selectFrom('observability_snapshot')
+    .select('snapshotJson')
+    .where('id', '=', 'observability-state')
+    .executeTakeFirst();
+  if (!row) return undefined;
+
+  const snapshot = JSON.parse(row.snapshotJson) as {
+    providerMetrics: Array<{
+      provider: string;
+      caches: Array<[string, { hits: number; misses: number }]>;
+    }>;
+  };
+  const entry = snapshot.providerMetrics.find((item) => item.provider === 'openai-compatible');
+  return entry?.caches.find(([name]) => name === 'sdk-client')?.[1].hits;
+}
+
+function inMemorySdkClientHits(): number | undefined {
+  const provider = getProviderObservabilityMetrics().providers.find(
+    (entry) => entry.provider === 'openai-compatible'
+  );
+  return provider?.caches.find((entry) => entry.cacheName === 'sdk-client')?.hits;
+}
+
+interface SnapshotWriteFake {
+  /** Resolves once the fake has intercepted the `observability_snapshot` write. */
+  reached: Promise<void>;
+  /** Lets the held write continue to the real Kysely `execute()`. */
+  release: () => void;
+  restore: () => void;
+}
+
+/**
+ * Intercepts only `insertInto('observability_snapshot')` on the real database. The write is held
+ * before the real `execute()` until released, or rejected when `mode` is `fail`.
+ */
+function fakeSnapshotWrite(mode: 'hold' | 'fail'): SnapshotWriteFake {
+  const db = getDb();
+  const realInsertInto = db.insertInto.bind(db) as (table: string) => unknown;
+  const held = Promise.withResolvers<void>();
+  const intercepted = Promise.withResolvers<void>();
+
+  const wrap = (builder: unknown): unknown =>
+    new Proxy(builder as object, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop, target);
+        if (typeof value !== 'function') return value;
+        if (prop === 'execute') {
+          return async () => {
+            intercepted.resolve();
+            if (mode === 'fail') throw new Error('fake snapshot write failure');
+            await held.promise;
+            return value.call(target);
+          };
+        }
+        return (...args: unknown[]) => wrap(value.apply(target, args));
+      },
+    });
+
+  const spy = spyOn(db, 'insertInto').mockImplementation(((table: string) =>
+    table === 'observability_snapshot'
+      ? wrap(realInsertInto(table))
+      : realInsertInto(table)) as never);
+
+  return {
+    reached: intercepted.promise,
+    release: () => held.resolve(),
+    restore: () => spy.mockRestore(),
+  };
+}
+
+describe('observability snapshot flush dirty tracking', () => {
+  it('persists a mutation recorded during a held write before the explicit flush resolves', async () => {
+    await flushObservabilitySnapshot();
+    recordProviderCacheHit('openai-compatible', 'sdk-client');
+
+    const fake = fakeSnapshotWrite('hold');
+    try {
+      const firstFlush = flushObservabilitySnapshot();
+      await fake.reached;
+      recordProviderCacheHit('openai-compatible', 'sdk-client');
+      fake.release();
+      await firstFlush;
+    } finally {
+      fake.restore();
+    }
+
+    expect(inMemorySdkClientHits()).toBe(2);
+    const persisted = await readPersistedSdkClientHits();
+    expect(persisted, `expected persisted hits: 2 | received: ${persisted}`).toBe(2);
+  });
+
+  it('keeps state dirty after a failed write and retries on the next flush', async () => {
+    recordProviderCacheHit('openai-compatible', 'sdk-client');
+    await flushObservabilitySnapshot();
+
+    const fake = fakeSnapshotWrite('fail');
+    try {
+      recordProviderCacheHit('openai-compatible', 'sdk-client');
+      await flushObservabilitySnapshot();
+    } finally {
+      fake.restore();
+    }
+    const afterFailure = await readPersistedSdkClientHits();
+    expect(
+      afterFailure,
+      `expected persisted hits after failed write: 1 | received: ${afterFailure}`
+    ).toBe(1);
+
+    await flushObservabilitySnapshot();
+
+    const afterRetry = await readPersistedSdkClientHits();
+    expect(afterRetry, `expected persisted hits after retry: 2 | received: ${afterRetry}`).toBe(2);
+  });
+
+  it('persists the newest state when a second flush starts while the first is still writing', async () => {
+    await flushObservabilitySnapshot();
+    recordProviderCacheHit('openai-compatible', 'sdk-client');
+
+    const firstFlush = flushObservabilitySnapshot();
+    recordProviderCacheHit('openai-compatible', 'sdk-client');
+    const secondFlush = flushObservabilitySnapshot();
+    await Promise.all([firstFlush, secondFlush]);
+
+    const persisted = await readPersistedSdkClientHits();
+    expect(persisted, `expected persisted hits: 2 | received: ${persisted}`).toBe(2);
+  });
+
+  it('does not keep the pre-reset snapshot as clean when a reset lands during a held write', async () => {
+    await flushObservabilitySnapshot();
+    recordProviderCacheHit('openai-compatible', 'sdk-client');
+
+    const fake = fakeSnapshotWrite('hold');
+    try {
+      const firstFlush = flushObservabilitySnapshot();
+      await fake.reached;
+      resetProviderObservability();
+      fake.release();
+      await firstFlush;
+    } finally {
+      fake.restore();
+    }
+    await flushObservabilitySnapshot();
+
+    const persisted = await readPersistedSdkClientHits();
+    expect(
+      persisted,
+      `expected persisted hits after reset: undefined | received: ${persisted}`
+    ).toBe(undefined);
   });
 });
