@@ -233,3 +233,74 @@ describe('catalog recalculation supersedes in-flight reads', () => {
     expectCount('enabled text models after second recalculate', 0, current.textModels.length);
   });
 });
+
+describe('catalog snapshot eviction order', () => {
+  it('evicts the oldest inserted snapshot and keeps the caller fresh one', async () => {
+    const snapshotStore = new Map<string, ModelCatalogResponse>();
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => [],
+      listAllSecretMetadataFn: () => Promise.resolve([]),
+      snapshotStore,
+    });
+
+    for (let i = 0; i < MAX_CATALOG_ENTRIES + 1; i++) {
+      await service.getUnifiedModelCatalog(`order-user-${i}`);
+    }
+
+    expect(snapshotStore.has('order-user-0')).toBe(false);
+    expect(snapshotStore.has(`order-user-${MAX_CATALOG_ENTRIES}`)).toBe(true);
+    expectCount('snapshots', MAX_CATALOG_ENTRIES, snapshotStore.size);
+  });
+});
+
+describe('catalog invalidation generation bound', () => {
+  /** Invalidates enough other users to push the oldest generation entries out of the bounded map. */
+  function churnInvalidations(service: { invalidate(userId: string): void }): void {
+    for (let i = 0; i < MAX_CATALOG_ENTRIES + 1; i++) service.invalidate(`churn-${i}`);
+  }
+
+  it('still ignores a stale write after its invalidation entry was evicted', async () => {
+    const heldRead = createGate<SecretMetadataRow[]>();
+    let metadataCalls = 0;
+    const snapshotStore = new Map<string, ModelCatalogResponse>();
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => ['gemini'],
+      getProviderFn: () => textProvider(),
+      listAllSecretMetadataFn: () => {
+        metadataCalls++;
+        if (metadataCalls === 1) return heldRead.wait();
+        return Promise.resolve(metadataRows([TEXT_MODEL.modelId]));
+      },
+      snapshotStore,
+    });
+
+    const olderRefresh = service.refresh('evicted-user');
+    await heldRead.reached;
+    service.invalidate('evicted-user');
+    churnInvalidations(service);
+    heldRead.release(metadataRows([]));
+    await olderRefresh;
+
+    expect(snapshotStore.has('evicted-user')).toBe(false);
+  });
+
+  it('accepts a refresh that starts after its invalidation entry was evicted', async () => {
+    const snapshotStore = new Map<string, ModelCatalogResponse>();
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => ['gemini'],
+      getProviderFn: () => textProvider(),
+      listAllSecretMetadataFn: () => Promise.resolve(metadataRows([TEXT_MODEL.modelId])),
+      snapshotStore,
+    });
+
+    service.invalidate('evicted-user');
+    churnInvalidations(service);
+    await service.refresh('evicted-user');
+
+    expectCount(
+      'enabled text models cached',
+      1,
+      snapshotStore.get('evicted-user')?.textModels.length ?? 0
+    );
+  });
+});
