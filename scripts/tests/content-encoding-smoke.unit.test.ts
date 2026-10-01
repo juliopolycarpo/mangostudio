@@ -41,6 +41,10 @@ interface Defects {
   refuseWith406?: boolean;
   /** Send the same ETag for every representation. */
   sharedEtag?: boolean;
+  /** Keep identity's ETag distinct but give gzip and Brotli the same one. */
+  sharedCompressedEtag?: boolean;
+  /** Send no Content-Type on any representation. */
+  omitContentType?: boolean;
   /** Serve a shell that names no hashed asset. */
   bareShell?: boolean;
 }
@@ -72,6 +76,12 @@ function representation(
   return { body, encoding: coding };
 }
 
+function etagFor(path: string, encoding: string | null, body: Buffer, defects: Defects): string {
+  if (defects.sharedEtag) return '"same"';
+  if (defects.sharedCompressedEtag && encoding) return '"same-compressed"';
+  return `"${path}-${encoding ?? 'identity'}-${body.length}"`;
+}
+
 function chooseCoding(header: string): 'gzip' | 'br' | null {
   if (header.includes('br')) return 'br';
   if (header.includes('gzip')) return 'gzip';
@@ -93,9 +103,9 @@ function answer(req: IncomingMessage, res: ServerResponse, defects: Defects, log
   const coding = defects.neverCompress ? null : chooseCoding(header);
   const { body, encoding } = representation(path, coding, defects);
   const headers: Record<string, string> = {
-    'Content-Type': CONTENT_TYPES[path] as string,
-    ETag: defects.sharedEtag ? '"same"' : `"${path}-${encoding ?? 'identity'}-${body.length}"`,
+    ETag: etagFor(path, encoding, body, defects),
   };
+  if (!defects.omitContentType) headers['Content-Type'] = CONTENT_TYPES[path] as string;
   if (!defects.omitLength) headers['Content-Length'] = String(body.length);
   if (!defects.omitVary) headers.Vary = 'Origin, Accept-Encoding';
   if (encoding) headers['Content-Encoding'] = encoding;
@@ -215,6 +225,27 @@ describe('collectContentEncodingProblems', () => {
 
     expect(problems).toContain(
       '/assets/app-1.js [Accept-Encoding: gzip] ETag: expected one distinct from the identity ETag | received the same, "same"'
+    );
+  });
+
+  test('flags gzip and Brotli copies that share a validator while identity differs', async () => {
+    const hub = await startFakeHub({ sharedCompressedEtag: true });
+    const problems = await collectPathProblems(hub.baseUrl, '/assets/app-1.js');
+
+    expect(problems).toEqual([
+      '/assets/app-1.js [Accept-Encoding: br] ETag: expected one distinct from the gzip ETag | received the same, "same-compressed"',
+    ]);
+  });
+
+  test('flags a hub that drops Content-Type from every representation', async () => {
+    const hub = await startFakeHub({ omitContentType: true });
+    const problems = await collectPathProblems(hub.baseUrl, '/assets/app-1.js');
+
+    expect(problems).toContain(
+      '/assets/app-1.js [identity] Content-Type: expected a media type | received (none)'
+    );
+    expect(problems).toContain(
+      '/assets/app-1.js [Accept-Encoding: gzip] Content-Type: expected a media type | received (none)'
     );
   });
 

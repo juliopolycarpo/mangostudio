@@ -119,6 +119,9 @@ function checkRepresentation(
   if (!etag || etag.startsWith('W/')) {
     problems.push(`${label} ETag: expected a strong validator | received ${etag ?? NONE}`);
   }
+  if (!headers['content-type']) {
+    problems.push(`${label} Content-Type: expected a media type | received ${NONE}`);
+  }
   return problems;
 }
 
@@ -130,9 +133,10 @@ function checkAgainstIdentity(
   coding: Coding | null
 ): string[] {
   const problems: string[] = [];
-  if (response.headers['content-type'] !== identity.headers['content-type']) {
+  const identityType = identity.headers['content-type'];
+  if (identityType && response.headers['content-type'] !== identityType) {
     problems.push(
-      `${label} Content-Type: expected ${identity.headers['content-type'] ?? NONE} (the identity type) | received ${response.headers['content-type'] ?? NONE}`
+      `${label} Content-Type: expected ${identityType} (the identity type) | received ${response.headers['content-type'] ?? NONE}`
     );
   }
   if (!coding) {
@@ -162,6 +166,22 @@ function checkAgainstIdentity(
   return problems;
 }
 
+/**
+ * The gzip and Brotli copies are different bytes, so they need different validators: a shared one
+ * lets a conditional request for one coding answer 304 from the other's validator.
+ */
+function checkCompressedValidatorsDiffer(
+  path: string,
+  compressed: ReadonlyMap<Coding, RawResponse>
+): string[] {
+  const gzipEtag = compressed.get('gzip')?.headers.etag;
+  const brotliEtag = compressed.get('br')?.headers.etag;
+  if (!gzipEtag || gzipEtag !== brotliEtag) return [];
+  return [
+    `${path} [Accept-Encoding: br] ETag: expected one distinct from the gzip ETag | received the same, ${brotliEtag}`,
+  ];
+}
+
 /** `Accept-Encoding` values sent per representation, in the order they are checked. */
 const REPRESENTATIONS: ReadonlyArray<{ header: string; coding: Coding }> = [
   { header: 'gzip', coding: 'gzip' },
@@ -180,14 +200,17 @@ export async function collectPathProblems(baseUrl: string, path: string): Promis
   const problems = checkRepresentation(`${path} [identity]`, identity, null);
   if (identity.status !== 200) return problems;
 
+  const compressed = new Map<Coding, RawResponse>();
   for (const { header, coding } of REPRESENTATIONS) {
     const label = `${path} [Accept-Encoding: ${header}]`;
     const response = await fetchRaw(url, header);
+    compressed.set(coding, response);
     problems.push(
       ...checkRepresentation(label, response, coding),
       ...checkAgainstIdentity(label, response, identity, coding)
     );
   }
+  problems.push(...checkCompressedValidatorsDiffer(path, compressed));
 
   // Refusing every coding is not a 406: the server answers identity, as it did before copies.
   const refusedLabel = `${path} [Accept-Encoding: identity;q=0]`;
