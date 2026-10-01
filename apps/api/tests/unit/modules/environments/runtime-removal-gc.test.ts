@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runtimeRemoveSlotBytesScript } from '../../../../src/modules/environments/domain/runtime-push';
 import {
@@ -131,8 +132,5 @@ describe('pruneRuntimeCache containment', () => {
 });
 
 function tmpdirUnique(): string {
-  return join(
-    process.env.TMPDIR ?? '/tmp',
-    `mango-cache-gc-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  );
+  return join(tmpdir(), `mango-cache-gc-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 }

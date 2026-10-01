@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   CHECKSUMS_CACHE_NAME,
   loadRuntimeReleaseBytes,
@@ -7,6 +9,14 @@ import {
   runtimeDigestSidecarPath,
 } from '../../../../src/modules/environments/domain/runtime-release-fetch';
 import { resolveRuntimeRelease } from '../../../../src/modules/environments/domain/runtime-release-resolution';
+
+/**
+ * Where these tests pretend the hub cache lives. Under the OS temp directory and
+ * never created: `loadRuntimeReleaseBytes` prunes the parent of the version
+ * directory on the real file system, so a fake root such as `/unused` would name
+ * the root of the current drive on Windows and everything in it.
+ */
+const FAKE_CACHE_ROOT = join(tmpdir(), 'mango-release-resolution-test-cache');
 
 describe('resolveRuntimeRelease', () => {
   it('keeps stable tag and asset identity exact', () => {
@@ -99,7 +109,7 @@ describe('resolveRuntimeRelease', () => {
         resolved += 1;
         return Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]);
       },
-      cacheDir: () => '/unused',
+      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: () => Promise.resolve(),
     });
@@ -130,7 +140,7 @@ describe('resolveRuntimeRelease', () => {
         );
       }) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
-      cacheDir: () => '/unused',
+      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: (path, writtenBytes) => {
         written.push({ path, bytes: writtenBytes });
@@ -164,7 +174,7 @@ describe('resolveRuntimeRelease', () => {
         );
       }) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
-      cacheDir: () => '/unused',
+      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: () => Promise.reject(new Error('disk full')),
     });
@@ -179,7 +189,7 @@ describe('resolveRuntimeRelease', () => {
       fetch: (() =>
         Promise.resolve(new Response('Not Found', { status: 404 }))) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
-      cacheDir: () => '/unused',
+      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: () => Promise.resolve(),
     });
@@ -241,7 +251,7 @@ describe('pinnedRuntimeDigest', () => {
 describe('the runtime cache when the release cannot be reached', () => {
   const VERSION = '1.2.3';
   const ASSET = 'mangostudio-runtime-1.2.3-linux-x64';
-  const CACHE_DIR = '/cache/1.2.3';
+  const CACHE_DIR = join(FAKE_CACHE_ROOT, '1.2.3');
   const BYTES = new TextEncoder().encode('a runtime this hub verified last week');
   const DIGEST = createHash('sha256').update(BYTES).digest('hex');
   const CACHE_PATH = `${CACHE_DIR}/${ASSET}`;
@@ -384,7 +394,7 @@ describe('the runtime cache when the release cannot be reached', () => {
 
 describe('the runtime cache while the release is reachable', () => {
   const ASSET = 'mangostudio-runtime-1.2.3-linux-x64';
-  const CACHE_DIR = '/cache/1.2.3';
+  const CACHE_DIR = join(FAKE_CACHE_ROOT, '1.2.3');
 
   // Must not regress: the release stays authoritative online, so a cache entry
   // that disagrees with the checksums it publishes is replaced, not trusted.
@@ -460,7 +470,7 @@ describe('the runtime cache while the release is reachable', () => {
         );
       }) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
-      cacheDir: () => '/cache/canary',
+      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: (path) => {
         written.push(path);
@@ -468,6 +478,6 @@ describe('the runtime cache while the release is reachable', () => {
       },
     });
 
-    expect(written).toContain(`/cache/canary/${CHECKSUMS_CACHE_NAME}`);
+    expect(written).toContain(join(FAKE_CACHE_ROOT, '1.2.3-canary.abcdef0', CHECKSUMS_CACHE_NAME));
   });
 });
