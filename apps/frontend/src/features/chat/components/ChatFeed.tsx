@@ -2,7 +2,15 @@ import type { Message } from '@mangostudio/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, Loader2, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { type UIEvent, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import {
+  type UIEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type WheelEvent,
+} from 'react';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
@@ -148,10 +156,23 @@ export function ChatFeed({
     [handleScroll, requestOlderNearTop]
   );
 
+  // At the very top the port cannot scroll further, so a reader pushing up
+  // sends no scroll event: without this, a page that failed there could only be
+  // retried by scrolling away and back. The ask is idempotent, so a gesture that
+  // sends many of these still starts one request.
+  const handleFeedWheel = useCallback(
+    (event: WheelEvent<HTMLElement>) => {
+      if (event.deltaY < 0) requestOlderNearTop();
+    },
+    [requestOlderNearTop]
+  );
+
   return (
     <section
       ref={parentRef}
       onScroll={handleFeedScroll}
+      onWheel={handleFeedWheel}
+      onTouchMove={requestOlderNearTop}
       className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 hide-scrollbar max-w-5xl mx-auto w-full"
     >
       {messages.length === 0 && <EmptyFeed />}

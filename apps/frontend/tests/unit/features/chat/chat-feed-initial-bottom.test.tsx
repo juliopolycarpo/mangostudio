@@ -570,6 +570,38 @@ describe('ChatFeed loading older messages', () => {
     expect(asks.count).toBeGreaterThan(0);
   });
 
+  // At the top of the port nothing can scroll, so a reader pushing further up
+  // sends no scroll event: the gesture itself has to ask again.
+  it('retries a failed page when the reader pushes up while already at the top', () => {
+    const { older, asks } = fakeOlder({ failed: true });
+    const { port } = openFeed('a', makeMessages('a', 60), older);
+    layout.settle(port);
+    fireEvent.wheel(port);
+    port.scrollTop = 0;
+    layout.flushFrame(port);
+    asks.count = 0;
+
+    fireEvent.wheel(port, { deltaY: -120 });
+
+    expect(`older asks after a wheel at the top: ${asks.count}`).toBe(
+      'older asks after a wheel at the top: 1'
+    );
+  });
+
+  it('does not ask when the reader wheels down near the top', () => {
+    const { older, asks } = fakeOlder({ failed: true });
+    const { port } = openFeed('a', makeMessages('a', 60), older);
+    layout.settle(port);
+    fireEvent.wheel(port);
+    port.scrollTop = 0;
+    layout.flushFrame(port);
+    asks.count = 0;
+
+    fireEvent.wheel(port, { deltaY: 120 });
+
+    expect(`older asks after a wheel down: ${asks.count}`).toBe('older asks after a wheel down: 0');
+  });
+
   it('says that earlier messages are loading, without moving any message', () => {
     const { older } = fakeOlder();
     const { port, rerender, queryByText } = openFeed('a', makeMessages('a', 60), older);
