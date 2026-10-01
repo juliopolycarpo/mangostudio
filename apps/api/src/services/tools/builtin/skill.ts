@@ -54,7 +54,7 @@ async function execute(
   const db = getDb();
   return file
     ? loadSkillFile(db, context.userId, name, file)
-    : loadSkillBody(db, context.userId, name);
+    : loadSkillBody(db, context.userId, name, { environmentId: context.environmentId });
 }
 
 /** Registers this built-in tool. // Usage: register() */

@@ -74,6 +74,17 @@ describe('skill tool', () => {
     expect(result.files).toEqual(['reference.md']);
   });
 
+  it('tells a remote chat the skill files stay on the hub and are read through "file"', async () => {
+    const remoteContext: ToolContext = { ...context, environmentId: 'env-remote-ssh' };
+
+    const result = (await executeTool(SKILL_TOOL_NAME, { name: 'pdf-tools' }, remoteContext)) as {
+      filesLocation?: string;
+    };
+
+    expect(result.filesLocation).toMatch(/hub/);
+    expect(result.filesLocation).toMatch(/"file"/);
+  });
+
   it('keeps the Local environment output identical, base dir included', async () => {
     const localContext: ToolContext = { ...context, environmentId: 'local' };
 
