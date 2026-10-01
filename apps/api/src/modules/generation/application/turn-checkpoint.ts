@@ -46,6 +46,11 @@ interface TurnCheckpointWriterOptions {
   readonly checkpoint: TurnCheckpointPart;
   readonly getContent: () => TurnCheckpointContent;
   readonly now?: () => number;
+  /**
+   * Starts `run` on a later macrotask. Best-effort snapshots wait here so deltas
+   * that arrive meanwhile share one write. Defaults to `setTimeout(run, 0)`.
+   */
+  readonly defer?: (run: () => void) => void;
 }
 
 export interface WriteTurnCheckpointOptions {
@@ -54,65 +59,75 @@ export interface WriteTurnCheckpointOptions {
   readonly reasonCode?: TurnInterruptionReasonCode;
 }
 
+function deferToMacrotask(run: () => void): void {
+  setTimeout(run, 0);
+}
+
 /**
- * Serializes bounded checkpoint writes for one assistant row. Text deltas are
- * throttled, while callers force writes at durable tool/provider boundaries.
+ * Orders bounded checkpoint writes for one assistant row.
+ *
+ * Forced checkpoints (tool and provider boundaries) and `prepareFinal` are
+ * required: each is serialized when it is called, written in call order, and
+ * never replaced. Text-delta checkpoints are best-effort: they only record
+ * that the latest state is dirty, and one trailing write serializes that state
+ * when it starts. A forced write supersedes a dirty best-effort snapshot
+ * because it carries newer state.
+ *
+ * @example
+ * await writer.checkpoint(); // best-effort: accepted, written on a later tick
+ * await writer.checkpoint({ force: true }); // required: resolves once written
+ * await writer.flush(); // everything accepted so far is on disk
  */
 export class TurnCheckpointWriter {
   private readonly now: () => number;
+  private readonly defer: (run: () => void) => void;
   private lastTextLength = 0;
   private lastWrittenAt: number;
   private pendingWrite: Promise<void> = Promise.resolve();
+  /** A best-effort snapshot was accepted and no write has taken it yet. */
+  private bestEffortDirty = false;
+  /**
+   * Identifies the trailing best-effort write chained on `pendingWrite` but not
+   * started. A required write clears it so the stale task cannot run ahead of it.
+   */
+  private bestEffortTicket: object | null = null;
+  private bestEffortTimerArmed = false;
 
   constructor(private readonly options: TurnCheckpointWriterOptions) {
     this.now = options.now ?? Date.now;
+    this.defer = options.defer ?? deferToMacrotask;
     this.lastWrittenAt = options.checkpoint.checkpointedAt;
   }
 
+  /**
+   * Request a checkpoint. A forced call resolves to whether its write landed.
+   * A best-effort call resolves to `true` when it passed the throttle and was
+   * accepted (it is written later, merged with any newer accepted snapshots,
+   * and `flush()` waits for it); `false` means the throttle skipped it.
+   */
   checkpoint(options: WriteTurnCheckpointOptions = {}): Promise<boolean> {
     const content = this.options.getContent();
     const now = this.now();
-    if (!this.shouldWrite(content.text.length, now, options.force === true)) {
+    const force = options.force === true;
+    if (!this.shouldWrite(content.text.length, now, force)) {
       return Promise.resolve(false);
     }
 
     this.lastTextLength = content.text.length;
     this.lastWrittenAt = now;
-    refreshTurnCheckpointPart(this.options.checkpoint, content, now, options);
-    const serializedParts = JSON.stringify(content.parts);
-    // Checkpointing is best effort: a failed write is logged and swallowed so a
-    // transient DB error can neither abort the live turn nor reject every later
-    // write chained onto this promise.
-    const write = this.pendingWrite
-      .then(() =>
-        this.options.db
-          .updateTable('messages')
-          .set({
-            text: content.text,
-            parts: serializedParts,
-            providerState: content.providerState,
-            generationTime: content.generationTime,
-          })
-          .where('id', '=', this.options.messageId)
-          .where('isGenerating', '=', 1)
-          .execute()
-      )
-      .then(
-        () => true,
-        (error: unknown) => {
-          logPersistenceError({
-            chatId: this.options.chatId,
-            error: String(error),
-            phase: 'turn_checkpoint',
-          });
-          return false;
-        }
-      );
-    this.pendingWrite = write.then(() => undefined);
-    return write;
+    if (force) return this.writeRequired(content, now, options);
+
+    // Sequence and timestamp advance per accepted call so the persisted
+    // sequence counts checkpoints, however many writes they were merged into.
+    advanceTurnCheckpoint(this.options.checkpoint, now);
+    this.bestEffortDirty = true;
+    this.armBestEffortWrite();
+    return Promise.resolve(true);
   }
 
+  /** Resolve once every checkpoint accepted so far, including the trailing best-effort one, is written. */
   flush(): Promise<void> {
+    if (this.bestEffortDirty) this.queueBestEffortWrite();
     return this.pendingWrite;
   }
 
@@ -120,7 +135,7 @@ export class TurnCheckpointWriter {
     status: Exclude<TurnCheckpointStatus, 'active'>,
     reasonCode?: TurnInterruptionReasonCode
   ): Promise<TurnCheckpointContent> {
-    await this.pendingWrite;
+    await this.flush();
     const content = this.options.getContent();
     refreshTurnCheckpointPart(this.options.checkpoint, content, this.now(), {
       force: true,
@@ -128,6 +143,81 @@ export class TurnCheckpointWriter {
       reasonCode,
     });
     return content;
+  }
+
+  private writeRequired(
+    content: TurnCheckpointContent,
+    now: number,
+    options: WriteTurnCheckpointOptions
+  ): Promise<boolean> {
+    // This write carries state at least as new as any snapshot still waiting.
+    this.bestEffortDirty = false;
+    this.bestEffortTicket = null;
+    refreshTurnCheckpointPart(this.options.checkpoint, content, now, options);
+    const serializedParts = JSON.stringify(content.parts);
+    return this.enqueueWrite(content, serializedParts);
+  }
+
+  private armBestEffortWrite(): void {
+    if (this.bestEffortTimerArmed || this.bestEffortTicket) return;
+    this.bestEffortTimerArmed = true;
+    this.defer(() => {
+      this.bestEffortTimerArmed = false;
+      if (this.bestEffortDirty) this.queueBestEffortWrite();
+    });
+  }
+
+  private queueBestEffortWrite(): void {
+    if (this.bestEffortTicket) return;
+    const ticket = {};
+    this.bestEffortTicket = ticket;
+    // The snapshot is taken when this write starts, not now: everything accepted
+    // while an earlier write was held collapses into this one.
+    this.pendingWrite = this.pendingWrite.then(async () => {
+      if (this.bestEffortTicket !== ticket) return;
+      this.bestEffortTicket = null;
+      if (!this.bestEffortDirty) return;
+      this.bestEffortDirty = false;
+      const content = this.options.getContent();
+      summarizeTurnCheckpointPart(this.options.checkpoint, content, {});
+      await this.writeRow(content, JSON.stringify(content.parts));
+    });
+  }
+
+  private enqueueWrite(content: TurnCheckpointContent, serializedParts: string): Promise<boolean> {
+    const write = this.pendingWrite.then(() => this.writeRow(content, serializedParts));
+    this.pendingWrite = write.then(() => undefined);
+    return write;
+  }
+
+  // Checkpointing is best effort: a failed write is logged and swallowed so a
+  // transient DB error can neither abort the live turn nor reject every later
+  // write chained onto the queue.
+  private async writeRow(
+    content: TurnCheckpointContent,
+    serializedParts: string
+  ): Promise<boolean> {
+    try {
+      await this.options.db
+        .updateTable('messages')
+        .set({
+          text: content.text,
+          parts: serializedParts,
+          providerState: content.providerState,
+          generationTime: content.generationTime,
+        })
+        .where('id', '=', this.options.messageId)
+        .where('isGenerating', '=', 1)
+        .execute();
+      return true;
+    } catch (error) {
+      logPersistenceError({
+        chatId: this.options.chatId,
+        error: String(error),
+        phase: 'turn_checkpoint',
+      });
+      return false;
+    }
   }
 
   private shouldWrite(textLength: number, now: number, force: boolean): boolean {
@@ -177,8 +267,20 @@ export function refreshTurnCheckpointPart(
   now: number,
   options: WriteTurnCheckpointOptions
 ): void {
+  advanceTurnCheckpoint(checkpoint, now);
+  summarizeTurnCheckpointPart(checkpoint, content, options);
+}
+
+function advanceTurnCheckpoint(checkpoint: TurnCheckpointPart, now: number): void {
   checkpoint.sequence += 1;
   checkpoint.checkpointedAt = now;
+}
+
+function summarizeTurnCheckpointPart(
+  checkpoint: TurnCheckpointPart,
+  content: TurnCheckpointContent,
+  options: WriteTurnCheckpointOptions
+): void {
   checkpoint.lastAssistantText = content.text.slice(-TURN_RECOVERY_MAX_TEXT_LENGTH);
   checkpoint.todoSnapshot = getLatestTodoSnapshot(content.parts);
   checkpoint.completedCalls = collectCompletedCalls(content.parts);
