@@ -266,6 +266,10 @@ export async function listByChatId(
  * rows written before the mode axis was retired and by the non-streaming
  * `POST /respond` path, while every streamed turn writes `agent`. Matching on
  * either literal would silently drop the other half of a chat's transcript.
+ *
+ * The newest rows are taken `timestamp DESC, rowid DESC`: a limit that splits
+ * rows sharing a timestamp keeps the newest of them, and the reversed window
+ * reads in insertion order.
  */
 export async function loadHistory(
   chatId: string,
@@ -278,6 +282,7 @@ export async function loadHistory(
     .where('chatId', '=', chatId)
     .where('interactionMode', '!=', 'image')
     .orderBy('timestamp', 'desc')
+    .orderBy(sql`rowid`, 'desc')
     .limit(opts.limit ?? 200);
 
   const excludedIds = collectExcludedIds(opts);
@@ -301,6 +306,7 @@ export async function loadRichHistory(
     .where('chatId', '=', chatId)
     .where('interactionMode', '!=', 'image')
     .orderBy('timestamp', 'desc')
+    .orderBy(sql`rowid`, 'desc')
     .limit(opts.limit ?? 200);
 
   const excludedIds = collectExcludedIds(opts);
