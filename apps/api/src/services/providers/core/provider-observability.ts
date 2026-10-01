@@ -74,6 +74,8 @@ let nextLogId = 0;
 let persistedNextLogId = 0;
 let pendingFlush: ReturnType<typeof setTimeout> | undefined;
 let dirty = false;
+/** Bumped on every mutation so a flush can tell whether its snapshot is still current. */
+let mutationRevision = 0;
 
 function schedulePersist(): void {
   if (pendingFlush) {
@@ -87,6 +89,7 @@ function schedulePersist(): void {
 }
 
 function markDirty(): void {
+  mutationRevision++;
   dirty = true;
   schedulePersist();
 }
@@ -145,6 +148,7 @@ async function persistSnapshot(): Promise<void> {
 
   try {
     const db = getDb();
+    const persistedRevision = mutationRevision;
     const json = JSON.stringify(toPersistedSnapshot());
 
     await db
@@ -159,7 +163,10 @@ async function persistSnapshot(): Promise<void> {
       )
       .execute();
 
-    dirty = false;
+    // A mutation that landed while the write awaited is not in `json`; it stays dirty.
+    if (persistedRevision === mutationRevision) {
+      dirty = false;
+    }
   } catch {
     // Persistence is best-effort; in-memory counters remain authoritative.
   }
@@ -402,6 +409,7 @@ export function resetProviderObservability(): void {
   providerMetrics.clear();
   recentLogs.length = 0;
   nextLogId = persistedNextLogId;
+  mutationRevision++;
   dirty = true;
 
   schedulePersist();
