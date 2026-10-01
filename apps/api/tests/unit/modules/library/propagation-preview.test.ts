@@ -627,6 +627,18 @@ describe('previewLibraryPropagation across machines', () => {
     expect(seen).toEqual([{ complete: false }]);
   });
 
+  it('treats an unsupported machine as scanned, since it can never hold copies', async () => {
+    const seen: (AcknowledgedKeysOptions | undefined)[] = [];
+    await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'old-box'],
+      environments: { 'old-box': { blockedReason: 'environment-unsupported' } },
+      onAcknowledgedKeys: (_resources, options) => seen.push(options),
+    });
+
+    expect(seen).toEqual([{ complete: true }]);
+  });
+
   it('blocks writing to a readonly machine while still using its copies', async () => {
     const result = await preview(['skill:gh'], ['mango-skills'], {
       resources: [],

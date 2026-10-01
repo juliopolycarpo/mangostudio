@@ -723,6 +723,21 @@ function planAcknowledgement(
       `"${entry.resourceKey}" has no comparable divergence to keep: expected divergence "divergent", received "${entry.divergence}".`
     );
   }
+  // An offline machine's copies are missing from the source groups, so what would
+  // be recorded is a partial divergence: it would replace a complete
+  // acknowledgement and then be retired the moment the machine answers.
+  const offline = [
+    ...new Set(
+      entry.destinations
+        .filter((destination) => destination.blockedReason === 'environment-offline')
+        .map((destination) => destination.environmentId)
+    ),
+  ];
+  if (offline.length > 0) {
+    throw validationError(
+      `"${entry.resourceKey}" cannot keep its divergence while ${offline.map((id) => `"${id}"`).join(', ')} could not be scanned (environment-offline): expected every selected machine to answer. Preview again once it is reachable.`
+    );
+  }
   if (decision.destinations.some((target) => target.action === 'apply')) {
     throw validationError(
       `"${entry.resourceKey}" cannot both keep its divergence and write to a destination.`

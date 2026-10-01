@@ -242,8 +242,8 @@ export async function previewLibraryPropagation(
 
   const [acknowledged, agentAvailable] = await Promise.all([
     // Every machine's copies, merged by key: an acknowledgement covers the
-    // versions across all of them. A machine that could not be scanned
-    // contributes none, so nothing is pruned on an answer that is missing it.
+    // versions across all of them. A machine that is offline contributes none,
+    // so nothing is honoured or pruned on an answer that is missing it.
     deps.acknowledgedKeys(
       userId,
       snapshots.flatMap((snapshot) => [...snapshot.resources]),
@@ -295,12 +295,14 @@ export async function previewLibraryPropagation(
   };
 }
 
-/** False for a machine whose copies are absent because it could not answer. */
+/**
+ * False for a machine whose copies are absent because it could not answer right
+ * now. An unsupported machine has no library to hold copies at all, and never
+ * will until it is upgraded, so it counts as scanned: treating it as a gap would
+ * leave every acknowledgement unhonoured for as long as it stays enabled.
+ */
 function wasScanned(snapshot: EnvironmentSnapshot): boolean {
-  return (
-    snapshot.blockedReason !== 'environment-offline' &&
-    snapshot.blockedReason !== 'environment-unsupported'
-  );
+  return snapshot.blockedReason !== 'environment-offline';
 }
 
 /** Deduplicates while preserving request order, so the response is predictable. */

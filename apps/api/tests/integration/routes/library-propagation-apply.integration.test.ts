@@ -673,21 +673,32 @@ const REMOTE_MACHINES: Record<string, readonly (readonly [LibraryLocationId, str
   'box-b': [['claude-skills', 'hash-on-box-b']],
 };
 
+/** What differs from a healthy fleet: directory-hash domains, or machines that cannot answer. */
+interface RemoteMachineState {
+  readonly hashDomains?: Readonly<Record<string, number>>;
+  readonly offline?: readonly string[];
+}
+
 /** A preview over machines that report their own copies through their own runtimes. */
 function previewRemoteMachines(
   request: PropagationPreviewRequest,
-  hashDomains: Readonly<Record<string, number>> = {}
+  machines: RemoteMachineState = {}
 ): Promise<PropagationPreview> {
   const env = pathEnv();
   const enabled = settings(SKILL_LOCATIONS);
   return previewLibraryPropagation(userId(), request, {
     snapshot: async (_userId, environmentId) => ({
       environmentId,
-      resources: remoteScan(REMOTE_MACHINES[environmentId] ?? []),
+      ...(machines.offline?.includes(environmentId) && {
+        blockedReason: 'environment-offline' as const,
+      }),
+      resources: machines.offline?.includes(environmentId)
+        ? []
+        : remoteScan(REMOTE_MACHINES[environmentId] ?? []),
       statuses: new Map(
         request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
       ),
-      directoryHashDomain: hashDomains[environmentId] ?? directoryHashDomainVersion(),
+      directoryHashDomain: machines.hashDomains?.[environmentId] ?? directoryHashDomainVersion(),
     }),
     enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
   });
@@ -697,14 +708,14 @@ describe('propagation apply — keeping a divergence across machines', () => {
   /** Keeps the divergence over `environmentIds`, with the real acknowledgement path. */
   async function keepDivergence(
     environmentIds: readonly string[],
-    hashDomains: Readonly<Record<string, number>> = {}
+    machines: RemoteMachineState = {}
   ) {
     const request: PropagationPreviewRequest = {
       resourceKeys: [REMOTE_SKILL_KEY],
       targetLocationIds: ['claude-skills', 'agents-skills'],
       environmentIds: [...environmentIds],
     };
-    const taken = await previewRemoteMachines(request, hashDomains);
+    const taken = await previewRemoteMachines(request, machines);
     const entry = onlyEntry(taken);
     const reviewed = entry.sourceGroups.map((group) => group.contentHash).sort();
 
@@ -722,7 +733,7 @@ describe('propagation apply — keeping a divergence across machines', () => {
           })),
         },
       ]),
-      applyDeps({ preview: (_userId, requested) => previewRemoteMachines(requested, hashDomains) })
+      applyDeps({ preview: (_userId, requested) => previewRemoteMachines(requested, machines) })
     ).then(
       () => 'applied',
       (error: unknown) => `rejected: ${error instanceof Error ? error.message : String(error)}`
@@ -755,11 +766,21 @@ describe('propagation apply — keeping a divergence across machines', () => {
     });
   });
 
+  it('refuses to keep a divergence while a machine is offline and leaves the stored one alone', async () => {
+    const first = await keepDivergence(['box-a', 'box-b']);
+    const second = await keepDivergence(['box-a', 'box-b'], { offline: ['box-b'] });
+
+    expect({ outcome: second.outcome, stored: second.stored }).toEqual({
+      outcome: `rejected: "${REMOTE_SKILL_KEY}" cannot keep its divergence while "box-b" could not be scanned (environment-offline): expected every selected machine to answer. Preview again once it is reachable.`,
+      stored: [{ resourceKey: REMOTE_SKILL_KEY, contentHashes: first.reviewed }],
+    });
+  });
+
   it('refuses to keep hashes that runtimes computed in different directory domains', async () => {
     // Distinct hashes across directory-hash domains do not prove distinct content,
     // so the preview calls the skill incomparable and there is nothing to keep.
     const hashDomains = { 'box-a': directoryHashDomainVersion(), 'box-b': 1 };
-    const { outcome, stored } = await keepDivergence(['box-a', 'box-b'], hashDomains);
+    const { outcome, stored } = await keepDivergence(['box-a', 'box-b'], { hashDomains });
 
     expect({ outcome, stored }).toEqual({
       outcome: `rejected: "${REMOTE_SKILL_KEY}" has no comparable divergence to keep: expected divergence "divergent", received "incomparable".`,
