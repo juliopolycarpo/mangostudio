@@ -100,6 +100,31 @@ function buildFailingArchive(
   return archivePath;
 }
 
+/**
+ * A release archive whose mangostudio floods stderr (about 3 MB) and, before exiting 3, records
+ * every file over 64 KiB under $TMPDIR into `leakReport`, to show where the installer kept it.
+ */
+function buildFloodingArchive(dir: string, name: string, leakReport: string): string {
+  const srcDir = join(dir, `src-flooding-${name}`);
+  mkdirSync(srcDir, { recursive: true });
+  writeFileSync(
+    join(srcDir, 'mangostudio'),
+    [
+      '#!/bin/sh',
+      'i=0',
+      'while [ "$i" -lt 3000 ]; do printf \'%01000d\\n\' "$i" >&2; i=$((i + 1)); done',
+      `find "$TMPDIR" -type f -size +64k > '${leakReport}'`,
+      'exit 3',
+      '',
+    ].join('\n')
+  );
+  chmodSync(join(srcDir, 'mangostudio'), 0o755);
+  const archivePath = join(dir, name);
+  const result = Bun.spawnSync({ cmd: ['tar', '-czf', archivePath, '-C', srcDir, 'mangostudio'] });
+  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
+  return archivePath;
+}
+
 /** An npm platform tarball: members live under package/, per pack-npm.ts. */
 function buildNpmTarball(dir: string, printedVersion: string): string {
   const srcDir = join(dir, 'npm-src');
@@ -444,6 +469,37 @@ describe('install.sh layout', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(glibcLine);
     expect(result.stderr).not.toContain('apk add');
+  });
+
+  test('a hub that floods stderr is capped at ten lines and never spooled to disk', () => {
+    const { workDir, env } = layout();
+    const scratchTmp = join(workDir, 'tmp');
+    mkdirSync(scratchTmp, { recursive: true });
+    const leakReport = join(workDir, 'leaked-files.txt');
+    const flooding = buildFloodingArchive(
+      workDir,
+      `mangostudio-0.1.0-${PLATFORM}.tar.gz`,
+      leakReport
+    );
+
+    const result = run(['--local', flooding, '--version', '0.1.0'], {
+      ...env,
+      TMPDIR: scratchTmp,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('exit status: 3');
+    const floodLines = result.stderr
+      .split('\n')
+      .filter((line) => /^0+\d*$/.test(line.replace('  stderr: ', '')));
+    expect(
+      floodLines.length,
+      'expected at most 10 stderr lines shown | received'
+    ).toBeLessThanOrEqual(10);
+    expect(
+      readFileSync(leakReport, 'utf8').trim(),
+      'expected no file over 64 KiB under TMPDIR while the probe ran | received'
+    ).toBe('');
   });
 
   test('an archive missing mangostudio fails and leaves no .install-* scratch directory behind', () => {

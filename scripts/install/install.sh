@@ -574,12 +574,19 @@ EOF
 # stderr has its status and stderr appended to the error, so the reason the
 # hub did not run (a missing shared library, say) reaches the user.
 smoke_or_fail() {
-  local dir="$1" expected="$2" remove_on_failure="$3" actual status=0
-  local err_file stderr_text message hint
-  err_file="$(mktemp)"
-  actual="$("${dir}/mangostudio" --version 2>"$err_file")" || status=$?
-  stderr_text="$(head -n 10 "$err_file")"
-  rm -f "$err_file"
+  local dir="$1" expected="$2" remove_on_failure="$3" actual status
+  local scratch stderr_text message hint
+  scratch="$(mktemp -d)"
+  printf '0\n' >"${scratch}/status"
+  # stderr goes through a pipe, never to disk: the reader keeps the first ten
+  # lines and drains the rest, so a hub that floods stderr cannot fill /tmp.
+  stderr_text="$(
+    { "${dir}/mangostudio" --version 2>&1 >"${scratch}/stdout" ||
+      printf '%s\n' "$?" >"${scratch}/status"; } | { head -n 10; cat >/dev/null; }
+  )"
+  status="$(cat "${scratch}/status")"
+  actual="$(cat "${scratch}/stdout")"
+  rm -rf "$scratch"
   [ "$status" -ne 0 ] && actual=''
   [ "$actual" = "$expected" ] && return 0
 
@@ -590,6 +597,8 @@ smoke_or_fail() {
   probe: ${dir}/mangostudio --version | expected: exit status: 0 | received: exit status: ${status}"
   fi
   if [ -n "$stderr_text" ]; then
+    # Continuation lines line up under the first so the block reads as one.
+    stderr_text="$(printf '%s\n' "$stderr_text" | sed '2,$s/^/          /')"
     message="${message}
   stderr: ${stderr_text}"
   fi
