@@ -1,11 +1,11 @@
 export { type ContextSeverity, getContextSeverity } from './context-severity';
-export type { Message } from './entities';
 export {
   type GalleryPage,
   GalleryPageSchema,
   type ListGalleryQuery,
   ListGalleryQuerySchema,
 } from './gallery-page';
+export { type Message, MessagePartSchema, MessageSchema } from './message';
 export { type MessagesPage, MessagesPageSchema } from './messages-page';
 export {
   type Chat,
@@ -42,6 +42,8 @@ export {
   GenerateChatTitleBodySchema,
   type GenerateChatTitleResponse,
   GenerateChatTitleResponseSchema,
+  type GeneratedImageArtifact,
+  GeneratedImageArtifactSchema,
   type ListChatMessagesQuery,
   ListChatMessagesQuerySchema,
   type SummarizeToNewChatBody,

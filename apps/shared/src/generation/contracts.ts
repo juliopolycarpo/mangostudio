@@ -1,4 +1,4 @@
-import type { Message } from '../chat/entities';
+import type { Message } from '../chat/message';
 
 /** A persisted message returned by the generate or respond endpoint. */
 export interface GeneratedMessage extends Message {

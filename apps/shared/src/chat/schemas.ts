@@ -170,6 +170,27 @@ export const ChatAttachmentSchema = Type.Object({
 
 export type ChatAttachment = Static<typeof ChatAttachmentSchema>;
 
+/**
+ * An image a tool or the image model produced, as the API sends it.
+ *
+ * Optional fields are omitted, never `null`: the repositories map an absent
+ * column to `undefined`, which JSON drops.
+ */
+export const GeneratedImageArtifactSchema = Type.Object({
+  id: Type.String(),
+  chatId: Type.String(),
+  messageId: Type.String(),
+  prompt: Type.String(),
+  imageUrl: Type.String(),
+  createdAt: Type.Number(),
+  toolCallId: Type.Optional(Type.String()),
+  modelName: Type.Optional(Type.String()),
+  generationTime: Type.Optional(Type.String()),
+  metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+});
+
+export type GeneratedImageArtifact = Static<typeof GeneratedImageArtifactSchema>;
+
 export const UploadChatAttachmentResponseSchema = Type.Object({
   attachment: ChatAttachmentSchema,
 });
