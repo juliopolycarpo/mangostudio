@@ -369,6 +369,7 @@ export function createUnifiedModelCatalogService(
      * expensive full provider re-fetch.
      */
     recalculate(userId: string): void {
+      markInvalidated(userId);
       dirtySnapshots.add(userId);
       refreshPromises.delete(userId);
     },
