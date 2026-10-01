@@ -381,16 +381,8 @@ class ExternalTranscriptWriter {
 
     this.#lastTextLength = text.length;
     this.#lastWrittenAt = at;
-    const parts = JSON.stringify(this.transcript.parts);
     this.#pending = this.#pending
-      .then(() =>
-        this.db
-          .updateTable('messages')
-          .set({ text, parts })
-          .where('id', '=', this.messageId)
-          .where('isGenerating', '=', 1)
-          .execute()
-      )
+      .then(() => this.#persistSnapshot())
       .then(
         () => undefined,
         (error: unknown) => {
@@ -409,20 +401,26 @@ class ExternalTranscriptWriter {
   /**
    * A steering attempt cannot reach the vendor unless its durable record did.
    * Unlike ordinary checkpoints, its failure must be observable by the caller.
+   *
+   * `onFailure` runs synchronously when this write rejects, ahead of any write
+   * queued behind it, so a caller can correct the transcript before the next
+   * snapshot is taken.
+   *
+   * @example
+   * await writer.writeRequired(() => transcript.resolveSteerRejected(id, 'not-supported'));
    */
-  writeRequired(): Promise<void> {
-    const text = this.transcript.text;
-    const parts = JSON.stringify(this.transcript.parts);
+  writeRequired(onFailure?: () => void): Promise<void> {
     const required = this.#pending
-      .then(() =>
-        this.db
-          .updateTable('messages')
-          .set({ text, parts })
-          .where('id', '=', this.messageId)
-          .where('isGenerating', '=', 1)
-          .execute()
-      )
-      .then(() => undefined);
+      .then(() => this.#persistSnapshot())
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          // Runs before the queue recovers, so a write chained behind this one
+          // snapshots the transcript with the correction already applied.
+          onFailure?.();
+          throw error;
+        }
+      );
     // Keep subsequent best-effort checkpoints usable if this required write
     // failed; the steering caller still receives the original rejection.
     this.#pending = required.then(
@@ -439,6 +437,22 @@ class ExternalTranscriptWriter {
 
   flush(): Promise<void> {
     return this.#pending;
+  }
+
+  /**
+   * Serialized when the write runs, not when it is queued: a write queued behind
+   * one that failed would otherwise persist a snapshot that predates the
+   * failure's correction.
+   */
+  #persistSnapshot() {
+    const text = this.transcript.text;
+    const parts = JSON.stringify(this.transcript.parts);
+    return this.db
+      .updateTable('messages')
+      .set({ text, parts })
+      .where('id', '=', this.messageId)
+      .where('isGenerating', '=', 1)
+      .execute();
   }
 
   #shouldWrite(textLength: number, at: number): boolean {
@@ -1196,6 +1210,11 @@ export function createExternalTurnController(
     };
   }
 
+  /** Whether `live` is no longer the turn that may still be steered for `chatId`. */
+  function hasEnded(live: LiveExternalTurn, chatId: string): boolean {
+    return live.terminating || live.transcript.terminated || liveTurns.get(chatId) !== live;
+  }
+
   const instance: ExternalTurnController = {
     start,
     async answerApproval(input) {
@@ -1259,7 +1278,17 @@ export function createExternalTurnController(
             { clientMessageId: input.clientMessageId, text: input.text },
             now()
           );
-          await live.writer.writeRequired();
+          // On failure the steer never reached the runtime and never will: a
+          // same-id retry reuses this rejected attempt. Left `accepted`, a
+          // later checkpoint or the finalization would persist a delivery that
+          // did not happen, and the correction must land before any write
+          // queued behind this one snapshots the transcript. The caller still
+          // sees the original failure. `turn-not-steerable` is the closest
+          // closed reason that stays true: the turn may well still be running,
+          // so `turn-already-completed` would tell the user it had finished.
+          await live.writer.writeRequired(() =>
+            live.transcript.resolveSteerRejected(input.clientMessageId, 'turn-not-steerable')
+          );
           if (recorded.terminal) {
             // This steer is what pushed the transcript past its byte or event
             // budget. It is already durably kept, matching how `apply` treats
@@ -1267,6 +1296,21 @@ export function createExternalTurnController(
             // it: the turn is over, the same as any other budget breach.
             live.terminate(recorded.terminal);
             live.cancelVendorAfter(recorded.terminal);
+            return { accepted: false, reasonCode: 'turn-already-completed' };
+          }
+
+          // The entry guard held when the write started, not when it resolved:
+          // a cancel or any other terminal path can land while it was awaited.
+          // The correction is in-memory only — the turn's final write is still
+          // to come and carries it.
+          if (hasEnded(live, input.chatId)) {
+            live.transcript.resolveSteerRejected(input.clientMessageId, 'turn-already-completed');
+            live.observer?.onSteer?.({
+              clientMessageId: input.clientMessageId,
+              text: input.text,
+              status: 'rejected',
+              reasonCode: 'turn-already-completed',
+            });
             return { accepted: false, reasonCode: 'turn-already-completed' };
           }
 
