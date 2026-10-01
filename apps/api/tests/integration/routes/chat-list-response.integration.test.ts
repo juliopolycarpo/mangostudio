@@ -219,6 +219,91 @@ describe('GET /chats wire parity', () => {
     expect(text).toBe(JSON.stringify(expectedChats('parity')));
   });
 
+  it('encodes the same body for chats carrying large continuation state', async () => {
+    const user = await insertTestUser();
+    const envelope = (cursor: string) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        provider: 'openai-compatible',
+        mode: 'responses',
+        modelName: 'gpt-5',
+        systemPromptHash: 'hash-a',
+        toolsetHash: 'hash-b',
+        cursor,
+        context: {
+          estimatedInputTokens: 20_000,
+          providerReportedInputTokens: 20_000,
+          contextLimit: 100_000,
+        },
+      });
+    const wide = 'w'.repeat(64 * 1024);
+    await seedChat(user, 'large-snapshot', 'Snapshot over a large envelope', {
+      createdAt: BASE_TIME,
+      updatedAt: BASE_TIME + 3,
+      lastProviderState: envelope(wide),
+      lastContextState: JSON.stringify({
+        estimatedInputTokens: 30_000,
+        contextLimit: 100_000,
+        estimatedUsageRatio: 0.3,
+        mode: 'stateful',
+        severity: 'normal',
+        lastUpdatedAt: BASE_TIME,
+      }),
+    });
+    await seedChat(user, 'large-legacy', 'Large envelope, no snapshot', {
+      createdAt: BASE_TIME,
+      updatedAt: BASE_TIME + 2,
+      lastProviderState: envelope(wide),
+    });
+    await seedChat(user, 'large-stale', 'Large envelope, stale snapshot shape', {
+      createdAt: BASE_TIME,
+      updatedAt: BASE_TIME + 1,
+      lastProviderState: envelope(wide),
+      // Valid JSON from an older shape: no `lastUpdatedAt`, so it is unreadable.
+      lastContextState: JSON.stringify({
+        estimatedInputTokens: 30_000,
+        contextLimit: 100_000,
+        estimatedUsageRatio: 0.3,
+        mode: 'stateful',
+        severity: 'normal',
+      }),
+    });
+    const chat = (id: string, title: string, updatedAt: number, tokens: number, ratio: number) => ({
+      id,
+      title,
+      createdAt: BASE_TIME,
+      updatedAt,
+      model: null,
+      textModel: null,
+      imageModel: null,
+      runner: { kind: 'mangostudio', agentId: 'default' },
+      runnerPermissions: {},
+      runnerModelSelection: {},
+      workdir: null,
+      environmentId: 'local',
+      restrictToolsToWorkdir: null,
+      contextInfo: {
+        estimatedInputTokens: tokens,
+        contextLimit: 100_000,
+        estimatedUsageRatio: ratio,
+        mode: 'stateful',
+        severity: 'normal',
+      },
+    });
+
+    const response = await authenticatedApp(user).handle(new Request('http://localhost/chats'));
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toBe(
+      JSON.stringify([
+        chat('large-snapshot', 'Snapshot over a large envelope', BASE_TIME + 3, 30_000, 0.3),
+        chat('large-legacy', 'Large envelope, no snapshot', BASE_TIME + 2, 20_000, 0.2),
+        chat('large-stale', 'Large envelope, stale snapshot shape', BASE_TIME + 1, 20_000, 0.2),
+      ])
+    );
+  });
+
   it('answers with the same headers, including ones set by earlier hooks', async () => {
     const user = await insertTestUser();
     await seedRepresentativeChats(user, 'headers');
