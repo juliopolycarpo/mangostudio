@@ -208,6 +208,7 @@ export function ChatPage({
             messages={messages}
             older={older}
             status={status}
+            isGenerating={isGenerating}
             hub={{
               chatId,
               userName,

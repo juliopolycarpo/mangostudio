@@ -12,6 +12,8 @@ interface ChatPageContentProps {
   /** Loads the messages above the ones in `messages`; see `ChatFeed`. */
   readonly older: OlderMessages;
   readonly status: MessageQueryStatus;
+  /** A turn is streaming; the transcript starts no background loading meanwhile. */
+  readonly isGenerating?: boolean;
   /** Everything the empty-state hub needs; unused once the chat has messages. */
   readonly hub: WorkspaceHubProps;
   /** Present only while question cards may be answered (no generation running). */
@@ -23,6 +25,7 @@ export function ChatPageContent({
   messages,
   older,
   status,
+  isGenerating,
   hub,
   onQuestionSubmit,
 }: ChatPageContentProps) {
@@ -41,6 +44,7 @@ export function ChatPageContent({
       chatId={chatId}
       messages={messages}
       older={older}
+      isGenerating={isGenerating}
       onQuestionSubmit={onQuestionSubmit}
     />
   );
