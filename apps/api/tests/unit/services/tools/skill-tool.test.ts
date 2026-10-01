@@ -56,6 +56,39 @@ describe('skill tool', () => {
     expect(result.files).toEqual(['reference.md']);
   });
 
+  it('does not hand a remote chat the hub host skill directory', async () => {
+    const remoteContext: ToolContext = { ...context, environmentId: 'env-remote-ssh' };
+    const hubDir = join(skillsDir, 'pdf-tools');
+
+    const result = (await executeTool(SKILL_TOOL_NAME, { name: 'pdf-tools' }, remoteContext)) as {
+      body: string;
+      baseDir?: string;
+      files: string[];
+    };
+
+    const leaked = JSON.stringify(result).includes(hubDir) ? (result.baseDir ?? hubDir) : undefined;
+    expect(leaked, `expected no hub filesystem path for a remote chat | received: ${leaked}`).toBe(
+      undefined
+    );
+    expect(result.body).toBe('Use `reference.md` for details.');
+    expect(result.files).toEqual(['reference.md']);
+  });
+
+  it('keeps the Local environment output identical, base dir included', async () => {
+    const localContext: ToolContext = { ...context, environmentId: 'local' };
+
+    const result = await executeTool(SKILL_TOOL_NAME, { name: 'pdf-tools' }, localContext);
+
+    expect(result).toEqual({
+      name: 'pdf-tools',
+      description: 'Work with PDF files',
+      baseDir: join(skillsDir, 'pdf-tools'),
+      body: 'Use `reference.md` for details.',
+      files: ['reference.md'],
+      filesTruncated: false,
+    });
+  });
+
   it('reads an explicit null "file" as absent and loads the skill body', async () => {
     const result = (await executeTool(
       SKILL_TOOL_NAME,
