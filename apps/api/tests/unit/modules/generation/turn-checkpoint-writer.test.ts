@@ -280,6 +280,46 @@ describe('TurnCheckpointWriter', () => {
     expect(checkpoint.lastAssistantText.length).toBeGreaterThan(0);
   });
 
+  it('drains accepted best-effort text before an interrupted turn is finalized', async () => {
+    const { db, checkpoint, writer, append } = setup();
+    for (let call = 0; call < 3; call++) {
+      append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+      await writer.checkpoint();
+    }
+    // The wake-up never fired: the abort path goes straight to prepareFinal.
+    expect(db.writes).toHaveLength(0);
+
+    const content = await writer.prepareFinal('interrupted', 'user_cancelled');
+
+    expect(db.writes).toHaveLength(1);
+    expect(db.writes[0]?.text).toBe(content.text);
+    expect(content.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS * 3);
+    expect(checkpoint.status).toBe('interrupted');
+    expect(checkpoint.reasonCode).toBe('user_cancelled');
+    expect(checkpoint.sequence).toBe(4);
+  });
+
+  it('loses only text after the last landed checkpoint when the turn crashes', async () => {
+    const { db, manual, writer, append } = setup();
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+    manual.fire();
+    await writer.flush();
+
+    // Accepted after the last landed write, then the process dies: neither the
+    // wake-up nor flush ever runs.
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+
+    expect(db.writes).toHaveLength(1);
+    const landed = db.writes[0];
+    expect(landed?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    expect(landed?.partCount).toBe(2);
+    expect(landed?.sequence).toBe(1);
+  });
+
   it('reports a failed write as false and keeps later writes landing', async () => {
     const { db, writer, append } = setup();
     db.failNextWrite(new Error('disk full'));
