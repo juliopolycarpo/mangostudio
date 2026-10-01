@@ -8,7 +8,9 @@ import type { FsProbe } from '../../../../src/cli/doctor-checks';
 import type { BuildInfo } from '../../../../src/lib/build-info';
 import type { MangoConfig } from '../../../../src/lib/config';
 import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
+import { resetRuntimeConnectionReleaseForTests } from '../../../../src/services/runtime-client/runtime-connection-release';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
+import { FakeRuntimeSpawner } from '../../../support/mocks/fake-runtime-spawner';
 
 const ALL_OK: FsProbe = { exists: () => true, isWritable: () => true };
 const NOTHING: FsProbe = { exists: () => false, isWritable: () => false };
@@ -434,6 +436,107 @@ describe('runDoctor', () => {
 
     expect(lines.join('\n')).toContain('MCP github');
     expect(received).toEqual([{ probe: true, serverRunning: true }]);
+  });
+});
+
+describe('runDoctor runtime child lifetime', () => {
+  afterEach(() => {
+    resetRuntimeConnectionReleaseForTests();
+  });
+
+  /** The environments check opens Local, which spawns the runtime child. */
+  function spawningEnvironmentChecks(spawner: FakeRuntimeSpawner) {
+    return () => {
+      spawner.spawn();
+      return Promise.resolve([]);
+    };
+  }
+
+  /** Fails with the received value in the message, not an incidental diff. */
+  function expectReaped(received: boolean | undefined): void {
+    if (received === true) return;
+    throw new Error(`expected runtime child reaped before exit: true | received: ${received}`);
+  }
+
+  it('reaps the runtime child before exiting when a check fails', async () => {
+    const spawner = new FakeRuntimeSpawner();
+    const reapedAtExit: boolean[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          fs: NOTHING,
+          collectEnvironmentChecks: spawningEnvironmentChecks(spawner),
+        }),
+        exit: () => {
+          reapedAtExit.push(spawner.allReaped());
+        },
+      }
+    );
+
+    expect(reapedAtExit.length).toBe(1);
+    expectReaped(reapedAtExit[0]);
+  });
+
+  it('reaps the runtime child before exiting when a check fails with --json', async () => {
+    const spawner = new FakeRuntimeSpawner();
+    const reapedAtExit: boolean[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS, json: true },
+      {
+        ...makeDoctorDeps({
+          fs: NOTHING,
+          collectEnvironmentChecks: spawningEnvironmentChecks(spawner),
+        }),
+        exit: () => {
+          reapedAtExit.push(spawner.allReaped());
+        },
+      }
+    );
+
+    expect(reapedAtExit.length).toBe(1);
+    expectReaped(reapedAtExit[0]);
+  });
+
+  it('reaps the runtime child before resolving when every check passes', async () => {
+    const spawner = new FakeRuntimeSpawner();
+    let exited = false;
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({ collectEnvironmentChecks: spawningEnvironmentChecks(spawner) }),
+        exit: () => {
+          exited = true;
+        },
+      }
+    );
+
+    expect(exited).toBe(false);
+    expectReaped(spawner.allReaped());
+  });
+
+  it('prints the report and surfaces a release that fails instead of exiting', async () => {
+    const lines: string[] = [];
+    let exited = -1;
+
+    const outcome = runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({ fs: NOTHING }),
+        log: (msg) => lines.push(msg),
+        exit: (code) => {
+          exited = code;
+        },
+        releaseRuntimes: () => Promise.reject(new Error('runtime child did not exit')),
+      }
+    );
+
+    await expect(outcome).rejects.toThrow('runtime child did not exit');
+    expect(lines.join('\n')).toContain('failure(s).');
+    expect(exited).toBe(-1);
   });
 });
 
