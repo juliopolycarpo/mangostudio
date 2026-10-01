@@ -1,4 +1,5 @@
-import type { Chat, Message, UpdateChatBody } from '@mangostudio/shared';
+import type { Chat, UpdateChatBody } from '@mangostudio/shared';
+import type { MessagesPage } from '@mangostudio/shared/chat';
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import {
   infiniteQueryOptions,
@@ -181,12 +182,6 @@ export function useDeleteChatMutation() {
 // Message query keys
 // ---------------------------------------------------------------------------
 
-export type MessagesPage = {
-  messages: Message[];
-  nextCursor: string | null;
-  contextInfo?: ContextInfo | null;
-};
-
 export const messageKeys = {
   all: ['messages'] as const,
   lists: () => [...messageKeys.all, 'list'] as const,
@@ -200,7 +195,7 @@ export const messagesQueryOptions = (chatId: string) =>
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
       const { data, error } = await client.api.chats({ id: chatId }).messages.get({ query });
       if (error) throw new ApiError(error.value);
-      return data as unknown as MessagesPage;
+      return data satisfies MessagesPage;
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,

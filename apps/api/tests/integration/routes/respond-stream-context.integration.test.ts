@@ -316,10 +316,13 @@ describe('POST /respond/stream — context and continuation', () => {
             select: () => ({
               where: () => ({
                 where: () => ({
+                  // timestamp DESC, then rowid DESC (tie-break).
                   orderBy: () => ({
-                    limit: () => ({
-                      where: () => ({ execute: () => Promise.resolve(messageRows) }),
-                      execute: () => Promise.resolve(messageRows),
+                    orderBy: () => ({
+                      limit: () => ({
+                        where: () => ({ execute: () => Promise.resolve(messageRows) }),
+                        execute: () => Promise.resolve(messageRows),
+                      }),
                     }),
                   }),
                 }),

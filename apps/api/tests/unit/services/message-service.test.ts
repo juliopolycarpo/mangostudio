@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../src/db/database';
+import { decodeTranscriptCursor } from '../../../src/modules/messages/domain/transcript-cursor';
 import {
   insertMessage,
   listByChatId,
@@ -97,11 +98,11 @@ describe('loadHistory', () => {
     const firstPage = await listByChatId(CHAT_ID, { limit: 2 }, db);
 
     expect(firstPage.messages.map((message) => message.id)).toEqual(['ms-msg-1', 'ms-msg-2']);
-    expect(firstPage.nextCursor).toBe(String(firstPage.messages.at(-1)?.timestamp));
+    expect(firstPage.nextCursor).toStartWith(`${firstPage.messages.at(-1)?.timestamp}:`);
 
     const secondPage = await listByChatId(
       CHAT_ID,
-      { limit: 2, cursor: Number(firstPage.nextCursor) },
+      { limit: 2, cursor: decodeTranscriptCursor(firstPage.nextCursor ?? '') },
       db
     );
 
