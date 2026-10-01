@@ -144,6 +144,11 @@ function removeTempPathsOnSignal(): void {
   }
 }
 
+/** Removes a directory tree synchronously, so cleanup can never interleave with a signal. */
+export type RemoveTree = (path: string) => void;
+
+const removeTreeSync: RemoveTree = (path) => rmSync(path, { recursive: true, force: true });
+
 interface FileIdentity {
   readonly dev: number;
   readonly ino: number;
@@ -404,11 +409,19 @@ export async function writeBuildState(outputDir: string, state: BuildState): Pro
  * POSIX cannot rename a directory over another non-empty directory. Move the
  * old one aside first, but restore it if publishing the staged tree or its
  * final sidecar operation fails.
+ *
+ * `removeTree` is the rollback's removal of a failed bundle, injectable so a
+ * test can make that one step fail on every platform (a read-only directory
+ * does not stop a removal on Windows).
+ *
+ * @example
+ * await publishDist(stagedDist, DIST, async () => rm(metafilePath, { force: true }));
  */
 export async function publishDist(
   stagedDist: string,
   dist: string,
-  finalize?: () => Promise<void>
+  finalize?: () => Promise<void>,
+  removeTree: RemoveTree = removeTreeSync
 ): Promise<void> {
   const backupDist = trackTempPath(join(dirname(dist), `.dist-backup-${Bun.randomUUIDv7()}`), {
     restoreTo: dist,
@@ -440,7 +453,7 @@ export async function publishDist(
       published && publishedIdentity !== undefined && isFileIdentity(dist, publishedIdentity);
     if (ownsPublishedDist) {
       try {
-        rmSync(dist, { recursive: true, force: true });
+        removeTree(dist);
       } catch (removeError) {
         rollbackErrors.push(removeError);
       }
