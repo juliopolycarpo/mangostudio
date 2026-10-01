@@ -27,6 +27,7 @@ const INTEGRATION_PR_WORKFLOWS = [
   '.github/workflows/cargo-shim.yml',
   '.github/workflows/codeql.yml',
   '.github/workflows/dependency-review.yml',
+  '.github/workflows/dependency-audit.yml',
   '.github/workflows/protocol-ci.yml',
   '.github/workflows/release-dry-run.yml',
 ] as const;
@@ -36,11 +37,16 @@ const INTEGRATION_PR_WORKFLOWS = [
 // Interpolating it into a template literal is not flagged.
 const EXPR = '$' + '{{';
 
-describe('Rust integration branch coverage', () => {
-  test.each([...INTEGRATION_PR_WORKFLOWS])('%s runs for both protected PR targets', (path) => {
-    const onBlock = extractOnBlock(readText(path));
-    expect(onBlock).toContain('pull_request:\n    branches: [main, feat/rust-runtime]');
-  });
+describe('Integration branch coverage', () => {
+  test.each([...INTEGRATION_PR_WORKFLOWS])(
+    '%s runs for main and protected integration PR targets',
+    (path) => {
+      const onBlock = extractOnBlock(readText(path));
+      expect(onBlock).toContain(
+        'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]'
+      );
+    }
+  );
 });
 
 describe('gate result evaluation', () => {
@@ -113,11 +119,13 @@ describe('ci.yml trigger and concurrency policy', () => {
    * one) has to come here and be justified, instead of quietly widening into a
    * branch allowlist.
    */
-  test('runs for PRs to main and the Rust integration branch, pushes to main, and manual dispatch', () => {
+  test('runs for PRs to protected branches, pushes to main, and manual dispatch', () => {
     const onBlock = extractOnBlock(workflow);
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
-    expect(onBlock).toContain('pull_request:\n    branches: [main, feat/rust-runtime]');
+    expect(onBlock).toContain(
+      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]'
+    );
     expect(onBlock).toContain('push:\n    branches: [main]');
     // No branch-prefix allowlist: development branches get CI via their PR.
     expect(onBlock).not.toContain('/**');
@@ -219,7 +227,9 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
     // pull_request must not be path-filtered, or the Gate check would hang as
     // "expected" on non-Rust PRs.
-    expect(onBlock).toContain('pull_request:\n    branches: [main, feat/rust-runtime]\n  push:');
+    expect(onBlock).toContain(
+      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]\n  push:'
+    );
     expect(onBlock).toContain('- "crates/**"');
     expect(onBlock).toContain('- "Cargo.toml"');
     expect(onBlock).toContain('- "Cargo.lock"');
@@ -372,7 +382,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'workflow_dispatch', 'schedule']);
     expect(onBlock).toContain(
-      'pull_request:\n    branches: [main, feat/rust-runtime]\n  workflow_dispatch:'
+      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]\n  workflow_dispatch:'
     );
   });
 
