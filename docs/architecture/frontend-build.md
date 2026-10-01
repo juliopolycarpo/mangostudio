@@ -234,8 +234,9 @@ at least 128 B and 5 %; fonts and images are never tried.
 - **Negotiation.** `apps/api/src/server/accept-encoding.ts` implements RFC 9110 §12.5.3: weights,
   `q=0`, `*`, `x-gzip`, case-insensitivity. No header or an empty one means identity. Highest
   weight wins and a tie goes to Brotli. An implicit identity never outranks a coding the client
-  asked for; `identity;q=0` or `*;q=0` refuses it, and with nothing else acceptable the answer
-  is `406`. A malformed member (bad token or weight) is ignored, not a `400`, and a coding
+  asked for. A client that refuses identity and everything on offer (`identity;q=0`, `*;q=0`)
+  still gets identity, never a `406`: the RFC lets a server ignore the header, and those
+  requests were answered before copies existed. A malformed member (bad token or weight) is ignored, not a `400`, and a coding
   listed twice keeps its first weight. A variant that was never built falls back to identity.
 - **Headers.** An asset that has copies always sends `Vary: Accept-Encoding`, folded into the
   `Vary` Elysia already holds so CORS's `Vary: Origin` survives (a `Response` carrying its own
@@ -247,8 +248,8 @@ at least 128 B and 5 %; fonts and images are never tried.
 - **HEAD** is answered for embedded assets and the SPA shell with the metadata GET would send.
   It arrives in the not-found fallback, since HEAD never matches a literal GET route; API and
   upload paths still decline there. Directory mode and uploads still answer HEAD with 404.
-- **Range** is Bun's: over the stored bytes of the selected representation, so the per-copy
-  `ETag` is what keeps `If-Range` honest. Bun does not slice the virtual files of a compiled
+- **Range** is Bun's: over the stored bytes of the selected representation. Bun ignores
+  `If-Range`, for identity files too, so the per-copy `ETag` does not protect a resume. Bun does not slice the virtual files of a compiled
   binary, which answers `200` with the whole representation.
 - **Directory mode** has no copies (`dist/` carries none) and `/assets` stays on
   `@elysia/static`, so it answers identity whatever the client asks for, with no `Vary`.

@@ -6,8 +6,8 @@
 
 import type { EmbeddedContentCoding } from './embedded-frontend';
 
-/** What the client's header resolves to for one resource. `null` means nothing acceptable (406). */
-export type EncodingChoice = EmbeddedContentCoding | 'identity' | null;
+/** What the client's header resolves to for one resource. */
+export type EncodingChoice = EmbeddedContentCoding | 'identity';
 
 /** Server preference among compressed codings that tie on weight: smallest first. */
 const PREFERENCE: readonly EmbeddedContentCoding[] = ['br', 'gzip'];
@@ -54,13 +54,13 @@ function parseWeight(params: readonly string[]): number | null {
  *   and the server may choose, and identity is the safe choice.
  * - A compressed coding is acceptable at its own weight, else at `*`'s, else not
  *   at all. Highest weight wins; a tie goes to the smaller (`br` over `gzip`).
- * - Identity is acceptable unless the client refuses it (`identity;q=0`, or
- *   `*;q=0` with identity unlisted). Left implicit it never outranks a
- *   compressed coding the client asked for, so `gzip` alone gets gzip.
- *   Listed (or implied by `*`), it competes on weight and wins only when strictly
- *   higher.
- *
- * Returns `null` when the client has refused every representation on offer.
+ * - Identity is the fallback. Left implicit it never outranks a compressed coding
+ *   the client asked for, so `gzip` alone gets gzip. Listed (or implied by `*`),
+ *   it competes on weight and wins only when strictly higher.
+ * - A client that refuses every representation on offer (`identity;q=0`,
+ *   `*;q=0`) still gets identity. RFC 9110 §12.5.3 lets a server ignore the
+ *   header, and a request that was answered with identity before copies existed
+ *   must not start failing because copies do.
  *
  * @example
  * negotiateEncoding('gzip, br;q=0.8', ['br', 'gzip']); // 'gzip'
@@ -88,7 +88,7 @@ export function negotiateEncoding(
   if (best !== null && (explicitIdentity === undefined || bestWeight >= explicitIdentity)) {
     return best;
   }
-  return (explicitIdentity ?? 1) > 0 ? 'identity' : null;
+  return 'identity';
 }
 
 /**

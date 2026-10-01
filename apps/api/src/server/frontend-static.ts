@@ -165,16 +165,18 @@ function representationEtag(
  * asked for.
  *
  * Only an asset that has precompressed copies negotiates: it always says
- * `Vary: Accept-Encoding`, whatever it ends up sending, and answers 406 when the
- * client refuses everything on offer. Every other asset — fonts, images, files
+ * `Vary: Accept-Encoding`, whatever it ends up sending. A client that refuses
+ * every representation still gets identity, as it did before copies existed.
+ * Every other asset — fonts, images, files
  * too small to be worth compressing — is served exactly as before, because
  * nothing about its response depends on the request header.
  *
  * Each representation has its own length and its own strong ETag, so a cache
  * revalidating one can never be told another is unchanged. Range is not handled
  * here: Bun answers it over the stored bytes, which makes it a range of the
- * selected representation, and the per-representation ETag is what keeps
- * `If-Range` honest.
+ * selected representation. Bun also ignores `If-Range`, for identity files just
+ * the same, so a client resuming against a different representation than the one
+ * it validated is not protected by the ETag here.
  */
 function serveEmbeddedAsset(
   asset: EmbeddedAsset,
@@ -193,19 +195,6 @@ function serveEmbeddedAsset(
     // `Vary: Origin` survives; a bare `Response` header would replace it.
     if (set) varyOnAcceptEncoding(set.headers);
     else headers.Vary = 'Accept-Encoding';
-  }
-  if (choice === null) {
-    // Never the asset's own policy: a hashed asset says `immutable`, and explicit
-    // freshness would let a shared cache keep this refusal for a year and replay
-    // it to the next client with the same `Accept-Encoding`.
-    return new Response('Not Acceptable', {
-      status: 406,
-      headers: {
-        ...headers,
-        'Cache-Control': 'no-store',
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-    });
   }
   if (asset.contentType) headers['Content-Type'] = asset.contentType;
   if (choice !== 'identity') headers['Content-Encoding'] = choice;

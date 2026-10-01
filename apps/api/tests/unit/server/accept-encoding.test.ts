@@ -31,11 +31,11 @@ describe('negotiateEncoding', () => {
     ['an explicit identity weighted below gzip', 'identity;q=0.2, gzip;q=0.5', 'gzip'],
     ['an identity tie, which the coding wins', 'identity, gzip', 'gzip'],
     ['identity refused, a coding named', 'identity;q=0, gzip', 'gzip'],
-    ['identity refused, nothing else named', 'identity;q=0', null],
-    ['a refused wildcard', '*;q=0', null],
+    ['identity refused, nothing else named, still identity', 'identity;q=0', 'identity'],
+    ['a refused wildcard, still identity', '*;q=0', 'identity'],
     ['a refused wildcard with a coding named', '*;q=0, br', 'br'],
     ['a refused wildcard with identity named', '*;q=0, identity', 'identity'],
-    ['a refused identity beside an unsupported coding', 'identity;q=0, deflate', null],
+    ['a refused identity beside an unsupported coding', 'identity;q=0, deflate', 'identity'],
     ['a malformed weight, ignored', 'gzip;q=banana', 'identity'],
     ['a weight above 1, ignored', 'br;q=1.5, gzip', 'gzip'],
     ['a weight with too many decimals, ignored', 'br;q=0.12345, gzip', 'gzip'],
@@ -49,7 +49,7 @@ describe('negotiateEncoding', () => {
     expect(negotiateEncoding('br, gzip', ['gzip'])).toBe('gzip');
     expect(negotiateEncoding('br', ['gzip'])).toBe('identity');
     expect(negotiateEncoding('*', ['br'])).toBe('br');
-    expect(negotiateEncoding('identity;q=0, br', ['gzip'])).toBeNull();
+    expect(negotiateEncoding('identity;q=0, br', ['gzip'])).toBe('identity');
   });
 });
 

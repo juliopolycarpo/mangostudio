@@ -217,16 +217,22 @@ describe('embedded asset negotiation', () => {
     expect(response.body.toString()).toBe(MAIN_JS);
   });
 
-  test('answers 406 when the client refuses identity and every coding on offer', async () => {
-    for (const header of ['identity;q=0', '*;q=0', 'identity;q=0, deflate']) {
-      const response = await send(MAIN_URL, { 'Accept-Encoding': header });
+  // RFC 9110 §12.5.3 does not require a 406, and these were all answered with
+  // identity before copies existed: a refusal must not start failing requests.
+  test.each(['identity;q=0', '*;q=0', 'deflate, identity;q=0'])(
+    'answers identity, not 406, for Accept-Encoding %p',
+    async (header) => {
+      for (const path of [MAIN_URL, '/']) {
+        const response = await send(path, { 'Accept-Encoding': header });
 
-      expect(response.status).toBe(406);
-      expect(response.headers['cache-control']).toBe('no-store');
-      expect(varyDirectives(response)).toContain('Accept-Encoding');
-      expect(response.headers['content-encoding']).toBeUndefined();
+        expect(response.status).toBe(200);
+        expect(varyDirectives(response)).toContain('Accept-Encoding');
+        expect(response.headers['content-encoding']).toBeUndefined();
+      }
+      const response = await send(MAIN_URL, { 'Accept-Encoding': header });
+      expect(response.body.toString()).toBe(MAIN_JS);
     }
-  });
+  );
 
   test('still serves a coding the client names while refusing identity', async () => {
     const response = await send(MAIN_URL, { 'Accept-Encoding': 'identity;q=0, gzip' });
@@ -347,6 +353,42 @@ describe('embedded asset representation headers', () => {
       });
 
       expect(response.headers['content-encoding']).toBe('gzip');
+      expect(response.headers.vary).toBe('Origin, Accept-Encoding');
+    }
+  });
+
+  test('keeps Origin and Accept-Encoding in Vary on a 304', async () => {
+    const gzip = await send(MAIN_URL, { 'Accept-Encoding': 'gzip' });
+
+    for (const path of [MAIN_URL, '/']) {
+      const first = path === MAIN_URL ? gzip : await send(path, { 'Accept-Encoding': 'gzip' });
+      const response = await send(path, {
+        'Accept-Encoding': 'gzip',
+        'If-None-Match': first.headers.etag as string,
+        Origin: 'http://localhost:3001',
+      });
+
+      expect(response.status).toBe(304);
+      expect(response.headers.vary).toBe('Origin, Accept-Encoding');
+    }
+  });
+
+  test('keeps Origin and Accept-Encoding in Vary when falling back to identity', async () => {
+    // A refused identity, an unsupported coding and a missing copy all land on identity.
+    const cases: [string, string][] = [
+      [MAIN_URL, 'identity;q=0'],
+      [MAIN_URL, 'zstd'],
+      [GZIP_ONLY_URL, 'br'],
+      ['/settings', 'zstd'],
+    ];
+    for (const [path, encoding] of cases) {
+      const response = await send(path, {
+        'Accept-Encoding': encoding,
+        Origin: 'http://localhost:3001',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-encoding']).toBeUndefined();
       expect(response.headers.vary).toBe('Origin, Accept-Encoding');
     }
   });
