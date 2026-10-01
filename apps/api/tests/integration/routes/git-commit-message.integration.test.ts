@@ -17,6 +17,7 @@ import {
 } from '../../../src/services/providers/core/provider-registry';
 import type { AIProvider, TextGenerationRequest } from '../../../src/services/providers/types';
 import { insertTestChat, insertTestConnector, insertTestUser } from '../../support/factories';
+import { gitFixtureEnv } from '../../support/git-fixture-env';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const hasGit = Bun.which('git') !== null;
@@ -29,12 +30,7 @@ let providerOutput = '';
 async function runFixtureGit(cwd: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(['git', ...args], {
     cwd,
-    env: {
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-      GIT_TERMINAL_PROMPT: '0',
-      LC_ALL: 'C',
-    },
+    env: gitFixtureEnv(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

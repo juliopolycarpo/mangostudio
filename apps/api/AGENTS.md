@@ -31,6 +31,10 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
   `bun test apps/api/...` from the root silently skips the bootstrap. Use the
   `--filter` commands above or `cd apps/api && bun test`. If you get them wrong,
   the harness throws an actionable error instead of touching real data.
+- The `test:*` scripts start Bun with a throwaway `HOME` (`scripts/with-test-home.ts`), so tests
+  may create and read `~/.mango` freely inside it. A bare `bun test` bypasses that and uses your
+  real home: use the scripts. A fixture that spawns `git` with its own `env` forwards
+  `gitFixtureEnv()` from `tests/support/git-fixture-env.ts`. See `docs/reference/testing.md`.
 - Integration tests must use `apps/api/tests/support/harness/create-api-test-app.ts`.
 - Integration test URLs use the plugin group path directly, without `/api`.
 - Validate public response shapes with `Value.Check(Schema, payload)` when the contract matters.

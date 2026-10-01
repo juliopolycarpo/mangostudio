@@ -179,6 +179,47 @@ bun run --filter @mangostudio/api test:integration
 > (`tests/support/fixtures/local-runtime-user.ts`); as suítes de checkpoint são o exemplo.
 > Fechar a conexão aguarda o processo filho encerrar.
 
+#### Home descartável
+
+As lanes unit e integration da API rodam em um home descartável. O código sob teste deriva
+`~/.mango`, `~/.claude`, `~/.ssh` e seus perfis de shell de `homedir()`, e o Bun respeita
+`HOME` apenas quando um processo **inicia** — uma atribuição em runtime a `process.env.HOME`
+é ignorada, então um preload ou um teste não consegue redirecioná-lo. Por isso os scripts
+`test:unit`, `test:integration` e `test:coverage:*` de `apps/api` iniciam o `bun test` por
+`scripts/with-test-home.ts`, que cria um `<tmpdir>/mangostudio-test-home-<aleatório>` novo,
+inicia os testes com `HOME` (e `USERPROFILE`) apontando para ele e o remove quando a execução
+termina. Essa única mudança cobre `bun run test`, os shards de CI atrás do watchdog, o
+orquestrador de cobertura e um `bun run test:unit` direto em `apps/api`; o workflow noturno de
+ordem aleatória encapsula o seu `bun test` da mesma forma.
+
+O que o launcher define, além do home:
+
+- `CARGO_HOME`, `RUSTUP_HOME`, `BUN_INSTALL` e `BUN_INSTALL_CACHE_DIR` mantêm seus valores
+  reais (um valor exportado vence), então mover o home não esconde o toolchain nem faz o Bun
+  baixar o cache de novo. `MANGOSTUDIO_RUNTIME_BINARY` e toda outra variável herdada passam
+  intactas.
+- `GIT_CONFIG_GLOBAL` nomeia uma configuração global do Git que não existe, então a política
+  de assinatura, a identidade e o `core.hooksPath` de quem desenvolve nunca chegam aos
+  repositórios de fixture que os testes montam. Uma fixture que monta o próprio `env` para o
+  `git` deve repassá-la (`tests/support/git-fixture-env.ts`); do contrário o Git volta ao
+  `~/.gitconfig` real.
+- `MANGOSTUDIO_REAL_HOME` carrega o home original do launcher. O preload da API aborta a lane
+  com os valores recebido e esperado quando `homedir()` ainda é igual a ele, que é como um
+  launcher cujo `HOME` não teve efeito é pego antes do primeiro teste.
+
+Um `bun test` direto em `apps/api` ignora o launcher e roda no seu home real — use os scripts
+do pacote. `scripts/tests/api-lanes-hermetic.unit.test.ts` falha, nomeando o `homedir()`
+resolvido e o formato esperado `<tmpdir>/mangostudio-test-home-<aleatório>`, se um script de
+lane da API deixar de passar por ele. O launcher reutiliza a criação, verificação de formato
+e remoção protegidas de `scripts/lib/temp-home.ts`, sobre as quais o home do browser-smoke é
+construído: ele só remove um filho direto do diretório temporário do SO com o nome esperado e
+recusa segmentos `..`. Uma execução encerrada com `SIGKILL` não consegue limpar e deixa o
+diretório no diretório temporário do SO.
+
+As lanes de frontend, shared, protocol e scripts da raiz foram verificadas com um spy de
+`node:fs` e não leem nem escrevem o home real (apenas percursos `lstat` dos ancestrais do
+próprio home nos testes de contenção de caminho), então não ficam atrás do launcher.
+
 O suporte da API vive em `apps/api/tests/support/`:
 
 - `harness/create-api-test-app.ts` — envolve plugins de rota em uma app Elysia mínima para testes via `app.handle()`

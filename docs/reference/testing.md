@@ -839,6 +839,45 @@ bun run --filter @mangostudio/api test:integration
 > an isolated in-memory sandbox (never the real `~/.mango`) and the harness throws an
 > actionable error, so a wrong-directory run fails loudly instead of corrupting data.
 
+### Hermetic home
+
+The API unit and integration lanes run on a throwaway home. Code under test derives
+`~/.mango`, `~/.claude`, `~/.ssh` and its shell profiles from `homedir()`, and Bun honours
+`HOME` only when a process **starts** — a runtime assignment to `process.env.HOME` is ignored,
+so a preload or a test cannot redirect it. The `test:unit`, `test:integration` and
+`test:coverage:*` scripts of `apps/api` therefore start `bun test` through
+`scripts/with-test-home.ts`, which creates a fresh `<tmpdir>/mangostudio-test-home-<random>`,
+starts the tests with `HOME` (and `USERPROFILE`) pointing at it, and removes it when the run
+ends. That one change covers `bun run test`, the CI shards behind the watchdog, the coverage
+orchestrator and a direct `bun run test:unit` from `apps/api`; the nightly randomized-order
+workflow wraps its `bun test` the same way.
+
+What the launcher sets, besides the home:
+
+- `CARGO_HOME`, `RUSTUP_HOME`, `BUN_INSTALL` and `BUN_INSTALL_CACHE_DIR` keep their real
+  values (an exported one wins), so a moved home does not hide the toolchain or make Bun
+  re-download its cache. `MANGOSTUDIO_RUNTIME_BINARY` and every other inherited variable pass
+  through untouched.
+- `GIT_CONFIG_GLOBAL` names a global Git config that does not exist, so the developer's
+  signing policy, identity and `core.hooksPath` never reach the fixture repositories the tests
+  build. A fixture that builds its own `env` for `git` must forward it
+  (`tests/support/git-fixture-env.ts`), or Git falls back to the real `~/.gitconfig`.
+- `MANGOSTUDIO_REAL_HOME` carries the launcher's original home. The API preload aborts the lane
+  with the received and expected values when `homedir()` still equals it, which is how a
+  launcher whose `HOME` did not take effect is caught before the first test.
+
+A bare `bun test` from `apps/api` bypasses the launcher and runs on your real home — use the
+package scripts. `scripts/tests/api-lanes-hermetic.unit.test.ts` fails, naming the resolved
+`homedir()` and the expected `<tmpdir>/mangostudio-test-home-<random>` shape, if an API lane
+script stops going through it. The launcher reuses the guarded create/shape-check/delete of
+`scripts/lib/temp-home.ts`, which the browser-smoke home is built on: it only ever deletes a
+direct child of the OS temp directory with the expected name and refuses `..` segments. A run
+killed with `SIGKILL` cannot clean up and leaves its directory in the OS temp directory.
+
+The frontend, shared, protocol and root-scripts lanes were checked with a `node:fs` spy and
+do not read or write the real home (only `lstat` ancestor walks of the home directory itself
+in the path-containment tests), so they are not behind the launcher.
+
 ### Environment-gated suites
 
 Some API integration suites need something the machine may not have and skip themselves

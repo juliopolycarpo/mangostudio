@@ -20,8 +20,13 @@
  * of them without hitting this.
  */
 
+import { assertHermeticHome } from './hermetic-home';
 import { installSpawnDiagnostics } from './spawn-diagnostics';
 import { setupTestEnvironment } from './test-environment';
+
+// First of all: nothing below may touch the home directory of a lane that was
+// started with the real one.
+assertHermeticHome();
 
 // Before the bootstrap, and before any test module loads: a child spawned
 // during setup counts too, and a wrapper installed after the fact would miss

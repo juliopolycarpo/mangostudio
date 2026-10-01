@@ -11,6 +11,7 @@ import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
 import { insertTestChat, insertTestUser } from '../../support/factories';
+import { gitFixtureEnv } from '../../support/git-fixture-env';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
@@ -35,12 +36,7 @@ async function bindWorkdir(chatId: string, workdir: string): Promise<void> {
 async function runFixtureGit(cwd: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(['git', ...args], {
     cwd,
-    env: {
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-      GIT_TERMINAL_PROMPT: '0',
-      LC_ALL: 'C',
-    },
+    env: gitFixtureEnv(),
     stdout: 'pipe',
     stderr: 'pipe',
   });

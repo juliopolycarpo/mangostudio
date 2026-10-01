@@ -174,14 +174,16 @@ jobs:
           # Carries the env the job sets, not just the flags: a paste that
           # leaves `MANGOSTUDIO_DIAGNOSTIC_LOGS` or `DATABASE_PATH` behind runs
           # a different suite than the one that went red.
-          echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && DATABASE_PATH=${DATABASE_PATH} MANGOSTUDIO_DIAGNOSTIC_LOGS=${MANGOSTUDIO_DIAGNOSTIC_LOGS} bun test ${args[*]})"
+          echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && DATABASE_PATH=${DATABASE_PATH} MANGOSTUDIO_DIAGNOSTIC_LOGS=${MANGOSTUDIO_DIAGNOSTIC_LOGS} bun ../../scripts/with-test-home.ts bun test ${args[*]})"
           # The watchdog owns run.log, mirrors the child's output to this
           # step's own log, and bounds+retries a hang or a crash exactly like
-          # the merge gate's shards (scripts/ci/run-tests-watchdog.ts).
+          # the merge gate's shards (scripts/ci/run-tests-watchdog.ts). The
+          # suite runs through with-test-home.ts, as the workspace test scripts
+          # do, so this lane sees the same temporary HOME the merge gate does.
           bun ../../scripts/ci/run-tests-watchdog.ts --label="${LANE}" \
             --timeout-seconds=420 --retry-on-crash \
             --log-file=run.log --meta-file=run-meta.json \
-            -- bun test "${args[@]}"
+            -- bun ../../scripts/with-test-home.ts bun test "${args[@]}"
 
       # The order is the finding. Without it a red run names a failing test and
       # nothing about what ran before it, which is the half that matters.
