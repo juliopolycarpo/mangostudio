@@ -175,6 +175,18 @@ describe('GET /chats/:id/messages cursor validation and shape', () => {
     expect(body.error).toContain('expected shape: <timestamp>:<rowid>');
   });
 
+  it('pages across negative, fractional and very large timestamps POST /messages can store', async () => {
+    const chatId = await newChat();
+    await insertMessages(chatId, [
+      { id: 'odd-d', timestamp: 1e21 },
+      { id: 'odd-b', timestamp: 1.5 },
+      { id: 'odd-a', timestamp: -5 },
+      { id: 'odd-c', timestamp: 1.5 },
+    ]);
+
+    expect(await readAll(chatId, 1)).toEqual(['odd-a', 'odd-b', 'odd-c', 'odd-d']);
+  });
+
   it('does not expose the paging rowid on returned messages', async () => {
     const chatId = await newChat();
     await insertMessages(chatId, tiedRows('shape', 2));

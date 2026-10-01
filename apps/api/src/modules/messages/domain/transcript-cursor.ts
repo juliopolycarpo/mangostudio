@@ -8,8 +8,12 @@ export interface TranscriptCursor {
   rowid: number;
 }
 
-const CURSOR_PATTERN = /^(\d{1,16}):(\d{1,16})$/;
-const LEGACY_CURSOR_PATTERN = /^\d{1,16}$/;
+// A stored timestamp is any finite JSON number (`POST /messages` accepts one), so
+// the cursor must round-trip whatever `Number#toString` prints for it: a
+// sign, a fraction or an exponent (`-5`, `1.5`, `1e+21`).
+const TIMESTAMP_SOURCE = String.raw`-?\d+(?:\.\d+)?(?:e[+-]?\d+)?`;
+const CURSOR_PATTERN = new RegExp(`^(${TIMESTAMP_SOURCE}):(\\d{1,16})$`);
+const LEGACY_CURSOR_PATTERN = new RegExp(`^${TIMESTAMP_SOURCE}$`);
 
 export const TRANSCRIPT_CURSOR_SHAPE = '<timestamp>:<rowid>';
 
@@ -52,7 +56,7 @@ export function encodeTranscriptCursor(cursor: TranscriptCursor): string {
 export function decodeTranscriptCursor(value: string): TranscriptCursor {
   if (LEGACY_CURSOR_PATTERN.test(value)) {
     const timestamp = Number(value);
-    if (!Number.isSafeInteger(timestamp)) throw new InvalidTranscriptCursorError(value);
+    if (!Number.isFinite(timestamp)) throw new InvalidTranscriptCursorError(value);
     return { timestamp, rowid: Number.MAX_SAFE_INTEGER };
   }
 
@@ -61,7 +65,7 @@ export function decodeTranscriptCursor(value: string): TranscriptCursor {
 
   const timestamp = Number(match[1]);
   const rowid = Number(match[2]);
-  if (!Number.isSafeInteger(timestamp) || !Number.isSafeInteger(rowid)) {
+  if (!Number.isFinite(timestamp) || !Number.isSafeInteger(rowid)) {
     throw new InvalidTranscriptCursorError(value);
   }
   return { timestamp, rowid };

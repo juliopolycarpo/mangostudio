@@ -30,13 +30,25 @@ describe('transcript cursor', () => {
   });
 
   it.each([
-    ['a bare numeric timestamp beyond the safe integer range', '9999999999999999'],
+    ['a fractional timestamp', 1.5],
+    ['a negative timestamp', -5],
+    ['a timestamp beyond the safe integer range', 1e21],
+    ['a tiny fractional timestamp', 1.5e-7],
+  ])('round-trips %s that POST /messages can store', (_label, timestamp) => {
+    const cursor = { timestamp, rowid: 3 };
+
+    expect(decodeTranscriptCursor(encodeTranscriptCursor(cursor))).toEqual(cursor);
+  });
+
+  it.each([
+    ['a bare timestamp too large to be finite', '1e999'],
+    ['a timestamp too large to be finite', '1e999:1'],
     ['an empty rowid', '1700000000000:'],
     ['a negative rowid', '1700000000000:-1'],
-    ['a fractional timestamp', '1.5:3'],
+    ['a fractional rowid', '1:1.5'],
     ['non-numeric text', 'abc:def'],
     ['an extra segment', '1:2:3'],
-    ['an unsafe integer', '9999999999999999:1'],
+    ['an unsafe rowid', '1:9999999999999999'],
   ])('rejects %s', (_label, value) => {
     const error = decodeError(value);
 
