@@ -7,6 +7,7 @@ import {
   binaryCompileDefines,
   binaryCompileFlags,
   createTurboBuildCommand,
+  removeStaleChunkMaps,
   selectBuildWorkspaces,
 } from './lib/build';
 import {
@@ -282,6 +283,8 @@ async function buildStandaloneTarget(
     );
     return true;
   }
+
+  removeStaleChunkMaps(platformOutDir);
 
   let crossRuntimePath: string | undefined;
   if (context.crossRuntimeChannel) {

@@ -147,8 +147,9 @@ median of 15 runs of `scripts/bench/startup.ts`; `--version` is the median of 20
 | Binary size (bytes)        |       99,218,912 |   116,930,016 |   +18% |
 
 Every target grows by the same ~17.7 MB of bytecode (`bun build --compile` of the same embed
-entry for the other seven targets). The external `.map` is unchanged in shape, and stack
-traces still resolve to original source lines.
+entry for the other seven targets). Stack traces still resolve to original source lines; with
+code splitting (below) the external `mangostudio.map` covers only the entry module and
+per-chunk maps carry the rest.
 
 ### Code splitting
 
@@ -160,10 +161,11 @@ import is still bundled once, so module-level singletons keep one identity.
 
 - Chunks live inside the binary. Nothing beside it is read at run time, so the executable
   works from any directory.
-- Each chunk gets its own external `.map` (about 75, beside the single `mangostudio.map`),
-  written next to the binary under `.mango/out/<platform>/`. Archives and npm packages copy
-  the hub and runtime by name and ship no maps; hashed chunk names mean stale maps from an
-  earlier build stay in that directory until it is cleaned.
+- Each chunk gets its own external `.map`, written next to the binary under
+  `.mango/out/<platform>/`; `mangostudio.map` shrinks to the entry module alone (about 31 KB).
+  The distribution manifest walks that directory, so it lists every map, but archives and npm
+  packages copy the hub and runtime by name and ship none. Chunk names carry a hash, so the
+  build deletes the previous build's `*.js.map` files before each compile.
 - Stack traces from a lazy chunk still resolve to original source lines: the maps are embedded
   in the executable as well, so a lone copy of the binary reports `lazy.ts:5`, not a chunk
   offset. `scripts/tests/build.unit.test.ts` compiles a fixture with these flags and asserts it.

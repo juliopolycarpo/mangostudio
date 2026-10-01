@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
   binaryCompileDefines,
   binaryCompileFlags,
   createTurboBuildCommand,
+  removeStaleChunkMaps,
   selectBuildWorkspaces,
 } from '../lib/build';
 import { readText } from './support/read-text';
@@ -191,13 +192,14 @@ describe('build script', () => {
 
       expect({
         compileExit: fixture.exitCode,
-        compileStderr: fixture.stderr,
+        // Only a failed compile's stderr is evidence; a warning on success is not.
+        compileFailure: fixture.exitCode === 0 ? null : fixture.stderr,
         stdout: run.stdout.toString().trim(),
         exitedWithError: run.exitCode !== 0,
         stackNamesLazySource: run.stderr.toString().includes(`lazy.ts:${LAZY_THROW_LINE}:`),
       }).toEqual({
         compileExit: 0,
-        compileStderr: '',
+        compileFailure: null,
         // 2 = the entry and the lazy chunk incremented the same `state` module.
         stdout: 'loads=2',
         exitedWithError: true,
@@ -207,6 +209,51 @@ describe('build script', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60_000);
+
+  test('removes stale chunk maps from a platform output directory and nothing else', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mangostudio-stale-maps-'));
+    try {
+      const compiled = await compileSplitFixture(dir);
+      const out = join(dir, 'out');
+      // What an earlier build left behind: a chunk map under a different hash.
+      writeFileSync(join(out, 'entry-stale0000.js.map'), '{}');
+      writeFileSync(join(out, 'fixture-runtime'), 'runtime');
+      writeFileSync(join(out, 'README.md'), 'readme');
+
+      const removed = removeStaleChunkMaps(out);
+      const remaining = readdirSync(out).sort();
+
+      expect({
+        compileExit: compiled.exitCode,
+        removedStale: removed.includes('entry-stale0000.js.map'),
+        chunkMapsLeft: remaining.filter((name) => name.endsWith('.js.map')),
+        // The binary, its entry map, the runtime and the README are not chunk maps.
+        survivors: remaining.filter((name) => !name.endsWith('.js.map')),
+      }).toEqual({
+        compileExit: 0,
+        removedStale: true,
+        chunkMapsLeft: [],
+        survivors: [
+          'README.md',
+          process.platform === 'win32' ? 'fixture.exe' : 'fixture',
+          'fixture-runtime',
+          'fixture.map',
+        ].sort(),
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test('clears stale chunk maps before every standalone compile', () => {
+    const source = readText('scripts/build.ts');
+    const body = source.slice(source.indexOf('async function buildStandaloneTarget'));
+
+    expect(body.indexOf('removeStaleChunkMaps(platformOutDir)')).toBeGreaterThan(-1);
+    expect(body.indexOf('removeStaleChunkMaps(platformOutDir)')).toBeLessThan(
+      body.indexOf('compileBinary(')
+    );
+  });
 
   test('uses the binary alias for standalone smoke builds', () => {
     expect(readText('scripts/test-build.ts')).toContain("'build:binary'");

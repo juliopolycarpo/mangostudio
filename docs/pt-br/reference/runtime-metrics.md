@@ -150,8 +150,9 @@ mediana de 15 execuções de `scripts/bench/startup.ts`; `--version` é a median
 | Tamanho do binário (bytes)      |   99,218,912 |  116,930,016 |     +18% |
 
 Todos os alvos crescem os mesmos ~17,7 MB de bytecode (`bun build --compile` do mesmo entry
-embutido para os outros sete alvos). O `.map` externo mantém o formato, e os stack traces
-continuam apontando para as linhas do código original.
+embutido para os outros sete alvos). Os stack traces continuam apontando para as linhas do
+código original; com a divisão de código (abaixo), o `mangostudio.map` externo cobre apenas o
+módulo de entrada e mapas por chunk carregam o resto.
 
 ### Divisão de código
 
@@ -164,10 +165,12 @@ chunks importam continua empacotado uma só vez, então singletons de nível de 
 
 - Os chunks ficam dentro do binário. Nada ao lado dele é lido em tempo de execução, então o
   executável funciona a partir de qualquer diretório.
-- Cada chunk ganha seu próprio `.map` externo (cerca de 75, ao lado do único `mangostudio.map`),
-  gravado junto ao binário em `.mango/out/<platform>/`. Arquivos e pacotes npm copiam o hub e o
-  runtime pelo nome e não distribuem mapas; como os nomes dos chunks levam hash, mapas antigos
-  de um build anterior permanecem nesse diretório até ele ser limpo.
+- Cada chunk ganha seu próprio `.map` externo, gravado junto ao binário em
+  `.mango/out/<platform>/`; o `mangostudio.map` encolhe para só o módulo de entrada (cerca de
+  31 KB). O manifesto de distribuição percorre esse diretório e por isso lista todos os mapas,
+  mas arquivos e pacotes npm copiam o hub e o runtime pelo nome e não distribuem nenhum. Os
+  nomes dos chunks levam hash, então o build apaga os `*.js.map` do build anterior antes de
+  cada compilação.
 - Stack traces de um chunk carregado sob demanda continuam apontando para as linhas do código
   original: os mapas também ficam embutidos no executável, então uma cópia isolada do binário
   reporta `lazy.ts:5`, não um deslocamento de chunk. `scripts/tests/build.unit.test.ts`

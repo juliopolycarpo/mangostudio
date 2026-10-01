@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { WORKSPACES, type WorkspaceName } from './config';
 
 const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
@@ -61,6 +63,26 @@ export function binaryCompileFlags(buildType: string): string[] {
   const flags = ['--bytecode', '--format=esm', '--splitting', '--sourcemap=external'];
   if (buildType === 'production') flags.push('--minify');
   return flags;
+}
+
+/**
+ * Deletes the per-chunk `*.js.map` files a previous split compile left in a
+ * platform output directory. Chunk names carry a content hash, so without this
+ * every rebuild adds a new set beside the old one and the distribution manifest
+ * (which walks `.mango/out`) hashes all of them. Only top-level `.js.map` files
+ * go: the binary, runtime, its own `<binary>.map`, README and anything else stay.
+ * Returns the removed file names.
+ * // Usage: removeStaleChunkMaps('.mango/out/linux-x64')
+ */
+export function removeStaleChunkMaps(platformOutDir: string): string[] {
+  if (!existsSync(platformOutDir)) return [];
+  const removed: string[] = [];
+  for (const entry of readdirSync(platformOutDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.js.map')) continue;
+    rmSync(join(platformOutDir, entry.name), { force: true });
+    removed.push(entry.name);
+  }
+  return removed;
 }
 
 export interface BuildSelection {
