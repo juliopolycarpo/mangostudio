@@ -3,7 +3,9 @@ import type { MessagesPage } from '@mangostudio/shared/chat';
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import {
   infiniteQueryOptions,
+  type Query,
   type QueryClient,
+  type QueryPersister,
   queryOptions,
   useInfiniteQuery,
   useMutation,
@@ -16,6 +18,7 @@ import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 import { invalidateChatCapabilities } from './hooks/capability-invalidation';
+import { catchUpNewestPages, type MessagesCache } from './transcript-pages';
 
 // ---------------------------------------------------------------------------
 // Chat query keys
@@ -188,15 +191,57 @@ export const messageKeys = {
   list: (chatId: string) => [...messageKeys.lists(), chatId] as const,
 };
 
+const MESSAGES_PAGE_SIZE = '50';
+
+/**
+ * Reads one transcript page from the newest end: the newest page for a `null`
+ * cursor, otherwise the page of rows before `cursor`. Rows inside a page are
+ * chronological.
+ */
+async function fetchMessagesPage(chatId: string, cursor: string | null): Promise<MessagesPage> {
+  const query = cursor
+    ? { limit: MESSAGES_PAGE_SIZE, order: 'desc' as const, cursor }
+    : { limit: MESSAGES_PAGE_SIZE, order: 'desc' as const };
+  const { data, error } = await client.api.chats({ id: chatId }).messages.get({ query });
+  if (error) throw new ApiError(error.value);
+  return data satisfies MessagesPage;
+}
+
+/**
+ * Bounds what a re-read of the transcript costs.
+ *
+ * TanStack re-reads every loaded page of an infinite query on each refetch, so
+ * a reader who scrolled back a long way would pay one request per page on every
+ * turn. Only the newest end ever changes, so a refetch (anything that is not
+ * "load the next page") reads the newest page and a page behind it, and keeps
+ * the older pages as loaded; see `catchUpNewestPages`. `maxPages` was not used
+ * instead: it drops the page at the opposite end from the one being fetched,
+ * which here is the newest, the one live writers append to.
+ *
+ * `persister` is the one hook that wraps a whole infinite fetch. Its type
+ * describes a single-page query, but for an infinite one it is handed the
+ * stock fetch of every page and returns the whole cache entry, hence the cast.
+ */
+const boundedTranscriptRefetch = (chatId: string) =>
+  (async (fetchEveryPage: () => Promise<MessagesCache>, _context: unknown, query: Query) => {
+    const current = query.state.data as MessagesCache | undefined;
+    const loadingOlder = query.state.fetchMeta?.fetchMore !== undefined;
+    if (loadingOlder || !current || current.pages.length < 2) return fetchEveryPage();
+    return await catchUpNewestPages(current, (cursor) => fetchMessagesPage(chatId, cursor));
+  }) as unknown as QueryPersister<MessagesPage, ReturnType<typeof messageKeys.list>, string | null>;
+
+/**
+ * The transcript, read from its newest end. `pages[0]` is the newest page and
+ * `getNextPageParam` walks to OLDER pages (see `MessagesCache`).
+ */
 export const messagesQueryOptions = (chatId: string) =>
   infiniteQueryOptions({
     queryKey: messageKeys.list(chatId),
-    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
-      const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
-      const { data, error } = await client.api.chats({ id: chatId }).messages.get({ query });
-      if (error) throw new ApiError(error.value);
-      return data satisfies MessagesPage;
-    },
+    queryFn: ({ pageParam }: { pageParam: string | null }) => fetchMessagesPage(chatId, pageParam),
+    persister: boundedTranscriptRefetch(chatId),
+    // A persister makes TanStack default to `offlineFirst`; keep the default
+    // this query always had, so an offline tab waits instead of failing.
+    networkMode: 'online',
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
   });

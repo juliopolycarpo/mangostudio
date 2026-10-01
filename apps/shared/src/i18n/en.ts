@@ -148,6 +148,7 @@ export const messages: Messages = {
     feed: {
       emptyTitle: 'Start a conversation or create an image',
       emptySubtitle: 'Switch to Create Image mode to generate art',
+      loadingOlder: 'Loading earlier messages...',
       generatingImage: 'Generating image...',
       statusGenerating: 'Generating',
       statusThinking: 'Thinking',

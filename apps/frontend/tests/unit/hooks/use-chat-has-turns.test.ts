@@ -22,7 +22,7 @@ describe('useChatHasTurns', () => {
   it('locks while the transcript is unloaded, then unlocks on an empty one', async () => {
     const scenario = createFetchScenario();
     scenario
-      .respondWithJson('GET', '/api/chats/chat-1/messages?limit=50', {
+      .respondWithJson('GET', '/api/chats/chat-1/messages?limit=50&order=desc', {
         body: { messages: [], nextCursor: null },
       })
       .install();
@@ -41,7 +41,7 @@ describe('useChatHasTurns', () => {
   it('stays locked once the transcript carries a message', async () => {
     const scenario = createFetchScenario();
     scenario
-      .respondWithJson('GET', '/api/chats/chat-1/messages?limit=50', {
+      .respondWithJson('GET', '/api/chats/chat-1/messages?limit=50&order=desc', {
         body: {
           messages: [{ id: 'm1', chatId: 'chat-1', role: 'user', content: 'hi', parts: [] }],
           nextCursor: null,

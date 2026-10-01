@@ -21,7 +21,7 @@ const SHELL_PATHS = {
 type ShellPathKey = keyof typeof SHELL_PATHS;
 
 /** The transcript request the loader chains from the first chat. */
-export const FIRST_CHAT_MESSAGES_PATH = '/api/chats/chat-1/messages?limit=50';
+export const FIRST_CHAT_MESSAGES_PATH = '/api/chats/chat-1/messages?limit=50&order=desc';
 
 /** How a responsibility is refused: an HTTP status with the hub's error body, or a dropped connection. */
 export type ShellRefusal = 'server-error' | 'rate-limited' | 'unauthorized' | 'network';

@@ -49,6 +49,20 @@ Para automação fora do navegador, use chaves de API com escopo (`x-api-key`). 
 | `GET`  | `/api/chats/:chatId/messages` | Sim  | Listar mensagens do chat |
 | `POST` | `/api/chats/:chatId/messages` | Sim  | Criar uma mensagem       |
 
+O `GET` pagina a transcrição (`MessagesPage` de `@mangostudio/shared/chat`). Query: `limit`
+(padrão 50), `cursor` e `order` — `asc` (o padrão) lê a partir da mensagem mais antiga, `desc`
+a partir da mais nova. Em ambas as ordens a página é cronológica, da mais antiga para a mais
+nova: `order` escolhe qual janela da transcrição a página é, e `nextCursor` aponta a borda da
+página voltada para as mensagens ainda não lidas (a última mensagem em `asc`, a primeira em
+`desc`), `null` na última página. O frontend abre um chat com `order=desc` e pede as páginas
+mais antigas conforme a pessoa rola para cima.
+
+O cursor é uma posição `(timestamp, rowid)` opaca, não uma direção: o emitido sob uma ordem é
+lido como posição pela outra. Um timestamp numérico puro de uma build antiga ainda é aceito
+(depois de toda mensagem daquele timestamp em `asc`, antes de toda uma delas em `desc`); um
+cursor vazio ou malformado é rejeitado com 400, e um `order` desconhecido com 422, como
+qualquer query que o schema recusa.
+
 ## Endpoints De Atividade
 
 | Método | Path            | Auth | Finalidade                           |

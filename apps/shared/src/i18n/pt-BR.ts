@@ -141,6 +141,7 @@ export const messages = {
     feed: {
       emptyTitle: 'Inicie uma conversa ou crie uma imagem',
       emptySubtitle: 'Mude para o modo Criar Imagem para gerar arte',
+      loadingOlder: 'Carregando mensagens anteriores...',
       generatingImage: 'Gerando imagem...',
       statusGenerating: 'Gerando',
       statusThinking: 'Pensando',

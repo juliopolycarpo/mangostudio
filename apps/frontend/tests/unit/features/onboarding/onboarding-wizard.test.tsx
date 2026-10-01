@@ -252,7 +252,7 @@ describe('OnboardingWizard', () => {
         chatId: 'chat-1',
       }),
     });
-    scenario.respondWithJson('GET', '/api/chats/chat-1/messages?limit=50', {
+    scenario.respondWithJson('GET', '/api/chats/chat-1/messages?limit=50&order=desc', {
       body: { messages: [], nextCursor: null },
     });
 

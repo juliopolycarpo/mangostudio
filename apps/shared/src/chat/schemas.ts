@@ -280,16 +280,34 @@ export const UpdateMessageBodySchema = Type.Object({
 
 export type UpdateMessageBody = Static<typeof UpdateMessageBodySchema>;
 
+/**
+ * Which end of a chat transcript a page is cut from.
+ *
+ * - `asc` (the default): the oldest rows first, then the rows after `cursor`.
+ * - `desc`: the NEWEST rows first, then the rows before `cursor`.
+ *
+ * Rows inside a returned page are chronological (oldest first) in both
+ * orders; the order picks which window of the transcript a page is.
+ */
+export const MessagesOrderSchema = Type.Union([Type.Literal('asc'), Type.Literal('desc')]);
+
+export type MessagesOrder = Static<typeof MessagesOrderSchema>;
+
 /** Query of `GET /api/chats/:id/messages`. */
 export const ListChatMessagesQuerySchema = Type.Object({
   limit: Type.Optional(Type.String()),
   /**
    * The `nextCursor` of the previous page, passed back unchanged. The value is
-   * opaque: it encodes the position of the last row returned. A bare
-   * timestamp from an older server is still read as a best-effort position;
-   * any other value that is not a cursor this server issued is rejected with a 400.
+   * opaque: it encodes the position of the row at the edge of that page facing
+   * the rows not read yet. It names a position, not a direction, so it keeps
+   * its meaning under either `order`. A bare timestamp from an older server is
+   * still read as a best-effort position (after every row of that timestamp for
+   * `asc`, before every row of it for `desc`); any other value that is not a
+   * cursor this server issued is rejected with a 400.
    */
   cursor: Type.Optional(Type.String()),
+  /** Which end the page is cut from. Omit it for `asc`, the behavior before this existed. */
+  order: Type.Optional(MessagesOrderSchema),
 });
 
 export type ListChatMessagesQuery = Static<typeof ListChatMessagesQuerySchema>;
