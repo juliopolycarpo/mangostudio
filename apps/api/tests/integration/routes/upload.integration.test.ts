@@ -1,8 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { sql } from 'kysely';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
@@ -100,6 +101,15 @@ const OTHER_USER = {
 
 const OWNED_CHAT_ID = 'upload-owned-chat';
 const OTHER_CHAT_ID = 'upload-other-chat';
+
+/** Every file below the uploads directory, as uploads-relative paths. */
+function listUploadedFiles(): string[] {
+  const root = getConfig().uploads.dir;
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name).slice(root.length));
+}
 
 let restoreAuth: (() => void) | null = null;
 
@@ -408,5 +418,41 @@ describe('POST /upload/chat', () => {
       error: 'Unsupported attachment file type.',
       code: ERROR_CODES.VALIDATION,
     });
+  });
+
+  it('removes the stored file and keeps metadata unchanged when the metadata insert fails', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, errorHandler, uploadRoutes);
+    restoreAuth = restore;
+    const db = getDb();
+
+    const filesBefore = new Set(listUploadedFiles());
+    const rowsBefore = await db.selectFrom('chat_attachments').selectAll().execute();
+
+    await sql`CREATE TRIGGER refuse_attachment_metadata BEFORE INSERT ON chat_attachments BEGIN SELECT RAISE(ABORT, 'attachment metadata refused'); END`.execute(
+      db
+    );
+    let response: Response;
+    try {
+      const formData = new FormData();
+      formData.append('chatId', OWNED_CHAT_ID);
+      formData.append('file', new File([TINY_PNG], 'orphan.png', { type: 'image/png' }));
+      response = await app.handle(
+        new Request('http://localhost/upload/chat', { method: 'POST', body: formData })
+      );
+    } finally {
+      await sql`DROP TRIGGER IF EXISTS refuse_attachment_metadata`.execute(db);
+    }
+
+    expect(response.status).toBe(500);
+    const payload = await response.json();
+    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+
+    const rowsAfter = await db.selectFrom('chat_attachments').selectAll().execute();
+    expect(rowsAfter).toEqual(rowsBefore);
+
+    const newFiles = listUploadedFiles().filter((path) => !filesBefore.has(path));
+    expect(`expected new upload files: 0 | received: ${newFiles.length}`).toBe(
+      'expected new upload files: 0 | received: 0'
+    );
   });
 });
