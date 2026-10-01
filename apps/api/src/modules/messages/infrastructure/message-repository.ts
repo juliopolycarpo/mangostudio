@@ -5,11 +5,12 @@ import type {
   InteractionMode,
   MessagePart,
 } from '@mangostudio/shared/types';
-import type { Kysely } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 import { boolToInt, parseStyleParams, serializeStyleParams } from '../../../db/serializers';
 import type { Database } from '../../../db/types';
 import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/attachment-repository';
 import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
+import { encodeTranscriptCursor, type TranscriptCursor } from '../domain/transcript-cursor';
 import {
   decodeMessageParts,
   readMessageParts,
@@ -96,7 +97,7 @@ interface RichTurn {
 }
 
 interface ListByChatOptions {
-  cursor?: number;
+  cursor?: TranscriptCursor;
   limit?: number;
 }
 
@@ -209,6 +210,18 @@ export async function updateMessage(
   await db.updateTable('messages').set(updates).where('id', '=', id).execute();
 }
 
+/**
+ * Pages a chat transcript oldest first, ordered by `(timestamp, rowid)`.
+ *
+ * `timestamp` is not unique (a user turn and its reply can share a
+ * millisecond), so `rowid` breaks ties in insertion order and the cursor
+ * carries both values. Any index serving the order must end in `timestamp`
+ * after `chatId`; SQLite appends `rowid` to every index.
+ *
+ * @example
+ * const page = await listByChatId(chatId, { limit: 50 }, db);
+ * const next = await listByChatId(chatId, { limit: 50, cursor: decodeTranscriptCursor(page.nextCursor) }, db);
+ */
 export async function listByChatId(
   chatId: string,
   opts: ListByChatOptions,
@@ -219,20 +232,29 @@ export async function listByChatId(
   let q = db
     .selectFrom('messages')
     .selectAll()
+    .select(sql<number>`rowid`.as('rowid'))
     .where('chatId', '=', chatId)
-    .orderBy('timestamp', 'asc');
+    .orderBy('timestamp', 'asc')
+    .orderBy(sql`rowid`, 'asc');
 
   if (opts.cursor) {
-    q = q.where('timestamp', '>', opts.cursor);
+    const { timestamp, rowid } = opts.cursor;
+    q = q.where(sql<boolean>`(timestamp, rowid) > (${timestamp}, ${rowid})`);
   }
 
-  const rows = await q.limit(limit + 1).execute();
+  const fetched = await q.limit(limit + 1).execute();
 
   let nextCursor: string | null = null;
-  if (rows.length > limit) {
-    rows.pop();
-    nextCursor = rows.at(-1)?.timestamp.toString() ?? null;
+  if (fetched.length > limit) {
+    fetched.pop();
+    const last = fetched.at(-1);
+    nextCursor = last
+      ? encodeTranscriptCursor({ timestamp: last.timestamp, rowid: last.rowid })
+      : null;
   }
+
+  // `rowid` is a paging detail and must not leak into the mapped message.
+  const rows = fetched.map(({ rowid: _rowid, ...row }) => row);
 
   const messageIds = rows.map((row) => row.id);
   const [generatedImagesByMessageId, attachmentsByMessageId] = await Promise.all([

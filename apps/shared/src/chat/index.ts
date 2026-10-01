@@ -1,5 +1,6 @@
 export { type ContextSeverity, getContextSeverity } from './context-severity';
 export type { Message } from './entities';
+export { type MessagesPage, MessagesPageSchema } from './messages-page';
 export {
   type Chat,
   type ChatAttachment,
@@ -35,6 +36,8 @@ export {
   GenerateChatTitleBodySchema,
   type GenerateChatTitleResponse,
   GenerateChatTitleResponseSchema,
+  type ListChatMessagesQuery,
+  ListChatMessagesQuerySchema,
   type SummarizeToNewChatBody,
   SummarizeToNewChatBodySchema,
   type UpdateChatBody,

@@ -142,3 +142,57 @@ describe('GET /chats/:id/messages tie-safe cursor', () => {
     expect(second.messages.map((message) => message.id)).toEqual(expectedRest);
   });
 });
+
+describe('GET /chats/:id/messages cursor validation and shape', () => {
+  function rawGet(chatId: string, query: string) {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+    return app.handle(new Request(`http://localhost/chats/${chatId}/messages?${query}`));
+  }
+
+  it('refuses a bare numeric cursor with an ApiErrorResponse', async () => {
+    const chatId = await newChat();
+    await insertMessages(chatId, tiedRows('legacy', 3));
+
+    const response = await rawGet(chatId, `limit=2&cursor=${TIED_TIMESTAMP}`);
+    const body = (await response.json()) as { error: string; code: string };
+
+    expect(`status ${response.status} code ${body.code}`).toBe('status 400 code VALIDATION');
+    expect(body.error).toContain(`"${TIED_TIMESTAMP}"`);
+    expect(body.error).toContain('expected shape: <timestamp>:<rowid>');
+  });
+
+  it('refuses a malformed cursor instead of restarting from the first page', async () => {
+    const chatId = await newChat();
+
+    const response = await rawGet(chatId, 'cursor=not-a-cursor');
+
+    expect(response.status).toBe(400);
+  });
+
+  it('does not expose the paging rowid on returned messages', async () => {
+    const chatId = await newChat();
+    await insertMessages(chatId, tiedRows('shape', 2));
+
+    const page = await fetchPage(chatId);
+
+    expect(Object.keys(page.messages[0] ?? {})).not.toContain('rowid');
+  });
+
+  it('keeps distinct-timestamp rows in timestamp order across pages', async () => {
+    const chatId = await newChat();
+    const offsets = [3, 1, 2, 5, 4];
+    await insertMessages(
+      chatId,
+      offsets.map((offset) => ({ id: `distinct-${offset}`, timestamp: TIED_TIMESTAMP + offset }))
+    );
+
+    expect(await readAll(chatId, 2)).toEqual([
+      'distinct-1',
+      'distinct-2',
+      'distinct-3',
+      'distinct-4',
+      'distinct-5',
+    ]);
+  });
+});
