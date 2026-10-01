@@ -27,6 +27,11 @@ interface UnifiedModelCatalogDeps {
    * build the set of enabled model IDs in a single round-trip.
    */
   listAllSecretMetadataFn?: typeof listAllSecretMetadata;
+  /**
+   * Backing store for per-user snapshots (useful in tests that assert the
+   * entry bound). Defaults to a private map.
+   */
+  snapshotStore?: Map<string, ModelCatalogResponse>;
 }
 
 function modelInfoToOption(m: ModelInfo): ModelOption {
@@ -92,7 +97,7 @@ export function createUnifiedModelCatalogService(
 
   // Per-user cache: full discovered models (before filtering by enabled)
   const fullCatalogs = new Map<string, ModelOption[]>();
-  const snapshots = new Map<string, ModelCatalogResponse>();
+  const snapshots = deps.snapshotStore ?? new Map<string, ModelCatalogResponse>();
   const refreshPromises = new Map<string, Promise<ModelCatalogResponse>>();
   const dirtySnapshots = new Set<string>();
 
