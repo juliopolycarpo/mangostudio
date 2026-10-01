@@ -96,6 +96,11 @@ describe('listChatsUseCase', () => {
       lastProviderState: envelope(),
     });
     await seedChat(user.id, 'p-unreadable-null', BASE_TIME + 1, { lastContextState: '{not json' });
+    // Valid JSON from an older snapshot shape (no `lastUpdatedAt`) is unreadable too.
+    await seedChat(user.id, 'p-stale-shape', BASE_TIME, {
+      lastContextState: JSON.stringify({ ...JSON.parse(snapshot()), lastUpdatedAt: undefined }),
+      lastProviderState: envelope(),
+    });
 
     const received = await listChatsUseCase(user.id, getDb());
     const expected = await fullRowReference(user.id);
@@ -107,6 +112,7 @@ describe('listChatsUseCase', () => {
       'p-legacy-replay',
       'p-unreadable',
       'p-unreadable-null',
+      'p-stale-shape',
     ]);
     const contexts = Object.fromEntries(received.map((chat) => [chat.id, chat.contextInfo?.mode]));
     expect(contexts).toEqual({
@@ -116,6 +122,7 @@ describe('listChatsUseCase', () => {
       'p-legacy-replay': 'replay',
       'p-unreadable': 'stateful',
       'p-unreadable-null': undefined,
+      'p-stale-shape': 'stateful',
     });
     expect(
       JSON.stringify(received),
