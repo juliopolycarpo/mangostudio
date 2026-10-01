@@ -142,4 +142,24 @@ describe('withModelCache', () => {
     expect(await replacement).toEqual([{ modelId: 'new' }]);
     expect(await joiner).toEqual([{ modelId: 'new' }]);
   });
+
+  it('does not let an invalidated loader write after its replacement already settled', async () => {
+    const held = createHeldLoader();
+    const cachedFetch = withModelCache(held.load, { ttl: 60_000, fallback: [] });
+
+    const invalidated = cachedFetch('user-1');
+    cachedFetch.invalidate('user-1');
+    const replacement = cachedFetch('user-1');
+
+    // The replacement settles first and caches; its in-flight entry is gone.
+    held.release(1, [{ modelId: 'new' }]);
+    expect(await replacement).toEqual([{ modelId: 'new' }]);
+
+    // The old loader now settles with no in-flight entry left to compare against.
+    held.release(0, [{ modelId: 'old' }]);
+    expect(await invalidated).toEqual([{ modelId: 'old' }]);
+
+    expect(await cachedFetch('user-1')).toEqual([{ modelId: 'new' }]);
+    expectCount('loader calls after both loaders settled', 2, held.calls());
+  });
 });
