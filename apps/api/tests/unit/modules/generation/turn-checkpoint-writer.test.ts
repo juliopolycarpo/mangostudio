@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:te
 import type { MessagePart } from '@mangostudio/shared';
 import { isTurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { Kysely } from 'kysely';
+import { getDb } from '../../../../src/db/database';
 import type { Database } from '../../../../src/db/types';
 import {
   CHECKPOINT_TEXT_INTERVAL_CHARS,
   createTurnCheckpointPart,
   TurnCheckpointWriter,
 } from '../../../../src/modules/generation/application/turn-checkpoint';
+import { insertMessage } from '../../../../src/modules/messages/infrastructure/message-repository';
+import { insertTestChat, insertTestUser } from '../../../support/factories';
 
 interface RecordedWrite {
   readonly text: string;
@@ -299,27 +302,6 @@ describe('TurnCheckpointWriter', () => {
     expect(checkpoint.sequence).toBe(4);
   });
 
-  it('loses only text after the last landed checkpoint when the turn crashes', async () => {
-    const { db, manual, writer, append } = setup();
-    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
-    await writer.checkpoint();
-    manual.fire();
-    await writer.flush();
-
-    // Accepted after the last landed write, then the process dies: neither the
-    // wake-up nor flush ever runs.
-    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
-    await writer.checkpoint();
-    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
-    await writer.checkpoint();
-
-    expect(db.writes).toHaveLength(1);
-    const landed = db.writes[0];
-    expect(landed?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS);
-    expect(landed?.partCount).toBe(2);
-    expect(landed?.sequence).toBe(1);
-  });
-
   it('reports a failed write as false and keeps later writes landing', async () => {
     const { db, writer, append } = setup();
     db.failNextWrite(new Error('disk full'));
@@ -368,5 +350,126 @@ describe('TurnCheckpointWriter', () => {
     manual.fire();
     await writer.flush();
     expect(db.writes).toHaveLength(0);
+  });
+});
+
+interface DurableRow {
+  readonly text: string;
+  readonly isGenerating: number;
+  readonly parts: MessagePart[];
+}
+
+/** The real in-memory `messages` row for one generating assistant turn. */
+async function setupDurable(options: { defer?: (run: () => void) => void } = {}) {
+  const user = await insertTestUser();
+  const chat = await insertTestChat(user.id);
+  const turnId = crypto.randomUUID();
+  const checkpoint = createTurnCheckpointPart({
+    turnId,
+    startedAt: 1_000,
+    provider: 'openai',
+    modelName: 'gpt-test',
+    agentId: 'default',
+  });
+  const parts: MessagePart[] = [checkpoint];
+  const state = { text: '', now: 1_000 };
+  await insertMessage(
+    {
+      id: turnId,
+      chatId: chat.id,
+      role: 'ai',
+      text: '',
+      timestamp: Date.now(),
+      isGenerating: true,
+      interactionMode: 'chat',
+      parts: JSON.stringify(parts),
+    },
+    getDb()
+  );
+  const writer = new TurnCheckpointWriter({
+    db: getDb(),
+    chatId: chat.id,
+    messageId: turnId,
+    checkpoint,
+    getContent: () => ({ text: state.text, parts, providerState: null }),
+    now: () => state.now,
+    ...(options.defer ? { defer: options.defer } : {}),
+  });
+  const append = (chars: number) => {
+    state.text += 'x'.repeat(chars);
+    parts.push({ type: 'text', text: 'x'.repeat(chars) });
+  };
+  const readRow = async (): Promise<DurableRow> => {
+    const row = await getDb()
+      .selectFrom('messages')
+      .select(['text', 'parts', 'isGenerating'])
+      .where('id', '=', turnId)
+      .executeTakeFirstOrThrow();
+    return {
+      text: row.text,
+      isGenerating: row.isGenerating,
+      parts: JSON.parse(row.parts ?? '[]') as MessagePart[],
+    };
+  };
+  const finalize = () =>
+    getDb().updateTable('messages').set({ isGenerating: 0 }).where('id', '=', turnId).execute();
+  return { checkpoint, writer, append, readRow, finalize };
+}
+
+describe('TurnCheckpointWriter on SQLite', () => {
+  it('lands the trailing write after a tick with the default wake-up', async () => {
+    const { writer, append, readRow } = await setupDurable();
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    expect(await writer.checkpoint()).toBe(true);
+    // Accepted, not yet written: the default wake-up is a later macrotask.
+    expect((await readRow()).text).toBe('');
+
+    await tick();
+    await writer.flush();
+
+    const row = await readRow();
+    expect(row.text).toHaveLength(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    expect(row.parts.find(isTurnCheckpointPart)?.sequence).toBe(1);
+  });
+
+  it('makes the trailing write a no-op once the turn is no longer generating', async () => {
+    const { writer, append, readRow, finalize } = await setupDurable();
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+    // The turn is finalized before the wake-up fires; the `isGenerating = 1`
+    // guard must keep the late snapshot from overwriting the final row.
+    await finalize();
+
+    await tick();
+    await writer.flush();
+
+    const row = await readRow();
+    expect(row.isGenerating).toBe(0);
+    expect(row.text).toBe('');
+    expect(row.parts.find(isTurnCheckpointPart)?.sequence).toBe(0);
+  });
+
+  it('leaves the last forced state as the durable row when the turn crashes', async () => {
+    const manual = new ManualDefer();
+    const { writer, append, readRow } = await setupDurable({ defer: manual.defer });
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+    append(10);
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+    const forced = await readRow();
+
+    // Accepted after the last landed write, then the process dies: neither the
+    // wake-up nor flush ever runs.
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    await writer.checkpoint();
+    await tick();
+
+    const durable = await readRow();
+    expect(durable).toEqual(forced);
+    expect(durable.text).toHaveLength(CHECKPOINT_TEXT_INTERVAL_CHARS + 10);
+    expect(durable.parts).toHaveLength(3);
+    expect(durable.parts.find(isTurnCheckpointPart)?.sequence).toBe(2);
   });
 });
