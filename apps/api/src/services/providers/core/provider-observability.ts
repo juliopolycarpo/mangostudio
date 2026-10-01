@@ -16,6 +16,8 @@ import { getDb } from '../../../db/database';
 
 const MAX_LOG_ENTRIES = 200;
 const PERSIST_DEBOUNCE_MS = 5_000;
+/** Upper bound on back-to-back writes one explicit flush makes while mutations keep arriving. */
+const MAX_FLUSH_PASSES = 5;
 const SNAPSHOT_ROW_ID = 'observability-state';
 const CACHE_ORDER: ReadonlyArray<ProviderCacheName> = [
   'sdk-client',
@@ -141,9 +143,10 @@ function fromPersistedSnapshot(snapshot: PersistedSnapshot): void {
   recentLogs.push(...snapshot.recentLogs);
 }
 
-async function persistSnapshot(): Promise<void> {
+/** Writes the current snapshot; resolves `false` only when the write failed. */
+async function persistSnapshot(): Promise<boolean> {
   if (!dirty) {
-    return;
+    return true;
   }
 
   try {
@@ -167,8 +170,10 @@ async function persistSnapshot(): Promise<void> {
     if (persistedRevision === mutationRevision) {
       dirty = false;
     }
+    return true;
   } catch {
     // Persistence is best-effort; in-memory counters remain authoritative.
+    return false;
   }
 }
 
@@ -192,13 +197,25 @@ export async function loadObservabilitySnapshot(): Promise<void> {
   }
 }
 
-export function flushObservabilitySnapshot(): Promise<void> {
+/**
+ * Persists the current snapshot now. A mutation recorded while a write is pending triggers another
+ * pass (at most `MAX_FLUSH_PASSES`), so the caller, such as shutdown, resolves with the latest
+ * state persisted. A failed write stops the loop; the state stays dirty for the next flush.
+ *
+ * @example
+ * await flushObservabilitySnapshot();
+ */
+export async function flushObservabilitySnapshot(): Promise<void> {
   if (pendingFlush) {
     clearTimeout(pendingFlush);
     pendingFlush = undefined;
   }
 
-  return persistSnapshot();
+  for (let pass = 0; pass < MAX_FLUSH_PASSES && dirty; pass++) {
+    if (!(await persistSnapshot())) {
+      return;
+    }
+  }
 }
 
 function ensureProviderMetrics(provider: ProviderType): MutableProviderMetrics {

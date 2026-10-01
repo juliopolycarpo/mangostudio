@@ -209,7 +209,7 @@ function fakeSnapshotWrite(mode: 'hold' | 'fail'): SnapshotWriteFake {
 }
 
 describe('observability snapshot flush dirty tracking', () => {
-  it('keeps a mutation recorded during a held write dirty until a later flush persists it', async () => {
+  it('persists a mutation recorded during a held write before the explicit flush resolves', async () => {
     await flushObservabilitySnapshot();
     recordProviderCacheHit('openai-compatible', 'sdk-client');
 
@@ -223,7 +223,6 @@ describe('observability snapshot flush dirty tracking', () => {
     } finally {
       fake.restore();
     }
-    await flushObservabilitySnapshot();
 
     expect(inMemorySdkClientHits()).toBe(2);
     const persisted = await readPersistedSdkClientHits();
