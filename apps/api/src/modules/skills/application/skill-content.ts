@@ -7,6 +7,7 @@
 
 import { type Dirent, readdirSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
@@ -27,11 +28,17 @@ const MAX_NAMES_IN_ERROR = 64;
 export interface SkillBodyResult {
   readonly name: string;
   readonly description: string;
-  /** Absolute skill directory; bundled script paths resolve against this. */
-  readonly baseDir: string;
+  /**
+   * Absolute skill directory on the hub host; bundled script paths resolve
+   * against this. Absent for a chat on another environment, where the path
+   * does not exist (see `filesLocation`).
+   */
+  readonly baseDir?: string;
+  /** Present instead of `baseDir` when the chat's environment is not the hub's own machine. */
+  readonly filesLocation?: string;
   /** SKILL.md body with frontmatter stripped. */
   readonly body: string;
-  /** Bundled files relative to baseDir (depth and count bounded). */
+  /** Bundled files relative to the skill directory (depth and count bounded). */
   readonly files: string[];
   readonly filesTruncated: boolean;
 }
@@ -43,11 +50,27 @@ export interface SkillFileResult {
   readonly truncated: boolean;
 }
 
-/** Loads a skill's instructions and bundled-file listing. // Usage: await loadSkillBody(db, userId, 'pdf-tools') */
+/** What a chat on a non-Local environment is told in place of the hub's skill directory. */
+export const REMOTE_SKILL_FILES_LOCATION =
+  'The skill files are stored on the MangoStudio hub, not on this environment, so this ' +
+  'skill has no directory here and bundled scripts cannot be run from it. Read a bundled ' +
+  'file with this tool\'s "file" argument.';
+
+/** Whether the chat's tools run on the hub's own machine, where skill paths are valid. */
+function isHubMachine(environmentId: string | undefined): boolean {
+  return environmentId === undefined || environmentId === LOCAL_ENVIRONMENT_ID;
+}
+
+/**
+ * Loads a skill's instructions and bundled-file listing. A chat on a non-Local
+ * environment gets `filesLocation` instead of the hub's `baseDir`.
+ * // Usage: await loadSkillBody(db, userId, 'pdf-tools', { environmentId: 'local' })
+ */
 export async function loadSkillBody(
   db: Kysely<Database>,
   userId: string,
-  name: string
+  name: string,
+  options: { readonly environmentId?: string } = {}
 ): Promise<SkillBodyResult> {
   const skill = await findSkillByName(db, userId, name);
   const markdown = readSkillText(join(skill.path, SKILL_FILE_NAME));
@@ -56,7 +79,9 @@ export async function loadSkillBody(
   return {
     name: skill.name,
     description: skill.description,
-    baseDir: skill.path,
+    ...(isHubMachine(options.environmentId)
+      ? { baseDir: skill.path }
+      : { filesLocation: REMOTE_SKILL_FILES_LOCATION }),
     body: parseMarkdownFrontmatter(markdown.content).body.trim(),
     files: listing.files,
     filesTruncated: listing.truncated,
