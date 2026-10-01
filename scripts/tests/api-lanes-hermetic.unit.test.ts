@@ -13,8 +13,8 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { REAL_HOME_ENV, TEST_HOME_PREFIX } from '../lib/test-home';
+import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { REAL_HOME_ENV, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
 
 const ROOT = join(import.meta.dir, '..', '..');
 const API_DIR = join(ROOT, 'apps', 'api');
@@ -152,5 +152,111 @@ describe('preload abort', () => {
       check,
       `apps/api hermetic-home.ts must read ${REAL_HOME_ENV}, the variable ${LAUNCHER} sets | expected: '${REAL_HOME_ENV}'`
     ).toContain(`'${REAL_HOME_ENV}'`);
+  });
+});
+
+/**
+ * What Turbo makes of the lanes. The launcher is not part of `apps/api`, and
+ * Turbo runs tasks with a strict environment, so both of these fail silently:
+ * a launcher edit is served a stale cached pass, and a developer's
+ * `CARGO_HOME` / `RUSTUP_HOME` / `BUN_INSTALL` never reaches the launcher that
+ * pins them. `turbo run --dry=json` is Turbo's own answer, after it has merged
+ * the root and workspace task definitions.
+ */
+describe('Turbo task definitions of the API lanes', () => {
+  /** The variables the launcher pins to the developer's real locations. */
+  const PINNED_TOOLCHAIN_VARS = [
+    'CARGO_HOME',
+    'RUSTUP_HOME',
+    'BUN_INSTALL',
+    'BUN_INSTALL_CACHE_DIR',
+  ];
+  const TURBO_LANES = ['test:unit', 'test:integration', 'test:coverage'];
+
+  interface DryRunTask {
+    taskId: string;
+    inputs: Record<string, string>;
+    resolvedTaskDefinition: { cache: boolean; passThroughEnv: string[] | null };
+  }
+
+  /** The `scripts/` files the launcher loads: its own and every relative import, transitively. */
+  function launcherFiles(entry = 'scripts/with-test-home.ts', seen = new Set<string>()): string[] {
+    if (seen.has(entry)) return [...seen];
+    seen.add(entry);
+    const source = readFileSync(join(ROOT, entry), 'utf8');
+    for (const match of source.matchAll(/from '(\.{1,2}\/[^']+)'/g)) {
+      launcherFiles(posix.join(posix.dirname(entry), `${match[1]}.ts`), seen);
+    }
+    return [...seen];
+  }
+
+  async function dryRun(): Promise<Map<string, DryRunTask>> {
+    const turbo = join(ROOT, 'node_modules', '.bin', 'turbo');
+    const probe = Bun.spawn({
+      cmd: [turbo, 'run', ...TURBO_LANES, '--filter=@mangostudio/api', '--dry=json'],
+      cwd: ROOT,
+      env: process.env as Record<string, string>,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(probe.stdout).text(),
+      new Response(probe.stderr).text(),
+      probe.exited,
+    ]);
+    expect(code, `expected turbo dry run exit: 0 | received: ${code} | stderr: ${err.trim()}`).toBe(
+      0
+    );
+    const { tasks } = JSON.parse(out) as { tasks: DryRunTask[] };
+    return new Map(tasks.map((task) => [task.taskId.replace('@mangostudio/api#', ''), task]));
+  }
+
+  test('the launcher closure is the three files the cache key names', () => {
+    expect(launcherFiles().sort()).toEqual([
+      'scripts/lib/temp-home.ts',
+      'scripts/lib/test-home.ts',
+      'scripts/with-test-home.ts',
+    ]);
+  });
+
+  test('the cached test:unit lane hashes every launcher file', async () => {
+    const task = (await dryRun()).get('test:unit');
+    expect(task, 'expected a @mangostudio/api#test:unit task in the Turbo dry run').toBeDefined();
+    expect(
+      task?.resolvedTaskDefinition.cache,
+      'expected test:unit to be cached, which is why its inputs matter'
+    ).toBe(true);
+
+    const hashed = Object.keys(task?.inputs ?? {});
+    for (const file of launcherFiles()) {
+      expect(
+        hashed.includes(`../../${file}`),
+        `a change to ${file} must invalidate the cached @mangostudio/api test:unit result | expected: "$TURBO_ROOT$/${file}" in the task's inputs in apps/api/turbo.json | received: ${hashed.length} hashed files, none of them ../../${file}`
+      ).toBe(true);
+    }
+    expect(
+      hashed.includes('package.json'),
+      'an explicit inputs list replaces the tracked package files | expected: "$TURBO_DEFAULT$" kept in the inputs | received: apps/api/package.json not hashed'
+    ).toBe(true);
+  });
+
+  test('every lane passes the pinned toolchain variables through', async () => {
+    const tasks = await dryRun();
+    for (const name of TURBO_LANES) {
+      const passThrough = tasks.get(name)?.resolvedTaskDefinition.passThroughEnv ?? [];
+      for (const variable of PINNED_TOOLCHAIN_VARS) {
+        expect(
+          passThrough,
+          `Turbo's strict environment drops ${variable} before ${LAUNCHER} sees it, so a non-default location is replaced by the home-directory default | expected: "${variable}" in passThroughEnv of @mangostudio/api ${name} | received: [${passThrough.join(', ')}]`
+        ).toContain(variable);
+      }
+    }
+  });
+
+  test('the pass-through list covers every toolchain variable the launcher pins', () => {
+    const pinned = Object.keys(testHomeEnv('/tmp/x', {}, { tmpDir: '/tmp', realHome: '/h' }));
+    for (const variable of PINNED_TOOLCHAIN_VARS) {
+      expect(pinned, `expected the launcher to pin ${variable}`).toContain(variable);
+    }
   });
 });
