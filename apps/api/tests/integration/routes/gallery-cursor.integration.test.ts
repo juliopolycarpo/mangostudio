@@ -16,6 +16,7 @@ let user!: UserFixture;
 let chatId = '';
 let tag = '';
 let restoreAuth: (() => void) | null = null;
+let app: ReturnType<typeof createAuthenticatedApiTestApp>['app'] | null = null;
 
 // The gallery is scoped to one user, so every test gets its own user and chat.
 beforeEach(async () => {
@@ -27,6 +28,7 @@ beforeEach(async () => {
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
+  app = null;
 });
 
 /** Row ids are global, so every id a test seeds carries this test's tag. */
@@ -99,9 +101,17 @@ async function insertArtifactImages(ids: string[], createdAt = TIED_TIMESTAMP) {
     .execute();
 }
 
+/**
+ * One authenticated app per test: each `createAuthenticatedApiTestApp` call
+ * wraps the previous call's session mock, so restoring only the last one
+ * would leave a stale session mock behind for later test files.
+ */
 function rawGet(query: string) {
-  const { app, restore } = createAuthenticatedApiTestApp(user, messageRoutes);
-  restoreAuth = restore;
+  if (!app) {
+    const created = createAuthenticatedApiTestApp(user, messageRoutes);
+    app = created.app;
+    restoreAuth = created.restore;
+  }
   return app.handle(new Request(`http://localhost/messages/images?${query}`));
 }
 
