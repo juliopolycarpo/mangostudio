@@ -70,8 +70,22 @@ export function decodeMessageParts(raw: string | null | undefined): DecodedMessa
   return { kind: 'ok', parts: parsed as MessagePart[] };
 }
 
-/** Logs one corrupt `messages.parts` cell: the message id and the value's shape, never its content. */
+/** Cap on remembered corrupt cells; past it the memory resets, so it never grows unbounded. */
+const REPORTED_CELLS_LIMIT = 256;
+const reportedCells = new Set<string>();
+
+/**
+ * Logs one corrupt `messages.parts` cell: the message id and the value's shape, never its
+ * content. A damaged cell stays damaged, so it is reported once per process (per message id,
+ * reason and size) instead of on every chat open or history read.
+ *
+ * Usage: warnCorruptMessageParts('msg-1', decoded.shape)
+ */
 export function warnCorruptMessageParts(messageId: string, shape: CorruptPartsShape): void {
+  const key = `${messageId}|${shape.reason}|${shape.bytes}`;
+  if (reportedCells.has(key)) return;
+  if (reportedCells.size >= REPORTED_CELLS_LIMIT) reportedCells.clear();
+  reportedCells.add(key);
   logger.warn('corrupt_message_parts', { messageId, ...shape });
 }
 

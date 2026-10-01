@@ -32,6 +32,33 @@ describe('decodeMessageParts', () => {
     expect(decodeMessageParts('')).toEqual({ kind: 'absent' });
   });
 
+  it('keeps parts of an unknown or legacy type and parts with missing optional fields', () => {
+    const parts = [
+      { type: 'text', text: 'hi' },
+      { type: 'future_widget', payload: { anything: 1 } },
+      { type: 'tool_result', toolCallId: 'call-1', content: 'done' },
+      { type: 'thinking', text: 'hmm' },
+    ] as unknown as MessagePart[]; // an unknown type is not in the union by design
+
+    expect(decodeMessageParts(JSON.stringify(parts))).toEqual({ kind: 'ok', parts });
+  });
+
+  it('treats an empty array as valid, not corrupt', () => {
+    expect(decodeMessageParts('[]')).toEqual({ kind: 'ok', parts: [] });
+  });
+
+  it.each([
+    ['a primitive', '[1]'],
+    ['a nested array', '[[]]'],
+    ['an object without a type', '[{"text":"x"}]'],
+    ['an object with a non-string type', '[{"type":3}]'],
+  ])('rejects an element that is %s', (_label, raw) => {
+    expect(decodeMessageParts(raw)).toMatchObject({
+      kind: 'corrupt',
+      shape: { reason: 'invalid_element', elementIndex: 0 },
+    });
+  });
+
   it('returns the parts of a valid array', () => {
     const parts: MessagePart[] = [{ type: 'text', text: 'hi' }];
 
@@ -79,11 +106,28 @@ describe('readMessageParts', () => {
     expect(capture.lines[0]).not.toContain('secret');
   });
 
+  it('reports the same damaged cell once, not on every read', () => {
+    const capture = new WarnCapture();
+    capture.start();
+    try {
+      for (let read = 0; read < 3; read++) {
+        readMessageParts({ id: 'msg-repeat', parts: '{not json' });
+      }
+      readMessageParts({ id: 'msg-other', parts: '{not json' });
+    } finally {
+      capture.stop();
+    }
+
+    expect(capture.lines).toHaveLength(2);
+    expect(capture.lines[0]).toContain('"messageId":"msg-repeat"');
+    expect(capture.lines[1]).toContain('"messageId":"msg-other"');
+  });
+
   it('stays silent when told the row was already reported', () => {
     const capture = new WarnCapture();
     capture.start();
     try {
-      readMessageParts({ id: 'msg-1', parts: '{not json' }, { quiet: true });
+      readMessageParts({ id: 'msg-quiet', parts: '{not json' }, { quiet: true });
     } finally {
       capture.stop();
     }

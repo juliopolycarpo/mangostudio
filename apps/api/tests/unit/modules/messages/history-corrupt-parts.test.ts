@@ -10,6 +10,7 @@ import {
   loadHistory,
   loadRichHistory,
 } from '../../../../src/modules/messages/infrastructure/message-repository';
+import { buildOpenAIResponsesReplay } from '../../../../src/services/providers/core/replay-builder';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
 
 let sequence = 0;
@@ -64,5 +65,22 @@ describe('history with one corrupt parts cell', () => {
       `text of b-${chatId}`,
       `text of c-${chatId}`,
     ]);
+  });
+
+  it('leaves no tool call or tool result behind when the corrupt turn held tool calls', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    await insertTurn(chat.id, `u1-${chat.id}`, 'user', null);
+    // Tool calls and their results live in one assistant turn's parts, so damage to that
+    // cell removes both sides of every pair; nothing can be left unpaired in the next turn.
+    await insertTurn(chat.id, `a1-${chat.id}`, 'ai', '[{"type":"tool_call","toolCallId":"c1"');
+    await insertTurn(chat.id, `u2-${chat.id}`, 'user', null);
+
+    const history = await loadRichHistory(chat.id, {}, getDb());
+    const items = buildOpenAIResponsesReplay(history);
+
+    const toolItems = items.filter((item) => 'type' in item);
+    expect(toolItems).toEqual([]);
+    expect(items.map((item) => item.role)).toEqual(['user', 'assistant', 'user']);
   });
 });
