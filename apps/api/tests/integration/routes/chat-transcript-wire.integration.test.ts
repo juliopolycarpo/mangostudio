@@ -212,10 +212,12 @@ async function seedWireFixture(): Promise<void> {
     .execute();
 }
 
-async function requestTranscriptText(): Promise<{ status: number; text: string }> {
+async function requestTranscriptText(
+  chatId: string = CHAT_ID
+): Promise<{ status: number; text: string }> {
   const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
   restoreAuth = restore;
-  const response = await app.handle(new Request(`http://localhost/chats/${CHAT_ID}/messages`));
+  const response = await app.handle(new Request(`http://localhost/chats/${chatId}/messages`));
   return { status: response.status, text: await response.text() };
 }
 
@@ -234,5 +236,82 @@ describe('GET /chats/:id/messages wire bytes', () => {
       );
     }
     expect(text).toBe(GOLDEN);
+  });
+});
+
+const TOLERANCE_CHAT_ID = 'wire-tolerance-chat';
+
+/**
+ * A value no writer produces, typed as the column's declared union. `messages.role`,
+ * `messages.interactionMode` and `chat_attachments.kind` are free text with no CHECK
+ * constraint, so such a row can exist (a downgrade, a hand edit) and the reader has
+ * to keep serving it; Kysely's row types would otherwise refuse to seed one.
+ */
+function storedOutsideTheUnion<T extends string>(value: string): T {
+  return value as T;
+}
+
+async function seedToleranceFixture(): Promise<void> {
+  await insertTestChat(TEST_USER.id, { id: TOLERANCE_CHAT_ID, title: 'wire tolerance' });
+  const db = getDb();
+  await db
+    .insertInto('messages')
+    .values([
+      {
+        id: 'tolerance-role-row',
+        chatId: TOLERANCE_CHAT_ID,
+        role: storedOutsideTheUnion<'user'>('zzz'),
+        text: 'role outside user | ai',
+        timestamp: BASE,
+        isGenerating: 0,
+        interactionMode: 'agent',
+      },
+      {
+        id: 'tolerance-mode-row',
+        chatId: TOLERANCE_CHAT_ID,
+        role: 'ai',
+        text: 'interaction mode outside chat | agent | image',
+        timestamp: BASE + 1,
+        isGenerating: 0,
+        interactionMode: storedOutsideTheUnion<'chat'>('zzz'),
+      },
+    ])
+    .execute();
+  await db
+    .insertInto('chat_attachments')
+    .values({
+      id: 'tolerance-attachment',
+      userId: TEST_USER.id,
+      chatId: TOLERANCE_CHAT_ID,
+      messageId: 'tolerance-mode-row',
+      originalName: 'odd.bin',
+      storedName: 'stored-odd.bin',
+      relativePath: 'stored-odd.bin',
+      url: '/uploads/stored-odd.bin',
+      mimeType: 'application/octet-stream',
+      sizeBytes: 3,
+      kind: storedOutsideTheUnion<'text'>('zzz'),
+      createdAt: BASE + 11,
+      updatedAt: BASE + 11,
+    })
+    .execute();
+}
+
+/** Captured from the route before the transcript row had a schema, when any stored value passed through. */
+const TOLERANCE_GOLDEN =
+  '{"messages":[{"id":"tolerance-role-row","chatId":"wire-tolerance-chat","role":"zzz","text":"role outside user | ai","imageUrl":null,"referenceImage":null,"timestamp":1700000000000,"isGenerating":false,"generationTime":null,"modelName":null,"interactionMode":"agent","providerState":null},{"id":"tolerance-mode-row","chatId":"wire-tolerance-chat","role":"ai","text":"interaction mode outside chat | agent | image","imageUrl":null,"referenceImage":null,"timestamp":1700000000001,"isGenerating":false,"generationTime":null,"modelName":null,"interactionMode":"zzz","providerState":null,"attachments":[{"id":"tolerance-attachment","chatId":"wire-tolerance-chat","messageId":"tolerance-mode-row","originalName":"odd.bin","mimeType":"application/octet-stream","sizeBytes":3,"kind":"zzz","url":"/uploads/stored-odd.bin","createdAt":1700000000011}]}],"nextCursor":null,"contextInfo":null}';
+
+describe('GET /chats/:id/messages with stored values outside the written unions', () => {
+  it('serves a row with an unknown role, an unknown interaction mode and an unknown attachment kind byte-for-byte as before', async () => {
+    await seedToleranceFixture();
+
+    const { status, text } = await requestTranscriptText(TOLERANCE_CHAT_ID);
+    if (status !== 200) throw new Error(`expected status: 200 | received: ${status} ${text}`);
+    if (text !== TOLERANCE_GOLDEN) {
+      throw new Error(
+        `expected response text: the pinned golden | received a different serialisation:\n${text}`
+      );
+    }
+    expect(text).toBe(TOLERANCE_GOLDEN);
   });
 });
