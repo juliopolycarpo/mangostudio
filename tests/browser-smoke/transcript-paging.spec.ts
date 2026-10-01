@@ -285,6 +285,44 @@ async function scrollUpUntilRequested(page: Page, hold: Transcript): Promise<voi
     .toBe(true);
 }
 
+/**
+ * Waits until the transcript has stopped moving: its `scrollTop` unchanged for
+ * eight frames in a row. One turn of the wheel is a scroll animation, not a
+ * jump, and `scrollTop` has changed on its first frame; a row read before the
+ * animation ends is still travelling, which would read as a prepended page
+ * moving it.
+ */
+async function awaitStill(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          ({ selector, stillFrames, maxFrames }) =>
+            new Promise<boolean>((resolve) => {
+              const port = document.querySelector<HTMLElement>(selector);
+              if (!port) return resolve(false);
+              let last = port.scrollTop;
+              let still = 0;
+              let frames = 0;
+              const tick = () => {
+                still = port.scrollTop === last ? still + 1 : 0;
+                last = port.scrollTop;
+                if (still >= stillFrames) return resolve(true);
+                if (++frames >= maxFrames) return resolve(false);
+                requestAnimationFrame(tick);
+              };
+              requestAnimationFrame(tick);
+            }),
+          { selector: FEED, stillFrames: 8, maxFrames: 240 }
+        ),
+      {
+        message: 'expected the transcript to stop moving after the wheel | received: still moving',
+        timeout: waitMs('the transcript to stop moving after the wheel'),
+      }
+    )
+    .toBe(true);
+}
+
 /** Starts recording where a row sits in the port on every frame; returns its stop. */
 async function traceRow(page: Page, text: string): Promise<() => Promise<number[]>> {
   await page.evaluate(
@@ -423,6 +461,7 @@ async function readTranscriptNewestFirst(
   while (!visibleLabels(await readView(page)).includes(label(1))) {
     await scrollUpUntilRequested(page, transcript);
     if (!transcript.requested()) break;
+    await awaitStill(page);
 
     const anchor = (await readView(page))?.visible[0];
     if (!anchor) throw new Error('expected a row in the viewport | received: none');
