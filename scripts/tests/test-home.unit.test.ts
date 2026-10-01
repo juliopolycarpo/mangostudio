@@ -118,6 +118,11 @@ describe('shellExitCode', () => {
     expect(shellExitCode(null, 15)).toBe(143);
   });
 
+  test('keeps the signal number of a signal the launcher does not forward', () => {
+    expect(shellExitCode(null, 6)).toBe(134);
+    expect(shellExitCode(null, 9)).toBe(137);
+  });
+
   test('reports failure when neither is known', () => {
     expect(shellExitCode(null, null)).toBe(1);
   });
@@ -246,6 +251,24 @@ describe('runWithTestHome', () => {
 
     expect(code, `expected exit code: 143 | received: ${code}`).toBe(143);
   });
+
+  test.each([
+    ['SIGABRT', 134],
+    ['SIGKILL', 137],
+    ['SIGSEGV', 139],
+  ])(
+    'reports the shell code for a child that dies of %s, not the forwarded-signal one',
+    async (name, expected) => {
+      const code = await runWithTestHome(
+        ['bun', '-e', `process.kill(process.pid, '${name}'); setTimeout(() => {}, 5000)`],
+        process.env
+      );
+
+      expect(code, `expected exit code: ${expected} (128 + ${name}) | received: ${code}`).toBe(
+        expected
+      );
+    }
+  );
 
   test('refuses an empty command, naming what it received', async () => {
     await expect(runWithTestHome([], process.env)).rejects.toThrow(

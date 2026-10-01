@@ -15,6 +15,7 @@
  * through untouched.
  */
 
+import { constants } from 'node:os';
 import { join } from 'node:path';
 import {
   createTemporaryHome,
@@ -162,8 +163,15 @@ export async function runWithTestHome(
   }
 }
 
-function signalNumber(name: string): number {
-  return (SIGNAL_NUMBERS as Record<string, number>)[name] ?? 15;
+/**
+ * The number of the signal that ended the child, whichever it was: the watchdog
+ * keys its crash retry on 134 (SIGABRT) and triages 137 (SIGKILL, the OOM
+ * killer) apart from a hang, so an unforwarded signal must not read as 143.
+ * An unknown name reports plain failure.
+ */
+function signalNumber(name: string): number | null {
+  const number = (constants.signals as Record<string, number | undefined>)[name];
+  return typeof number === 'number' ? number : null;
 }
 
 function removeHomeQuietly(root: string, host: TemporaryHomeHost): void {
