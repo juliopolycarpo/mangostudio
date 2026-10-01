@@ -807,15 +807,28 @@ describe('release workflow binary gate', () => {
     expect(windowsBlock).toContain('install.ps1 -Uninstall');
   });
 
-  test('release dry run runs the install.ps1 failed-probe cases on Windows and is relevant to them', () => {
+  test('release dry run runs the install.ps1 failed-probe and npm tarball cases on Windows and is relevant to them', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
     const windowsBlock = extractJobBlock(workflow, 'dry-run-windows');
 
     // Linux skips install-ps1-layout.unit.test.ts for want of a Windows
-    // PowerShell, so this job is the only place the fake-binary cases run.
-    expect(windowsBlock).toContain("-t 'failed version probe'");
+    // PowerShell, so this job is the only place the fake-binary cases and the
+    // GNU-tar-first tarball case run.
+    expect(windowsBlock).toContain("-t 'failed version probe|npm tarball extraction'");
     expect(windowsBlock).toContain('scripts/tests/install-ps1-layout.unit.test.ts');
     expect(windowsBlock).toContain('MANGOSTUDIO_TEST_NATIVE_FAKES: "1"');
+
+    // `bun test -t` exits 0 while any one alternative matches, so a renamed
+    // describe would drop its cases from this job without failing it.
+    const filter = /-t '([^']+)'/.exec(windowsBlock)?.[1] ?? '';
+    const layoutCases = readText('scripts/tests/install-ps1-layout.unit.test.ts');
+    const describes = [...layoutCases.matchAll(/^describe\('([^']+)'/gm)].map((match) => match[1]);
+    for (const name of filter.split('|')) {
+      expect(
+        describes.filter((title) => title?.includes(name)),
+        `expected one describe in install-ps1-layout.unit.test.ts to match "${name}" | received: ${describes.join(', ')}`
+      ).toHaveLength(1);
+    }
 
     const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
     expect(source, 'release_pattern not found in the changes job').toBeDefined();
