@@ -1,5 +1,5 @@
 import { tmpdir } from 'node:os';
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { type APIResponse, expect, type Page, type Route, test } from '@playwright/test';
 
 /**
  * A chat longer than one page opens on its NEWEST messages and loads older ones
@@ -20,6 +20,8 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 const TOTAL = 130;
 const PAGE_SIZE = 50;
 const SEED_CONCURRENCY = 10;
+/** What the app itself may ask of the limiter between seeding and the end of the spec. */
+const PAGE_LOAD_REQUESTS = 150;
 /** A prepended page may not move the row the reader was looking at by more than this. */
 const MAX_JUMP_PX = 4;
 const BASE_TIMESTAMP = 1_700_000_000_000;
@@ -105,20 +107,49 @@ async function wheel(page: Page, deltaY: number): Promise<void> {
   await page.mouse.wheel(0, deltaY);
 }
 
+/**
+ * What the API's per-IP limiter last reported. This spec posts well over a
+ * hundred messages, and the limiter is shared by every spec of the suite and by
+ * the page itself: a burst that leaves nothing behind turns the next page load
+ * into a 429 (the transcript fails to load and the chat shows its empty state),
+ * in this spec or in whichever runs after it.
+ */
+const limiter = { remaining: Number.POSITIVE_INFINITY, resetsAtMs: 0 };
+
+function noteLimiter(response: APIResponse): void {
+  const headers = response.headers();
+  const remaining = Number(headers['x-ratelimit-remaining']);
+  const resetsAtMs = Number(headers['x-ratelimit-reset']) * 1000;
+  if (Number.isNaN(remaining) || Number.isNaN(resetsAtMs)) return;
+  // Concurrent responses arrive out of order: within one window the lowest count is the truth.
+  limiter.remaining =
+    resetsAtMs > limiter.resetsAtMs ? remaining : Math.min(limiter.remaining, remaining);
+  limiter.resetsAtMs = Math.max(limiter.resetsAtMs, resetsAtMs);
+}
+
+/** Waits for the limiter's window to reopen when fewer than `requests` are left in it. */
+async function awaitLimiterHeadroom(requests: number): Promise<void> {
+  if (limiter.remaining >= requests) return;
+  const reopensInMs = limiter.resetsAtMs - Date.now() + 250;
+  if (reopensInMs > 0) await new Promise((resolve) => setTimeout(resolve, reopensInMs));
+  limiter.remaining = Number.POSITIVE_INFINITY;
+}
+
 async function createChat(page: Page, title: string): Promise<string> {
   const created = await page.request.post('/api/chats', { data: { title } });
+  noteLimiter(created);
   expect(created.ok(), `expected chat create: 2xx | received: ${created.status()}`).toBe(true);
   const { id } = (await created.json()) as { id: string };
   // A chat with no working directory opens a folder picker over the rail.
   const bound = await page.request.put(`/api/chats/${id}`, { data: { workdir: tmpdir() } });
+  noteLimiter(bound);
   expect(bound.ok(), `expected workdir bind: 2xx | received: ${bound.status()}`).toBe(true);
   return id;
 }
 
 /**
  * Stores one message through the API, waiting out the per-IP limiter instead of
- * failing on it: this spec posts more than a hundred rows, and the limiter is
- * shared with every other spec in the suite.
+ * failing on it.
  */
 async function postMessage(page: Page, chatId: string, position: number): Promise<void> {
   for (;;) {
@@ -132,6 +163,7 @@ async function postMessage(page: Page, chatId: string, position: number): Promis
         interactionMode: 'agent',
       },
     });
+    noteLimiter(response);
     if (response.ok()) return;
     if (response.status() !== 429) {
       throw new Error(`expected ${label(position)} stored: 2xx | received: ${response.status()}`);
@@ -260,7 +292,9 @@ test('a 130-message chat opens on its newest messages and loads older ones on de
 
   const chatId = await createChat(page, title);
   await createChat(page, otherTitle);
+  await awaitLimiterHeadroom(TOTAL + PAGE_LOAD_REQUESTS);
   await seedMessages(page, chatId, 1, TOTAL);
+  await awaitLimiterHeadroom(PAGE_LOAD_REQUESTS);
 
   await page.goto('/');
   await openChat(page, title);
@@ -281,9 +315,9 @@ test('a 130-message chat opens on its newest messages and loads older ones on de
   // reader is still, so the row they were looking at before it lands is the
   // reference for where it must be after.
   let pagesPrepended = 0;
+  const hold = holdOlderPages(page);
+  await hold.install();
   while (!visibleLabels(await readView(page)).includes(label(1))) {
-    const hold = holdOlderPages(page);
-    await hold.install();
     await scrollUpUntilRequested(page, hold);
     if (!hold.requested()) break;
 
@@ -298,7 +332,6 @@ test('a 130-message chat opens on its newest messages and loads older ones on de
         { message: `expected ${anchor.text} to move down when an older page lands` }
       )
       .toBeGreaterThan(anchor.index);
-    await hold.uninstall();
 
     const tops = await stopTrace();
     const jump = Math.max(...tops.map((top) => Math.abs(top - anchor.top)));
@@ -313,6 +346,7 @@ test('a 130-message chat opens on its newest messages and loads older ones on de
     pagesPrepended++;
     expect(pagesPrepended, 'expected pages prepended: <= 3').toBeLessThanOrEqual(3);
   }
+  await hold.uninstall();
 
   // Everything is loaded: each rendered row sits at the index its text says,
   // so a duplicate or a gap anywhere shows up as a row in the wrong place.
