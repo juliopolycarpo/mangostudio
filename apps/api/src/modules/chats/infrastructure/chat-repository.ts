@@ -195,7 +195,9 @@ export interface ChatRecord {
  * context snapshot (the legacy fallback), and that envelope is the largest
  * column on the row. It is therefore selected only for rows whose
  * `lastContextState` is NULL; for every other row `lastProviderState` comes
- * back NULL and SQLite never reads it. A row whose snapshot is present but
+ * back NULL, so the envelope is never copied out of the record, materialized
+ * as a string, or parsed. (SQLite still walks past it to reach the columns
+ * stored after it, which cannot be avoided without changing the table.) A row whose snapshot is present but
  * unreadable still needs its envelope: resolve those with
  * {@link listProviderStatesByIds}.
  *
