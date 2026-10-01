@@ -188,14 +188,87 @@ export interface ChatRecord {
   lastContextState: string | null;
 }
 
+/**
+ * Every chat one user owns, newest first, for the chat list.
+ *
+ * The list only needs the continuation envelope when a chat has no persisted
+ * context snapshot (the legacy fallback), and that envelope is the largest
+ * column on the row. It is therefore selected only for rows whose
+ * `lastContextState` is NULL; for every other row `lastProviderState` comes
+ * back NULL and SQLite never reads it. A row whose snapshot is present but
+ * unreadable still needs its envelope: resolve those with
+ * {@link listProviderStatesByIds}.
+ *
+ * @example
+ * const chats = await listByUserId(user.id, getDb());
+ */
 export async function listByUserId(userId: string, db: Kysely<Database>): Promise<ChatRecord[]> {
   const rows = await db
     .selectFrom('chats')
-    .selectAll()
+    .select([
+      'id',
+      'title',
+      'createdAt',
+      'updatedAt',
+      'model',
+      'textModel',
+      'imageModel',
+      'runnerKind',
+      'runnerAgentId',
+      'runnerTargetId',
+      'runnerPermissionLevel',
+      'runnerApprovalRouting',
+      'runnerModel',
+      'runnerEffort',
+      'workdir',
+      'environmentId',
+      'restrictToolsToWorkdir',
+      'userId',
+      'lastContextState',
+      (eb) =>
+        eb
+          .case()
+          .when('lastContextState', 'is', null)
+          .then(eb.ref('lastProviderState'))
+          .end()
+          .as('lastProviderState'),
+    ])
     .where('userId', '=', userId)
     .orderBy('updatedAt', 'desc')
     .execute();
   return rows.map(mapChatRow);
+}
+
+/** Matches SQLite's historical 999-variable ceiling so one batch is always valid. */
+const PROVIDER_STATE_BATCH_SIZE = 500;
+
+/**
+ * Continuation envelopes for the given chats of one owner, keyed by chat id.
+ * Chats that are absent, foreign, or have no envelope are simply missing.
+ *
+ * @example
+ * const states = await listProviderStatesByIds(user.id, ['chat-1'], getDb());
+ * states.get('chat-1'); // the raw envelope JSON, or undefined
+ */
+export async function listProviderStatesByIds(
+  userId: string,
+  ids: readonly string[],
+  db: Kysely<Database>
+): Promise<Map<string, string>> {
+  const states = new Map<string, string>();
+  for (let start = 0; start < ids.length; start += PROVIDER_STATE_BATCH_SIZE) {
+    const batch = ids.slice(start, start + PROVIDER_STATE_BATCH_SIZE);
+    const rows = await db
+      .selectFrom('chats')
+      .select(['id', 'lastProviderState'])
+      .where('userId', '=', userId)
+      .where('id', 'in', batch)
+      .execute();
+    for (const row of rows) {
+      if (row.lastProviderState) states.set(row.id, row.lastProviderState);
+    }
+  }
+  return states;
 }
 
 /** Exactly what the batched git state read consumes; narrow on purpose so a
