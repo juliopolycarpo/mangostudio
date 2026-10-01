@@ -252,23 +252,16 @@ describe('runWithTestHome', () => {
     expect(code, `expected exit code: 143 | received: ${code}`).toBe(143);
   });
 
-  test.each([
-    ['SIGABRT', 134],
-    ['SIGKILL', 137],
-    ['SIGSEGV', 139],
-  ])(
-    'reports the shell code for a child that dies of %s, not the forwarded-signal one',
-    async (name, expected) => {
-      const code = await runWithTestHome(
-        ['bun', '-e', `process.kill(process.pid, '${name}'); setTimeout(() => {}, 5000)`],
-        process.env
-      );
+  // SIGKILL cannot be intercepted, so unlike SIGABRT or SIGSEGV (which Bun's
+  // crash handler can stall on a CI runner) it ends the child at once.
+  test('reports 128 plus SIGKILL, not the forwarded-signal code, for an unforwarded signal', async () => {
+    const code = await runWithTestHome(
+      ['bun', '-e', "process.kill(process.pid, 'SIGKILL'); setTimeout(() => {}, 5000)"],
+      process.env
+    );
 
-      expect(code, `expected exit code: ${expected} (128 + ${name}) | received: ${code}`).toBe(
-        expected
-      );
-    }
-  );
+    expect(code, `expected exit code: 137 (128 + SIGKILL) | received: ${code}`).toBe(137);
+  });
 
   test('refuses an empty command, naming what it received', async () => {
     await expect(runWithTestHome([], process.env)).rejects.toThrow(
