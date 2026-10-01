@@ -400,17 +400,35 @@ export function pinnedRuntimeDigest(text: string): string | undefined {
 }
 
 /**
+ * The file-system operations {@link pruneRuntimeCache} performs, so a caller can
+ * observe what a prune would remove without removing it.
+ */
+export interface RuntimeCacheFs {
+  readonly readdir: (path: string) => Promise<string[]>;
+  readonly remove: (path: string) => Promise<void>;
+}
+
+const nodeRuntimeCacheFs: RuntimeCacheFs = {
+  readdir: (path) => readdir(path),
+  remove: (path) => rm(path, { force: true, recursive: true }),
+};
+
+/**
  * Keeps the hub cache at current + previous version directories only — same rule
  * as slot version GC in {@link pushRuntimeBinary}.
+ *
+ * `fs` is injectable so a test can record the removals instead of performing them.
+ * // Usage: await pruneRuntimeCache(join(cacheRoot, '1.2.0'), '1.2.0')
  */
 export async function pruneRuntimeCache(
   currentVersionDir: string,
-  currentVersion: string
+  currentVersion: string,
+  fs: RuntimeCacheFs = nodeRuntimeCacheFs
 ): Promise<void> {
   const cacheRoot = dirname(currentVersionDir);
   let entries: string[];
   try {
-    entries = await readdir(cacheRoot);
+    entries = await fs.readdir(cacheRoot);
   } catch {
     return;
   }
@@ -421,7 +439,7 @@ export async function pruneRuntimeCache(
   const keepPrevious = others[0];
   for (const name of others) {
     if (name === keepPrevious) continue;
-    await rm(join(cacheRoot, name), { force: true, recursive: true }).catch(() => undefined);
+    await fs.remove(join(cacheRoot, name)).catch(() => undefined);
   }
 }
 
