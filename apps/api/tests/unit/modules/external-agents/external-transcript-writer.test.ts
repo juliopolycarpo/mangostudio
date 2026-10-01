@@ -302,6 +302,61 @@ describe('ExternalTranscriptWriter', () => {
     });
   });
 
+  it('keeps a flush barrier open for the snapshot a failed required write handed back', async () => {
+    const { db, transcript, writer, append, steer } = setup();
+    db.hold();
+    append(CHUNK);
+    void writer.write();
+    const id = steer();
+    const required = writer.writeRequired(() =>
+      transcript.resolveSteerRejected(id, 'turn-not-steerable')
+    );
+    const requiredOutcome = required.then(
+      () => 'resolved',
+      (error: unknown) => String(error)
+    );
+    let rejectionPersistedWhenFlushResolved = false;
+    const flush = writer.flush().then(() => {
+      rejectionPersistedWhenFlushResolved = db.writes.some(
+        (write) => write.steerStatus === 'rejected'
+      );
+    });
+    await tick();
+    db.failOldest(new Error('disk full'));
+    await tick();
+    db.releaseAll();
+    await flush;
+    expect(await requiredOutcome).toContain('disk full');
+    expect({ rejectionPersistedWhenFlushResolved }).toEqual({
+      rejectionPersistedWhenFlushResolved: true,
+    });
+  });
+
+  it('keeps a flush barrier open for a best-effort delta accepted while it waits', async () => {
+    const { db, manual, writer, append } = setup();
+    db.hold();
+    append(CHUNK);
+    void writer.write();
+    manual.fire();
+    await tick();
+    let lastWrittenLengthWhenFlushResolved = -1;
+    const flush = writer.flush().then(() => {
+      lastWrittenLengthWhenFlushResolved = db.writes[db.writes.length - 1]?.text.length ?? 0;
+    });
+
+    // Accepted after flush captured the held write: it only marks the state dirty.
+    append(CHUNK);
+    void writer.write();
+    db.releaseOldest();
+    await tick();
+    db.releaseAll();
+    await flush;
+
+    expect({ lastWrittenLengthWhenFlushResolved }).toEqual({
+      lastWrittenLengthWhenFlushResolved: CHUNK * 2,
+    });
+  });
+
   it('flush starts the trailing write without waiting for the deferred wake-up', async () => {
     const { db, writer, append } = setup();
     append(CHUNK);
