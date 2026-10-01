@@ -526,6 +526,66 @@ describe('propagation apply — decisions', () => {
     await expect(failure).rejects.toMatchObject({ status: 422 });
   });
 
+  it('refuses keeping a non-divergent resource before any other decision is written', async () => {
+    // `gh` would be written to claude-skills; `other` has one version, so there is
+    // no divergence to keep. The refusal has to come from planning, ahead of every
+    // write, because an acknowledgement error after the writes cannot be undone.
+    writeSkill('mango-skills', 'mine\n');
+    makeDirectories('claude-skills');
+    const otherDir = join(home, '.mango', 'skills', 'other');
+    mkdirSync(otherDir, { recursive: true });
+    writeFileSync(join(otherDir, 'SKILL.md'), '---\nname: other\ndescription: Other\n---\nsolo\n');
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh', 'skill:other'],
+      targetLocationIds: ['claude-skills'],
+    };
+    const taken = await preview(request);
+    const [gh, other] = [...taken.entries].sort((a, b) =>
+      a.resourceKey.localeCompare(b.resourceKey)
+    );
+    if (!gh || !other)
+      throw new Error(`Expected two preview entries, received ${taken.entries.length}.`);
+
+    const writes: RuntimeLibraryApplyParams[] = [];
+    const acknowledged: unknown[] = [];
+    const failure = applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        adoptAll(gh, winnerFrom(gh, 'mango-skills')),
+        {
+          resourceKey: other.resourceKey,
+          resolution: 'keep-per-location',
+          destinations: other.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action: 'skip' as const,
+          })),
+        },
+      ]),
+      applyDeps({
+        runtimeApply: (params) => {
+          writes.push(params);
+          return refuseLibraryApply(params);
+        },
+        acknowledge: (_userId, ack) => {
+          acknowledged.push(ack);
+          return Promise.resolve(undefined);
+        },
+      })
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('"skill:other" is not divergent'),
+    });
+    expect({ writes: writes.length, acknowledged: acknowledged.length }).toEqual({
+      writes: 0,
+      acknowledged: 0,
+    });
+    expect(existsSync(skillPath('claude-skills'))).toBe(false);
+  });
+
   it('refuses a decision that leaves an offered destination undecided', async () => {
     writeSkill('mango-skills', 'winner\n');
     makeDirectories('claude-skills', 'cursor-skills');
