@@ -1,5 +1,11 @@
 import { defineConfig } from '@playwright/test';
 import { STORAGE_STATE_PATH } from './tests/browser-smoke/support/global-auth';
+import { prepareSmokeHome, smokeHubEnv } from './tests/browser-smoke/support/smoke-home';
+
+// The suite signs up accounts and creates chats, so it gets a hub of its own on
+// a throwaway home (see the module for how that confines every storage path).
+// Created once by the runner; workers re-evaluating this file reuse it.
+const smokeHome = prepareSmokeHome(process.env);
 
 export default defineConfig({
   testDir: './tests/browser-smoke',
@@ -52,8 +58,16 @@ export default defineConfig({
       // The API builds the frontend bundle before it listens, so the default
       // 60s is not enough on a cold runner.
       timeout: 180_000,
-      reuseExistingServer: !process.env.CI,
+      // Never attach to a hub that is already running: its home is whatever
+      // the developer started it with, which is their real `~/.mango`. A hub
+      // left on :3001 now fails the run loudly ("already used") instead.
+      reuseExistingServer: false,
+      // `bun run dev` -> turbo -> `bun run --watch` is a chain of processes;
+      // a graceful signal lets each one forward it instead of the chain being
+      // cut off at the top and leaving the hub listening on :3001.
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 10_000 },
       env: {
+        ...smokeHubEnv(smokeHome),
         // Required since the auth-secret startup guard landed; a 32+ char
         // random value satisfies the runtime check without exposing a real key.
         BETTER_AUTH_SECRET: 'browser-smoke-test-secret-at-least-32-characters-long',

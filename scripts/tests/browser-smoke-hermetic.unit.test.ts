@@ -9,11 +9,12 @@
  * actually decides what the hub inherits.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import config from '../../playwright.config';
+import { removeSmokeHome, SMOKE_HOME_ENV } from '../../tests/browser-smoke/support/smoke-home';
 
 /** Env keys that place hub state; each must resolve inside the temporary home. */
 const HOME_KEYS = [
@@ -54,6 +55,14 @@ function canonical(path: string): string {
 }
 
 describe('browser smoke lane hermeticity', () => {
+  // Importing the config creates the temporary home; Bun's test runner exits
+  // without running the 'exit' hook that removes it in a Playwright run.
+  afterAll(() => {
+    const created = process.env[SMOKE_HOME_ENV];
+    if (created) removeSmokeHome(created);
+    delete process.env[SMOKE_HOME_ENV];
+  });
+
   test('declares a web server to guard', () => {
     expect(
       webServers().length,
