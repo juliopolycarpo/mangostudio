@@ -57,6 +57,20 @@ The list is kept live during streaming by the `todo_update` SSE chunk.
 | `GET`  | `/api/chats/:chatId/messages` | Yes  | List messages in a chat |
 | `POST` | `/api/chats/:chatId/messages` | Yes  | Create a message        |
 
+`GET` pages the transcript (`MessagesPage` from `@mangostudio/shared/chat`). Query:
+`limit` (default 50), `cursor`, and `order` — `asc` (the default) reads from the oldest
+message, `desc` from the newest. A page is chronological, oldest message first, in both
+orders: `order` picks which window of the transcript the page is, and `nextCursor` names the
+edge of the page that faces the messages not read yet (its last message for `asc`, its
+first for `desc`), `null` on the last page. The frontend opens a chat with `order=desc` and
+asks for the older pages as the reader scrolls up.
+
+The cursor is an opaque `(timestamp, rowid)` position, not a direction: one issued under
+either order is read as a position by the other. A bare numeric timestamp from an older
+build is still accepted (after every message of that timestamp for `asc`, before every one
+of it for `desc`); an empty or malformed cursor is rejected with a 400, and an unknown `order`
+with a 422 like any query the schema refuses.
+
 ## Activity Endpoints
 
 | Method | Path            | Auth | Purpose                          |

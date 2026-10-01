@@ -339,8 +339,9 @@ describe('GET /chats/:id/messages cursors in both orders', () => {
 
     const response = await rawGet(chatId, 'order=newest');
 
-    // Query validation is Elysia's: this harness mounts the route without the
-    // app's error handler, which turns the same refusal into a 400 VALIDATION.
+    // A query the schema rejects is a 422 (the app's error handler adds the
+    // VALIDATION code; this harness mounts the route without it), unlike a
+    // cursor the use case rejects, which is a 400.
     expect(`status ${response.status}`).toBe('status 422');
   });
 });
