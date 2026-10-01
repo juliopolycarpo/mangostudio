@@ -23,6 +23,14 @@ interface RunServerStopCommandOptions {
   successMessage: (pid: number) => string;
   failureMessage: (pid: number) => string;
   removeStateAfterSignal?: boolean;
+  /**
+   * Remove the state file once the pid is confirmed gone. For a signal the hub
+   * cannot catch, so its own cleanup never ran; a pid that outlives the wait
+   * keeps its file, since that file is the only way left to find it. The file
+   * is removed only while it still names the stopped pid: a supervisor restart
+   * or a `serve` right after may already have written a successor's.
+   */
+  removeStateWhenStopped?: boolean;
 }
 
 function resolveServerShutdownDeps(
@@ -40,6 +48,13 @@ function resolveServerShutdownDeps(
   };
 }
 
+/** Remove the state file only when it still names `pid`. // Usage: await removeStateStillNaming(d, 42) */
+async function removeStateStillNaming(d: Required<ServerShutdownDeps>, pid: number): Promise<void> {
+  const current = await d.readState();
+  if (current?.pid !== pid) return;
+  await d.removeState();
+}
+
 export async function runServerStopCommand({
   deps,
   signal,
@@ -49,6 +64,7 @@ export async function runServerStopCommand({
   successMessage,
   failureMessage,
   removeStateAfterSignal = false,
+  removeStateWhenStopped = false,
 }: RunServerStopCommandOptions): Promise<void> {
   const d = resolveServerShutdownDeps(deps);
   const state = await d.readState();
@@ -71,6 +87,8 @@ export async function runServerStopCommand({
 
   if (removeStateAfterSignal) {
     await d.removeState();
+  } else if (removeStateWhenStopped && stopped) {
+    await removeStateStillNaming(d, state.pid);
   }
 
   if (stopped) {
