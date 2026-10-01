@@ -15,9 +15,18 @@
  * `HOME` override. {@link smokeHubEnv} therefore pins each of those keys too.
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  assertTemporaryHome,
+  createTemporaryHome,
+  currentHost,
+  homeEnv,
+  removeTemporaryHome,
+  type TemporaryHomeHost,
+  type TemporaryHomeKind,
+  toolchainEnv,
+} from '../../../scripts/lib/temp-home';
 
 /**
  * Names the temporary home. `playwright.config.ts` is evaluated again in every
@@ -33,29 +42,13 @@ export const SMOKE_HOME_PREFIX = 'mangostudio-smoke-';
 export const SMOKE_HUB_HOST = '127.0.0.1';
 
 /** The machine facts the shape check compares against; injectable for tests. */
-export interface SmokeHomeHost {
-  /** The OS temporary directory. */
-  readonly tmpDir: string;
-  /** The developer's real home directory (the parent of `~/.mango`). */
-  readonly realHome: string;
-}
+export type SmokeHomeHost = TemporaryHomeHost;
 
-function currentHost(): SmokeHomeHost {
-  return { tmpDir: tmpdir(), realHome: homedir() };
-}
-
-function canonical(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-}
-
-function isInside(parent: string, child: string): boolean {
-  const rel = relative(parent, child);
-  return rel === '' || !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel));
-}
+const SMOKE_HOME_KIND: TemporaryHomeKind = {
+  prefix: SMOKE_HOME_PREFIX,
+  context: 'browser-smoke',
+  noun: 'smoke hub home',
+};
 
 /**
  * The shape a smoke home must have, for error messages.
@@ -66,26 +59,6 @@ function isInside(parent: string, child: string): boolean {
  */
 export function describeSmokeHomeShape(host: SmokeHomeHost = currentHost()): string {
   return join(host.tmpDir, `${SMOKE_HOME_PREFIX}<random>`);
-}
-
-function findViolation(candidate: string, host: SmokeHomeHost): string | undefined {
-  if (!candidate || !isAbsolute(candidate)) return 'not an absolute path';
-  // The check resolves `..` lexically, but the OS resolves it after following
-  // symlinks, so a `..` could name a different directory than the one proved.
-  if (candidate.split(/[\\/]/).includes('..')) return 'it contains ".." segments';
-  const resolved = canonical(candidate);
-  const realHome = canonical(host.realHome);
-  if (resolved === realHome || isInside(resolved, realHome)) {
-    return 'it is, or contains, the real home';
-  }
-  if (isInside(join(realHome, '.mango'), resolved)) return 'it is inside ~/.mango';
-  if (canonical(dirname(resolved)) !== canonical(host.tmpDir)) {
-    return 'it is not a direct child of the OS temp directory';
-  }
-  if (!basename(resolved).startsWith(SMOKE_HOME_PREFIX)) {
-    return `its name does not start with ${SMOKE_HOME_PREFIX}`;
-  }
-  return undefined;
 }
 
 /**
@@ -102,12 +75,7 @@ export function assertTemporarySmokeHome(
   candidate: string,
   host: SmokeHomeHost = currentHost()
 ): void {
-  const violation = findViolation(candidate, host);
-  if (!violation) return;
-  throw new Error(
-    `browser-smoke: refusing smoke hub home. expected: ${describeSmokeHomeShape(host)} | ` +
-      `received: ${JSON.stringify(candidate)} (${violation}) | real home: ${join(host.realHome, '.mango')}`
-  );
+  assertTemporaryHome(candidate, SMOKE_HOME_KIND, host);
 }
 
 /**
@@ -117,9 +85,7 @@ export function assertTemporarySmokeHome(
  * removeSmokeHome('/tmp/mangostudio-smoke-a1b2c3');
  */
 export function removeSmokeHome(root: string, host: SmokeHomeHost = currentHost()): void {
-  assertTemporarySmokeHome(root, host);
-  // Delete the path that was checked, not the spelling it was given in.
-  rmSync(canonical(root), { recursive: true, force: true });
+  removeTemporaryHome(root, SMOKE_HOME_KIND, host);
 }
 
 /**
@@ -146,8 +112,7 @@ export function prepareSmokeHome(
     return published;
   }
 
-  const root = mkdtempSync(join(host.tmpDir, SMOKE_HOME_PREFIX));
-  assertTemporarySmokeHome(root, host);
+  const root = createTemporaryHome(SMOKE_HOME_KIND, host);
   env[SMOKE_HOME_ENV] = root;
   process.on('exit', () => removeSmokeHome(root, host));
   return root;
@@ -175,8 +140,7 @@ export function smokeHubEnv(
   assertTemporarySmokeHome(root, host);
   const mango = join(root, '.mango');
   return {
-    HOME: root,
-    USERPROFILE: root,
+    ...homeEnv(root),
     MANGO_HOME: mango,
     DATABASE_PATH: join(mango, 'database.sqlite'),
     UPLOADS_DIR: join(mango, 'uploads'),
@@ -191,7 +155,6 @@ export function smokeHubEnv(
     // config.toml to narrow it. Open signup plus the first-owner Local runtime
     // must never be reachable from the network during a run.
     API_HOST: SMOKE_HUB_HOST,
-    CARGO_HOME: ambient.CARGO_HOME?.trim() || join(host.realHome, '.cargo'),
-    RUSTUP_HOME: ambient.RUSTUP_HOME?.trim() || join(host.realHome, '.rustup'),
+    ...toolchainEnv(ambient, host),
   };
 }
