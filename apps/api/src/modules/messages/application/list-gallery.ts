@@ -60,7 +60,7 @@ export async function listGalleryUseCase(
   db: Kysely<Database>
 ): Promise<GalleryPage> {
   const limit = input.limit ?? 50;
-  const cursor = input.cursor ? decodeGalleryCursor(input.cursor) : undefined;
+  const cursor = input.cursor === undefined ? undefined : decodeGalleryCursor(input.cursor);
   const [generatedEntries, legacyEntries] = await Promise.all([
     listGeneratedImagesForGallery(input.userId, { cursor, limit }, db),
     listLegacyGalleryImages(input.userId, { cursor, limit }, db),

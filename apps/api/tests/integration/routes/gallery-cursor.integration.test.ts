@@ -230,14 +230,18 @@ describe('GET /messages/images cursor validation and shape', () => {
     expect(page.nextCursor).toBeNull();
   });
 
-  it('refuses a malformed cursor instead of restarting from the first page', async () => {
+  it.each([
+    ['not-a-cursor', 'cursor=not-a-cursor'],
+    ['an empty string', 'cursor='],
+  ])('refuses %s as a cursor instead of restarting from the first page', async (label, query) => {
     await insertArtifactImages([uid('any-1')]);
 
-    const response = await rawGet('cursor=not-a-cursor');
-    const body = (await response.json()) as { error: string; code: string };
+    const response = await rawGet(query);
+    const body = (await response.json()) as { error?: string; code?: string };
 
-    expect(`status ${response.status} code ${body.code}`).toBe('status 400 code VALIDATION');
-    expect(body.error).toContain('"not-a-cursor"');
+    expect(`${label}: status ${response.status} code ${body.code}`).toBe(
+      `${label}: status 400 code VALIDATION`
+    );
     expect(body.error).toContain('expected shape');
   });
 
