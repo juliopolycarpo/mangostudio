@@ -27,11 +27,12 @@ import { dirname, join } from 'node:path';
 // uninstall, the --rollback/--use failure paths) hand-craft the on-disk
 // layout directly and only need POWERSHELL, with a dummy mangostudio.exe.
 //
-// The "failed version probe" cases need only POWERSHELL too: their fake exes
-// are copies of System32 binaries, built in the test, or compiled by the
-// host's own Windows PowerShell. They also run natively on Windows (the path
-// helpers below are the identity there), which is how the release dry run's
-// Windows job runs them: that is the only CI job with a Windows PowerShell.
+// The "failed version probe" and "npm tarball extraction" cases need only
+// POWERSHELL too: their fake exes are copies of System32 binaries, built in
+// the test, or compiled by the host's own Windows PowerShell. They also run
+// natively on Windows (the path helpers below are the identity there), which
+// is how the release dry run's Windows job runs them: that is the only CI job
+// with a Windows PowerShell.
 
 const INSTALL_PS1 = join(import.meta.dir, '..', 'install', 'install.ps1');
 const POWERSHELL = Bun.which('powershell.exe');
@@ -212,13 +213,40 @@ function buildZipMissingExe(linuxDir: string, name: string): string {
   return toWindowsPath(zipPath);
 }
 
-function buildNpmTarball(linuxDir: string): string {
+/** A System32 binary, at the path this process can read and copy it from. */
+function systemExecutable(name: string): string {
+  const root = sh([POWERSHELL as string, '-NoProfile', '-Command', '$env:SystemRoot']);
+  return join(toLinuxPath(root.stdout.replace(/\r/g, '').trim()), 'System32', name);
+}
+
+/**
+ * The tar that builds a fixture archive. Natively on Windows that is the
+ * System32 bsdtar by full path: a GNU tar first on PATH (Git's usr\bin, which
+ * is what `shell: bash` gives a hosted runner) cannot open a `C:\` path.
+ */
+function systemTar(): string {
+  return IS_WINDOWS ? systemExecutable('tar.exe') : 'tar';
+}
+
+/**
+ * An npm platform tarball whose package/mangostudio.exe is written by
+ * `makeExe`: the real binary, unless a case needs a placeholder.
+ */
+function buildNpmTarball(
+  linuxDir: string,
+  makeExe: (target: string) => void = (target) => copyFileSync(WINDOWS_BINARY as string, target)
+): string {
   const srcDir = join(linuxDir, 'npm-src');
   mkdirSync(join(srcDir, 'package'), { recursive: true });
-  copyFileSync(WINDOWS_BINARY as string, join(srcDir, 'package', 'mangostudio.exe'));
+  makeExe(join(srcDir, 'package', 'mangostudio.exe'));
   const tgzPath = join(linuxDir, 'mangostudio-npm.tgz');
-  const result = sh(['tar', '-czf', tgzPath, '-C', srcDir, 'package']);
-  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr}`);
+  const tar = systemTar();
+  const result = sh([tar, '-czf', tgzPath, '-C', srcDir, 'package']);
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `expected ${tar} to create ${tgzPath} | received exit ${result.exitCode}: ${result.stderr}`
+    );
+  }
   return toWindowsPath(tgzPath);
 }
 
@@ -894,11 +922,6 @@ describe('install.ps1 failed version probe (fake mangostudio.exe)', () => {
 
   type FakeLayout = Layout & { readonly fakeDir: string; readonly fakeExe: string };
 
-  function systemExecutable(name: string): string {
-    const root = sh([POWERSHELL as string, '-NoProfile', '-Command', '$env:SystemRoot']);
-    return join(toLinuxPath(root.stdout.replace(/\r/g, '').trim()), 'System32', name);
-  }
-
   /** A layout whose `fake/` directory holds the mangostudio.exe under test. */
   function fakeLayout(makeExe: (target: string) => void): FakeLayout {
     const l = layout();
@@ -1146,15 +1169,12 @@ describe('install.ps1 npm tarball extraction', () => {
   // mangostudio.exe, so a successful extraction ends at the version probe
   // ("expected: it starts"), which is how this case tells the two apart.
   const EXPECTED = '9.9.9';
-  const TAR_FAILURE = /tar\.exe failed to extract[^\n]*|tar: [^\n]*/i;
+  // The first line a failed extraction leaves on stderr. Tar's own reason comes
+  // ahead of the installer's: `tar (child): Cannot connect to C: resolve
+  // failed` from GNU tar, `tar.exe: Error opening archive: ...` from bsdtar.
+  const TAR_FAILURE = /\btar(?:\.exe)?(?: \(child\))?: [^\n]*|tar\.exe failed to extract[^\n]*/i;
 
-  function systemTar(): string {
-    return IS_WINDOWS
-      ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
-      : 'tar';
-  }
-
-  /** The directory of a GNU tar that Windows would find ahead of System32, or null when there is none. */
+  /** The directory of the first GNU tar on PATH, or null: there is none, or this is WSL, whose PATH is not the Windows one. */
   function gnuTarDirectory(): string | null {
     if (!IS_WINDOWS) return null;
     const found = sh(['where.exe', 'tar.exe']).stdout.split(/\r?\n/).filter(Boolean);
@@ -1165,43 +1185,45 @@ describe('install.ps1 npm tarball extraction', () => {
     return null;
   }
 
-  /** A tarball whose package/mangostudio.exe is a placeholder, created with the system tar so it works on any host. */
-  function buildPlaceholderTarball(linuxDir: string): string {
-    const srcDir = join(linuxDir, 'npm-src');
-    mkdirSync(join(srcDir, 'package'), { recursive: true });
-    writeFileSync(join(srcDir, 'package', 'mangostudio.exe'), 'this is not a program');
-    const tgzPath = join(linuxDir, 'mangostudio-npm.tgz');
-    const result = sh([systemTar(), '-czf', tgzPath, '-C', srcDir, 'package']);
-    if (result.exitCode !== 0) {
-      throw new Error(
-        `expected ${systemTar()} to create ${tgzPath} | received exit ${result.exitCode}: ${result.stderr}`
-      );
-    }
-    return toWindowsPath(tgzPath);
+  /** A directory whose tar.exe is where.exe: it rejects tar's arguments, so it stands in for a tar PATH must not pick. */
+  function decoyTarDirectory(linuxDir: string): string {
+    const decoyDir = join(linuxDir, 'first-on-path');
+    mkdirSync(decoyDir, { recursive: true });
+    copyFileSync(systemExecutable('where.exe'), join(decoyDir, 'tar.exe'));
+    return toWindowsPath(decoyDir);
+  }
+
+  /** PATH as the installer's PowerShell inherits it; under WSL that is the Windows one, not this process's. */
+  function hostPath(): string {
+    if (IS_WINDOWS) return process.env.Path ?? process.env.PATH ?? '';
+    const path = sh([POWERSHELL as string, '-NoProfile', '-Command', '$env:Path']);
+    return path.stdout.replace(/\r/g, '').trim();
   }
 
   test.skipIf(!POWERSHELL)(
-    'extracts a local .tgz even when a GNU tar is first on PATH',
+    'extracts a local .tgz when another tar.exe, like a GNU tar, is first on PATH',
     () => {
       const gnuDir = gnuTarDirectory();
-      // The hosted Windows runner is the lane this case exists for; a runner
-      // image that loses its GNU tar would otherwise turn the case into a
-      // test of nothing.
+      // The hosted Windows runner is the lane with a real GNU tar; a runner
+      // image that loses it would otherwise quietly settle for the decoy.
       if (IS_WINDOWS && process.env.GITHUB_ACTIONS === 'true' && gnuDir === null) {
         throw new Error('expected a GNU tar.exe on the hosted runner PATH | received: none');
       }
       const l = layout();
-      const tarball = buildPlaceholderTarball(l.linuxDir);
-      const env = gnuDir
-        ? { ...l.env, Path: `${gnuDir};${process.env.Path ?? process.env.PATH ?? ''}` }
-        : l.env;
+      const tarball = buildNpmTarball(l.linuxDir, (target) =>
+        writeFileSync(target, 'this is not a program')
+      );
+      // With no GNU tar to borrow (WSL, a Windows host without Git's usr\bin on
+      // PATH), a decoy keeps the case from passing on PATH order alone.
+      const firstOnPath = gnuDir ?? decoyTarDirectory(l.linuxDir);
+      const env = { ...l.env, Path: `${firstOnPath};${hostPath()}` };
 
       const result = run(l.scriptPath, ['-Local', tarball, '-Version', EXPECTED], env);
 
-      const tarFailure = TAR_FAILURE.exec(result.stderr)?.[0] ?? '<none>';
+      const tarFailure = TAR_FAILURE.exec(result.stderr.replace(/\r/g, ''))?.[0] ?? '<none>';
       expect(
         tarFailure,
-        `expected tar.exe to extract the .tgz | received: ${tarFailure} (GNU tar first on PATH: ${gnuDir ?? 'no GNU tar found'})`
+        `expected tar.exe to extract the .tgz | received: ${tarFailure} (first on PATH: ${gnuDir ? 'GNU tar' : 'where.exe as tar.exe'} in ${firstOnPath})`
       ).toBe('<none>');
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).toContain(`expected version: ${EXPECTED} | received: <none>`);
