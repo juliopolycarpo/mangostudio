@@ -579,19 +579,80 @@ function Expand-InstallArchive([string]$ArchivePath, [string]$Version, [string]$
   return $tempInstall
 }
 
+# The status the Windows loader gives a process it could not start. It has no
+# stderr to write to, so the exit code is the only trace of a missing DLL; the
+# named ones are the three a broken install actually produces.
+function Format-ProbeExitCode([int]$Code) {
+  $hex = '{0:X8}' -f $Code
+  $name = switch ($hex) {
+    'C0000135' { 'STATUS_DLL_NOT_FOUND' }
+    'C000007B' { 'STATUS_INVALID_IMAGE_FORMAT' }
+    'C0000139' { 'STATUS_ENTRYPOINT_NOT_FOUND' }
+    default { '' }
+  }
+  if ($name) { return "$Code (0x$hex, $name)" }
+  return "$Code (0x$hex)"
+}
+
+# What "<exe> --version" printed and how it ended. Under $ErrorActionPreference
+# = 'Stop', Windows PowerShell 5.1 turns the first stderr line of a native
+# command into a terminating error (even with 2>$null) and then reports an
+# exit code of its own choosing, so the preference is relaxed for the call
+# alone. stderr is read through 2>&1 as ErrorRecords (a file redirect would
+# prefix PowerShell's own NativeCommandError text). Only the first lines of
+# either stream are kept and the rest is drained, so a chatty binary cannot
+# grow this process. An image Windows cannot load (truncated, not a PE) never
+# runs and has no exit code: the engine's exception is the only diagnostic.
+function Invoke-VersionProbe([string]$ExePath, [int]$LineLimit) {
+  $stdout = New-Object System.Collections.Generic.List[string]
+  $stderr = New-Object System.Collections.Generic.List[string]
+  $startError = $null
+  $global:LASTEXITCODE = $null
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & $ExePath '--version' 2>&1 | ForEach-Object {
+      $line = if ($null -eq $_) { '' } else { $_.ToString() }
+      if ($_ -is [System.Management.Automation.ErrorRecord]) {
+        if ($stderr.Count -lt $LineLimit) { $stderr.Add($line) }
+      } elseif ($stdout.Count -lt $LineLimit) {
+        $stdout.Add($line)
+      }
+    }
+  } catch {
+    $startError = $_.Exception.Message
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  $exitCode = $global:LASTEXITCODE
+  return [pscustomobject]@{
+    Stdout = $stdout.ToArray()
+    Stderr = $stderr.ToArray()
+    ExitCode = $exitCode
+    StartError = $startError
+  }
+}
+
+# The engine appends the script position ("At <file>:<n> char:<n>" and the
+# source line) to a start failure; only the first sentence is the reason.
+function Format-StartError([string]$Message) {
+  $text = ($Message -split '\r?\n')[0]
+  $text = $text -replace '(?<=\.)At \S.*? char:\d+.*$', ''
+  return $text.Trim()
+}
+
 # Run "<dir>\mangostudio.exe --version" and compare to what we meant to
 # install, before the pointer moves. RemoveOnFailure=$true for a directory
 # this run just created (fresh install/local/canary); $false for -Use/
-# -Rollback, which reuse a directory that predates this run.
+# -Rollback, which reuse a directory that predates this run. A probe that
+# exits non-zero, writes to stderr or cannot be started has its exit code,
+# stderr and start error appended to the message, as install.sh does, so the
+# reason the hub did not run reaches the user.
 function Test-SmokeOrFail([string]$Dir, [string]$Expected, [bool]$RemoveOnFailure) {
   $exePath = Join-Path $Dir 'mangostudio.exe'
+  $probe = Invoke-VersionProbe $exePath 10
   $actual = $null
-  try {
-    $output = & $exePath '--version' 2>$null
-    if ($output) { $actual = ($output | Select-Object -First 1).ToString().Trim() }
-  } catch {
-    $actual = $null
-  }
+  if ($probe.Stdout.Count -gt 0) { $actual = $probe.Stdout[0].Trim() }
 
   if ($actual -eq $Expected) { return }
 
@@ -607,7 +668,17 @@ function Test-SmokeOrFail([string]$Dir, [string]$Expected, [bool]$RemoveOnFailur
     }
   }
   $received = if ($actual) { $actual } else { '<none>' }
-  Fail "expected version: $Expected | received: $received"
+  $message = "expected version: $Expected | received: $received"
+  if ($probe.StartError) {
+    $message += "`n  probe: $exePath --version | expected: it starts | received: $(Format-StartError $probe.StartError)"
+  } elseif ($null -ne $probe.ExitCode -and $probe.ExitCode -ne 0) {
+    $message += "`n  probe: $exePath --version | expected: exit code: 0 | received: exit code: $(Format-ProbeExitCode $probe.ExitCode)"
+  }
+  if ($probe.Stderr.Count -gt 0) {
+    # Continuation lines line up under the first so the block reads as one.
+    $message += "`n  stderr: " + ($probe.Stderr -join "`n          ")
+  }
+  Fail $message
 }
 
 # --- Actions -------------------------------------------------------------
