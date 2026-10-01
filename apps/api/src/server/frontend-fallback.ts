@@ -11,6 +11,16 @@
  * and keeps the two files free of an import cycle.
  */
 
+import type { Context } from 'elysia';
+
+/**
+ * The response headers Elysia has accumulated for the request so far — CORS's
+ * `Vary: Origin` among them. Elysia merges them into a returned `Response` only
+ * for names the response does not already carry, so a handler that sets its own
+ * `Vary` has to fold into this record or it silently replaces what is there.
+ */
+export type FallbackResponseHeaders = Pick<Context['set'], 'headers'>;
+
 /**
  * Returns the response the frontend claims, or `undefined` to defer.
  *
@@ -20,7 +30,10 @@
  * branches answer from state they hold synchronously (embedded manifest +
  * boot-time validators, or a `statSync` result), so nothing needs to be async.
  */
-export type FrontendFallback = (request: Request) => Response | undefined;
+export type FrontendFallback = (
+  request: Request,
+  set?: FallbackResponseHeaders
+) => Response | undefined;
 
 let activeFallback: FrontendFallback | null = null;
 
@@ -35,6 +48,9 @@ export function clearFrontendFallback(): void {
 }
 
 /** The active frontend's answer for an unmatched request, if it claims one. */
-export function frontendNotFound(request: Request): Response | undefined {
-  return activeFallback?.(request);
+export function frontendNotFound(
+  request: Request,
+  set?: FallbackResponseHeaders
+): Response | undefined {
+  return activeFallback?.(request, set);
 }

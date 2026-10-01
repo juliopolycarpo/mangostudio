@@ -11,8 +11,19 @@ import { NotFound } from 'elysia';
 import type { App } from '../app';
 import { contentEtag, fileEtag, matchesEtag } from '../lib/http-cache';
 import { HASHED_ASSET_DIR, isApiOwnedPath, isSpaRoute } from '../lib/spa-guard';
-import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
-import { frontendNotFound, setFrontendFallback } from './frontend-fallback';
+import { negotiateEncoding, varyOnAcceptEncoding } from './accept-encoding';
+import {
+  type EmbeddedContentCoding,
+  type EmbeddedFrontendEncodings,
+  type EmbeddedFrontendFiles,
+  getEmbeddedFrontend,
+  getEmbeddedFrontendEncodings,
+} from './embedded-frontend';
+import {
+  type FallbackResponseHeaders,
+  frontendNotFound,
+  setFrontendFallback,
+} from './frontend-fallback';
 
 /** True when a built frontend (index.html) exists in the directory. // Usage: hasFrontend(dir) */
 function hasFrontend(frontendDir: string): boolean {
@@ -30,7 +41,7 @@ export function registerFrontend(app: App, frontendDir: string): void {
   const embedded = getEmbeddedFrontend();
   if (embedded) {
     console.warn('[frontend] Serving embedded frontend assets');
-    registerEmbeddedSpa(app, embedded);
+    registerEmbeddedSpa(app, embedded, getEmbeddedFrontendEncodings());
     return;
   }
 
@@ -76,8 +87,8 @@ function serveIndexFile(indexPath: string, etag: string | null, request: Request
 }
 
 /**
- * An embedded file's validator: a hash of its bytes, computed once at boot.
- * The content cannot change within one binary, so once is enough — and the
+ * An embedded file's validator: a hash of its bytes. The content cannot change
+ * within one binary, so a result is good for the life of the process — and the
  * bytes are the only identity that survives embedding (see serveIndexFile).
  */
 function embeddedEtag(filePath: string): string | null {
@@ -93,24 +104,121 @@ function embeddedEtag(filePath: string): string | null {
 }
 
 /**
- * An embedded non-shell file: fixed bytes behind a validator the caller
- * precomputed at boot. Null means no validator — hashed assets, which are
- * `immutable` and never revalidated, or a failed boot-time read.
+ * One embedded URL and every representation of it: the identity bytes plus any
+ * precompressed copies. Built once at boot, so a request does no lookup beyond
+ * the map hit.
  */
-function serveEmbeddedFile(
-  filePath: string,
-  etag: string | null,
-  cacheControl: string,
-  request: Request
+interface EmbeddedAsset {
+  identityPath: string;
+  encodings: Readonly<Partial<Record<EmbeddedContentCoding, string>>>;
+  cacheControl: string;
+  /** Set explicitly when the file loader's guess is not enough: the shell, and every variant. */
+  contentType: string | null;
+  /** Whether representations carry a validator. Hashed assets without variants do not. */
+  validated: boolean;
+  /** Validators already spelled, per coding (`identity` included). */
+  etags: Map<string, string | null>;
+}
+
+function createEmbeddedAsset(
+  urlPath: string,
+  identityPath: string,
+  encodings: EmbeddedFrontendEncodings
+): EmbeddedAsset {
+  const variants = encodings[urlPath] ?? {};
+  const hashed = urlPath.startsWith(`/${HASHED_ASSET_DIR}/`);
+  const hasVariants = Object.keys(variants).length > 0;
+  const isShell = urlPath === '/index.html';
+  return {
+    identityPath,
+    encodings: variants,
+    cacheControl: embeddedCacheControl(urlPath),
+    // A variant's own path ends in `.br` or `.gz`, which the file loader maps to
+    // an opaque type, so the identity file's type is what every representation
+    // of an asset with variants must advertise.
+    contentType: isShell ? 'text/html' : hasVariants ? Bun.file(identityPath).type : null,
+    // `immutable` hashed files never revalidate, so a validator is dead weight
+    // there — unless a second representation exists, where a validator that
+    // tells the two apart is what keeps a stored copy of one from being
+    // mistaken for the other.
+    validated: !hashed || hasVariants,
+    etags: new Map(),
+  };
+}
+
+/** The strong validator of one representation, spelled on first use and then remembered. */
+function representationEtag(
+  asset: EmbeddedAsset,
+  coding: EmbeddedContentCoding | 'identity'
+): string | null {
+  if (!asset.validated) return null;
+  const known = asset.etags.get(coding);
+  if (known !== undefined) return known;
+  const path = coding === 'identity' ? asset.identityPath : asset.encodings[coding];
+  const etag = path ? embeddedEtag(path) : null;
+  asset.etags.set(coding, etag);
+  return etag;
+}
+
+/**
+ * Answer a GET or HEAD for an embedded asset with the representation the client
+ * asked for.
+ *
+ * Only an asset that has precompressed copies negotiates: it always says
+ * `Vary: Accept-Encoding`, whatever it ends up sending, and answers 406 when the
+ * client refuses everything on offer. Every other asset — fonts, images, files
+ * too small to be worth compressing — is served exactly as before, because
+ * nothing about its response depends on the request header.
+ *
+ * Each representation has its own length and its own strong ETag, so a cache
+ * revalidating one can never be told another is unchanged. Range is not handled
+ * here: Bun answers it over the stored bytes, which makes it a range of the
+ * selected representation, and the per-representation ETag is what keeps
+ * `If-Range` honest.
+ */
+function serveEmbeddedAsset(
+  asset: EmbeddedAsset,
+  request: Request,
+  set?: FallbackResponseHeaders
 ): Response {
-  const headers: Record<string, string> = { 'Cache-Control': cacheControl };
+  const offered = Object.keys(asset.encodings) as EmbeddedContentCoding[];
+  const negotiated = offered.length > 0;
+  const choice = negotiated
+    ? negotiateEncoding(request.headers.get('accept-encoding'), offered)
+    : 'identity';
+
+  const headers: Record<string, string> = { 'Cache-Control': asset.cacheControl };
+  if (negotiated) {
+    // Folded into the accumulated headers when Elysia hands them over, so CORS's
+    // `Vary: Origin` survives; a bare `Response` header would replace it.
+    if (set) varyOnAcceptEncoding(set.headers);
+    else headers.Vary = 'Accept-Encoding';
+  }
+  if (choice === null) {
+    // Never the asset's own policy: a hashed asset says `immutable`, and explicit
+    // freshness would let a shared cache keep this refusal for a year and replay
+    // it to the next client with the same `Accept-Encoding`.
+    return new Response('Not Acceptable', {
+      status: 406,
+      headers: {
+        ...headers,
+        'Cache-Control': 'no-store',
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+    });
+  }
+  if (asset.contentType) headers['Content-Type'] = asset.contentType;
+  if (choice !== 'identity') headers['Content-Encoding'] = choice;
+
+  const etag = representationEtag(asset, choice);
   if (etag) {
     headers.ETag = etag;
     if (matchesEtag(request.headers.get('if-none-match'), etag)) {
       return new Response(null, { status: 304, headers });
     }
   }
-  return new Response(Bun.file(filePath), { headers });
+  const filePath = choice === 'identity' ? asset.identityPath : asset.encodings[choice];
+  return new Response(Bun.file(filePath as string), { headers });
 }
 
 /**
@@ -125,78 +233,56 @@ function serveEmbeddedFile(
  * The bundler content-hashes `/assets/*`, so those are immutable; index.html must
  * revalidate so browsers pick up new bundles after an upgrade instead of
  * serving a stale cached shell.
+ *
+ * HEAD never matches a literal GET route, so it arrives in the fallback below,
+ * which answers it for embedded assets and the SPA shell only — API and upload
+ * paths decline there exactly as for any other method.
  */
-function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
-  const indexPath = files['/index.html'];
-  if (!indexPath) {
+function registerEmbeddedSpa(
+  app: App,
+  files: EmbeddedFrontendFiles,
+  encodings: EmbeddedFrontendEncodings
+): void {
+  const assets = new Map<string, EmbeddedAsset>();
+  for (const [urlPath, filePath] of Object.entries(files)) {
+    assets.set(urlPath, createEmbeddedAsset(urlPath, filePath, encodings));
+  }
+  const shell = assets.get('/index.html');
+  if (!shell) {
     console.warn('[frontend] Embedded frontend has no index.html; serving API only');
     registerApiOnly(app);
     return;
   }
 
-  const shellEtag = embeddedEtag(indexPath);
-  const serveEmbeddedIndex = (request: Request) => serveIndexFile(indexPath, shellEtag, request);
-
-  app.get('/', ({ request }) => serveEmbeddedIndex(request));
-
-  // One validator per unhashed manifest entry, spelled at boot. Stat is not an
-  // option here — an embedded file stats as `mtimeMs: 0` (see serveIndexFile) —
-  // and hashed assets need none: they are `immutable` and never revalidated.
-  const etags = new Map<string, string | null>();
-
-  for (const urlPath of Object.keys(files)) {
-    if (urlPath === '/index.html') {
-      app.get('/index.html', ({ request }) => serveEmbeddedIndex(request));
-      continue;
-    }
-    const filePath = files[urlPath];
-    if (urlPath.startsWith(`/${HASHED_ASSET_DIR}/`)) {
-      const headers = { 'Cache-Control': HASHED_CACHE_CONTROL };
-      app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
-      continue;
-    }
-    // The route's own URL path is a loop constant, so the directive and the
-    // validator it implies are settled here rather than re-derived per hit.
-    const cacheControl = unhashedCacheControl(urlPath);
-    const etag = embeddedEtag(filePath);
-    etags.set(urlPath, etag);
-    app.get(urlPath, ({ request }) => serveEmbeddedFile(filePath, etag, cacheControl, request));
+  app.get('/', ({ request, set }) => serveEmbeddedAsset(shell, request, set));
+  for (const [urlPath, asset] of assets) {
+    app.get(urlPath, ({ request, set }) => serveEmbeddedAsset(asset, request, set));
   }
 
-  setFrontendFallback((request) => {
-    if (request.method !== 'GET') return undefined;
+  setFrontendFallback((request, set) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return undefined;
     const { pathname } = new URL(request.url);
-    // The routes above are literal manifest keys and Elysia does not normalise
+    // The literal routes are exact manifest keys and Elysia does not normalise
     // percent escapes before matching them, so `/favicon%2eico` never reaches
     // `/favicon.ico`'s route and arrives here instead. `isSpaRoute` *does*
     // decode, recognises a root file and declines — a 404 for a file the same
     // build serves fine from disk, where `resolveUnhashedFile` decodes first.
     // The shipped binary is this branch, so the decode has to happen here too.
-    const decoded = decodedManifestKey(pathname);
-    if (decoded !== null) {
-      if (decoded === '/index.html') return serveEmbeddedIndex(request);
-      const filePath = files[decoded];
-      // An exact key lookup is the whole guard: a decoded traversal, backslash
-      // or NUL form is simply not a manifest key and falls through below.
-      if (filePath) {
-        // Hashed keys were never given a validator, and `etags` holds exactly
-        // the unhashed ones — so a miss here is a hashed asset, served as its
-        // literal route serves it.
-        const etag = etags.get(decoded) ?? null;
-        return serveEmbeddedFile(filePath, etag, embeddedCacheControl(decoded), request);
-      }
-    }
-    return isSpaRoute(pathname) ? serveEmbeddedIndex(request) : undefined;
+    // An exact key lookup is the whole guard: a decoded traversal, backslash
+    // or NUL form is simply not a manifest key and falls through below.
+    const asset = assets.get(pathname) ?? assets.get(decodedManifestKey(pathname) ?? '');
+    if (asset) return serveEmbeddedAsset(asset, request, set);
+    return isSpaRoute(pathname) ? serveEmbeddedAsset(shell, request, set) : undefined;
   });
-  app.error(NotFound, ({ request }) => frontendNotFound(request));
+  app.error(NotFound, ({ request, set }) => frontendNotFound(request, set));
 }
 
 /**
  * The decoded form of a pathname that could still name an embedded asset, or
  * null when there is nothing left to try.
  *
- * A pathname that decodes to itself was already offered to its literal route
- * and did not match, so re-checking the manifest for it would find nothing.
+ * A pathname that decodes to itself was already looked up literally, so
+ * re-checking the manifest for it would find nothing.
  */
 function decodedManifestKey(pathname: string): string | null {
   let decoded: string;
@@ -211,6 +297,7 @@ function decodedManifestKey(pathname: string): string | null {
 
 /** Cache directive for an embedded asset, given the manifest key it lives at. */
 function embeddedCacheControl(urlPath: string): string {
+  if (urlPath === '/index.html') return SHELL_CACHE_CONTROL;
   return urlPath.startsWith(`/${HASHED_ASSET_DIR}/`)
     ? HASHED_CACHE_CONTROL
     : unhashedCacheControl(urlPath);
