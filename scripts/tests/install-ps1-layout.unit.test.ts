@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -1227,6 +1228,33 @@ describe('install.ps1 npm tarball extraction', () => {
       ).toBe('<none>');
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).toContain(`expected version: ${EXPECTED} | received: <none>`);
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'a .tgz tar cannot read fails naming the tar that ran and its exit code, and stages nothing',
+    () => {
+      const l = layout();
+      const archive = join(l.linuxDir, 'corrupt.tgz');
+      writeFileSync(archive, 'this is not an archive');
+      const windowsArchive = toWindowsPath(archive);
+      const windowsTar = toWindowsPath(systemExecutable('tar.exe'));
+
+      // The exception message itself, as probeMessage reads it: rendered on
+      // stderr, Windows PowerShell wraps it at the console width.
+      const result = runDotSourced(
+        l.scriptPath,
+        `$m = '<no failure>'; try { Expand-InstallArchive ${psQuote(windowsArchive)} ${psQuote(EXPECTED)} ${psQuote(l.root)} | Out-Null } catch { $m = $_.Exception.Message }; [Console]::Out.Write($m)`
+      );
+
+      const message = result.stdout.replace(/\r/g, '');
+      const exitCode = /received: exit code: ([1-9]\d*)$/.exec(message)?.[1] ?? '<non-zero>';
+      expect(message).toBe(
+        `${windowsTar} failed to extract ${windowsArchive} | expected: exit code: 0 | received: exit code: ${exitCode}`
+      );
+      // Neither the .install-* directory nor its .npm-staging sibling survives.
+      expect(readdirSync(l.rootLinux)).toEqual([]);
     },
     90000
   );

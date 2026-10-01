@@ -552,7 +552,9 @@ function Expand-NpmTarball([string]$ArchivePath, [string]$DestinationPath) {
 
   try {
     & $tar -xzf $ArchivePath -C $stagingDir
-    if ($LASTEXITCODE -ne 0) { Fail "tar.exe failed to extract $ArchivePath" }
+    if ($LASTEXITCODE -ne 0) {
+      Fail "$tar failed to extract $ArchivePath | expected: exit code: 0 | received: exit code: $LASTEXITCODE"
+    }
 
     $packageDir = Join-Path $stagingDir 'package'
     if (-not (Test-Path $packageDir)) { Fail "npm archive is missing a package/ directory: $ArchivePath" }
