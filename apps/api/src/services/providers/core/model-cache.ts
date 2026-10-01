@@ -3,6 +3,7 @@
  * Wraps a provider's listModels() call with TTL caching, deduplication of concurrent
  * fetches, and a fallback value for when the fetch fails.
  */
+import { setBounded } from '../../../lib/bounded-map';
 
 export interface ModelCacheOptions<T> {
   /** Time-to-live in milliseconds before the cache is considered stale. */
@@ -11,7 +12,7 @@ export interface ModelCacheOptions<T> {
   fallback: T[];
   /** Injected clock (useful in tests). */
   now?: () => number;
-  /** Maximum number of user entries to keep. Oldest entry is evicted when exceeded. Default: 1000. */
+  /** Maximum number of user entries to keep. The entry written longest ago is evicted when exceeded. Default: 1000. */
   maxEntries?: number;
 }
 
@@ -62,11 +63,7 @@ export function withModelCache<T>(
         // A load invalidated mid-flight still answers its own caller, but must
         // not repopulate the shared cache with the pre-invalidation value.
         if (inflight.get(userId) === promise) {
-          cache.set(userId, { value: models, expiresAt: now() + opts.ttl });
-          if (cache.size > maxEntries) {
-            const firstKey = cache.keys().next().value;
-            if (firstKey !== undefined) cache.delete(firstKey);
-          }
+          setBounded(cache, userId, { value: models, expiresAt: now() + opts.ttl }, maxEntries);
         }
         return models;
       } catch {

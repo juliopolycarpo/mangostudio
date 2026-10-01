@@ -54,3 +54,41 @@ describe('withModelCache eviction', () => {
     expect(fetchCounts.get('user-b')).toBe(1);
   });
 });
+
+/** Fails with `expected <label> retained: true | received: <actual>` when a hot key was evicted. */
+function expectRetained(label: string, received: boolean): void {
+  if (received) return;
+  throw new Error(`expected ${label} retained: true | received: ${received}`);
+}
+
+describe('withModelCache eviction order', () => {
+  it('keeps a user refetched after expiry ahead of users fetched once', async () => {
+    const ttl = 100;
+    let clock = 0;
+    const fetchCounts = new Map<string, number>();
+
+    const cachedFetch = withModelCache(
+      (userId: string) => {
+        fetchCounts.set(userId, (fetchCounts.get(userId) ?? 0) + 1);
+        return Promise.resolve([{ userId }]);
+      },
+      { ttl, fallback: [], maxEntries: 3, now: () => clock }
+    );
+
+    // The hot user is inserted first, so by insertion order it is the oldest entry.
+    await cachedFetch('hot-user');
+    await cachedFetch('one-shot-a');
+    await cachedFetch('one-shot-b');
+
+    // Expiry makes the hot user refetch and rewrite its entry in place.
+    clock = ttl + 1;
+    await cachedFetch('hot-user');
+    expect(fetchCounts.get('hot-user')).toBe(2);
+
+    // A new key pushes the cache past the cap by one: the least recently written goes.
+    await cachedFetch('one-shot-c');
+    await cachedFetch('hot-user');
+
+    expectRetained('hot user', fetchCounts.get('hot-user') === 2);
+  });
+});

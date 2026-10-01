@@ -7,6 +7,7 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
+import { setBounded } from '../../lib/bounded-map';
 import { parseStringArray } from '../../utils/json';
 import { listAllSecretMetadata } from '../secret-store/metadata';
 import { getProvider, listRegisteredProviderTypes } from './core/provider-registry';
@@ -80,13 +81,6 @@ interface UnifiedModelCatalogService {
  * Creates a unified model catalog service that aggregates models from all
  * registered AI providers.
  */
-function evictOldest<V>(map: Map<string, V>): void {
-  if (map.size > MAX_CATALOG_ENTRIES) {
-    const firstKey = map.keys().next().value;
-    if (firstKey !== undefined) map.delete(firstKey);
-  }
-}
-
 export function createUnifiedModelCatalogService(
   deps: UnifiedModelCatalogDeps = {}
 ): UnifiedModelCatalogService {
@@ -123,10 +117,14 @@ export function createUnifiedModelCatalogService(
     return startedAt >= evictedFloor && startedAt >= (invalidatedAt.get(userId) ?? 0);
   }
 
-  /** Single insertion point for snapshots so every path respects the entry cap. */
+  /**
+   * Single insertion point for snapshots so every path respects the entry cap.
+   * Eviction follows the last write, so a user refreshed regularly outlives
+   * users seen once. Reads do not reorder: an active user is rewritten at
+   * least once per TTL by the stale refresh, which keeps it recent enough.
+   */
   function storeSnapshot(userId: string, snapshot: ModelCatalogResponse): void {
-    snapshots.set(userId, snapshot);
-    evictOldest(snapshots);
+    setBounded(snapshots, userId, snapshot, MAX_CATALOG_ENTRIES);
   }
 
   function getSnapshot(userId: string): ModelCatalogResponse {
@@ -248,8 +246,7 @@ export function createUnifiedModelCatalogService(
         }
 
         if (isCurrent(userId, startedAt)) {
-          fullCatalogs.set(userId, allModels);
-          evictOldest(fullCatalogs);
+          setBounded(fullCatalogs, userId, allModels, MAX_CATALOG_ENTRIES);
         }
         return await recalculateSnapshot(userId, startedAt, {
           catalog: allModels,
