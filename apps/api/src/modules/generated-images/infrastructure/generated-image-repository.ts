@@ -1,6 +1,11 @@
 import type { GalleryItem, GeneratedImageArtifact } from '@mangostudio/shared';
-import type { Kysely } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 import type { Database, GeneratedImageSelect } from '../../../db/types';
+import {
+  type GalleryCursor,
+  type GalleryEntry,
+  tiedRowidCeiling,
+} from '../../messages/domain/gallery-cursor';
 
 export interface CreateGeneratedImageArtifactData {
   id: string;
@@ -17,7 +22,8 @@ export interface CreateGeneratedImageArtifactData {
 }
 
 export interface ListGeneratedImagesOptions {
-  cursor?: number;
+  /** Position of the last image of the previous page; only later ones are returned. */
+  cursor?: GalleryCursor;
   limit?: number;
 }
 
@@ -100,24 +106,40 @@ export async function listGeneratedImagesByMessageIds(
   return artifactsByMessageId;
 }
 
+/**
+ * Lists a user's generated images newest first, ordered by
+ * `(createdAt, rowid)` descending. `createdAt` is not unique (images of one
+ * batch share it), so the SQLite `rowid` breaks the tie in insertion order.
+ * Entries carry the `rowid` and the `artifact` source for the merged gallery
+ * cursor; one extra row is fetched so the caller can tell whether more remain.
+ *
+ * @example
+ * const entries = await listGeneratedImagesForGallery(userId, { limit: 50, cursor }, db);
+ */
 export async function listGeneratedImagesForGallery(
   userId: string,
   opts: ListGeneratedImagesOptions,
   db: Kysely<Database>
-): Promise<GalleryItem[]> {
+): Promise<GalleryEntry<GalleryItem>[]> {
   const limit = opts.limit ?? 50;
 
   let query = db
     .selectFrom('generated_images')
     .selectAll()
+    .select(sql<number>`rowid`.as('rowid'))
     .where('userId', '=', userId)
     .orderBy('createdAt', 'desc')
-    .orderBy('id', 'desc');
+    .orderBy(sql`rowid`, 'desc');
 
   if (opts.cursor) {
-    query = query.where('createdAt', '<', opts.cursor);
+    const ceiling = tiedRowidCeiling('artifact', opts.cursor);
+    query = query.where(sql<boolean>`(createdAt, rowid) < (${opts.cursor.createdAt}, ${ceiling})`);
   }
 
   const rows = await query.limit(limit + 1).execute();
-  return rows.map(mapGeneratedImage);
+  return rows.map((row) => ({
+    item: mapGeneratedImage(row),
+    source: 'artifact',
+    rowid: row.rowid,
+  }));
 }

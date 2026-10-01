@@ -1,5 +1,15 @@
-import { CreateMessageBodySchema, UpdateMessageBodySchema } from '@mangostudio/shared/chat';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
+import {
+  CreateMessageBodySchema,
+  type GalleryPage,
+  GalleryPageSchema,
+  ListGalleryQuerySchema,
+  UpdateMessageBodySchema,
+} from '@mangostudio/shared/chat';
+import {
+  type ApiErrorResponse,
+  ApiErrorResponseSchema,
+  ERROR_CODES,
+} from '@mangostudio/shared/errors';
 import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -8,6 +18,7 @@ import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { createMessageUseCase } from '../application/create-message';
 import { listGalleryUseCase } from '../application/list-gallery';
 import { updateMessageUseCase } from '../application/update-message';
+import { InvalidGalleryCursorError } from '../domain/gallery-cursor';
 import { MessageNotFoundError } from '../domain/message-ownership';
 
 export const messageRoutes = (app: Elysia) =>
@@ -21,21 +32,29 @@ export const messageRoutes = (app: Elysia) =>
       .get(
         '/images',
         {
-          query: t.Object({
-            limit: t.Optional(t.String()),
-            cursor: t.Optional(t.String()),
-          }),
+          query: ListGalleryQuerySchema,
+          response: {
+            200: GalleryPageSchema,
+            400: ApiErrorResponseSchema,
+          },
         },
-        // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-        async ({ query, user }) => {
-          return listGalleryUseCase(
-            {
-              userId: user?.id ?? '',
-              cursor: query.cursor ? parseQueryInt(query.cursor, 0) : undefined,
-              limit: query.limit ? parseQueryInt(query.limit, 50) : undefined,
-            },
-            getDb()
-          );
+        async ({ query, user, set }): Promise<ApiErrorResponse | GalleryPage> => {
+          try {
+            return await listGalleryUseCase(
+              {
+                userId: user?.id ?? '',
+                cursor: query.cursor,
+                limit: query.limit ? parseQueryInt(query.limit, 50) : undefined,
+              },
+              getDb()
+            );
+          } catch (err) {
+            if (err instanceof InvalidGalleryCursorError) {
+              set.status = 400;
+              return { error: err.message, code: ERROR_CODES.VALIDATION };
+            }
+            throw err;
+          }
         }
       )
 

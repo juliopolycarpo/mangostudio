@@ -163,10 +163,13 @@ describe('GET /messages/images tie-safe cursor', () => {
     await insertArtifactImages(descendingIds('art', 33));
     await insertLegacyImages(descendingIds('legacy', 32));
 
-    const paged = await readAll(7);
+    // 33 puts a page boundary exactly between the last artifact and the first message.
+    for (const limit of [7, 33, 32, 1]) {
+      const paged = await readAll(limit);
 
-    expectSize('combined gallery pages', 65, paged.length);
-    expect(new Set(paged).size).toBe(65);
+      expectSize(`combined gallery pages at limit ${limit}`, 65, paged.length);
+      expect(new Set(paged).size).toBe(65);
+    }
   });
 
   it('pages in the same order an unpaged read returns', async () => {

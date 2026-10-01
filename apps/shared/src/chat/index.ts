@@ -1,5 +1,11 @@
 export { type ContextSeverity, getContextSeverity } from './context-severity';
 export type { Message } from './entities';
+export {
+  type GalleryPage,
+  GalleryPageSchema,
+  type ListGalleryQuery,
+  ListGalleryQuerySchema,
+} from './gallery-page';
 export { type MessagesPage, MessagesPageSchema } from './messages-page';
 export {
   type Chat,
