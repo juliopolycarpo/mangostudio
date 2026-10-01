@@ -32,6 +32,13 @@ import {
  * durations, and all of them draw on one budget (`SPEC_BUDGET_MS`) that the test
  * timeout exceeds. The scroll is the wheel, not `scrollTop = 0`: only a gesture
  * tells the feed that the reader, not layout, is moving the view.
+ *
+ * Two specs live here. The first pins the on-demand paging above with read-ahead
+ * starved: the page's idle callbacks never run (`starveIdleCallbacks`), so every
+ * older page is one the reader asked for by scrolling. That keeps the paging
+ * contract proven on its own, and shows that nothing depends on read-ahead. The
+ * second is read-ahead itself: older pages arrive ahead of a reader scrolling at
+ * reading speed, never showing the loading indicator and never moving the view.
  */
 
 const TOTAL = 30;
@@ -53,6 +60,20 @@ const OUTSIDE_BUDGET_MS = 30_000;
 const MAX_WHEEL_TURNS = 30;
 /** A prepended page may not move the row the reader was looking at by more than this. */
 const MAX_JUMP_PX = 4;
+/** What the loading indicator says (`chat.feed.loadingOlder`, English), looked for as text. */
+const LOADING_INDICATOR_TEXT = 'Loading earlier messages';
+/** A reader's pace: 100 px of wheel, then six frames (about 100 ms) of reading. */
+const READING_STEP_PX = 100;
+const READING_STEP_FRAMES = 6;
+/** The bound on reading steps; the 30 rows of the spec's chat take about 60. */
+const MAX_READING_STEPS = 150;
+/**
+ * The most a row in view may move between two frames while the reader scrolls
+ * at the pace above. A wheel step moves it by at most READING_STEP_PX over its
+ * animation, and a page landing above the reader without being compensated for
+ * moves it by the height of the page (six rows at the least).
+ */
+const MAX_FRAME_MOVE_PX = 140;
 const BASE_TIMESTAMP = 1_700_000_000_000;
 const TRANSCRIPT_PATTERN = '**/api/chats/*/messages?*';
 
@@ -198,14 +219,18 @@ const sidebarRow = (page: Page, title: string) =>
     .filter({ has: page.getByTitle(title, { exact: true }) });
 
 async function openChat(page: Page, title: string): Promise<void> {
-  await sidebarRow(page, title).getByTitle(title, { exact: true }).click();
+  await sidebarRow(page, title)
+    .getByTitle(title, { exact: true })
+    .click({ timeout: waitMs(`the chat "${title}" in the sidebar`) });
 }
 
-/** The query of one transcript request as the app sent it. */
+/** The query of one transcript request as the app sent it, and when it was sent. */
 interface TranscriptRequest {
   readonly limit: string | null;
   readonly order: string | null;
   readonly cursor: string | null;
+  /** `Date.now()` when the page's request reached the spec. */
+  readonly at: number;
 }
 
 /**
@@ -217,11 +242,21 @@ interface TranscriptRequest {
  *   kept in flight until `release()`, and `requested()` says one is. The
  *   reader's view is then still while the page is fetched, so what moves when
  *   it lands is the prepend and nothing else.
+ * - While `holdNewest(true, chatId)`, the request for the newest page of that
+ *   chat is kept in flight until `releaseNewest()`, so nothing of it has
+ *   rendered meanwhile. (The app's shell prefetches the first chat of the list
+ *   before it renders, so the held chat must not be that one.)
+ * - `finishedOlder()` counts the older-page responses the page has received.
  */
 function shrinkTranscriptPages(page: Page, pageSize: number) {
   const asked: TranscriptRequest[] = [];
   let holding = false;
+  let holdingNewest = false;
+  let newestChatId = '';
   let held: { route: Route; url: string } | null = null;
+  let heldNewest: { route: Route; url: string } | null = null;
+  let finishedOlder = 0;
+  const isTranscript = (url: string) => /\/api\/chats\/[^/]+\/messages\?/.test(url);
   const handler = async (route: Route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     const url = new URL(route.request().url());
@@ -229,17 +264,28 @@ function shrinkTranscriptPages(page: Page, pageSize: number) {
       limit: url.searchParams.get('limit'),
       order: url.searchParams.get('order'),
       cursor: url.searchParams.get('cursor'),
+      at: Date.now(),
     });
     url.searchParams.set('limit', String(pageSize));
     if (holding && url.searchParams.has('cursor')) {
       held = { route, url: url.toString() };
       return;
     }
+    if (holdingNewest && !url.searchParams.has('cursor') && url.pathname.includes(newestChatId)) {
+      heldNewest = { route, url: url.toString() };
+      return;
+    }
     await route.continue({ url: url.toString() });
+  };
+  const onFinished = (request: { url(): string }) => {
+    if (isTranscript(request.url()) && request.url().includes('cursor=')) finishedOlder++;
   };
   return {
     asked,
-    install: () => page.route(TRANSCRIPT_PATTERN, handler),
+    install: () => {
+      page.on('requestfinished', onFinished);
+      return page.route(TRANSCRIPT_PATTERN, handler);
+    },
     holdOlder(on: boolean) {
       holding = on;
     },
@@ -249,7 +295,23 @@ function shrinkTranscriptPages(page: Page, pageSize: number) {
       held = null;
       await request?.route.continue({ url: request.url });
     },
-    uninstall: () => page.unroute(TRANSCRIPT_PATTERN, handler),
+    /** Holds the newest-page request of `chatId`, so nothing of that chat renders meanwhile. */
+    holdNewest(on: boolean, chatId = '') {
+      holdingNewest = on;
+      newestChatId = chatId;
+    },
+    newestRequested: () => heldNewest !== null,
+    async releaseNewest() {
+      const request = heldNewest;
+      heldNewest = null;
+      await request?.route.continue({ url: request.url });
+    },
+    finishedOlder: () => finishedOlder,
+    olderAsked: () => asked.filter((request) => request.cursor !== null),
+    uninstall: () => {
+      page.off('requestfinished', onFinished);
+      return page.unroute(TRANSCRIPT_PATTERN, handler);
+    },
   };
 }
 
@@ -432,6 +494,7 @@ async function readTranscriptNewestFirst(
 
   const transcript = shrinkTranscriptPages(page, PAGE_SIZE);
   await transcript.install();
+  await starveIdleCallbacks(page);
   await page.goto('/');
   await openChat(page, title);
 
@@ -538,5 +601,297 @@ async function readTranscriptNewestFirst(
   await openChat(page, otherTitle);
   await openChat(page, title);
   await expectEdgeVisible(page, 'last', label(TOTAL + 1), 'after the refetch');
+  await transcript.uninstall();
+}
+
+/**
+ * Makes the page's idle callbacks never run, so transcript read-ahead (which is
+ * gated on them) never starts: every older page is then one the reader asked for.
+ */
+async function starveIdleCallbacks(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const host = window as unknown as Record<string, unknown>;
+    host.requestIdleCallback = () => 0;
+    host.cancelIdleCallback = () => undefined;
+  });
+}
+
+/** Waits for the browser to report idle `rounds` times in a row. */
+function idleRounds(page: Page, rounds: number): Promise<void> {
+  return page.evaluate(
+    (count) =>
+      new Promise<void>((resolve) => {
+        let done = 0;
+        const next = () =>
+          requestIdleCallback(() => (++done >= count ? resolve() : next()), { timeout: 1_000 });
+        next();
+      }),
+    rounds
+  );
+}
+
+/**
+ * Records, inside the page, when the newest message first rendered and whether
+ * the loading indicator was ever in the document. Both are read back by
+ * `readWatch`; neither depends on the spec polling at the right moment.
+ */
+async function watchPage(page: Page, newest: string): Promise<void> {
+  await page.addInitScript(
+    ({ newestText, indicatorText }) => {
+      const win = window as unknown as {
+        __watch: { newestRenderedAt: number | null; indicatorSeen: boolean };
+      };
+      win.__watch = { newestRenderedAt: null, indicatorSeen: false };
+      const check = () => {
+        const rows = document.querySelectorAll('[data-index]');
+        if (win.__watch.newestRenderedAt === null) {
+          for (const row of rows) {
+            if (row.textContent?.includes(newestText)) win.__watch.newestRenderedAt = Date.now();
+          }
+        }
+        if (document.body?.textContent?.includes(indicatorText)) win.__watch.indicatorSeen = true;
+      };
+      new MutationObserver(check).observe(document, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    },
+    { newestText: newest, indicatorText: LOADING_INDICATOR_TEXT }
+  );
+}
+
+function readWatch(
+  page: Page
+): Promise<{ newestRenderedAt: number | null; indicatorSeen: boolean }> {
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __watch: { newestRenderedAt: number | null; indicatorSeen: boolean };
+        }
+      ).__watch
+  );
+}
+
+/** Scrolls up one reading step: a wheel turn, then a few frames of reading. */
+async function readUpOneStep(page: Page): Promise<void> {
+  await wheel(page, -READING_STEP_PX);
+  await page.evaluate(
+    (frames) =>
+      new Promise<void>((resolve) => {
+        let left = frames;
+        const tick = () => (--left <= 0 ? resolve() : requestAnimationFrame(tick));
+        requestAnimationFrame(tick);
+      }),
+    READING_STEP_FRAMES
+  );
+}
+
+interface MovementTrace {
+  /** The most a row in view moved between two frames, in px. */
+  readonly maxMove: number;
+  /** The row that moved that much, and how, for a failure message. */
+  readonly worst: string;
+  /** Frames in which a row in view had a different index than a frame before: a page landed above it. */
+  readonly shifts: number;
+  /** Frames in which no row that was in view is still in view: the view jumped. */
+  readonly lost: number;
+}
+
+/**
+ * Starts recording, on every frame, how far each row in view moved since the
+ * previous frame, and how often a row's index shifted (an older page landed
+ * above it). Returns the function that stops it and reads the result.
+ */
+async function traceMovement(page: Page): Promise<() => Promise<MovementTrace>> {
+  await page.evaluate((selector) => {
+    const win = window as unknown as {
+      __move: { on: boolean; maxMove: number; worst: string; shifts: number; lost: number };
+    };
+    win.__move = { on: true, maxMove: 0, worst: 'none', shifts: 0, lost: 0 };
+    let previous = new Map<string, { top: number; index: number }>();
+    const sample = () => {
+      const port = document.querySelector<HTMLElement>(selector);
+      const current = new Map<string, { top: number; index: number }>();
+      if (port) {
+        const portTop = port.getBoundingClientRect().top;
+        for (const row of port.querySelectorAll<HTMLElement>('[data-index]')) {
+          const box = row.getBoundingClientRect();
+          const top = box.top - portTop;
+          if (box.bottom - portTop <= 0 || top >= port.clientHeight) continue;
+          const text = /msg-\d{3}/.exec(row.textContent ?? '')?.[0];
+          if (text) current.set(text, { top, index: Number(row.dataset.index) });
+        }
+      }
+      const kept = [...current.keys()].filter((text) => previous.has(text));
+      if (previous.size > 0 && current.size > 0 && kept.length === 0) win.__move.lost++;
+      for (const [text, now] of current) {
+        const before = previous.get(text);
+        if (!before) continue;
+        if (now.index !== before.index) win.__move.shifts++;
+        const moved = Math.abs(now.top - before.top);
+        if (moved > win.__move.maxMove) {
+          win.__move.maxMove = moved;
+          win.__move.worst = `${text} moved ${moved}px in one frame (from ${before.top} to ${now.top})`;
+        }
+      }
+      previous = current;
+      if (win.__move.on) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, FEED);
+  return () =>
+    page.evaluate(
+      () =>
+        new Promise<MovementTrace>((resolve) => {
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const win = window as unknown as {
+                __move: {
+                  on: boolean;
+                  maxMove: number;
+                  worst: string;
+                  shifts: number;
+                  lost: number;
+                };
+              };
+              win.__move.on = false;
+              resolve({
+                maxMove: win.__move.maxMove,
+                worst: win.__move.worst,
+                shifts: win.__move.shifts,
+                lost: win.__move.lost,
+              });
+            })
+          );
+        })
+    );
+}
+
+test('older pages are read ahead of a reader scrolling up, without a loading indicator or a jump', async ({
+  browser,
+}, testInfo) => {
+  test.setTimeout(SPEC_BUDGET_MS + OUTSIDE_BUDGET_MS);
+  const run = `${Date.now()}-${testInfo.repeatEachIndex}`;
+  const context = await newSignedInContext(browser, run);
+  const page = await context.newPage();
+  const chatIds: string[] = [];
+  try {
+    budgetEndsAt = Date.now() + SPEC_BUDGET_MS;
+    await readAheadOfTheReader(page, run, chatIds);
+  } finally {
+    const removed = await Promise.all(chatIds.map((id) => page.request.delete(`/api/chats/${id}`)));
+    for (const response of removed) {
+      expect
+        .soft(response.ok(), `expected chat cleanup: 2xx | received: ${response.status()}`)
+        .toBe(true);
+    }
+    await context.close();
+  }
+});
+
+async function readAheadOfTheReader(page: Page, run: string, chatIds: string[]): Promise<void> {
+  const title = `Transcript read-ahead ${run}`;
+  const chatId = await createChat(page, title);
+  chatIds.push(chatId);
+  const otherId = await createChat(page, `Transcript read-ahead other ${run}`);
+  chatIds.push(otherId);
+  await seedMessages(page, chatId, 1, TOTAL);
+  // The chat list is ordered by the newest message and the shell prefetches its first
+  // chat: make that the other one, so the chat under test is opened cold.
+  await postMessage(page, otherId, TOTAL + 1);
+
+  const transcript = shrinkTranscriptPages(page, PAGE_SIZE);
+  await transcript.install();
+  await watchPage(page, label(TOTAL));
+  transcript.holdNewest(true, chatId);
+  await page.goto('/');
+  await openChat(page, title);
+
+  // Nothing is asked for ahead of a page that has not arrived: with the newest
+  // page held in flight the browser goes idle, twice, and no older page is asked.
+  await expect
+    .poll(() => transcript.newestRequested(), {
+      message: 'expected the newest page requested on open | received: no request',
+      timeout: waitMs('the newest page requested on open'),
+    })
+    .toBe(true);
+  await idleRounds(page, 2);
+  expect(
+    transcript.olderAsked().length,
+    `expected older pages requested before the newest page rendered: 0 | received: ${JSON.stringify(transcript.asked)}`
+  ).toBe(0);
+
+  // Once it has rendered, exactly one older page is read ahead, after idle.
+  transcript.holdNewest(false);
+  await transcript.releaseNewest();
+  await expectEdgeVisible(page, 'last', label(TOTAL), 'on open');
+  await expect
+    .poll(() => transcript.olderAsked().length, {
+      message: 'expected one older page read ahead after the newest rendered | received: none',
+      timeout: waitMs('one older page read ahead after the newest rendered'),
+    })
+    .toBe(1);
+  await expect
+    .poll(() => transcript.finishedOlder(), {
+      message: 'expected the read-ahead page received: 1 | received: 0',
+      timeout: waitMs('the read-ahead page received'),
+    })
+    .toBe(1);
+  const watch = await readWatch(page);
+  const ahead = transcript.olderAsked()[0];
+  expect(
+    watch.newestRenderedAt !== null && (ahead?.at ?? 0) >= watch.newestRenderedAt,
+    `expected the older page asked after the newest rendered | received: asked at ${ahead?.at}, newest rendered at ${watch.newestRenderedAt}`
+  ).toBe(true);
+  expect(
+    `limit=${ahead?.limit} order=${ahead?.order}`,
+    `expected the read-ahead request: limit=${APP_PAGE_SIZE} order=desc | received: ${JSON.stringify(ahead)}`
+  ).toBe(`limit=${APP_PAGE_SIZE} order=desc`);
+
+  // The idle window is that one page: more idle time asks for nothing.
+  await idleRounds(page, 3);
+  expect(
+    transcript.olderAsked().length,
+    `expected older pages requested while the reader is idle: 1 | received: ${transcript.olderAsked().length}`
+  ).toBe(1);
+
+  // Read up through all three pages at reading speed.
+  const stopTrace = await traceMovement(page);
+  let steps = 0;
+  while (!visibleLabels(await readView(page)).includes(label(1))) {
+    expect(
+      steps,
+      `expected the first message reached within ${MAX_READING_STEPS} reading steps | received: ${steps}`
+    ).toBeLessThan(MAX_READING_STEPS);
+    await readUpOneStep(page);
+    steps++;
+  }
+  await awaitStill(page);
+  const movement = await stopTrace();
+
+  const after = await readWatch(page);
+  expect(
+    after.indicatorSeen,
+    'expected the loading indicator never shown while reading up: never | received: it was shown'
+  ).toBe(false);
+  expect(
+    transcript.olderAsked().length,
+    `expected older pages requested in all: ${OLDER_PAGES} | received: ${JSON.stringify(transcript.olderAsked())}`
+  ).toBe(OLDER_PAGES);
+  expect(
+    movement.lost,
+    `expected the view to keep at least one row in view between frames: 0 frames lost | received: ${movement.lost} frames in which every row in view was replaced`
+  ).toBe(0);
+  expect(
+    movement.shifts,
+    'expected an older page to land above the reader while scrolling: at least 1 frame with rows shifted down | received: none'
+  ).toBeGreaterThan(0);
+  expect(
+    movement.maxMove,
+    `expected no row in view to move more than ${MAX_FRAME_MOVE_PX}px in a frame | received: ${movement.worst}`
+  ).toBeLessThanOrEqual(MAX_FRAME_MOVE_PX);
+  await expectEdgeVisible(page, 'first', label(1), 'at the top');
   await transcript.uninstall();
 }
