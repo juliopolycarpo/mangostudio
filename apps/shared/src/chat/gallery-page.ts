@@ -21,9 +21,11 @@ export type ListGalleryQuery = Static<typeof ListGalleryQuerySchema>;
  * `nextCursor` is `null` on the last page; otherwise it is an opaque token to
  * send back as `cursor`.
  *
- * The item shape stays the hand-written `GalleryItem` interface: it has no
- * schema yet, so each item is declared as an open object here instead of
- * being re-described.
+ * The item type is `GalleryItem` (a `GeneratedImageArtifact`), but the items
+ * stay declared as open objects here on purpose: the two sources of a page
+ * build their items with different key orders, and a closed schema serialises
+ * in its own key order, so describing them would change the bytes of every
+ * legacy item.
  */
 export const GalleryPageSchema = Type.Object({
   items: Type.Array(Type.Unsafe<GalleryItem>(Type.Object({}, { additionalProperties: true }))),

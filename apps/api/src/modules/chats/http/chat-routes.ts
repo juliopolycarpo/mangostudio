@@ -244,7 +244,7 @@ export const chatRoutes = (app: Elysia) =>
         },
         async ({ params, query, user, set }): Promise<ApiErrorResponse | MessagesPage> => {
           try {
-            const page = await getChatMessagesUseCase(
+            return await getChatMessagesUseCase(
               {
                 chatId: params.id,
                 userId: user?.id ?? '',
@@ -253,11 +253,6 @@ export const chatRoutes = (app: Elysia) =>
               },
               getDb()
             );
-            // Stored rows carry `null` for an absent optional column where the
-            // shared `Message` interface says `undefined`; the wire shape has
-            // always been the stored one, so the page is asserted rather than
-            // remapped here.
-            return page as MessagesPage;
           } catch (err) {
             if (err instanceof InvalidTranscriptCursorError) {
               set.status = 400;

@@ -5,8 +5,8 @@
 
 // Auth types — source of truth is auth/contracts.ts
 export type { AuthSession, AuthUser } from '../auth/contracts';
-// Chat domain types — source of truth is chat/schemas.ts and chat/entities.ts
-export type { Message } from '../chat/entities';
+// Chat domain types — source of truth is chat/schemas.ts and chat/message.ts
+export type { Message } from '../chat/message';
 export type { Chat } from '../chat/schemas';
 export type { TurnCheckpointPart } from '../turn-recovery';
 export type {
