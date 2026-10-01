@@ -9,6 +9,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
+  LibraryResource,
   PropagationApplyRequest,
   PropagationDecision,
   PropagationPreview,
@@ -19,6 +20,7 @@ import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudi
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { RuntimeLibraryApplyParams } from '@mangostudio/shared/runtime-contract';
 import { getDb } from '../../../src/db/database';
+import { listDivergenceAcks } from '../../../src/modules/library/application/conflict-resolution';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import {
   applyLibraryPropagation,
@@ -570,6 +572,121 @@ describe('propagation apply — decisions', () => {
 
     await expect(failure).rejects.toMatchObject({ status: 422 });
     expect(() => readSkill('claude-skills')).toThrow();
+  });
+});
+
+/**
+ * A skill that exists on remote machines only. Nothing on this host's disk holds
+ * it, so anything that verifies a divergence by scanning the hub cannot find it.
+ */
+const REMOTE_SKILL_KEY = 'skill:remote-only-divergence';
+const REMOTE_SKILL_SLUG = 'remote-only-divergence';
+
+/** What a remote runtime reports for the skill: one readable copy per `[location, hash]`. */
+function remoteScan(copies: readonly (readonly [LibraryLocationId, string])[]): LibraryResource[] {
+  return [
+    {
+      ref: { kind: 'skill', slug: REMOTE_SKILL_SLUG },
+      key: REMOTE_SKILL_KEY,
+      instances: copies.map(([locationId, contentHash]) => ({
+        locationId,
+        path: `/srv/home/${locationId}/${REMOTE_SKILL_SLUG}`,
+        modifiedAtMs: 1,
+        format: 'markdown-frontmatter' as const,
+        valid: true as const,
+        contentHash,
+        sizeBytes: 4,
+      })),
+      coverage: [],
+      divergence: 'divergent',
+      whitespaceOnlyDivergence: false,
+      contentGroups: [],
+    },
+  ];
+}
+
+const REMOTE_MACHINES: Record<string, readonly (readonly [LibraryLocationId, string])[]> = {
+  'box-a': [
+    ['claude-skills', 'hash-on-box-a-claude'],
+    ['agents-skills', 'hash-on-box-a-agents'],
+  ],
+  'box-b': [['claude-skills', 'hash-on-box-b']],
+};
+
+/** A preview over machines that report their own copies through their own runtimes. */
+function previewRemoteMachines(request: PropagationPreviewRequest): Promise<PropagationPreview> {
+  const env = pathEnv();
+  const enabled = settings(SKILL_LOCATIONS);
+  return previewLibraryPropagation(userId(), request, {
+    snapshot: async (_userId, environmentId) => ({
+      environmentId,
+      resources: remoteScan(REMOTE_MACHINES[environmentId] ?? []),
+      statuses: new Map(
+        request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
+      ),
+      directoryHashDomain: directoryHashDomainVersion(),
+    }),
+    enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
+  });
+}
+
+describe('propagation apply — keeping a divergence across machines', () => {
+  /** Keeps the divergence over `environmentIds`, with the real acknowledgement path. */
+  async function keepDivergence(environmentIds: readonly string[]) {
+    const request: PropagationPreviewRequest = {
+      resourceKeys: [REMOTE_SKILL_KEY],
+      targetLocationIds: ['claude-skills', 'agents-skills'],
+      environmentIds: [...environmentIds],
+    };
+    const taken = await previewRemoteMachines(request);
+    const entry = onlyEntry(taken);
+    const reviewed = entry.sourceGroups.map((group) => group.contentHash).sort();
+
+    // Only the writes are stubbed; verification and storage are the real ones.
+    const outcome = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        {
+          resourceKey: entry.resourceKey,
+          resolution: 'keep-per-location',
+          destinations: entry.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action: 'skip' as const,
+          })),
+        },
+      ]),
+      applyDeps({ preview: (_userId, requested) => previewRemoteMachines(requested) })
+    ).then(
+      () => 'applied',
+      (error: unknown) => `rejected: ${error instanceof Error ? error.message : String(error)}`
+    );
+
+    const stored = (await listDivergenceAcks(userId())).map((ack) => ({
+      resourceKey: ack.resourceKey,
+      contentHashes: [...ack.contentHashes].sort(),
+    }));
+    return { outcome, stored, reviewed };
+  }
+
+  it('records two differing copies that one remote machine holds', async () => {
+    const { outcome, stored, reviewed } = await keepDivergence(['box-a']);
+
+    expect(reviewed).toHaveLength(2);
+    expect({ outcome, stored }).toEqual({
+      outcome: 'applied',
+      stored: [{ resourceKey: REMOTE_SKILL_KEY, contentHashes: reviewed }],
+    });
+  });
+
+  it('records the versions the preview read from every machine', async () => {
+    const { outcome, stored, reviewed } = await keepDivergence(['box-a', 'box-b']);
+
+    expect(reviewed).toHaveLength(3);
+    expect({ outcome, stored }).toEqual({
+      outcome: 'applied',
+      stored: [{ resourceKey: REMOTE_SKILL_KEY, contentHashes: reviewed }],
+    });
   });
 });
 

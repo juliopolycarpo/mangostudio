@@ -252,6 +252,34 @@ describe('acknowledgedResourceKeys', () => {
     expect(repository.rows.size).toBe(0);
   });
 
+  it('judges a resource by every machine that holds a copy, not by the last one listed', async () => {
+    // One snapshot per machine contributes its own `skill:gh`; the divergence the
+    // user accepted spans both, so neither machine's hashes alone can match it.
+    const onLocal = ghSkill([instance('mango-skills', 'hash-a')]);
+    const onRemote = ghSkill([instance('mango-skills', 'hash-b')]);
+    const repository = memoryRepository([record]);
+
+    const kept = await acknowledgedResourceKeys('user-1', [onLocal, onRemote], deps(repository));
+
+    expect({ acknowledged: [...kept], storedRows: repository.rows.size }).toEqual({
+      acknowledged: ['skill:gh'],
+      storedRows: 1,
+    });
+  });
+
+  it('still retires a cross-machine acknowledgement once one machine changes', async () => {
+    const onLocal = ghSkill([instance('mango-skills', 'hash-a')]);
+    const onRemote = ghSkill([instance('mango-skills', 'hash-edited')]);
+    const repository = memoryRepository([record]);
+
+    const kept = await acknowledgedResourceKeys('user-1', [onLocal, onRemote], deps(repository));
+
+    expect({ acknowledged: [...kept], storedRows: repository.rows.size }).toEqual({
+      acknowledged: [],
+      storedRows: 0,
+    });
+  });
+
   it('retires an acknowledgement when the divergence resolves entirely', async () => {
     const repository = memoryRepository([record]);
     const converged = ghSkill([
