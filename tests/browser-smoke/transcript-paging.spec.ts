@@ -1,0 +1,354 @@
+import { tmpdir } from 'node:os';
+import { expect, type Page, type Route, test } from '@playwright/test';
+
+/**
+ * A chat longer than one page opens on its NEWEST messages and loads older ones
+ * as the reader scrolls up.
+ *
+ * It used to show only the oldest 50 messages: the transcript asked for the
+ * first page oldest-first and never asked again, so a 130-message chat ended at
+ * `msg-050` and nothing said anything was missing. What only a real browser can
+ * prove is the part that is not data: that the view opens at the end, that a
+ * page prepended above the reader does not move what they are looking at, and
+ * that every message is reachable, once and in order, once everything is loaded.
+ *
+ * Waits are conditions (a row to be visible, a request to arrive), never
+ * durations. The scroll is the wheel, not `scrollTop = 0`: only a gesture tells
+ * the feed that the reader, not layout, is moving the view.
+ */
+
+const TOTAL = 130;
+const PAGE_SIZE = 50;
+const SEED_CONCURRENCY = 10;
+/** A prepended page may not move the row the reader was looking at by more than this. */
+const MAX_JUMP_PX = 4;
+const BASE_TIMESTAMP = 1_700_000_000_000;
+const OLDER_PAGES_PATTERN = '**/api/chats/*/messages?*';
+
+const label = (position: number) => `msg-${String(position).padStart(3, '0')}`;
+
+interface ViewRow {
+  /** The `msg-NNN` text of the row. */
+  readonly text: string;
+  /** The virtualizer's row index, which shifts when older rows are prepended. */
+  readonly index: number;
+  /** Distance of the row's top edge from the top of the scroll port. */
+  readonly top: number;
+}
+
+interface View {
+  readonly scrollTop: number;
+  readonly clientHeight: number;
+  readonly scrollHeight: number;
+  /** Rows that intersect the scroll port, top to bottom. */
+  readonly visible: readonly ViewRow[];
+  /** Every rendered row, overscan included. */
+  readonly rendered: readonly ViewRow[];
+}
+
+const FEED = 'section:has(> div > [data-index])';
+
+/** Reads the transcript's scroll port: where it is and which rows are in it. */
+function readView(page: Page): Promise<View | null> {
+  return page.evaluate((selector) => {
+    const port = document.querySelector<HTMLElement>(selector);
+    if (!port) return null;
+    const portTop = port.getBoundingClientRect().top;
+    const rendered = [...port.querySelectorAll<HTMLElement>('[data-index]')].map((row) => {
+      const box = row.getBoundingClientRect();
+      return {
+        text: /msg-\d{3}/.exec(row.textContent ?? '')?.[0] ?? '',
+        index: Number(row.dataset.index),
+        top: box.top - portTop,
+        bottom: box.bottom - portTop,
+      };
+    });
+    const visible = rendered.filter((row) => row.bottom > 0 && row.top < port.clientHeight);
+    return {
+      scrollTop: port.scrollTop,
+      clientHeight: port.clientHeight,
+      scrollHeight: port.scrollHeight,
+      visible: visible.map(({ text, index, top }) => ({ text, index, top })),
+      rendered: rendered.map(({ text, index, top }) => ({ text, index, top })),
+    };
+  }, FEED);
+}
+
+const visibleLabels = (view: View | null) => view?.visible.map((row) => row.text) ?? [];
+
+/**
+ * Waits until the newest (`last`) or oldest (`first`) message in the viewport
+ * is `expected`, and fails as `expected last message visible: msg-130 |
+ * received: msg-050 (on open)` when it never is.
+ */
+async function expectEdgeVisible(
+  page: Page,
+  edge: 'first' | 'last',
+  expected: string,
+  when: string
+): Promise<void> {
+  await expect(async () => {
+    const labels = visibleLabels(await readView(page)).sort();
+    const received = (edge === 'last' ? labels.at(-1) : labels[0]) ?? 'none';
+    expect(
+      received,
+      `expected ${edge} message visible: ${expected} | received: ${received} (${when})`
+    ).toBe(expected);
+  }).toPass({ timeout: 20_000 });
+}
+
+/** Moves the pointer over the transcript and turns the wheel: a reader's gesture. */
+async function wheel(page: Page, deltaY: number): Promise<void> {
+  const box = await page.locator(FEED).boundingBox();
+  if (!box) throw new Error(`expected transcript: visible | received: ${FEED} not found`);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, deltaY);
+}
+
+async function createChat(page: Page, title: string): Promise<string> {
+  const created = await page.request.post('/api/chats', { data: { title } });
+  expect(created.ok(), `expected chat create: 2xx | received: ${created.status()}`).toBe(true);
+  const { id } = (await created.json()) as { id: string };
+  // A chat with no working directory opens a folder picker over the rail.
+  const bound = await page.request.put(`/api/chats/${id}`, { data: { workdir: tmpdir() } });
+  expect(bound.ok(), `expected workdir bind: 2xx | received: ${bound.status()}`).toBe(true);
+  return id;
+}
+
+/**
+ * Stores one message through the API, waiting out the per-IP limiter instead of
+ * failing on it: this spec posts more than a hundred rows, and the limiter is
+ * shared with every other spec in the suite.
+ */
+async function postMessage(page: Page, chatId: string, position: number): Promise<void> {
+  for (;;) {
+    const response = await page.request.post('/api/messages', {
+      data: {
+        id: `${chatId}-${label(position)}`,
+        chatId,
+        role: position % 2 === 1 ? 'user' : 'ai',
+        text: label(position),
+        timestamp: BASE_TIMESTAMP + position,
+        interactionMode: 'agent',
+      },
+    });
+    if (response.ok()) return;
+    if (response.status() !== 429) {
+      throw new Error(`expected ${label(position)} stored: 2xx | received: ${response.status()}`);
+    }
+    // The limiter says when its window reopens; that is the condition waited on.
+    const retryAfterSeconds = Number(response.headers()['retry-after'] ?? 1);
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, retryAfterSeconds) * 1000));
+  }
+}
+
+async function seedMessages(page: Page, chatId: string, from: number, to: number) {
+  const positions = Array.from({ length: to - from + 1 }, (_, index) => from + index);
+  const workers = Array.from({ length: SEED_CONCURRENCY }, async () => {
+    for (let next = positions.shift(); next !== undefined; next = positions.shift()) {
+      await postMessage(page, chatId, next);
+    }
+  });
+  await Promise.all(workers);
+}
+
+const sidebarRow = (page: Page, title: string) =>
+  page
+    .getByRole('navigation', { name: 'Chats' })
+    .getByRole('listitem')
+    .filter({ has: page.getByTitle(title, { exact: true }) });
+
+async function openChat(page: Page, title: string): Promise<void> {
+  await sidebarRow(page, title).getByTitle(title, { exact: true }).click();
+}
+
+/**
+ * Holds every request for an older page until `release()` is called, and says
+ * when one is in flight. The reader's view is then still while the page is
+ * fetched, so what moves when it lands is the prepend and nothing else.
+ */
+function holdOlderPages(page: Page) {
+  let held: Route | null = null;
+  const handler = (route: Route) => {
+    if (!route.request().url().includes('cursor=')) return route.continue();
+    held = route;
+    return Promise.resolve();
+  };
+  return {
+    install: () => page.route(OLDER_PAGES_PATTERN, handler),
+    requested: () => held !== null,
+    async release() {
+      const route = held;
+      held = null;
+      await route?.continue();
+    },
+    uninstall: () => page.unroute(OLDER_PAGES_PATTERN, handler),
+  };
+}
+
+type OlderPageHold = ReturnType<typeof holdOlderPages>;
+
+/**
+ * Turns the wheel up until the transcript asks for an older page, or there is
+ * none to ask for because the first message is already in view.
+ */
+async function scrollUpUntilRequested(page: Page, hold: OlderPageHold): Promise<void> {
+  for (let turn = 0; turn < 100 && !hold.requested(); turn++) {
+    const view = await readView(page);
+    if (visibleLabels(view).includes(label(1))) return;
+    if ((view?.scrollTop ?? 1) <= 0) break;
+    const before = view?.scrollTop ?? 0;
+    await wheel(page, -400);
+    await expect
+      .poll(
+        async () => hold.requested() || ((await readView(page))?.scrollTop ?? before) !== before
+      )
+      .toBe(true);
+  }
+  await expect
+    .poll(async () => hold.requested() || visibleLabels(await readView(page)).includes(label(1)), {
+      message:
+        'expected an older page requested at the top of the loaded rows | received: no request',
+    })
+    .toBe(true);
+}
+
+/** Starts recording where a row sits in the port on every frame; returns its stop. */
+async function traceRow(page: Page, text: string): Promise<() => Promise<number[]>> {
+  await page.evaluate(
+    ({ selector, rowText }) => {
+      const win = window as unknown as { __rowTops: number[]; __rowTraceOn: boolean };
+      win.__rowTops = [];
+      win.__rowTraceOn = true;
+      const sample = () => {
+        const port = document.querySelector<HTMLElement>(selector);
+        const row = [...(port?.querySelectorAll<HTMLElement>('[data-index]') ?? [])].find(
+          (element) => element.textContent?.includes(rowText)
+        );
+        if (port && row) {
+          win.__rowTops.push(row.getBoundingClientRect().top - port.getBoundingClientRect().top);
+        }
+        if (win.__rowTraceOn) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    },
+    { selector: FEED, rowText: text }
+  );
+  return () =>
+    page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          // Two more frames, so a correction that lands late is sampled too.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const win = window as unknown as { __rowTops: number[]; __rowTraceOn: boolean };
+              win.__rowTraceOn = false;
+              resolve(win.__rowTops);
+            })
+          );
+        })
+    );
+}
+
+test('a 130-message chat opens on its newest messages and loads older ones on demand', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const run = `${Date.now()}-${testInfo.repeatEachIndex}`;
+  const title = `Transcript paging ${run}`;
+  const otherTitle = `Transcript paging other ${run}`;
+
+  const chatId = await createChat(page, title);
+  await createChat(page, otherTitle);
+  await seedMessages(page, chatId, 1, TOTAL);
+
+  await page.goto('/');
+  await openChat(page, title);
+
+  // The reader lands on the end of the conversation, not on its first page.
+  await expectEdgeVisible(page, 'last', label(TOTAL), 'on open');
+  const opened = await readView(page);
+  expect(
+    opened?.rendered.length,
+    `expected rows rendered on open: <= ${PAGE_SIZE} | received: ${opened?.rendered.length}`
+  ).toBeLessThanOrEqual(PAGE_SIZE);
+  expect(
+    visibleLabels(opened).includes(label(1)),
+    `expected first message loaded on open: no | received: ${label(1)} is in the viewport`
+  ).toBe(false);
+
+  // Read back one page at a time. Each older page is held in flight while the
+  // reader is still, so the row they were looking at before it lands is the
+  // reference for where it must be after.
+  let pagesPrepended = 0;
+  while (!visibleLabels(await readView(page)).includes(label(1))) {
+    const hold = holdOlderPages(page);
+    await hold.install();
+    await scrollUpUntilRequested(page, hold);
+    if (!hold.requested()) break;
+
+    const anchor = (await readView(page))?.visible[0];
+    if (!anchor) throw new Error('expected a row in the viewport | received: none');
+    const stopTrace = await traceRow(page, anchor.text);
+    await hold.release();
+    await expect
+      .poll(
+        async () =>
+          (await readView(page))?.visible.find((row) => row.text === anchor.text)?.index ?? -1,
+        { message: `expected ${anchor.text} to move down when an older page lands` }
+      )
+      .toBeGreaterThan(anchor.index);
+    await hold.uninstall();
+
+    const tops = await stopTrace();
+    const jump = Math.max(...tops.map((top) => Math.abs(top - anchor.top)));
+    expect(
+      tops.length,
+      `expected frames sampled for ${anchor.text}: > 0 | received: ${tops.length}`
+    ).toBeGreaterThan(0);
+    expect(
+      jump,
+      `expected ${anchor.text} to stay within ${MAX_JUMP_PX}px when older rows are prepended | received: moved ${jump}px (was ${anchor.top}px)`
+    ).toBeLessThanOrEqual(MAX_JUMP_PX);
+    pagesPrepended++;
+    expect(pagesPrepended, 'expected pages prepended: <= 3').toBeLessThanOrEqual(3);
+  }
+
+  // Everything is loaded: each rendered row sits at the index its text says,
+  // so a duplicate or a gap anywhere shows up as a row in the wrong place.
+  await expectEdgeVisible(page, 'first', label(1), 'at the top');
+  const reached = new Set<string>();
+  for (let step = 0; step < 60; step++) {
+    const view = await readView(page);
+    for (const row of view?.rendered ?? []) {
+      expect(
+        row.text,
+        `expected row ${row.index} to read ${label(row.index + 1)} | received: ${row.text}`
+      ).toBe(label(row.index + 1));
+      reached.add(row.text);
+    }
+    if (view && view.scrollTop + view.clientHeight >= view.scrollHeight - 1) break;
+    const before = view?.scrollTop ?? 0;
+    await wheel(page, 600);
+    await expect
+      .poll(async () => (await readView(page))?.scrollTop ?? before, {
+        message: 'expected the wheel to move the transcript down',
+      })
+      .toBeGreaterThan(before);
+  }
+  expect(reached.size, `expected messages reached: ${TOTAL} | received: ${reached.size}`).toBe(
+    TOTAL
+  );
+
+  // A message stored since the transcript loaded appears once it refetches. The
+  // query goes stale after 30 s; the page's clock is moved past that rather than
+  // waited for, and switching away and back is what refetches a stale query.
+  await postMessage(page, chatId, TOTAL + 1);
+  await page.evaluate(() => {
+    const realNow = Date.now.bind(Date);
+    Date.now = () => realNow() + 31_000;
+  });
+  await openChat(page, otherTitle);
+  await openChat(page, title);
+  await expectEdgeVisible(page, 'last', label(TOTAL + 1), 'after the refetch');
+});
