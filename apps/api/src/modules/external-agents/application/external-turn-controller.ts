@@ -1259,7 +1259,16 @@ export function createExternalTurnController(
             { clientMessageId: input.clientMessageId, text: input.text },
             now()
           );
-          await live.writer.writeRequired();
+          try {
+            await live.writer.writeRequired();
+          } catch (error) {
+            // The steer never reached the runtime and never will: a same-id
+            // retry reuses this rejected attempt. Left `accepted`, the next
+            // checkpoint or the finalization would persist a delivery that
+            // did not happen. The caller still sees the original failure.
+            live.transcript.resolveSteerRejected(input.clientMessageId, 'turn-already-completed');
+            throw error;
+          }
           if (recorded.terminal) {
             // This steer is what pushed the transcript past its byte or event
             // budget. It is already durably kept, matching how `apply` treats
