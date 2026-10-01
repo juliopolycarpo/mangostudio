@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from 'bun:test';
+import { RemoteError } from '@mangostudio/protocol';
 import type {
   ExternalAgentAttachment,
   ExternalAgentConfiguration,
@@ -1139,56 +1140,9 @@ describe('external turn controller', () => {
         (part) => part.type === 'external_steer' && part.clientMessageId === 'steer-1'
       );
       expect(parts).toHaveLength(1);
-      expectSteerNotAccepted(steerPartOf((await readAssistantRow()).parts, 'steer-1'));
 
       runtime.emit({ type: 'completed' });
       await running;
-    });
-
-    it('persists a steer as not accepted when the runtime dispatch throws', async () => {
-      const notifications: unknown[] = [];
-      const { runtime, controller } = harness({
-        steerFailure: () => new Error('runtime disconnected mid-call'),
-      });
-      const running = startTurn(controller, {
-        observer: { onSteer: (steer) => void notifications.push(steer) },
-      });
-      await waitForTurnStart(runtime);
-
-      const input = { userId, chatId, clientMessageId: 'steer-1', text: 'switch approach' };
-      await expect(controller.steer(input)).rejects.toThrow('runtime disconnected mid-call');
-
-      // What a reload or a crash right now would show.
-      expectSteerNotAccepted(steerPartOf((await readAssistantRow()).parts, 'steer-1'));
-      expect(notifications).toEqual([
-        {
-          clientMessageId: 'steer-1',
-          text: 'switch approach',
-          status: 'rejected',
-          reasonCode: 'turn-not-steerable',
-        },
-      ]);
-
-      // Delivery is unknown, so the same id is never dispatched a second time.
-      await expect(controller.steer(input)).rejects.toThrow('runtime disconnected mid-call');
-      expect(runtime.calls.steer).toHaveLength(1);
-
-      // A later checkpoint snapshots the transcript again.
-      runtime.emit({ type: 'text_delta', text: 'still working' });
-      runtime.emit({
-        type: 'activity_started',
-        callId: 'call-1',
-        activity: { name: 'shell', kind: 'command', title: 'ls' },
-      });
-      await waitForStoredText('still working');
-      expectSteerNotAccepted(steerPartOf((await readAssistantRow()).parts, 'steer-1'));
-
-      runtime.emit({ type: 'completed' });
-      await running;
-      expect(steerPartOf((await readAssistantRow()).parts, 'steer-1')).toMatchObject({
-        status: 'rejected',
-        reasonCode: 'turn-not-steerable',
-      });
     });
 
     it('answers a steer the runtime never received with a rejection and dispatches a new id', async () => {
@@ -1227,28 +1181,51 @@ describe('external turn controller', () => {
       expect(steerPartOf(parts, 'steer-2').status).toBe('accepted');
     });
 
-    it('finalizes a steer whose dispatch throws while the turn is ending as not accepted', async () => {
-      const held = Promise.withResolvers<ExternalAgentSteerResult>();
-      const { runtime, controller } = harness({ steerResult: () => held.promise });
+    it('answers a steer the runtime reports as not submitted with a rejection and tells the observer', async () => {
+      const notSubmitted = new RemoteError('UNAVAILABLE', 'vendor link down', {
+        dispatch: 'not-submitted',
+      });
+      const notifications: unknown[] = [];
+      const { runtime, controller } = harness({ steerResult: () => Promise.reject(notSubmitted) });
+      const running = startTurn(controller, {
+        observer: { onSteer: (steer) => void notifications.push(steer) },
+      });
+      await waitForTurnStart(runtime);
+
+      const first = await controller
+        .steer({ userId, chatId, clientMessageId: 'steer-1', text: 'switch approach' })
+        .catch((error: unknown) => ({ threw: String(error) }));
+
+      expect(first).toEqual({ accepted: false, reasonCode: 'turn-not-steerable' });
+      expect(notifications).toEqual([
+        {
+          clientMessageId: 'steer-1',
+          text: 'switch approach',
+          status: 'rejected',
+          reasonCode: 'turn-not-steerable',
+        },
+      ]);
+      expectSteerNotAccepted(steerPartOf((await readAssistantRow()).parts, 'steer-1'));
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('rethrows a steer failure that leaves delivery unknown and never dispatches its id twice', async () => {
+      const unknown = new RemoteError('INTERNAL', 'vendor may have taken it', {
+        dispatch: 'acceptance-unknown',
+      });
+      const { runtime, controller } = harness({ steerResult: () => Promise.reject(unknown) });
       const running = startTurn(controller);
       await waitForTurnStart(runtime);
 
-      const steering = controller
-        .steer({ userId, chatId, clientMessageId: 'steer-1', text: 'switch approach' })
-        .then(
-          () => undefined,
-          (error: unknown) => error
-        );
-      await waitFor(() => runtime.calls.steer.length === 1, 'the steer to reach the runtime');
-      runtime.emit({ type: 'completed' });
-      const failure = new Error('runtime disconnected mid-call');
-      held.reject(failure);
+      const input = { userId, chatId, clientMessageId: 'steer-1', text: 'switch approach' };
+      await expect(controller.steer(input)).rejects.toBe(unknown);
+      await expect(controller.steer(input)).rejects.toBe(unknown);
+      expect(runtime.calls.steer).toHaveLength(1);
 
-      expect(await steering).toBe(failure);
+      runtime.emit({ type: 'completed' });
       await running;
-      const stored = await readAssistantRow();
-      expectSteerNotAccepted(steerPartOf(stored.parts, 'steer-1'));
-      expect(turnPartOf(stored.parts).terminalReason).toBe('completed');
     });
 
     it('persists a rejected steer before terminal finalization', async () => {
