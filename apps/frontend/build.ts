@@ -497,9 +497,19 @@ export async function publishDist(
       // only copy of the previous bundle. A no-op when the failure was the
       // `rmSync` instead, because then `dist` still exists.
       restoreTempPath(backupDist);
+      // Still tracked with `dist` present means `dist` holds the failed bundle
+      // (the rollback could not remove it) and the backup is the only good copy
+      // of the previous one. `removeTempPaths` reads "backup tracked, `dist`
+      // present" as "the new bundle is live, the backup is redundant" — right
+      // for an interrupt mid-finalize, wrong here — and would delete it. Forget
+      // the backup so no cleanup touches it, and say where it is.
+      const keptBackup = tempPaths.has(backupDist) && existsSync(dist);
+      if (keptBackup) tempPaths.delete(backupDist);
       throw new AggregateError(
         [publishError, ...rollbackErrors],
-        `Failed to publish ${dist} and restore its previous contents`
+        `Failed to publish ${dist} and restore its previous contents${
+          keptBackup ? `; the previous bundle is kept at ${backupDist}` : ''
+        }`
       );
     }
     throw publishError;
