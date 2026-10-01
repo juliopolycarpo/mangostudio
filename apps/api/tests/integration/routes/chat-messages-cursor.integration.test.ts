@@ -13,15 +13,15 @@ interface PageBody {
 }
 
 let TEST_USER!: UserFixture;
-let restoreAuth: (() => void) | null = null;
+/** Every authenticated app patches `getSession` over the previous patch, so each one is undone, newest first. */
+const authRestores: (() => void)[] = [];
 
 beforeAll(async () => {
   TEST_USER = await insertTestUser();
 });
 
 afterEach(() => {
-  restoreAuth?.();
-  restoreAuth = null;
+  while (authRestores.length > 0) authRestores.pop()?.();
 });
 
 async function insertMessages(chatId: string, rows: { id: string; timestamp: number }[]) {
@@ -59,7 +59,7 @@ async function newChat(): Promise<string> {
 
 async function fetchPage(chatId: string, cursor?: string | null, limit = PAGE_SIZE) {
   const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
-  restoreAuth = restore;
+  authRestores.push(restore);
   const query = new URLSearchParams({ limit: String(limit) });
   if (cursor) query.set('cursor', cursor);
   const response = await app.handle(
@@ -146,7 +146,7 @@ describe('GET /chats/:id/messages tie-safe cursor', () => {
 describe('GET /chats/:id/messages cursor validation and shape', () => {
   function rawGet(chatId: string, query: string) {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
-    restoreAuth = restore;
+    authRestores.push(restore);
     return app.handle(new Request(`http://localhost/chats/${chatId}/messages?${query}`));
   }
 
