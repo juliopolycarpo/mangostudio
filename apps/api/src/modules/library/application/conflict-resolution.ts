@@ -224,9 +224,9 @@ function readableHashesByKey(resources: readonly LibraryResource[]): Map<string,
 export interface AcknowledgedKeysOptions {
   /**
    * False when a machine in scope could not be scanned. Its copies are missing
-   * from `resources`, so a hash set that looks changed may only be incomplete:
-   * such an acknowledgement is not honoured for this answer, but it is not
-   * deleted either.
+   * from `resources`, so a hash set that looks changed may only be incomplete,
+   * and one that looks unchanged may hide a new version: no acknowledgement is
+   * honoured for this answer, and none is deleted either.
    */
   readonly complete?: boolean;
 }
@@ -251,6 +251,7 @@ export async function acknowledgedResourceKeys(
 ): Promise<ReadonlySet<string>> {
   const deps = resolveDeps(overrides);
   const profileId = resolveActiveProfileId({ userId });
+  const complete = options.complete !== false;
   const hashesByKey = readableHashesByKey(resources);
   const records = await deps.repository.listFor(userId, profileId, [...hashesByKey.keys()]);
 
@@ -258,13 +259,15 @@ export async function acknowledgedResourceKeys(
   const expired: string[] = [];
   for (const record of records) {
     const hashes = hashesByKey.get(record.resourceKey);
-    if (hashes && record.divergenceKey === divergenceKeyFor(hashes)) {
-      current.add(record.resourceKey);
-    } else {
+    if (!hashes || record.divergenceKey !== divergenceKeyFor(hashes)) {
       expired.push(record.resourceKey);
+      continue;
     }
+    // A match over an incomplete scan proves nothing: the machine that could
+    // not answer may hold a version the user never accepted.
+    if (complete) current.add(record.resourceKey);
   }
-  if (options.complete !== false) await deps.repository.remove(userId, profileId, expired);
+  if (complete) await deps.repository.remove(userId, profileId, expired);
   return current;
 }
 

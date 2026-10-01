@@ -674,7 +674,10 @@ const REMOTE_MACHINES: Record<string, readonly (readonly [LibraryLocationId, str
 };
 
 /** A preview over machines that report their own copies through their own runtimes. */
-function previewRemoteMachines(request: PropagationPreviewRequest): Promise<PropagationPreview> {
+function previewRemoteMachines(
+  request: PropagationPreviewRequest,
+  hashDomains: Readonly<Record<string, number>> = {}
+): Promise<PropagationPreview> {
   const env = pathEnv();
   const enabled = settings(SKILL_LOCATIONS);
   return previewLibraryPropagation(userId(), request, {
@@ -684,7 +687,7 @@ function previewRemoteMachines(request: PropagationPreviewRequest): Promise<Prop
       statuses: new Map(
         request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
       ),
-      directoryHashDomain: directoryHashDomainVersion(),
+      directoryHashDomain: hashDomains[environmentId] ?? directoryHashDomainVersion(),
     }),
     enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
   });
@@ -692,13 +695,16 @@ function previewRemoteMachines(request: PropagationPreviewRequest): Promise<Prop
 
 describe('propagation apply — keeping a divergence across machines', () => {
   /** Keeps the divergence over `environmentIds`, with the real acknowledgement path. */
-  async function keepDivergence(environmentIds: readonly string[]) {
+  async function keepDivergence(
+    environmentIds: readonly string[],
+    hashDomains: Readonly<Record<string, number>> = {}
+  ) {
     const request: PropagationPreviewRequest = {
       resourceKeys: [REMOTE_SKILL_KEY],
       targetLocationIds: ['claude-skills', 'agents-skills'],
       environmentIds: [...environmentIds],
     };
-    const taken = await previewRemoteMachines(request);
+    const taken = await previewRemoteMachines(request, hashDomains);
     const entry = onlyEntry(taken);
     const reviewed = entry.sourceGroups.map((group) => group.contentHash).sort();
 
@@ -716,7 +722,7 @@ describe('propagation apply — keeping a divergence across machines', () => {
           })),
         },
       ]),
-      applyDeps({ preview: (_userId, requested) => previewRemoteMachines(requested) })
+      applyDeps({ preview: (_userId, requested) => previewRemoteMachines(requested, hashDomains) })
     ).then(
       () => 'applied',
       (error: unknown) => `rejected: ${error instanceof Error ? error.message : String(error)}`
@@ -746,6 +752,18 @@ describe('propagation apply — keeping a divergence across machines', () => {
     expect({ outcome, stored }).toEqual({
       outcome: 'applied',
       stored: [{ resourceKey: REMOTE_SKILL_KEY, contentHashes: reviewed }],
+    });
+  });
+
+  it('refuses to keep hashes that runtimes computed in different directory domains', async () => {
+    // Distinct hashes across directory-hash domains do not prove distinct content,
+    // so the preview calls the skill incomparable and there is nothing to keep.
+    const hashDomains = { 'box-a': directoryHashDomainVersion(), 'box-b': 1 };
+    const { outcome, stored } = await keepDivergence(['box-a', 'box-b'], hashDomains);
+
+    expect({ outcome, stored }).toEqual({
+      outcome: `rejected: "${REMOTE_SKILL_KEY}" has no comparable divergence to keep: expected divergence "divergent", received "incomparable".`,
+      stored: [],
     });
   });
 });

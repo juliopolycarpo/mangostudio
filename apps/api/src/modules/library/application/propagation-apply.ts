@@ -716,6 +716,13 @@ function planAcknowledgement(
       `"${entry.resourceKey}" is not divergent, so there is no divergence to keep.`
     );
   }
+  // Distinct hashes from runtimes that hash directories differently do not prove
+  // distinct content, so there is no divergence to accept either.
+  if (entry.divergence !== 'divergent') {
+    throw validationError(
+      `"${entry.resourceKey}" has no comparable divergence to keep: expected divergence "divergent", received "${entry.divergence}".`
+    );
+  }
   if (decision.destinations.some((target) => target.action === 'apply')) {
     throw validationError(
       `"${entry.resourceKey}" cannot both keep its divergence and write to a destination.`

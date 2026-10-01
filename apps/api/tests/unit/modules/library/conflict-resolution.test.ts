@@ -359,6 +359,25 @@ describe('acknowledgedResourceKeys', () => {
     });
   });
 
+  it('does not honour a matching acknowledgement while a machine could not be scanned', async () => {
+    // The visible copies still hold exactly the accepted versions, but the machine
+    // that could not answer may now hold a third one the user never saw.
+    const visible = ghSkill([
+      instance('mango-skills', 'hash-a'),
+      instance('claude-skills', 'hash-b'),
+    ]);
+    const repository = memoryRepository([record]);
+
+    const kept = await acknowledgedResourceKeys('user-1', [visible], deps(repository), {
+      complete: false,
+    });
+
+    expect({ acknowledged: [...kept], storedRows: repository.rows.size }).toEqual({
+      acknowledged: [],
+      storedRows: 1,
+    });
+  });
+
   it('retires an acknowledgement when the divergence resolves entirely', async () => {
     const repository = memoryRepository([record]);
     const converged = ghSkill([
