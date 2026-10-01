@@ -153,6 +153,29 @@ Todos os alvos crescem os mesmos ~17,7 MB de bytecode (`bun build --compile` do 
 embutido para os outros sete alvos). O `.map` externo mantém o formato, e os stack traces
 continuam apontando para as linhas do código original.
 
+### Divisão de código
+
+A mesma compilação também passa `--splitting` (`binaryCompileFlags` em `scripts/lib/build.ts`;
+produção acrescenta `--minify`). Cada `import()` dinâmico do hub — cada comando da CLI e o
+`start-server` — vira um chunk próprio, embutido no executável e carregado só quando aquele
+comando roda, em vez de um bundle único avaliado por inteiro a cada início. Um módulo que dois
+chunks importam continua empacotado uma só vez, então singletons de nível de módulo mantêm uma
+única identidade.
+
+- Os chunks ficam dentro do binário. Nada ao lado dele é lido em tempo de execução, então o
+  executável funciona a partir de qualquer diretório.
+- Cada chunk ganha seu próprio `.map` externo (cerca de 75, ao lado do único `mangostudio.map`),
+  gravado junto ao binário em `.mango/out/<platform>/`. Arquivos e pacotes npm copiam o hub e o
+  runtime pelo nome e não distribuem mapas; como os nomes dos chunks levam hash, mapas antigos
+  de um build anterior permanecem nesse diretório até ele ser limpo.
+- Stack traces de um chunk carregado sob demanda continuam apontando para as linhas do código
+  original: os mapas também ficam embutidos no executável, então uma cópia isolada do binário
+  reporta `lazy.ts:5`, não um deslocamento de chunk. `scripts/tests/build.unit.test.ts`
+  compila um fixture com essas flags e verifica isso.
+
+O efeito medido no tempo até ficar saudável, na latência da primeira requisição, na memória e no
+tamanho está pendente de medição em um host ocioso; esta seção recebe os números quando existirem.
+
 ## Como medir de novo
 
 - Tamanhos: baixe os artefatos `runtime-<sha>-<platform>` de uma execução de CI

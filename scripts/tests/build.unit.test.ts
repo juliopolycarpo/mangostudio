@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   binaryCompileDefines,
   binaryCompileFlags,
@@ -8,6 +9,81 @@ import {
   selectBuildWorkspaces,
 } from '../lib/build';
 import { readText } from './support/read-text';
+
+/** Line of the fixture's `lazy.ts` that throws; a mapped stack must name it. */
+const LAZY_THROW_LINE = 5;
+
+/**
+ * Compiles a three-module fixture with the production hub flags: an entry that
+ * statically imports a shared `state` module, then dynamically imports a module
+ * that imports the same `state` and throws.
+ */
+async function compileSplitFixture(dir: string) {
+  const src = join(dir, 'src');
+  const out = join(dir, 'out');
+  mkdirSync(src);
+  mkdirSync(out);
+  await Bun.write(
+    join(src, 'state.ts'),
+    [
+      'export const state = { loads: 0 };',
+      'export function mark(): number {',
+      '  state.loads += 1;',
+      '  return state.loads;',
+      '}',
+      '',
+    ].join('\n')
+  );
+  await Bun.write(
+    join(src, 'entry.ts'),
+    [
+      "import { mark } from './state';",
+      '',
+      'mark();',
+      "const lazy = await import('./lazy');",
+      'lazy.report();',
+      '',
+    ].join('\n')
+  );
+  await Bun.write(
+    join(src, 'lazy.ts'),
+    [
+      "import { mark } from './state';",
+      '',
+      'export function report(): void {',
+      '  console.log(`loads=${mark()}`);',
+      "  throw new Error('lazy chunk failure');",
+      '}',
+      '',
+    ].join('\n')
+  );
+
+  // `--outfile` gains `.exe` on Windows, so the name is built to match.
+  const executable = join(out, process.platform === 'win32' ? 'fixture.exe' : 'fixture');
+  const compile = Bun.spawnSync({
+    cmd: [
+      'bun',
+      'build',
+      join(src, 'entry.ts'),
+      '--compile',
+      ...binaryCompileFlags('production'),
+      '--outfile',
+      executable,
+    ],
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const result = { exitCode: compile.exitCode, stderr: compile.stderr.toString().trim() };
+  if (result.exitCode !== 0) return { ...result, executable };
+
+  // Run a lone copy: the chunk `.map` files beside the compiled output must
+  // not be what makes a lazy chunk load or a stack trace map.
+  const alone = join(dir, 'alone');
+  mkdirSync(alone);
+  const lone = join(alone, basename(executable));
+  copyFileSync(executable, lone);
+  return { ...result, executable: lone };
+}
 
 describe('build script', () => {
   test('keeps only build-capable workspaces', () => {
@@ -82,21 +158,55 @@ describe('build script', () => {
     expect(defines).toContain('process.env.BUILD_PLATFORM_ID="linux-x64-musl"');
   });
 
-  test('compiles every standalone binary to ESM bytecode with external sourcemaps', () => {
+  test('compiles every standalone binary to split ESM bytecode with external sourcemaps', () => {
     // Bytecode without `--format=esm` falls back to CommonJS, which rejects
-    // the hub entry's top-level `await` and fails the compile.
+    // the hub entry's top-level `await`. `--splitting` moves each dynamically
+    // imported module into its own chunk, loaded only when it is selected.
     expect(binaryCompileFlags('production')).toEqual([
       '--bytecode',
       '--format=esm',
+      '--splitting',
       '--sourcemap=external',
       '--minify',
     ]);
     expect(binaryCompileFlags('development')).toEqual([
       '--bytecode',
       '--format=esm',
+      '--splitting',
       '--sourcemap=external',
     ]);
   });
+
+  test('a compiled split binary keeps one module instance and maps lazy-chunk errors', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mangostudio-split-compile-'));
+    try {
+      const fixture = await compileSplitFixture(dir);
+      const run = Bun.spawnSync({
+        cmd: [fixture.executable],
+        // Neither the fixture sources nor the compile output directory.
+        cwd: tmpdir(),
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+
+      expect({
+        compileExit: fixture.exitCode,
+        compileStderr: fixture.stderr,
+        stdout: run.stdout.toString().trim(),
+        exitedWithError: run.exitCode !== 0,
+        stackNamesLazySource: run.stderr.toString().includes(`lazy.ts:${LAZY_THROW_LINE}:`),
+      }).toEqual({
+        compileExit: 0,
+        compileStderr: '',
+        // 2 = the entry and the lazy chunk incremented the same `state` module.
+        stdout: 'loads=2',
+        exitedWithError: true,
+        stackNamesLazySource: true,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   test('uses the binary alias for standalone smoke builds', () => {
     expect(readText('scripts/test-build.ts')).toContain("'build:binary'");

@@ -51,10 +51,14 @@ export function binaryCompileDefines(context: BinaryCompileDefines): string[] {
  * hub's `--version` went from 427 ms to 148 ms on linux-x64, median of 20), at the cost
  * of a larger binary. Bytecode defaults to CommonJS output, which rejects the
  * entry's top-level `await`, so `--format=esm` is required with it.
- * // Usage: binaryCompileFlags('production') // → ['--bytecode', '--format=esm', '--sourcemap=external', '--minify']
+ * `--splitting` puts each dynamically imported module (every CLI command, the
+ * server) in its own chunk, embedded in the binary and loaded only when
+ * selected; a module shared by two chunks is still bundled once. Chunks carry
+ * their own external `.map` files, written beside the binary and not shipped.
+ * // Usage: binaryCompileFlags('production') // → ['--bytecode', '--format=esm', '--splitting', '--sourcemap=external', '--minify']
  */
 export function binaryCompileFlags(buildType: string): string[] {
-  const flags = ['--bytecode', '--format=esm', '--sourcemap=external'];
+  const flags = ['--bytecode', '--format=esm', '--splitting', '--sourcemap=external'];
   if (buildType === 'production') flags.push('--minify');
   return flags;
 }

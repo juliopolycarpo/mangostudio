@@ -150,6 +150,27 @@ Every target grows by the same ~17.7 MB of bytecode (`bun build --compile` of th
 entry for the other seven targets). The external `.map` is unchanged in shape, and stack
 traces still resolve to original source lines.
 
+### Code splitting
+
+The same compile also passes `--splitting` (`binaryCompileFlags` in `scripts/lib/build.ts`;
+production adds `--minify`). Every dynamic `import()` in the hub — each CLI command and
+`start-server` — becomes its own chunk, embedded in the executable and loaded only when that
+command runs, instead of one bundle evaluated whole at every start. A module two chunks both
+import is still bundled once, so module-level singletons keep one identity.
+
+- Chunks live inside the binary. Nothing beside it is read at run time, so the executable
+  works from any directory.
+- Each chunk gets its own external `.map` (about 75, beside the single `mangostudio.map`),
+  written next to the binary under `.mango/out/<platform>/`. Archives and npm packages copy
+  the hub and runtime by name and ship no maps; hashed chunk names mean stale maps from an
+  earlier build stay in that directory until it is cleaned.
+- Stack traces from a lazy chunk still resolve to original source lines: the maps are embedded
+  in the executable as well, so a lone copy of the binary reports `lazy.ts:5`, not a chunk
+  offset. `scripts/tests/build.unit.test.ts` compiles a fixture with these flags and asserts it.
+
+The measured effect on time to health, first-request latency, memory and size is pending a
+quiet-host measurement; this section gets its numbers once they exist.
+
 ## Re-measuring
 
 - Sizes: download the `runtime-<sha>-<platform>` artifacts of a CI run
