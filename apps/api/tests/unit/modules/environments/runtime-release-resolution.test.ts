@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   CHECKSUMS_CACHE_NAME,
@@ -9,14 +8,23 @@ import {
   runtimeDigestSidecarPath,
 } from '../../../../src/modules/environments/domain/runtime-release-fetch';
 import { resolveRuntimeRelease } from '../../../../src/modules/environments/domain/runtime-release-resolution';
+import { FAKE_RUNTIME_CACHE_ROOT, recordingCacheFs } from '../../../support/runtime-cache-fs';
 
 /**
- * Where these tests pretend the hub cache lives. Under the OS temp directory and
- * never created: `loadRuntimeReleaseBytes` prunes the parent of the version
- * directory on the real file system, so a fake root such as `/unused` would name
- * the root of the current drive on Windows and everything in it.
+ * `loadRuntimeReleaseBytes` prunes the parent of the version directory once a
+ * download completes. Every call in this file therefore runs the prune on a
+ * recording fake, never on the real file system: a fake cache root such as
+ * `/unused` once named the root of the current drive and everything in it.
  */
-const FAKE_CACHE_ROOT = join(tmpdir(), 'mango-release-resolution-test-cache');
+function loadFromRelease(
+  platformId: string,
+  overrides: Parameters<typeof loadRuntimeReleaseBytes>[1] = {}
+): ReturnType<typeof loadRuntimeReleaseBytes> {
+  return loadRuntimeReleaseBytes(platformId, {
+    cacheFs: recordingCacheFs([]).fs,
+    ...overrides,
+  });
+}
 
 describe('resolveRuntimeRelease', () => {
   it('keeps stable tag and asset identity exact', () => {
@@ -96,7 +104,7 @@ describe('resolveRuntimeRelease', () => {
     let resolved = 0;
     const asset = 'mangostudio-runtime-1.2.3-canary.abcdef0-linux-x64';
 
-    const loaded = await loadRuntimeReleaseBytes('linux-x64', {
+    const loaded = await loadFromRelease('linux-x64', {
       version: '1.2.3-canary.abcdef0',
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
@@ -109,7 +117,7 @@ describe('resolveRuntimeRelease', () => {
         resolved += 1;
         return Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]);
       },
-      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
+      cacheDir: (version) => join(FAKE_RUNTIME_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: () => Promise.resolve(),
     });
@@ -131,7 +139,7 @@ describe('resolveRuntimeRelease', () => {
     const hash = createHash('sha256').update(bytes).digest('hex');
     const written: Array<{ path: string; bytes: Uint8Array }> = [];
 
-    const loaded = await loadRuntimeReleaseBytes('linux-x64', {
+    const loaded = await loadFromRelease('linux-x64', {
       version: '1.2.3-canary.abcdef0',
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
@@ -140,7 +148,7 @@ describe('resolveRuntimeRelease', () => {
         );
       }) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
-      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
+      cacheDir: (version) => join(FAKE_RUNTIME_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: (path, writtenBytes) => {
         written.push({ path, bytes: writtenBytes });
@@ -165,7 +173,7 @@ describe('resolveRuntimeRelease', () => {
     const hash = createHash('sha256').update(bytes).digest('hex');
     const asset = 'mangostudio-runtime-1.2.3-linux-x64';
 
-    const loaded = await loadRuntimeReleaseBytes('linux-x64', {
+    const loaded = await loadFromRelease('linux-x64', {
       version: '1.2.3',
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
@@ -174,7 +182,7 @@ describe('resolveRuntimeRelease', () => {
         );
       }) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
-      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
+      cacheDir: (version) => join(FAKE_RUNTIME_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: () => Promise.reject(new Error('disk full')),
     });
@@ -184,12 +192,12 @@ describe('resolveRuntimeRelease', () => {
 
   /** A release that was pruned: nothing under its tag answers any more. */
   const goneRelease = (version: string) =>
-    loadRuntimeReleaseBytes('linux-x64', {
+    loadFromRelease('linux-x64', {
       version,
       fetch: (() =>
         Promise.resolve(new Response('Not Found', { status: 404 }))) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
-      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
+      cacheDir: (version) => join(FAKE_RUNTIME_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: () => Promise.resolve(),
     });
@@ -251,7 +259,7 @@ describe('pinnedRuntimeDigest', () => {
 describe('the runtime cache when the release cannot be reached', () => {
   const VERSION = '1.2.3';
   const ASSET = 'mangostudio-runtime-1.2.3-linux-x64';
-  const CACHE_DIR = join(FAKE_CACHE_ROOT, '1.2.3');
+  const CACHE_DIR = join(FAKE_RUNTIME_CACHE_ROOT, '1.2.3');
   const BYTES = new TextEncoder().encode('a runtime this hub verified last week');
   const DIGEST = createHash('sha256').update(BYTES).digest('hex');
   const CACHE_PATH = `${CACHE_DIR}/${ASSET}`;
@@ -267,7 +275,7 @@ describe('the runtime cache when the release cannot be reached', () => {
 
   function load(cache: Record<string, Uint8Array>, fetchImpl: typeof fetch) {
     const requested: string[] = [];
-    const loaded = loadRuntimeReleaseBytes('linux-x64', {
+    const loaded = loadFromRelease('linux-x64', {
       version: VERSION,
       fetch: ((input: string | URL | Request) => {
         requested.push(String(input));
@@ -394,7 +402,7 @@ describe('the runtime cache when the release cannot be reached', () => {
 
 describe('the runtime cache while the release is reachable', () => {
   const ASSET = 'mangostudio-runtime-1.2.3-linux-x64';
-  const CACHE_DIR = join(FAKE_CACHE_ROOT, '1.2.3');
+  const CACHE_DIR = join(FAKE_RUNTIME_CACHE_ROOT, '1.2.3');
 
   // Must not regress: the release stays authoritative online, so a cache entry
   // that disagrees with the checksums it publishes is replaced, not trusted.
@@ -407,7 +415,7 @@ describe('the runtime cache while the release is reachable', () => {
       [runtimeDigestSidecarPath(assetPath)]: new TextEncoder().encode('0'.repeat(64)),
     };
 
-    const loaded = await loadRuntimeReleaseBytes('linux-x64', {
+    const loaded = await loadFromRelease('linux-x64', {
       version: '1.2.3',
       fetch: ((input: string | URL | Request) =>
         Promise.resolve(
@@ -433,7 +441,7 @@ describe('the runtime cache while the release is reachable', () => {
     const hash = createHash('sha256').update(bytes).digest('hex');
     const written: string[] = [];
 
-    await loadRuntimeReleaseBytes('linux-x64', {
+    await loadFromRelease('linux-x64', {
       version: '1.2.3',
       fetch: ((input: string | URL | Request) =>
         Promise.resolve(
@@ -461,7 +469,7 @@ describe('the runtime cache while the release is reachable', () => {
     const hash = createHash('sha256').update(bytes).digest('hex');
     const written: string[] = [];
 
-    await loadRuntimeReleaseBytes('linux-x64', {
+    await loadFromRelease('linux-x64', {
       version: '1.2.3-canary.abcdef0',
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
@@ -470,7 +478,7 @@ describe('the runtime cache while the release is reachable', () => {
         );
       }) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
-      cacheDir: (version) => join(FAKE_CACHE_ROOT, version),
+      cacheDir: (version) => join(FAKE_RUNTIME_CACHE_ROOT, version),
       readBytes: () => Promise.resolve(null),
       writeCache: (path) => {
         written.push(path);
@@ -478,6 +486,36 @@ describe('the runtime cache while the release is reachable', () => {
       },
     });
 
-    expect(written).toContain(join(FAKE_CACHE_ROOT, '1.2.3-canary.abcdef0', CHECKSUMS_CACHE_NAME));
+    expect(written).toContain(
+      join(FAKE_RUNTIME_CACHE_ROOT, '1.2.3-canary.abcdef0', CHECKSUMS_CACHE_NAME)
+    );
+  });
+
+  // The prune is reachable from a completed download; it must stay inside the
+  // runtime-cache directory, and here it only ever runs on the recording fake.
+  it('prunes older version directories from the runtime cache after a download, on the injected file system', async () => {
+    const bytes = new TextEncoder().encode('fresh runtime');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const cache = recordingCacheFs(['0.9.0', '1.0.0', '1.1.0', '1.2.3', 'notes.txt']);
+
+    await loadFromRelease('linux-x64', {
+      version: '1.2.3',
+      fetch: ((input: string | URL | Request) =>
+        Promise.resolve(
+          String(input).endsWith('/SHA256SUMS')
+            ? new Response(`${hash}  ${ASSET}\n`)
+            : new Response(bytes)
+        )) as unknown as typeof fetch,
+      resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+      cacheDir: (version) => join(FAKE_RUNTIME_CACHE_ROOT, version),
+      cacheFs: cache.fs,
+      readBytes: () => Promise.resolve(null),
+      writeCache: () => Promise.resolve(),
+    });
+
+    expect(cache.removed).toEqual([
+      join(FAKE_RUNTIME_CACHE_ROOT, '1.0.0'),
+      join(FAKE_RUNTIME_CACHE_ROOT, '0.9.0'),
+    ]);
   });
 });

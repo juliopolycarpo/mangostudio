@@ -44,6 +44,8 @@ import {
 } from '../domain/runtime-push';
 import {
   pruneRuntimeCache,
+  RUNTIME_CACHE_DIR_NAME,
+  type RuntimeCacheFs,
   readOfflineCacheEntry,
   rememberReleaseChecksums,
   runtimeDigestSidecarPath,
@@ -131,6 +133,8 @@ export interface WslProvisionerDeps extends SafeFetchDeps {
   readBytes(path: string): Promise<Uint8Array | null>;
   writeCache(path: string, bytes: Uint8Array): Promise<void>;
   cacheDir(version: string): string;
+  /** The file system the post-download cache prune runs on; tests pass a recording fake. */
+  cacheFs?: RuntimeCacheFs;
   /** Where this checkout's own Linux runtime build would be. */
   localBuildPath(platformId: LinuxPlatformId): string;
   version(): string;
@@ -673,7 +677,7 @@ async function loadAsset(
       .writeCache(runtimeDigestSidecarPath(cachePath), new TextEncoder().encode(actual))
       .catch(() => undefined);
   }
-  await pruneRuntimeCache(versionDir, version).catch((error: unknown) => {
+  await pruneRuntimeCache(versionDir, version, deps.cacheFs).catch((error: unknown) => {
     logger.warn('cache_prune_failed', { path: versionDir, error: String(error) });
   });
   return { bytes, digest: actual, offlineCache: false };
@@ -932,7 +936,7 @@ const defaultDeps: WslProvisionerDeps = {
     await writeFile(staging, bytes);
     await rename(staging, path);
   },
-  cacheDir: (version) => join(getHomeMangoDir(), 'runtime-cache', version),
+  cacheDir: (version) => join(getHomeMangoDir(), RUNTIME_CACHE_DIR_NAME, version),
   localBuildPath: (platformId) => localRuntimeBuildPath(getRuntimeBaseDir(), platformId),
   version: getVersion,
   hubHost: hostname,

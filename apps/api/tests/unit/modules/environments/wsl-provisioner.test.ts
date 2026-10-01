@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeSlotConfig } from '@mangostudio/shared/runtime-home';
 import {
@@ -13,6 +11,7 @@ import {
   type DistroCommandResult,
   WslProvisioningError,
 } from '../../../../src/modules/environments/infrastructure/wsl-provisioner';
+import { recordingCacheFs } from '../../../support/runtime-cache-fs';
 
 const VERSION = '1.2.3';
 const ASSET = `mangostudio-${VERSION}-linux-x64.tar.gz`;
@@ -21,6 +20,8 @@ const ARCHIVE = new TextEncoder().encode('pretend this is a tar.gz');
 const DIGEST = createHash('sha256').update(ARCHIVE).digest('hex');
 const CHECKSUMS = `${DIGEST}  ${RAW_ASSET}\n${DIGEST}  ${ASSET}\n`;
 const DISTRO_HOME = '/home/dev';
+/** The hub cache these tests pretend to use. Shaped like `~/.mango/runtime-cache`; never on disk. */
+const CACHE_ROOT = '/hub-home/.mango/runtime-cache';
 
 interface DistroCall {
   readonly distro: string;
@@ -61,8 +62,8 @@ function harness(
     readonly version?: string;
     /** Bytes at the local build path, standing in for a checkout that built one. */
     readonly localBuild?: Uint8Array | null;
-    /** Overrides the (otherwise fake) cache directory — used for real-fs GC tests. */
-    readonly cacheDirOverride?: (version: string) => string;
+    /** Entries the hub cache lists when the post-install prune reads it. */
+    readonly cacheEntries?: readonly string[];
     /** Stands in for a full disk or an unwritable cache directory. */
     readonly writeCacheFails?: boolean;
     /** Exact cache paths and their contents, for tests that need a sidecar too. */
@@ -81,10 +82,12 @@ function harness(
   let installed = options.installed;
   let config = options.config ?? null;
 
+  const cache = recordingCacheFs(options.cacheEntries ?? []);
   const provisioner = createWslProvisioner({
     version: () => version,
     hubHost: () => 'win-desktop',
-    cacheDir: options.cacheDirOverride ?? ((cacheVersion) => `/cache/${cacheVersion}`),
+    cacheDir: (cacheVersion) => `${CACHE_ROOT}/${cacheVersion}`,
+    cacheFs: cache.fs,
     localBuildPath: (platformId) => `/repo/.mango/out/${platformId}/mangostudio-runtime`,
     readBytes: (path) => {
       read.push(path);
@@ -161,7 +164,15 @@ function harness(
     }) as typeof fetch,
   });
 
-  return { provisioner, calls, read, requested, written, config: () => config };
+  return {
+    provisioner,
+    calls,
+    read,
+    requested,
+    written,
+    removedFromCache: cache.removed,
+    config: () => config,
+  };
 }
 
 describe('WslProvisioner', () => {
@@ -174,7 +185,7 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${RAW_ASSET}`,
     ]);
-    expect(written.get(`/cache/${VERSION}/${RAW_ASSET}`)).toEqual(ARCHIVE);
+    expect(written.get(`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}`)).toEqual(ARCHIVE);
     expect(calls.every((call) => call.distro === 'Ubuntu')).toBe(true);
 
     const unpack = calls.find((call) => call.script.includes('cat > '));
@@ -205,8 +216,8 @@ describe('WslProvisioner', () => {
     const { provisioner, calls, written } = harness({
       offline: true,
       cacheFiles: {
-        [`/cache/${VERSION}/${RAW_ASSET}`]: ARCHIVE,
-        [`/cache/${VERSION}/${RAW_ASSET}.sha256`]: new TextEncoder().encode(DIGEST),
+        [`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}`]: ARCHIVE,
+        [`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}.sha256`]: new TextEncoder().encode(DIGEST),
       },
     });
 
@@ -224,8 +235,8 @@ describe('WslProvisioner', () => {
     const { provisioner, calls, written } = harness({
       offline: true,
       cacheFiles: {
-        [`/cache/${VERSION}/${ASSET}`]: ARCHIVE,
-        [`/cache/${VERSION}/${ASSET}.sha256`]: new TextEncoder().encode(DIGEST),
+        [`${CACHE_ROOT}/${VERSION}/${ASSET}`]: ARCHIVE,
+        [`${CACHE_ROOT}/${VERSION}/${ASSET}.sha256`]: new TextEncoder().encode(DIGEST),
       },
     });
 
@@ -240,7 +251,7 @@ describe('WslProvisioner', () => {
   it('refuses an unreachable release when nothing recorded what the cache holds', async () => {
     const { provisioner } = harness({
       offline: true,
-      cacheFiles: { [`/cache/${VERSION}/${RAW_ASSET}`]: ARCHIVE },
+      cacheFiles: { [`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}`]: ARCHIVE },
     });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(WslProvisioningError);
@@ -251,7 +262,9 @@ describe('WslProvisioner', () => {
 
     await provisioner.ensure('Ubuntu');
 
-    expect(new TextDecoder().decode(written.get(`/cache/${VERSION}/SHA256SUMS`))).toBe(CHECKSUMS);
+    expect(new TextDecoder().decode(written.get(`${CACHE_ROOT}/${VERSION}/SHA256SUMS`))).toBe(
+      CHECKSUMS
+    );
   });
 
   it('falls back to the platform archive when the raw asset is unpublished', async () => {
@@ -266,7 +279,7 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${ASSET}`,
     ]);
-    expect(written.get(`/cache/${VERSION}/${ASSET}`)).toEqual(ARCHIVE);
+    expect(written.get(`${CACHE_ROOT}/${VERSION}/${ASSET}`)).toEqual(ARCHIVE);
     const unpack = calls.find((call) => call.script.includes('tar -xzf -'));
     expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
   });
@@ -288,7 +301,7 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/${canaryAsset}`,
     ]);
-    expect(written.get(`/cache/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
+    expect(written.get(`${CACHE_ROOT}/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
   });
 
   // A cache entry is only as good as the checksum that vouches for it: a
@@ -309,7 +322,7 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/${canaryAsset}`,
     ]);
-    expect(written.get(`/cache/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
+    expect(written.get(`${CACHE_ROOT}/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
   });
 
   // Pruning deletes the whole release, so SHA256SUMS 404s before anything can
@@ -527,7 +540,8 @@ describe('WslProvisioner', () => {
   it('names both ways out when the release cannot be reached', async () => {
     const provisioner = createWslProvisioner({
       version: () => VERSION,
-      cacheDir: (version) => `/cache/${version}`,
+      cacheDir: (version) => `${CACHE_ROOT}/${version}`,
+      cacheFs: recordingCacheFs([]).fs,
       readBytes: () => Promise.resolve(null),
       // Only the slot probe runs before the download fails.
       runInDistro: () =>
@@ -540,7 +554,7 @@ describe('WslProvisioner', () => {
     // where the cache expects the asset, and where the binary belongs.
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
       new RegExp(
-        `Could not download .*\\. Either download .*/${RAW_ASSET} to /cache/${VERSION}/${RAW_ASSET} ` +
+        `Could not download .*\\. Either download .*/${RAW_ASSET} to ${CACHE_ROOT}/${VERSION}/${RAW_ASSET} ` +
           'on this host and connect again, or put the 1\\.2\\.3 runtime at ' +
           '~/\\.mango/runtime/wsl/current/mangostudio-runtime inside "Ubuntu" yourself\\.',
         's'
@@ -681,27 +695,16 @@ describe('WslProvisioner', () => {
   // but used to never call `pruneRuntimeCache`, so `~/.mango/runtime-cache/`
   // grew one directory per version forever — the exact "stranded bytes"
   // problem the removal feature exists to fix, just on the hub side instead
-  // of the distro side. `pruneRuntimeCache` reads/writes the real filesystem
-  // (it is shared with the ssh fetch path), so this test uses a real temp
-  // directory rather than the harness's mocked cache; `writeCache` itself
-  // stays mocked, so the current version's own directory never lands on
-  // disk here — pruning older entries down to one survivor is what proves
-  // the call happened.
+  // of the distro side. The prune runs on the harness's recording file system,
+  // so what it would remove is observable without a real path being touched.
   it('prunes the hub-side download cache after a fresh install', async () => {
-    const cacheRoot = await mkdtemp(join(tmpdir(), 'mango-wsl-cache-'));
-    try {
-      await mkdir(join(cacheRoot, '0.9.0'), { recursive: true });
-      await mkdir(join(cacheRoot, '0.8.0'), { recursive: true });
+    const { provisioner, removedFromCache } = harness({ cacheEntries: ['0.9.0', '0.8.0'] });
 
-      const { provisioner } = harness({ cacheDirOverride: (version) => join(cacheRoot, version) });
-      await provisioner.ensure('Ubuntu');
+    await provisioner.ensure('Ubuntu');
 
-      // Only the most recent stale entry survives as "previous"; the older
-      // one is pruned. Left unfixed, both (and every future version) pile up.
-      expect(await readdir(cacheRoot)).toEqual(['0.9.0']);
-    } finally {
-      await rm(cacheRoot, { force: true, recursive: true });
-    }
+    // Only the most recent stale entry survives as "previous"; the older
+    // one is pruned. Left unfixed, both (and every future version) pile up.
+    expect(removedFromCache).toEqual([join(CACHE_ROOT, '0.8.0')]);
   });
 
   // Regression: this provisioner keeps its own copy of `loadAsset`, and only the
@@ -716,7 +719,7 @@ describe('WslProvisioner', () => {
 
     await provisioner.ensure('Ubuntu');
 
-    const sidecar = written.get(`/cache/${VERSION}/${RAW_ASSET}.sha256`);
+    const sidecar = written.get(`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}.sha256`);
     expect(sidecar).toBeDefined();
     expect(new TextDecoder().decode(sidecar)).toBe(DIGEST);
   });
@@ -728,8 +731,10 @@ describe('WslProvisioner', () => {
 
     await provisioner.ensure('Ubuntu');
 
-    expect(written.has(`/cache/${VERSION}/${RAW_ASSET}.sha256`)).toBe(false);
-    expect(new TextDecoder().decode(written.get(`/cache/${VERSION}/${ASSET}.sha256`))).toBe(DIGEST);
+    expect(written.has(`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}.sha256`)).toBe(false);
+    expect(new TextDecoder().decode(written.get(`${CACHE_ROOT}/${VERSION}/${ASSET}.sha256`))).toBe(
+      DIGEST
+    );
   });
 
   // Caching is a courtesy: a hub that cannot write the asset must not leave a
