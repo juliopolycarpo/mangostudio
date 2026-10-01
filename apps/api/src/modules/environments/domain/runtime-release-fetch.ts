@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
@@ -413,9 +413,31 @@ const nodeRuntimeCacheFs: RuntimeCacheFs = {
   remove: (path) => rm(path, { force: true, recursive: true }),
 };
 
+function ownedCacheRoot(currentVersionDir: string, currentVersion: string): string {
+  const cacheRoot = dirname(currentVersionDir);
+  const singleName =
+    currentVersion !== '' &&
+    currentVersion !== '.' &&
+    currentVersion !== '..' &&
+    basename(currentVersion) === currentVersion;
+  const namedAfterVersion = basename(currentVersionDir) === currentVersion;
+  const isFilesystemRoot = dirname(cacheRoot) === cacheRoot;
+  if (singleName && namedAfterVersion && !isFilesystemRoot) return cacheRoot;
+  throw new Error(
+    `pruneRuntimeCache refused to prune the parent of ${JSON.stringify(currentVersionDir)} | expected: <cache root>/<version> named exactly the single-name version, under a cache root that is not a filesystem root | received: version ${JSON.stringify(currentVersion)}, cache root ${JSON.stringify(cacheRoot)}`
+  );
+}
+
 /**
  * Keeps the hub cache at current + previous version directories only — same rule
  * as slot version GC in {@link pushRuntimeBinary}.
+ *
+ * Every entry of the parent of `currentVersionDir` is a candidate for removal,
+ * so the parent has to be a cache root this module owns: `currentVersionDir`
+ * must be named exactly `currentVersion` (a single directory name) and its
+ * parent must not be a filesystem root. A fake or collapsed path such as `/x`
+ * names the root of the current drive on Windows, and the prune would remove
+ * everything in it. Anything else throws, naming the value and the shape.
  *
  * `fs` is injectable so a test can record the removals instead of performing them.
  * // Usage: await pruneRuntimeCache(join(cacheRoot, '1.2.0'), '1.2.0')
@@ -425,7 +447,7 @@ export async function pruneRuntimeCache(
   currentVersion: string,
   fs: RuntimeCacheFs = nodeRuntimeCacheFs
 ): Promise<void> {
-  const cacheRoot = dirname(currentVersionDir);
+  const cacheRoot = ownedCacheRoot(currentVersionDir, currentVersion);
   let entries: string[];
   try {
     entries = await fs.readdir(cacheRoot);
