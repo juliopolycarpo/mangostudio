@@ -56,6 +56,7 @@ import { chatRunnerModel } from './055_chat_runner_model';
 import { externalTurnAttempts } from './056_external_turn_attempts';
 import { dropAttemptConnectionRevision } from './057_drop_attempt_connection_revision';
 import { messagesGeneratingIndex } from './058_messages_generating_index';
+import { messagePagingIndexes } from './059_message_paging_indexes';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -116,4 +117,5 @@ export const allMigrations = {
   '056_external_turn_attempts': externalTurnAttempts,
   '057_drop_attempt_connection_revision': dropAttemptConnectionRevision,
   '058_messages_generating_index': messagesGeneratingIndex,
+  '059_message_paging_indexes': messagePagingIndexes,
 };
