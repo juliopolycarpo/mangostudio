@@ -1,5 +1,14 @@
 import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Same matrix as install-sh-layout.unit.test.ts, run against the real host
@@ -17,10 +26,17 @@ import { join } from 'node:path';
 // Cases that never smoke an exe (prune bookkeeping, unknown-line survival,
 // uninstall, the --rollback/--use failure paths) hand-craft the on-disk
 // layout directly and only need POWERSHELL, with a dummy mangostudio.exe.
+//
+// The "failed version probe" cases need only POWERSHELL too: their fake exes
+// are copies of System32 binaries, built in the test, or compiled by the
+// host's own Windows PowerShell. They also run natively on Windows (the path
+// helpers below are the identity there), which is how the release dry run's
+// Windows job runs them: that is the only CI job with a Windows PowerShell.
 
 const INSTALL_PS1 = join(import.meta.dir, '..', 'install', 'install.ps1');
 const POWERSHELL = Bun.which('powershell.exe');
 const WINDOWS_BINARY = process.env.MANGOSTUDIO_TEST_WINDOWS_BINARY;
+const IS_WINDOWS = process.platform === 'win32';
 
 interface RunResult {
   readonly exitCode: number;
@@ -38,6 +54,7 @@ function sh(cmd: string[]): RunResult {
 }
 
 function toWindowsPath(linuxPath: string): string {
+  if (IS_WINDOWS) return linuxPath;
   const result = sh(['wslpath', '-w', linuxPath]);
   if (result.exitCode !== 0)
     throw new Error(`wslpath -w failed for ${linuxPath}: ${result.stderr}`);
@@ -45,6 +62,7 @@ function toWindowsPath(linuxPath: string): string {
 }
 
 function toLinuxPath(windowsPath: string): string {
+  if (IS_WINDOWS) return windowsPath;
   const result = sh(['wslpath', windowsPath]);
   if (result.exitCode !== 0) throw new Error(`wslpath failed for ${windowsPath}: ${result.stderr}`);
   return result.stdout.trim();
@@ -55,6 +73,10 @@ let tempDirs: string[] = [];
 
 beforeAll(() => {
   if (!POWERSHELL) return;
+  if (IS_WINDOWS) {
+    windowsTempMount = tmpdir();
+    return;
+  }
   // A path under %TEMP% is one the Windows-side PowerShell can address
   // directly as C:\...; a \\wsl.localhost\... UNC path (what wslpath -w
   // would produce for a repo path) breaks junction creation and .cmd
@@ -840,4 +862,277 @@ describe('install.ps1 canary tag selection', () => {
     expect(result.stdout).toContain('tag=');
     expect(result.stdout).not.toContain('canary');
   });
+});
+
+describe('install.ps1 failed version probe (fake mangostudio.exe)', () => {
+  // The probe runs `<dir>\mangostudio.exe --version`; when it fails the
+  // installer must say why. Windows reports a binary that cannot load through
+  // the OS loader, not through the child's stderr, so what the message can
+  // carry differs per failure: an exit code and stderr for a binary that ran, a
+  // NTSTATUS exit code for a missing DLL, and only the engine's exception for
+  // an image that is not a program at all. The text of a system exe's stderr
+  // is localized, so these cases pin the shape of the message, not the words.
+  const EXPECTED = '9.9.9';
+  const FIRST_LINE = `expected version: ${EXPECTED} | received: <none>`;
+  // Signed System32 console exes that reject `--version` on stderr. Their
+  // messages come from the OS (FormatMessage), not from a `<name>.exe.mui`
+  // beside them: renamed to mangostudio.exe, an exe like whoami.exe loses its
+  // message table and says nothing.
+  const STDERR_SYSTEM_EXES = ['icacls.exe', 'cacls.exe', 'sort.exe'] as const;
+  // The loader's own message box can block a desktop session, and a patched or
+  // freshly compiled exe is refused by Smart App Control, so the cases that
+  // need one run only where MANGOSTUDIO_TEST_NATIVE_FAKES=1 says it is safe: a
+  // hosted runner.
+  const NATIVE_FAKES = process.env.MANGOSTUDIO_TEST_NATIVE_FAKES === '1';
+  const nativeReason = NATIVE_FAKES
+    ? ''
+    : 'compiled and patched fake exes run only with MANGOSTUDIO_TEST_NATIVE_FAKES=1 (set by the release dry run)';
+
+  test.skipIf(!nativeReason)(`skipped: ${nativeReason}`, () => {
+    // Body intentionally empty: this entry exists only to name the skip reason.
+  });
+
+  type FakeLayout = Layout & { readonly fakeDir: string; readonly fakeExe: string };
+
+  function systemExecutable(name: string): string {
+    const root = sh([POWERSHELL as string, '-NoProfile', '-Command', '$env:SystemRoot']);
+    return join(toLinuxPath(root.stdout.replace(/\r/g, '').trim()), 'System32', name);
+  }
+
+  /** A layout whose `fake/` directory holds the mangostudio.exe under test. */
+  function fakeLayout(makeExe: (target: string) => void): FakeLayout {
+    const l = layout();
+    const fakeLinux = join(l.linuxDir, 'fake');
+    mkdirSync(fakeLinux, { recursive: true });
+    const fakeExe = join(fakeLinux, 'mangostudio.exe');
+    makeExe(fakeExe);
+    return { ...l, fakeDir: toWindowsPath(fakeLinux), fakeExe };
+  }
+
+  /** What Test-SmokeOrFail throws for the fake, or '<no failure>' when the probe passes. */
+  function probeMessage(l: FakeLayout): string {
+    const result = runDotSourced(
+      l.scriptPath,
+      `$m = '<no failure>'; try { Test-SmokeOrFail ${psQuote(l.fakeDir)} ${psQuote(EXPECTED)} $false } catch { $m = $_.Exception.Message }; [Console]::Out.Write($m)`
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `expected the probe to report a message | received exit ${result.exitCode}: ${result.stderr}`
+      );
+    }
+    return result.stdout.replace(/\r/g, '');
+  }
+
+  /** Runs the fake itself, so the test knows the exit code the OS gave without asking the installer. */
+  function runFake(target: string): { exitCode: number; stderr: string } {
+    const direct = Bun.spawnSync({ cmd: [target, '--version'] });
+    return { exitCode: direct.exitCode ?? -1, stderr: direct.stderr.toString() };
+  }
+
+  function compileFake(target: string, body: string): void {
+    const source = `using System; public static class Fake { public static int Main(string[] args) { ${body} } }`;
+    const result = sh([
+      POWERSHELL as string,
+      '-NoProfile',
+      '-Command',
+      `Add-Type -TypeDefinition ${psQuote(source)} -OutputAssembly ${psQuote(toWindowsPath(target))} -OutputType ConsoleApplication`,
+    ]);
+    if (result.exitCode !== 0 || !existsSync(target)) {
+      throw new Error(
+        `expected a compiled fake exe at ${target} | received exit ${result.exitCode}: ${result.stderr}`
+      );
+    }
+  }
+
+  /** The same exe with the first character of its first imported DLL name changed, so the loader cannot find it. */
+  function withMissingImport(source: Buffer): Buffer {
+    const out = Buffer.from(source);
+    const pe = out.readUInt32LE(0x3c);
+    if (out.toString('latin1', pe, pe + 4) !== 'PE\0\0') {
+      throw new Error(`expected a PE image | received no PE signature at 0x${pe.toString(16)}`);
+    }
+    const sections = out.readUInt16LE(pe + 6);
+    const optional = pe + 24;
+    const sectionTable = optional + out.readUInt16LE(pe + 20);
+    const directories = optional + (out.readUInt16LE(optional) === 0x20b ? 112 : 96);
+    const importRva = out.readUInt32LE(directories + 8);
+    const toOffset = (rva: number): number => {
+      for (let i = 0; i < sections; i += 1) {
+        const section = sectionTable + i * 40;
+        const start = out.readUInt32LE(section + 12);
+        const size = Math.max(out.readUInt32LE(section + 8), out.readUInt32LE(section + 16));
+        if (rva >= start && rva < start + size) return rva - start + out.readUInt32LE(section + 20);
+      }
+      throw new Error(`expected an RVA inside a section | received 0x${rva.toString(16)}`);
+    };
+    const nameOffset = toOffset(out.readUInt32LE(toOffset(importRva) + 12));
+    out[nameOffset] = out[nameOffset] === 0x78 ? 0x79 : 0x78;
+    return out;
+  }
+
+  /** A layout whose mangostudio.exe is the first System32 exe that fails `--version` with stderr. */
+  function stderrSystemLayout(): FakeLayout & { readonly direct: ReturnType<typeof runFake> } {
+    const seen: string[] = [];
+    for (const name of STDERR_SYSTEM_EXES) {
+      const l = fakeLayout((target) => copyFileSync(systemExecutable(name), target));
+      const direct = runFake(l.fakeExe);
+      if (direct.exitCode !== 0 && direct.stderr.trim() !== '') return { ...l, direct };
+      seen.push(`${name}: exit ${direct.exitCode}, stderr ${JSON.stringify(direct.stderr)}`);
+    }
+    throw new Error(
+      `expected one System32 exe to fail --version with stderr output | received: ${seen.join('; ')}`
+    );
+  }
+
+  test.skipIf(!POWERSHELL)(
+    'a probe that exits non-zero reports its exit code and its stderr',
+    () => {
+      const { direct, ...l } = stderrSystemLayout();
+
+      const message = probeMessage(l);
+
+      expect(message.split('\n')[0]).toBe(FIRST_LINE);
+      expect(message).toContain(
+        `expected: exit code: 0 | received: exit code: ${direct.exitCode} (0x`
+      );
+      expect(message).toMatch(/\n {2}stderr: \S/);
+    },
+    90000
+  );
+
+  const unloadable: ReadonlyArray<readonly [string, (target: string) => void]> = [
+    [
+      'a truncated PE image',
+      (target) =>
+        writeFileSync(target, readFileSync(systemExecutable('where.exe')).subarray(0, 512)),
+    ],
+    ['a text file', (target) => writeFileSync(target, 'this is not a program')],
+    ['an empty file', (target) => writeFileSync(target, '')],
+  ];
+
+  for (const [label, makeExe] of unloadable) {
+    test.skipIf(!POWERSHELL)(
+      `${label} reports why it could not be started, without an exit code`,
+      () => {
+        const l = fakeLayout(makeExe);
+
+        const message = probeMessage(l);
+
+        expect(message.split('\n')[0]).toBe(FIRST_LINE);
+        expect(message).toMatch(
+          /\n {2}probe: .*mangostudio\.exe --version \| expected: it starts \| received: \S/
+        );
+        expect(message).not.toContain('exit code');
+        // The engine's script position is noise, not the reason.
+        expect(message).not.toContain('char:');
+      },
+      90000
+    );
+  }
+
+  test.skipIf(!POWERSHELL || !NATIVE_FAKES)(
+    'a binary missing a DLL it imports reports the loader status by name',
+    () => {
+      const l = fakeLayout((target) =>
+        writeFileSync(target, withMissingImport(readFileSync(systemExecutable('where.exe'))))
+      );
+
+      const message = probeMessage(l);
+
+      expect(message.split('\n')[0]).toBe(FIRST_LINE);
+      expect(message).toContain(
+        'received: exit code: -1073741515 (0xC0000135, STATUS_DLL_NOT_FOUND)'
+      );
+      expect(message).not.toContain('stderr:');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL || !NATIVE_FAKES)(
+    'a probe that floods stderr keeps its first ten lines and its exit code',
+    () => {
+      const l = fakeLayout((target) =>
+        compileFake(
+          target,
+          'for (int i = 1; i <= 200; i++) Console.Error.WriteLine("flood line " + i); return 4;'
+        )
+      );
+
+      const message = probeMessage(l);
+
+      expect(message).toContain('received: exit code: 4 (0x00000004)');
+      expect(message).toContain('stderr: flood line 1\n          flood line 2\n');
+      expect(message).toContain('flood line 10');
+      expect(message).not.toContain('flood line 11');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL || !NATIVE_FAKES)(
+    'a probe that exits non-zero in silence reports only its exit code',
+    () => {
+      const l = fakeLayout((target) => compileFake(target, 'return 5;'));
+
+      const message = probeMessage(l);
+
+      expect(message.split('\n')[0]).toBe(FIRST_LINE);
+      expect(message).toContain('received: exit code: 5 (0x00000005)');
+      expect(message).not.toContain('stderr:');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL || !NATIVE_FAKES)(
+    'a probe that prints the expected version passes, with or without a stderr warning',
+    () => {
+      const quiet = fakeLayout((target) =>
+        compileFake(target, `Console.WriteLine("${EXPECTED}"); return 0;`)
+      );
+      const noisy = fakeLayout((target) =>
+        compileFake(
+          target,
+          `Console.Error.WriteLine("a warning"); Console.WriteLine("${EXPECTED}"); return 0;`
+        )
+      );
+
+      expect(probeMessage(quiet)).toBe('<no failure>');
+      expect(probeMessage(noisy)).toBe('<no failure>');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'the full install fails with the probe diagnostic and installs nothing',
+    () => {
+      const l = layout();
+      const staged = join(l.linuxDir, 'stage');
+      mkdirSync(staged, { recursive: true });
+      writeFileSync(join(staged, 'mangostudio.exe'), 'this is not a program');
+      // Compress-Archive, not zip(1): a Windows runner has no zip, and a zip
+      // keeps the case off the installer's tar.exe, which a GNU tar earlier on
+      // the PATH can shadow.
+      const archive = join(l.linuxDir, 'mangostudio-fake.zip');
+      const packed = sh([
+        POWERSHELL as string,
+        '-NoProfile',
+        '-Command',
+        `Compress-Archive -LiteralPath ${psQuote(toWindowsPath(join(staged, 'mangostudio.exe')))} -DestinationPath ${psQuote(toWindowsPath(archive))}`,
+      ]);
+      expect(packed.exitCode).toBe(0);
+      expect(existsSync(archive)).toBe(true);
+
+      const result = run(
+        l.scriptPath,
+        ['-Local', toWindowsPath(archive), '-Version', EXPECTED],
+        l.env
+      );
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(FIRST_LINE);
+      expect(result.stderr).toContain('expected: it starts | received:');
+      expect(existsSync(join(l.rootLinux, EXPECTED))).toBe(false);
+      expect(existsSync(join(l.binLinux, 'mangostudio.cmd'))).toBe(false);
+    },
+    90000
+  );
 });

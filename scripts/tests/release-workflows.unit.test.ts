@@ -807,6 +807,21 @@ describe('release workflow binary gate', () => {
     expect(windowsBlock).toContain('install.ps1 -Uninstall');
   });
 
+  test('release dry run runs the install.ps1 failed-probe cases on Windows and is relevant to them', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+    const windowsBlock = extractJobBlock(workflow, 'dry-run-windows');
+
+    // Linux skips install-ps1-layout.unit.test.ts for want of a Windows
+    // PowerShell, so this job is the only place the fake-binary cases run.
+    expect(windowsBlock).toContain("-t 'failed version probe'");
+    expect(windowsBlock).toContain('scripts/tests/install-ps1-layout.unit.test.ts');
+    expect(windowsBlock).toContain('MANGOSTUDIO_TEST_NATIVE_FAKES: "1"');
+
+    const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
+    expect(source, 'release_pattern not found in the changes job').toBeDefined();
+    expect('scripts/tests/install-ps1-layout.unit.test.ts').toMatch(new RegExp(source as string));
+  });
+
   test('release dry run relevance pattern does not over-promise Alpine Docker coverage', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
     const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
