@@ -56,7 +56,7 @@ import {
 } from '../domain/format-adapters';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { isAgentStrategyAvailable } from './adapters/agent-strategy';
-import { acknowledgedResourceKeys } from './conflict-resolution';
+import { type AcknowledgedKeysOptions, acknowledgedResourceKeys } from './conflict-resolution';
 import { environmentLibraryService } from './environment-library-service';
 import { compareText, hashJson, hashLibraryState, type LibraryStateSlice } from './preview-state';
 
@@ -94,7 +94,8 @@ export interface PropagationPreviewDeps {
   /** Resources whose current divergence the user has already accepted. */
   acknowledgedKeys(
     userId: string,
-    resources: readonly LibraryResource[]
+    resources: readonly LibraryResource[],
+    options?: AcknowledgedKeysOptions
   ): Promise<ReadonlySet<string>>;
   /** The same set the scanner honours, so a destination is never written blind. */
   enabledLocationIds(userId: string): Promise<ReadonlySet<LibraryLocationId>>;
@@ -179,7 +180,8 @@ const defaultPropagationPreviewDeps: PropagationPreviewDeps = {
   snapshot: readEnvironmentSnapshot,
   adapters: defaultAdapterCatalog,
   agentAvailable: isAgentStrategyAvailable,
-  acknowledgedKeys: acknowledgedResourceKeys,
+  acknowledgedKeys: (userId, resources, options) =>
+    acknowledgedResourceKeys(userId, resources, {}, options),
   enabledLocationIds: async (userId) =>
     // Every propagation destination is home-scoped: v1 defines no workspace
     // location, and writing into a repository is a consent question this seam
@@ -239,9 +241,13 @@ export async function previewLibraryPropagation(
   }
 
   const [acknowledged, agentAvailable] = await Promise.all([
+    // Every machine's copies, merged by key: an acknowledgement covers the
+    // versions across all of them. A machine that is offline contributes none,
+    // so nothing is honoured or pruned on an answer that is missing it.
     deps.acknowledgedKeys(
       userId,
-      snapshots.flatMap((snapshot) => [...snapshot.resources])
+      snapshots.flatMap((snapshot) => [...snapshot.resources]),
+      { complete: snapshots.every(wasScanned) }
     ),
     deps.agentAvailable(userId),
   ]);
@@ -287,6 +293,16 @@ export async function previewLibraryPropagation(
     stateHash,
     entries,
   };
+}
+
+/**
+ * False for a machine whose copies are absent because it could not answer right
+ * now. An unsupported machine has no library to hold copies at all, and never
+ * will until it is upgraded, so it counts as scanned: treating it as a gap would
+ * leave every acknowledgement unhonoured for as long as it stays enabled.
+ */
+function wasScanned(snapshot: EnvironmentSnapshot): boolean {
+  return snapshot.blockedReason !== 'environment-offline';
 }
 
 /** Deduplicates while preserving request order, so the response is predictable. */

@@ -9,6 +9,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
+  LibraryResource,
   PropagationApplyRequest,
   PropagationDecision,
   PropagationPreview,
@@ -19,6 +20,7 @@ import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudi
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { RuntimeLibraryApplyParams } from '@mangostudio/shared/runtime-contract';
 import { getDb } from '../../../src/db/database';
+import { listDivergenceAcks } from '../../../src/modules/library/application/conflict-resolution';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import {
   applyLibraryPropagation,
@@ -524,6 +526,138 @@ describe('propagation apply — decisions', () => {
     await expect(failure).rejects.toMatchObject({ status: 422 });
   });
 
+  it('refuses keeping a non-divergent resource before any other decision is written', async () => {
+    // `gh` would be written to claude-skills; `other` has one version, so there is
+    // no divergence to keep. The refusal has to come from planning, ahead of every
+    // write, because an acknowledgement error after the writes cannot be undone.
+    writeSkill('mango-skills', 'mine\n');
+    makeDirectories('claude-skills');
+    const otherDir = join(home, '.mango', 'skills', 'other');
+    mkdirSync(otherDir, { recursive: true });
+    writeFileSync(join(otherDir, 'SKILL.md'), '---\nname: other\ndescription: Other\n---\nsolo\n');
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh', 'skill:other'],
+      targetLocationIds: ['claude-skills'],
+    };
+    const taken = await preview(request);
+    const [gh, other] = [...taken.entries].sort((a, b) =>
+      a.resourceKey.localeCompare(b.resourceKey)
+    );
+    if (!gh || !other)
+      throw new Error(`Expected two preview entries, received ${taken.entries.length}.`);
+
+    const writes: RuntimeLibraryApplyParams[] = [];
+    const acknowledged: unknown[] = [];
+    const failure = applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        adoptAll(gh, winnerFrom(gh, 'mango-skills')),
+        {
+          resourceKey: other.resourceKey,
+          resolution: 'keep-per-location',
+          destinations: other.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action: 'skip' as const,
+          })),
+        },
+      ]),
+      applyDeps({
+        runtimeApply: (params) => {
+          writes.push(params);
+          return refuseLibraryApply(params);
+        },
+        acknowledge: (_userId, ack) => {
+          acknowledged.push(ack);
+          return Promise.resolve(undefined);
+        },
+      })
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('"skill:other" is not divergent'),
+    });
+    expect({ writes: writes.length, acknowledged: acknowledged.length }).toEqual({
+      writes: 0,
+      acknowledged: 0,
+    });
+    expect(existsSync(skillPath('claude-skills'))).toBe(false);
+  });
+
+  it('refuses to keep a divergence whose reported hash cannot be stored before writing anything', async () => {
+    // `gh` would be written; `other` is divergent but one runtime-reported hash is
+    // far larger than a digest. Recording it fails, and that must happen while
+    // planning, not after `gh` has landed.
+    writeSkill('mango-skills', 'mine\n');
+    makeDirectories('claude-skills');
+    for (const [location, body] of [
+      ['mango-skills', 'one'],
+      ['agents-skills', 'two'],
+    ] as const) {
+      const dir = join(home, location === 'mango-skills' ? '.mango' : '.agents', 'skills', 'other');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'SKILL.md'), `---\nname: other\ndescription: Other\n---\n${body}\n`);
+    }
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh', 'skill:other'],
+      targetLocationIds: ['claude-skills'],
+    };
+    const real = await preview(request);
+    const oversized = 'x'.repeat(500);
+    const taken: PropagationPreview = {
+      ...real,
+      entries: real.entries.map((entry) =>
+        entry.resourceKey === 'skill:other'
+          ? {
+              ...entry,
+              sourceGroups: entry.sourceGroups.map((group, index) =>
+                index === 0 ? { ...group, contentHash: oversized } : group
+              ),
+            }
+          : entry
+      ),
+    };
+    const [gh, other] = [...taken.entries].sort((a, b) =>
+      a.resourceKey.localeCompare(b.resourceKey)
+    );
+    if (!gh || !other)
+      throw new Error(`Expected two preview entries, received ${taken.entries.length}.`);
+
+    const writes: RuntimeLibraryApplyParams[] = [];
+    const failure = applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        adoptAll(gh, winnerFrom(gh, 'mango-skills')),
+        {
+          resourceKey: other.resourceKey,
+          resolution: 'keep-per-location',
+          destinations: other.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action: 'skip' as const,
+          })),
+        },
+      ]),
+      applyDeps({
+        preview: () => Promise.resolve(taken),
+        runtimeApply: (params) => {
+          writes.push(params);
+          return refuseLibraryApply(params);
+        },
+      })
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('content hash of 500 characters: expected at most 128'),
+    });
+    expect(writes).toHaveLength(0);
+    expect(existsSync(skillPath('claude-skills'))).toBe(false);
+  });
+
   it('refuses a decision that leaves an offered destination undecided', async () => {
     writeSkill('mango-skills', 'winner\n');
     makeDirectories('claude-skills', 'cursor-skills');
@@ -570,6 +704,160 @@ describe('propagation apply — decisions', () => {
 
     await expect(failure).rejects.toMatchObject({ status: 422 });
     expect(() => readSkill('claude-skills')).toThrow();
+  });
+});
+
+/**
+ * A skill that exists on remote machines only. Nothing on this host's disk holds
+ * it, so anything that verifies a divergence by scanning the hub cannot find it.
+ */
+const REMOTE_SKILL_KEY = 'skill:remote-only-divergence';
+const REMOTE_SKILL_SLUG = 'remote-only-divergence';
+
+/** What a remote runtime reports for the skill: one readable copy per `[location, hash]`. */
+function remoteScan(copies: readonly (readonly [LibraryLocationId, string])[]): LibraryResource[] {
+  return [
+    {
+      ref: { kind: 'skill', slug: REMOTE_SKILL_SLUG },
+      key: REMOTE_SKILL_KEY,
+      instances: copies.map(([locationId, contentHash]) => ({
+        locationId,
+        path: `/srv/home/${locationId}/${REMOTE_SKILL_SLUG}`,
+        modifiedAtMs: 1,
+        format: 'markdown-frontmatter' as const,
+        valid: true as const,
+        contentHash,
+        sizeBytes: 4,
+      })),
+      coverage: [],
+      divergence: 'divergent',
+      whitespaceOnlyDivergence: false,
+      contentGroups: [],
+    },
+  ];
+}
+
+const REMOTE_MACHINES: Record<string, readonly (readonly [LibraryLocationId, string])[]> = {
+  'box-a': [
+    ['claude-skills', 'hash-on-box-a-claude'],
+    ['agents-skills', 'hash-on-box-a-agents'],
+  ],
+  'box-b': [['claude-skills', 'hash-on-box-b']],
+};
+
+/** What differs from a healthy fleet: directory-hash domains, or machines that cannot answer. */
+interface RemoteMachineState {
+  readonly hashDomains?: Readonly<Record<string, number>>;
+  readonly offline?: readonly string[];
+}
+
+/** A preview over machines that report their own copies through their own runtimes. */
+function previewRemoteMachines(
+  request: PropagationPreviewRequest,
+  machines: RemoteMachineState = {}
+): Promise<PropagationPreview> {
+  const env = pathEnv();
+  const enabled = settings(SKILL_LOCATIONS);
+  return previewLibraryPropagation(userId(), request, {
+    snapshot: async (_userId, environmentId) => ({
+      environmentId,
+      ...(machines.offline?.includes(environmentId) && {
+        blockedReason: 'environment-offline' as const,
+      }),
+      resources: machines.offline?.includes(environmentId)
+        ? []
+        : remoteScan(REMOTE_MACHINES[environmentId] ?? []),
+      statuses: new Map(
+        request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
+      ),
+      directoryHashDomain: machines.hashDomains?.[environmentId] ?? directoryHashDomainVersion(),
+    }),
+    enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
+  });
+}
+
+describe('propagation apply — keeping a divergence across machines', () => {
+  /** Keeps the divergence over `environmentIds`, with the real acknowledgement path. */
+  async function keepDivergence(
+    environmentIds: readonly string[],
+    machines: RemoteMachineState = {}
+  ) {
+    const request: PropagationPreviewRequest = {
+      resourceKeys: [REMOTE_SKILL_KEY],
+      targetLocationIds: ['claude-skills', 'agents-skills'],
+      environmentIds: [...environmentIds],
+    };
+    const taken = await previewRemoteMachines(request, machines);
+    const entry = onlyEntry(taken);
+    const reviewed = entry.sourceGroups.map((group) => group.contentHash).sort();
+
+    // Only the writes are stubbed; verification and storage are the real ones.
+    const outcome = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        {
+          resourceKey: entry.resourceKey,
+          resolution: 'keep-per-location',
+          destinations: entry.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action: 'skip' as const,
+          })),
+        },
+      ]),
+      applyDeps({ preview: (_userId, requested) => previewRemoteMachines(requested, machines) })
+    ).then(
+      () => 'applied',
+      (error: unknown) => `rejected: ${error instanceof Error ? error.message : String(error)}`
+    );
+
+    const stored = (await listDivergenceAcks(userId())).map((ack) => ({
+      resourceKey: ack.resourceKey,
+      contentHashes: [...ack.contentHashes].sort(),
+    }));
+    return { outcome, stored, reviewed };
+  }
+
+  it('records two differing copies that one remote machine holds', async () => {
+    const { outcome, stored, reviewed } = await keepDivergence(['box-a']);
+
+    expect(reviewed).toHaveLength(2);
+    expect({ outcome, stored }).toEqual({
+      outcome: 'applied',
+      stored: [{ resourceKey: REMOTE_SKILL_KEY, contentHashes: reviewed }],
+    });
+  });
+
+  it('records the versions the preview read from every machine', async () => {
+    const { outcome, stored, reviewed } = await keepDivergence(['box-a', 'box-b']);
+
+    expect(reviewed).toHaveLength(3);
+    expect({ outcome, stored }).toEqual({
+      outcome: 'applied',
+      stored: [{ resourceKey: REMOTE_SKILL_KEY, contentHashes: reviewed }],
+    });
+  });
+
+  it('refuses to keep a divergence while a machine is offline and leaves the stored one alone', async () => {
+    const first = await keepDivergence(['box-a', 'box-b']);
+    const second = await keepDivergence(['box-a', 'box-b'], { offline: ['box-b'] });
+
+    expect({ outcome: second.outcome, stored: second.stored }).toEqual({
+      outcome: `rejected: "${REMOTE_SKILL_KEY}" cannot keep its divergence while "box-b" could not be scanned (environment-offline): expected every selected machine to answer. Preview again once it is reachable.`,
+      stored: [{ resourceKey: REMOTE_SKILL_KEY, contentHashes: first.reviewed }],
+    });
+  });
+
+  it('refuses to keep hashes that runtimes computed in different directory domains', async () => {
+    // Distinct hashes across directory-hash domains do not prove distinct content,
+    // so the preview calls the skill incomparable and there is nothing to keep.
+    const hashDomains = { 'box-a': directoryHashDomainVersion(), 'box-b': 1 };
+    const { outcome, stored } = await keepDivergence(['box-a', 'box-b'], { hashDomains });
+
+    expect({ outcome, stored }).toEqual({
+      outcome: `rejected: "${REMOTE_SKILL_KEY}" has no comparable divergence to keep: expected divergence "divergent", received "incomparable".`,
+      stored: [],
+    });
   });
 });
 

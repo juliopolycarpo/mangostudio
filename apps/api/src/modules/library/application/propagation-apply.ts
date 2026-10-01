@@ -55,7 +55,7 @@ import { defaultAdapterRegistry } from './adapters/registry';
 import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
-import { acknowledgeDivergence } from './conflict-resolution';
+import { assertBoundedHashes, recordDivergenceAck } from './conflict-resolution';
 import { resetLibraryCachesForEnvironments } from './environment-library-service';
 import { previewLibraryPropagation } from './propagation-preview';
 
@@ -91,6 +91,11 @@ export interface PropagationApplyDeps {
     input: { readonly locationId: string; readonly path: string }
   ): Promise<readonly PreparedPropagationFile[]>;
   adapt(input: AdaptInput, strategy: AdapterStrategy): Promise<AdaptResult>;
+  /**
+   * Records a divergence the user chose to keep. Receives the hashes the preview
+   * read from every machine in scope, so it must not re-verify them against any
+   * one machine's disk.
+   */
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<unknown>;
   backup: BackupStoreDeps;
   /** Stands in for the RuntimeClient; tests inject transport failures and runtime faults. */
@@ -128,7 +133,7 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
     readSourceFile: overrides.readSourceFile ?? readResourceFile,
     readRemoteSource: overrides.readRemoteSource ?? readRemoteLibrarySource,
     adapt: overrides.adapt ?? ((input, strategy) => defaultAdapterRegistry.adapt(input, strategy)),
-    acknowledge: overrides.acknowledge ?? acknowledgeDivergence,
+    acknowledge: overrides.acknowledge ?? recordDivergenceAck,
     backup: overrides.backup ?? defaultBackupStoreDeps,
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     recordBackup: overrides.recordBackup ?? recordWrittenBackup,
@@ -711,15 +716,38 @@ function planAcknowledgement(
       `"${entry.resourceKey}" is not divergent, so there is no divergence to keep.`
     );
   }
+  // Distinct hashes from runtimes that hash directories differently do not prove
+  // distinct content, so there is no divergence to accept either.
+  if (entry.divergence !== 'divergent') {
+    throw validationError(
+      `"${entry.resourceKey}" has no comparable divergence to keep: expected divergence "divergent", received "${entry.divergence}".`
+    );
+  }
+  // An offline machine's copies are missing from the source groups, so what would
+  // be recorded is a partial divergence: it would replace a complete
+  // acknowledgement and then be retired the moment the machine answers.
+  const offline = [
+    ...new Set(
+      entry.destinations
+        .filter((destination) => destination.blockedReason === 'environment-offline')
+        .map((destination) => destination.environmentId)
+    ),
+  ];
+  if (offline.length > 0) {
+    throw validationError(
+      `"${entry.resourceKey}" cannot keep its divergence while ${offline.map((id) => `"${id}"`).join(', ')} could not be scanned (environment-offline): expected every selected machine to answer. Preview again once it is reachable.`
+    );
+  }
   if (decision.destinations.some((target) => target.action === 'apply')) {
     throw validationError(
       `"${entry.resourceKey}" cannot both keep its divergence and write to a destination.`
     );
   }
-  return {
-    resourceKey: entry.resourceKey,
-    contentHashes: entry.sourceGroups.map((group) => group.contentHash),
-  };
+  const contentHashes = entry.sourceGroups.map((group) => group.contentHash);
+  // These came from each machine's runtime. Checked here so an unstorable
+  // acknowledgement is refused before the writes, not after them.
+  assertBoundedHashes(entry.resourceKey, contentHashes);
+  return { resourceKey: entry.resourceKey, contentHashes };
 }
 
 interface ResolvedWinner {

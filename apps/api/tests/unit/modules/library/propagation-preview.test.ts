@@ -14,6 +14,7 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
+import type { AcknowledgedKeysOptions } from '../../../../src/modules/library/application/conflict-resolution';
 import {
   type EnvironmentSnapshot,
   previewLibraryPropagation,
@@ -80,6 +81,11 @@ interface PreviewHarness {
   readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
   readonly adapters?: AdapterCatalog;
   readonly acknowledged?: string[];
+  /** Observes what the preview hands the acknowledgement lookup. */
+  readonly onAcknowledgedKeys?: (
+    resources: readonly LibraryResource[],
+    options: AcknowledgedKeysOptions | undefined
+  ) => void;
   readonly onDiscover?: (kinds: readonly ResourceKind[]) => void;
   /** Defaults to "every requested location is enabled" so cases opt in explicitly. */
   readonly enabledLocationIds?: readonly LibraryLocationId[];
@@ -140,7 +146,10 @@ function preview(
         if (environmentId === LOCAL_ENVIRONMENT_ID) harness.onDiscover?.(kinds);
         return Promise.resolve(snapshotFor(environmentId, harness, targetLocationIds));
       },
-      acknowledgedKeys: () => Promise.resolve(new Set(harness.acknowledged ?? [])),
+      acknowledgedKeys: (_userId, resources, options) => {
+        harness.onAcknowledgedKeys?.(resources, options);
+        return Promise.resolve(new Set(harness.acknowledged ?? []));
+      },
       enabledLocationIds: () =>
         Promise.resolve(new Set(harness.enabledLocationIds ?? targetLocationIds)),
       agentAvailable: () => Promise.resolve(false),
@@ -591,6 +600,43 @@ describe('previewLibraryPropagation across machines', () => {
     // Nothing can be said about a disk nobody looked at, so no outcome is
     // offered rather than one being guessed.
     expect(offline?.outcomes).toEqual([]);
+  });
+
+  it('looks up acknowledgements over every machine in scope', async () => {
+    const seen: { machines: number; options: AcknowledgedKeysOptions | undefined }[] = [];
+    await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: { 'wsl-ubuntu': { resources: [ghOnRemote] } },
+      onAcknowledgedKeys: (resources, options) =>
+        seen.push({ machines: resources.length, options }),
+    });
+
+    expect(seen).toEqual([{ machines: 2, options: { complete: true } }]);
+  });
+
+  it('marks the acknowledgement lookup incomplete when a machine could not be scanned', async () => {
+    const seen: (AcknowledgedKeysOptions | undefined)[] = [];
+    await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'ssh-box'],
+      environments: { 'ssh-box': { blockedReason: 'environment-offline' } },
+      onAcknowledgedKeys: (_resources, options) => seen.push(options),
+    });
+
+    expect(seen).toEqual([{ complete: false }]);
+  });
+
+  it('treats an unsupported machine as scanned, since it can never hold copies', async () => {
+    const seen: (AcknowledgedKeysOptions | undefined)[] = [];
+    await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'old-box'],
+      environments: { 'old-box': { blockedReason: 'environment-unsupported' } },
+      onAcknowledgedKeys: (_resources, options) => seen.push(options),
+    });
+
+    expect(seen).toEqual([{ complete: true }]);
   });
 
   it('blocks writing to a readonly machine while still using its copies', async () => {

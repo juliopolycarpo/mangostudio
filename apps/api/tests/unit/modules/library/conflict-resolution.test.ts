@@ -12,6 +12,7 @@ import {
   forgetDivergenceAck,
   listDivergenceAcks,
   readableContentHashes,
+  recordDivergenceAck,
 } from '../../../../src/modules/library/application/conflict-resolution';
 import type {
   DivergenceAckRecord,
@@ -221,6 +222,101 @@ describe('acknowledgeDivergence', () => {
   });
 });
 
+describe('recordDivergenceAck', () => {
+  it('records the reviewed hashes without scanning any machine', async () => {
+    const repository = memoryRepository();
+    let scanned = false;
+    const ack = await recordDivergenceAck(
+      'user-1',
+      { resourceKey: 'skill:gh', contentHashes: ['hash-remote', 'hash-a', 'hash-remote'] },
+      {
+        repository,
+        discover: () => {
+          scanned = true;
+          return Promise.resolve([]);
+        },
+        now: () => 1_700_000,
+      }
+    );
+
+    expect({ scanned, ack, key: repository.rows.get('skill:gh')?.divergenceKey }).toEqual({
+      scanned: false,
+      ack: {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-remote'],
+        acknowledgedAtMs: 1_700_000,
+      },
+      key: divergenceKeyFor(['hash-a', 'hash-remote']),
+    });
+  });
+
+  it('refuses fewer than two distinct versions and names what it received', async () => {
+    const repository = memoryRepository();
+    const failure = recordDivergenceAck(
+      'user-1',
+      { resourceKey: 'skill:gh', contentHashes: ['hash-a', 'hash-a'] },
+      deps(repository)
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('expected at least 2 distinct content hashes, received 1'),
+    });
+    expect(repository.rows.size).toBe(0);
+  });
+
+  it('refuses a content hash larger than a digest could be', async () => {
+    const repository = memoryRepository();
+    const failure = recordDivergenceAck(
+      'user-1',
+      { resourceKey: 'skill:gh', contentHashes: ['hash-a', 'x'.repeat(4096)] },
+      deps(repository)
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('content hash of 4096 characters: expected at most 128'),
+    });
+    expect(repository.rows.size).toBe(0);
+  });
+
+  it('refuses more versions than the acknowledgement wire accepts', async () => {
+    const repository = memoryRepository();
+    const hashes = Array.from({ length: 65 }, (_, index) => `hash-${index}`);
+    const failure = recordDivergenceAck(
+      'user-1',
+      { resourceKey: 'skill:gh', contentHashes: hashes },
+      deps(repository)
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('expected at most 64 distinct content hashes, received 65'),
+    });
+    expect(repository.rows.size).toBe(0);
+  });
+
+  it('refuses a malformed resource key', async () => {
+    const failure = recordDivergenceAck(
+      'user-1',
+      { resourceKey: 'not-a-key', contentHashes: ['hash-a', 'hash-b'] },
+      deps(memoryRepository())
+    );
+
+    await expect(failure).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('rejects a mismatched profile id', async () => {
+    const failure = recordDivergenceAck(
+      'user-1',
+      { resourceKey: 'skill:gh', contentHashes: ['hash-a', 'hash-b'], profileId: 'work-laptop' },
+      deps(memoryRepository())
+    );
+
+    await expect(failure).rejects.toMatchObject({ status: 400 });
+  });
+});
+
 describe('acknowledgedResourceKeys', () => {
   const record: DivergenceAckRecord = {
     resourceKey: 'skill:gh',
@@ -250,6 +346,67 @@ describe('acknowledgedResourceKeys', () => {
 
     expect([...(await acknowledgedResourceKeys('user-1', [edited], deps(repository)))]).toEqual([]);
     expect(repository.rows.size).toBe(0);
+  });
+
+  it('judges a resource by every machine that holds a copy, not by the last one listed', async () => {
+    // One snapshot per machine contributes its own `skill:gh`; the divergence the
+    // user accepted spans both, so neither machine's hashes alone can match it.
+    const onLocal = ghSkill([instance('mango-skills', 'hash-a')]);
+    const onRemote = ghSkill([instance('mango-skills', 'hash-b')]);
+    const repository = memoryRepository([record]);
+
+    const kept = await acknowledgedResourceKeys('user-1', [onLocal, onRemote], deps(repository));
+
+    expect({ acknowledged: [...kept], storedRows: repository.rows.size }).toEqual({
+      acknowledged: ['skill:gh'],
+      storedRows: 1,
+    });
+  });
+
+  it('still retires a cross-machine acknowledgement once one machine changes', async () => {
+    const onLocal = ghSkill([instance('mango-skills', 'hash-a')]);
+    const onRemote = ghSkill([instance('mango-skills', 'hash-edited')]);
+    const repository = memoryRepository([record]);
+
+    const kept = await acknowledgedResourceKeys('user-1', [onLocal, onRemote], deps(repository));
+
+    expect({ acknowledged: [...kept], storedRows: repository.rows.size }).toEqual({
+      acknowledged: [],
+      storedRows: 0,
+    });
+  });
+
+  it('keeps the row, without honouring it, when a machine could not be scanned', async () => {
+    const onLocal = ghSkill([instance('mango-skills', 'hash-a')]);
+    const repository = memoryRepository([record]);
+
+    const kept = await acknowledgedResourceKeys('user-1', [onLocal], deps(repository), {
+      complete: false,
+    });
+
+    expect({ acknowledged: [...kept], storedRows: repository.rows.size }).toEqual({
+      acknowledged: [],
+      storedRows: 1,
+    });
+  });
+
+  it('does not honour a matching acknowledgement while a machine could not be scanned', async () => {
+    // The visible copies still hold exactly the accepted versions, but the machine
+    // that could not answer may now hold a third one the user never saw.
+    const visible = ghSkill([
+      instance('mango-skills', 'hash-a'),
+      instance('claude-skills', 'hash-b'),
+    ]);
+    const repository = memoryRepository([record]);
+
+    const kept = await acknowledgedResourceKeys('user-1', [visible], deps(repository), {
+      complete: false,
+    });
+
+    expect({ acknowledged: [...kept], storedRows: repository.rows.size }).toEqual({
+      acknowledged: [],
+      storedRows: 1,
+    });
   });
 
   it('retires an acknowledgement when the divergence resolves entirely', async () => {
