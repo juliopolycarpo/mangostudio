@@ -94,6 +94,19 @@ export async function listDivergenceAcks(
   }));
 }
 
+/**
+ * Records a divergence acknowledgement after checking it against the hub's own
+ * disk.
+ *
+ * The scan is the hub host's, which is the Local environment's disk: this
+ * verifies a request that names no environment (`POST /library/divergence/acks`).
+ * A divergence reviewed across machines is recorded by
+ * {@link recordDivergenceAck} from the hashes the preview read through each
+ * machine's own runtime, never from this rescan.
+ *
+ * @example
+ * await acknowledgeDivergence(userId, { resourceKey: 'skill:gh', contentHashes: [a, b] });
+ */
 export async function acknowledgeDivergence(
   userId: string,
   request: LibraryDivergenceAckRequest,
@@ -129,14 +142,56 @@ export async function acknowledgeDivergence(
     );
   }
 
+  return storeAcknowledgement(deps, userId, profileId, request.resourceKey, contentHashes);
+}
+
+/**
+ * Records an acknowledgement for versions that were already verified: the apply
+ * path acknowledges the source groups its own forced preview just built from
+ * every selected machine's runtime, and that preview is pinned to the request by
+ * token and state hash. Rescanning the hub here would answer with the wrong
+ * machine's files, so this takes the reviewed hashes as they are and only checks
+ * what can be known without a scan: a well-formed key and at least two distinct
+ * versions.
+ *
+ * @example
+ * await recordDivergenceAck(userId, { resourceKey: 'skill:gh', contentHashes: [a, b] });
+ */
+export async function recordDivergenceAck(
+  userId: string,
+  request: LibraryDivergenceAckRequest,
+  overrides: Partial<DivergenceAckDeps> = {}
+): Promise<LibraryDivergenceAck> {
+  const deps = resolveDeps(overrides);
+  const profileId = activeProfileId(userId, request.profileId);
+  if (!parseResourceKey(request.resourceKey)) {
+    throw new LibraryRequestError(422, `Invalid library resource key: "${request.resourceKey}".`);
+  }
+  const contentHashes = normalizeHashes(request.contentHashes);
+  if (contentHashes.length < 2) {
+    throw new LibraryRequestError(
+      422,
+      `Library resource "${request.resourceKey}" is not divergent: expected at least 2 distinct content hashes, received ${contentHashes.length}.`
+    );
+  }
+  return await storeAcknowledgement(deps, userId, profileId, request.resourceKey, contentHashes);
+}
+
+async function storeAcknowledgement(
+  deps: DivergenceAckDeps,
+  userId: string,
+  profileId: string,
+  resourceKey: string,
+  contentHashes: string[]
+): Promise<LibraryDivergenceAck> {
   const acknowledgedAtMs = deps.now();
   await deps.repository.upsert(userId, profileId, {
-    resourceKey: request.resourceKey,
-    divergenceKey,
+    resourceKey,
+    divergenceKey: divergenceKeyFor(contentHashes),
     contentHashes,
     acknowledgedAtMs,
   });
-  return { resourceKey: request.resourceKey, contentHashes, acknowledgedAtMs };
+  return { resourceKey, contentHashes, acknowledgedAtMs };
 }
 
 export async function forgetDivergenceAck(
@@ -150,32 +205,66 @@ export async function forgetDivergenceAck(
 }
 
 /**
+ * The distinct readable versions of each resource across every copy handed in.
+ * Callers pass one entry per machine holding the resource; the divergence a
+ * user accepts is the union of all of them, so a resource listed twice is one
+ * resource, not two competing ones.
+ */
+function readableHashesByKey(resources: readonly LibraryResource[]): Map<string, string[]> {
+  const hashes = new Map<string, string[]>();
+  for (const resource of resources) {
+    hashes.set(resource.key, [
+      ...(hashes.get(resource.key) ?? []),
+      ...readableContentHashes(resource),
+    ]);
+  }
+  return new Map([...hashes].map(([key, found]) => [key, normalizeHashes(found)] as const));
+}
+
+export interface AcknowledgedKeysOptions {
+  /**
+   * False when a machine in scope could not be scanned. Its copies are missing
+   * from `resources`, so a hash set that looks changed may only be incomplete:
+   * such an acknowledgement is not honoured for this answer, but it is not
+   * deleted either.
+   */
+  readonly complete?: boolean;
+}
+
+/**
  * Which of these resources the user has already accepted as divergent, dropping
  * acknowledgements whose content has moved on. Pruning here rather than on a
  * schedule keeps "the flag returns when the content changes again" true without
  * a background job that could lag behind the next scan.
+ *
+ * `resources` may hold several entries per key, one per machine scanned; they
+ * are compared as one merged set of versions.
+ *
+ * @example
+ * const kept = await acknowledgedResourceKeys(userId, [onLocal, onRemote]);
  */
 export async function acknowledgedResourceKeys(
   userId: string,
   resources: readonly LibraryResource[],
-  overrides: Partial<DivergenceAckDeps> = {}
+  overrides: Partial<DivergenceAckDeps> = {},
+  options: AcknowledgedKeysOptions = {}
 ): Promise<ReadonlySet<string>> {
   const deps = resolveDeps(overrides);
   const profileId = resolveActiveProfileId({ userId });
-  const byKey = new Map(resources.map((resource) => [resource.key, resource] as const));
-  const records = await deps.repository.listFor(userId, profileId, [...byKey.keys()]);
+  const hashesByKey = readableHashesByKey(resources);
+  const records = await deps.repository.listFor(userId, profileId, [...hashesByKey.keys()]);
 
   const current = new Set<string>();
   const expired: string[] = [];
   for (const record of records) {
-    const resource = byKey.get(record.resourceKey);
-    if (resource && record.divergenceKey === divergenceKeyFor(readableContentHashes(resource))) {
+    const hashes = hashesByKey.get(record.resourceKey);
+    if (hashes && record.divergenceKey === divergenceKeyFor(hashes)) {
       current.add(record.resourceKey);
     } else {
       expired.push(record.resourceKey);
     }
   }
-  await deps.repository.remove(userId, profileId, expired);
+  if (options.complete !== false) await deps.repository.remove(userId, profileId, expired);
   return current;
 }
 

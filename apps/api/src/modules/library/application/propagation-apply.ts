@@ -55,7 +55,7 @@ import { defaultAdapterRegistry } from './adapters/registry';
 import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
-import { acknowledgeDivergence } from './conflict-resolution';
+import { recordDivergenceAck } from './conflict-resolution';
 import { resetLibraryCachesForEnvironments } from './environment-library-service';
 import { previewLibraryPropagation } from './propagation-preview';
 
@@ -91,6 +91,11 @@ export interface PropagationApplyDeps {
     input: { readonly locationId: string; readonly path: string }
   ): Promise<readonly PreparedPropagationFile[]>;
   adapt(input: AdaptInput, strategy: AdapterStrategy): Promise<AdaptResult>;
+  /**
+   * Records a divergence the user chose to keep. Receives the hashes the preview
+   * read from every machine in scope, so it must not re-verify them against any
+   * one machine's disk.
+   */
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<unknown>;
   backup: BackupStoreDeps;
   /** Stands in for the RuntimeClient; tests inject transport failures and runtime faults. */
@@ -128,7 +133,7 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
     readSourceFile: overrides.readSourceFile ?? readResourceFile,
     readRemoteSource: overrides.readRemoteSource ?? readRemoteLibrarySource,
     adapt: overrides.adapt ?? ((input, strategy) => defaultAdapterRegistry.adapt(input, strategy)),
-    acknowledge: overrides.acknowledge ?? acknowledgeDivergence,
+    acknowledge: overrides.acknowledge ?? recordDivergenceAck,
     backup: overrides.backup ?? defaultBackupStoreDeps,
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     recordBackup: overrides.recordBackup ?? recordWrittenBackup,
