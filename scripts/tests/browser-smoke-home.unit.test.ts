@@ -17,6 +17,7 @@ import {
   removeSmokeHome,
   SMOKE_HOME_ENV,
   SMOKE_HOME_PREFIX,
+  SMOKE_HUB_HOST,
   type SmokeHomeHost,
   smokeHubEnv,
 } from '../../tests/browser-smoke/support/smoke-home';
@@ -285,6 +286,14 @@ describe('smokeHubEnv', () => {
       ).toBe(true);
     }
     expect(env.DATABASE_PATH).toBe(join(root(), '.mango', 'database.sqlite'));
+  });
+
+  test('binds the hub to loopback whatever the developer exported', () => {
+    const env = smokeHubEnv(root(), { API_HOST: '0.0.0.0' }, host);
+
+    expect(env.API_HOST, `expected API_HOST: ${SMOKE_HUB_HOST} | received: ${env.API_HOST}`).toBe(
+      '127.0.0.1'
+    );
   });
 
   test('ignores a developer-exported database path or hub home', () => {

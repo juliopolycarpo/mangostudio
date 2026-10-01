@@ -29,6 +29,9 @@ export const SMOKE_HOME_ENV = 'MANGO_SMOKE_HOME';
 /** Prefix of every directory {@link prepareSmokeHome} creates. */
 export const SMOKE_HOME_PREFIX = 'mangostudio-smoke-';
 
+/** The address the smoke hub binds: loopback only. */
+export const SMOKE_HUB_HOST = '127.0.0.1';
+
 /** The machine facts the shape check compares against; injectable for tests. */
 export interface SmokeHomeHost {
   /** The OS temporary directory. */
@@ -153,7 +156,8 @@ export function prepareSmokeHome(
 /**
  * The environment that confines a hub to `root`.
  *
- * `HOME`/`USERPROFILE` move the whole home; the explicit storage keys and
+ * `HOME`/`USERPROFILE` move the whole home; `API_HOST` keeps the hub on
+ * loopback; the explicit storage keys and
  * `MANGO_HOME` stop an exported variable from overriding it; the file
  * secret-store keeps connector tokens out of the OS keychain. `CARGO_HOME` and
  * `RUSTUP_HOME` keep the dev server's `cargo build` on the developer's real
@@ -183,6 +187,10 @@ export function smokeHubEnv(
     CHECKPOINTS_DIR: join(mango, 'checkpoints'),
     MANGO_LIBRARY_BACKUP_DIR: join(mango, 'library-backups'),
     MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(root, 'secret-store'),
+    // The hub's default bind is every interface, and a fresh home has no
+    // config.toml to narrow it. Open signup plus the first-owner Local runtime
+    // must never be reachable from the network during a run.
+    API_HOST: SMOKE_HUB_HOST,
     CARGO_HOME: ambient.CARGO_HOME?.trim() || join(host.realHome, '.cargo'),
     RUSTUP_HOME: ambient.RUSTUP_HOME?.trim() || join(host.realHome, '.rustup'),
   };

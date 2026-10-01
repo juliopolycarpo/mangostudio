@@ -92,6 +92,16 @@ describe('browser smoke lane hermeticity', () => {
     });
   }
 
+  test('binds the smoke hub to loopback only', () => {
+    for (const server of webServers()) {
+      const host = effectiveEnv(server, 'API_HOST');
+      expect(
+        host,
+        `expected API_HOST: 127.0.0.1 | received: ${host || '(unset, the hub binds 0.0.0.0)'}`
+      ).toBe('127.0.0.1');
+    }
+  });
+
   test('never attaches to an already running hub', () => {
     for (const server of webServers()) {
       expect(
