@@ -48,8 +48,14 @@ const MIN_SAVING_BYTES = 128;
 /** ... and at least this fraction of the original. */
 const MIN_SAVING_RATIO = 0.05;
 
-const GZIP_LEVEL = 6;
-const BROTLI_QUALITY = 6;
+/**
+ * Maximum effort, because it is paid once per build and the bytes are paid on
+ * every download. On the pinned bundle (123 text files, 6.05 MB) Brotli 11 takes
+ * about 11 s against 0.3 s at quality 6, and the copies are about 6 % smaller in
+ * total (2.51 MB against 2.67 MB). Gzip 9 is nearly free by comparison.
+ */
+const GZIP_LEVEL = 9;
+const BROTLI_QUALITY = 11;
 
 export interface PrecompressedVariant {
   /** URL path of the identity file this variant encodes ('/assets/main-x.js'). */
