@@ -67,8 +67,34 @@ describe('MessageSchema', () => {
     expectInvalid(MessageSchema, { ...storedRow, parts: [{ type: 3 }] }, 'non-string part type');
   });
 
+  it('accepts a free-text column holding a value the product never writes', () => {
+    // No CHECK constraint guards these columns, and one such row must not fail a whole page.
+    expectValid(MessageSchema, { ...storedRow, role: 'assistant' });
+    expectValid(MessageSchema, { ...storedRow, interactionMode: 'voice' });
+    expectValid(MessageSchema, {
+      ...storedRow,
+      attachments: [
+        {
+          id: 'attachment-1',
+          chatId: 'chat-1',
+          messageId: 'message-1',
+          originalName: 'odd.bin',
+          mimeType: 'application/octet-stream',
+          sizeBytes: 3,
+          kind: 'archive',
+          url: '/uploads/odd.bin',
+          createdAt: 1,
+        },
+      ],
+    });
+  });
+
+  it('still rejects a free-text column that is not a string', () => {
+    expectInvalid(MessageSchema, { ...storedRow, role: 1 }, 'numeric role');
+    expectInvalid(MessageSchema, { ...storedRow, interactionMode: null }, 'null interactionMode');
+  });
+
   it('rejects a column of the wrong type', () => {
-    expectInvalid(MessageSchema, { ...storedRow, role: 'assistant' }, 'role outside user | ai');
     expectInvalid(MessageSchema, { ...storedRow, isGenerating: 1 }, 'isGenerating as an integer');
     expectInvalid(MessageSchema, { ...storedRow, timestamp: '1' }, 'timestamp as a string');
   });

@@ -9,6 +9,8 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { MessageSchema } from '@mangostudio/shared/chat';
+import { sql } from 'kysely';
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
@@ -313,5 +315,22 @@ describe('GET /chats/:id/messages with stored values outside the written unions'
       );
     }
     expect(text).toBe(TOLERANCE_GOLDEN);
+  });
+});
+
+describe('transcript row schema coverage', () => {
+  it('declares every column of the messages table', async () => {
+    // The route selects `*`, and the response is serialised from the schema, so a
+    // column added to `messages` without a key in `MessageSchema` is silently
+    // dropped from every transcript.
+    const { rows } = await sql<{ name: string }>`PRAGMA table_info(messages)`.execute(getDb());
+    const declared = new Set(Object.keys(MessageSchema.properties));
+    const missing = rows.map((row) => row.name).filter((column) => !declared.has(column));
+    if (missing.length > 0) {
+      throw new Error(
+        `expected MessageSchema to declare every messages column | missing: ${JSON.stringify(missing)}`
+      );
+    }
+    expect(missing).toEqual([]);
   });
 });

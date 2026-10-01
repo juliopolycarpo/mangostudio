@@ -7,7 +7,7 @@ import {
   ExternalVendorIdSchema,
 } from '../external-agents/schemas';
 
-export const InteractionModeSchema = Type.Union([
+const InteractionModeSchema = Type.Union([
   Type.Literal('chat'),
   Type.Literal('agent'),
   Type.Literal('image'),

@@ -1,9 +1,10 @@
 import Type, { type Static, type TSchema } from 'typebox';
 import type { MessagePart } from '../types/agent-events';
+import type { InteractionMode } from '../types/provider';
 import {
+  type ChatAttachmentKind,
   ChatAttachmentSchema,
   GeneratedImageArtifactSchema,
-  InteractionModeSchema,
 } from './schemas';
 
 /**
@@ -30,6 +31,33 @@ const NullableOptional = <T extends TSchema>(schema: T) =>
   Type.Optional(Type.Union([schema, Type.Null()]));
 
 /**
+ * A free-text column the transcript serves whatever it holds.
+ *
+ * `messages.role`, `messages.interactionMode` and `chat_attachments.kind` are
+ * `TEXT` with no CHECK constraint, and the transcript passed a row through
+ * before it had a response schema. A union here would turn one row outside it
+ * (a downgrade, a hand edit) into a 500 for the whole page, the failure the
+ * `parts` decoder exists to avoid, so the wire schema accepts any string.
+ *
+ * The derived type is `Known | string`: the values the product writes stay
+ * available for narrowing and completion, and the type does not claim a value
+ * the column cannot guarantee. Code that switches on one of these must handle
+ * the fall-through. The strict unions still guard what a client may send
+ * (`CreateMessageBodySchema`) and what the upload route returns.
+ */
+const OpenString = <Known extends string>() =>
+  Type.Unsafe<Known | (string & Record<never, never>)>(Type.String());
+
+/**
+ * An attachment as the transcript sends it: {@link ChatAttachmentSchema} with an
+ * open `kind`, since the stored column is free text.
+ */
+const TranscriptAttachmentSchema = Type.Object({
+  ...ChatAttachmentSchema.properties,
+  kind: OpenString<ChatAttachmentKind>(),
+});
+
+/**
  * A chat message as the API sends it, one row of the transcript.
  *
  * Source of truth for {@link Message}. `imageUrl`, `referenceImage`,
@@ -43,12 +71,12 @@ const NullableOptional = <T extends TSchema>(schema: T) =>
  * order, then the joined `generatedImages` and `attachments`. Reordering a key
  * here reorders it on the wire; `chat-transcript-wire.integration.test.ts`
  * pins the text. A column added to `messages` must be added here too, or the
- * response drops it.
+ * response drops it; that test fails when one is missing.
  */
 export const MessageSchema = Type.Object({
   id: Type.String(),
   chatId: Type.String(),
-  role: Type.Union([Type.Literal('user'), Type.Literal('ai')]),
+  role: OpenString<'user' | 'ai'>(),
   text: Type.String(),
   imageUrl: NullableOptional(Type.String()),
   referenceImage: NullableOptional(Type.String()),
@@ -57,11 +85,11 @@ export const MessageSchema = Type.Object({
   generationTime: NullableOptional(Type.String()),
   modelName: NullableOptional(Type.String()),
   styleParams: Type.Optional(Type.Array(Type.String())),
-  interactionMode: Type.Optional(InteractionModeSchema),
+  interactionMode: Type.Optional(OpenString<InteractionMode>()),
   parts: Type.Optional(Type.Array(MessagePartSchema)),
   providerState: NullableOptional(Type.String()),
   generatedImages: Type.Optional(Type.Array(GeneratedImageArtifactSchema)),
-  attachments: Type.Optional(Type.Array(ChatAttachmentSchema)),
+  attachments: Type.Optional(Type.Array(TranscriptAttachmentSchema)),
   agentId: Type.Optional(Type.String()),
   agentName: Type.Optional(Type.String()),
 });
