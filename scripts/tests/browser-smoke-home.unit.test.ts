@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -75,6 +83,74 @@ describe('assertTemporarySmokeHome', () => {
   });
 });
 
+describe('assertTemporarySmokeHome path tricks', () => {
+  function refusalOf(candidate: string, forHost: SmokeHomeHost = host): string {
+    try {
+      assertTemporarySmokeHome(candidate, forHost);
+    } catch (error) {
+      return String(error);
+    }
+    return '';
+  }
+
+  test('refuses ".." segments that climb out of the temp directory into the real home', () => {
+    const candidate = join(host.tmpDir, `${SMOKE_HOME_PREFIX}a`, '..', '..', 'home', '.mango');
+    expect(refusalOf(candidate)).toContain(`received: ${JSON.stringify(candidate)}`);
+  });
+
+  test('refuses a ".." that would resolve through a symlink to a directory outside the temp directory', () => {
+    const outside = join(sandbox, 'elsewhere');
+    mkdirSync(join(outside, 'sub'), { recursive: true });
+    mkdirSync(join(outside, `${SMOKE_HOME_PREFIX}victim`));
+    symlinkSync(join(outside, 'sub'), join(host.tmpDir, 'linkdir'));
+    const candidate = `${join(host.tmpDir, 'linkdir')}/../${SMOKE_HOME_PREFIX}victim`;
+
+    expect(refusalOf(candidate)).toContain('".." segments');
+    expect(() => removeSmokeHome(candidate, host)).toThrow(
+      `received: ${JSON.stringify(candidate)}`
+    );
+    expect(
+      existsSync(join(outside, `${SMOKE_HOME_PREFIX}victim`)),
+      `expected directory kept: ${join(outside, `${SMOKE_HOME_PREFIX}victim`)}`
+    ).toBe(true);
+  });
+
+  test('refuses a smoke-named symlink that points into the real ~/.mango, and keeps its target', () => {
+    const link = join(host.tmpDir, `${SMOKE_HOME_PREFIX}link`);
+    const real = join(host.realHome, '.mango');
+    writeFileSync(join(real, 'database.sqlite'), 'x');
+    symlinkSync(real, link);
+
+    expect(refusalOf(link)).toContain(`received: ${JSON.stringify(link)}`);
+    expect(() => removeSmokeHome(link, host)).toThrow('refusing smoke hub home');
+    expect(existsSync(join(real, 'database.sqlite'))).toBe(true);
+  });
+
+  test('refuses a smoke-named symlink that points at a directory outside the temp directory', () => {
+    const target = join(sandbox, 'elsewhere');
+    const link = join(host.tmpDir, `${SMOKE_HOME_PREFIX}other`);
+    mkdirSync(target);
+    symlinkSync(target, link);
+
+    expect(refusalOf(link)).toContain('not a direct child of the OS temp directory');
+    expect(() => removeSmokeHome(link, host)).toThrow('refusing smoke hub home');
+    expect(existsSync(target)).toBe(true);
+  });
+
+  test('accepts a temp directory reached through a symlink, as macOS /tmp -> /private/tmp is', () => {
+    const real = join(sandbox, 'private-tmp');
+    mkdirSync(join(real, `${SMOKE_HOME_PREFIX}a`), { recursive: true });
+    const linked: SmokeHomeHost = { tmpDir: join(sandbox, 'tmp-link'), realHome: host.realHome };
+    symlinkSync(real, linked.tmpDir);
+
+    expect(refusalOf(join(linked.tmpDir, `${SMOKE_HOME_PREFIX}a`), linked)).toBe('');
+  });
+
+  test('refuses a whitespace-only value', () => {
+    expect(refusalOf('   ')).toContain('received: "   "');
+  });
+});
+
 describe('prepareSmokeHome', () => {
   test('creates a smoke directory and publishes it for workers', () => {
     const env: NodeJS.ProcessEnv = {};
@@ -92,6 +168,26 @@ describe('prepareSmokeHome', () => {
 
     expect(prepareSmokeHome(env, host)).toBe(published);
     expect(existsSync(published)).toBe(true);
+  });
+
+  test('refuses a published value that is the real home itself', () => {
+    const env: NodeJS.ProcessEnv = { [SMOKE_HOME_ENV]: host.realHome };
+
+    expect(() => prepareSmokeHome(env, host)).toThrow(`received: ${JSON.stringify(host.realHome)}`);
+  });
+
+  test('refuses a published value inside the real home', () => {
+    const inside = join(host.realHome, 'projects', `${SMOKE_HOME_PREFIX}x`);
+    const env: NodeJS.ProcessEnv = { [SMOKE_HOME_ENV]: inside };
+
+    expect(() => prepareSmokeHome(env, host)).toThrow(`received: ${JSON.stringify(inside)}`);
+  });
+
+  test('refuses a published value inside the real home even when the temp directory is the home', () => {
+    const inHome: SmokeHomeHost = { tmpDir: host.realHome, realHome: host.realHome };
+    const env: NodeJS.ProcessEnv = { [SMOKE_HOME_ENV]: join(host.realHome, '.mango') };
+
+    expect(() => prepareSmokeHome(env, inHome)).toThrow('inside ~/.mango');
   });
 
   test('refuses a published value that points at the real home', () => {
@@ -119,6 +215,46 @@ describe('removeSmokeHome', () => {
 
     expect(() => removeSmokeHome(real, host)).toThrow('refusing smoke hub home');
     expect(existsSync(join(real, 'database.sqlite'))).toBe(true);
+  });
+});
+
+describe('smoke home lifetime across process exit', () => {
+  /** Runs prepareSmokeHome in a fresh process on the real OS temp directory. */
+  function runPrepare(published: string | undefined): { status: number; home: string } {
+    const script = join(sandbox, 'prepare.ts');
+    const modulePath = join(import.meta.dir, '../../tests/browser-smoke/support/smoke-home');
+    writeFileSync(
+      script,
+      `import { prepareSmokeHome } from ${JSON.stringify(modulePath)};\n` +
+        `console.log(prepareSmokeHome(process.env));\n`
+    );
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    delete env[SMOKE_HOME_ENV];
+    if (published) env[SMOKE_HOME_ENV] = published;
+    const run = Bun.spawnSync([process.execPath, script], { env, stdout: 'pipe', stderr: 'pipe' });
+    return { status: run.exitCode ?? -1, home: run.stdout.toString().trim() };
+  }
+
+  test('deletes the directory it created when the process exits', () => {
+    const { status, home } = runPrepare(undefined);
+
+    expect(status, `expected exit status: 0 | received: ${status}`).toBe(0);
+    expect(home.startsWith(join(realpathSync(tmpdir()), SMOKE_HOME_PREFIX))).toBe(true);
+    expect(existsSync(home), `expected directory removed on exit: ${home}`).toBe(false);
+  });
+
+  test('never deletes a directory it was given through MANGO_SMOKE_HOME', () => {
+    const given = join(tmpdir(), `${SMOKE_HOME_PREFIX}given-${process.pid}`);
+    mkdirSync(given, { recursive: true });
+    try {
+      const { status, home } = runPrepare(given);
+
+      expect(status, `expected exit status: 0 | received: ${status}`).toBe(0);
+      expect(home).toBe(given);
+      expect(existsSync(given), `expected directory kept after exit: ${given}`).toBe(true);
+    } finally {
+      rmSync(given, { recursive: true, force: true });
+    }
   });
 });
 

@@ -67,6 +67,9 @@ export function describeSmokeHomeShape(host: SmokeHomeHost = currentHost()): str
 
 function findViolation(candidate: string, host: SmokeHomeHost): string | undefined {
   if (!candidate || !isAbsolute(candidate)) return 'not an absolute path';
+  // The check resolves `..` lexically, but the OS resolves it after following
+  // symlinks, so a `..` could name a different directory than the one proved.
+  if (candidate.split(/[\\/]/).includes('..')) return 'it contains ".." segments';
   const resolved = canonical(candidate);
   const realHome = canonical(host.realHome);
   if (resolved === realHome || isInside(resolved, realHome)) {
@@ -112,7 +115,8 @@ export function assertTemporarySmokeHome(
  */
 export function removeSmokeHome(root: string, host: SmokeHomeHost = currentHost()): void {
   assertTemporarySmokeHome(root, host);
-  rmSync(root, { recursive: true, force: true });
+  // Delete the path that was checked, not the spelling it was given in.
+  rmSync(canonical(root), { recursive: true, force: true });
 }
 
 /**
