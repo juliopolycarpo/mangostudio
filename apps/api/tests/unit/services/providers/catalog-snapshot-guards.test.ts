@@ -178,3 +178,58 @@ describe('catalog invalidated refresh', () => {
     expect(cached).toBeUndefined();
   });
 });
+
+describe('catalog recalculation supersedes in-flight reads', () => {
+  it('does not cache an older refresh whose metadata read predates recalculate()', async () => {
+    const heldRead = createGate<SecretMetadataRow[]>();
+    let enabled: string[] = [];
+    let metadataCalls = 0;
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => ['gemini'],
+      getProviderFn: () => textProvider(),
+      listAllSecretMetadataFn: () => {
+        metadataCalls++;
+        if (metadataCalls === 1) return heldRead.wait();
+        return Promise.resolve(metadataRows(enabled));
+      },
+    });
+
+    const olderRefresh = service.refresh('recalc-user');
+    await heldRead.reached;
+    // The user enables a model after the older read started; that read still sees none.
+    enabled = [TEXT_MODEL.modelId];
+    service.recalculate('recalc-user');
+    heldRead.release(metadataRows([]));
+    await olderRefresh;
+
+    const current = await service.getUnifiedModelCatalog('recalc-user');
+    expectCount('enabled text models after recalculate', 1, current.textModels.length);
+  });
+
+  it('does not clear the dirty flag from a recalculation that predates recalculate()', async () => {
+    const heldRead = createGate<SecretMetadataRow[]>();
+    let enabled: string[] = [TEXT_MODEL.modelId];
+    let metadataCalls = 0;
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => ['gemini'],
+      getProviderFn: () => textProvider(),
+      listAllSecretMetadataFn: () => {
+        metadataCalls++;
+        if (metadataCalls === 2) return heldRead.wait();
+        return Promise.resolve(metadataRows(enabled));
+      },
+    });
+
+    await service.getUnifiedModelCatalog('dirty-user');
+    service.recalculate('dirty-user');
+    const olderRecalc = service.getUnifiedModelCatalog('dirty-user');
+    await heldRead.reached;
+    enabled = [];
+    service.recalculate('dirty-user');
+    heldRead.release(metadataRows([TEXT_MODEL.modelId]));
+    await olderRecalc;
+
+    const current = await service.getUnifiedModelCatalog('dirty-user');
+    expectCount('enabled text models after second recalculate', 0, current.textModels.length);
+  });
+});
