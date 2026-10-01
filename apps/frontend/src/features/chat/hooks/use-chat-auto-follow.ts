@@ -12,7 +12,7 @@ const SCROLL_UP_THRESHOLD_PX = 1;
  * the fingers are gone; each attributed frame pushes the window out again, so a
  * fling stays one gesture rather than becoming a gesture and then a mystery.
  */
-const GESTURE_WINDOW_MS = 700;
+export const GESTURE_WINDOW_MS = 700;
 /**
  * Input that means a person is moving the view, rather than layout moving it.
  *
@@ -20,7 +20,7 @@ const GESTURE_WINDOW_MS = 700;
  * the transcript has focus. The composer is a sibling of the scroll port, not a
  * descendant, so typing a prompt never reaches this.
  */
-const GESTURE_EVENTS = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const;
+export const GESTURE_EVENTS = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const;
 
 /** True when the scroll position sits within a small threshold of the bottom. */
 export function isNearBottom(element: HTMLElement): boolean {

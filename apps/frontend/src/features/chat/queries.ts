@@ -18,7 +18,8 @@ import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 import { invalidateChatCapabilities } from './hooks/capability-invalidation';
-import { catchUpNewestPages, type MessagesCache } from './transcript-pages';
+import { catchUpNewestPages, loadOlderPage, type MessagesCache } from './transcript-pages';
+import { takeBackgroundRun } from './transcript-read-ahead';
 
 // ---------------------------------------------------------------------------
 // Chat query keys
@@ -198,11 +199,17 @@ const MESSAGES_PAGE_SIZE = '50';
  * cursor, otherwise the page of rows before `cursor`. Rows inside a page are
  * chronological.
  */
-async function fetchMessagesPage(chatId: string, cursor: string | null): Promise<MessagesPage> {
+async function fetchMessagesPage(
+  chatId: string,
+  cursor: string | null,
+  signal?: AbortSignal
+): Promise<MessagesPage> {
   const query = cursor
     ? { limit: MESSAGES_PAGE_SIZE, order: 'desc' as const, cursor }
     : { limit: MESSAGES_PAGE_SIZE, order: 'desc' as const };
-  const { data, error } = await client.api.chats({ id: chatId }).messages.get({ query });
+  const { data, error } = await client.api
+    .chats({ id: chatId })
+    .messages.get(signal ? { query, fetch: { signal } } : { query });
   if (error) throw new ApiError(error.value);
   return data satisfies MessagesPage;
 }
@@ -218,15 +225,33 @@ async function fetchMessagesPage(chatId: string, cursor: string | null): Promise
  * instead: it drops the page at the opposite end from the one being fetched,
  * which here is the newest, the one live writers append to.
  *
+ * "Load the next page" is read here too (see `loadOlderPage`): the page lands
+ * on the cache as it is by then, so a row a live writer added meanwhile is not
+ * overwritten, and a read-ahead fetch can be aborted without an error state.
+ *
  * `persister` is the one hook that wraps a whole infinite fetch. Its type
  * describes a single-page query, but for an infinite one it is handed the
  * stock fetch of every page and returns the whole cache entry, hence the cast.
  */
 const boundedTranscriptRefetch = (chatId: string) =>
   (async (fetchEveryPage: () => Promise<MessagesCache>, _context: unknown, query: Query) => {
-    const current = query.state.data as MessagesCache | undefined;
+    const readCache = () => query.state.data as MessagesCache | undefined;
     const loadingOlder = query.state.fetchMeta?.fetchMore !== undefined;
-    if (loadingOlder || !current || current.pages.length < 2) return fetchEveryPage();
+    if (loadingOlder) {
+      const background = takeBackgroundRun(query);
+      return await loadOlderPage(
+        readCache,
+        (cursor, signal) => fetchMessagesPage(chatId, cursor, signal),
+        background && {
+          signal: background.controller.signal,
+          onFailure: () => {
+            background.failed = true;
+          },
+        }
+      );
+    }
+    const current = readCache();
+    if (!current || current.pages.length < 2) return fetchEveryPage();
     return await catchUpNewestPages(current, (cursor) => fetchMessagesPage(chatId, cursor));
   }) as unknown as QueryPersister<MessagesPage, ReturnType<typeof messageKeys.list>, string | null>;
 

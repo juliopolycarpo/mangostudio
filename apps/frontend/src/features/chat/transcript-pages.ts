@@ -13,8 +13,14 @@ import type { InfiniteData } from '@tanstack/react-query';
  */
 export type MessagesCache = InfiniteData<MessagesPage, string | null>;
 
-/** Fetches one transcript page: the newest when `cursor` is `null`, else the one before `cursor`. */
-export type FetchMessagesPage = (cursor: string | null) => Promise<MessagesPage>;
+/**
+ * Fetches one transcript page: the newest when `cursor` is `null`, else the one
+ * before `cursor`. `signal` aborts the request.
+ */
+export type FetchMessagesPage = (
+  cursor: string | null,
+  signal?: AbortSignal
+) => Promise<MessagesPage>;
 
 /**
  * How many pages a refresh may fetch while looking for where the new rows meet
@@ -22,6 +28,60 @@ export type FetchMessagesPage = (cursor: string | null) => Promise<MessagesPage>
  * hundreds of messages arrived since the last read.
  */
 const MAX_CATCH_UP_PAGES = 4;
+
+/**
+ * Reads the page below the oldest loaded one and adds it to the cache as it is
+ * *when the page lands*, not as it was when the read started.
+ *
+ * The stock "load the next page" appends to the pages the fetch began with, so
+ * a row a live writer added to the newest page meanwhile (an optimistic message,
+ * a streamed reply) would be overwritten by the page landing. A page whose
+ * cursor no longer follows the oldest loaded page (a refetch dropped the older
+ * pages meanwhile) is not added.
+ *
+ * With `background`, the read is read-ahead: it never throws. An aborted or
+ * failed read leaves the cache exactly as it is and reports the failure through
+ * `background.onFailure`, so the query never enters an error state, is not
+ * retried, and nothing shows that the read-ahead existed.
+ *
+ * @example
+ * const next = await loadOlderPage(() => query.state.data, fetchPage, { signal, onFailure });
+ */
+export async function loadOlderPage(
+  readCache: () => MessagesCache | undefined,
+  fetchPage: FetchMessagesPage,
+  background?: { readonly signal: AbortSignal; readonly onFailure: () => void }
+): Promise<MessagesCache> {
+  const started = readCache();
+  const cursor = started?.pages.at(-1)?.nextCursor ?? null;
+  if (!started || cursor === null) return started ?? { pages: [], pageParams: [] };
+
+  let page: MessagesPage;
+  try {
+    page = await fetchPage(cursor, background?.signal);
+  } catch (error) {
+    if (!background) throw error;
+    if (!background.signal.aborted) background.onFailure();
+    return readCache() ?? started;
+  }
+
+  const latest = readCache() ?? started;
+  if (latest.pages.at(-1)?.nextCursor !== cursor) return latest;
+  return { pages: [...latest.pages, page], pageParams: [...latest.pageParams, cursor] };
+}
+
+/**
+ * Row count of each loaded page, oldest page first: the layout of the flattened
+ * transcript, for read-ahead to tell which page the reader is in.
+ *
+ * @example
+ * transcriptPageSizes(data); // => [50, 50, 12] for three pages, newest last
+ */
+export function transcriptPageSizes(
+  data: { readonly pages: readonly MessagesPage[] } | undefined
+): number[] {
+  return (data?.pages ?? []).map((page) => page.messages.length).reverse();
+}
 
 /**
  * Flattens the transcript's cache into the chronological list the feed renders.

@@ -17,6 +17,8 @@ import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
 import { useChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
 import type { OlderMessages } from '../hooks/use-chat-page-state';
+import { useTranscriptReadAhead } from '../hooks/use-transcript-read-ahead';
+import type { ReaderPosition } from '../transcript-read-ahead';
 import { ChatMessageRow } from './ChatMessageRow';
 
 /** The height the virtualizer assumes for a row it has not measured yet. */
@@ -52,6 +54,7 @@ export function ChatFeed({
   chatId,
   messages,
   older,
+  isGenerating = false,
   onQuestionSubmit,
 }: {
   chatId: string | null;
@@ -63,6 +66,8 @@ export function ChatFeed({
    * nothing older to load.
    */
   older?: OlderMessages;
+  /** A turn is streaming: the feed starts no background page load meanwhile. */
+  isGenerating?: boolean;
   /** Present only while question cards may be answered (no generation running). */
   onQuestionSubmit?: (prompt: string) => void;
 }) {
@@ -148,6 +153,25 @@ export function ChatFeed({
   useEffect(() => {
     if (!olderFailed) requestOlderNearTop();
   }, [olderFailed, requestOlderNearTop, messages.length]);
+  // Older pages are also fetched ahead of the reader, after the newest page has
+  // rendered; see `useTranscriptReadAhead`. It reads the reader's place from the
+  // virtualizer at the moment it decides, not from a render.
+  const readPosition = useCallback(
+    (): ReaderPosition => ({
+      firstVisibleIndex: rowVirtualizer.range?.startIndex ?? 0,
+      offsetPx: parentRef.current?.scrollTop ?? 0,
+      viewportPx: parentRef.current?.clientHeight ?? 0,
+    }),
+    [rowVirtualizer, parentRef]
+  );
+  useTranscriptReadAhead({
+    chatId,
+    ready: portPositioned && messages.length > 0,
+    paused: isGenerating || messages.at(-1)?.isGenerating === true,
+    older,
+    parentRef,
+    readPosition,
+  });
   const handleFeedScroll = useCallback(
     (event: UIEvent<HTMLElement>) => {
       handleScroll(event);
