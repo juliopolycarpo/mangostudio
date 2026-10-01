@@ -255,6 +255,13 @@ at least 128 B and 5 %; fonts and images are never tried.
   representation.
 - **Directory mode** has no copies (`dist/` carries none) and `/assets` stays on
   `@elysia/static`, so it answers identity whatever the client asks for, with no `Vary`.
+- **Smoke.** `scripts/test-build.ts` asks the compiled binary for the shell and one hashed script
+  and stylesheet with `gzip`, `br`, `identity` and `identity;q=0`, through
+  `scripts/lib/content-encoding-smoke.ts`. `fetch` negotiates and decodes transparently, so it
+  cannot see any of this; that client is `node:http`, which returns the bytes as sent. It asserts
+  `Content-Encoding`, `Vary`, a `Content-Length` equal to the bytes received, a distinct strong
+  `ETag` per representation, decoded copies byte-identical to identity, and `200` identity for a
+  refusal. It runs in CI's `Smoke — Binary` job on every target the host can execute.
 - **Cost.** About 2.5 MB of copies (198 files) grow the executable and the release archive by
   roughly the same amount; the `Base`/`Head` table in the PR that introduced this holds the
   measured numbers.
