@@ -125,8 +125,10 @@ fi
 # served shell must match it byte-for-byte.
 dist_index="${repo_root}/apps/frontend/dist/index.html"
 if [ -f "$dist_index" ]; then
-  served_hash="$(sha256sum "$served_index" | cut -d' ' -f1)"
-  dist_hash="$(sha256sum "$dist_index" | cut -d' ' -f1)"
+  # macOS ships `shasum`, not GNU `sha256sum`; same fallback as scripts/install/install.sh.
+  sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+  served_hash="$(sha256_of "$served_index")"
+  dist_hash="$(sha256_of "$dist_index")"
   if [ "$served_hash" != "$dist_hash" ]; then
     echo "Served index.html (${served_hash}) differs from built dist (${dist_hash})." >&2
     exit 1
