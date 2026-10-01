@@ -7,6 +7,7 @@ import {
   binaryCompileDefines,
   binaryCompileFlags,
   createTurboBuildCommand,
+  discardStandaloneReadme,
   selectBuildWorkspaces,
 } from './lib/build';
 import {
@@ -658,6 +659,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   const frontendDist = join(ROOT_DIR, 'apps/frontend/dist');
 
   mkdirSync(outDir, { recursive: true });
+  if (!options.dryRun) discardStandaloneReadme(outDir);
 
   console.log(`📦 Building MangoStudio v${options.version}`);
   console.log(`📅 Build time: ${buildTime}`);

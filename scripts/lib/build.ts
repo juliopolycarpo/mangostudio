@@ -1,3 +1,6 @@
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { WORKSPACES, type WorkspaceName } from './config';
 
 const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
@@ -80,4 +83,16 @@ export function createTurboBuildCommand(workspaces: WorkspaceName[]): string[] {
 
 function isBuildWorkspace(workspace: WorkspaceName): boolean {
   return BUILDABLE_WORKSPACES.includes(workspace);
+}
+
+/**
+ * Delete the standalone `README.md` left by an earlier build, before a binary build starts.
+ *
+ * The README is the completion marker `archive-assets.ts` looks for, written only after every
+ * platform has built and verified. A failed rebuild into a dirty output directory must not pass
+ * for a finished one on the strength of the previous build's README.
+ * // Usage: discardStandaloneReadme('.mango/out')
+ */
+export function discardStandaloneReadme(outDir: string): void {
+  rmSync(join(outDir, 'README.md'), { force: true });
 }

@@ -1,13 +1,47 @@
 import { describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   binaryCompileDefines,
   binaryCompileFlags,
   createTurboBuildCommand,
+  discardStandaloneReadme,
   selectBuildWorkspaces,
 } from '../lib/build';
 import { readText } from './support/read-text';
+
+describe('discardStandaloneReadme', () => {
+  test('removes a stale README and keeps the staged binaries', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'mangostudio-build-readme-'));
+    try {
+      mkdirSync(join(outDir, 'linux-x64'));
+      writeFileSync(join(outDir, 'README.md'), 'from an earlier successful build');
+      writeFileSync(join(outDir, 'linux-x64', 'mangostudio'), 'binary');
+
+      discardStandaloneReadme(outDir);
+
+      expect(
+        {
+          readme: existsSync(join(outDir, 'README.md')),
+          binary: existsSync(join(outDir, 'linux-x64', 'mangostudio')),
+        },
+        'expected README.md removed and the binary kept'
+      ).toEqual({ readme: false, binary: true });
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  test('does nothing when no README exists', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'mangostudio-build-readme-'));
+    try {
+      expect(() => discardStandaloneReadme(outDir)).not.toThrow();
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('build script', () => {
   test('keeps only build-capable workspaces', () => {
