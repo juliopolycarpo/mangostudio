@@ -40,6 +40,7 @@ fn product_answers_keep_questions_separate_from_authority() {
 #[derive(Default)]
 struct OwnedBackend {
     hosts: Mutex<Vec<Host>>,
+    discovery_state: Option<wire::DiscoveryState>,
 }
 #[async_trait::async_trait]
 impl AgentBackend for OwnedBackend {
@@ -57,9 +58,14 @@ impl AgentBackend for OwnedBackend {
         // The fake can return owned product facts without an SDK discovery, harness or launcher.
         Ok(wire::Descriptor {
             target_id: target,
-            installed: false,
-            discovery_state: wire::DiscoveryState::Determined,
-            version: None,
+            installed: self.discovery_state.is_some(),
+            discovery_state: self
+                .discovery_state
+                .unwrap_or(wire::DiscoveryState::Determined),
+            version: self
+                .discovery_state
+                .filter(|state| *state == wire::DiscoveryState::Determined)
+                .map(|_| "fixture-build-1".into()),
             required_version: None,
             auth_state: wire::AuthState::Unknown,
             login_command: None,
@@ -150,6 +156,125 @@ async fn product_discovery_needs_only_an_owned_backend() {
         backend.hosts.lock().unwrap()[0].runtime_version,
         "owned-test"
     );
+}
+
+/// Grants only the discovery capability needed by the registered-method compatibility tests.
+struct DiscoveryAuthorization;
+impl crate::ports::authorization::Authorization for DiscoveryAuthorization {
+    fn missing_capabilities<'a>(
+        &'a self,
+        method: &'a str,
+        capabilities: &'a [String],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<String>> + Send + 'a>> {
+        assert_eq!(method, "external-agent.discover");
+        assert_eq!(capabilities, ["externalAgents"]);
+        Box::pin(async { Vec::new() })
+    }
+}
+
+/// Calls the actual service handler over a handshaken session with a named owned backend.
+async fn discovery_from_calling_hub(state: wire::DiscoveryState) -> serde_json::Value {
+    use mango_protocol::contract::Contract;
+    use mango_protocol::frame::PeerInfo;
+    use mango_protocol::session::{Session, SessionOptions};
+    let peer = |role: &str| PeerInfo {
+        name: "discovery-compatibility".into(),
+        version: "0.0.0".into(),
+        role: role.into(),
+    };
+    let capabilities = serde_json::Map::new();
+    let (hub_port, runtime_port) = mango_protocol::port::port_pair();
+    let (hub, _) = Session::spawn(
+        hub_port,
+        SessionOptions::new(peer("hub")).with_capabilities(capabilities),
+    );
+    let (runtime, _) = Session::spawn(runtime_port, SessionOptions::new(peer("runtime")));
+    let (hub_ready, runtime_ready) = tokio::join!(hub.ready(), runtime.ready());
+    hub_ready.unwrap();
+    runtime_ready.unwrap();
+    let scratch = crate::test_support::ScratchDir::created("discovery-compatibility");
+    let supervisor = Supervisor::new(Ports {
+        harnesses: Arc::new(OwnedBackend {
+            discovery_state: Some(state),
+            ..OwnedBackend::default()
+        }),
+        workspaces: Arc::new(super::DenyEveryWorkspace),
+        executables: Arc::new(MissingExecutable),
+        environment: Arc::new(crate::probing::detection::path_env::PathEnv::default),
+        consent: Arc::new(|| true),
+        private_root: scratch.path().to_path_buf(),
+        runtime_version: "owned-test".into(),
+        account_key: Arc::new(|| None),
+        session_cap: 1,
+        consent_poll: super::CONSENT_POLL,
+        consent_read_timeout: std::time::Duration::from_secs(1),
+        cleanup_timeout: super::CLEANUP_TIMEOUT,
+        hard_turn_timeout: super::HARD_TURN_TIMEOUT,
+    });
+    let registry =
+        crate::external_agents::service::register(crate::registry::Registry::new(), supervisor);
+    let contract =
+        Contract::from_catalog(mangostudio_runtime_contract::catalog::catalog().clone()).unwrap();
+    let _served = crate::serve::serve(
+        &contract,
+        &runtime,
+        registry,
+        Arc::new(DiscoveryAuthorization),
+        "host",
+    )
+    .unwrap();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        hub.request(
+            "external-agent.discover",
+            serde_json::json!({"targetIds":["claude"],"timeoutMs":1000}),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let _ = tokio::join!(
+        hub.close(1000, Some("test finished")),
+        runtime.close(1000, Some("test finished"))
+    );
+    result
+}
+
+/// The actual pre-feature catalog accepts descriptor additions through its open runtime projection.
+#[tokio::test]
+async fn a_new_runtime_answers_the_released_hubs_discovery_contract() {
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/external-agents/discover-result-before-state.json"
+    ))
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    for state in [
+        wire::DiscoveryState::Determined,
+        wire::DiscoveryState::Undetermined,
+    ] {
+        let result = discovery_from_calling_hub(state).await;
+        let errors: Vec<_> = validator
+            .iter_errors(&result)
+            .map(|error| error.to_string())
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "expected the older result schema to accept the actual method reply; received {errors:?}"
+        );
+        assert!(result["descriptors"][0].get("discoveryState").is_some());
+    }
+}
+
+/// The registered service forwards both new facts through the current result contract.
+#[tokio::test]
+async fn a_new_runtime_emits_both_states_through_the_current_contract() {
+    for (state, expected) in [
+        (wire::DiscoveryState::Determined, "determined"),
+        (wire::DiscoveryState::Undetermined, "undetermined"),
+    ] {
+        let result = discovery_from_calling_hub(state).await;
+        assert_eq!(result["descriptors"][0]["discoveryState"], expected);
+    }
 }
 
 #[derive(Default)]
