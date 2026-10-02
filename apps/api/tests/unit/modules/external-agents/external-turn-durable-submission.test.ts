@@ -6,10 +6,10 @@
  * vendor turn behind it.
  */
 
-import { beforeEach, describe, expect, it, setSystemTime } from 'bun:test';
+import { beforeEach, describe, expect, it, setSystemTime, spyOn } from 'bun:test';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnPart, MessagePart } from '@mangostudio/shared/types';
-import { sql } from 'kysely';
+import { InsertQueryBuilder, sql } from 'kysely';
 import { getDb } from '../../../../src/db/database';
 import { getChatMessagesUseCase } from '../../../../src/modules/chats/application/get-chat-messages';
 import { createEnvironmentService } from '../../../../src/modules/environments/application/environment-service';
@@ -24,7 +24,10 @@ import {
   type ExternalTurnResult,
 } from '../../../../src/modules/external-agents/application/external-turn-controller';
 import { reconcileExternalTurns } from '../../../../src/modules/external-agents/application/external-turn-recovery';
-import type { SubmissionOutcome } from '../../../../src/modules/external-agents/application/external-turn-submission';
+import {
+  fingerprintTurnParams,
+  type SubmissionOutcome,
+} from '../../../../src/modules/external-agents/application/external-turn-submission';
 import { listAttemptsForMessage } from '../../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { cancelActiveTurn } from '../../../../src/modules/generation/application/active-turn-registry';
 import { RuntimeConnectionManager } from '../../../../src/services/runtime-client/runtime-connection-manager';
@@ -170,12 +173,16 @@ function harness(
   return { runtime, clock, manager, sessions: baseSessions, controller, submission };
 }
 
-function start(controller: ReturnType<typeof harness>['controller']): Promise<ExternalTurnResult> {
+function start(
+  controller: ReturnType<typeof harness>['controller'],
+  review = false
+): Promise<ExternalTurnResult> {
   return controller.start(
     {
       userId,
       chatId,
       prompt: 'refactor the parser',
+      ...(review ? { review: { target: { type: 'uncommittedChanges' as const } } } : {}),
       configuration: CONFIGURATION,
       canonicalWorkspacePath: '/work/repo',
       vendorAccountFingerprint: 'account-a',
@@ -676,4 +683,242 @@ describe('restart against a real runtime', () => {
     expect(runtime.submissionCount()).toBe(1);
     await runtime.close();
   });
+});
+
+describe('durable native review admission', () => {
+  it('sends zero review RPCs when the attempt insert is blocked', async () => {
+    const { runtime, controller } = harness();
+    await sql`CREATE TRIGGER refuse_review_attempts BEFORE INSERT ON external_turn_attempts BEGIN SELECT RAISE(ABORT, 'review receipt refused'); END`.execute(
+      getDb()
+    );
+    try {
+      const running = start(controller, true);
+      let result: ExternalTurnResult | undefined;
+      void running.then((settled) => {
+        result = settled;
+      });
+      await waitFor(
+        () => result !== undefined || runtime.rpcCount() > 0,
+        'review receipt failure or a premature RPC'
+      );
+      expect(runtime.rpcCount()).toBe(0);
+      expect((await running).reason).toBe('vendor-error');
+      expect(runtime.reviews).toEqual([]);
+      expect(runtime.submissionCount()).toBe(0);
+    } finally {
+      await sql`DROP TRIGGER IF EXISTS refuse_review_attempts`.execute(getDb());
+      await runtime.close();
+    }
+  });
+
+  it('waits for a pending attempt insert before any review RPC', async () => {
+    const { runtime, controller } = harness();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const execute = InsertQueryBuilder.prototype.execute;
+    const held = spyOn(InsertQueryBuilder.prototype, 'execute').mockImplementation(
+      async function holdAttemptInsert(this: InstanceType<typeof InsertQueryBuilder>) {
+        if (this.compile().sql.startsWith('insert into "external_turn_attempts"')) {
+          entered.resolve();
+          await release.promise;
+        }
+        return await execute.call(this);
+      }
+    );
+    try {
+      const running = start(controller, true);
+      await entered.promise;
+      expect(runtime.rpcCount()).toBe(0);
+      expect(await attemptStates()).toEqual([]);
+      release.resolve();
+      await accepted();
+      runtime.emit({ type: 'completed' });
+      expect((await running).reason).toBe('completed');
+      expect(runtime.reviews).toHaveLength(1);
+    } finally {
+      release.resolve();
+      held.mockRestore();
+      await runtime.close();
+    }
+  });
+
+  it('records the logical assistant attempt and exact review digest before sending', async () => {
+    const { runtime, controller } = harness();
+    runtime.script.push('stall');
+    const running = start(controller, true);
+    await waitFor(() => runtime.reviews.length === 1, 'one native review RPC');
+    const [row] = await listAttemptsForMessage(assistantMessageId, getDb());
+    expect(row).toMatchObject({
+      messageId: assistantMessageId,
+      clientMessageId: userMessageId,
+      state: 'acceptance-unknown',
+      sessionId: 'session-1',
+    });
+    const params = runtime.reviews[0];
+    if (!params) throw new Error('expected a review request | received: none');
+    expect(row?.inputFingerprint).toBe(fingerprintTurnParams(params));
+    expect(params).toEqual({
+      sessionId: 'session-1',
+      clientMessageId: userMessageId,
+      target: { type: 'uncommittedChanges' },
+    });
+    runtime.releaseStalled();
+    await accepted();
+    runtime.emit({ type: 'completed' });
+    expect((await running).reason).toBe('completed');
+    expect(await attemptStates()).toEqual(['terminal']);
+    await runtime.close();
+  });
+
+  it('replays a lost review reply byte-identically on the same connection with one vendor review', async () => {
+    const { runtime, controller } = harness({ callTimeoutMs: 30 });
+    runtime.script.push('stall');
+    const running = start(controller, true);
+    await waitFor(() => runtime.reviews.length === 2, 'the exact review receipt replay');
+    await accepted();
+    expect(JSON.stringify(runtime.reviews[1])).toBe(JSON.stringify(runtime.reviews[0]));
+    expect(runtime.turns).toEqual([]);
+    expect(runtime.submissionCount()).toBe(1);
+    expect(runtime.connectionCount()).toBe(1);
+    runtime.emit({ type: 'completed' });
+    expect((await running).reason).toBe('completed');
+    expect(await attemptStates()).toEqual(['terminal']);
+    await runtime.close();
+  });
+
+  it('leaves a locally closed unanswered review unresolved without reopening or resending', async () => {
+    const { runtime, controller, submission } = harness();
+    runtime.script.push('drop-ack');
+    const running = start(controller, true);
+    expect((await running).reason).toBe('acceptance-unknown');
+    expect((await submission()).kind).toBe('unresolved');
+    expect(await attemptStates()).toEqual(['unresolved']);
+    expect({
+      rpcs: runtime.rpcCount(),
+      vendorReviews: runtime.submissionCount(),
+      connections: runtime.connectionCount(),
+    }).toEqual({ rpcs: 1, vendorReviews: 1, connections: 1 });
+    expect((await turnPart()).generating).toBe(false);
+    await runtime.close();
+  });
+
+  it('does not send a receipt replay after the session closes during backoff', async () => {
+    const clock = createFakeBackoffClock({ auto: false });
+    const { runtime, controller, submission } = harness({ clock, callTimeoutMs: 20 });
+    runtime.script.push('stall');
+    const running = start(controller, true);
+    await waitFor(() => clock.pendingCount() === 1, 'the review to enter receipt replay backoff');
+    await runtime.drop();
+    clock.advance();
+    expect((await submission()).kind).toBe('unresolved');
+    expect((await running).reason).toBe('acceptance-unknown');
+    expect(runtime.rpcCount()).toBe(1);
+    expect(runtime.reviewSendCount()).toBe(1);
+    expect(runtime.connectionCount()).toBe(1);
+    expect(await attemptStates()).toEqual(['unresolved']);
+    await runtime.close();
+  });
+
+  it('honors an explicit disconnect while an unanswered review waits in backoff', async () => {
+    const clock = createFakeBackoffClock({ auto: false });
+    const { runtime, controller, sessions, submission } = harness({ clock, callTimeoutMs: 20 });
+    runtime.script.push('stall');
+    const running = start(controller, true);
+    await waitFor(() => clock.pendingCount() === 1, 'the review to wait in backoff');
+    await sessions.reapScope({ userId }, 'runtime-disconnected', {
+      keepContinuation: true,
+      explicit: true,
+    });
+    expect((await running).reason).toBe('runtime-disconnected');
+    expect((await submission()).kind).toBe('stopped');
+    expect(runtime.rpcCount()).toBe(1);
+    expect(runtime.connectionCount()).toBe(1);
+    expect(await attemptStates()).toEqual(['unresolved']);
+    await runtime.close();
+  });
+
+  for (const reason of ['cancelled-by-user', 'consent-revoked'] as const) {
+    it(`ends a stalled review promptly on ${reason} and records/cancels late acceptance`, async () => {
+      const { runtime, controller, sessions, submission } = harness();
+      runtime.script.push('stall');
+      const running = start(controller, true);
+      await waitFor(() => runtime.reviews.length === 1, 'a stalled review');
+      if (reason === 'cancelled-by-user')
+        expect(cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled')).toBe(true);
+      else await sessions.reapScope({ userId }, reason);
+      expect((await running).reason).toBe(reason);
+      runtime.releaseStalled();
+      expect((await submission()).kind).toBe('stopped');
+      await waitFor(
+        () => runtime.cancels.some((cancel) => cancel.nativeTurnId === 'native-turn-1'),
+        'late review cancellation'
+      );
+      const [row] = await listAttemptsForMessage(assistantMessageId, getDb());
+      expect(row).toMatchObject({
+        state: 'terminal',
+        nativeTurnId: 'native-turn-1',
+        terminalReason: 'accepted-after-stop',
+      });
+      expect((await turnPart()).part.terminalReason).toBe(reason);
+      expect(runtime.submissionCount()).toBe(1);
+      await runtime.close();
+    });
+  }
+
+  it('classifies shutdown during an unanswered review as acceptance-unknown', async () => {
+    const { runtime, controller, sessions, submission } = harness();
+    runtime.script.push('stall');
+    const running = start(controller, true);
+    await waitFor(() => runtime.reviews.length === 1, 'a stalled review');
+    await sessions.reapAll('hub-restarted');
+    expect((await running).reason).toBe('acceptance-unknown');
+    runtime.releaseStalled();
+    expect((await submission()).kind).toBe('stopped');
+    await runtime.close();
+  });
+
+  it('boot recovery seals an unknown review without dispatching again', async () => {
+    const { runtime, controller, submission } = harness();
+    runtime.script.push('stall');
+    void start(controller, true);
+    await waitFor(() => runtime.reviews.length === 1, 'a stalled review');
+    expect(
+      await reconcileExternalTurns(
+        { reason: 'hub-restarted', chatId, isActive: () => false },
+        getDb()
+      )
+    ).toBe(1);
+    expect((await turnPart()).part.terminalReason).toBe('acceptance-unknown');
+    expect((await turnPart()).generating).toBe(false);
+    expect(await attemptStates()).toEqual(['unresolved']);
+    runtime.releaseStalled();
+    expect((await submission()).kind).toBe('stopped');
+    expect(runtime.rpcCount()).toBe(1);
+    expect(runtime.submissionCount()).toBe(1);
+    await runtime.close();
+  });
+
+  for (const [behaviour, reason, state] of [
+    ['refuse-busy', 'vendor-error', 'terminal'],
+    ['refuse-accepted', 'vendor-error', 'terminal'],
+    ['refuse-deterministic', 'vendor-error', 'terminal'],
+    ['refuse-spent', 'session-lost', 'terminal'],
+    ['refuse-acceptance-unknown', 'acceptance-unknown', 'unresolved'],
+    ['refuse-cleanup', 'acceptance-unknown', 'unresolved'],
+  ] as const) {
+    it(`preserves ${behaviour} as one review RPC and settles its durable state`, async () => {
+      const { runtime, controller, clock, submission } = harness();
+      runtime.script.push(behaviour);
+      const running = start(controller, true);
+      expect((await running).reason).toBe(reason);
+      expect((await submission()).kind).toBe(
+        reason === 'acceptance-unknown' ? 'unresolved' : 'refused'
+      );
+      expect(await attemptStates()).toEqual([state]);
+      expect(runtime.rpcCount()).toBe(1);
+      expect(runtime.submissionCount()).toBe(0);
+      expect(clock.waits).toEqual([]);
+      await runtime.close();
+    });
+  }
 });

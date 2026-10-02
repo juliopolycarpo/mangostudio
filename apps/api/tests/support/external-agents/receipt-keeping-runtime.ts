@@ -19,6 +19,7 @@ import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import {
   type ExternalAgentEvent,
   type ExternalAgentOpenParams,
+  type ExternalAgentStartReviewParams,
   type ExternalAgentTurnParams,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
@@ -47,9 +48,42 @@ type TurnBehaviour =
   | 'refuse'
   | 'refuse-unavailable'
   | 'refuse-timeout'
-  | 'refuse-acceptance-unknown';
+  | 'refuse-acceptance-unknown'
+  | 'refuse-busy'
+  | 'refuse-deterministic'
+  | 'refuse-spent'
+  | 'refuse-cleanup'
+  | 'refuse-accepted';
 
 const REFUSALS: Partial<Record<TurnBehaviour, () => RemoteError>> = {
+  'refuse-accepted': () =>
+    new RemoteError('INTERNAL', 'Accepted review failed.', {
+      kind: 'external_agent_vendor',
+      dispatch: 'accepted',
+      cleanupRequired: true,
+    }),
+  'refuse-busy': () =>
+    new RemoteError('INTERNAL', 'Review is busy.', {
+      kind: 'external_agent_busy',
+      dispatch: 'not-submitted',
+    }),
+  'refuse-deterministic': () =>
+    new RemoteError('INTERNAL', 'Review is unsupported.', {
+      kind: 'external_agent_turn_refused',
+      dispatch: 'not-submitted',
+    }),
+  'refuse-spent': () =>
+    new RemoteError('INTERNAL', 'Session is spent.', {
+      kind: 'tool_argument',
+      dispatch: 'not-submitted',
+    }),
+  'refuse-cleanup': () =>
+    new RemoteError('INTERNAL', 'Review cleanup is unconfirmed.', {
+      kind: 'external_agent_turn_refused',
+      dispatch: 'not-submitted',
+      cleanupRequired: true,
+      cleanup: 'unconfirmed',
+    }),
   refuse: () => new RemoteError('VENDOR_REFUSED', 'The vendor refused this turn.'),
   'refuse-unavailable': () =>
     new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'The vendor CLI is signed out.'),
@@ -70,6 +104,8 @@ export interface ReceiptKeepingRuntime {
   readonly connector: RuntimeEnvironmentConnector;
   /** Every `external-agent.turn` request that reached the runtime, receipt hits included. */
   rpcCount(): number;
+  /** Review send calls, including calls the closed transport cannot write. */
+  reviewSendCount(): number;
   /** Native vendor submissions: one per turn the vendor was actually asked to run. */
   submissionCount(): number;
   /** How many connections `resolveClient` has opened. */
@@ -78,6 +114,8 @@ export interface ReceiptKeepingRuntime {
   connectAttemptCount(): number;
   /** Params of every turn request, in arrival order. */
   readonly turns: ExternalAgentTurnParams[];
+  /** Exact native review requests, including receipt hits. */
+  readonly reviews: ExternalAgentStartReviewParams[];
   /** Every `external-agent.cancel` the hub sent. */
   readonly cancels: { sessionId: string; nativeTurnId?: string }[];
   /** Behaviours for the next submissions, consumed in order; `answer` once empty. */
@@ -110,10 +148,12 @@ interface Connection {
 
 export function createReceiptKeepingRuntime(): ReceiptKeepingRuntime {
   const turns: ExternalAgentTurnParams[] = [];
+  const reviews: ExternalAgentStartReviewParams[] = [];
   const cancels: ReceiptKeepingRuntime['cancels'] = [];
   const script: TurnBehaviour[] = [];
   const stalled: Array<() => void> = [];
   let rpcs = 0;
+  let reviewSends = 0;
   let submissions = 0;
   let connections = 0;
   let connectAttempts = 0;
@@ -144,44 +184,19 @@ export function createReceiptKeepingRuntime(): ReceiptKeepingRuntime {
               structuredStreaming: true,
               cancellation: true,
               resume: true,
+              nativeReview: true,
             },
           };
         },
         'external-agent.turn': (params) => {
           const typed = params as ExternalAgentTurnParams;
-          rpcs += 1;
           turns.push(typed);
-          const fingerprint = JSON.stringify(typed);
-          const receipt = receipts.get(typed.clientMessageId);
-          if (receipt) {
-            if (receipt.fingerprint !== fingerprint) {
-              throw new RemoteError(
-                RESERVED_ERROR_CODES.INVALID_PARAMS,
-                `clientMessageId "${typed.clientMessageId}" was reused with different turn input.`,
-                { kind: 'tool_argument' }
-              );
-            }
-            if (receipt.refusal) throw receipt.refusal();
-            return { nativeTurnId: receipt.nativeTurnId };
-          }
-          const behaviour = script.shift() ?? 'answer';
-          const refusal = REFUSALS[behaviour];
-          if (refusal) {
-            receipts.set(typed.clientMessageId, { fingerprint, refusal });
-            throw refusal();
-          }
-          submissions += 1;
-          const nativeTurnId = `native-turn-${submissions}`;
-          receipts.set(typed.clientMessageId, { fingerprint, nativeTurnId });
-          connection.nativeTurnId = nativeTurnId;
-          if (behaviour === 'answer') return { nativeTurnId };
-          if (behaviour === 'drop-ack') {
-            void runtime.close();
-            return new Promise(() => undefined);
-          }
-          return new Promise((resolve) => {
-            stalled.push(() => resolve({ nativeTurnId }));
-          });
+          return admit(typed, 'turn');
+        },
+        'external-agent.start-review': (params) => {
+          const typed = params as ExternalAgentStartReviewParams;
+          reviews.push(typed);
+          return admit(typed, 'review');
         },
         'external-agent.cancel': (params) => {
           cancels.push(params as { sessionId: string; nativeTurnId?: string });
@@ -190,6 +205,53 @@ export function createReceiptKeepingRuntime(): ReceiptKeepingRuntime {
         'external-agent.close': () => ({ ok: true as const }),
       },
     });
+
+    /** Applies the same receipt identity to review and turn RPCs. */
+    function admit(
+      typed: ExternalAgentTurnParams | ExternalAgentStartReviewParams,
+      kind: 'turn' | 'review'
+    ) {
+      const result = (nativeTurnId: string | undefined) =>
+        kind === 'review' ? { nativeTurnId, reviewThreadId: 'native-session-1' } : { nativeTurnId };
+      rpcs += 1;
+
+      const fingerprint = `${kind}:${JSON.stringify(typed)}`;
+      const receipt = receipts.get(typed.clientMessageId);
+      if (receipt) {
+        if (receipt.fingerprint !== fingerprint) {
+          throw new RemoteError(
+            RESERVED_ERROR_CODES.INVALID_PARAMS,
+            `clientMessageId "${typed.clientMessageId}" was reused with different turn input.`,
+            { kind: 'tool_argument' }
+          );
+        }
+        if (receipt.refusal) throw receipt.refusal();
+        return result(receipt.nativeTurnId);
+      }
+      const behaviour = script.shift() ?? 'answer';
+      const refusal = REFUSALS[behaviour];
+      if (refusal) {
+        receipts.set(typed.clientMessageId, { fingerprint, refusal });
+        throw refusal();
+      }
+      submissions += 1;
+      const nativeTurnId = `native-turn-${submissions}`;
+      receipts.set(typed.clientMessageId, { fingerprint, nativeTurnId });
+      connection.nativeTurnId = nativeTurnId;
+      if (behaviour === 'answer') return result(nativeTurnId);
+      if (behaviour === 'drop-ack') {
+        void runtime.close();
+        return new Promise(() => undefined);
+      }
+      return new Promise((resolve) => {
+        stalled.push(() => resolve(result(nativeTurnId)));
+      });
+    }
+    const sendReview = runtime.client.externalAgents.startReview;
+    runtime.client.externalAgents.startReview = function countReviewSend(params, options) {
+      reviewSends += 1;
+      return sendReview(params, options);
+    };
     (connection as { runtime: TestRuntime }).runtime = runtime;
     runtime.client.onClose(() => {
       // A reconnect is a new runtime session: every receipt is gone with it.
@@ -231,10 +293,12 @@ export function createReceiptKeepingRuntime(): ReceiptKeepingRuntime {
       return (live ?? (await connect())).runtime.client;
     },
     rpcCount: () => rpcs,
+    reviewSendCount: () => reviewSends,
     submissionCount: () => submissions,
     connectionCount: () => connections,
     connectAttemptCount: () => connectAttempts,
     turns,
+    reviews,
     cancels,
     script,
     setAvailable(next) {

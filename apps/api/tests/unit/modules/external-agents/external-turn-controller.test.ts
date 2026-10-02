@@ -1040,8 +1040,11 @@ describe('external turn controller', () => {
       );
     }
 
-    it('preserves an unanswered review deadline without retrying or claiming a vendor refusal', async () => {
-      function reviewDeadline(): Error {
+    it('reconciles an unanswered review deadline through the same-session receipt', async () => {
+      let lostReply = true;
+      function reviewDeadline(): Error | undefined {
+        if (!lostReply) return undefined;
+        lostReply = false;
         return new ToolExecutionTimedOutError('Review acknowledgement timed out.', {
           cause: new RuntimeRequestNoReplyError(
             new RemoteError('TIMEOUT', 'Review acknowledgement timed out.'),
@@ -1049,18 +1052,20 @@ describe('external turn controller', () => {
           ),
         });
       }
+      const clock = createFakeBackoffClock({ auto: true });
       const { runtime, controller } = harness({
         capabilities: REVIEW_CAPABILITIES,
         reviewFailure: reviewDeadline,
+        sleep: clock.sleep,
       });
-      const result = await startReview(controller);
-      expect(result.reason).toBe('acceptance-unknown');
-      expect(runtime.calls.startReview).toHaveLength(1);
+      const running = startReview(controller);
+      await waitFor(() => runtime.calls.startReview.length === 2, 'the review receipt replay');
+      expect(runtime.calls.startReview[1]).toEqual(runtime.calls.startReview[0]);
+      runtime.emit({ type: 'completed' });
+      expect((await running).reason).toBe('completed');
       expect(runtime.calls.close).toEqual([]);
       expect(runtime.calls.cancel).toEqual([]);
-      expect(turnPartOf((await readAssistantRow()).parts).terminalReason).toBe(
-        'acceptance-unknown'
-      );
+      expect(clock.waits).toHaveLength(1);
     });
 
     for (const dispatch of [undefined, 'not-submitted'] as const) {

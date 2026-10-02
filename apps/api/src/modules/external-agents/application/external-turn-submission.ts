@@ -1,6 +1,6 @@
 /**
- * Submits one external turn to a runtime, at most once, and keeps trying until
- * the answer is known.
+ * Submits one external turn or native review to a runtime, at most once,
+ * and reconciles its acceptance before binding the vendor turn.
  *
  * The rules this loop holds, in the order they are applied:
  *
@@ -16,8 +16,8 @@
  *
  * 3. **Replay only what was proven not submitted.** A request the hub never
  *    wrote, or one the runtime said it did not dispatch, becomes
- *    `not-submitted` and is retried after a capped, jittered backoff with no
- *    count cutoff.
+ *    `not-submitted`; an ordinary turn is retried after a capped, jittered
+ *    backoff with no count cutoff. A native review retains its one-call refusal policy.
  * 4. **Reconcile what may have been accepted.** A sent request with no reply
  *    is resent unchanged while its connection is still the same one — the
  *    runtime's receipt answers it. Once that connection is gone the receipts
@@ -31,7 +31,10 @@
 
 import { createHash } from 'node:crypto';
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-import type { ExternalAgentTurnParams } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentStartReviewParams,
+  ExternalAgentTurnParams,
+} from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
@@ -46,7 +49,11 @@ import {
   insertAttempt,
   transitionAttempt,
 } from '../infrastructure/external-turn-attempt-repository';
-import type { ExternalSessionHandle, ExternalTurnInput } from './external-session-manager';
+import type {
+  ExternalReviewInput,
+  ExternalSessionHandle,
+  ExternalTurnInput,
+} from './external-session-manager';
 
 const logger = createDiagnosticLogger('external-turn-submission');
 
@@ -80,14 +87,16 @@ export const sleepUnlessAborted: CancellableSleep = (ms, signal) =>
  * @example
  * fingerprintTurnParams(params); // 'sha256:3f…'
  */
-export function fingerprintTurnParams(params: ExternalAgentTurnParams): string {
+export function fingerprintTurnParams(
+  params: ExternalAgentTurnParams | ExternalAgentStartReviewParams
+): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(params)).digest('hex')}`;
 }
 
 export type SubmissionOutcome =
   | { readonly kind: 'accepted'; readonly nativeTurnId: string; readonly attemptId: string }
   /** The runtime may or may not have the turn; nothing can reconcile it now. */
-  | { readonly kind: 'unresolved'; readonly attemptId: string }
+  | { readonly kind: 'unresolved'; readonly attemptId: string; readonly error?: unknown }
   /** The runtime, or the session open, refused the turn. */
   | { readonly kind: 'refused'; readonly error: unknown }
   /** The pre-submission receipt could not be written; nothing was sent. */
@@ -95,13 +104,12 @@ export type SubmissionOutcome =
   /** `signal` aborted. The caller already knows why. */
   | { readonly kind: 'stopped' };
 
-export interface SubmitExternalTurnInput {
+interface SubmissionContext {
   readonly db: Kysely<Database>;
   readonly messageId: string;
   readonly chatId: string;
   readonly userId: string;
   readonly environmentId: string;
-  readonly turn: ExternalTurnInput;
   /** The session to submit on first. */
   readonly handle: ExternalSessionHandle;
   /**
@@ -128,6 +136,13 @@ export interface SubmitExternalTurnInput {
   readonly onDispatchPending?: (pending: boolean) => void;
 }
 
+/** One turn or native review; both use the existing durable attempt ledger. */
+export type SubmitExternalTurnInput = SubmissionContext &
+  (
+    | { readonly turn: ExternalTurnInput; readonly review?: never }
+    | { readonly review: ExternalReviewInput; readonly turn?: never }
+  );
+
 /** A session open that failed because the connection is not there yet, not because it was refused. */
 function isConnectionUnavailable(error: unknown): boolean {
   return error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE;
@@ -143,7 +158,7 @@ function isConnectionUnavailable(error: unknown): boolean {
 export async function submitExternalTurn(
   input: SubmitExternalTurnInput
 ): Promise<SubmissionOutcome> {
-  let handle: ExternalSessionHandle | undefined = input.handle;
+  let handle = input.handle;
   let retries = 0;
 
   const wait = async (): Promise<void> => {
@@ -153,7 +168,8 @@ export async function submitExternalTurn(
   };
 
   while (!input.signal.aborted) {
-    if (!handle?.isLive()) {
+    // A review stays on its selected vendor thread and opened configuration.
+    if (!input.review && !handle.isLive()) {
       try {
         handle = await input.reacquire();
       } catch (error) {
@@ -182,13 +198,50 @@ type AttemptResult =
   | { readonly kind: 'retry' }
   | { readonly kind: 'done'; readonly outcome: SubmissionOutcome };
 
+/** Builds one ordinary turn request; the closure always sends the same params. */
+function turnRequest(handle: ExternalSessionHandle, input: ExternalTurnInput) {
+  const params = handle.turnParams(input);
+  return { params, send: () => handle.sendTurn(params) };
+}
+
+/**
+ * Builds a review on the session's existing policy. Every supported runtime
+ * offering nativeReview has fingerprinted start-review receipts, including
+ * the former TypeScript host; the method/capability boundary is unchanged.
+ */
+function reviewRequest(handle: ExternalSessionHandle, input: ExternalReviewInput) {
+  const params = handle.reviewParams(input);
+  return { params, send: () => startReviewTurn(handle, params) };
+}
+
+/**
+ * Starts the review and verifies its events belong to the session being observed.
+ * A detached thread is cancelled rather than bound to the wrong transcript.
+ */
+async function startReviewTurn(
+  handle: ExternalSessionHandle,
+  params: ExternalAgentStartReviewParams
+): Promise<string> {
+  const started = await handle.sendReview(params);
+  if (started.reviewThreadId !== handle.nativeSessionId) {
+    await handle.cancel(started.nativeTurnId).catch(() => undefined);
+    throw new Error(
+      `The review was started on session "${started.reviewThreadId}" instead of this chat's own.`
+    );
+  }
+  return started.nativeTurnId;
+}
+
 /** One attempt: one receipt, one params object, resent only on the same connection. */
 async function runAttempt(
   input: SubmitExternalTurnInput,
   handle: ExternalSessionHandle,
   wait: () => Promise<void>
 ): Promise<AttemptResult> {
-  const params = handle.turnParams(input.turn);
+  const request = input.review
+    ? reviewRequest(handle, input.review)
+    : turnRequest(handle, input.turn);
+  const params = request.params;
   const attemptId = input.newId();
   try {
     await insertAttempt(
@@ -230,11 +283,15 @@ async function runAttempt(
       await settle(dispatched ? 'unresolved' : 'terminal', 'stopped');
       return { kind: 'done', outcome: { kind: 'stopped' } };
     }
+    if (unanswered && !handle.isLive()) {
+      await settle('unresolved', 'acceptance-unknown');
+      return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
+    }
     let nativeTurnId: string;
     try {
       dispatched = true;
       pending(true);
-      nativeTurnId = await handle.sendTurn(params);
+      nativeTurnId = await request.send();
     } catch (error) {
       const failure = classifySubmissionFailure(error);
       // The hub's own proof covers only this write; after an unanswered send
@@ -244,6 +301,9 @@ async function runAttempt(
       if (provenAbsent) {
         await settle('not-submitted');
         pending(false);
+        // Preserve review's one-call Busy/NotSubmitted policy. An ordinary
+        // turn may retry proven absence, but a review is an explicit action.
+        if (input.review) return { kind: 'done', outcome: { kind: 'refused', error } };
         await wait();
         return { kind: 'retry' };
       }
@@ -261,7 +321,14 @@ async function runAttempt(
       if (!reconcilable) {
         if (input.signal.aborted) continue;
         await settle('unresolved', 'acceptance-unknown');
-        return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
+        return {
+          kind: 'done',
+          outcome: {
+            kind: 'unresolved',
+            attemptId,
+            ...(input.review && failure === 'acceptance-unknown' ? { error } : {}),
+          },
+        };
       }
       await wait();
       continue;
