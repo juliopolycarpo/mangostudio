@@ -155,6 +155,19 @@ describe('terminal limits', () => {
 });
 
 describe('terminal schemas', () => {
+  it('accepts a runtime open failure without claiming the connection was lost', () => {
+    expect(
+      Value.Check(TerminalAvailabilitySchema, {
+        environmentId: 'remote',
+        available: false,
+        reason: 'runtime-unavailable',
+        shells: [],
+        openSessions: 0,
+        maxSessions: 8,
+      })
+    ).toBe(true);
+  });
+
   it('accepts an update-required terminal availability without treating it as shell denial', () => {
     expect(
       Value.Check(TerminalAvailabilitySchema, {

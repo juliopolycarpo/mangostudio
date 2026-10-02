@@ -209,6 +209,8 @@ export const TerminalRefusalReasonSchema = Type.Union([
   Type.Literal('not-isolated'),
   /** The environment's runtime does not offer a PTY, or the owner refused `shell`. */
   Type.Literal('unavailable'),
+  /** Opening failed or timed out without proof that the runtime disconnected. */
+  Type.Literal('runtime-unavailable'),
   /** The runtime can open a PTY but cannot close it safely after shell consent is revoked. */
   Type.Literal('runtime-update-required'),
   /** The environment has no live runtime connection right now. */

@@ -4,11 +4,19 @@ import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
 import { unavailableMessage } from '../../../../src/features/terminal/unavailable-message';
 
 describe('unavailableMessage', () => {
+  it('describes a runtime open failure without reporting a disconnected environment', () => {
+    expect(unavailableMessage(en, 'runtime-unavailable')).toBe(
+      'The runtime could not open the terminal. Try again.'
+    );
+    expect(unavailableMessage(ptBR, 'runtime-unavailable')).toContain('Tente novamente.');
+  });
+
   const cases: ReadonlyArray<[TerminalRefusalReason, string]> = [
     ['disabled', en.terminal.unavailable.disabled],
     ['limit', en.terminal.unavailable.limit],
     ['not-isolated', en.terminal.unavailable.notIsolated],
     ['unavailable', en.terminal.unavailable.unavailable],
+    ['runtime-unavailable', en.terminal.unavailable.runtimeUnavailable],
     ['runtime-update-required', en.terminal.unavailable.runtimeUpdateRequired],
     ['disconnected', en.terminal.unavailable.disconnected],
   ];
