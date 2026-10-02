@@ -127,6 +127,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
+      - name: Verify the trusted release tag signer
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bun ./scripts/release/verify-release-tag.ts "$RELEASE_TAG"
       - run: rustup show active-toolchain
       # `protocol:check` adds the feature-powerset lane only when cargo-hack is
       # already on PATH, and skips it with a warning otherwise — a runner

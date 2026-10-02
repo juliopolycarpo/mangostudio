@@ -39,6 +39,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Qualify trusted and untrusted release tag signatures
+        run: bun test scripts/tests/verify-release-tag.unit.test.ts
+
       - id: changed
         name: Check release and launcher paths
         env:

@@ -93,6 +93,11 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      - name: Verify the trusted release tag signer
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bun ./scripts/release/verify-release-tag.ts "$RELEASE_TAG"
+
       - name: Resolve version
         id: resolve
         # Read the dispatch input via env, never interpolated into the shell, so
