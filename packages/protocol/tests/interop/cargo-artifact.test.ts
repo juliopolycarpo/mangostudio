@@ -57,9 +57,14 @@ describe('Cargo peer build receipt', () => {
     );
   });
 
-  it('reports the invalid JSON message instead of guessing a path', () => {
-    expect(() => peerExecutable('{broken')).toThrow(
-      'Cargo reported "{broken"; expected a JSON build message'
+  it('ignores brace-prefixed procedural macro diagnostics before a valid receipt', () => {
+    const output = ['{not json', '  {another diagnostic', JSON.stringify(artifact)].join('\n');
+    expect(peerExecutable(output)).toBe(artifact.executable);
+  });
+
+  it('requires a valid receipt after malformed procedural macro output', () => {
+    expect(() => peerExecutable('{not json')).toThrow(
+      'Cargo reported executable paths []; expected exactly one conformance_peer example executable'
     );
   });
 

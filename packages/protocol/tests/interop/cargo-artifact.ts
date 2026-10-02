@@ -18,7 +18,7 @@ export function peerExecutable(output: string): string {
     try {
       message = JSON.parse(line);
     } catch {
-      throw new Error(`Cargo reported ${JSON.stringify(line)}; expected a JSON build message`);
+      continue;
     }
     if (
       message.reason !== 'compiler-artifact' ||
