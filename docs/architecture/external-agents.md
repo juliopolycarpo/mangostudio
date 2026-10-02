@@ -892,9 +892,11 @@ cleanup wrappers; settling a cleanup handle does not make a closed session usabl
 reviews use the Hub's existing submission admission and recovery ledger before dispatch.
 
 The Hub's terminal fallback settles remaining running activities and reasoning for every terminal
-status while preserving explicit activity results. Terminal creation reports a live peer's refusal
-or deadline as `runtime-unavailable`; a locally observed closed transport reports `disconnected`.
-A vendor-session failure alone does not establish that its runtime environment is dead.
+status while preserving explicit activity results. Terminal creation maps a timeout, a Hub-observed
+deadline or a remote `UNAVAILABLE` reply to `runtime-unavailable`. A locally observed closed
+transport reports `disconnected`; revoked terminal consent reports `unavailable`. Other remote
+refusals keep their own error codes. A vendor-session failure alone does not establish that its
+runtime environment is dead.
 
 These product facts come from SDK operations inside the adapter:
 
@@ -985,8 +987,8 @@ read returns. This is an accepted asymmetry with the watcher.
 
 Cancelling a turn is a protocol request for Codex (`turn/interrupt`) and Cursor (ACP
 `session/cancel`), so neither depends on a process signal. The compiled qualification covers ACP
-cancel-and-continue on Windows. Authenticated Codex or Cursor smoke is separate: a live receipt
-qualifies only its recorded runtime and SDK version and must be repeated after a release change. If a
+cancel-and-continue on Windows. Authenticated Codex or Cursor smoke is separate and must be repeated
+for each runtime and SDK release. A historical pass does not qualify a later SDK pin. If a
 Codex cancel does not settle, the SDK tears the session down and it is reported lost (below). Claude has no protocol cancel: the SDK interrupts the
 process, and the Windows launcher reports interrupt as unsupported
 (`windows_interrupt_is_unsupported_and_kill_ends_the_job`), so a Claude cancel on Windows is a
