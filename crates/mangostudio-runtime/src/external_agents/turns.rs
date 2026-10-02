@@ -256,7 +256,7 @@ impl Supervisor {
     /// answered; with different input it is refused. One turn at a time.
     pub(crate) async fn turn(
         self: &Arc<Self>,
-        params: TurnParams,
+        mut params: TurnParams,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<TurnResult, RemoteError> {
         let live = self.require_live(&params.session_id)?;
@@ -282,12 +282,7 @@ impl Supervisor {
             Admitted::Replay(outcome) => return decode_outcome(outcome).await,
             Admitted::Fresh(publish) => publish,
         };
-        let request = TurnRequest {
-            turn_id: params.client_message_id.clone(),
-            input: params.input.clone(),
-            attachments,
-            configuration: &params.configuration,
-        };
+        let request = turn_request(&mut params, attachments);
         // Not raced against the hub's request cancel: the hub reconciles a
         // lost reply by sending this same id again, and the receipt has to
         // hold what really happened, not that the first caller stopped waiting.
@@ -941,10 +936,29 @@ fn to_value(value: &impl serde::Serialize) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
-/// Identifies one request's input without holding its attachment bytes.
+/// Identifies one request's complete serialized input, with the original empty-byte fallback.
 fn fingerprint(params: &impl serde::Serialize) -> [u8; 32] {
     let bytes = serde_json::to_vec(params).unwrap_or_default();
     Sha256::digest(&bytes).into()
+}
+
+/// Prepares admitted input while keeping the configuration borrowed for the start call.
+///
+/// # Example
+/// ```ignore
+/// let request = turn_request(&mut params, decoded_attachments);
+/// session.start_turn(request).await?;
+/// ```
+fn turn_request(params: &mut TurnParams, attachments: Vec<OwnedAttachment>) -> TurnRequest<'_> {
+    // The receipt already identifies the complete encoded request. Only the
+    // decoded owned bytes are needed while the SDK starts or retains the turn.
+    params.attachments = None;
+    TurnRequest {
+        turn_id: params.client_message_id.clone(),
+        input: std::mem::take(&mut params.input),
+        attachments,
+        configuration: &params.configuration,
+    }
 }
 
 fn decoded_attachments(attachments: &[Attachment]) -> Result<Vec<OwnedAttachment>, RemoteError> {
@@ -973,6 +987,14 @@ fn decoded_attachments(attachments: &[Attachment]) -> Result<Vec<OwnedAttachment
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
 }
+
+#[cfg(test)]
+#[path = "turns_bench.rs"]
+mod benchmarks;
+
+#[cfg(test)]
+#[path = "turns_performance_tests.rs"]
+mod performance_tests;
 
 #[cfg(test)]
 mod tests {

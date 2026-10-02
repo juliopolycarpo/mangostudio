@@ -189,6 +189,37 @@ pub(crate) fn map_event(target: TargetId, event: &sdk::AgentEvent) -> MappedEven
     }
 }
 
+/// Consumes one received event, moving compact delta buffers into the wire.
+/// Strings with spare capacity keep the previous clone's compaction, since the
+/// SDK strips dirty text in place without shrinking its original allocation.
+///
+/// # Example
+/// ```ignore
+/// let mapped = map_owned_event(target, stream.recv().await?);
+/// ```
+pub(super) fn map_owned_event(target: TargetId, event: sdk::AgentEvent) -> MappedEvent {
+    match event.kind {
+        sdk::EventKind::TextDelta { text } => MappedEvent::wire(wire::Event::TextDelta {
+            text: compact_delta(text),
+        }),
+        sdk::EventKind::ReasoningDelta { text } => MappedEvent::wire(wire::Event::ReasoningDelta {
+            text: compact_delta(text),
+        }),
+        _ => map_event(target, &event),
+    }
+}
+
+fn compact_delta(text: String) -> String {
+    if text.capacity() == text.len() {
+        return text;
+    }
+    text.clone()
+}
+
+#[cfg(test)]
+#[path = "map_events_bench.rs"]
+mod benchmarks;
+
 /// The SDK answer for a hub `respond(requestId, optionId)` against a pending interaction.
 ///
 /// A question is answered with its choice id as a [`sdk::QuestionResponse`],
