@@ -1,12 +1,20 @@
 import type { Locale } from '@mangostudio/shared/i18n';
 
-const timestampFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-});
+const timestampFormatters = new Map<Locale, Intl.DateTimeFormat>();
 
-export function formatTimestamp(timestamp: number): string {
-  return timestampFormatter.format(timestamp);
+/**
+ * Formats a Settings timestamp in the selected app language and viewer timezone.
+ * Invalid timestamps retain Intl's RangeError.
+ *
+ * @example
+ * formatTimestamp(entry.timestamp, locale);
+ */
+export function formatTimestamp(timestamp: number, locale: Locale): string {
+  const cached = timestampFormatters.get(locale);
+  const formatter =
+    cached ?? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
+  if (!cached) timestampFormatters.set(locale, formatter);
+  return formatter.format(timestamp);
 }
 
 export function formatPercent(value: number): string {

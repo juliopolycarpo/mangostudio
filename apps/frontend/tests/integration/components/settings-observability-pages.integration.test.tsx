@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+import { useI18n } from '../../../src/hooks/use-i18n';
 import { AppContext } from '../../../src/lib/app-context';
-import { render, screen } from '../../support/harness/render';
+import { LOCALE_STORAGE_KEY } from '../../../src/lib/locale-dictionaries';
+import { act, render, screen } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
@@ -28,6 +31,24 @@ const { LogsSettingsPage, MetricsSettingsPage } = await import(
 
 const fetchScenario = createFetchScenario();
 
+/**
+ * Switches the real app dictionary while Settings stays mounted.
+ * @example render(<><LocaleSwitch /><LogsSettingsPage /></>);
+ */
+function LocaleSwitch() {
+  const { setLocale } = useI18n();
+  return (
+    <>
+      <button type="button" onClick={() => setLocale('pt-BR')}>
+        Use Portuguese
+      </button>
+      <button type="button" onClick={() => setLocale('en')}>
+        Use English
+      </button>
+    </>
+  );
+}
+
 describe('Observability settings pages', () => {
   beforeEach(() => {
     fetchScenario.install();
@@ -35,6 +56,69 @@ describe('Observability settings pages', () => {
 
   afterEach(() => {
     fetchScenario.restore();
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+  });
+
+  it('updates metrics, probe logs and discovery timestamps when the app language changes', async () => {
+    const timestamp = 1_700_000_000_000;
+    fetchScenario.respondWithJson('GET', '/api/settings/metrics', {
+      body: { generatedAt: timestamp, providers: [] },
+    });
+    fetchScenario.respondWithJson('GET', '/api/settings/logs', {
+      body: {
+        generatedAt: timestamp,
+        entries: [
+          {
+            id: 'locale-probe',
+            timestamp,
+            provider: 'gemini',
+            kind: 'probe-timeout',
+            operation: 'model-list',
+            message: 'Locale probe timeout.',
+          },
+        ],
+      },
+    });
+    fetchScenario.respondWithJson('GET', '/api/connectors', { body: { connectors: [] } });
+    fetchScenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        agents: [
+          {
+            targetId: 'codex',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'undetermined',
+            authState: 'unknown',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: timestamp, attempts: 1 },
+          },
+        ],
+      },
+    });
+    render(
+      withApp(
+        <>
+          <LocaleSwitch />
+          <MetricsSettingsPage />
+          <LogsSettingsPage />
+        </>
+      )
+    );
+
+    const englishDate = /Nov \d{1,2}, 2023/;
+    const portugueseDate = /\d{1,2} de nov\. de 2023/;
+    expect(await screen.findAllByText(englishDate)).toHaveLength(3);
+
+    act(() => screen.getByRole('button', { name: 'Use Portuguese' }).click());
+    expect(await screen.findAllByText(portugueseDate)).toHaveLength(3);
+    expect(screen.queryAllByText(englishDate)).toHaveLength(0);
+    expect(screen.getByText(/A verificação não confirmou este agente/)).toBeInTheDocument();
+
+    act(() => screen.getByRole('button', { name: 'Use English' }).click());
+    expect(await screen.findAllByText(englishDate)).toHaveLength(3);
+    expect(screen.queryAllByText(portugueseDate)).toHaveLength(0);
   });
 
   it('loads and renders provider metrics', async () => {

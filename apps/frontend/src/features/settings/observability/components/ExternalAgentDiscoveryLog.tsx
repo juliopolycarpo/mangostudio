@@ -25,7 +25,7 @@ import { useApp } from '@/lib/app-context';
 import { formatTimestamp } from '../utils';
 
 export function ExternalAgentDiscoveryLog() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const app = useApp();
   // `currentEnvironmentId` is derived from the open chat, and Settings is not a
   // chat. Without a fallback the query never runs for a user with no chats — a
@@ -70,7 +70,7 @@ export function ExternalAgentDiscoveryLog() {
               ) : null}
               {agent.discovery ? (
                 <p className="mt-1 text-xs text-on-surface-variant/70">
-                  {formatTimestamp(agent.discovery.probedAtMs)}
+                  {formatTimestamp(agent.discovery.probedAtMs, locale)}
                   {agent.discovery.attempts > 1
                     ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`
                     : ''}

@@ -8,7 +8,7 @@ import { formatTimestamp } from '../utils';
 import { ExternalAgentDiscoveryLog } from './ExternalAgentDiscoveryLog';
 
 export function LogsSettingsPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { data, error, isLoading, isFetching, refetch } = useQuery(observabilityLogsQueryOptions());
   const labels = t.settings.logs;
   const operationLabels: Record<ProviderProbeOperation, string> = {
@@ -72,7 +72,7 @@ export function LogsSettingsPage() {
                 <p className="text-sm text-on-surface">{entry.message}</p>
               </div>
               <span className="text-xs text-on-surface-variant/60">
-                {formatTimestamp(entry.timestamp)}
+                {formatTimestamp(entry.timestamp, locale)}
               </span>
             </div>
 
