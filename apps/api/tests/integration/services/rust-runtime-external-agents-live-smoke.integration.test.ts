@@ -15,19 +15,24 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { sanitizedEnv, spawnPort } from '@mangostudio/protocol/spawn';
+import { spawnPort } from '@mangostudio/protocol/spawn';
 import {
   EXTERNAL_AGENT_TARGET_IDS,
   type ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
 import { getDb } from '../../../src/db/database';
+import { createDiagnosticLogger } from '../../../src/lib/logger';
 import { cancelActiveTurn } from '../../../src/modules/generation/application/active-turn-registry';
 import { openHubSession } from '../../../src/services/runtime-client/hub-session';
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   createRustTurnHarness,
   grantRuntimeConsent,
+  openRustSmokeHub,
   type RustTurnHarness,
+  runRustAgentSmoke,
+  rustSmokeConfiguration,
+  rustSmokeRuntimeEnv,
   turnPartOf,
   within,
 } from '../../support/external-agents/rust-agent-turns';
@@ -40,6 +45,7 @@ import {
 } from '../../support/rust-runtime-binary';
 
 const binary = resolveRustRuntimeBinary();
+const logger = createDiagnosticLogger('live-agent-smoke');
 const requested = (process.env.MANGOSTUDIO_LIVE_AGENT_SMOKE ?? '')
   .split(',')
   .map((target) => target.trim())
@@ -87,28 +93,46 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
     const mangoHome = join(scratch, 'mango');
     await mkdir(mangoHome);
     await grantRuntimeConsent(binary.path, mangoHome, 'host');
-    // The real HOME and PATH: the signed-in CLIs are the point.
+    // Only the runtime child receives the original credential home. The Hub's
+    // database and configuration stay under the canonical isolated test home.
     const peer = spawnPort({
       argv: [binary.path, '--stdio'],
-      env: sanitizedEnv(process.env, { MANGO_HOME: mangoHome }),
+      env: rustSmokeRuntimeEnv(process.env, mangoHome),
       terminateGraceMs: 2_000,
       killGraceMs: 2_000,
       exitGraceMs: 1_000,
     });
-    const hub = await openHubSession(peer.port, {
-      workspaceBinding: { userId: owner.id, environmentId },
-      hubVersion: await rustRuntimeVersion(binary.path),
-    });
-    cleanups.push(async () => {
-      hub.close();
-      await peer.terminate();
-    });
+    const hub = await openRustSmokeHub(
+      peer,
+      async () =>
+        openHubSession(peer.port, {
+          workspaceBinding: { userId: owner.id, environmentId },
+          hubVersion: await rustRuntimeVersion(binary.path),
+        }),
+      (cleanup) => cleanups.push(cleanup)
+    );
     const client = new RuntimeClient(hub, () => undefined, environmentId);
 
     const [descriptor] = (
       await client.externalAgents.discover({ targetIds: [targetId], timeoutMs: 60_000 })
     ).descriptors;
     expect(descriptor).toMatchObject({ targetId, installed: true });
+    if (!descriptor)
+      throw new Error(`expected an installed ${targetId} descriptor | received: none`);
+    const configuration = rustSmokeConfiguration(descriptor);
+    logger.info('discovery', {
+      targetId,
+      version: descriptor.version,
+      authState: descriptor.authState,
+      discoveryState: descriptor.discoveryState,
+      supportedConfigurations: descriptor.supportedConfigurations,
+      advertisedModels: descriptor.models?.map(({ id, hidden, isDefault }) => ({
+        id,
+        hidden,
+        isDefault,
+      })),
+      requestedConfiguration: configuration,
+    });
 
     const credentialHomeFingerprint = client.manifest.identityIsolation?.credentialHomeFingerprint;
     if (!credentialHomeFingerprint) {
@@ -122,6 +146,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       chatId,
       workspace,
       credentialHomeFingerprint,
+      configuration,
     });
     return { turns, owner, chatId };
   }
@@ -151,7 +176,14 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       );
     }
     expect(row.text.toLowerCase()).toContain('pong');
-    return turnPartOf(row.parts);
+    const part = turnPartOf(row.parts);
+    logger.info('completed', {
+      targetId,
+      effectiveConfiguration: turns.effectiveConfiguration(),
+      part,
+    });
+    expect(turns.effectiveConfiguration()).toMatchObject({ level: 'read-only', routing: 'user' });
+    return part;
   }
 
   for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
@@ -159,8 +191,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       `${targetId}: discovers, opens and completes a one-word turn`,
       async () => {
         const { turns, chatId } = await liveSession(targetId);
-        await pongTurn(turns, targetId, chatId);
-        await turns.close();
+        await runRustAgentSmoke(turns, () => pongTurn(turns, targetId, chatId));
+        expect(turns.liveSessionCount()).toBe(0);
       },
       180_000
     );
@@ -173,19 +205,22 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       `${targetId}: cancels a streaming turn and completes the next one on the same session`,
       async () => {
         const { turns, owner, chatId } = await liveSession(targetId);
-        const running = turns.start(
-          'Count from 1 to 300, one number per line, and nothing else. Do not use any tools.'
-        );
-        const messageId = await runningMessageId(turns);
-        await streamingStarted(turns, messageId);
-        expect(cancelActiveTurn(messageId, owner.id, chatId, 'user_cancelled')).toBe(true);
-        const cancelled = await within(running, `the cancelled live ${targetId} turn`, 120_000);
-        expect(cancelled.reason).toBe('cancelled-by-user');
-        const cancelledTurn = turnPartOf((await turns.assistantRow(messageId)).parts);
+        await runRustAgentSmoke(turns, async () => {
+          const running = turns.start(
+            'Count from 1 to 300, one number per line, and nothing else. Do not use any tools.'
+          );
+          const messageId = await runningMessageId(turns);
+          await streamingStarted(turns, messageId);
+          expect(cancelActiveTurn(messageId, owner.id, chatId, 'user_cancelled')).toBe(true);
+          const cancelled = await within(running, `the cancelled live ${targetId} turn`, 120_000);
+          expect(cancelled.reason).toBe('cancelled-by-user');
+          const cancelledTurn = turnPartOf((await turns.assistantRow(messageId)).parts);
+          logger.info('cancelled', { targetId, part: cancelledTurn });
 
-        const next = await pongTurn(turns, targetId, chatId);
-        expect(next.sessionId).toBe(cancelledTurn.sessionId);
-        await turns.close();
+          const next = await pongTurn(turns, targetId, chatId);
+          expect(next.sessionId).toBe(cancelledTurn.sessionId);
+        });
+        expect(turns.liveSessionCount()).toBe(0);
       },
       360_000
     );

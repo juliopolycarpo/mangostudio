@@ -65,7 +65,11 @@ interface Connected {
   ): Promise<TerminalServerMessage>;
 }
 
-function connect(url: string, headers: Record<string, string> = {}): Connected {
+function connect(
+  url: string,
+  headers: Record<string, string> = {},
+  receiveTimeoutMs = 2_000
+): Connected {
   const socket = new WebSocket(url, { headers });
   socket.binaryType = 'arraybuffer';
   sockets.add(socket);
@@ -99,7 +103,7 @@ function connect(url: string, headers: Record<string, string> = {}): Connected {
       const timer = setTimeout(() => {
         waiters.delete(onMessage);
         reject(new Error('Timed out waiting for a terminal socket message'));
-      }, 2_000);
+      }, receiveTimeoutMs);
       const onMessage = (message: TerminalServerMessage): void => {
         if (!predicate(message)) return;
         clearTimeout(timer);
@@ -208,6 +212,49 @@ describe('terminal socket relay', () => {
       message.type === 'data' ? [Buffer.from(message.data).toString()] : []
     );
   }
+
+  class DelayedTerminalRuntime extends FakeTerminalRuntimeClient {
+    async deliverAfter(sessionId: string, text: string, delayMs: number): Promise<void> {
+      await Bun.sleep(delayMs);
+      this.emitOutput(sessionId, { kind: 'data', data: Buffer.from(text).toString('base64') });
+    }
+  }
+
+  it('keeps the default two-second observation bounded for fake runtime frames', async () => {
+    const user = await insertTestUser();
+    const runtime = new DelayedTerminalRuntime();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const viewer = await openViewer(service, user.id, session.id);
+    const delivered = runtime.deliverAfter(session.id, 'delayed hi', 2_200);
+    try {
+      await expect(viewer.nextMessage((message) => message.type === 'data')).rejects.toThrow(
+        'Timed out waiting for a terminal socket message'
+      );
+    } finally {
+      await delivered;
+    }
+    expect(dataText([await viewer.nextMessage((message) => message.type === 'data')])).toEqual([
+      'delayed hi',
+    ]);
+  });
+
+  it('receives a delayed frame within the explicit real-runtime observation window', async () => {
+    const user = await insertTestUser();
+    const runtime = new DelayedTerminalRuntime();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const hub = await startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
+    const viewer = connect(`${hub.url}/${session.id}`, {}, 5_000);
+    await waitForOpen(viewer.socket);
+    const delivered = runtime.deliverAfter(session.id, 'delayed hi', 2_200);
+    try {
+      const frame = await viewer.nextMessage((message) => message.type === 'data');
+      expect(dataText([frame])).toEqual(['delayed hi']);
+    } finally {
+      await delivered;
+    }
+  });
 
   it('replays scrollback, relays live output, and closes on exit', async () => {
     const user = await insertTestUser();
@@ -544,7 +591,9 @@ describe('terminal socket over a real Rust runtime', () => {
           shell: 'bash',
         });
         const hub = await startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
-        const viewer = connect(`${hub.url}/${session.id}`);
+        // Native PTY startup can exceed the fake runtime's two-second budget.
+        // This observation remains bounded inside the case's 30-second budget.
+        const viewer = connect(`${hub.url}/${session.id}`, {}, 5_000);
         await waitForOpen(viewer.socket);
 
         viewer.socket.send(
