@@ -92,9 +92,20 @@ describe('Bun toolchain pins', () => {
 
     let seen = 0;
     for (const file of files) {
-      for (const match of readText(join('.github', file)).matchAll(/bun-version-file:\s*(\S+)/g)) {
+      const pins = [
+        ...readText(join('.github', file)).matchAll(/bun-version-file:[ \t]*([^\n]+)/g),
+      ];
+      for (const [index, match] of pins.entries()) {
         seen++;
-        expect(match[1], file).toBe('.bun-version');
+        // Release authentication cannot take its executable pin from the tag
+        // it is authenticating; those two bootstraps read protected main's
+        // archived .bun-version before any tagged code can execute.
+        const expected =
+          index === 0 &&
+          (file === 'workflows/release.yml' || file === 'workflows/protocol-release.yml')
+            ? '${{ runner.temp }}/release-trust/.bun-version'
+            : '.bun-version';
+        expect(match[1].trim(), file).toBe(expected);
       }
     }
     // Every `oven-sh/setup-bun` step must name the file; a step that stops

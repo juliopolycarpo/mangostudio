@@ -124,9 +124,22 @@ jobs:
             echo "::error::refusing to release $(git rev-parse HEAD): not an ancestor of origin/main, so it never passed the pull request gate"
             exit 1
           fi
+      - name: Load the release verifier from protected main
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-trust"
+          git archive refs/remotes/origin/main | tar -x -C "$RUNNER_TEMP/release-trust"
+          echo "Trusted release policy source: $(git rev-parse refs/remotes/origin/main)"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: ${{ runner.temp }}/release-trust/.bun-version
+      - name: Verify the trusted release tag signer
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_RELEASE_TAG: protocol-v${{ steps.resolve.outputs.version }}
+        run: |
+          cd "$RUNNER_TEMP/release-trust"
+          bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"
       - run: rustup show active-toolchain
       # `protocol:check` adds the feature-powerset lane only when cargo-hack is
       # already on PATH, and skips it with a warning otherwise — a runner
