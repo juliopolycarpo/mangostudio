@@ -17,7 +17,11 @@
 import { existsSync } from 'node:fs';
 import { chmod, copyFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
+import { type SpawnedPeer, sanitizedEnv } from '@mangostudio/protocol/spawn';
+import type {
+  ExternalAgentConfiguration,
+  ExternalAgentRuntimeDescriptor,
+} from '@mangostudio/shared/external-agents';
 import type {
   ExternalApprovalPart,
   ExternalTurnPart,
@@ -27,7 +31,10 @@ import { getDb } from '../../../src/db/database';
 import { workspaceCargoTargetDir } from '../../../src/lib/runtime-paths';
 import { createExternalApprovalRegistry } from '../../../src/modules/external-agents/application/external-approval-registry';
 import { createExternalCommandCatalogCache } from '../../../src/modules/external-agents/application/external-command-catalog-cache';
-import { createExternalSessionManager } from '../../../src/modules/external-agents/application/external-session-manager';
+import {
+  createExternalSessionManager,
+  type EnsureExternalSessionInput,
+} from '../../../src/modules/external-agents/application/external-session-manager';
 import {
   createExternalTurnController,
   type ExternalTurnResult,
@@ -187,6 +194,8 @@ export interface RustTurnHarness {
   /** Closes the chat's vendor session the way a hub-side reap does. */
   close(): Promise<void>;
   liveSessionCount(): number;
+  /** The runtime's last accepted open configuration, or undefined before open. */
+  effectiveConfiguration(): ExternalAgentConfiguration | undefined;
 }
 
 export interface RustTurnHarnessOptions {
@@ -195,6 +204,88 @@ export interface RustTurnHarnessOptions {
   readonly chatId: string;
   readonly workspace: string;
   readonly credentialHomeFingerprint: string;
+  readonly configuration?: ExternalAgentConfiguration;
+}
+
+/**
+ * Owns the runtime peer before its hub handshake, so a rejected handshake is cleaned up too.
+ * @example await openRustSmokeHub(peer, connect, (cleanup) => cleanups.push(cleanup));
+ */
+export async function openRustSmokeHub<T extends { close(): void }>(
+  peer: Pick<SpawnedPeer, 'terminate'>,
+  connect: () => Promise<T>,
+  registerCleanup: (cleanup: () => Promise<void>) => void
+): Promise<T> {
+  let hub: T | undefined;
+  registerCleanup(async () => {
+    try {
+      hub?.close();
+    } finally {
+      await peer.terminate();
+    }
+  });
+  hub = await connect();
+  return hub;
+}
+
+/**
+ * Closes the chat's vendor session after a smoke, including a failed assertion or turn.
+ * @example await runRustAgentSmoke(turns, () => pongTurn(turns));
+ */
+export async function runRustAgentSmoke<T>(
+  turns: Pick<RustTurnHarness, 'close'>,
+  run: () => Promise<T>
+): Promise<T> {
+  try {
+    return await run();
+  } finally {
+    await turns.close();
+  }
+}
+
+/**
+ * Gives only the live runtime the credential home recorded before Hub test-home isolation.
+ * @example rustSmokeRuntimeEnv(process.env, scratchMangoHome);
+ */
+export function rustSmokeRuntimeEnv(
+  source: NodeJS.ProcessEnv,
+  mangoHome: string
+): Record<string, string> {
+  const credentialHome = source.MANGOSTUDIO_REAL_HOME;
+  return sanitizedEnv(source, {
+    MANGO_HOME: mangoHome,
+    ...(credentialHome ? { HOME: credentialHome, USERPROFILE: credentialHome } : {}),
+  });
+}
+
+/**
+ * Selects an advertised model for a ReadOnly/User live smoke, refusing unsupported permission pairs.
+ * @example const configuration = rustSmokeConfiguration(descriptor);
+ */
+export function rustSmokeConfiguration(
+  descriptor: ExternalAgentRuntimeDescriptor
+): ExternalAgentConfiguration {
+  const permission = descriptor.supportedConfigurations.find(
+    (choice) => choice.level === 'read-only' && choice.routing === 'user' && choice.supported
+  );
+  if (!permission) {
+    throw new Error(
+      `expected ${descriptor.targetId} to advertise supported ReadOnly/User | received: ${JSON.stringify(descriptor.supportedConfigurations)}`
+    );
+  }
+  const visibleModels = descriptor.models?.filter((model) => !model.hidden) ?? [];
+  const model = visibleModels.find((choice) => choice.isDefault) ?? visibleModels[0];
+  if (descriptor.targetId === 'codex' && !model) {
+    throw new Error(
+      `expected codex to advertise a visible smoke model | received: ${JSON.stringify(descriptor.models ?? [])}`
+    );
+  }
+  return {
+    level: 'read-only',
+    routing: 'user',
+    workspaceRoots: [],
+    ...(model ? { model: model.id } : {}),
+  };
 }
 
 const CONFIGURATION: ExternalAgentConfiguration = {
@@ -215,10 +306,19 @@ const CONFIGURATION: ExternalAgentConfiguration = {
  */
 export function createRustTurnHarness(options: RustTurnHarnessOptions): RustTurnHarness {
   const { client, userId, chatId } = options;
-  const sessions = createExternalSessionManager({
+  const manager = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(client),
     resolveExistingRuntimeClient: () => Promise.resolve(client),
   });
+  let effectiveConfiguration: ExternalAgentConfiguration | undefined;
+  const sessions = {
+    ...manager,
+    async ensureSession(input: EnsureExternalSessionInput) {
+      const handle = await manager.ensureSession(input);
+      effectiveConfiguration = handle.effectiveConfiguration;
+      return handle;
+    },
+  };
   const approvals = createExternalApprovalRegistry();
   const controller = createExternalTurnController({
     sessions,
@@ -243,7 +343,7 @@ export function createRustTurnHarness(options: RustTurnHarnessOptions): RustTurn
           userId,
           chatId,
           prompt,
-          configuration: CONFIGURATION,
+          configuration: options.configuration ?? CONFIGURATION,
           canonicalWorkspacePath: options.workspace,
           credentialHomeFingerprint: options.credentialHomeFingerprint,
         },
@@ -285,6 +385,7 @@ export function createRustTurnHarness(options: RustTurnHarnessOptions): RustTurn
     },
     close: () => sessions.reapChat(chatId, 'interrupted'),
     liveSessionCount: () => sessions.liveSessionCount(),
+    effectiveConfiguration: () => effectiveConfiguration,
   };
 }
 
