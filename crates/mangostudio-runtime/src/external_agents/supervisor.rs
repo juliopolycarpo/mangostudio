@@ -1321,3 +1321,7 @@ mod tests;
 #[cfg(test)]
 #[path = "adapter/integration_tests.rs"]
 mod sdk_tests;
+
+#[cfg(test)]
+#[path = "lifecycle_product_tests.rs"]
+pub(super) mod lifecycle_product_tests;

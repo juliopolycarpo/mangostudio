@@ -6,6 +6,12 @@ mod map_events;
 mod session;
 
 mod backend;
+#[cfg(test)]
+mod lifecycle_tests;
+#[cfg(test)]
+mod relay_tests;
+#[cfg(test)]
+mod test_support;
 use super::port::AgentBackend;
 use crate::subprocess::LaunchCheck;
 use mango_external_agents::Limits;
