@@ -3637,6 +3637,9 @@ export const messages: Messages = {
       noneDiscovered: 'No external agents found on this machine.',
       signedIn: 'signed in',
       authUnknown: 'sign-in state unknown',
+      discoveryUndetermined: 'availability undetermined',
+      discoveryUndeterminedHint:
+        'The probe could not confirm this agent or its version. You can still try a turn.',
       notInstalledIn: 'Not installed in {environment}',
       /** Stands in for a required version a runtime reported without naming. */
       unknownVersion: 'a newer version',

@@ -87,6 +87,40 @@ describe('runner selector groups', () => {
 });
 
 describe('external availability states', () => {
+  it('explains undetermined discovery and still selects the installed target without a version', () => {
+    const { props } = renderSelector({
+      externalAgents: [descriptor({ discoveryState: 'undetermined' })],
+    });
+    expect(codexOption()).toBeEnabled();
+    expect(
+      screen.getByText(
+        'The probe could not confirm this agent or its version. You can still try a turn.'
+      )
+    ).toBeInTheDocument();
+    fireEvent.click(codexOption());
+    expect(props.onSelectExternal).toHaveBeenCalledWith(
+      expect.objectContaining({ discoveryState: 'undetermined' })
+    );
+  });
+
+  it('announces uncertain discovery in the active runner pill instead of promising availability', () => {
+    renderSelector({
+      runner: { kind: 'external', targetId: 'codex' },
+      externalAgents: [descriptor({ discoveryState: 'undetermined' })],
+    });
+    expect(screen.getByText('availability undetermined')).toBeInTheDocument();
+  });
+
+  it('keeps an explicit refusal authoritative over undetermined discovery', () => {
+    renderSelector({
+      externalAgents: [
+        descriptor({ discoveryState: 'undetermined', unavailableReason: 'runtime-denied' }),
+      ],
+    });
+    expect(codexOption()).toBeDisabled();
+    expect(screen.queryByText(/You can still try a turn/)).toBeNull();
+  });
+
   it('lets a signed-in agent be selected and reports the account', () => {
     const { props } = renderSelector({
       externalAgents: [descriptor({ account: { label: 'ada@example.test' } })],

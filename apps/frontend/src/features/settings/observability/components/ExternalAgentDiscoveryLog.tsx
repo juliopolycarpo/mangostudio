@@ -16,7 +16,10 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { Card } from '@/components/ui/Card';
-import { useExternalAgents } from '@/features/external-agents/useExternalAgents';
+import {
+  externalAgentSelectable,
+  useExternalAgents,
+} from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
 import { formatTimestamp } from '../utils';
@@ -60,6 +63,11 @@ export function ExternalAgentDiscoveryLog() {
                 </span>
                 <span className="text-xs text-on-surface-variant/60">{summary(agent, labels)}</span>
               </div>
+              {agent.discoveryState === 'undetermined' && externalAgentSelectable(agent) ? (
+                <p className="mt-1 text-xs text-on-surface-variant/70">
+                  {t.externalAgents.selector.discoveryUndeterminedHint}
+                </p>
+              ) : null}
               {agent.discovery ? (
                 <p className="mt-1 text-xs text-on-surface-variant/70">
                   {formatTimestamp(agent.discovery.probedAtMs)}

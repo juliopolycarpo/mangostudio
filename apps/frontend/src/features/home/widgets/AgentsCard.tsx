@@ -161,6 +161,7 @@ function availabilityNote(descriptor: ExternalAgentDescriptor, t: Messages): str
   if (descriptor.unavailableReason) return labels.unavailable[descriptor.unavailableReason];
   if (!descriptor.installed) return labels.unavailable['not-installed'];
   if (descriptor.authState === 'signed-out') return labels.unavailable['signed-out'];
+  if (descriptor.discoveryState === 'undetermined') return labels.selector.discoveryUndetermined;
   return descriptor.authState === 'signed-in'
     ? labels.selector.signedIn
     : labels.selector.authUnknown;
@@ -175,7 +176,8 @@ function availabilityProblem(descriptor: ExternalAgentDescriptor): 'warning' | '
   // `unknown` is not a verdict: Claude may keep credentials in an OS keychain,
   // so a missing credential file is not a signed-out agent — see
   // `externalAgentSelectable`.
-  return descriptor.authState === 'signed-out' ? 'error' : null;
+  if (descriptor.authState === 'signed-out') return 'error';
+  return descriptor.discoveryState === 'undetermined' ? 'warning' : null;
 }
 
 /**

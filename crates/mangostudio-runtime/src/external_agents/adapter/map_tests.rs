@@ -297,6 +297,31 @@ fn a_resolved_executable_replaces_the_program_name() {
 // Descriptors, per vendor
 // ---------------------------------------------------------------------------
 
+/// An inconclusive gate remains tryable but must not promise a determined discovery.
+#[test]
+fn unknown_discovery_is_undetermined_without_an_unavailable_reason() {
+    let mut discovery = claude_signed_in_subscription();
+    discovery.gate = sdk::GateVerdict::Unknown;
+    let received = describe(TargetId::Claude, &discovery);
+    assert_eq!(received["discoveryState"], "undetermined");
+    assert!(received.get("unavailableReason").is_none());
+    assert_eq!(received["authState"], "signed-in");
+    assert_eq!(received["supportedConfigurations"][2]["supported"], true);
+}
+
+/// Missing and empty versions give no visible label and no false discovery certainty.
+#[test]
+fn an_installed_target_without_a_version_is_undetermined() {
+    for version in [None, Some(String::new()), Some(String::from("   "))] {
+        let mut discovery = claude_signed_in_subscription();
+        discovery.version = version;
+        let received = describe(TargetId::Claude, &discovery);
+        assert_eq!(received["discoveryState"], "undetermined");
+        assert!(received.get("version").is_none());
+        assert!(received.get("unavailableReason").is_none());
+    }
+}
+
 #[test]
 fn claude_signed_in_subscription_descriptor() {
     let received = describe(TargetId::Claude, &claude_signed_in_subscription());
@@ -307,6 +332,7 @@ fn claude_signed_in_subscription_descriptor() {
     let expected = json!({
         "targetId": "claude",
         "installed": true,
+        "discoveryState": "determined",
         "version": "2.1.211 (Claude Code)",
         "authState": "signed-in",
         "capabilities": {
@@ -412,6 +438,7 @@ fn claude_missing_surface_names_the_version_to_upgrade_to() {
     let expected = json!({
         "targetId": "claude",
         "installed": true,
+        "discoveryState": "determined",
         "version": "2.1.211 (Claude Code)",
         "requiredVersion": "2.1.211",
         "authState": "unknown",
@@ -498,6 +525,7 @@ fn codex_signed_in_descriptor() {
     let expected = json!({
         "targetId": "codex",
         "installed": true,
+        "discoveryState": "determined",
         "version": "codex-cli 0.147.0",
         "authState": "signed-in",
         "capabilities": {
@@ -566,6 +594,7 @@ fn codex_too_old_offers_nothing_selectable() {
     let expected = json!({
         "targetId": "codex",
         "installed": true,
+        "discoveryState": "determined",
         "version": "codex-cli 0.140.0",
         "requiredVersion": mango_agent_codex::MINIMUM_CODEX_VERSION,
         "authState": "unknown",
@@ -596,6 +625,7 @@ fn not_installed_matches_each_typescript_adapter() {
         let expected = json!({
             "targetId": target.as_str(),
             "installed": false,
+            "discoveryState": "determined",
             "authState": "unknown",
             "loginCommand": login,
             "capabilities": no_capabilities(),
@@ -619,6 +649,7 @@ fn cursor_current_descriptor_refuses_auto_review_and_full_access() {
     let expected = json!({
         "targetId": "cursor",
         "installed": true,
+        "discoveryState": "determined",
         "version": "2026.08.04-aaa8809",
         "authState": "unknown",
         "loginCommand": "cursor-agent login",

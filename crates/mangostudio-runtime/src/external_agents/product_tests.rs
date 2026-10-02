@@ -58,6 +58,7 @@ impl AgentBackend for OwnedBackend {
         Ok(wire::Descriptor {
             target_id: target,
             installed: false,
+            discovery_state: wire::DiscoveryState::Determined,
             version: None,
             required_version: None,
             auth_state: wire::AuthState::Unknown,

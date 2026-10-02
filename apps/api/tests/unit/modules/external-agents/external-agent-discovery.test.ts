@@ -105,6 +105,17 @@ function runtimeManifest(
 }
 
 describe('external agent discovery — the cheap pass', () => {
+  it('explains an installed target without a version without making it unavailable', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: fakeProbing([agentStatus({ targetId: 'codex', ...installed('codex', '') })]),
+    });
+    const [codex] = await service.listExternalAgents(SCOPE);
+    expect(codex?.discoveryState).toBe('undetermined');
+    expect(codex?.version).toBeUndefined();
+    expect(codex?.unavailableReason).toBeUndefined();
+    expect(Value.Check(ExternalAgentDescriptorSchema, codex)).toBe(true);
+  });
+
   it('maps an installed, signed-in CLI', async () => {
     const service = createExternalAgentDiscoveryService({
       probingService: fakeProbing([
@@ -271,6 +282,30 @@ describe('external agent discovery — the authoritative pass', () => {
     agentStatus({ targetId: 'codex', ...installed('codex', '0.100.0') }),
     agentStatus({ targetId: 'claude', findings: [{ code: 'cli-not-installed' }] }),
   ]);
+
+  it('preserves an undetermined adapter answer even when the scan reported a version', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      authoritative: authoritative([
+        {
+          targetId: 'codex',
+          installed: true,
+          authState: 'signed-in',
+          discoveryState: 'undetermined',
+          capabilities: ALL_CAPABLE,
+        },
+      ]),
+    });
+    const [codex] = await service.describeExternalAgents(SCOPE, { waitForAdapter: true });
+    expect(codex?.adapterAnswered).toBe(true);
+    expect(codex?.descriptor).toMatchObject({
+      discoveryState: 'undetermined',
+      version: '0.100.0',
+      installed: true,
+      authState: 'signed-in',
+    });
+    expect(codex?.descriptor.unavailableReason).toBeUndefined();
+  });
 
   /**
    * A stand-in for the realtime publish, and the sync point tests wait on.

@@ -109,6 +109,8 @@ export {
   ExternalAgentDiscoverResultSchema,
   type ExternalAgentDiscoveryReport,
   ExternalAgentDiscoveryReportSchema,
+  type ExternalAgentDiscoveryState,
+  ExternalAgentDiscoveryStateSchema,
   type ExternalAgentError,
   ExternalAgentErrorSchema,
   type ExternalAgentEvent,
