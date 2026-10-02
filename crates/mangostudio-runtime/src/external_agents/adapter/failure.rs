@@ -27,7 +27,7 @@ fn observed_dispatch(error: &Error) -> Option<Dispatch> {
 fn spent(error: &Error) -> bool {
     match error {
         Error::Cancelled { .. } | Error::Closed { .. } => true,
-        Error::Operation { source, .. } => spent(source),
+        Error::Operation { source, .. } | Error::CleanupRequired { source, .. } => spent(source),
         _ => false,
     }
 }
