@@ -258,12 +258,16 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 `external-agent-boundary.ts` runs ignored Rust libtests, so benchmarks are not part of the normal
 test gate. Build each revision's runtime libtest with `cargo test -p mangostudio-runtime --lib
 --release --locked --no-run --message-format=json` and `MANGOSTUDIO_BENCH_SOURCE_SHA` set to that
-revision's full commit SHA. Cargo's `compiler-artifact.executable` identifies the binary. Then:
+revision's full commit SHA. Set `CARGO_PROFILE_RELEASE_LTO=false` and
+`CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16` identically on both builds. This keeps optimization at
+level 3 without optimizing the entire test suite under the shipped binary's fat LTO settings.
+Cargo's `compiler-artifact.executable` identifies the binary. Then:
 
 ```bash
 bun scripts/bench/external-agent-boundary.ts --base-binary /path/base-libtest \
   --head-binary /path/head-libtest --base-sha BASE_FULL_SHA --head-sha HEAD_FULL_SHA \
-  --samples 30 --profile release --output boundary-receipt.json
+  --samples 30 --profile 'release, opt-level=3, lto=false, codegen-units=16' \
+  --output boundary-receipt.json
 ```
 
 The receipt binds binary hashes and lockfile hashes to both revisions. Fixtures are built before
@@ -276,7 +280,7 @@ bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 10
 bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --warm
 ```
 
-Every run gets a temp `HOME`, database, uploads, and images directory, so the
+The startup benchmark gives each run a temp `HOME`, database, uploads, and images directory, so the
 developer's real `~/.mango` is never read or written. Cold (default) measures a
 first run with every migration applying; `--warm` migrates once, discards that
 run, and measures the restart cost — the only mode where framework and

@@ -936,7 +936,7 @@ fn to_value(value: &impl serde::Serialize) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
-/// Identifies one request's input without holding its attachment bytes.
+/// Identifies one request's complete serialized input, with the original empty-byte fallback.
 fn fingerprint(params: &impl serde::Serialize) -> [u8; 32] {
     let bytes = serde_json::to_vec(params).unwrap_or_default();
     Sha256::digest(&bytes).into()
@@ -950,9 +950,12 @@ fn fingerprint(params: &impl serde::Serialize) -> [u8; 32] {
 /// session.start_turn(request).await?;
 /// ```
 fn turn_request(params: &mut TurnParams, attachments: Vec<OwnedAttachment>) -> TurnRequest<'_> {
+    // The receipt already identifies the complete encoded request. Only the
+    // decoded owned bytes are needed while the SDK starts or retains the turn.
+    params.attachments = None;
     TurnRequest {
         turn_id: params.client_message_id.clone(),
-        input: params.input.clone(),
+        input: std::mem::take(&mut params.input),
         attachments,
         configuration: &params.configuration,
     }

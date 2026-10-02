@@ -38,7 +38,7 @@ fn agent_event(kind: sdk::EventKind) -> sdk::AgentEvent {
 }
 
 fn map(kind: sdk::EventKind) -> MappedEvent {
-    map_event(TargetId::Codex, &agent_event(kind))
+    map_owned_event(TargetId::Codex, agent_event(kind))
 }
 
 fn event_validator() -> &'static Validator {
@@ -189,6 +189,82 @@ fn text_delta_maps_one_to_one() {
         &json!({ "type": "text_delta", "text": "hello" }),
     );
     assert_nothing_else(&mapped);
+}
+
+#[test]
+fn clean_owned_deltas_keep_the_original_buffer_and_wire_shape() {
+    for reasoning in [false, true] {
+        let mut event = agent_event(sdk::EventKind::Completed);
+        let text = "clean text".repeat(400).into_boxed_str().into_string();
+        let pointer = text.as_ptr();
+        assert_eq!(text.len(), text.capacity());
+        event.kind = if reasoning {
+            sdk::EventKind::ReasoningDelta { text }
+        } else {
+            sdk::EventKind::TextDelta { text }
+        };
+        let expected = map_event(TargetId::Codex, &event);
+        let mapped = map_owned_event(TargetId::Codex, event);
+        assert_eq!(mapped, expected);
+        let output = mapped.wire.unwrap();
+        assert_valid_event(&output);
+        let (wire::Event::TextDelta { text } | wire::Event::ReasoningDelta { text }) = output
+        else {
+            panic!("expected delta")
+        };
+        assert_eq!(
+            text.as_ptr(),
+            pointer,
+            "expected the received buffer to move"
+        );
+    }
+}
+
+#[test]
+fn owned_deltas_compact_excess_capacity_and_sdk_normalized_dirty_text() {
+    for reasoning in [false, true] {
+        for dirty in [false, true] {
+            let mut text = String::with_capacity(1024 * 1024);
+            text.push_str(if dirty {
+                "safe\0\u{001b}[31m text"
+            } else {
+                "safe text"
+            });
+            let kind = if reasoning {
+                sdk::EventKind::ReasoningDelta { text }
+            } else {
+                sdk::EventKind::TextDelta { text }
+            };
+            let normalized = kind.normalized().unwrap();
+            let (sdk::EventKind::TextDelta { text } | sdk::EventKind::ReasoningDelta { text }) =
+                &normalized
+            else {
+                panic!("expected delta")
+            };
+            assert!(
+                text.capacity() > text.len(),
+                "the real SDK keeps the original slack capacity"
+            );
+            let expected_text = text.clone();
+            let mut event = agent_event(sdk::EventKind::Completed);
+            event.kind = normalized;
+            let expected = map_event(TargetId::Codex, &event);
+            let mapped = map_owned_event(TargetId::Codex, event);
+            assert_eq!(mapped, expected);
+            let output = mapped.wire.unwrap();
+            assert_valid_event(&output);
+            let (wire::Event::TextDelta { text } | wire::Event::ReasoningDelta { text }) = output
+            else {
+                panic!("expected delta")
+            };
+            assert_eq!(text, expected_text);
+            assert_eq!(
+                text.capacity(),
+                text.len(),
+                "expected the old clone's compaction"
+            );
+        }
+    }
 }
 
 #[test]

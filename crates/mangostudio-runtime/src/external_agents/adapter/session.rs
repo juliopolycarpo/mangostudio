@@ -213,15 +213,17 @@ impl port::EventStream for Events {
     }
     async fn recv(&mut self) -> Option<TurnEvent> {
         let event = self.stream.recv().await?;
-        let mapped = map_events::map_event(self.target, &event);
+        let at_ms = map::epoch_ms(event.at);
+        let idle_timeout = matches!(
+            &event.kind,
+            sdk::EventKind::Cancelled {
+                reason: sdk::CancelReason::Timeout
+            }
+        );
+        let mapped = map_events::map_owned_event(self.target, event);
         Some(TurnEvent {
-            at_ms: map::epoch_ms(event.at),
-            idle_timeout: matches!(
-                event.kind,
-                sdk::EventKind::Cancelled {
-                    reason: sdk::CancelReason::Timeout
-                }
-            ),
+            at_ms,
+            idle_timeout,
             mapped: MappedEvent {
                 wire: mapped.wire,
                 opened: mapped.opened,

@@ -7,7 +7,7 @@ impl serde::Serialize for PartiallySerialized {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::{Error as _, SerializeSeq as _};
         let mut sequence = serializer.serialize_seq(Some(2))?;
-        sequence.serialize_element("already emitted bytes")?;
+        sequence.serialize_element(&"x".repeat(8192))?;
         Err(S::Error::custom(
             "intentional partial serialization failure",
         ))
@@ -66,4 +66,34 @@ fn request_preparation_preserves_ids_configuration_input_and_decoded_attachment_
         assert_eq!(attachment.bytes.len() as u64, encoded.size_bytes);
         assert_eq!(attachment.bytes.as_ptr(), pointer);
     }
+}
+
+#[test]
+fn admitted_request_moves_input_and_releases_the_encoded_attachment_source() {
+    let mut params = benchmarks::fixture("combined");
+    let digest = fingerprint(&params);
+    let original_pointer = params.input.as_ptr();
+    let attachments = decoded_attachments(params.attachments.as_deref().unwrap()).unwrap();
+    let request = turn_request(&mut params, attachments);
+    assert_eq!(
+        request.input.as_ptr(),
+        original_pointer,
+        "expected the admitted input buffer to move"
+    );
+    assert_eq!(request.input.len(), 200_000);
+    drop(request);
+    assert!(
+        params.input.is_empty(),
+        "expected no retained input copy during SDK start"
+    );
+    assert!(
+        params.attachments.is_none(),
+        "expected no retained base64 after decoding and admission"
+    );
+    assert_eq!(params.client_message_id, "message-bench");
+    assert_ne!(
+        fingerprint(&params),
+        digest,
+        "the receipt must be hashed before transferring input"
+    );
 }
