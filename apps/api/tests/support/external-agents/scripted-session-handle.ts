@@ -49,6 +49,8 @@ export function createScriptedSessionHandle(sessionId = 'session-1'): ScriptedSe
     startTurn: () => Promise.reject(new Error('startTurn is not scripted; expected sendTurn')),
     respond: () => Promise.resolve(),
     steer: () => Promise.resolve({ accepted: true as const }),
+    reviewParams: (input) => ({ sessionId, ...input }),
+    sendReview: () => Promise.reject(new Error('sendReview is not scripted')),
     startReview: () => Promise.reject(new Error('startReview is not scripted')),
     cancel: () => Promise.resolve(),
   };

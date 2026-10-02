@@ -575,7 +575,7 @@ export function createExternalTurnController(
      * Until the vendor accepts the turn, a dropped connection is not the end
      * of it: whether the turn was received is the submission loop's call.
      */
-    let submitting = !input.review;
+    let submitting = true;
     /** Mirrors the submission's latest attempt: sent, and not yet settled. */
     let dispatchPending = false;
     const startedAt = now();
@@ -908,72 +908,61 @@ export function createExternalTurnController(
         }
       };
 
-      if (input.review) {
-        try {
-          bindAccepted(
-            await startReviewTurn({
-              handle,
-              clientMessageId: userMessageId,
-              target: input.review.target,
-            })
-          );
-        } catch (error) {
-          failStart(error, 'review-start');
-        }
-      } else {
-        // Not awaited: the turn ends when it is terminated, and a stop must not
-        // wait out an in-flight submission's deadline.
-        const submission = submitExternalTurn({
-          db,
-          messageId: assistantMessageId,
-          chatId: input.chatId,
-          userId: input.userId,
-          environmentId: context.chat.environmentId,
-          turn: {
-            clientMessageId: userMessageId,
-            input: input.prompt,
-            configuration: input.configuration,
-            ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-          },
-          handle,
-          reacquire,
-          isTerminalConnectFailure: (error) =>
-            isTerminalConnectFailure(error, {
-              userId: input.userId,
-              environmentId: context.chat.environmentId,
+      // Not awaited: stop must not wait out an in-flight admission deadline.
+      const submission = submitExternalTurn({
+        db,
+        messageId: assistantMessageId,
+        chatId: input.chatId,
+        userId: input.userId,
+        environmentId: context.chat.environmentId,
+        ...(input.review
+          ? { review: { clientMessageId: userMessageId, target: input.review.target } }
+          : {
+              turn: {
+                clientMessageId: userMessageId,
+                input: input.prompt,
+                configuration: input.configuration,
+                ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+              },
             }),
-          signal: stop.signal,
-          policy: retryPolicy,
-          now,
-          newId,
-          random,
-          sleep,
-          onDispatchPending: (pending) => {
-            dispatchPending = pending;
-          },
-          onLateAcceptance: (lateHandle, nativeTurnId) => {
-            void lateHandle.cancel(nativeTurnId).catch((error: unknown) => {
-              logger.warn('cancel_failed', {
-                sessionId: lateHandle.sessionId,
-                error: String(error),
-              });
-            });
-          },
-        });
-        dependencies.observeSubmission?.(assistantMessageId, submission);
-        submission.then(
-          (outcome) => applySubmission(outcome),
-          (error: unknown) => {
-            // An unexpected fault in the loop itself — a database error on a
-            // state write. The turn cannot be left spinning.
-            logger.warn('submission_failed', {
-              messageId: assistantMessageId,
+        handle,
+        reacquire,
+        isTerminalConnectFailure: (error) =>
+          isTerminalConnectFailure(error, {
+            userId: input.userId,
+            environmentId: context.chat.environmentId,
+          }),
+        signal: stop.signal,
+        policy: retryPolicy,
+        now,
+        newId,
+        random,
+        sleep,
+        onDispatchPending: (pending) => {
+          dispatchPending = pending;
+        },
+        onLateAcceptance: (lateHandle, nativeTurnId) => {
+          void lateHandle.cancel(nativeTurnId).catch((error: unknown) => {
+            logger.warn('cancel_failed', {
+              sessionId: lateHandle.sessionId,
               error: String(error),
             });
-            if (!terminalReason) failStart(error, 'turn-start');
-          }
-        );
-      }
+          });
+        },
+      });
+      dependencies.observeSubmission?.(assistantMessageId, submission);
+      submission.then(
+        (outcome) => applySubmission(outcome),
+        (error: unknown) => {
+          // An unexpected fault in the loop itself — a database error on a
+          // state write. The turn cannot be left spinning.
+          logger.warn('submission_failed', {
+            messageId: assistantMessageId,
+            error: String(error),
+          });
+          if (!terminalReason) failStart(error, input.review ? 'review-start' : 'turn-start');
+        }
+      );
 
       function applySubmission(outcome: SubmissionOutcome): void {
         if (terminalReason) return;
@@ -982,15 +971,20 @@ export function createExternalTurnController(
             bindAccepted(outcome.nativeTurnId);
             return;
           case 'unresolved':
-            // No English error part: the localized terminal notice says it.
+            // A local lost reply has no error part; preserve a committed
+            // review error alongside its localized uncertainty notice.
+            if (input.review && outcome.error)
+              transcript.recordError(vendorErrorFrom(outcome.error, 'review-start'));
             terminate('acceptance-unknown');
             return;
           case 'receipt-failed':
-            transcript.recordError(vendorErrorFrom(outcome.error, 'turn-receipt'));
+            transcript.recordError(
+              vendorErrorFrom(outcome.error, input.review ? 'review-receipt' : 'turn-receipt')
+            );
             terminate('vendor-error');
             return;
           case 'refused':
-            failStart(outcome.error, 'turn-start');
+            failStart(outcome.error, input.review ? 'review-start' : 'turn-start');
             return;
           case 'stopped':
             return;
@@ -1232,38 +1226,6 @@ export function createExternalTurnController(
     },
   };
   return instance;
-}
-
-/**
- * Starts the review and checks that it landed where the hub is listening.
- *
- * Only inline delivery is requested, and inline means the review runs on this
- * session's own thread — so a `reviewThreadId` naming another one is a vendor
- * that changed its behaviour, not a case to accommodate. Refusing here rather
- * than proceeding is what keeps "the review ran" from meaning "its events went
- * somewhere nobody is reading": the failure surfaces on the turn, where the user
- * can see it.
- */
-async function startReviewTurn(context: {
-  readonly handle: ExternalSessionHandle;
-  readonly clientMessageId: string;
-  readonly target: ExternalReviewTarget;
-}): Promise<string> {
-  const started = await context.handle.startReview({
-    clientMessageId: context.clientMessageId,
-    target: context.target,
-  });
-  if (started.reviewThreadId !== context.handle.nativeSessionId) {
-    // The turn is refused but it is already accepted over there. Nothing else
-    // will stop it: the hub never learns its id — `finish` cancels only a turn
-    // it recorded — so a vendor that ran it detached would keep the session
-    // busy and the next send would be refused for a turn nobody can see.
-    await context.handle.cancel(started.nativeTurnId).catch(() => undefined);
-    throw new Error(
-      `The review was started on session "${started.reviewThreadId}" instead of this chat's own.`
-    );
-  }
-  return started.nativeTurnId;
 }
 
 /**
