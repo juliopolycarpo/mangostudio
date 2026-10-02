@@ -15,6 +15,16 @@ use super::super::supervisor::PortFuture;
 use super::super::wire::{self, TargetId};
 use super::{failure, map, session};
 
+// Four 2MiB UTF-8 Text resources can expand to 48MiB of JSON. The shared runtime
+// prompt allows another 6MiB when every unit needs six-byte escaping. 55MiB also
+// covers bounded metadata/native IDs and leaves more than 512KiB for small controls.
+// Incoming messages/events, line limits, attachment caps and deadlines stay in Limits.
+const ACP_OUTBOUND_BUFFER_BYTES: usize = 55 * 1024 * 1024;
+
+#[cfg(test)]
+#[path = "prompt_budget_tests.rs"]
+mod prompt_budget_tests;
+
 pub(crate) struct TargetDiscovery {
     pub(crate) discovery: mango_external_agents::Discovery,
     pub(crate) account: Option<CodexAccount>,
@@ -91,7 +101,8 @@ impl Backend {
             .environment(EnvSource::from_pairs(host.environment))
             .client_info("mangostudio-runtime", host.runtime_version)
             .cancel(cancel)
-            .limits(self.limits);
+            .limits(self.limits)
+            .outbound_buffer_bytes(ACP_OUTBOUND_BUFFER_BYTES);
         if let Some(scratch) = host.scratch {
             builder = builder.scratch(scratch);
         }
