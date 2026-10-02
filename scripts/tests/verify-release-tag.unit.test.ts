@@ -47,6 +47,7 @@ beforeAll(async () => {
   }
   for (const path of [
     '.bun-version',
+    'bunfig.toml',
     'scripts/lib/config.ts',
     'scripts/lib/release-version.ts',
     'scripts/lib/cargo-version.ts',
@@ -55,7 +56,7 @@ beforeAll(async () => {
     await writeFile(join(directory, path), readText(path));
   }
   await writeFile(join(directory, '.github/release-allowed-signers'), await readFile(signers));
-  fixtureCommand(['git', 'add', '.github', '.bun-version', 'scripts']);
+  fixtureCommand(['git', 'add', '.github', '.bun-version', 'bunfig.toml', 'scripts']);
   fixtureCommand(['git', 'commit', '-m', 'Trusted release verifier']);
   fixtureCommand(['git', 'update-ref', 'refs/remotes/origin/main', 'HEAD']);
   fixtureCommand([
@@ -151,7 +152,7 @@ describe('trusted release tag verification', () => {
     fixtureCommand(['git', 'reset', '--hard', 'HEAD~1']);
   });
 
-  test('the workflow rejects a candidate that replaces its own verifier and signer policy', async () => {
+  test('the workflow rejects a candidate verifier, signer policy and Bun preload bypass', async () => {
     const archive = await mkdtemp(join(tmpdir(), 'release-policy-archive-'));
     try {
       await writeFile(
@@ -162,7 +163,12 @@ describe('trusted release tag verification', () => {
         join(directory, 'scripts/release/verify-release-tag.ts'),
         'console.log("Candidate bypassed verification");\n'
       );
-      fixtureCommand(['git', 'add', '.github', 'scripts']);
+      await writeFile(join(directory, 'bunfig.toml'), 'preload = ["./preload.ts"]\n');
+      await writeFile(
+        join(directory, 'preload.ts'),
+        'console.log("Candidate preload bypass"); process.exit(0);\n'
+      );
+      fixtureCommand(['git', 'add', '.github', 'scripts', 'bunfig.toml', 'preload.ts']);
       fixtureCommand(['git', 'commit', '-m', 'Untrusted candidate replaces release policy']);
       fixtureCommand([
         'git',
@@ -205,6 +211,7 @@ describe('trusted release tag verification', () => {
         expect(new TextDecoder().decode(result.stdout)).not.toContain(
           'Candidate bypassed verification'
         );
+        expect(new TextDecoder().decode(result.stdout)).not.toContain('Candidate preload bypass');
       }
     } finally {
       fixtureCommand(['git', 'reset', '--hard', 'refs/remotes/origin/main']);
@@ -231,13 +238,14 @@ describe('release signature gates', () => {
       const workflow = readText(`.github/workflows/${file}`);
       const block = extractJobBlock(workflow, job);
       expect(block).toContain(
-        'bun "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"'
+        'bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"'
       );
       expect(block).not.toContain('continue-on-error:');
       const verification = extractStepBlocks(block).find((step) =>
         step.includes('verify-release-tag.ts')
       );
       expect(verification).toContain('RELEASE_TAG:');
+      expect(verification).toContain('cd "$RUNNER_TEMP/release-trust"');
       expect(verification).not.toContain('allow_unverified_source');
     }
   });
@@ -250,7 +258,7 @@ describe('release signature gates', () => {
       const block = extractJobBlock(readText(`.github/workflows/${file}`), job);
       expect(block).toContain('git archive refs/remotes/origin/main');
       expect(block).toContain('bun-version-file: ${{ runner.temp }}/release-trust/.bun-version');
-      const verification = block.indexOf('bun "$RUNNER_TEMP/release-trust/scripts/');
+      const verification = block.indexOf('bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/');
       expect(verification).toBeGreaterThan(-1);
       expect(verification).toBeLessThan(
         block.indexOf(

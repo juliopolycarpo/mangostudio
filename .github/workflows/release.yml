@@ -151,7 +151,8 @@ jobs:
             echo "::error::refusing release ref $RELEASE_REF_TYPE $RELEASE_TAG; expected tag $EXPECTED_RELEASE_TAG"
             exit 1
           fi
-          bun "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"
+          cd "$RUNNER_TEMP/release-trust"
+          bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"
 
       - uses: ./.github/actions/setup-mango
         with:

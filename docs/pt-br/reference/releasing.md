@@ -14,8 +14,10 @@ momento da tag; nada é editado manualmente.
 Os workflows da aplicação e do protocolo verificam uma tag anotada e assinada
 com SSH no commit do checkout antes de executar código da tag ou publicar em
 qualquer canal. O verificador, sua versão do Bun e a política pública vêm de
-`main` protegido, independentemente da tag autenticada. A política
-pública em `.github/release-allowed-signers` confia em `julio@polycarpo.dev`,
+`main` protegido, independentemente da tag autenticada. O verificador roda no
+arquivo extraído confiável, com carregamento automático de `.env` desativado,
+para impedir que a configuração Bun da candidata execute um preload antes da
+autenticação. A política pública em `.github/release-allowed-signers` confia em `julio@polycarpo.dev`,
 fingerprint ED25519 `SHA256:2dqX4aQDayJuTK97HAXfcMlVrcfuPEsatwTAn4sxDSo`, para
 assinaturas Git. Uma tag sem assinatura, outro assinante, uma política ausente
 ou uma tag apontando para outro commit falha no gate. O nome assinado da tag

@@ -137,7 +137,9 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           EXPECTED_RELEASE_TAG: protocol-v${{ steps.resolve.outputs.version }}
-        run: bun "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"
+        run: |
+          cd "$RUNNER_TEMP/release-trust"
+          bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"
       - run: rustup show active-toolchain
       # `protocol:check` adds the feature-powerset lane only when cargo-hack is
       # already on PATH, and skips it with a warning otherwise — a runner

@@ -29,8 +29,10 @@ root-relative paths.
 Both application and protocol release workflows verify an annotated SSH-signed
 tag at the checked-out commit before any tagged code runs or channel can publish.
 The verifier, its Bun version and public policy come from protected `main`,
-independently of the tag being authenticated. The public policy
-in `.github/release-allowed-signers` trusts `julio@polycarpo.dev`, ED25519
+independently of the tag being authenticated.
+The verifier runs in the trusted archive with automatic `.env` loading disabled,
+so a candidate's Bun configuration cannot execute a preload before authentication.
+The public policy in `.github/release-allowed-signers` trusts `julio@polycarpo.dev`, ED25519
 fingerprint `SHA256:2dqX4aQDayJuTK97HAXfcMlVrcfuPEsatwTAn4sxDSo`, for Git
 signatures. An unsigned tag, another signer, a missing policy or a tag pointing
 at another commit fails the gate. The signed tag name must match the release
