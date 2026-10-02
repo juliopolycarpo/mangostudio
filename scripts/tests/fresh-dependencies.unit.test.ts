@@ -128,27 +128,48 @@ describe('fresh dependency workflow', () => {
     expect(workflow).not.toContain('git push');
   });
 
-  test('resolves a fresh graph before all locked build, policy, clippy and test checks', () => {
+  test('shares one freshly resolved graph across policy and all supported OS checks', () => {
+    const resolution = extractJobBlock(workflow, 'resolve');
+    expect(resolution.indexOf('rm Cargo.lock')).toBeLessThan(
+      resolution.indexOf('cargo generate-lockfile')
+    );
+    expect(resolution).toContain('name: fresh-rust-lockfile');
+    expect(resolution).toContain('path: Cargo.lock');
     const fresh = extractJobBlock(workflow, 'fresh');
-    expect(fresh.indexOf('rm Cargo.lock')).toBeLessThan(fresh.indexOf('cargo generate-lockfile'));
-    expect(fresh.indexOf('cargo generate-lockfile')).toBeLessThan(
+    expect(fresh).toContain('needs: [resolve]');
+    expect(fresh).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(fresh).toContain('fail-fast: false');
+    expect(fresh).toContain('name: fresh-rust-lockfile');
+    expect(fresh.indexOf('actions/download-artifact@')).toBeLessThan(
       fresh.indexOf('cargo build --workspace --all-features --locked')
     );
-    expect(fresh).toContain('cargo deny check bans licenses sources');
+    expect(fresh).not.toContain('cargo generate-lockfile');
+    const policy = extractJobBlock(workflow, 'policy');
+    expect(policy).toContain('needs: [resolve]');
+    expect(policy).toContain('name: fresh-rust-lockfile');
+    expect(policy).toContain('cargo deny check bans licenses sources');
+    expect(policy).not.toContain('cargo generate-lockfile');
     expect(fresh).toContain(
       'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings'
     );
     expect(fresh).toContain('cargo test --workspace --all-targets --all-features --locked');
     expect(fresh).toContain('cargo test --doc --workspace --all-features --locked');
-    expect(fresh).toContain('path: Cargo.lock');
     expect(fresh).not.toContain('issues: write');
   });
 
   test('only reports a genuine failed scheduled or dispatched run', () => {
     const report = extractJobBlock(workflow, 'report');
-    expect(report).toContain("needs.fresh.result == 'failure'");
+    expect(report).toContain('needs: [resolve, policy, fresh]');
+    expect(report).toContain("contains(needs.*.result, 'failure')");
     expect(report).toContain("github.event_name != 'pull_request'");
     expect(report).toContain('issues: write');
     expect(report).toContain('reportFreshDependencies');
+  });
+
+  test('serializes issue writers across refs without canceling an active update', () => {
+    const report = extractJobBlock(workflow, 'report');
+    expect(report).toContain('group: rust-fresh-dependencies-report-${{ github.repository }}');
+    expect(report).toContain('cancel-in-progress: false');
+    expect(report).not.toContain('github.ref');
   });
 });

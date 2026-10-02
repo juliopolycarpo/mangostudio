@@ -25,8 +25,9 @@ the gate fails the test.
 ## Fresh Rust dependencies
 
 `rust-fresh-dependencies.yml` resolves a new root Cargo lockfile each Tuesday and
-on manual dispatch, then runs dependency policy, build, clippy, workspace tests
-and doctests against that graph. Exact SDK pins remain exact. The resolved lock
+on manual dispatch, then runs dependency policy and Linux, macOS and Windows
+build, clippy, workspace tests and doctests against the same graph. Policy
+failures do not skip platform checks. Exact SDK pins remain exact. The resolved lock
 is retained as a workflow artifact and never committed. This advisory workflow
 does not feed a required PR gate. Failed scheduled or manual runs update one
 bot-owned compatibility issue, preserving maintainer notes; PR validation of the

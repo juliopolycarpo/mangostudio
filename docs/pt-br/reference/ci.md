@@ -25,8 +25,9 @@ conectá-la ao gate falha o teste.
 ## Dependências Rust resolvidas do zero
 
 O `rust-fresh-dependencies.yml` resolve um novo lockfile Cargo da raiz toda terça
-e em execuções manuais. Roda a política de dependências, build, clippy, testes do
-workspace e doctests com esse grafo. Os pins exatos do SDK continuam exatos. O
+e em execuções manuais. Roda a política de dependências e build, clippy, testes do
+workspace e doctests no Linux, macOS e Windows com o mesmo grafo. Falhas de
+política não pulam os checks de plataforma. Os pins exatos do SDK continuam exatos. O
 lock resolvido fica como artefato do workflow e nunca é commitado. Esse workflow
 informativo não alimenta um gate obrigatório de PR. Falhas agendadas ou manuais
 atualizam uma única issue do bot, preservando notas dos mantenedores; a validação
