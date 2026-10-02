@@ -38,7 +38,8 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
  *   connection closed. The request may have been received.
  * - `acceptance-unknown`: the runtime answered that it cannot say whether the
  *   vendor took the turn (`details.dispatch === "acceptance-unknown"`).
- * - `refused`: any other answer the runtime sent, whatever its code. A
+ * - `refused`: a deterministic `external_agent_turn_refused`, even when it
+ *   says nothing reached the vendor, or any other committed runtime answer. A
  *   runtime-sent `UNAVAILABLE`, `TIMEOUT` or `CANCELLED` is a committed outcome
  *   it replays from its receipt, so resending it would only spin.
  */
@@ -54,9 +55,20 @@ export type SubmissionFailure = 'not-submitted' | 'no-reply' | 'acceptance-unkno
 export function classifySubmissionFailure(error: unknown): SubmissionFailure {
   if (isRequestNotSent(error)) return 'not-submitted';
   if (noReplyOf(error)) return 'no-reply';
-  const dispatch = error instanceof RemoteError ? error.details?.dispatch : undefined;
-  if (dispatch === 'not-submitted') return 'not-submitted';
+  const details = error instanceof RemoteError ? error.details : undefined;
+  const dispatch = details?.dispatch;
   if (dispatch === 'acceptance-unknown') return 'acceptance-unknown';
+  if (details?.kind === 'external_agent_turn_refused' && dispatch !== 'accepted') {
+    // A deterministic input refusal needs no replay or cleanup. Contradictory
+    // cleanup facts cannot prove that safe outcome, even with NotSubmitted.
+    if (
+      (details.cleanupRequired !== undefined && details.cleanupRequired !== false) ||
+      details.cleanup !== undefined
+    )
+      return 'acceptance-unknown';
+    return 'refused';
+  }
+  if (dispatch === 'not-submitted') return 'not-submitted';
   return 'refused';
 }
 
