@@ -27,13 +27,16 @@ root-relative paths.
 ## Trusted release signer
 
 Both application and protocol release workflows verify an annotated SSH-signed
-tag at the checked-out commit before any channel can publish. The public policy
+tag at the checked-out commit before any tagged code runs or channel can publish.
+The verifier, its Bun version and public policy come from protected `main`,
+independently of the tag being authenticated. The public policy
 in `.github/release-allowed-signers` trusts `julio@polycarpo.dev`, ED25519
 fingerprint `SHA256:2dqX4aQDayJuTK97HAXfcMlVrcfuPEsatwTAn4sxDSo`, for Git
 signatures. An unsigned tag, another signer, a missing policy or a tag pointing
 at another commit fails the gate. The signed tag name must match the release
-ref, so a signature cannot be reused under a different name. Source verification
-bypasses cannot skip it.
+ref and requested version, so a signature cannot be reused under a different
+name. A manual app release must target exactly `v<version>` as a tag ref.
+Source verification bypasses cannot skip these checks.
 Key rotation requires a reviewed update to the public policy; no private key is
 stored in the repository. Existing ancestry checks and publication rerun
 idempotency still apply. Release dry runs test temporary trusted, unsigned and

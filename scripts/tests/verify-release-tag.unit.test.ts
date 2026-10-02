@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyReleaseTag } from '../release/verify-release-tag';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
+import { extractJobBlock, extractStepBlocks, runScriptLines } from './support/workflow-blocks';
 
 let directory: string;
 let trustedKey: string;
@@ -42,6 +42,22 @@ beforeAll(async () => {
     signers,
     `fixture@example.test namespaces="git" ${await readFile(`${trustedKey}.pub`, 'utf8')}`
   );
+  for (const path of ['.github', 'scripts/lib', 'scripts/release']) {
+    await mkdir(join(directory, path), { recursive: true });
+  }
+  for (const path of [
+    '.bun-version',
+    'scripts/lib/config.ts',
+    'scripts/lib/release-version.ts',
+    'scripts/lib/cargo-version.ts',
+    'scripts/release/verify-release-tag.ts',
+  ]) {
+    await writeFile(join(directory, path), readText(path));
+  }
+  await writeFile(join(directory, '.github/release-allowed-signers'), await readFile(signers));
+  fixtureCommand(['git', 'add', '.github', '.bun-version', 'scripts']);
+  fixtureCommand(['git', 'commit', '-m', 'Trusted release verifier']);
+  fixtureCommand(['git', 'update-ref', 'refs/remotes/origin/main', 'HEAD']);
   fixtureCommand([
     'git',
     '-c',
@@ -91,6 +107,12 @@ describe('trusted release tag verification', () => {
     }
   });
 
+  test('rejects a signed tag whose name differs from the requested release', async () => {
+    await expect(
+      verifyReleaseTag('v1.0.0', { ...options(), expectedTag: 'v9.9.9' })
+    ).rejects.toThrow('Tag "v1.0.0" does not match the release; expected v9.9.9');
+  });
+
   test('rejects a signature from another key despite local Git trust', async () => {
     const unrelatedTrust = join(directory, 'unrelated-trust');
     await writeFile(
@@ -129,6 +151,67 @@ describe('trusted release tag verification', () => {
     fixtureCommand(['git', 'reset', '--hard', 'HEAD~1']);
   });
 
+  test('the workflow rejects a candidate that replaces its own verifier and signer policy', async () => {
+    const archive = await mkdtemp(join(tmpdir(), 'release-policy-archive-'));
+    try {
+      await writeFile(
+        join(directory, '.github/release-allowed-signers'),
+        `fixture@example.test namespaces="git" ${await readFile(`${otherKey}.pub`, 'utf8')}`
+      );
+      await writeFile(
+        join(directory, 'scripts/release/verify-release-tag.ts'),
+        'console.log("Candidate bypassed verification");\n'
+      );
+      fixtureCommand(['git', 'add', '.github', 'scripts']);
+      fixtureCommand(['git', 'commit', '-m', 'Untrusted candidate replaces release policy']);
+      fixtureCommand([
+        'git',
+        '-c',
+        `user.signingkey=${otherKey}`,
+        'tag',
+        '-s',
+        'v1.0.5',
+        '-m',
+        'Untrusted',
+      ]);
+      const block = extractJobBlock(readText('.github/workflows/release.yml'), 'prepare');
+      const steps = extractStepBlocks(block);
+      const load = steps.find((step) => step.includes('name: Load the release verifier'));
+      const verify = steps.find((step) => step.includes('name: Verify the trusted release tag'));
+      expect(load).toBeDefined();
+      expect(verify).toBeDefined();
+      const env = {
+        ...process.env,
+        RUNNER_TEMP: archive,
+        GITHUB_WORKSPACE: directory,
+        RELEASE_TAG: 'v1.0.5',
+        RELEASE_REF_TYPE: 'tag',
+        EXPECTED_RELEASE_TAG: 'v1.0.5',
+      };
+      for (const step of [load, verify]) {
+        const script = runScriptLines(step ?? '')
+          .map(({ text }) => text.trimStart())
+          .join('\n');
+        const result = Bun.spawnSync(['bash', '-euo', 'pipefail', '-c', script], {
+          cwd: directory,
+          env,
+        });
+        if (step === load) {
+          expect(result.exitCode).toBe(0);
+          continue;
+        }
+        expect(result.exitCode).toBe(1);
+        expect(new TextDecoder().decode(result.stderr)).toContain('failed signature verification');
+        expect(new TextDecoder().decode(result.stdout)).not.toContain(
+          'Candidate bypassed verification'
+        );
+      }
+    } finally {
+      fixtureCommand(['git', 'reset', '--hard', 'refs/remotes/origin/main']);
+      await rm(archive, { recursive: true, force: true });
+    }
+  });
+
   test.each(['', 'main', 'vv1.2.3', 'v01.2.3', 'protocol-v1.2.3 ', 'v1.2.3\nignored'])(
     'rejects malformed release ref %j',
     async (tag) => {
@@ -147,7 +230,9 @@ describe('release signature gates', () => {
     ] as const) {
       const workflow = readText(`.github/workflows/${file}`);
       const block = extractJobBlock(workflow, job);
-      expect(block).toContain('bun ./scripts/release/verify-release-tag.ts "$RELEASE_TAG"');
+      expect(block).toContain(
+        'bun "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"'
+      );
       expect(block).not.toContain('continue-on-error:');
       const verification = extractStepBlocks(block).find((step) =>
         step.includes('verify-release-tag.ts')
@@ -155,6 +240,39 @@ describe('release signature gates', () => {
       expect(verification).toContain('RELEASE_TAG:');
       expect(verification).not.toContain('allow_unverified_source');
     }
+  });
+
+  test('gets verifier code and policy from protected main before executing tagged code', () => {
+    for (const [file, job] of [
+      ['release.yml', 'prepare'],
+      ['protocol-release.yml', 'verify'],
+    ] as const) {
+      const block = extractJobBlock(readText(`.github/workflows/${file}`), job);
+      expect(block).toContain('git archive refs/remotes/origin/main');
+      expect(block).toContain('bun-version-file: ${{ runner.temp }}/release-trust/.bun-version');
+      const verification = block.indexOf('bun "$RUNNER_TEMP/release-trust/scripts/');
+      expect(verification).toBeGreaterThan(-1);
+      expect(verification).toBeLessThan(
+        block.indexOf(
+          file === 'release.yml' ? 'uses: ./.github/actions/setup-mango' : 'bun install'
+        )
+      );
+    }
+  });
+
+  test('binds the resolved app version to a tag ref before signature verification', () => {
+    const block = extractJobBlock(readText('.github/workflows/release.yml'), 'prepare');
+    expect(block).toContain('RELEASE_REF_TYPE: ${{ github.ref_type }}');
+    expect(block).toContain('EXPECTED_RELEASE_TAG: v${{ steps.resolve.outputs.version }}');
+    expect(block).toContain('[ "$RELEASE_REF_TYPE" != "tag" ]');
+    expect(block).toContain('"$RELEASE_TAG" != "$EXPECTED_RELEASE_TAG"');
+    expect(block.indexOf('id: resolve')).toBeLessThan(block.indexOf('EXPECTED_RELEASE_TAG:'));
+  });
+
+  test('the stable publisher requires the verified tag to already exist on GitHub', () => {
+    const block = extractJobBlock(readText('.github/workflows/release.yml'), 'github-release');
+    const publication = extractStepBlocks(block).find((step) => step.includes('publish_release'));
+    expect(publication).toContain('--verify-tag');
   });
 
   test('release dry-run runs cryptographic acceptance and rejection fixtures', () => {

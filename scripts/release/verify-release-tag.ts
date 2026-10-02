@@ -5,6 +5,7 @@ import { isValidSemver, normalizeVersion } from '../lib/release-version';
 interface VerificationOptions {
   readonly cwd?: string;
   readonly allowedSignersFile?: string;
+  readonly expectedTag?: string;
 }
 
 /**
@@ -16,6 +17,7 @@ export async function verifyReleaseTag(
   {
     cwd = ROOT_DIR,
     allowedSignersFile = resolve(ROOT_DIR, '.github/release-allowed-signers'),
+    expectedTag,
   }: VerificationOptions = {}
 ): Promise<{ tag: string; commit: string }> {
   const version = tag.replace(/^(?:protocol-v|v)/, '');
@@ -25,6 +27,11 @@ export async function verifyReleaseTag(
     !isValidSemver(version)
   ) {
     throw new Error(`Invalid tag ${JSON.stringify(tag)}; expected v<semver> or protocol-v<semver>`);
+  }
+  if (expectedTag !== undefined && tag !== expectedTag) {
+    throw new Error(
+      `Tag ${JSON.stringify(tag)} does not match the release; expected ${expectedTag}`
+    );
   }
   const ref = `refs/tags/${tag}`;
   const type = Bun.spawnSync(['git', 'cat-file', '-t', ref], { cwd });
@@ -97,7 +104,10 @@ export async function verifyReleaseTag(
 
 if (import.meta.main) {
   try {
-    const receipt = await verifyReleaseTag(Bun.argv[2] ?? '');
+    const receipt = await verifyReleaseTag(Bun.argv[2] ?? '', {
+      cwd: Bun.argv[3] ?? ROOT_DIR,
+      expectedTag: Bun.argv[4],
+    });
     console.log(`Verified trusted release tag ${receipt.tag} at ${receipt.commit}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

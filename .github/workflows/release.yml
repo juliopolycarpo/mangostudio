@@ -89,15 +89,6 @@ jobs:
           # scripts/tests/workflow-hygiene.unit.test.ts.
           persist-credentials: true
 
-      - uses: ./.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - name: Verify the trusted release tag signer
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: bun ./scripts/release/verify-release-tag.ts "$RELEASE_TAG"
-
       - name: Resolve version
         id: resolve
         # Read the dispatch input via env, never interpolated into the shell, so
@@ -138,6 +129,33 @@ jobs:
           esac
           echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
           echo "Releasing v${version} (prerelease=${prerelease})"
+
+      - name: Load the release verifier from protected main
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-trust"
+          git archive refs/remotes/origin/main | tar -x -C "$RUNNER_TEMP/release-trust"
+          echo "Trusted release policy source: $(git rev-parse refs/remotes/origin/main)"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: ${{ runner.temp }}/release-trust/.bun-version
+
+      - name: Verify the trusted release tag signer
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+          EXPECTED_RELEASE_TAG: v${{ steps.resolve.outputs.version }}
+        run: |
+          if [ "$RELEASE_REF_TYPE" != "tag" ] || [ "$RELEASE_TAG" != "$EXPECTED_RELEASE_TAG" ]; then
+            echo "::error::refusing release ref $RELEASE_REF_TYPE $RELEASE_TAG; expected tag $EXPECTED_RELEASE_TAG"
+            exit 1
+          fi
+          bun "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"
+
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Verify versions are in lockstep
         # Fail before producing artifacts if the root and workspace package.json
@@ -326,6 +344,7 @@ jobs:
             flags+=(--prerelease --latest=false)
           fi
           publish_release "$tag" release-assets/* -- \
+            --verify-tag \
             --title "$tag" \
             --notes-file RELEASE_NOTES.md \
             "${flags[@]}"

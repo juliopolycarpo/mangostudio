@@ -12,13 +12,17 @@ momento da tag; nada é editado manualmente.
 ## Assinante confiável da release
 
 Os workflows da aplicação e do protocolo verificam uma tag anotada e assinada
-com SSH no commit do checkout antes de qualquer canal publicar. A política
+com SSH no commit do checkout antes de executar código da tag ou publicar em
+qualquer canal. O verificador, sua versão do Bun e a política pública vêm de
+`main` protegido, independentemente da tag autenticada. A política
 pública em `.github/release-allowed-signers` confia em `julio@polycarpo.dev`,
 fingerprint ED25519 `SHA256:2dqX4aQDayJuTK97HAXfcMlVrcfuPEsatwTAn4sxDSo`, para
 assinaturas Git. Uma tag sem assinatura, outro assinante, uma política ausente
 ou uma tag apontando para outro commit falha no gate. O nome assinado da tag
-deve corresponder ao ref da release, para impedir reutilização da assinatura
-sob outro nome. O bypass de verificação da fonte não pula essa checagem. A rotação da chave exige atualização revisada da
+deve corresponder ao ref e à versão da release, para impedir reutilização da
+assinatura sob outro nome. A release manual da aplicação exige exatamente o
+ref de tag `v<versão>`. O bypass de verificação da fonte não pula essas checagens.
+A rotação da chave exige atualização revisada da
 política pública; nenhuma chave privada fica no repositório. As checagens de
 ancestralidade e a idempotência de reexecução continuam valendo. Os dry runs
 testam tags temporárias confiáveis, sem assinatura e não confiáveis localmente,
