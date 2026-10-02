@@ -258,6 +258,7 @@ fn not_installed(target: TargetId, report: Option<wire::DiscoveryReport>) -> wir
     wire::Descriptor {
         target_id: target,
         installed: false,
+        discovery_state: wire::DiscoveryState::Determined,
         version: None,
         required_version: None,
         auth_state: wire::AuthState::Unknown,
@@ -292,7 +293,11 @@ fn refused(
     wire::Descriptor {
         target_id: target,
         installed: true,
-        version: discovery.version.clone(),
+        discovery_state: wire::DiscoveryState::Determined,
+        version: discovery
+            .version
+            .clone()
+            .filter(|version| !version.trim().is_empty()),
         required_version: unavailable.and(floor),
         auth_state,
         login_command: login,
@@ -306,7 +311,7 @@ fn refused(
     }
 }
 
-/// A build the gate let through, or one it could not judge.
+/// A build the gate let through, preserving uncertainty when a probe or version was inconclusive.
 fn usable(
     target: TargetId,
     discovery: &sdk::Discovery,
@@ -319,6 +324,15 @@ fn usable(
         with_codex_account(account, facts);
     }
     let signed_out = auth_state == wire::AuthState::SignedOut;
+    let version = discovery
+        .version
+        .clone()
+        .filter(|version| !version.trim().is_empty());
+    let discovery_state = if discovery.gate == sdk::GateVerdict::Unknown || version.is_none() {
+        wire::DiscoveryState::Undetermined
+    } else {
+        wire::DiscoveryState::Determined
+    };
     let models: Vec<wire::Model> = discovery
         .models
         .iter()
@@ -327,7 +341,8 @@ fn usable(
     wire::Descriptor {
         target_id: target,
         installed: true,
-        version: discovery.version.clone(),
+        discovery_state,
+        version,
         required_version: None,
         auth_state,
         remedy: signed_out.then(|| remedy(wire::RemedyKind::SignIn, login.clone())),

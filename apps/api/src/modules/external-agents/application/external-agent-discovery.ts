@@ -44,6 +44,7 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentDescriptor,
   ExternalAgentDiscoveryReport,
+  ExternalAgentDiscoveryState,
   ExternalAgentModel,
   ExternalAgentTargetId,
   ExternalAgentUnavailableReason,
@@ -84,6 +85,7 @@ export interface AuthoritativeAgentStatus {
   readonly targetId: ExternalAgentTargetId;
   readonly installed?: boolean;
   readonly version?: string;
+  readonly discoveryState?: ExternalAgentDiscoveryState;
   readonly authState?: ExternalAgentAuthState;
   readonly capabilities: ExternalAgentCapabilities;
   readonly supportedConfigurations?: readonly ExternalSupportedConfiguration[];
@@ -366,6 +368,7 @@ interface DescriptorInput {
   readonly installed: boolean;
   readonly authState: ExternalAgentAuthState;
   readonly version: string | undefined;
+  readonly discoveryState?: ExternalAgentDiscoveryState;
   readonly capabilities: ExternalAgentCapabilities;
   readonly supportedConfigurations: readonly ExternalSupportedConfiguration[];
   readonly models: readonly ExternalAgentModel[] | undefined;
@@ -398,7 +401,7 @@ function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
     input.supportedConfigurations
   );
   const remedy = externalRemedyFor(reason, loginCommand ? { loginCommand } : {});
-  const version = input.version?.slice(0, MAX_VERSION_LENGTH);
+  const version = input.version?.trim() ? input.version.slice(0, MAX_VERSION_LENGTH) : undefined;
   // Bound to the one reason whose copy interpolates it. A required version on
   // any other row would read as a floor this runtime enforces, and it does not:
   // an older binary that still answers its probe stays selectable.
@@ -411,6 +414,9 @@ function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
     targetId: input.targetId,
     environmentId: input.environmentId,
     installed: input.installed,
+    discoveryState:
+      input.discoveryState ??
+      (input.installed && !reason && !version ? 'undetermined' : 'determined'),
     ...(version && { version }),
     ...(requiredVersion && { requiredVersion }),
     authState: input.authState,
@@ -465,6 +471,7 @@ function mergeAuthoritative(
     // `unknown` survives only where the status command said nothing usable.
     authState: authoritative.authState ?? base.authState,
     version: authoritative.version ?? base.version,
+    discoveryState: authoritative.discoveryState,
     capabilities: authoritative.capabilities,
     supportedConfigurations: authoritative.supportedConfigurations ?? [],
     models: authoritative.models,

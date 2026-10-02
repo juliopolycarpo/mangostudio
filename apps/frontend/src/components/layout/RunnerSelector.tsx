@@ -155,9 +155,11 @@ export function RunnerSelector({
         ? { tone: 'neutral', text: labels.loading }
         : !activeUsable
           ? { tone: 'error', text: labels.unavailableHere }
-          : activeDescriptor?.authState === 'signed-in'
-            ? { tone: 'success', text: labels.signedIn }
-            : { tone: 'warning', text: labels.authUnknown };
+          : activeDescriptor?.discoveryState === 'undetermined'
+            ? { tone: 'warning', text: labels.discoveryUndetermined }
+            : activeDescriptor?.authState === 'signed-in'
+              ? { tone: 'success', text: labels.signedIn }
+              : { tone: 'warning', text: labels.authUnknown };
 
   return (
     <div ref={containerRef} className="relative">
@@ -373,7 +375,9 @@ function ExternalRow({
       ? labels.unavailable['signed-out']
       : notInstalled
         ? labels.selector.notInstalledIn.replace('{environment}', environmentName)
-        : null;
+        : descriptor.discoveryState === 'undetermined'
+          ? labels.selector.discoveryUndeterminedHint
+          : null;
 
   return (
     <div className="rounded-xl px-1">

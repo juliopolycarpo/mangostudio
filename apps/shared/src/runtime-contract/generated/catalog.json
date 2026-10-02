@@ -3293,6 +3293,18 @@
                 "installed": {
                   "type": "boolean"
                 },
+                "discoveryState": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "determined"
+                    },
+                    {
+                      "type": "string",
+                      "const": "undetermined"
+                    }
+                  ]
+                },
                 "version": {
                   "type": "string",
                   "minLength": 1,

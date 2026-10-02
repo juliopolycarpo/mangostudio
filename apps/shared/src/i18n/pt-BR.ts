@@ -3640,6 +3640,9 @@ export const messages = {
       noneDiscovered: 'Nenhum agente externo encontrado nesta máquina.',
       signedIn: 'sessão iniciada',
       authUnknown: 'estado de login desconhecido',
+      discoveryUndetermined: 'disponibilidade indeterminada',
+      discoveryUndeterminedHint:
+        'A verificação não confirmou este agente ou sua versão. Você ainda pode tentar enviar uma mensagem.',
       notInstalledIn: 'Não instalado em {environment}',
       unknownVersion: 'uma versão mais recente',
       continueInNewChat: 'Continuar em um novo chat',

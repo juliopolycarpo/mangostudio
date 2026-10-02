@@ -1,0 +1,419 @@
+{
+  "type": "object",
+  "required": [
+    "descriptors"
+  ],
+  "properties": {
+    "descriptors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "targetId",
+          "installed",
+          "authState",
+          "capabilities",
+          "supportedConfigurations"
+        ],
+        "properties": {
+          "targetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "codex"
+              },
+              {
+                "type": "string",
+                "const": "cursor"
+              },
+              {
+                "type": "string",
+                "const": "claude"
+              }
+            ]
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "requiredVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "authState": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "signed-in"
+              },
+              {
+                "type": "string",
+                "const": "signed-out"
+              },
+              {
+                "type": "string",
+                "const": "unknown"
+              }
+            ]
+          },
+          "loginCommand": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "capabilities": {
+            "type": "object",
+            "required": [
+              "structuredStreaming",
+              "reasoningStream",
+              "interactiveApprovals",
+              "resume",
+              "modelCatalog",
+              "images",
+              "usageReporting",
+              "cancellation",
+              "steering",
+              "sessionListing",
+              "nativeReview",
+              "accountUsage"
+            ],
+            "properties": {
+              "structuredStreaming": {
+                "type": "boolean"
+              },
+              "reasoningStream": {
+                "type": "boolean"
+              },
+              "interactiveApprovals": {
+                "type": "boolean"
+              },
+              "resume": {
+                "type": "boolean"
+              },
+              "modelCatalog": {
+                "type": "boolean"
+              },
+              "images": {
+                "type": "boolean"
+              },
+              "usageReporting": {
+                "type": "boolean"
+              },
+              "cancellation": {
+                "type": "boolean"
+              },
+              "steering": {
+                "type": "boolean"
+              },
+              "sessionListing": {
+                "type": "boolean"
+              },
+              "nativeReview": {
+                "type": "boolean"
+              },
+              "accountUsage": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "supportedConfigurations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "level",
+                "routing",
+                "supported",
+                "unattended"
+              ],
+              "properties": {
+                "level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "read-only"
+                    },
+                    {
+                      "type": "string",
+                      "const": "default"
+                    },
+                    {
+                      "type": "string",
+                      "const": "full-access"
+                    }
+                  ]
+                },
+                "routing": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "user"
+                    },
+                    {
+                      "type": "string",
+                      "const": "auto-review"
+                    }
+                  ]
+                },
+                "supported": {
+                  "type": "boolean"
+                },
+                "unsupportedReasonKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "vendorId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "unattended": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 6
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "displayName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "isDefault": {
+                  "type": "boolean"
+                },
+                "hidden": {
+                  "type": "boolean"
+                },
+                "inputModalities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "maxItems": 16,
+                  "uniqueItems": true
+                },
+                "supportedReasoningEfforts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "displayName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512
+                      },
+                      "description": {
+                        "type": "string",
+                        "maxLength": 8192
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 32,
+                  "uniqueItems": true
+                },
+                "defaultReasoningEffort": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "serviceTiers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "maxItems": 32,
+                  "uniqueItems": true
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 256
+          },
+          "account": {
+            "type": "object",
+            "required": [
+              "label"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "planType": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "fingerprint": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "additionalProperties": false
+          },
+          "unavailableReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "not-installed"
+              },
+              {
+                "type": "string",
+                "const": "signed-out"
+              },
+              {
+                "type": "string",
+                "const": "runtime-unsupported"
+              },
+              {
+                "type": "string",
+                "const": "runtime-denied"
+              },
+              {
+                "type": "string",
+                "const": "environment-unreachable"
+              },
+              {
+                "type": "string",
+                "const": "isolation-unproven"
+              },
+              {
+                "type": "string",
+                "const": "version-unsupported"
+              },
+              {
+                "type": "string",
+                "const": "disclosure-required"
+              },
+              {
+                "type": "string",
+                "const": "installed-but-unusable"
+              }
+            ]
+          },
+          "remedy": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "install"
+                  },
+                  {
+                    "type": "string",
+                    "const": "update"
+                  },
+                  {
+                    "type": "string",
+                    "const": "sign-in"
+                  },
+                  {
+                    "type": "string",
+                    "const": "contact-admin"
+                  },
+                  {
+                    "type": "string",
+                    "const": "accept-disclosure"
+                  },
+                  {
+                    "type": "string",
+                    "const": "none"
+                  }
+                ]
+              },
+              "command": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "additionalProperties": false
+          },
+          "discovery": {
+            "type": "object",
+            "required": [
+              "source",
+              "probedAtMs",
+              "attempts"
+            ],
+            "properties": {
+              "source": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "live"
+                  },
+                  {
+                    "type": "string",
+                    "const": "cache"
+                  }
+                ]
+              },
+              "probedAtMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "attempts": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 16
+              },
+              "failureCode": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "maxItems": 3
+    }
+  },
+  "additionalProperties": false
+}
