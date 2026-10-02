@@ -1,5 +1,6 @@
 //! A real ACP harness with a fake child that keeps frame sizes, never large frame bodies.
 use std::collections::{BTreeMap, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -12,9 +13,14 @@ use tokio::sync::{Notify, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use super::super::{Backend, ProductHarnesses};
+use crate::external_agents::failure::{
+    CleanupOutcome, FailureCause, RetryAdvice, SessionUsability,
+};
 use crate::external_agents::port::{self, AgentBackend};
 use crate::external_agents::wire;
 use crate::test_support::ScratchDir;
+
+const CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -296,10 +302,10 @@ impl Rig {
             launcher.clone(),
             Arc::new(ProductHarnesses),
             Limits {
-                shutdown_timeout: Duration::from_secs(2),
+                shutdown_timeout: CLEANUP_TIMEOUT,
                 ..Limits::default()
             },
-            Duration::from_secs(2),
+            CLEANUP_TIMEOUT,
         );
         Self {
             launcher,
@@ -349,6 +355,35 @@ pub(super) async fn start(
             configuration: &configuration(),
         })
         .await
+}
+
+/// Waits for admission after cancellation: a terminal stream can close before ACP releases its slot.
+/// Only a proven unsubmitted, retryable Busy refusal permits another attempt.
+///
+/// ```ignore
+/// let stream = after_turn_release(|| start(session, "next send".into(), Vec::new())).await?;
+/// ```
+pub(super) async fn after_turn_release<T, F: Future<Output = port::AgentResult<T>>>(
+    mut attempt: impl FnMut() -> F,
+) -> port::AgentResult<T> {
+    tokio::time::timeout(CLEANUP_TIMEOUT, async {
+        loop {
+            match attempt().await {
+                Err(failure)
+                    if failure.cause == FailureCause::Busy
+                        && failure.retry == RetryAdvice::Retryable
+                        && failure.dispatch == Some(port::Dispatch::NotSubmitted)
+                        && failure.session == SessionUsability::Unknown
+                        && failure.cleanup == CleanupOutcome::NotRequired =>
+                {
+                    tokio::task::yield_now().await;
+                }
+                result => return result,
+            }
+        }
+    })
+    .await
+    .expect("expected ACP turn admission released within the cleanup budget; received a busy slot")
 }
 
 pub(super) async fn drain(mut stream: port::TurnStream) -> Vec<wire::Event> {

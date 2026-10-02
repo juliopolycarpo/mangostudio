@@ -480,9 +480,11 @@ async fn prompt_budget_small_cancel_control_fits_beside_a_maximum_prompt() {
     assert!(cancel < 2048);
     assert_eq!(rig.launcher.fake.live_children(), 1);
     fixtures::complete(
-        fixtures::start(&*session, "after cancellation".into(), Vec::new())
-            .await
-            .unwrap(),
+        fixtures::after_turn_release(|| {
+            fixtures::start(&*session, "after cancellation".into(), Vec::new())
+        })
+        .await
+        .unwrap(),
     )
     .await;
     assert_eq!(rig.launcher.fake.launches().len(), 1);
@@ -510,6 +512,120 @@ async fn prompt_budget_small_recovery_bypasses_large_write_backpressure() {
     assert_eq!(rig.launcher.fake.launches().len(), 1);
     session.close(CloseCause::Requested).await.unwrap();
     rig.assert_closed();
+}
+
+/// Models the interval after a terminal is consumed but before the native prompt slot is released.
+#[derive(Default)]
+struct SettlingAdmission {
+    released: std::sync::atomic::AtomicBool,
+    attempts: std::sync::atomic::AtomicUsize,
+    attempted: tokio::sync::Notify,
+}
+impl SettlingAdmission {
+    async fn start(&self) -> crate::external_agents::port::AgentResult<()> {
+        use std::sync::atomic::Ordering;
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        self.attempted.notify_one();
+        if self.released.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        Err(super::super::failure::facts(
+            mango_external_agents::Error::Busy
+                .with_dispatch(mango_external_agents::Dispatch::NotSubmitted),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn prompt_budget_recovery_waits_for_cancelled_turn_admission() {
+    use std::sync::atomic::Ordering;
+    let admission = SettlingAdmission::default();
+    let pending = fixtures::after_turn_release(|| admission.start());
+    tokio::pin!(pending);
+    tokio::select! {
+        biased;
+        result = &mut pending => panic!("expected pending until explicit turn release, received {result:?}"),
+        () = admission.attempted.notified() => {}
+    }
+    assert!(!admission.released.load(Ordering::SeqCst));
+    admission.released.store(true, Ordering::SeqCst);
+    pending.await.unwrap();
+    assert!(admission.attempts.load(Ordering::SeqCst) >= 2);
+}
+
+/// Refuses exactly once; a replay of any unsafe failure makes the test fail.
+struct RefusingAdmission {
+    failure: std::sync::Mutex<Option<crate::external_agents::failure::AgentFailure>>,
+    attempts: std::sync::atomic::AtomicUsize,
+}
+impl RefusingAdmission {
+    async fn start(&self) -> crate::external_agents::port::AgentResult<()> {
+        self.attempts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(self
+            .failure
+            .lock()
+            .unwrap()
+            .take()
+            .expect("an unsafe failure must not be retried"))
+    }
+}
+
+#[tokio::test]
+async fn prompt_budget_recovery_does_not_replay_other_failure_facts() {
+    use crate::external_agents::failure::{FailureCause, RetryAdvice};
+    for changed in [
+        "cause",
+        "retry",
+        "accepted",
+        "uncertain",
+        "unobserved",
+        "session",
+        "cleanup",
+    ] {
+        let mut failure = super::super::failure::facts(
+            mango_external_agents::Error::Busy
+                .with_dispatch(mango_external_agents::Dispatch::NotSubmitted),
+        );
+        match changed {
+            "cause" => failure.cause = FailureCause::Link,
+            "retry" => failure.retry = RetryAdvice::DoNotRetry,
+            "accepted" => failure.dispatch = Some(Dispatch::Accepted),
+            "uncertain" => failure.dispatch = Some(Dispatch::AcceptanceUnknown),
+            "unobserved" => failure.dispatch = None,
+            "session" => failure.session = SessionUsability::Spent,
+            "cleanup" => failure.cleanup = CleanupOutcome::Unconfirmed,
+            _ => unreachable!(),
+        }
+        let expected = (
+            failure.cause,
+            failure.retry,
+            failure.dispatch,
+            failure.session,
+            failure.cleanup,
+        );
+        let admission = RefusingAdmission {
+            failure: std::sync::Mutex::new(Some(failure)),
+            attempts: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let failure = fixtures::after_turn_release(|| admission.start())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (
+                failure.cause,
+                failure.retry,
+                failure.dispatch,
+                failure.session,
+                failure.cleanup
+            ),
+            expected
+        );
+        assert_eq!(
+            admission.attempts.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+    }
 }
 
 async fn concurrent_prompt_probe(sessions: usize, text: bool, require_acceptance: bool) {
@@ -654,9 +770,11 @@ async fn concurrent_prompt_probe(sessions: usize, text: bool, require_acceptance
     }
     for session in &children {
         fixtures::complete(
-            fixtures::start(&**session, "next send".into(), Vec::new())
-                .await
-                .unwrap(),
+            fixtures::after_turn_release(|| {
+                fixtures::start(&**session, "next send".into(), Vec::new())
+            })
+            .await
+            .unwrap(),
         )
         .await;
     }
