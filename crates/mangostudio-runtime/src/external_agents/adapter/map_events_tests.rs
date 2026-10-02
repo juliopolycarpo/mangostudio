@@ -984,6 +984,12 @@ fn assert_declined(request: &sdk::QuestionRequest, reason: &str) {
     let (response, received_reason) = mapped
         .unrenderable
         .unwrap_or_else(|| panic!("expected an unrenderable decline for: {reason}"));
+    let response = match super::super::session::sdk_answer(response) {
+        super::super::session::SdkAnswer::Question(response) => response,
+        super::super::session::SdkAnswer::Permission(_) => {
+            panic!("a declined question cannot grant authority")
+        }
+    };
     assert_eq!(received_reason, reason, "expected the reason named");
     let expected = sdk::QuestionResponse::new(
         request.interaction.id.clone(),
@@ -1141,6 +1147,12 @@ fn the_sdk_refuses_to_decline_a_required_question() {
     })
     .unrenderable
     .expect("expected an unrenderable decline");
+    let response = match super::super::session::sdk_answer(response) {
+        super::super::session::SdkAnswer::Question(response) => response,
+        super::super::session::SdkAnswer::Permission(_) => {
+            panic!("a declined question cannot grant authority")
+        }
+    };
     let received = request.validate(&response);
     assert!(
         received.is_err(),

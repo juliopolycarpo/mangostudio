@@ -7,19 +7,20 @@
 //! child can see, consent and isolation cleanup, aggregate budgets, and the
 //! one mapping between SDK types and the product wire.
 //!
+//! - [`port`] defines the small owned backend, session and stream operations.
+//! - The private `adapter/` owns all SDK imports, harness construction, mapping and launcher glue.
 //! - [`isolation`] proves whose vendor credentials this process would use.
-//! - [`launcher`] adapts the runtime's process supervision to the SDK's
-//!   `ProcessLauncher` port.
-//! - [`wire`] is the product wire as typed Rust; [`map`] is the one place SDK
-//!   types become wire types, with [`map_events`] for turn events and
-//!   interactions.
-//! - [`supervisor`] owns the sessions; [`service`] registers the methods.
+//! - [`interactions`] routes product-visible approvals and questions separately.
+//! - [`wire`] reuses the product contracts, without introducing another serialized shape.
+//! - [`supervisor`] owns admission and sessions; [`turns`] owns receipts and the hub relay.
+//! - [`service`] registers the methods. SDK cleanup handles never leave the adapter.
 
+mod adapter;
+pub(crate) mod failure;
 pub(crate) mod hub_authority;
+pub(crate) mod interactions;
 pub(crate) mod isolation;
-pub(crate) mod launcher;
-pub(crate) mod map;
-pub(crate) mod map_events;
+pub(crate) mod port;
 pub(crate) mod service;
 pub(crate) mod supervisor;
 pub(crate) mod turns;

@@ -22,26 +22,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use base64::Engine as _;
-use mango_external_agents::normalize;
-use mango_external_agents::{
-    Attachment as SdkAttachment, AttachmentKind as SdkAttachmentKind, CancelReason, Capability,
-    Error as SdkError, ReviewRequest, ReviewStream, ReviewTarget as SdkReviewTarget, Steer,
-    SteerOutcome, SteerRejection as SdkSteerRejection, TurnRequest, TurnStream,
+use super::failure::{AgentFailure, FailureCause, FailureContext, SessionUsability};
+use super::port::{
+    Attachment as OwnedAttachment, CancelReason, ReviewStream, Steer, TurnEvent, TurnRequest,
+    TurnStream,
 };
+use base64::Engine as _;
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::{EventInput, Session as HubSession};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
-use super::map;
-use super::map_events::{self, Answer, PendingInteraction};
+use super::interactions::{self, PendingInteraction};
 use super::supervisor::{CloseCause, LiveSession, Supervisor};
 use super::wire::{
-    AckResult, AgentError, Attachment, AttachmentKind, CancelParams, Event, EventEnvelope,
-    RespondParams, StartReviewParams, StartReviewResult, SteerParams, SteerRejection, SteerResult,
-    TurnParams, TurnResult,
+    AckResult, AgentError, Attachment, CancelParams, Event, EventEnvelope, RespondParams,
+    StartReviewParams, StartReviewResult, SteerParams, SteerRejection, SteerResult, TurnParams,
+    TurnResult,
 };
 use crate::json_size::serialized_len;
 use crate::ports::wall_clock::epoch_millis;
@@ -264,7 +262,7 @@ impl Supervisor {
         super::supervisor::refuse_unoffered_configuration(live.target, &params.configuration)?;
         // Decoded before the session's one turn slot is taken, so a malformed
         // attachment refuses this call and leaves the session idle.
-        let attachments = sdk_attachments(params.attachments.as_deref().unwrap_or_default())?;
+        let attachments = decoded_attachments(params.attachments.as_deref().unwrap_or_default())?;
         for root in &params.configuration.workspace_roots {
             if !live.authorized_roots.contains(root) {
                 return Err(tool_argument(format!(
@@ -283,14 +281,17 @@ impl Supervisor {
             Admitted::Replay(outcome) => return decode_outcome(outcome).await,
             Admitted::Fresh(publish) => publish,
         };
-        let request = TurnRequest::new(params.client_message_id.clone(), params.input.clone())
-            .with_attachments(attachments)
-            .with_configuration(map::configuration_patch(&params.configuration));
+        let request = TurnRequest {
+            turn_id: params.client_message_id.clone(),
+            input: params.input.clone(),
+            attachments,
+            configuration: &params.configuration,
+        };
         // Not raced against the hub's request cancel: the hub reconciles a
         // lost reply by sending this same id again, and the receipt has to
         // hold what really happened, not that the first caller stopped waiting.
         let result = match live.session.start_turn(request).await {
-            Ok(stream) => match bounded_native_turn_id(&stream) {
+            Ok(mut stream) => match bounded_native_turn_id(&mut stream) {
                 Ok(native) => {
                     self.relay(&live, &params.client_message_id, stream);
                     Ok(TurnResult {
@@ -318,11 +319,7 @@ impl Supervisor {
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<StartReviewResult, RemoteError> {
         let live = self.require_live(&params.session_id)?;
-        if live
-            .session
-            .require_capability(Capability::NativeReview)
-            .is_err()
-        {
+        if !live.session.capabilities().native_review {
             return Err(tool_argument(format!(
                 "External-agent target {:?} cannot start a native review; expected a target with native review.",
                 live.target.as_str()
@@ -338,14 +335,14 @@ impl Supervisor {
             Admitted::Replay(outcome) => return decode_outcome(outcome).await,
             Admitted::Fresh(publish) => publish,
         };
-        let request = ReviewRequest {
-            turn_id: mango_external_agents::TurnId::new(params.client_message_id.clone()),
-            target: SdkReviewTarget::UncommittedChanges,
-        };
         // Not raced against the caller's cancel either, for the same reason
         // as a turn: a resend under the same id is answered from the receipt.
-        let result = match live.session.start_review(request).await {
-            Ok(review) => match admissible_review(&live, &review) {
+        let result = match live
+            .session
+            .start_review(params.client_message_id.clone())
+            .await
+        {
+            Ok(mut review) => match admissible_review(&live, &mut review) {
                 Ok(native) => {
                     self.relay(&live, &params.client_message_id, review.turn);
                     Ok(StartReviewResult {
@@ -373,7 +370,7 @@ impl Supervisor {
         &self,
         live: &LiveSession,
         client_message_id: &str,
-        error: SdkError,
+        error: AgentFailure,
     ) -> RemoteError {
         // The session itself refused: it can never run a turn again. The
         // Claude harness answers cancelled once a forced stop made it
@@ -383,7 +380,8 @@ impl Supervisor {
         // lost makes the next send open a session that can run the turn.
         // It starts closing while this turn still holds the slot, so a
         // concurrent turn is refused rather than sent to the spent session.
-        let spent = error.dispatch().is_safe_to_replay() && is_spent_session(&error);
+        let spent =
+            error.dispatch().is_safe_to_replay() && error.session == SessionUsability::Spent;
         let closed = if spent {
             Some(
                 self.close_session(
@@ -411,12 +409,10 @@ impl Supervisor {
                 live.session_id
             ));
         }
-        if matches!(error, SdkError::Busy)
-            || matches!(&error, SdkError::Operation { source, .. } if matches!(**source, SdkError::Busy))
-        {
+        if error.busy_refusal {
             return busy(&live.session_id);
         }
-        self.sdk_failure(error).await
+        error.into_remote()
     }
 
     /// Drains one turn's stream to the hub, owned by the supervisor's tasks.
@@ -453,7 +449,7 @@ impl Supervisor {
                 shown_commands: None,
             };
             let mut subscription = live.session.subscribe();
-            relay.commands(&subscription.current().commands);
+            relay.commands(subscription.current());
             let mut facts_open = true;
             let deadline = tokio::time::sleep(this.hard_turn_timeout());
             tokio::pin!(deadline);
@@ -475,10 +471,10 @@ impl Supervisor {
                     }
                     event = stream.recv() => {
                         let Some(event) = event else { break };
-                        relay.event(&event).await;
+                        relay.event(event).await;
                     }
                     changed = subscription.changed(), if facts_open => match changed {
-                        Some(snapshot) => relay.commands(&snapshot.commands),
+                        Some(snapshot) => relay.commands(snapshot),
                         None => facts_open = false,
                     },
                 }
@@ -535,13 +531,13 @@ impl Supervisor {
                 params.request_id
             )));
         };
-        let outcome = match map_events::answer(&pending, &params.option_id)? {
-            Answer::Permission(response) => live.session.respond(response).await,
-            Answer::Question(response) => live.session.answer(response).await,
-        };
+        let outcome = live
+            .session
+            .respond(interactions::answer(&pending, &params.option_id)?)
+            .await;
         match outcome {
             Ok(()) => Ok(AckResult::OK),
-            Err(error) => Err(self.sdk_failure(error).await),
+            Err(error) => Err(error.into_remote()),
         }
     }
 
@@ -550,11 +546,7 @@ impl Supervisor {
     /// cache can reach this mid-turn.
     pub(crate) async fn steer(&self, params: SteerParams) -> Result<SteerResult, RemoteError> {
         let live = self.require_live(&params.session_id)?;
-        if live
-            .session
-            .require_capability(Capability::Steering)
-            .is_err()
-        {
+        if !live.session.capabilities().steering {
             return Ok(SteerResult::rejected(SteerRejection::NotSupported));
         }
         let Some((turn_id, native)) = live.turns.active_native_turn() else {
@@ -586,27 +578,22 @@ impl Supervisor {
             Err(outcome) => return await_steer(&live, &params.client_message_id, outcome).await,
         };
         let steer = Steer {
-            turn_id: mango_external_agents::TurnId::new(turn_id),
+            turn_id,
             native_turn_id: native,
             input: params.input,
         };
         let result = match live.session.steer(steer).await {
-            Ok(SteerOutcome::Accepted) => SteerResult::ACCEPTED,
-            Ok(SteerOutcome::Rejected { reason }) => SteerResult::rejected(match reason {
-                SdkSteerRejection::TurnAlreadyCompleted => SteerRejection::TurnAlreadyCompleted,
-                SdkSteerRejection::TurnNotSteerable => SteerRejection::TurnNotSteerable,
-                // A refusal this build does not know yet is still a refusal.
-                _ => SteerRejection::TurnNotSteerable,
-            }),
-            Ok(_) => SteerResult::rejected(SteerRejection::TurnNotSteerable),
-            Err(SdkError::NotSupported { .. }) => {
-                SteerResult::rejected(SteerRejection::NotSupported)
-            }
+            Ok(outcome) => outcome,
+            Err(AgentFailure {
+                cause: FailureCause::Unsupported,
+                context: FailureContext::Direct,
+                ..
+            }) => SteerResult::rejected(SteerRejection::NotSupported),
             Err(error) => {
                 // A duplicate that arrives before the failure is known, even
                 // while a child is being reaped, gets the same failure; after
                 // it, the id may be sent again.
-                let failure = self.sdk_failure(error).await;
+                let failure = error.into_remote();
                 publish.send_replace(Some(Err(failure.clone())));
                 lock(&live.turns.steers).remove(&params.client_message_id);
                 return Err(failure);
@@ -633,7 +620,7 @@ impl Supervisor {
         }
         match live.session.cancel(CancelReason::Requested).await {
             Ok(()) => Ok(AckResult::OK),
-            Err(error) => Err(self.sdk_failure(error).await),
+            Err(error) => Err(error.into_remote()),
         }
     }
 }
@@ -656,8 +643,7 @@ impl Relay {
     }
 
     /// Shows the catalog when it differs from what this turn last showed.
-    fn commands(&mut self, commands: &[mango_external_agents::Command]) {
-        let commands = map_events::commands(commands);
+    fn commands(&mut self, commands: Vec<super::wire::Command>) {
         if self.failed || self.shown_commands.as_ref() == Some(&commands) {
             return;
         }
@@ -666,19 +652,18 @@ impl Relay {
         self.publish(at, Event::CommandsAvailable { commands });
     }
 
-    async fn event(&mut self, event: &mango_external_agents::AgentEvent) {
+    async fn event(&mut self, event: TurnEvent) {
         // The SDK ends a silent turn, or one whose approval lapsed, as a
         // timeout cancellation. A bare `cancelled` reads to the hub as the
         // agent stopping on its own, so the turn ends with the runtime's own
         // error, as the TypeScript supervisor's idle deadline did, and the
         // `completed` behind it is dropped. Every other reason stays a cancel.
-        if let mango_external_agents::EventKind::Cancelled {
-            reason: CancelReason::Timeout,
-        } = &event.kind
-        {
+        if event.idle_timeout {
             if !self.failed {
                 self.failed = true;
-                let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_millis(SystemTime::now()));
+                let at = event
+                    .at_ms
+                    .unwrap_or_else(|| epoch_millis(SystemTime::now()));
                 self.error(
                     at,
                     "adapter-stream",
@@ -688,7 +673,7 @@ impl Relay {
             return;
         }
         let live = Arc::clone(&self.live);
-        let mapped = map_events::map_event(live.target, event);
+        let mapped = event.mapped;
         if let Some(pending) = mapped.opened {
             lock(&live.turns.interactions).insert(pending.request_id().to_owned(), pending);
         }
@@ -698,13 +683,15 @@ impl Relay {
             .closed
             .as_ref()
             .is_some_and(|request_id| lock(&live.turns.interactions).remove(request_id).is_none());
-        let at = map::epoch_ms(event.at).unwrap_or_else(|| epoch_millis(SystemTime::now()));
+        let at = event
+            .at_ms
+            .unwrap_or_else(|| epoch_millis(SystemTime::now()));
         if let Some((response, reason)) = mapped.unrenderable {
             // A form the product cannot show is declined by name, so the
             // vendor is not left waiting on nobody. A required question cannot
             // be declined; that turn fails explicitly rather than hanging
             // until the question expires.
-            if live.session.answer(response).await.is_err() && !self.failed {
+            if live.session.respond(response).await.is_err() && !self.failed {
                 self.fail(
                     at,
                     "unsupported-question",
@@ -808,18 +795,11 @@ fn release_turn(live: &LiveSession, client_message_id: &str) {
 /// ```ignore
 /// let native = bounded_native_turn_id(&stream)?;
 /// ```
-fn bounded_native_turn_id(stream: &TurnStream) -> Result<String, RemoteError> {
-    const FIELD: &str = "native turn id";
-    let native = stream.native_turn_id();
-    let refused = match normalize::opaque_id(native, FIELD) {
-        Ok(bounded) if bounded == native => return Ok(bounded),
-        Ok(received) => SdkError::InvalidVendorValue {
-            field: FIELD,
-            received,
-        },
-        Err(error) => error,
-    };
-    Err(map::remote_error(&refused.with_dispatch(stream.dispatch())))
+fn bounded_native_turn_id(stream: &mut TurnStream) -> Result<String, RemoteError> {
+    stream
+        .native_id
+        .take()
+        .expect("a started stream's admission is checked once")
 }
 
 /// A started review's handle, when the review also runs on the vendor thread
@@ -827,25 +807,15 @@ fn bounded_native_turn_id(stream: &TurnStream) -> Result<String, RemoteError> {
 /// thread would stream nothing this session hears and stall until the SDK's
 /// idle bound, so it is refused instead. Like a refused handle, the refusal
 /// carries the stream's dispatch: the vendor may already be running it.
-fn admissible_review(live: &LiveSession, review: &ReviewStream) -> Result<String, RemoteError> {
-    if review.review_thread_id != live.session.ids().native_session_id {
+fn admissible_review(live: &LiveSession, review: &mut ReviewStream) -> Result<String, RemoteError> {
+    if review.review_thread_id != live.session.native_session_id() {
         return Err(tool_argument(format!(
             "External-agent review on session {:?} ran on another vendor thread than the session's; expected a review on the session's own thread.",
             live.session_id
         ))
-        .with_detail("dispatch", map::dispatch_name(review.turn.dispatch())));
+        .with_detail("dispatch", review.turn.dispatch.name()));
     }
-    bounded_native_turn_id(&review.turn)
-}
-
-/// Whether the SDK refused because the session can run no more work:
-/// `Cancelled` or `Closed`, directly or inside its `Operation` wrapper.
-fn is_spent_session(error: &SdkError) -> bool {
-    match error {
-        SdkError::Cancelled { .. } | SdkError::Closed { .. } => true,
-        SdkError::Operation { source, .. } => is_spent_session(source),
-        _ => false,
-    }
+    bounded_native_turn_id(&mut review.turn)
 }
 
 /// A turn refused because the session is still running one, typically a
@@ -853,9 +823,16 @@ fn is_spent_session(error: &SdkError) -> bool {
 /// vendor, and the refusal is transient, so the hub retries it rather than
 /// reading it as a lost session.
 fn busy(session_id: &str) -> RemoteError {
-    map::busy_not_submitted(format!(
+    busy_not_submitted(format!(
         "External-agent session {session_id:?} already has an active turn; expected an idle session."
     ))
+}
+
+fn busy_not_submitted(message: String) -> RemoteError {
+    RemoteError::new(codes::INTERNAL, message)
+        .with_detail("kind", "external_agent_busy")
+        .with_detail("retryable", true)
+        .with_detail("dispatch", "not-submitted")
 }
 
 enum Admitted {
@@ -961,7 +938,7 @@ fn fingerprint(params: &impl serde::Serialize) -> [u8; 32] {
     Sha256::digest(&bytes).into()
 }
 
-fn sdk_attachments(attachments: &[Attachment]) -> Result<Vec<SdkAttachment>, RemoteError> {
+fn decoded_attachments(attachments: &[Attachment]) -> Result<Vec<OwnedAttachment>, RemoteError> {
     attachments
         .iter()
         .map(|attachment| {
@@ -973,17 +950,11 @@ fn sdk_attachments(attachments: &[Attachment]) -> Result<Vec<SdkAttachment>, Rem
                         attachment.id
                     ))
                 })?;
-            Ok(SdkAttachment {
+            Ok(OwnedAttachment {
                 id: attachment.id.clone(),
                 name: attachment.original_name.clone(),
                 mime_type: attachment.mime_type.clone(),
-                kind: match attachment.kind {
-                    AttachmentKind::Image => SdkAttachmentKind::Image,
-                    AttachmentKind::Text => SdkAttachmentKind::Text,
-                    AttachmentKind::Pdf => SdkAttachmentKind::Pdf,
-                    AttachmentKind::Data => SdkAttachmentKind::Data,
-                    AttachmentKind::Unknown => SdkAttachmentKind::Unknown,
-                },
+                kind: attachment.kind,
                 bytes,
             })
         })
