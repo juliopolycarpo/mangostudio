@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import type { ExternalAgentEvent } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentEvent,
+  ExternalTurnTerminalReason,
+} from '@mangostudio/shared/external-agents';
 import type { ExternalActivityPart, ExternalApprovalPart } from '@mangostudio/shared/types';
 import { ExternalTurnTranscript } from '../../../../src/modules/external-agents/domain/external-turn-transcript';
 
@@ -35,6 +38,20 @@ const APPROVAL: Extract<ExternalAgentEvent, { type: 'approval_requested' }> = {
     expiresAtMs: 9_999,
   },
 };
+
+const TERMINAL_ACTIVITY_STATUSES = {
+  completed: 'completed',
+  'cancelled-by-user': 'cancelled',
+  interrupted: 'cancelled',
+  'vendor-error': 'failed',
+  'runtime-disconnected': 'failed',
+  'hub-restarted': 'failed',
+  'sequence-gap': 'failed',
+  'limit-exceeded': 'failed',
+  'consent-revoked': 'cancelled',
+  'session-lost': 'failed',
+  'acceptance-unknown': 'failed',
+} satisfies Record<ExternalTurnTerminalReason, ExternalActivityPart['status']>;
 
 describe('ExternalTurnTranscript', () => {
   it('opens with the turn record so a transcript always names its owner', () => {
@@ -161,6 +178,157 @@ describe('ExternalTurnTranscript', () => {
     expect(target.parts.some((part) => part.type === 'tool_result')).toBe(false);
   });
 
+  it.each(Object.entries(TERMINAL_ACTIVITY_STATUSES))(
+    'settles all open activities and reasoning on %s when close events are omitted',
+    (reason, status) => {
+      const target = transcript();
+      feed(target, [
+        { type: 'reasoning_started' },
+        { type: 'reasoning_delta', text: 'before the work' },
+        {
+          type: 'activity_started',
+          callId: 'call-1',
+          activity: { name: 'shell', kind: 'command', title: 'ls', detail: 'listing' },
+        },
+        {
+          type: 'activity_started',
+          callId: 'call-2',
+          activity: { name: 'read', kind: 'other', title: 'README.md', truncated: true },
+        },
+        { type: 'reasoning_started' },
+        { type: 'reasoning_delta', text: 'after the work' },
+      ]);
+      target.finalize(reason as ExternalTurnTerminalReason, 5_000);
+
+      // The writer persists this exact JSON projection, including part order.
+      const persisted = JSON.parse(JSON.stringify(target.parts));
+      expect(persisted.map((part: { type: string }) => part.type)).toEqual([
+        'external_turn',
+        'thinking',
+        'external_activity',
+        'external_activity',
+        'thinking',
+      ]);
+      expect(persisted[0]).toMatchObject({
+        status: 'terminal',
+        terminalReason: reason,
+        updatedAt: 5_000,
+        lastSequence: 6,
+        eventCount: 6,
+      });
+      expect(persisted[1]).toEqual({ type: 'thinking', text: 'before the work' });
+      expect(persisted[2]).toMatchObject({ callId: 'call-1', detail: 'listing', status });
+      expect(persisted[3]).toMatchObject({ callId: 'call-2', truncated: true, status });
+      expect(persisted[2].isError).toBe(status === 'failed' ? true : undefined);
+      expect(persisted[3].isError).toBe(status === 'failed' ? true : undefined);
+      expect(persisted[4]).toEqual({
+        type: 'thinking',
+        text: 'after the work',
+        ...(reason === 'completed' ? {} : { incomplete: true }),
+      });
+      expect(target.terminated).toBe(true);
+
+      const snapshot = JSON.stringify(target.parts);
+      target.finalize('completed', 6_000);
+      target.finalize('vendor-error', 7_000);
+      expect(JSON.stringify(target.parts)).toBe(snapshot);
+    }
+  );
+
+  it.each(['completed', 'cancelled', 'error'] as const)(
+    'settles an omitted activity close when the vendor sends %s',
+    (terminalType) => {
+      const target = transcript();
+      const terminalEvents: ExternalAgentEvent[] =
+        terminalType === 'error'
+          ? [{ type: 'error', error: { code: 'adapter-stream', message: 'vendor failed' } }]
+          : terminalType === 'cancelled'
+            ? [{ type: 'cancelled' }, { type: 'completed' }]
+            : [{ type: 'completed' }];
+      const applications = feed(target, [
+        {
+          type: 'activity_started',
+          callId: 'call-1',
+          activity: { name: 'shell', kind: 'command', title: 'ls' },
+        },
+        { type: 'reasoning_started' },
+        ...terminalEvents,
+      ]);
+      const reason =
+        terminalType === 'error'
+          ? 'vendor-error'
+          : terminalType === 'cancelled'
+            ? 'interrupted'
+            : 'completed';
+
+      expect(applications.at(-1)).toEqual({ durable: true, terminal: reason });
+      expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'external_activity']);
+      expect(target.parts[1]).toMatchObject({ status: TERMINAL_ACTIVITY_STATUSES[reason] });
+      expect(target.turnPart.terminalReason).toBe(reason);
+
+      const snapshot = JSON.stringify(target.parts);
+      const lateCloses = feed(
+        target,
+        [
+          {
+            type: 'activity_completed',
+            callId: 'call-1',
+            result: { status: 'completed', detail: 'late success' },
+          },
+          { type: 'reasoning_ended' },
+        ],
+        applications.length + 1
+      );
+      expect(lateCloses).toEqual([{ durable: false }, { durable: false }]);
+      expect(JSON.stringify(target.parts)).toBe(snapshot);
+    }
+  );
+
+  it.each(['completed', 'failed', 'cancelled'] as const)(
+    'preserves an explicit %s result through terminal settlement and ignores late closes',
+    (status) => {
+      const target = transcript();
+      feed(target, [
+        { type: 'reasoning_started' },
+        { type: 'reasoning_delta', text: 'a finished thought' },
+        { type: 'reasoning_ended' },
+        {
+          type: 'activity_started',
+          callId: 'call-1',
+          activity: { name: 'shell', kind: 'command', title: 'ls' },
+        },
+        {
+          type: 'activity_completed',
+          callId: 'call-1',
+          result: { status, detail: 'explicit result', truncated: true },
+        },
+      ]);
+      const explicitResult = JSON.stringify(target.parts[2]);
+      target.finalize('cancelled-by-user', 5_000);
+      expect(JSON.stringify(target.parts[2])).toBe(explicitResult);
+
+      const snapshot = JSON.stringify(target.parts);
+      const applications = feed(
+        target,
+        [
+          {
+            type: 'activity_completed',
+            callId: 'call-1',
+            result: { status: 'completed', detail: 'late result' },
+          },
+          { type: 'reasoning_started' },
+          { type: 'reasoning_delta', text: 'late thought' },
+          { type: 'completed' },
+          { type: 'error', error: { code: 'adapter-stream', message: 'late failure' } },
+        ],
+        6
+      );
+
+      expect(applications).toEqual(Array.from({ length: 5 }, () => ({ durable: false })));
+      expect(JSON.stringify(target.parts)).toBe(snapshot);
+    }
+  );
+
   it('keeps the vendor option set untouched and reports the request to its caller', () => {
     const target = transcript();
     const [application] = feed(target, [APPROVAL]);
@@ -281,7 +449,7 @@ describe('ExternalTurnTranscript', () => {
   });
 
   it('terminates on the byte budget', () => {
-    const target = transcript({ maxBytes: 40 });
+    const target = transcript({ maxBytes: 80 });
     const applications = feed(target, [
       { type: 'text_delta', text: 'x'.repeat(30) },
       { type: 'text_delta', text: 'y'.repeat(30) },
