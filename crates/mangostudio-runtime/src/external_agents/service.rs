@@ -14,13 +14,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use mango_external_agents::Limits;
-
 use super::hub_authority::{HUB_AUTHORIZE_TIMEOUT, HubWorkspaceAuthority};
-use super::launcher::GuardedProcessLauncher;
 use super::supervisor::{
     CLEANUP_TIMEOUT, CONSENT_POLL, CloseCause, DEFAULT_SESSION_CAP, ExecutableResolver,
-    HARD_TURN_TIMEOUT, PortFuture, Ports, ProductHarnesses, Supervisor,
+    HARD_TURN_TIMEOUT, PortFuture, Ports, Supervisor,
 };
 use super::wire::TargetId;
 use crate::consent::read::CONSENT_READ_TIMEOUT;
@@ -164,22 +161,19 @@ pub(crate) fn production_supervisor(
     consent: ConsentSource,
 ) -> Arc<Supervisor> {
     let consent = Arc::new(consent);
-    let limits = Limits::default();
-    let launcher = GuardedProcessLauncher::new(
+    let backend = super::adapter::production_backend(
         Arc::new(FreshExternalAgentLaunch(Arc::clone(&consent))),
-        &limits,
+        CLEANUP_TIMEOUT,
     );
     let read = Arc::clone(&consent);
     Supervisor::new(Ports {
-        launcher: Arc::new(launcher),
-        harnesses: Arc::new(ProductHarnesses),
+        harnesses: backend,
         workspaces: Arc::new(HubWorkspaceAuthority::new(HUB_AUTHORIZE_TIMEOUT)),
         executables: Arc::new(ProbedExecutables),
         environment: Arc::new(|| crate::probing::host::build_runtime_path_env(None)),
         consent: Arc::new(move || read.refresh().external_agents),
         private_root: slot_dir(slot, mango_home).join("external-agents"),
         runtime_version: runtime_version.to_owned(),
-        limits,
         account_key: Arc::new(super::isolation::detect_account_fingerprint_key),
         session_cap: DEFAULT_SESSION_CAP,
         consent_poll: CONSENT_POLL,

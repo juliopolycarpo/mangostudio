@@ -388,8 +388,7 @@ mod unix {
     /// this process sees the ignored signal.
     #[test]
     fn interrupt_reaches_a_child_when_the_runtime_ignores_sigint() {
-        let inner =
-            "external_agents::launcher::tests::unix::interrupt_delivers_sigint_to_a_running_child";
+        let inner = "external_agents::adapter::launcher::tests::unix::interrupt_delivers_sigint_to_a_running_child";
         let output = std::process::Command::new("/bin/sh")
             .args(["-c", "trap '' INT; exec \"$0\" --exact \"$1\" --nocapture"])
             .arg(std::env::current_exe().expect("the test binary path exists"))

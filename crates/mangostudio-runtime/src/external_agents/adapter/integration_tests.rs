@@ -20,9 +20,9 @@ use serde_json::json;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use super::{
-    AccountKeySource, CloseCause, ExecutableResolver, HarnessFactory, PortFuture, Ports,
-    Supervisor, TargetDiscovery, WorkspaceAuthority,
+use crate::external_agents::supervisor::{
+    AccountKeySource, CloseCause, ExecutableResolver, PortFuture, Ports, Supervisor,
+    WorkspaceAuthority,
 };
 use crate::external_agents::wire::{
     ApprovalRouting, CloseParams, Configuration, DiscoverParams, ListSessionsParams, OpenParams,
@@ -39,6 +39,7 @@ use crate::test_support::ScratchDir;
 #[derive(Default)]
 struct HarnessLog {
     opens: AtomicUsize,
+    command_state: Mutex<Option<SessionState>>,
     closes: Mutex<Vec<CloseReason>>,
     probes: AtomicUsize,
     listings: AtomicUsize,
@@ -195,6 +196,7 @@ impl Harness for CountingHarness {
             }
         }
         let inner = self.inner.open_session(host, request).await?;
+        *self.log.command_state.lock().unwrap() = Some(inner.state().clone());
         if let OpenBehaviour::Scripted(script) = &self.open {
             return Ok(Box::new(ScriptedSession {
                 inner,
@@ -552,7 +554,7 @@ struct CountingHarnesses {
     codex_email: Option<&'static str>,
 }
 
-impl HarnessFactory for CountingHarnesses {
+impl crate::external_agents::adapter::SdkHarnessFactory for CountingHarnesses {
     fn harness(&self, target: TargetId, _executable: Option<PathBuf>) -> Arc<dyn Harness> {
         let probe = self
             .probes
@@ -576,7 +578,10 @@ impl HarnessFactory for CountingHarnesses {
         executable: Option<PathBuf>,
         host: &'a HostContext,
         key: Option<&'a AccountFingerprintKey>,
-    ) -> PortFuture<'a, mango_external_agents::Result<TargetDiscovery>> {
+    ) -> PortFuture<
+        'a,
+        mango_external_agents::Result<crate::external_agents::adapter::TargetDiscovery>,
+    > {
         let harness = self.harness(target, executable);
         Box::pin(async move {
             let discovery = harness.discover(host).await?;
@@ -587,7 +592,7 @@ impl HarnessFactory for CountingHarnesses {
                 ),
                 _ => None,
             };
-            Ok(TargetDiscovery { discovery, account })
+            Ok(crate::external_agents::adapter::TargetDiscovery { discovery, account })
         })
     }
 }
@@ -741,10 +746,10 @@ impl Default for RigOptions {
             probes: Vec::new(),
             authorize_workspace: true,
             installed: true,
-            session_cap: super::DEFAULT_SESSION_CAP,
+            session_cap: crate::external_agents::supervisor::DEFAULT_SESSION_CAP,
             authority_gate: None,
             fake: FakeHarness::new(),
-            hard_turn_timeout: super::HARD_TURN_TIMEOUT,
+            hard_turn_timeout: crate::external_agents::supervisor::HARD_TURN_TIMEOUT,
             environment: PathEnv::default(),
             lists_sessions: true,
             account_key: Arc::new(|| None),
@@ -800,22 +805,25 @@ async fn rig(options: RigOptions) -> Rig {
         }
     };
     let supervisor = Supervisor::new(Ports {
-        launcher: Arc::new(FakeLauncher::new()),
-        harnesses: Arc::new(CountingHarnesses {
-            log: Arc::clone(&log),
-            fake: options.fake,
-            open: options.open,
-            probes: Mutex::new(options.probes),
-            lists_sessions: options.lists_sessions,
-            codex_email: options.codex_email,
-        }),
+        harnesses: Arc::new(crate::external_agents::adapter::Backend::new(
+            Arc::new(FakeLauncher::new()),
+            Arc::new(CountingHarnesses {
+                log: Arc::clone(&log),
+                fake: options.fake,
+                open: options.open,
+                probes: Mutex::new(options.probes),
+                lists_sessions: options.lists_sessions,
+                codex_email: options.codex_email,
+            }),
+            Limits::default(),
+            Duration::from_secs(2),
+        )),
         workspaces: Arc::clone(&workspaces) as Arc<dyn WorkspaceAuthority>,
         executables: Arc::clone(&executables) as Arc<dyn ExecutableResolver>,
         environment: Arc::new(environment),
         consent: Arc::new(move || consent_read.read()),
         private_root: private_root.clone(),
         runtime_version: String::from("0.0.0-test"),
-        limits: Limits::default(),
         account_key: options.account_key,
         session_cap: options.session_cap,
         consent_poll: Duration::from_millis(10),
@@ -1311,31 +1319,50 @@ async fn an_open_that_finishes_after_a_close_was_requested_is_closed_not_registe
     assert_eq!(rig.live_count(), 0);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn an_open_bounded_by_its_deadline_tells_the_vendor_to_stop() {
     let rig = rig(RigOptions {
         open: OpenBehaviour::Stall,
         ..RigOptions::default()
     })
     .await;
-    let mut params = rig.open_params("one");
-    // Long enough that the vendor is reached well before it fires.
-    params.timeout_ms = 500;
-    let error = rig
+    let params = rig.open_params("one");
+    let host_cancel = CancellationToken::new();
+    // Prepare host facts before the deadline so the proof does not depend on
+    // the shared blocking pool reaching filesystem authorization first.
+    let host = rig
         .supervisor
-        .open(params, &rig.hub, &CancellationToken::new())
+        .host_context(Path::new(&rig.workspace), None, None, &host_cancel);
+    let work = async {
+        rig.supervisor
+            .ports
+            .harnesses
+            .open(
+                params.target_id,
+                PathBuf::from("/fake/bin/claude"),
+                host,
+                &params,
+            )
+            .await
+            .map_err(|failure| failure.into_remote())
+    };
+    let interrupted = rig
+        .supervisor
+        .bounded(
+            work,
+            Duration::from_millis(500),
+            &CancellationToken::new(),
+            &host_cancel,
+            || String::from("The stalled vendor open timed out."),
+        )
         .await
-        .expect_err("a stalled open must time out");
-    assert_eq!(error.code, codes::TIMEOUT, "received: {error:?}");
-    eventually(
-        "the stalled open to observe the host cancellation",
-        || rig.log.saw_host_cancel.load(Ordering::SeqCst),
-        |seen| *seen,
-    )
-    .await;
+        .err()
+        .expect("a stalled open must time out");
+    assert_eq!(interrupted.error.code, codes::TIMEOUT);
+    assert_eq!(rig.log.opens(), 1, "expected the vendor open reached");
     assert!(
-        rig.supervisor.slots().is_empty(),
-        "expected the timed-out slot released"
+        rig.log.saw_host_cancel.load(Ordering::SeqCst),
+        "expected the stalled open to observe host cancellation"
     );
 }
 
@@ -1581,7 +1608,7 @@ async fn discovered_accounts(options: RigOptions) -> (serde_json::Value, serde_j
 async fn codex_discovery_sends_the_fingerprint_the_typescript_adapter_stored() {
     let (codex, claude) = discovered_accounts(RigOptions {
         account_key: Arc::new(|| {
-            crate::external_agents::isolation::account_fingerprint_key("host-local-key")
+            crate::external_agents::isolation::account_fingerprint_key("host-local-key".into())
         }),
         codex_email: Some("user@example.com"),
         ..RigOptions::default()
@@ -1603,7 +1630,8 @@ async fn codex_discovery_sends_the_fingerprint_the_typescript_adapter_stored() {
 
 #[tokio::test]
 async fn a_host_key_that_becomes_readable_is_used_by_the_next_discovery() {
-    let key: Arc<Mutex<Option<AccountFingerprintKey>>> = Arc::new(Mutex::new(None));
+    let key: Arc<Mutex<Option<crate::external_agents::port::AccountKey>>> =
+        Arc::new(Mutex::new(None));
     let reads = Arc::new(AtomicUsize::new(0));
     let source: AccountKeySource = {
         let (key, reads) = (Arc::clone(&key), Arc::clone(&reads));
@@ -1636,7 +1664,7 @@ async fn a_host_key_that_becomes_readable_is_used_by_the_next_discovery() {
         "expected no fingerprint without a key"
     );
     *key.lock().unwrap() =
-        crate::external_agents::isolation::account_fingerprint_key("host-local-key");
+        crate::external_agents::isolation::account_fingerprint_key("host-local-key".into());
     let after = rig.supervisor.discover(params(), &cancel).await.unwrap();
     assert_eq!(
         fingerprint(&after).as_deref(),
@@ -3582,9 +3610,11 @@ async fn a_mid_stream_adapter_crash_ends_the_turn_with_its_error_and_frees_the_s
 #[tokio::test]
 async fn a_long_streaming_command_stays_inside_the_persisted_budget() {
     use mango_agent_codex::turn_reducer::ACTIVITY_UPDATE_INTERVAL;
-    let updates =
-        usize::try_from(super::HARD_TURN_TIMEOUT.as_secs() / ACTIVITY_UPDATE_INTERVAL.as_secs())
-            .expect("a small count");
+    let updates = usize::try_from(
+        crate::external_agents::supervisor::HARD_TURN_TIMEOUT.as_secs()
+            / ACTIVITY_UPDATE_INTERVAL.as_secs(),
+    )
+    .expect("a small count");
     let rig = rig(RigOptions {
         open: OpenBehaviour::Scripted(Script::StreamingCommand { updates }),
         ..RigOptions::default()
@@ -4065,7 +4095,7 @@ async fn an_unstructured_steer_failure_is_returned_as_its_mapped_error() {
         })
         .await
         .expect_err("a steer lost in transit must fail, not be answered");
-    let expected = crate::external_agents::map::remote_error(&SdkError::Link {
+    let expected = crate::external_agents::adapter::sdk_remote_error(&SdkError::Link {
         peer: String::from("fake-agent"),
         message: String::from("steer lost in transit"),
     });
@@ -4154,11 +4184,17 @@ async fn the_command_catalog_is_replayed_each_turn_and_a_mid_turn_change_is_forw
             "expected the catalog under this turn's handle"
         );
         if index == 1 {
-            let live = rig.supervisor.require_live("one").unwrap();
-            live.session.state().set_commands(vec![
-                mango_external_agents::Command::new("review").with_description("Reviews the diff"),
-                mango_external_agents::Command::new("plan"),
-            ]);
+            rig.log
+                .command_state
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .set_commands(vec![
+                    mango_external_agents::Command::new("review")
+                        .with_description("Reviews the diff"),
+                    mango_external_agents::Command::new("plan"),
+                ]);
             let changed = rig.events_until("commands_available").await;
             assert_eq!(
                 changed.last().unwrap()["event"]["commands"],

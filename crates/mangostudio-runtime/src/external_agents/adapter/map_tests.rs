@@ -1379,7 +1379,9 @@ fn reset_credit_rows_drop_what_the_wire_refuses_and_cap_at_sixty_four() {
 /// What `CodexHarness::discover_with_account` reports for a ChatGPT sign-in
 /// under the runtime's key built from `digest_key`.
 fn codex_account(digest_key: &str, email: &str) -> CodexAccount {
-    let key = super::super::isolation::account_fingerprint_key(digest_key).expect("a key");
+    let key = crate::external_agents::isolation::account_fingerprint_key(digest_key.into())
+        .expect("a key");
+    let key = AccountFingerprintKey::new(key.bytes()).unwrap();
     CodexAccount::from_account_read(
         &json!({ "account": { "type": "chatgpt", "email": email, "planType": "plus" } }),
         &key,

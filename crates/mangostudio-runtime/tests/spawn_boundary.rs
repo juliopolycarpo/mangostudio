@@ -31,7 +31,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
         "the bounded spawn takes its flags from the request; the ConPTY spawn must not hide",
     ),
     (
-        "external_agents/launcher.rs",
+        "external_agents/adapter/launcher.rs",
         "hide_window =",
         1,
         "copies the vendor launch spec's own window policy",

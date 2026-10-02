@@ -36,11 +36,11 @@
 
 use mango_external_agents as sdk;
 use mango_external_agents::normalize::{self, APPROVAL_MAX_OPTIONS, BoundedText, TextLimit};
+#[cfg(test)]
 use mango_protocol::error::RemoteError;
 
+use super::super::wire::{self, TargetId};
 use super::map::{self, epoch_ms};
-use super::wire::{self, TargetId};
-use crate::tool_argument::tool_argument;
 
 /// The `optionId` an `approval_resolved` carries for a question that ended
 /// without a choice: expired, cancelled, refused or declined.
@@ -81,46 +81,7 @@ mod unrenderable {
 }
 
 /// What the supervisor needs to route a later answer to the right SDK call.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PendingInteraction {
-    /// A permission request. Answering it grants or refuses authority.
-    Approval {
-        /// The interaction id, which is also the wire's `requestId`.
-        request_id: String,
-        /// Every option id the card offered, unchanged.
-        option_ids: Vec<String>,
-        /// When the SDK stops accepting an answer.
-        expires_at_ms: u64,
-    },
-    /// A single-choice question shown as an approval card: option id -> the question's choice id.
-    Question {
-        /// The interaction id, which is also the wire's `requestId`.
-        request_id: String,
-        /// The one question the round asked.
-        question_id: String,
-        /// `(card option id, question choice id)`, in the vendor's order.
-        choices: Vec<(String, String)>,
-        /// When the SDK stops accepting an answer.
-        expires_at_ms: u64,
-    },
-}
-
-impl PendingInteraction {
-    /// The interaction id either variant was opened under: the wire's
-    /// `requestId`, and the key a hub `respond` names.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let pending = map_event(TargetId::Codex, &event).opened.expect("an approval");
-    /// interactions.insert(pending.request_id().to_owned(), pending);
-    /// ```
-    pub(crate) fn request_id(&self) -> &str {
-        match self {
-            Self::Approval { request_id, .. } | Self::Question { request_id, .. } => request_id,
-        }
-    }
-}
+use super::super::interactions::PendingInteraction;
 
 /// What one SDK event means to the supervisor.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -136,7 +97,7 @@ pub(crate) struct MappedEvent {
     /// and the hub never saw a card for it.
     pub closed: Option<String>,
     /// A question the product cannot render. The supervisor must answer it Declined, and the reason is logged.
-    pub unrenderable: Option<(sdk::QuestionResponse, &'static str)>,
+    pub unrenderable: Option<(super::super::interactions::Answer, &'static str)>,
 }
 
 impl MappedEvent {
@@ -149,6 +110,7 @@ impl MappedEvent {
 }
 
 /// The SDK answer for one hub `respond`.
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Answer {
     /// Goes to `Session::respond`: a permission decision.
@@ -246,54 +208,14 @@ pub(crate) fn map_event(target: TargetId, event: &sdk::AgentEvent) -> MappedEven
 ///     Answer::Question(response) => session.answer(response).await?,
 /// }
 /// ```
+#[cfg(test)]
 pub(crate) fn answer(pending: &PendingInteraction, option_id: &str) -> Result<Answer, RemoteError> {
-    match pending {
-        PendingInteraction::Approval {
-            request_id,
-            option_ids,
-            ..
-        } => {
-            if !option_ids.iter().any(|offered| offered == option_id) {
-                return Err(unknown_option(option_id, option_ids.iter()));
-            }
-            Ok(Answer::Permission(sdk::PermissionResponse::from_user(
-                sdk::InteractionId::new(request_id),
-                option_id,
-            )))
-        }
-        PendingInteraction::Question {
-            request_id,
-            question_id,
-            choices,
-            ..
-        } => {
-            let Some((_, choice)) = choices.iter().find(|(offered, _)| offered == option_id) else {
-                return Err(unknown_option(
-                    option_id,
-                    choices.iter().map(|(offered, _)| offered),
-                ));
-            };
-            Ok(Answer::Question(sdk::QuestionResponse::new(
-                sdk::InteractionId::new(request_id),
-                vec![sdk::Answer::new(
-                    sdk::QuestionId::new(question_id),
-                    sdk::AnswerValue::chosen(sdk::QuestionOptionId::new(choice)),
-                )],
-            )))
-        }
-    }
+    let answer = super::super::interactions::answer(pending, option_id)?;
+    Ok(match super::session::sdk_answer(answer) {
+        super::session::SdkAnswer::Permission(response) => Answer::Permission(response),
+        super::session::SdkAnswer::Question(response) => Answer::Question(response),
+    })
 }
-
-fn unknown_option<'a>(received: &str, offered: impl Iterator<Item = &'a String>) -> RemoteError {
-    let offered: Vec<&str> = offered.map(String::as_str).collect();
-    tool_argument(format!(
-        "optionId \"{received}\" is not an option this request offered; expected one of {offered:?}."
-    ))
-}
-
-// ---------------------------------------------------------------------------
-// Activities
-// ---------------------------------------------------------------------------
 
 fn activity_started(call_id: &str, activity: &sdk::Activity) -> wire::Event {
     let kind = activity_kind(activity.kind);
@@ -676,15 +598,15 @@ fn renderable(
 }
 
 /// Declines every question in the round, one answer each.
-fn declined(request: &sdk::QuestionRequest) -> sdk::QuestionResponse {
-    sdk::QuestionResponse::new(
-        request.interaction.id.clone(),
-        request
+fn declined(request: &sdk::QuestionRequest) -> super::super::interactions::Answer {
+    super::super::interactions::Answer::DeclineQuestions {
+        request_id: request.interaction.id.as_str().to_owned(),
+        question_ids: request
             .questions
             .iter()
-            .map(|question| sdk::Answer::new(question.id.clone(), sdk::AnswerValue::Declined))
+            .map(|question| question.id.as_str().to_owned())
             .collect(),
-    )
+    }
 }
 
 /// The card's title and detail, as `userInputApproval` built them: a short
