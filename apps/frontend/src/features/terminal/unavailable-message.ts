@@ -19,6 +19,8 @@ export function unavailableMessage(t: Messages, reason: TerminalRefusalReason): 
       return t.terminal.unavailable.notIsolated;
     case 'unavailable':
       return t.terminal.unavailable.unavailable;
+    case 'runtime-unavailable':
+      return t.terminal.unavailable.runtimeUnavailable;
     case 'runtime-update-required':
       return t.terminal.unavailable.runtimeUpdateRequired;
     case 'disconnected':

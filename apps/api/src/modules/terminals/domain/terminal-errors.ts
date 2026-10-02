@@ -38,7 +38,7 @@ export class TerminalUnavailableError extends Error {
   constructor(
     readonly reason: Extract<
       TerminalRefusalReason,
-      'disconnected' | 'unavailable' | 'runtime-update-required'
+      'disconnected' | 'unavailable' | 'runtime-unavailable' | 'runtime-update-required'
     >,
     message: string
   ) {

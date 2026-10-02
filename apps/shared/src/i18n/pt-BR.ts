@@ -2059,6 +2059,7 @@ export const messages = {
         'Este ambiente não pode abrir um terminal. Ele precisa de um shell e da permissão de shell.',
       runtimeUpdateRequired:
         'O runtime deste ambiente precisa de uma atualização antes que os terminais possam ser abertos com segurança.',
+      runtimeUnavailable: 'O runtime não conseguiu abrir o terminal. Tente novamente.',
       disconnected: 'O ambiente não está conectado.',
     },
     page: {

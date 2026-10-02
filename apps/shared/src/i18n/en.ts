@@ -2038,6 +2038,7 @@ export const messages: Messages = {
         'This environment cannot open a terminal. It needs a shell and the shell permission.',
       runtimeUpdateRequired:
         'This environment’s runtime needs an update before terminals can open safely.',
+      runtimeUnavailable: 'The runtime could not open the terminal. Try again.',
       disconnected: 'The environment is not connected.',
     },
     page: {

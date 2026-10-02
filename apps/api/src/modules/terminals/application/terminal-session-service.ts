@@ -27,6 +27,7 @@ import {
 import { getDb } from '../../../db/database';
 import { getConfig as getApiConfig, type MangoConfig } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { isRequestNotSent, noReplyOf } from '../../../services/runtime-client/request-not-sent';
 import {
   getRuntimeClient as getRuntimeClientDefault,
   getRuntimeConnectionManager,
@@ -538,12 +539,20 @@ export function createTerminalSessionService(
               `Environment "${body.environmentId}" no longer grants terminal access.`
             );
           }
+          const noReply = noReplyOf(error);
+          if (isRequestNotSent(error) || noReply?.reason === 'connection-closed') {
+            throw new TerminalUnavailableError(
+              'disconnected',
+              `Environment "${body.environmentId}" disconnected before the terminal open completed.`
+            );
+          }
           if (
             error instanceof ToolExecutionTimedOutError ||
+            noReply?.reason === 'deadline' ||
             (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE)
           ) {
             throw new TerminalUnavailableError(
-              'disconnected',
+              'runtime-unavailable',
               `Environment "${body.environmentId}" did not complete the terminal open.`
             );
           }
