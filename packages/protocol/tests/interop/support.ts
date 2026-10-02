@@ -15,6 +15,7 @@ import { CHUNK_HEADER_BYTES } from '../../src/codec/chunk';
 import { assertCatalog } from '../../src/schemas/catalog';
 import type { Session } from '../../src/session';
 import { rejectionOf } from '../../src/testing/rejection';
+import { peerExecutable } from './cargo-artifact';
 
 /** Off unless the runner asked for it; these tests need Cargo. */
 export const INTEROP_ENABLED = process.env.MANGO_INTEROP === '1';
@@ -54,6 +55,7 @@ async function build(): Promise<string> {
       'build',
       '--quiet',
       '--locked',
+      '--message-format=json-render-diagnostics',
       '--example',
       'conformance_peer',
       '--features',
@@ -61,10 +63,17 @@ async function build(): Promise<string> {
     ],
     { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' }
   );
-  const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-  if (code !== 0) throw new Error(`cargo build --example conformance_peer failed:\n${stderr}`);
-  const suffix = process.platform === 'win32' ? '.exe' : '';
-  return `${ROOT}/target/debug/examples/conformance_peer${suffix}`;
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (code !== 0) {
+    throw new Error(
+      `cargo build --example conformance_peer exited with ${code}; expected exit code 0:\n${stderr}`
+    );
+  }
+  return peerExecutable(stdout);
 }
 
 /** A peer process, and the address it announced. */
