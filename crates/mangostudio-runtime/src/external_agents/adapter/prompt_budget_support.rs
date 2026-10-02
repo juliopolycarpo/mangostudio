@@ -221,8 +221,9 @@ impl NonRetainingStdin {
         self.announcer
             .announce(json!({"jsonrpc":"2.0", "id":id, "result":result}).to_string());
     }
-    async fn prompt(&mut self, id: Value) {
-        if self.peer.hold_prompts {
+    async fn prompt(&mut self, id: Value, bytes: usize) {
+        // Keep only large writes in flight; a refused large call must still recover with a small turn.
+        if self.peer.hold_prompts && bytes > 64 * 1024 {
             self.peer.hold_prompts = false;
             self.pending_prompt = Some(id);
             self.frames.release.acquire().await.unwrap().forget();
@@ -268,7 +269,7 @@ impl ByteSink for NonRetainingStdin {
                 }}),
             ),
             "session/set_mode" => self.answer(header.id.unwrap(), json!({})),
-            "session/prompt" => self.prompt(header.id.unwrap()).await,
+            "session/prompt" => self.prompt(header.id.unwrap(), bytes.len()).await,
             "session/cancel" => {
                 if let Some(id) = self.pending_prompt.take() {
                     self.answer(id, json!({"stopReason":"cancelled"}));

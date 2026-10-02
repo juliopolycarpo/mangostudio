@@ -490,6 +490,28 @@ async fn prompt_budget_small_cancel_control_fits_beside_a_maximum_prompt() {
     rig.assert_closed();
 }
 
+#[tokio::test]
+async fn prompt_budget_small_recovery_bypasses_large_write_backpressure() {
+    let rig = Rig::new([Peer {
+        hold_prompts: true,
+        ..Peer::default()
+    }]);
+    let session = rig.open("small-recovery").await;
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        fixtures::complete(
+            fixtures::start(&*session, "next send".into(), Vec::new())
+                .await
+                .unwrap(),
+        )
+        .await;
+    })
+    .await
+    .expect("a small recovery turn bypasses large-frame backpressure");
+    assert_eq!(rig.launcher.fake.launches().len(), 1);
+    session.close(CloseCause::Requested).await.unwrap();
+    rig.assert_closed();
+}
+
 async fn concurrent_prompt_probe(sessions: usize, text: bool, require_acceptance: bool) {
     let limits = fixtures::product_limits();
     let rig = Rig::new((0..sessions).map(|_| Peer {
