@@ -127,7 +127,7 @@ export function MetricsSettingsPage() {
   );
   const now = Date.now();
   const labels = t.settings.metrics;
-  const generatedAtLabel = data?.generatedAt ? formatTimestamp(data.generatedAt) : '-';
+  const generatedAtLabel = data?.generatedAt ? formatTimestamp(data.generatedAt, locale) : '-';
   const cacheLabels: Record<ProviderCacheName, string> = {
     'sdk-client': labels.caches.sdkClient,
     'prepared-runtime': labels.caches.preparedRuntime,
