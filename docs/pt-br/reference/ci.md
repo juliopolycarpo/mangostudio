@@ -22,6 +22,17 @@ cada gate a partir do texto do workflow: todo job exceto o próprio gate e
 qualquer job que já dependa do gate. Adicionar uma lane obrigatória sem
 conectá-la ao gate falha o teste.
 
+## Dependências Rust resolvidas do zero
+
+O `rust-fresh-dependencies.yml` resolve um novo lockfile Cargo da raiz toda terça
+e em execuções manuais. Roda a política de dependências, build, clippy, testes do
+workspace e doctests com esse grafo. Os pins exatos do SDK continuam exatos. O
+lock resolvido fica como artefato do workflow e nunca é commitado. Esse workflow
+informativo não alimenta um gate obrigatório de PR. Falhas agendadas ou manuais
+atualizam uma única issue do bot, preservando notas dos mantenedores; a validação
+do workflow em PRs nunca escreve issues. O CI com lock e o Dependabot continuam
+independentes.
+
 ## Cobertura Rust
 
 A execução dos testes Rust no Ubuntu é o `.github/workflows/rust-coverage.yml`,

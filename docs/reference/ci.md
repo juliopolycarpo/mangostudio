@@ -22,6 +22,16 @@ Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
 that already depends on the gate. Adding a mandatory lane without wiring it into
 the gate fails the test.
 
+## Fresh Rust dependencies
+
+`rust-fresh-dependencies.yml` resolves a new root Cargo lockfile each Tuesday and
+on manual dispatch, then runs dependency policy, build, clippy, workspace tests
+and doctests against that graph. Exact SDK pins remain exact. The resolved lock
+is retained as a workflow artifact and never committed. This advisory workflow
+does not feed a required PR gate. Failed scheduled or manual runs update one
+bot-owned compatibility issue, preserving maintainer notes; PR validation of the
+workflow never writes issues. Locked CI and Dependabot continue independently.
+
 ## Rust coverage
 
 The Ubuntu Rust test run is `.github/workflows/rust-coverage.yml`, called from
