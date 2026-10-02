@@ -1608,7 +1608,7 @@ async fn discovered_accounts(options: RigOptions) -> (serde_json::Value, serde_j
 async fn codex_discovery_sends_the_fingerprint_the_typescript_adapter_stored() {
     let (codex, claude) = discovered_accounts(RigOptions {
         account_key: Arc::new(|| {
-            crate::external_agents::isolation::account_fingerprint_key("host-local-key")
+            crate::external_agents::isolation::account_fingerprint_key("host-local-key".into())
         }),
         codex_email: Some("user@example.com"),
         ..RigOptions::default()
@@ -1664,7 +1664,7 @@ async fn a_host_key_that_becomes_readable_is_used_by_the_next_discovery() {
         "expected no fingerprint without a key"
     );
     *key.lock().unwrap() =
-        crate::external_agents::isolation::account_fingerprint_key("host-local-key");
+        crate::external_agents::isolation::account_fingerprint_key("host-local-key".into());
     let after = rig.supervisor.discover(params(), &cancel).await.unwrap();
     assert_eq!(
         fingerprint(&after).as_deref(),

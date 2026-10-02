@@ -200,20 +200,21 @@ pub(crate) fn host_local_digest_key(home: &Path) -> Option<String> {
 /// ```
 pub(crate) fn detect_account_fingerprint_key() -> Option<AccountKey> {
     let home = crate::runtime_home::home_dir().ok()?;
-    account_fingerprint_key(&host_local_digest_key(&home)?)
+    account_fingerprint_key(host_local_digest_key(&home)?)
 }
 
-/// The SDK key for a [`host_local_digest_key`]: the hex text's own bytes, the
+/// The account key for a [`host_local_digest_key`]: the hex text's own bytes, the
 /// way `codex/adapter.ts` handed the same string to `createHmac`, so every
 /// fingerprint equals the one the TypeScript adapter stored on a continuation.
+/// Takes the fresh digest's buffer so the adapter adds no intermediate copy.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let key = account_fingerprint_key(&host_local_digest_key(&home)?)?;
+/// let key = account_fingerprint_key(host_local_digest_key(&home)?)?;
 /// ```
-pub(crate) fn account_fingerprint_key(digest_key: &str) -> Option<AccountKey> {
-    AccountKey::new(digest_key.as_bytes())
+pub(crate) fn account_fingerprint_key(digest_key: String) -> Option<AccountKey> {
+    AccountKey::new(digest_key.into_bytes())
 }
 
 fn attestation(method: IdentityIsolationMethod, home: &Path) -> Option<ExternalIdentityIsolation> {
@@ -563,14 +564,26 @@ mod tests {
     #[test]
     fn an_empty_digest_key_yields_no_account_fingerprint_key() {
         assert!(
-            account_fingerprint_key("").is_none(),
+            account_fingerprint_key(String::new()).is_none(),
             "expected no key, so no unkeyed fingerprint, for an empty digest key"
         );
-        let key = account_fingerprint_key("host-local-key").expect("a non-empty key");
+        let key = account_fingerprint_key("host-local-key".into()).expect("a non-empty key");
         assert_eq!(
             key.bytes(),
             b"host-local-key",
             "expected the host digest text's bytes"
+        );
+    }
+
+    #[test]
+    fn the_account_key_retains_the_fresh_digest_buffer() {
+        let digest = String::from("host-local-key");
+        let buffer = digest.as_ptr();
+        let key = account_fingerprint_key(digest).expect("a non-empty digest key");
+        assert_eq!(
+            key.bytes().as_ptr(),
+            buffer,
+            "expected the supplied allocation retained"
         );
     }
 

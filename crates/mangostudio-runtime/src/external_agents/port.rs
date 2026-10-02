@@ -18,13 +18,14 @@ pub(crate) type AgentResult<T> = Result<T, AgentFailure>;
 #[derive(Clone)]
 pub(crate) struct AccountKey(Vec<u8>);
 impl AccountKey {
-    /// Retains a nonempty host key; an empty key cannot authorize a fingerprint.
+    /// Takes a nonempty host key, retaining an owned buffer without another copy.
     ///
     /// ```ignore
     /// let key = AccountKey::new(b"host-local-key").expect("a host key");
     /// ```
-    pub(crate) fn new(bytes: &[u8]) -> Option<Self> {
-        (!bytes.is_empty()).then(|| Self(bytes.to_vec()))
+    pub(crate) fn new(bytes: impl Into<Vec<u8>>) -> Option<Self> {
+        let bytes = bytes.into();
+        (!bytes.is_empty()).then_some(Self(bytes))
     }
     /// Supplies private key bytes only to the account adapter.
     ///
