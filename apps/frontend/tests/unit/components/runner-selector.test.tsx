@@ -112,13 +112,18 @@ describe('external availability states', () => {
   });
 
   it('keeps an explicit refusal authoritative over undetermined discovery', () => {
-    renderSelector({
-      externalAgents: [
-        descriptor({ discoveryState: 'undetermined', unavailableReason: 'runtime-denied' }),
-      ],
-    });
-    expect(codexOption()).toBeDisabled();
-    expect(screen.queryByText(/You can still try a turn/)).toBeNull();
+    for (const refusal of [
+      { unavailableReason: 'runtime-denied' },
+      { installed: false },
+      { authState: 'signed-out' },
+    ] as const) {
+      const view = renderSelector({
+        externalAgents: [descriptor({ discoveryState: 'undetermined', ...refusal })],
+      });
+      expect(codexOption()).toBeDisabled();
+      expect(screen.queryByText(/You can still try a turn/)).toBeNull();
+      view.unmount();
+    }
   });
 
   it('lets a signed-in agent be selected and reports the account', () => {
