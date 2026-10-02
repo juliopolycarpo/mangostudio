@@ -1,5 +1,8 @@
 //! Product tests use owned ports and wire contracts only.
 use super::{Ports, Supervisor};
+use crate::external_agents::failure::{
+    AgentFailure, CleanupOutcome, FailureCause, FailureContext, RetryAdvice, SessionUsability,
+};
 use crate::external_agents::interactions::{self, Answer, PendingInteraction};
 use crate::external_agents::port::*;
 use crate::external_agents::wire;
@@ -154,6 +157,9 @@ async fn product_discovery_needs_only_an_owned_backend() {
 #[derive(Default)]
 struct OwnedSessionLog {
     inputs: Mutex<Vec<(String, Vec<u8>)>>,
+    reviews: Mutex<Vec<String>>,
+    start_failure: Mutex<Option<AgentFailure>>,
+    native_review: bool,
     closes: Mutex<Vec<CloseCause>>,
 }
 struct OwnedSession(Arc<OwnedSessionLog>);
@@ -215,7 +221,7 @@ impl AgentSession for OwnedSession {
             resumed: false,
             fallback_reason: None,
             effective_configuration: requested.clone(),
-            capabilities: owned_capabilities(),
+            capabilities: self.capabilities(),
             account_limits: None,
         }
     }
@@ -223,7 +229,9 @@ impl AgentSession for OwnedSession {
         "owned-native-session".into()
     }
     fn capabilities(&self) -> wire::Capabilities {
-        owned_capabilities()
+        let mut capabilities = owned_capabilities();
+        capabilities.native_review = self.0.native_review;
+        capabilities
     }
     fn subscribe(&self) -> Box<dyn SessionSubscription> {
         Box::new(NoCommands)
@@ -235,6 +243,9 @@ impl AgentSession for OwnedSession {
             .flat_map(|attachment| attachment.bytes)
             .collect();
         self.0.inputs.lock().unwrap().push((request.input, bytes));
+        if let Some(failure) = self.0.start_failure.lock().unwrap().take() {
+            return Err(failure);
+        }
         Ok(TurnStream {
             dispatch: Dispatch::Accepted,
             native_id: Some(Ok(request.turn_id.clone())),
@@ -244,8 +255,22 @@ impl AgentSession for OwnedSession {
             }),
         })
     }
-    async fn start_review(&self, _turn_id: String) -> AgentResult<ReviewStream> {
-        unreachable!("product capabilities refuse reviews before calling the backend")
+    async fn start_review(&self, turn_id: String) -> AgentResult<ReviewStream> {
+        self.0.reviews.lock().unwrap().push(turn_id.clone());
+        if let Some(failure) = self.0.start_failure.lock().unwrap().take() {
+            return Err(failure);
+        }
+        Ok(ReviewStream {
+            review_thread_id: self.native_session_id(),
+            turn: TurnStream {
+                dispatch: Dispatch::Accepted,
+                native_id: Some(Ok(turn_id.clone())),
+                events: Box::new(FinishedEvents {
+                    native: turn_id,
+                    sent: false,
+                }),
+            },
+        })
     }
     async fn respond(&self, _answer: Answer) -> AgentResult<()> {
         Ok(())
@@ -324,8 +349,18 @@ impl super::ExecutableResolver for OwnedExecutable {
     }
 }
 
-#[tokio::test]
-async fn owned_session_fake_qualifies_product_admission_receipts_and_cleanup() {
+struct OwnedRig {
+    supervisor: Arc<Supervisor>,
+    configuration: wire::Configuration,
+    log: Arc<OwnedSessionLog>,
+    hub: mango_protocol::session::Session,
+    _runtime: mango_protocol::session::Session,
+    _workspace: crate::test_support::ScratchDir,
+    scratch: crate::test_support::ScratchDir,
+}
+
+/// Opens one owned fake against the actual product admission and protocol event boundary.
+async fn owned_rig(log: Arc<OwnedSessionLog>) -> OwnedRig {
     use mango_protocol::frame::PeerInfo;
     use mango_protocol::session::{Session, SessionOptions};
     let (port, peer) = mango_protocol::port::port_pair();
@@ -339,11 +374,9 @@ async fn owned_session_fake_qualifies_product_admission_receipts_and_cleanup() {
     let (runtime_ready, hub_ready) = tokio::join!(runtime.ready(), hub.ready());
     runtime_ready.unwrap();
     hub_ready.unwrap();
-    let mut events = hub.events();
     let workspace = crate::test_support::ScratchDir::created("owned-agent-workspace");
     let canonical = crate::workspace_path::canonical_directory(workspace.path()).unwrap();
     let scratch = crate::test_support::ScratchDir::created("owned-agent-session");
-    let log = Arc::new(OwnedSessionLog::default());
     let supervisor = Supervisor::new(Ports {
         harnesses: Arc::new(OwnedSessions(Arc::clone(&log))),
         workspaces: Arc::new(OwnedWorkspace(canonical.clone())),
@@ -385,6 +418,25 @@ async fn owned_session_fake_qualifies_product_admission_receipts_and_cleanup() {
         .await
         .unwrap();
     assert_eq!(opened.native_session_id, "owned-native-session");
+    OwnedRig {
+        supervisor,
+        configuration,
+        log,
+        hub,
+        _runtime: runtime,
+        _workspace: workspace,
+        scratch,
+    }
+}
+
+#[tokio::test]
+async fn owned_session_fake_qualifies_product_admission_receipts_and_cleanup() {
+    let rig = owned_rig(Arc::new(OwnedSessionLog::default())).await;
+    let supervisor = &rig.supervisor;
+    let log = &rig.log;
+    let configuration = rig.configuration.clone();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let mut events = rig.hub.events();
     let request = wire::TurnParams {
         session_id: "owned".into(),
         client_message_id: "message".into(),
@@ -438,7 +490,104 @@ async fn owned_session_fake_qualifies_product_admission_receipts_and_cleanup() {
         .unwrap();
     assert_eq!(*log.closes.lock().unwrap(), [CloseCause::Requested]);
     assert_eq!(supervisor.live_sessions().0, 0);
-    let scratch_root = scratch.path().join("scratch");
+    let scratch_root = rig.scratch.path().join("scratch");
     assert_eq!(std::fs::read_dir(scratch_root).unwrap().count(), 0);
     supervisor.close_all(CloseCause::Shutdown).await;
+}
+
+/// Supplies recovery facts through the product's owned port, with no SDK error dependency.
+fn owned_refusal(cause: FailureCause) -> AgentFailure {
+    AgentFailure {
+        remote: Box::new(
+            mango_protocol::error::RemoteError::new(
+                mango_protocol::error::codes::INTERNAL,
+                "Invalid input \"empty\"; expected a nonempty attachment.",
+            )
+            .with_detail("kind", "tool_argument")
+            .with_detail("dispatch", "not-submitted")
+            .with_detail("fixture", "preserved"),
+        ),
+        cause,
+        context: FailureContext::Operation,
+        retry: RetryAdvice::DoNotRetry,
+        dispatch: Some(Dispatch::NotSubmitted),
+        session: SessionUsability::Unknown,
+        cleanup: CleanupOutcome::NotRequired,
+        busy_refusal: false,
+    }
+}
+
+#[tokio::test]
+async fn owned_turn_and_review_refusals_keep_the_session_and_forget_proven_absence() {
+    for review in [false, true] {
+        for cause in [FailureCause::InvalidRequest, FailureCause::Unsupported] {
+            let log = Arc::new(OwnedSessionLog {
+                native_review: true,
+                ..Default::default()
+            });
+            *log.start_failure.lock().unwrap() = Some(owned_refusal(cause));
+            let rig = owned_rig(Arc::clone(&log)).await;
+            let cancel = tokio_util::sync::CancellationToken::new();
+            let start = |input: &str| wire::TurnParams {
+                session_id: "owned".into(),
+                client_message_id: "message".into(),
+                input: input.into(),
+                configuration: rig.configuration.clone(),
+                attachments: None,
+            };
+            let review_params = wire::StartReviewParams {
+                session_id: "owned".into(),
+                client_message_id: "message".into(),
+                target: wire::ReviewTarget::UncommittedChanges,
+            };
+            let error = if review {
+                rig.supervisor
+                    .start_review(review_params.clone(), &cancel)
+                    .await
+                    .unwrap_err()
+            } else {
+                rig.supervisor
+                    .turn(start("empty"), &cancel)
+                    .await
+                    .unwrap_err()
+            };
+            assert_eq!(error.code, mango_protocol::error::codes::INTERNAL);
+            assert_eq!(
+                error.message,
+                "Invalid input \"empty\"; expected a nonempty attachment."
+            );
+            let details = error.details.as_ref().unwrap();
+            assert_eq!(details["kind"], "external_agent_turn_refused");
+            assert_eq!(details["retryable"], false);
+            assert_eq!(details["dispatch"], "not-submitted");
+            assert_eq!(details["fixture"], "preserved");
+            assert_eq!(rig.supervisor.live_sessions().0, 1);
+            assert!(log.closes.lock().unwrap().is_empty());
+            if review {
+                let accepted = rig
+                    .supervisor
+                    .start_review(review_params.clone(), &cancel)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    rig.supervisor
+                        .start_review(review_params, &cancel)
+                        .await
+                        .unwrap(),
+                    accepted
+                );
+                assert_eq!(log.reviews.lock().unwrap().len(), 2);
+            } else {
+                let accepted = rig.supervisor.turn(start("valid"), &cancel).await.unwrap();
+                assert_eq!(
+                    rig.supervisor.turn(start("valid"), &cancel).await.unwrap(),
+                    accepted
+                );
+                assert_eq!(log.inputs.lock().unwrap().len(), 2);
+            }
+            assert!(log.closes.lock().unwrap().is_empty());
+            rig.supervisor.close_all(CloseCause::Shutdown).await;
+            assert_eq!(*log.closes.lock().unwrap(), [CloseCause::Shutdown]);
+        }
+    }
 }

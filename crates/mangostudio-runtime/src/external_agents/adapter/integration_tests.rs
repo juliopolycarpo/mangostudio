@@ -38,6 +38,9 @@ use crate::test_support::ScratchDir;
 /// Everything a [`CountingHarness`] observed, shared with the test.
 #[derive(Default)]
 struct HarnessLog {
+    /// One typed SDK start failure to inject before native work begins.
+    start_failure: Mutex<Option<SdkError>>,
+    start_calls: AtomicUsize,
     opens: AtomicUsize,
     command_state: Mutex<Option<SessionState>>,
     closes: Mutex<Vec<CloseReason>>,
@@ -277,6 +280,10 @@ impl Session for CountingSession {
                 reason: mango_external_agents::CancelReason::Timeout,
             }
             .with_dispatch(mango_external_agents::Dispatch::NotSubmitted));
+        }
+        self.log.start_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(failure) = self.log.start_failure.lock().unwrap().take() {
+            return Err(failure);
         }
         self.log.turns_started.fetch_add(1, Ordering::SeqCst);
         self.inner.start_turn(request).await
@@ -3116,6 +3123,10 @@ impl Session for ScriptedSession {
     }
 
     async fn start_turn(&self, request: TurnRequest) -> mango_external_agents::Result<TurnStream> {
+        self.log.start_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(failure) = self.log.start_failure.lock().unwrap().take() {
+            return Err(failure);
+        }
         self.log.turns_started.fetch_add(1, Ordering::SeqCst);
         let (sink, events) = self.open_stream(&request.turn_id, request.attempt);
         let native = match &self.script {
@@ -3179,6 +3190,9 @@ impl Session for ScriptedSession {
             ));
         };
         self.log.reviews.fetch_add(1, Ordering::SeqCst);
+        if let Some(failure) = self.log.start_failure.lock().unwrap().take() {
+            return Err(failure);
+        }
         let attempt = mango_external_agents::AttemptId::FIRST;
         let (sink, events) = self.open_stream(&request.turn_id, attempt);
         sink.emit(text("P1: the retry loop never exits.")).await?;
@@ -4246,3 +4260,6 @@ async fn an_empty_command_catalog_still_reaches_the_hub() {
     );
     rig.close("one").await;
 }
+
+#[path = "refusal_tests.rs"]
+mod refusal_tests;

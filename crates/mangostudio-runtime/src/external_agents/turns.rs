@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use super::failure::{AgentFailure, FailureCause, FailureContext, SessionUsability};
+use super::port::Dispatch;
 use super::port::{
     Attachment as OwnedAttachment, CancelReason, ReviewStream, Steer, TurnEvent, TurnRequest,
     TurnStream,
@@ -409,8 +410,16 @@ impl Supervisor {
                 live.session_id
             ));
         }
-        if error.busy_refusal {
+        // Preserve the established bare Busy refusal, but an explicit committed
+        // dispatch is a stronger fact than the cause's advice to try again.
+        if error.busy_refusal && matches!(error.dispatch, None | Some(Dispatch::NotSubmitted)) {
             return busy(&live.session_id);
+        }
+        if error.is_deterministic_start_refusal() {
+            return error
+                .into_remote()
+                .with_detail("kind", "external_agent_turn_refused")
+                .with_detail("retryable", false);
         }
         error.into_remote()
     }
