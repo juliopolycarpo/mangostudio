@@ -4,10 +4,30 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,
+  settleUnfinishedExternalTurn,
   settleUnfinishedImageParts,
 } from '../../../../src/features/generation/text-generation-stream-reducer';
 
 const REDUCER_OPTIONS = { pendingSubagentName: 'Pending subagent' };
+
+const EXTERNAL_ACTIVITY_PREFIX: StreamChunk[] = [
+  {
+    type: 'external_session_started',
+    sessionId: 'hub-session-1',
+    targetId: 'codex',
+    resumed: false,
+    done: false,
+  },
+  {
+    type: 'external_activity_started',
+    callId: 'call-1',
+    name: 'shell',
+    kind: 'command',
+    title: 'ls',
+    done: false,
+  },
+  { type: 'external_reasoning_started', done: false },
+];
 
 function reduceChunks(chunks: StreamChunk[]) {
   return chunks.reduce(
@@ -24,6 +44,46 @@ function getPartsByType<TType extends MessagePart['type']>(parts: MessagePart[],
 }
 
 describe('text generation stream reducer', () => {
+  it.each(['cancelled-by-user', 'runtime-disconnected'] as const)(
+    'settles pending external activity on a local %s before a terminal chunk arrives',
+    (reason) => {
+      const state = reduceChunks(EXTERNAL_ACTIVITY_PREFIX);
+      const settled = settleUnfinishedExternalTurn(state, reason);
+
+      expect(settled.parts.map((part) => part.type)).toEqual([
+        'external_turn',
+        'external_activity',
+      ]);
+      expect(settled.parts[0]).toMatchObject({ status: 'terminal', terminalReason: reason });
+      expect(settled.parts[1]).toMatchObject({
+        status: reason === 'cancelled-by-user' ? 'cancelled' : 'failed',
+      });
+      expect(settled.aiMessageUpdate?.patch.parts).toBe(settled.parts);
+      expect(settled.openExternalThinkingIndex).toBeNull();
+      expect(settleUnfinishedExternalTurn(settled, 'completed')).toBe(settled);
+    }
+  );
+
+  it('publishes settled external parts at terminal handling and keeps them through done', () => {
+    const terminal = reduceChunks([
+      ...EXTERNAL_ACTIVITY_PREFIX,
+      { type: 'external_turn_completed', reason: 'completed', done: false },
+    ]);
+
+    expect(terminal.aiMessageUpdate?.patch.parts?.[1]).toMatchObject({ status: 'completed' });
+    const done = reduceTextGenerationStreamChunk(
+      terminal,
+      { type: 'done', done: true, messageId: 'server-ai-1' },
+      REDUCER_OPTIONS
+    );
+    expect(done.aiMessageUpdate?.patch).toMatchObject({
+      isGenerating: false,
+      parts: terminal.parts,
+    });
+    expect(done.parts).toBe(terminal.parts);
+    expect(done.sealed).toBe(true);
+  });
+
   it('builds separate thinking segments across tool boundaries', () => {
     const state = reduceChunks([
       { type: 'thinking_start', done: false },

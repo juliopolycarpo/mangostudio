@@ -209,6 +209,7 @@ export {
   isExternalAgentTargetId,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from './schemas';
+export { externalActivityStatusForTerminal } from './terminal-status';
 export {
   type ExternalContextUsage,
   externalContextUsage,

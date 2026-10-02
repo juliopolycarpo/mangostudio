@@ -14,7 +14,10 @@
 
 import { describe, expect, it } from 'bun:test';
 import { ExternalTurnTranscript } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
-import type { ExternalAgentEvent } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentEvent,
+  ExternalTurnTerminalReason,
+} from '@mangostudio/shared/external-agents';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
   externalAgentEventToStreamChunk,
@@ -22,13 +25,27 @@ import {
   externalSteerChunk,
   externalTurnCompletedChunk,
 } from '@mangostudio/shared/streaming';
-import type { MessagePart } from '@mangostudio/shared/types';
+import type { ExternalActivityPart, MessagePart } from '@mangostudio/shared/types';
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,
 } from '../../../../src/features/generation/text-generation-stream-reducer';
 
 const REDUCER_OPTIONS = { pendingSubagentName: 'Pending subagent' };
+
+const TERMINAL_ACTIVITY_STATUSES = {
+  completed: 'completed',
+  'cancelled-by-user': 'cancelled',
+  interrupted: 'cancelled',
+  'vendor-error': 'failed',
+  'runtime-disconnected': 'failed',
+  'hub-restarted': 'failed',
+  'sequence-gap': 'failed',
+  'limit-exceeded': 'failed',
+  'consent-revoked': 'cancelled',
+  'session-lost': 'failed',
+  'acceptance-unknown': 'failed',
+} satisfies Record<ExternalTurnTerminalReason, ExternalActivityPart['status']>;
 
 /**
  * A turn that exercises every branch, in an order a real vendor produces:
@@ -79,7 +96,10 @@ const TURN: readonly ExternalAgentEvent[] = [
 ];
 
 /** What the hub stores, built from the neutral events themselves. */
-function storedParts(events: readonly ExternalAgentEvent[]): MessagePart[] {
+function storedParts(
+  events: readonly ExternalAgentEvent[],
+  terminalReason?: ExternalTurnTerminalReason
+): MessagePart[] {
   const transcript = new ExternalTurnTranscript({
     targetId: 'codex',
     sessionId: 'hub-session-1',
@@ -88,11 +108,15 @@ function storedParts(events: readonly ExternalAgentEvent[]): MessagePart[] {
   events.forEach((event, index) => {
     transcript.apply(event, { sequence: index + 1, at: 0 });
   });
+  if (terminalReason) transcript.finalize(terminalReason, 0);
   return transcript.parts;
 }
 
 /** What the client renders, built from the chunks those events project onto. */
-function streamedParts(events: readonly ExternalAgentEvent[]): MessagePart[] {
+function streamedParts(
+  events: readonly ExternalAgentEvent[],
+  terminalReason?: ExternalTurnTerminalReason
+): MessagePart[] {
   const chunks: StreamChunk[] = [
     externalSessionStartedChunk({ sessionId: 'hub-session-1', targetId: 'codex', resumed: false }),
   ];
@@ -107,6 +131,14 @@ function streamedParts(events: readonly ExternalAgentEvent[]): MessagePart[] {
     if (event.type === 'completed') {
       chunks.push(externalTurnCompletedChunk(vendorInterrupted ? 'interrupted' : 'completed'));
     }
+    if (event.type === 'error') chunks.push(externalTurnCompletedChunk('vendor-error'));
+  }
+  if (terminalReason) chunks.push(externalTurnCompletedChunk(terminalReason));
+  if (
+    terminalReason ||
+    events.some((event) => event.type === 'completed' || event.type === 'error')
+  ) {
+    chunks.push({ type: 'done', done: true, messageId: 'ai-1' });
   }
   const state = chunks.reduce(
     (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),
@@ -147,6 +179,108 @@ describe('external turn: live stream vs reloaded transcript', () => {
   it('produces the same parts from the same events', () => {
     expect(comparable(streamedParts(TURN))).toEqual(comparable(storedParts(TURN)));
   });
+
+  it.each(Object.entries(TERMINAL_ACTIVITY_STATUSES))(
+    'settles omitted activity closes identically on %s before done',
+    (reason, status) => {
+      const events: ExternalAgentEvent[] = [
+        { type: 'reasoning_started' },
+        { type: 'reasoning_delta', text: 'before the work' },
+        {
+          type: 'activity_started',
+          callId: 'running-1',
+          activity: { name: 'shell', kind: 'command', title: 'ls', detail: 'listing' },
+        },
+        {
+          type: 'activity_started',
+          callId: 'running-2',
+          activity: { name: 'read', kind: 'other', title: 'README.md', truncated: true },
+        },
+        ...(['completed', 'failed', 'cancelled'] as const).flatMap(
+          (explicitStatus): ExternalAgentEvent[] => [
+            {
+              type: 'activity_started',
+              callId: explicitStatus,
+              activity: { name: 'shell', kind: 'command', title: 'explicit work' },
+            },
+            {
+              type: 'activity_completed',
+              callId: explicitStatus,
+              result: { status: explicitStatus, detail: 'explicit result', truncated: true },
+            },
+          ]
+        ),
+        { type: 'reasoning_started' },
+        { type: 'reasoning_delta', text: 'after the work' },
+      ];
+      const terminalReason = reason as ExternalTurnTerminalReason;
+      const live = streamedParts(events, terminalReason);
+      const persisted = JSON.parse(JSON.stringify(storedParts(events, terminalReason)));
+
+      expect(live.find((part) => part.type === 'external_activity')).toMatchObject({
+        callId: 'running-1',
+        status,
+        detail: 'listing',
+      });
+      expect(comparable(live)).toEqual(comparable(persisted));
+      expect(live.map((part) => part.type)).toEqual([
+        'external_turn',
+        'thinking',
+        'external_activity',
+        'external_activity',
+        'external_activity',
+        'external_activity',
+        'external_activity',
+        'thinking',
+      ]);
+      expect(
+        live.some((part) => part.type === 'external_activity' && part.status === 'running')
+      ).toBe(false);
+      expect(live.at(-1)).toEqual({
+        type: 'thinking',
+        text: 'after the work',
+        ...(reason === 'completed' ? {} : { incomplete: true }),
+      });
+    }
+  );
+
+  it.each(['completed', 'cancelled', 'error'] as const)(
+    'keeps terminal results and reasoning identical after %s and late vendor events',
+    (terminalType) => {
+      const terminalEvents: ExternalAgentEvent[] =
+        terminalType === 'error'
+          ? [{ type: 'error', error: { code: 'adapter-stream', message: 'vendor failed' } }]
+          : terminalType === 'cancelled'
+            ? [{ type: 'cancelled' }, { type: 'completed' }]
+            : [{ type: 'completed' }];
+      const events: ExternalAgentEvent[] = [
+        {
+          type: 'activity_started',
+          callId: 'call-1',
+          activity: { name: 'shell', kind: 'command', title: 'ls' },
+        },
+        { type: 'reasoning_started' },
+        ...terminalEvents,
+      ];
+      const expected = comparable(storedParts(events));
+      const lateEvents: ExternalAgentEvent[] = [
+        {
+          type: 'activity_completed',
+          callId: 'call-1',
+          result: { status: 'completed', detail: 'late success' },
+        },
+        { type: 'reasoning_started' },
+        { type: 'reasoning_delta', text: 'late reasoning' },
+        { type: 'text_delta', text: 'late text' },
+        { type: 'error', error: { code: 'adapter-stream', message: 'late failure' } },
+        { type: 'completed' },
+      ];
+
+      expect(comparable(streamedParts(events))).toEqual(expected);
+      expect(comparable(streamedParts([...events, ...lateEvents]))).toEqual(expected);
+      expect(comparable(storedParts([...events, ...lateEvents]))).toEqual(expected);
+    }
+  );
 
   it('splits prose where the vendor split it, rather than collapsing it', () => {
     const texts = streamedParts(TURN).filter((part) => part.type === 'text');

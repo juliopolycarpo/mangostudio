@@ -24,6 +24,7 @@ import type {
 import {
   EXTERNAL_TURN_MAX_EVENTS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
+  externalActivityStatusForTerminal,
 } from '@mangostudio/shared/external-agents';
 import type {
   ExternalActivityPart,
@@ -211,12 +212,7 @@ export class ExternalTurnTranscript {
     if (reason !== 'completed') {
       this.#markIncomplete(stoppedInReasoning ? openPhase : this.#parts.at(-1));
     }
-    const activityStatus =
-      reason === 'completed'
-        ? 'completed'
-        : reason === 'cancelled-by-user' || reason === 'interrupted' || reason === 'consent-revoked'
-          ? 'cancelled'
-          : 'failed';
+    const activityStatus = externalActivityStatusForTerminal(reason);
     // Vendors may exhaust their event budget before emitting activity closes.
     // Only settle work still running; an explicit result remains authoritative.
     for (const activity of this.#activityByCallId.values()) {
