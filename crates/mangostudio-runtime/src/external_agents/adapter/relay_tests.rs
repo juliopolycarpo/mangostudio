@@ -1,4 +1,4 @@
-//! SDK 0.3.1 sequences observed through the owned session and product event topic.
+//! SDK sequences observed through the owned session and product event topic.
 use std::sync::Arc;
 
 use mango_agent_acp::testing::FakeAcpAgent;
@@ -126,7 +126,6 @@ async fn explicit_sdk_closes_precede_terminal_without_a_second_close_from_termin
             fixtures::item("item/completed", finished),
             fixtures::item("item/completed", reasoning),
         ],
-        ..Default::default()
     };
     launcher.push(peer.process(Announcer::new()));
     let mut rig = Rig::new(launcher.clone(), wire::TargetId::Codex, fixtures::limits()).await;
