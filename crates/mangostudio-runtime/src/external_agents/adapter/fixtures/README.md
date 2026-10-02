@@ -56,7 +56,10 @@ direct adapter stress; that most escaped turn exceeds the Hub-to-runtime wire ca
 non-retaining launcher uses the SDK fake process control and small
 handshake replies, but replaces the recording stdin. It parses only a request header and retains
 scalar frame sizes. Large frames remain owned by the SDK while four physical writes are held.
-The test asserts that the SDK fake's written-frame log is empty. These synthetic Linux receipts
+The test asserts that the SDK fake's written-frame log is empty. Scalar observations and small
+request headers remain in the fixture; zero retained large frame bodies does not mean zero fixture
+allocation. Both acceptance and baseline refusal must permit a small next send on the same session,
+and every fake child must be closed. These synthetic Linux receipts
 include SDK serialization and fake-process overhead; they do not measure a live vendor child or
 native Windows or macOS memory. A missing `VmHWM` is an error, never a zero measurement.
 

@@ -536,6 +536,15 @@ async fn concurrent_prompt_probe(sessions: usize, text: bool, require_acceptance
             Ok(stream) => streams.push(stream),
             Err(failure) => {
                 assert_eq!(failure.dispatch, Some(Dispatch::NotSubmitted));
+                assert_eq!(failure.session, SessionUsability::Unknown);
+                assert_eq!(failure.cleanup, CleanupOutcome::NotRequired);
+                assert!(
+                    failure
+                        .remote
+                        .message
+                        .contains("bytes in one frame to the ACP agent, received ")
+                );
+                assert!(failure.remote.message.contains("8388608"));
                 refusals += 1;
             }
         }
@@ -552,6 +561,19 @@ async fn concurrent_prompt_probe(sessions: usize, text: bool, require_acceptance
         );
         assert_eq!(refusals, 0);
     }
+    let outbound_bytes = rig
+        .backend
+        .host(fixtures::host(std::env::temp_dir()), CancelToken::new())
+        .unwrap()
+        .outbound_buffer_bytes();
+    if outbound_bytes == limits.outbound_bytes {
+        assert_eq!(streams.len(), sessions);
+        assert_eq!(refusals, 0);
+    } else {
+        assert_eq!(outbound_bytes, limits.incoming_bytes);
+        assert_eq!(streams.len(), 0);
+        assert_eq!(refusals, sessions);
+    }
     assert_eq!(rig.launcher.fake.live_children(), sessions);
     assert_eq!(rig.launcher.fake.launches().len(), sessions);
     assert!(rig.launcher.fake.written().is_empty());
@@ -567,11 +589,6 @@ async fn concurrent_prompt_probe(sessions: usize, text: bool, require_acceptance
     #[cfg(not(target_os = "linux"))]
     let hwm: Option<usize> = None;
     assert!(hwm.is_none_or(|value| value > 0));
-    let outbound_bytes = rig
-        .backend
-        .host(fixtures::host(std::env::temp_dir()), CancelToken::new())
-        .unwrap()
-        .outbound_buffer_bytes();
     let frames: Vec<_> = rig
         .launcher
         .frames
@@ -585,7 +602,7 @@ async fn concurrent_prompt_probe(sessions: usize, text: bool, require_acceptance
         "promptUnits":if text {limits.runtime_prompt_units} else {limits.http_prompt_units},
         "accepted":streams.len(),"refusedNotSubmitted":refusals,"vmHwmKiB":hwm,"frameBytes":frames,
         "incomingBytes":limits.incoming_bytes,"outboundBytes":outbound_bytes,
-        "captureRetainedBytes":0,"launcher":"non-retaining-sdk-fake","childrenLiveAtSample":rig.launcher.fake.live_children()})
+        "retainedLargeFrameBodyBytes":0,"launcher":"non-retaining-sdk-fake","childrenLiveAtSample":rig.launcher.fake.live_children()})
     );
     rig.launcher.frames.release_prompts(streams.len());
     for session in &children {
@@ -613,21 +630,24 @@ async fn concurrent_prompt_probe(sessions: usize, text: bool, require_acceptance
                 .any(|event| matches!(event, wire::Event::Error { .. }))
         );
     }
-    if require_acceptance {
-        for session in &children {
-            fixtures::complete(
-                fixtures::start(&**session, "next send".into(), Vec::new())
-                    .await
-                    .unwrap(),
-            )
-            .await;
-        }
-        assert_eq!(rig.launcher.fake.launches().len(), sessions);
+    for session in &children {
+        fixtures::complete(
+            fixtures::start(&**session, "next send".into(), Vec::new())
+                .await
+                .unwrap(),
+        )
+        .await;
     }
+    assert_eq!(rig.launcher.fake.launches().len(), sessions);
     for session in children {
         session.close(CloseCause::Requested).await.unwrap();
     }
     rig.assert_closed();
+    println!(
+        "PROMPT_BUDGET_RECOVERY {}",
+        json!({"healthyNextSends":sessions,"launches":rig.launcher.fake.launches().len(),
+            "childrenAfterClose":rig.launcher.fake.live_children(),"retainedLargeFrameBodyBytes":0})
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
