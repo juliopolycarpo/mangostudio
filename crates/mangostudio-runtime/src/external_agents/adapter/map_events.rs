@@ -189,6 +189,16 @@ pub(crate) fn map_event(target: TargetId, event: &sdk::AgentEvent) -> MappedEven
     }
 }
 
+/// Benchmark bridge around the production mapping, consuming the received event.
+#[cfg(test)]
+fn map_owned_event(target: TargetId, event: sdk::AgentEvent) -> MappedEvent {
+    map_event(target, &event)
+}
+
+#[cfg(test)]
+#[path = "map_events_bench.rs"]
+mod benchmarks;
+
 /// The SDK answer for a hub `respond(requestId, optionId)` against a pending interaction.
 ///
 /// A question is answered with its choice id as a [`sdk::QuestionResponse`],

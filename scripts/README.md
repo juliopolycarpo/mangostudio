@@ -247,12 +247,29 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 
 ## bench/ — hermetic performance measurement
 
-| Script                   | Purpose                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------- |
-| `startup.ts`             | Median process-start → first healthy `GET /api/health` of a binary                    |
-| `runtime-handshake.ts`   | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max |
-| `grep.ts`                | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel  |
-| `rust-test-inventory.ts` | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log   |
+| Script                       | Purpose                                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                              |
+| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                           |
+| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                            |
+| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                             |
+| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS |
+
+`external-agent-boundary.ts` runs ignored Rust libtests, so benchmarks are not part of the normal
+test gate. Build each revision's runtime libtest with `cargo test -p mangostudio-runtime --lib
+--release --locked --no-run --message-format=json` and `MANGOSTUDIO_BENCH_SOURCE_SHA` set to that
+revision's full commit SHA. Cargo's `compiler-artifact.executable` identifies the binary. Then:
+
+```bash
+bun scripts/bench/external-agent-boundary.ts --base-binary /path/base-libtest \
+  --head-binary /path/head-libtest --base-sha BASE_FULL_SHA --head-sha HEAD_FULL_SHA \
+  --samples 30 --profile release --output boundary-receipt.json
+```
+
+The receipt binds binary hashes and lockfile hashes to both revisions. Fixtures are built before
+timing. Linux RSS is the fresh process high-water mark, including those untimed fixtures; unsupported
+memory measurements stay null. These are function measurements, not vendor throughput or chat latency.
+Keep the same instrumentation on both revisions and stop competing builds during timing.
 
 ```bash
 bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 10
