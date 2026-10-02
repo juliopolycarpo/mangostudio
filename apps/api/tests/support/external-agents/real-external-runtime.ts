@@ -16,11 +16,12 @@
 import {
   type ExternalAgentEvent,
   type ExternalAgentOpenParams,
+  type ExternalAgentStartReviewParams,
   type ExternalAgentTurnParams,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import type { RuntimeMethod } from '@mangostudio/shared/runtime-contract';
-import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
+import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import { connectTestRuntime, type TestHandler } from '../runtime-fixture';
 
 export interface RealExternalRuntime {
@@ -28,6 +29,7 @@ export interface RealExternalRuntime {
   readonly calls: {
     readonly open: ExternalAgentOpenParams[];
     readonly turn: ExternalAgentTurnParams[];
+    readonly startReview: ExternalAgentStartReviewParams[];
     readonly cancel: { sessionId: string; nativeTurnId?: string }[];
     readonly close: { sessionId: string }[];
   };
@@ -41,10 +43,28 @@ export interface RealExternalRuntime {
   close(): Promise<void>;
 }
 
+/**
+ * Serves named external-agent handlers over the real Hub protocol boundary.
+ *
+ * @example
+ * const runtime = await createRealExternalRuntime({ turnFailure: () => refusal });
+ * await runtime.client.externalAgents.turn(params);
+ */
 export async function createRealExternalRuntime(
-  options: { readonly nativeTurnId?: string } = {}
+  options: {
+    readonly nativeTurnId?: string;
+    readonly turnFailure?: () => Error | undefined;
+    readonly reviewFailure?: () => Error | undefined;
+    readonly onUnavailable?: () => void;
+  } = {}
 ): Promise<RealExternalRuntime> {
-  const calls: RealExternalRuntime['calls'] = { open: [], turn: [], cancel: [], close: [] };
+  const calls: RealExternalRuntime['calls'] = {
+    open: [],
+    turn: [],
+    startReview: [],
+    cancel: [],
+    close: [],
+  };
   const nativeTurnId = options.nativeTurnId ?? 'native-turn-1';
   let openSessionId = '';
   let started = false;
@@ -65,13 +85,23 @@ export async function createRealExternalRuntime(
           interactiveApprovals: true,
           cancellation: true,
           resume: true,
+          nativeReview: true,
         },
       };
     },
     'external-agent.turn': (params) => {
       calls.turn.push(params as ExternalAgentTurnParams);
+      const failure = options.turnFailure?.();
+      if (failure) throw failure;
       started = true;
       return { nativeTurnId };
+    },
+    'external-agent.start-review': (params) => {
+      calls.startReview.push(params as ExternalAgentStartReviewParams);
+      const failure = options.reviewFailure?.();
+      if (failure) throw failure;
+      started = true;
+      return { nativeTurnId, reviewThreadId: 'native-session-1' };
     },
     'external-agent.cancel': (params) => {
       calls.cancel.push(params as { sessionId: string; nativeTurnId?: string });
@@ -86,7 +116,7 @@ export async function createRealExternalRuntime(
   const runtime = await connectTestRuntime({ handlers });
 
   return {
-    client: runtime.client,
+    client: new RuntimeClient(runtime.hub, options.onUnavailable),
     calls,
     emit(event) {
       sequence += 1;

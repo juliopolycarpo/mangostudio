@@ -332,6 +332,8 @@ function terminalReasonForAbort(
 function terminalReasonForCallFailure(error: unknown): ExternalTurnTerminalReason {
   if (error instanceof RuntimeConsentDeniedError) return 'consent-revoked';
   if (error instanceof Error && error.name === 'ToolArgumentError') return 'session-lost';
+  const failure = classifySubmissionFailure(error);
+  if (failure === 'acceptance-unknown' || failure === 'no-reply') return 'acceptance-unknown';
   return 'vendor-error';
 }
 

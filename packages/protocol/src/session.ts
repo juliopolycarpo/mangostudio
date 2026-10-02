@@ -73,6 +73,20 @@ export interface SessionClosure {
 
 export type SessionState = 'handshaking' | 'ready' | 'closed';
 
+/** Object identity keeps a peer's open error details from claiming a local close. */
+const sessionClosedRequestErrors = new WeakSet<RemoteError>();
+
+/**
+ * Whether this Session implementation rejected a request because its transport closed.
+ * The proof is local object identity and never crosses an error frame.
+ *
+ * @example
+ * if (isSessionClosedRequestError(error)) reconnect();
+ */
+export function isSessionClosedRequestError(error: unknown): boolean {
+  return error instanceof RemoteError && sessionClosedRequestErrors.has(error);
+}
+
 export interface SessionTimers {
   readonly setTimeout: (callback: () => void, ms: number) => unknown;
   readonly clearTimeout: (handle: unknown) => void;
@@ -839,7 +853,7 @@ export class Session {
     const why = closure
       ? ` (closed with ${closure.code}${closure.reason ? `: ${closure.reason}` : ''})`
       : '';
-    return new RemoteError(
+    const error = new RemoteError(
       RESERVED_ERROR_CODES.UNAVAILABLE,
       `Request "${method}" cannot complete: the session is closed${why}.`,
       {
@@ -848,6 +862,8 @@ export class Session {
         ...(closure ? { closeCode: closure.code } : {}),
       }
     );
+    sessionClosedRequestErrors.add(error);
+    return error;
   }
 
   #asSendFailure(error: unknown, method: string): RemoteError {
