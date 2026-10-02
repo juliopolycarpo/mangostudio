@@ -137,6 +137,12 @@ each one do* takes two tiers, in this order:
 
 The hub spawns no vendor CLI and keeps no second capability table.
 
+`discoveryState` records probe certainty separately from installation, authentication and permission
+support. An installed target with an inconclusive probe or absent version is `undetermined` and
+remains tryable when its other checks allow it. Home, the selector and Settings show this uncertainty.
+The field is optional for older runtimes; explicit refusals still make the affected target or
+permission combination unavailable.
+
 **Discovery is not free.** The authoritative pass is a subprocess on someone else's machine, so it
 carries a stated budget: a per-call timeout, a cache TTL per (user, environment), a single-flight
 so a burst of selector renders produces one probe, and a cap on concurrent discoveries per
@@ -845,7 +851,7 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.3.0). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.3.2). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
@@ -876,9 +882,19 @@ separate from the wire error. Absence of observed dispatch stays unknown. The ad
 SDK cleanup handle while bounded kill/wait runs, reports an unconfirmed cleanup explicitly, and
 never hands a process control to product services. The guarded launcher still owns an unconfirmed
 process tree and reaps it on drop or runtime shutdown. Product scratch cleanup remains the
-supervisor's obligation. This extraction retains the existing deterministic-refusal/replay and
-missing-terminal fallback behavior; it does not qualify a new SDK version or claim a performance
-improvement.
+supervisor's obligation.
+
+A definitely unsubmitted turn or review with a deterministic input/configuration refusal ends that
+message once as `external_agent_turn_refused`. Its receipt is forgotten so a corrected request can
+use the healthy session. Busy, accepted or uncertain dispatch, spent sessions and cleanup-bearing
+failures preserve their separate handling. Spent-session classification follows both operation and
+cleanup wrappers; settling a cleanup handle does not make a closed session usable again. Native
+reviews use the Hub's existing submission admission and recovery ledger before dispatch.
+
+The Hub's terminal fallback settles remaining running activities and reasoning for every terminal
+status while preserving explicit activity results. Terminal creation reports a live peer's refusal
+or deadline as `runtime-unavailable`; a locally observed closed transport reports `disconnected`.
+A vendor-session failure alone does not establish that its runtime environment is dead.
 
 These product facts come from SDK operations inside the adapter:
 
@@ -968,7 +984,9 @@ read returns. This is an accepted asymmetry with the watcher.
 ### Cancellation on Windows
 
 Cancelling a turn is a protocol request for Codex (`turn/interrupt`) and Cursor (ACP
-`session/cancel`), so neither depends on a process signal. The qualification above demonstrates the ACP cancel-and-continue path on Windows, and the live smoke cancelled a streaming Codex turn on Windows and completed the next one on the same session. If a
+`session/cancel`), so neither depends on a process signal. The compiled qualification covers ACP
+cancel-and-continue on Windows. Authenticated Codex or Cursor smoke is separate: a live receipt
+qualifies only its recorded runtime and SDK version and must be repeated after a release change. If a
 Codex cancel does not settle, the SDK tears the session down and it is reported lost (below). Claude has no protocol cancel: the SDK interrupts the
 process, and the Windows launcher reports interrupt as unsupported
 (`windows_interrupt_is_unsupported_and_kill_ends_the_job`), so a Claude cancel on Windows is a
