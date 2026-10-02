@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'bun:test';
+import { RemoteError } from '@mangostudio/protocol';
 import { PathAccessError, RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
+import {
+  isRequestNotSent,
+  noReplyOf,
+  RuntimeRequestNoReplyError,
+  RuntimeRequestNotSentError,
+} from '../../../../src/services/runtime-client/request-not-sent';
+import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 import { connectTestRuntime, TEST_RUNTIME_MANIFEST } from '../../../support/runtime-fixture';
 
@@ -13,6 +21,205 @@ function withoutShell(): RuntimeCapabilityAllow {
 }
 
 describe('RuntimeClient', () => {
+  for (const kind of ['external_agent_turn_refused', 'external_agent_link_lost']) {
+    for (const dispatch of [undefined, 'not-submitted', 'accepted', 'acceptance-unknown']) {
+      it(`preserves message-local ${kind} (${dispatch ?? 'no dispatch'}) and leaves the runtime usable`, async () => {
+        const details = {
+          kind,
+          ...(dispatch ? { dispatch } : {}),
+          cleanup: 'unconfirmed',
+          closeCode: 1001,
+        };
+        function refuseExternalOperation(): never {
+          throw new RemoteError('UNAVAILABLE', 'Vendor refused this operation.', details);
+        }
+        function hashLiveSnapshot(): { hash: string } {
+          return { hash: 'still-live' };
+        }
+        const runtime = await connectTestRuntime({
+          handlers: {
+            'external-agent.turn': refuseExternalOperation,
+            'snapshot.hash': hashLiveSnapshot,
+          },
+        });
+        let unavailable = 0;
+        function recordUnavailable(): void {
+          unavailable += 1;
+        }
+        const client = new RuntimeClient(runtime.hub, recordUnavailable);
+        try {
+          const error = await client.externalAgents
+            .turn({
+              sessionId: 'session-1',
+              clientMessageId: 'message-1',
+              input: 'hello',
+              configuration: { level: 'default', routing: 'user', workspaceRoots: ['/work'] },
+            })
+            .catch((error: unknown) => error);
+          expect(error).toBeInstanceOf(RemoteError);
+          expect((error as RemoteError).details).toEqual(details);
+          expect(noReplyOf(error)).toBeUndefined();
+          expect(unavailable).toBe(0);
+          expect(await client.snapshot.hash({ path: '/work/file' })).toEqual({
+            hash: 'still-live',
+          });
+        } finally {
+          await runtime.close();
+        }
+      });
+    }
+  }
+
+  it('keeps generic tool_argument translation and non-external refusals message-local', async () => {
+    function refuseToolArguments(): never {
+      throw new RemoteError('INTERNAL', 'Expected a usable session id.', { kind: 'tool_argument' });
+    }
+    function refuseSnapshot(): never {
+      throw new RemoteError('UNAVAILABLE', 'Other service unavailable.', {
+        kind: 'external_agent_link_lost',
+      });
+    }
+    const runtime = await connectTestRuntime({
+      handlers: {
+        'external-agent.turn': refuseToolArguments,
+        'snapshot.hash': refuseSnapshot,
+      },
+    });
+    let unavailable = 0;
+    function recordUnavailable(): void {
+      unavailable += 1;
+    }
+    const client = new RuntimeClient(runtime.hub, recordUnavailable);
+    try {
+      await expect(
+        client.externalAgents.turn({
+          sessionId: 'spent-session',
+          clientMessageId: 'message-1',
+          input: 'hello',
+          configuration: { level: 'default', routing: 'user', workspaceRoots: ['/work'] },
+        })
+      ).rejects.toMatchObject({
+        name: 'ToolArgumentError',
+        message: 'Expected a usable session id.',
+      });
+      await expect(client.snapshot.hash({ path: '/work/file' })).rejects.toBeInstanceOf(
+        RemoteError
+      );
+      expect(unavailable).toBe(0);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  for (const details of [
+    undefined,
+    { kind: 'in_flight_limit' },
+    { kind: 'terminal_capacity' },
+    { kind: { malformed: true }, closeCode: 1001 },
+  ]) {
+    it(`keeps arbitrary runtime UNAVAILABLE replies local (${JSON.stringify(details) ?? 'no details'})`, async () => {
+      let refuse = true;
+      function snapshotOperation(): { hash: string } {
+        if (refuse)
+          throw new RemoteError('UNAVAILABLE', 'Runtime refused this operation.', details);
+        return { hash: 'still-live' };
+      }
+      const runtime = await connectTestRuntime({
+        handlers: { 'snapshot.hash': snapshotOperation },
+      });
+      let unavailable = 0;
+      function recordUnavailable(): void {
+        unavailable += 1;
+      }
+      const client = new RuntimeClient(runtime.hub, recordUnavailable);
+      try {
+        await expect(client.snapshot.hash({ path: '/work/file' })).rejects.toMatchObject({
+          code: 'UNAVAILABLE',
+          message: 'Runtime refused this operation.',
+        });
+        expect(unavailable).toBe(0);
+        refuse = false;
+        expect(await client.snapshot.hash({ path: '/work/file' })).toEqual({ hash: 'still-live' });
+      } finally {
+        await runtime.close();
+      }
+    });
+  }
+
+  for (const afterSend of [false, true]) {
+    it(`still reports a locally closed runtime ${afterSend ? 'during' : 'before'} an external request`, async () => {
+      const arrived = Promise.withResolvers<void>();
+      function stallExternalOperation(): Promise<never> {
+        arrived.resolve();
+        return new Promise(() => undefined);
+      }
+      const runtime = await connectTestRuntime({
+        handlers: { 'external-agent.turn': stallExternalOperation },
+      });
+      let unavailable = 0;
+      function recordUnavailable(): void {
+        unavailable += 1;
+      }
+      const client = new RuntimeClient(runtime.hub, recordUnavailable);
+      const params = {
+        sessionId: 'session-1',
+        clientMessageId: 'message-1',
+        input: 'hello',
+        configuration: { level: 'default', routing: 'user', workspaceRoots: ['/work'] },
+      } as const;
+      if (!afterSend) await runtime.close();
+      const pending = client.externalAgents.turn(params).catch((error: unknown) => error);
+      if (afterSend) {
+        await arrived.promise;
+        await runtime.close();
+      }
+      const error = await pending;
+      expect(unavailable).toBe(1);
+      expect(afterSend ? noReplyOf(error)?.reason : isRequestNotSent(error)).toBe(
+        afterSend ? 'connection-closed' : true
+      );
+    });
+  }
+
+  it('lets local close provenance override a carried message-local kind', async () => {
+    const runtime = await connectTestRuntime({ handlers: {} });
+    const neverSent = new RuntimeRequestNotSentError('external-agent.turn', undefined);
+    Object.assign(neverSent.details ?? {}, { kind: 'external_agent_turn_refused' });
+    const noReply = new RuntimeRequestNoReplyError(
+      new RemoteError('UNAVAILABLE', 'Closed.', {
+        kind: 'external_agent_link_lost',
+        closeCode: 1001,
+      }),
+      'connection-closed'
+    );
+    let unavailable = 0;
+    function recordUnavailable(): void {
+      unavailable += 1;
+    }
+    try {
+      for (const failure of [neverSent, noReply]) {
+        const locallyClosedHub = {
+          ...runtime.hub,
+          request(): Promise<never> {
+            return Promise.reject(failure);
+          },
+        };
+        const client = new RuntimeClient(locallyClosedHub, recordUnavailable);
+        await expect(
+          client.externalAgents.turn({
+            sessionId: 'session-1',
+            clientMessageId: 'message-1',
+            input: 'hello',
+            configuration: { level: 'default', routing: 'user', workspaceRoots: ['/work'] },
+          })
+        ).rejects.toBe(failure);
+      }
+      expect(unavailable).toBe(2);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it('routes the complete external-agent facade through the typed request multiplexer', async () => {
     const received: [string, unknown][] = [];
     const record =

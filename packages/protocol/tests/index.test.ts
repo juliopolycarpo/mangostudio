@@ -29,6 +29,7 @@ describe('package entry point', () => {
       'ChunkReassembler',
       'maxChunksFor',
       'Session',
+      'isSessionClosedRequestError',
       'defineContract',
     ]) {
       expect(exported).toContain(name);

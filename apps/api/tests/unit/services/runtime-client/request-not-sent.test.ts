@@ -1,11 +1,46 @@
 import { describe, expect, it } from 'bun:test';
-import { RemoteError } from '@mangostudio/protocol';
+import { type Frame, type Port, type PortClosure, RemoteError } from '@mangostudio/protocol';
+import { createInProcessPortPair } from '@mangostudio/protocol/in-process';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import { openHubSession } from '../../../../src/services/runtime-client/hub-session';
 import {
   isRequestNotSent,
   noReplyOf,
   RuntimeRequestNotSentError,
 } from '../../../../src/services/runtime-client/request-not-sent';
-import { connectTestRuntime } from '../../../support/runtime-fixture';
+import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
+import { serveFakeRuntime } from '../../../support/fake-runtime-host';
+import {
+  connectTestRuntime,
+  FakeRuntimeDefinition,
+  fixedConsent,
+  TEST_RUNTIME_MANIFEST,
+} from '../../../support/runtime-fixture';
+
+/** Delivers an error response, then closes before the awaiting request resumes. */
+class CloseAfterErrorPort implements Port {
+  readonly #inner: Port;
+  afterError: (() => void) | undefined;
+
+  constructor(inner: Port) {
+    this.#inner = inner;
+  }
+  send(frame: Frame): void {
+    this.#inner.send(frame);
+  }
+  onFrame(listener: (frame: Frame) => void): () => void {
+    return this.#inner.onFrame((frame) => {
+      listener(frame);
+      if (frame.type === 'err') this.afterError?.();
+    });
+  }
+  onClosed(listener: (closure: PortClosure) => void): () => void {
+    return this.#inner.onClosed(listener);
+  }
+  close(code: number, reason?: string): void {
+    this.#inner.close(code, reason);
+  }
+}
 
 const TURN_PARAMS = {
   sessionId: 'session-1',
@@ -93,6 +128,38 @@ describe('RuntimeRequestNotSentError', () => {
     });
     expect(unavailable).toBeInstanceOf(RemoteError);
     await runtime.close();
+  });
+
+  it('keeps a forged remote closeCode message-local when a real close races after the answer', async () => {
+    const ports = createInProcessPortPair();
+    const port = new CloseAfterErrorPort(ports.a);
+    function refuseTurn(): never {
+      throw new RemoteError('UNAVAILABLE', 'This input is refused.', { closeCode: 1001 });
+    }
+    const definition = new FakeRuntimeDefinition({
+      runtimeVersion: 'runtime-test',
+      manifest: TEST_RUNTIME_MANIFEST,
+      consent: fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host'),
+      handlers: { 'external-agent.turn': refuseTurn },
+    });
+    const peer = serveFakeRuntime(ports.b, definition, { livenessIntervalMs: false });
+    const hub = await openHubSession(port, { hubVersion: 'hub-test', workspaceBinding: null });
+    port.afterError = () => hub.close();
+    let unavailable = 0;
+    function recordUnavailable(): void {
+      unavailable += 1;
+    }
+    const client = new RuntimeClient(hub, recordUnavailable);
+    try {
+      const error = await client.externalAgents.turn(TURN_PARAMS).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(RemoteError);
+      expect((error as RemoteError).message).toBe('This input is refused.');
+      expect(noReplyOf(error)).toBeUndefined();
+      expect(unavailable).toBe(0);
+    } finally {
+      hub.close();
+      peer.close();
+    }
   });
 
   it('names the method and the expected state in its message', () => {

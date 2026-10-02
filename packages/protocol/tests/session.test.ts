@@ -3,7 +3,7 @@ import { CLOSE_CODES } from '../src/close';
 import { CodecError, RESERVED_ERROR_CODES, RemoteError } from '../src/errors';
 import type { Port, PortClosure } from '../src/port';
 import type { Frame, HelloFrame } from '../src/schemas/frames';
-import { Session, type SessionOptions } from '../src/session';
+import { isSessionClosedRequestError, Session, type SessionOptions } from '../src/session';
 import { createInProcessPortPair } from '../src/transports/in-process';
 import { PROTOCOL_MINOR } from '../src/version';
 
@@ -117,6 +117,84 @@ function pair(options: Partial<SessionOptions> = {}) {
 function tick(ms = 5): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+describe('local request close provenance', () => {
+  for (const afterSend of [false, true]) {
+    it(`recognizes a local close ${afterSend ? 'during' : 'before'} the request without changing its error payload`, async () => {
+      const { hub, runtime } = pair();
+      await Promise.all([hub.ready, runtime.ready]);
+      const arrived = Promise.withResolvers<void>();
+      function stallRequest(): Promise<never> {
+        arrived.resolve();
+        return new Promise(() => undefined);
+      }
+      runtime.handle('test.stall', stallRequest);
+      if (!afterSend) hub.closeNow(CLOSE_CODES.RELEASED, 'test close');
+      const pending = hub.request('test.stall', {}).catch((error: unknown) => error);
+      if (afterSend) {
+        await arrived.promise;
+        hub.closeNow(CLOSE_CODES.RELEASED, 'test close');
+      }
+      const error = await pending;
+      expect(isSessionClosedRequestError(error)).toBe(true);
+      expect(error).toBeInstanceOf(RemoteError);
+      expect((error as RemoteError).name).toBe('RemoteError');
+      expect((error as RemoteError).code).toBe('UNAVAILABLE');
+      expect((error as RemoteError).details).toMatchObject({
+        method: 'test.stall',
+        closeCode: CLOSE_CODES.RELEASED,
+      });
+      expect(
+        isSessionClosedRequestError(
+          new RemoteError(
+            (error as RemoteError).code,
+            (error as RemoteError).message,
+            (error as RemoteError).details
+          )
+        )
+      ).toBe(false);
+      runtime.closeNow();
+    });
+  }
+
+  it('does not brand a forged remote close when local closure races after the response', async () => {
+    const { ports, hub, runtime } = pair();
+    await Promise.all([hub.ready, runtime.ready]);
+    function refuseRequest(): never {
+      throw new RemoteError('UNAVAILABLE', 'Remote refusal.', {
+        closeCode: CLOSE_CODES.RELEASED,
+        kind: 'connection-closed',
+      });
+    }
+    runtime.handle('test.refuse', refuseRequest);
+    function closeAfterError(frame: Frame): void {
+      if (frame.type === 'err') hub.closeNow();
+    }
+    const off = ports.a.onFrame(closeAfterError);
+    const error = await hub.request('test.refuse', {}).catch((error: unknown) => error);
+    expect(hub.state).toBe('closed');
+    expect(error).toBeInstanceOf(RemoteError);
+    expect((error as RemoteError).message).toBe('Remote refusal.');
+    expect(isSessionClosedRequestError(error)).toBe(false);
+    off();
+    runtime.closeNow();
+  });
+
+  it('rejects markers claimed by primitives, plain objects, remote errors or their causes', () => {
+    for (const value of [
+      null,
+      undefined,
+      true,
+      1,
+      'closed',
+      {},
+      new RemoteError('UNAVAILABLE', 'closed', { closeCode: 4000 }),
+      new Error('closed', { cause: { kind: 'connection-closed' } }),
+    ]) {
+      expect(isSessionClosedRequestError(value)).toBe(false);
+    }
+  });
+});
 
 describe('Session handshake', () => {
   it('resolves ready on both sides with the peer announcement', async () => {

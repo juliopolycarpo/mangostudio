@@ -62,7 +62,7 @@ export interface FakeExternalRuntimeOptions {
    * detached answer the hub must refuse to correlate events against.
    */
   readonly reviewThreadId?: string;
-  readonly reviewFailure?: () => Error;
+  readonly reviewFailure?: () => Error | undefined;
 }
 
 export interface FakeExternalRuntime {
