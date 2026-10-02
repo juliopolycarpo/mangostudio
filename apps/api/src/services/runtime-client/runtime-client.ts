@@ -886,7 +886,10 @@ function translateRuntimeError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
   }
   if (error.code === RESERVED_ERROR_CODES.CANCELLED) {
-    return new DOMException(error.message, 'AbortError');
+    const aborted = new DOMException(error.message, 'AbortError');
+    // Keep dispatch and cleanup facts without changing the AbortError facade.
+    Object.defineProperty(aborted, 'cause', { value: error });
+    return aborted;
   }
   if (error.code === RESERVED_ERROR_CODES.TIMEOUT) {
     // `cause` keeps whether the hub or the runtime decided it timed out.

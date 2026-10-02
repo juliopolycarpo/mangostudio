@@ -28,7 +28,11 @@ import type { CancellableSleep } from '../../../../src/modules/external-agents/a
 import { readContinuation } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
 import { listAttemptsForMessage } from '../../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { cancelActiveTurn } from '../../../../src/modules/generation/application/active-turn-registry';
-import { RuntimeRequestNotSentError } from '../../../../src/services/runtime-client/request-not-sent';
+import {
+  RuntimeRequestNoReplyError,
+  RuntimeRequestNotSentError,
+} from '../../../../src/services/runtime-client/request-not-sent';
+import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 import { createFakeBackoffClock } from '../../../support/external-agents/fake-backoff-clock';
 import {
   createFakeExternalRuntime,
@@ -1036,6 +1040,29 @@ describe('external turn controller', () => {
       );
     }
 
+    it('preserves an unanswered review deadline without retrying or claiming a vendor refusal', async () => {
+      function reviewDeadline(): Error {
+        return new ToolExecutionTimedOutError('Review acknowledgement timed out.', {
+          cause: new RuntimeRequestNoReplyError(
+            new RemoteError('TIMEOUT', 'Review acknowledgement timed out.'),
+            'deadline'
+          ),
+        });
+      }
+      const { runtime, controller } = harness({
+        capabilities: REVIEW_CAPABILITIES,
+        reviewFailure: reviewDeadline,
+      });
+      const result = await startReview(controller);
+      expect(result.reason).toBe('acceptance-unknown');
+      expect(runtime.calls.startReview).toHaveLength(1);
+      expect(runtime.calls.close).toEqual([]);
+      expect(runtime.calls.cancel).toEqual([]);
+      expect(turnPartOf((await readAssistantRow()).parts).terminalReason).toBe(
+        'acceptance-unknown'
+      );
+    });
+
     for (const dispatch of [undefined, 'not-submitted'] as const) {
       it(`settles deterministic review refusal once and keeps the session usable (${dispatch ?? 'no dispatch'})`, async () => {
         let refuse = true;
@@ -1072,6 +1099,84 @@ describe('external turn controller', () => {
         expect(runtime.calls.open).toHaveLength(1);
         expect(runtime.calls.close).toEqual([]);
         expect(runtime.calls.startReview[1]?.sessionId).toBe(result.sessionId);
+      });
+    }
+
+    for (const [label, code, details, expected] of [
+      [
+        'Busy',
+        'INTERNAL',
+        { kind: 'external_agent_busy', dispatch: 'not-submitted' },
+        'vendor-error',
+      ],
+      [
+        'Accepted',
+        'INTERNAL',
+        { kind: 'external_agent_vendor', dispatch: 'accepted', cleanupRequired: true },
+        'vendor-error',
+      ],
+      [
+        'AcceptanceUnknown',
+        'UNAVAILABLE',
+        {
+          kind: 'external_agent_link_lost',
+          dispatch: 'acceptance-unknown',
+          cleanupRequired: true,
+          cleanup: 'unconfirmed',
+        },
+        'acceptance-unknown',
+      ],
+      [
+        'contradictory cleanup refusal',
+        'INTERNAL',
+        { kind: 'external_agent_turn_refused', dispatch: 'not-submitted', cleanupRequired: true },
+        'acceptance-unknown',
+      ],
+      [
+        'malformed cleanup refusal',
+        'INTERNAL',
+        { kind: 'external_agent_turn_refused', cleanupRequired: 'true' },
+        'acceptance-unknown',
+      ],
+      [
+        'normalized timeout uncertainty',
+        'TIMEOUT',
+        { kind: 'external_agent_failure', dispatch: 'acceptance-unknown' },
+        'acceptance-unknown',
+      ],
+      [
+        'normalized cancellation uncertainty',
+        'CANCELLED',
+        { kind: 'external_agent_failure', dispatch: 'acceptance-unknown' },
+        'acceptance-unknown',
+      ],
+    ] as const) {
+      it(`preserves ${label} on a refused review start without retrying or reaping`, async () => {
+        const error = new RemoteError(code, `Review failed: ${label}.`, details);
+        function refuseReview(): Error {
+          return error;
+        }
+        const { runtime, controller, sessions } = await realHarness({
+          reviewFailure: refuseReview,
+        });
+        try {
+          const result = await startReview(controller);
+          expect(result.reason).toBe(expected);
+          expect(result.error).toEqual({
+            code: 'review-start',
+            message: `Review failed: ${label}.`,
+          });
+          expect(runtime.calls.startReview).toHaveLength(1);
+          expect(runtime.calls.turn).toEqual([]);
+          expect(runtime.calls.cancel).toEqual([]);
+          expect(runtime.calls.close).toEqual([]);
+          expect(sessions.liveSessionCount()).toBe(1);
+          const stored = await readAssistantRow();
+          expect(stored.generating).toBe(false);
+          expect(turnPartOf(stored.parts).terminalReason).toBe(expected);
+        } finally {
+          await runtime.close();
+        }
       });
     }
 

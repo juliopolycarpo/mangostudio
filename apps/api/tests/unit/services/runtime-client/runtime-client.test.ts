@@ -111,6 +111,34 @@ describe('RuntimeClient', () => {
     }
   });
 
+  it('preserves a cancelled runtime reply as cause of its AbortError', async () => {
+    function refuseCancelledReview(): never {
+      throw new RemoteError('CANCELLED', 'Vendor could not confirm acceptance.', {
+        dispatch: 'acceptance-unknown',
+      });
+    }
+    const runtime = await connectTestRuntime({
+      handlers: { 'external-agent.start-review': refuseCancelledReview },
+    });
+    try {
+      const error = await runtime.client.externalAgents
+        .startReview({
+          sessionId: 'session-1',
+          clientMessageId: 'review-1',
+          target: { type: 'uncommittedChanges' },
+        })
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(DOMException);
+      expect((error as Error).name).toBe('AbortError');
+      expect((error as Error).cause).toBeInstanceOf(RemoteError);
+      expect(((error as Error).cause as RemoteError).details).toEqual({
+        dispatch: 'acceptance-unknown',
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
   for (const details of [
     undefined,
     { kind: 'in_flight_limit' },

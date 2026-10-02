@@ -48,6 +48,7 @@ export type SubmissionFailure = 'not-submitted' | 'no-reply' | 'acceptance-unkno
 /**
  * Classifies a rejected submission. Only failures the hub itself observed are
  * `no-reply`; everything that came over the wire is the runtime's answer.
+ * Normalized errors retain that answer in `cause`, including dispatch facts.
  *
  * @example
  * classifySubmissionFailure(new RemoteError('UNAVAILABLE', 'signed out')); // 'refused'
@@ -55,7 +56,7 @@ export type SubmissionFailure = 'not-submitted' | 'no-reply' | 'acceptance-unkno
 export function classifySubmissionFailure(error: unknown): SubmissionFailure {
   if (isRequestNotSent(error)) return 'not-submitted';
   if (noReplyOf(error)) return 'no-reply';
-  const details = error instanceof RemoteError ? error.details : undefined;
+  const details = submissionRemoteErrorOf(error)?.details;
   const dispatch = details?.dispatch;
   if (dispatch === 'acceptance-unknown') return 'acceptance-unknown';
   if (details?.kind === 'external_agent_turn_refused' && dispatch !== 'accepted') {
@@ -70,6 +71,16 @@ export function classifySubmissionFailure(error: unknown): SubmissionFailure {
   }
   if (dispatch === 'not-submitted') return 'not-submitted';
   return 'refused';
+}
+
+/** The runtime answer behind the Hub's bounded error normalization chain. */
+function submissionRemoteErrorOf(error: unknown): RemoteError | undefined {
+  let current = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    if (current instanceof RemoteError) return current;
+    current = current.cause;
+  }
+  return undefined;
 }
 
 /**
