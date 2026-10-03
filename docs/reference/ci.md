@@ -38,21 +38,25 @@ protocol paths only, and every path the protocol crate compiles from is a Rust
 path too. Each lane selects its toolchain with a job-level `RUSTUP_TOOLCHAIN`,
 which outranks `rust-toolchain.toml` (1.99.0) for every step.
 
-| Lane             | Toolchain | Runs                                                                                                                                                                                                 |
-| ---------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workspace-msrv` | 1.97.0    | Linux: `cargo check --workspace --locked`, then `--workspace --all-targets --all-features --locked`                                                                                                  |
-| `target-msrv`    | 1.97.0    | `cargo check --workspace --all-targets --all-features --locked --target <t>` for `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`, on native macOS and Windows runners |
-| `launcher-msrv`  | 1.96.0    | `cargo check`, `clippy` and `test` of the `mangostudio` launcher, whose published floor is lower                                                                                                     |
+| Lane             | Toolchain | Runs                                                                                                                                                                                                                                                                                 |
+| ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workspace-msrv` | 1.97.0    | Linux: `cargo check --workspace --locked`, then `--workspace --all-targets --all-features --locked`                                                                                                                                                                                  |
+| `target-msrv`    | 1.97.0    | `cargo check --workspace --all-targets --all-features --locked --target <t>` for `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`: native on the macOS arm64 and Windows x64 runners, ARM64 Windows cross-checked from the x64 `windows-latest` runner |
+| `launcher-msrv`  | 1.96.0    | `cargo check`, `clippy` and `test` of the `mangostudio` launcher, whose published floor is lower                                                                                                                                                                                     |
 
 The workspace floor is `rust-version` in the root `Cargo.toml`;
 `scripts/tests/ci-gate.unit.test.ts` fails when a lane's toolchain drifts from it.
 `target-msrv` exists because `cfg(windows)` and `cfg(target_os = "macos")` code is
 not compiled on Linux, and the native tests of `workspace` run on 1.99.0, so they
 say nothing about the floor. It only checks: compiling every target kind is the
-whole minimum-version claim, and running them would repeat `workspace`. Linux
-musl keeps its own 1.99.0 clippy lane and is not a minimum-Rust target.
+whole minimum-version claim, and running them would repeat `workspace`. The
+Windows ARM64 leg is cross-checked from the x64 runner, not run natively; the
+native ARM64 runner only runs the tests below. Neither lane uses rust-cache:
+the cold checks take minutes and the repository's Actions cache is already over
+its quota. Linux musl keeps its own 1.99.0 clippy lane and is not a minimum-Rust
+target.
 
-Windows ARM64 also gets native tests: `workspace-windows-arm64` runs
+Windows ARM64 also gets native tests (not a minimum-Rust check; they run on the 1.99.0 development toolchain): `workspace-windows-arm64` runs
 `cargo test -p mangostudio-runtime --all-targets --all-features --locked` on
 `windows-11-arm` behind the same Rust signal, because distribution only
 cross-compiles that target and smoke only boots the built binary. It is scoped to
