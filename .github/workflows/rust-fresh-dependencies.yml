@@ -106,7 +106,7 @@ jobs:
   report:
     name: Update compatibility issue
     needs: [resolve, policy, fresh]
-    if: ${{ !cancelled() && contains(needs.*.result, 'failure') && github.event_name != 'pull_request' }}
+    if: ${{ !cancelled() && contains(needs.*.result, 'failure') && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:

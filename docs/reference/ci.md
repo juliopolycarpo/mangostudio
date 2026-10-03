@@ -29,9 +29,10 @@ on manual dispatch, then runs dependency policy and Linux, macOS and Windows
 build, clippy, workspace tests and doctests against the same graph. Policy
 failures do not skip platform checks. Exact SDK pins remain exact. The resolved lock
 is retained as a workflow artifact and never committed. This advisory workflow
-does not feed a required PR gate. Failed scheduled or manual runs update one
-bot-owned compatibility issue, preserving maintainer notes; PR validation of the
-workflow never writes issues. Locked CI and Dependabot continue independently.
+does not feed a required PR gate. Failed scheduled or manual runs of `main` update
+one bot-owned compatibility issue, preserving maintainer notes; a manual run on
+another ref and PR validation of the workflow never write issues. Locked CI and
+Dependabot continue independently.
 
 ## Rust coverage
 

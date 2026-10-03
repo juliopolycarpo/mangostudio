@@ -30,9 +30,9 @@ workspace e doctests no Linux, macOS e Windows com o mesmo grafo. Falhas de
 política não pulam os checks de plataforma. Os pins exatos do SDK continuam exatos. O
 lock resolvido fica como artefato do workflow e nunca é commitado. Esse workflow
 informativo não alimenta um gate obrigatório de PR. Falhas agendadas ou manuais
-atualizam uma única issue do bot, preservando notas dos mantenedores; a validação
-do workflow em PRs nunca escreve issues. O CI com lock e o Dependabot continuam
-independentes.
+na `main` atualizam uma única issue do bot, preservando notas dos mantenedores; uma
+execução manual em outra ref e a validação do workflow em PRs nunca escrevem issues.
+O CI com lock e o Dependabot continuam independentes.
 
 ## Cobertura Rust
 
