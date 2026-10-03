@@ -155,8 +155,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for ObservedLines<R> {
         let before = buf.filled().len();
         let polled = Pin::new(&mut self.inner).poll_read(context, buf);
         if let Poll::Ready(Ok(())) = polled {
-            let read = buf.filled()[before..].to_vec();
-            self.feed(&read);
+            self.feed(&buf.filled()[before..]);
         }
         polled
     }
@@ -167,6 +166,54 @@ mod tests {
     use tokio::io::AsyncReadExt;
 
     use super::*;
+
+    /// Answers its first read with `Pending`, then reads from `inner`.
+    struct PendingOnce<R> {
+        inner: R,
+        polled: bool,
+    }
+
+    impl<R: AsyncRead + Unpin> AsyncRead for PendingOnce<R> {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            context: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            if !self.polled {
+                self.polled = true;
+                return Poll::Pending;
+            }
+            Pin::new(&mut self.inner).poll_read(context, buf)
+        }
+    }
+
+    /// Fails every read, after writing `garbage` into the buffer it was given.
+    struct FailingRead {
+        garbage: &'static [u8],
+    }
+
+    impl AsyncRead for FailingRead {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            buf.put_slice(self.garbage);
+            Poll::Ready(Err(std::io::Error::other("FailingRead: injected failure")))
+        }
+    }
+
+    fn poll_once<R: AsyncRead + Unpin>(
+        reader: &mut ObservedLines<R>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut context = Context::from_waker(std::task::Waker::noop());
+        Pin::new(reader).poll_read(&mut context, buf)
+    }
+
+    fn request(id: usize) -> String {
+        REQUEST.replace("\"id\":7", &format!("\"id\":{id}"))
+    }
 
     const REQUEST: &str = r#"{"jsonrpc":"2.0","id":7,"method":"elicitation/create","params":{"message":"m","requestedSchema":{"type":"object","properties":{"zeta":{"type":"string"},"alpha":{"type":"number"},"mid":{"type":"boolean"}}}}}"#;
 
@@ -223,5 +270,137 @@ mod tests {
 
     fn tokio_test_chain(first: Vec<u8>, second: Vec<u8>) -> impl AsyncRead + Unpin {
         std::io::Cursor::new(first).chain(std::io::Cursor::new(second))
+    }
+
+    #[test]
+    fn a_pending_read_shows_nothing_and_the_next_read_still_completes_the_line() {
+        let order = Arc::new(SchemaOrder::default());
+        let line = format!("{REQUEST}\n");
+        let source = PendingOnce {
+            inner: std::io::Cursor::new(line.clone().into_bytes()),
+            polled: false,
+        };
+        let mut reader = ObservedLines::new(source, Arc::clone(&order));
+        let mut storage = vec![0u8; line.len()];
+        let mut buf = ReadBuf::new(&mut storage);
+
+        let first = poll_once(&mut reader, &mut buf);
+
+        assert!(
+            first.is_pending() && buf.filled().is_empty() && order.take("7").is_none(),
+            "expected Pending with nothing filled or observed | received: {first:?}, filled: {}",
+            buf.filled().len()
+        );
+        let second = poll_once(&mut reader, &mut buf);
+        assert!(
+            matches!(second, Poll::Ready(Ok(()))) && buf.filled() == line.as_bytes(),
+            "expected the whole line passed through | received: {second:?}, filled: {:?}",
+            buf.filled()
+        );
+        assert_eq!(
+            order.take("7"),
+            Some(vec!["zeta".into(), "alpha".into(), "mid".into()])
+        );
+    }
+
+    #[test]
+    fn a_failed_read_shows_nothing_even_if_the_source_wrote_bytes() {
+        let order = Arc::new(SchemaOrder::default());
+        let source = FailingRead {
+            garbage: b"{\"id\":7,\"method\":\"elicitation/create\"}\n",
+        };
+        let mut reader = ObservedLines::new(source, Arc::clone(&order));
+        let mut storage = [0u8; 128];
+        let mut buf = ReadBuf::new(&mut storage);
+
+        let polled = poll_once(&mut reader, &mut buf);
+
+        assert!(
+            matches!(polled, Poll::Ready(Err(_))) && reader.line.is_empty(),
+            "expected an error and no observed bytes | received: {polled:?}, line: {:?}",
+            reader.line
+        );
+    }
+
+    #[test]
+    fn only_the_bytes_this_read_added_are_observed_when_the_buffer_was_already_filled() {
+        let order = Arc::new(SchemaOrder::default());
+        let line = format!("{REQUEST}\n");
+        let mut reader = ObservedLines::new(
+            std::io::Cursor::new(line.clone().into_bytes()),
+            Arc::clone(&order),
+        );
+        let mut storage = vec![0u8; line.len() + 64];
+        let mut buf = ReadBuf::new(&mut storage);
+        buf.put_slice(b"leftover without a newline ");
+
+        let polled = poll_once(&mut reader, &mut buf);
+
+        assert!(matches!(polled, Poll::Ready(Ok(()))));
+        assert_eq!(
+            buf.filled(),
+            [b"leftover without a newline ".as_slice(), line.as_bytes()].concat(),
+            "expected the prefilled bytes and the read passed through untouched"
+        );
+        assert_eq!(
+            order.take("7"),
+            Some(vec!["zeta".into(), "alpha".into(), "mid".into()]),
+            "expected only this read's bytes observed, not the prefilled bytes glued to its line"
+        );
+    }
+
+    #[tokio::test]
+    async fn end_of_stream_leaves_an_unterminated_line_unobserved() {
+        let order = Arc::new(SchemaOrder::default());
+        let bytes = format!("{}\n{}", request(1), request(2));
+        let mut reader = ObservedLines::new(
+            std::io::Cursor::new(bytes.clone().into_bytes()),
+            Arc::clone(&order),
+        );
+        let mut sink = Vec::new();
+
+        reader.read_to_end(&mut sink).await.expect("reads");
+
+        assert_eq!(
+            sink,
+            bytes.as_bytes(),
+            "expected the bytes passed through untouched"
+        );
+        assert!(
+            order.take("2").is_none(),
+            "expected the line without a newline unobserved at EOF"
+        );
+        assert!(
+            order.take("1").is_some(),
+            "expected the terminated line observed"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_requests_are_kept_in_arrival_order_and_the_oldest_ages_out() {
+        let order = Arc::new(SchemaOrder::default());
+        let total = MAX_ORDERS + 2;
+        let bytes: String = (0..total).map(|id| format!("{}\n", request(id))).collect();
+        let mut reader = ObservedLines::new(
+            std::io::Cursor::new(bytes.clone().into_bytes()),
+            Arc::clone(&order),
+        );
+        let mut sink = Vec::new();
+
+        reader.read_to_end(&mut sink).await.expect("reads");
+
+        assert_eq!(
+            sink,
+            bytes.as_bytes(),
+            "expected the bytes passed through untouched"
+        );
+        let kept: Vec<usize> = (0..total)
+            .filter(|id| order.take(&id.to_string()).is_some())
+            .collect();
+        let expected: Vec<usize> = (2..total).collect();
+        assert!(
+            kept == expected,
+            "expected the {MAX_ORDERS} newest ids kept: {expected:?} | received: {kept:?}"
+        );
     }
 }

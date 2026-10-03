@@ -52,6 +52,14 @@ const DEFAULT_MAX_FILES: u32 = 3;
 /// A line this sink could not yet write is held in memory up to this many
 /// entries; beyond it, the oldest buffered line is dropped rather than
 /// growing without bound.
+///
+/// The bound covers the queue (`State::buffered`), the only place a line
+/// waits. The one line a drain has popped and is writing is owned by the
+/// writer, outside the queue, so peak ownership is this many queued lines
+/// plus that one in-flight line. If that write fails, the line is the oldest
+/// record and goes back to the front only while the queue has room; a queue
+/// refilled to the cap by producers in the meantime has no room, so the
+/// line is dropped and counted, never retained past the cap.
 const MAX_BUFFERED_RECORDS: usize = 1_024;
 
 /// Methods whose successful calls are per-interaction rather than
@@ -135,11 +143,50 @@ fn outcome_str(outcome: Outcome) -> &'static str {
     }
 }
 
+/// Where one buffered line lands on disk. [`FileAudit`] holds one per
+/// instance so a test can pause or fail the write; production always uses
+/// [`DiskAppend`].
+trait AppendLine: Send + Sync {
+    /// Writes `line` for `audit`, with `audit.write_lock` already held.
+    ///
+    /// Usage: `DiskAppend.append(&audit, "{\"ts\":...}")` appends one line to
+    /// `audit`'s log, rotating first when the file would pass `max_bytes`.
+    fn append(&self, audit: &FileAudit, line: &str) -> std::io::Result<()>;
+}
+
+/// The real filesystem append: [`FileAudit::append_line_locked`].
+struct DiskAppend;
+
+impl AppendLine for DiskAppend {
+    fn append(&self, audit: &FileAudit, line: &str) -> std::io::Result<()> {
+        audit.append_line_locked(line)
+    }
+}
+
 struct State {
     hub_label: String,
     buffered: VecDeque<String>,
     dropped: usize,
     error_maybe_present: bool,
+}
+
+impl State {
+    /// Puts back the line a failed append took out of the queue's front.
+    ///
+    /// `line` is the oldest record. While it was in flight, producers kept
+    /// enqueuing, so the queue may already be at [`MAX_BUFFERED_RECORDS`]; in
+    /// that case the oldest-first drop rule applies to `line` itself, and it
+    /// is dropped and counted instead of pushing the queue past its cap.
+    ///
+    /// Usage: with a full queue, `state.reinsert_oldest(line)` leaves the
+    /// queue as it was and raises `state.dropped` by one.
+    fn reinsert_oldest(&mut self, line: String) {
+        if self.buffered.len() >= MAX_BUFFERED_RECORDS {
+            self.dropped += 1;
+            return;
+        }
+        self.buffered.push_front(line);
+    }
 }
 
 /// Records every call's outcome (bar a successful keystroke-rate terminal
@@ -180,6 +227,7 @@ pub struct FileAudit {
     max_bytes: u64,
     max_files: u32,
     wall_clock: Arc<dyn WallClock>,
+    append: Arc<dyn AppendLine>,
     state: Arc<Mutex<State>>,
     /// Serialises `append_line_locked`'s read-size, maybe-rotate, then-write
     /// sequence, kept separate from `state`: two `record` calls dispatched
@@ -212,6 +260,7 @@ impl FileAudit {
             max_bytes: DEFAULT_MAX_BYTES,
             max_files: DEFAULT_MAX_FILES,
             wall_clock,
+            append: Arc::new(DiskAppend),
             state: Arc::new(Mutex::new(State {
                 hub_label: UNIDENTIFIED_HUB.to_string(),
                 buffered: VecDeque::new(),
@@ -235,6 +284,14 @@ impl FileAudit {
         self
     }
 
+    /// Replaces the disk append with `append`, for a test that needs to
+    /// pause or fail a write.
+    #[cfg(test)]
+    fn with_append(mut self, append: Arc<dyn AppendLine>) -> Self {
+        self.append = append;
+        self
+    }
+
     /// Names every subsequent line's `hub` field, once a handshake
     /// identifies the peer. `None` reverts to `"unidentified hub"`.
     pub fn set_hub(&self, hub: Option<HubIdentity>) {
@@ -244,8 +301,10 @@ impl FileAudit {
 
     /// Drains every currently buffered line, retrying its write. Mirrors
     /// `audit-log.ts`'s own drain-on-close loop; a line that still cannot
-    /// be written is put back (in order) and reported via the sidecar
-    /// error file rather than lost.
+    /// be written is put back (in order) while the buffer has room, and
+    /// reported via the sidecar error file. If producers refilled the
+    /// buffer to its cap meanwhile, that oldest line is dropped instead and
+    /// counted in the sidecar's dropped total.
     ///
     /// # Example
     ///
@@ -301,10 +360,10 @@ impl FileAudit {
     }
 
     /// The read-size, maybe-rotate, then-write sequence itself, assuming
-    /// `write_lock` is already held — [`FileAudit::drain_buffer`] is the
-    /// sole caller, and takes `write_lock` itself before calling in;
-    /// nothing here takes it again, or draining a batch would deadlock
-    /// against its own outer lock. See `write_lock`'s own doc comment for
+    /// `write_lock` is already held — [`DiskAppend`], reached only through
+    /// [`FileAudit::drain_buffer`], is the sole caller, and `drain_buffer`
+    /// takes `write_lock` itself before calling in; nothing here takes it
+    /// again, or draining a batch would deadlock against its own outer lock. See `write_lock`'s own doc comment for
     /// why a partial hold (or none at all) lets two concurrent callers both
     /// decide to rotate from the same stale length.
     fn append_line_locked(&self, line: &str) -> std::io::Result<()> {
@@ -376,8 +435,11 @@ impl FileAudit {
     }
 
     /// Retries every currently buffered line, oldest first, stopping at the
-    /// first one that still fails and putting it back so ordering is
-    /// preserved for the next attempt. Holds `write_lock` for the whole
+    /// first one that still fails. That line goes back to the front, so
+    /// ordering is preserved for the next attempt, while the queue has
+    /// room; if producers refilled the queue to [`MAX_BUFFERED_RECORDS`]
+    /// during the write, it is the oldest record and is dropped and
+    /// counted instead (see `State::reinsert_oldest`). Holds `write_lock` for the whole
     /// drain rather than re-acquiring it one line at a time: two `record`
     /// calls each buffering their own line and then racing to drain used
     /// to let each drain snapshot a different, disjoint slice of
@@ -396,10 +458,10 @@ impl FileAudit {
                 self.clear_error();
                 return;
             };
-            if let Err(error) = self.append_line_locked(&line) {
+            if let Err(error) = self.append.append(self, &line) {
                 let dropped = {
                     let mut state = lock(&self.state);
-                    state.buffered.push_front(line);
+                    state.reinsert_oldest(line);
                     state.dropped
                 };
                 let suffix = if dropped > 0 {
@@ -474,16 +536,227 @@ mod tests {
     use std::io;
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Barrier};
+    use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::sync::{Arc, Barrier, Mutex};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use serde_json::{Value, json};
 
-    use super::{FileAudit, HubIdentity};
+    use super::{AppendLine, FileAudit, HubIdentity, MAX_BUFFERED_RECORDS};
     use crate::ports::audit::{Audit, AuditEntry, Outcome, lock};
     use crate::ports::wall_clock::FixedWallClock;
     use crate::runtime_home::atomic::Rename;
-    use crate::test_support::scratch_dir;
+    use crate::test_support::{ScratchDir, scratch_dir};
+
+    /// What the first line [`PausedAppend`] sees ends in.
+    #[derive(Clone, Copy)]
+    enum PausedOutcome {
+        Fail,
+        Land,
+    }
+
+    /// A per-instance append fake. Its first call reports the line it was
+    /// handed on `entered`, then blocks until `release` is signalled, so a
+    /// test holds one append in flight while producers enqueue; it then fails
+    /// or lands per `outcome`. Later calls skip the pause and follow
+    /// `outcome` at once, and every landed line is kept in `landed`, in
+    /// write order. Like the real append, it requires the caller to hold
+    /// `audit.write_lock` and panics naming that contract otherwise.
+    struct PausedAppend {
+        entered: Sender<String>,
+        release: Mutex<Receiver<()>>,
+        outcome: PausedOutcome,
+        calls: AtomicUsize,
+        landed: Mutex<Vec<String>>,
+    }
+
+    impl AppendLine for PausedAppend {
+        fn append(&self, audit: &FileAudit, line: &str) -> io::Result<()> {
+            assert!(
+                matches!(
+                    audit.write_lock.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                ),
+                "expected AppendLine::append to run with write_lock held | received: write_lock free for line {line:?}"
+            );
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.entered.send(line.to_string()).unwrap();
+                lock(&self.release)
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("expected the test to release the paused append within 5s");
+            }
+            match self.outcome {
+                PausedOutcome::Fail => Err(io::Error::other("PausedAppend: injected failure")),
+                PausedOutcome::Land => {
+                    lock(&self.landed).push(line.to_string());
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// A [`FileAudit`] wired to a [`PausedAppend`], plus the test's ends of
+    /// its channels.
+    struct PausedAudit {
+        audit: Arc<FileAudit>,
+        append: Arc<PausedAppend>,
+        entered: Receiver<String>,
+        release: Sender<()>,
+        dir: ScratchDir,
+    }
+
+    fn paused_audit(name: &str, outcome: PausedOutcome) -> PausedAudit {
+        let dir = scratch_dir(name);
+        let (entered_tx, entered) = channel();
+        let (release, release_rx) = channel();
+        let append = Arc::new(PausedAppend {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+            outcome,
+            calls: AtomicUsize::new(0),
+            landed: Mutex::new(Vec::new()),
+        });
+        let audit = Arc::new(
+            FileAudit::new(
+                dir.join("audit.log"),
+                Arc::new(FixedWallClock::new(SystemTime::now())),
+            )
+            .with_append(Arc::clone(&append) as Arc<dyn AppendLine>),
+        );
+        PausedAudit {
+            audit,
+            append,
+            entered,
+            release,
+            dir,
+        }
+    }
+
+    /// Fills the queue to `MAX_BUFFERED_RECORDS` (`record-0` oldest), parks
+    /// a drain inside the paused append of `record-0`, lets `enqueue_during`
+    /// producers each add `newest-<n>`, then releases the append and waits
+    /// for the drain to finish.
+    fn race_producers_against_paused_append(
+        name: &str,
+        outcome: PausedOutcome,
+        enqueue_during: usize,
+    ) -> PausedAudit {
+        let paused = paused_audit(name, outcome);
+        for index in 0..MAX_BUFFERED_RECORDS {
+            paused.audit.enqueue(format!("record-{index}"));
+        }
+        let draining = Arc::clone(&paused.audit);
+        let worker = std::thread::spawn(move || draining.drain_buffer());
+        let in_flight = paused
+            .entered
+            .recv_timeout(Duration::from_secs(5))
+            .expect("expected the drain to enter the paused append within 5s");
+        assert_eq!(in_flight, "record-0", "expected the oldest line in flight");
+        for index in 0..enqueue_during {
+            paused.audit.enqueue(format!("newest-{index}"));
+        }
+        paused.release.send(()).unwrap();
+        worker.join().unwrap();
+        paused
+    }
+
+    fn retained(audit: &FileAudit) -> (Vec<String>, usize) {
+        let state = lock(&audit.state);
+        (state.buffered.iter().cloned().collect(), state.dropped)
+    }
+
+    fn assert_retained_within_cap(retained: &[String]) {
+        assert!(
+            retained.len() <= MAX_BUFFERED_RECORDS,
+            "expected retained <= {MAX_BUFFERED_RECORDS} | received: {}",
+            retained.len()
+        );
+    }
+
+    #[test]
+    fn a_failed_append_racing_an_enqueue_keeps_the_buffer_within_its_cap() {
+        let race = race_producers_against_paused_append("cap-one-enqueue", PausedOutcome::Fail, 1);
+
+        let (queue, dropped) = retained(&race.audit);
+        assert_retained_within_cap(&queue);
+        assert!(
+            dropped == 1,
+            "expected dropped: 1 (the in-flight oldest record) | received: {dropped}"
+        );
+        assert!(
+            queue.first().map(String::as_str) == Some("record-1")
+                && queue.last().map(String::as_str) == Some("newest-0"),
+            "expected oldest survivor record-1 and newest newest-0 | received: {:?} .. {:?}",
+            queue.first(),
+            queue.last()
+        );
+        let sidecar = std::fs::read_to_string(race.dir.join("audit.log.error")).unwrap();
+        assert!(
+            sidecar.contains("(1 record(s) dropped)"),
+            "expected sidecar containing: (1 record(s) dropped) | received: {sidecar:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_append_racing_two_enqueues_drops_exactly_the_two_oldest_records() {
+        let race = race_producers_against_paused_append("cap-two-enqueues", PausedOutcome::Fail, 2);
+
+        let (queue, dropped) = retained(&race.audit);
+        assert_retained_within_cap(&queue);
+        assert!(
+            dropped == 2,
+            "expected dropped: 2 (record-0 and record-1) | received: {dropped}"
+        );
+        assert!(
+            queue.first().map(String::as_str) == Some("record-2")
+                && queue.last().map(String::as_str) == Some("newest-1"),
+            "expected oldest survivor record-2 and newest newest-1 | received: {:?} .. {:?}",
+            queue.first(),
+            queue.last()
+        );
+    }
+
+    #[test]
+    fn an_append_that_lands_while_producers_enqueue_drops_nothing() {
+        let race = race_producers_against_paused_append("cap-landed", PausedOutcome::Land, 1);
+
+        let (queue, dropped) = retained(&race.audit);
+        assert!(
+            queue.is_empty() && dropped == 0,
+            "expected an empty queue and dropped: 0 | received: {} queued, dropped: {dropped}",
+            queue.len()
+        );
+        let landed = lock(&race.append.landed);
+        let expected: Vec<String> = (0..MAX_BUFFERED_RECORDS)
+            .map(|index| format!("record-{index}"))
+            .chain(["newest-0".to_string()])
+            .collect();
+        assert!(
+            *landed == expected,
+            "expected every record landed oldest first ({} records) | received: {} records, first {:?}, last {:?}",
+            expected.len(),
+            landed.len(),
+            landed.first(),
+            landed.last()
+        );
+    }
+
+    #[test]
+    fn a_failed_append_with_room_in_the_queue_puts_its_line_back_in_front() {
+        let paused = paused_audit("cap-room", PausedOutcome::Fail);
+        for index in 0..3 {
+            paused.audit.enqueue(format!("record-{index}"));
+        }
+        paused.release.send(()).unwrap();
+
+        paused.audit.drain_buffer();
+
+        let (queue, dropped) = retained(&paused.audit);
+        assert!(
+            queue == ["record-0", "record-1", "record-2"] && dropped == 0,
+            "expected [record-0, record-1, record-2] and dropped: 0 | received: {queue:?}, dropped: {dropped}"
+        );
+    }
 
     struct SharingViolationOnce {
         attempts: AtomicUsize,
