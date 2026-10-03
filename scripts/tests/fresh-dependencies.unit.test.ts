@@ -141,8 +141,9 @@ describe('fresh dependency workflow', () => {
     expect(fresh).toContain('fail-fast: false');
     expect(fresh).toContain('name: fresh-rust-lockfile');
     expect(fresh.indexOf('actions/download-artifact@')).toBeLessThan(
-      fresh.indexOf('cargo build --workspace --all-features --locked')
+      fresh.indexOf('cargo clippy --workspace')
     );
+    expect(fresh).not.toContain('cargo build');
     expect(fresh).not.toContain('cargo generate-lockfile');
     const policy = extractJobBlock(workflow, 'policy');
     expect(policy).toContain('needs: [resolve]');
