@@ -233,7 +233,7 @@ impl InstallEvents for RecordingEvents {
         self.frames.lock().unwrap().push(input);
         let accepted = self
             .accept
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                 left.checked_sub(1)
             })
             .is_ok();

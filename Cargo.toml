@@ -18,9 +18,9 @@ authors = ["Julio Polycarpo"]
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/juliopolycarpo/mangostudio"
-# Protocol policy: current stable minus two minors (currently 1.96) is the floor we'd allow, but
-# the protocol holds at 1.97 because dropping to the floor buys nothing today. The launcher's
-# published MSRV stays explicit in its manifest so it cannot inherit this protocol decision.
+# Protocol policy: current stable minus two minors is 1.97, matching the workspace MSRV.
+# The launcher's published MSRV stays explicit in its manifest so it cannot inherit
+# this protocol decision.
 # Both MSRV lanes run independently of the development toolchain in `rust-toolchain.toml`.
 rust-version = "1.97.0"
 

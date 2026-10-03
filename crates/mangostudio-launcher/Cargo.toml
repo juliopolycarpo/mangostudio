@@ -10,9 +10,10 @@ keywords = ["ai", "image-generation", "chat", "cli"]
 license.workspace = true
 readme = "README.md"
 repository.workspace = true
-# This published launcher keeps the existing stable-minus-two floor. It shares
-# the workspace edition and development toolchain without inheriting the
-# protocol crate's intentionally higher 1.97 floor.
+# Deliberate exception for the published launcher: it stays at 1.96, one minor
+# below the workspace's stable-minus-two floor of 1.97, and its MSRV and
+# release lanes build with 1.96.0. It shares the workspace edition and
+# development toolchain without inheriting the workspace `rust-version`.
 rust-version = "1.96.0"
 description = "AI-powered image generation and chat studio (launcher; downloads the prebuilt binary on first run)"
 
