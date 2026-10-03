@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use super::paths::{ResourceKind, node_basename, node_dirname, resolve_through_existing_ancestor};
 use crate::hex::hex;
+use crate::lossy_utf8::lossy_string_from_bytes;
 
 /// Why a copy is being made. Only a fault fixture reads it: the TypeScript
 /// writer's `copyTree` takes the same tag so a test can fail staging without
@@ -109,7 +110,7 @@ impl MutationFs for NativeMutationFs {
         File::open(path)?.read_to_end(&mut bytes)?;
         // `readFile(path, 'utf8')` replaces invalid sequences rather than
         // failing; JSON.parse then decides.
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
+        Ok(lossy_string_from_bytes(bytes))
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<(String, EntryType)>> {

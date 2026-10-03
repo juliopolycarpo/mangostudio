@@ -62,6 +62,7 @@ use super::detection::winget_ownership::{
 use super::locations::{LocationFsProbe, LocationLayout};
 use crate::blocking::run_blocking;
 use crate::file_identity::fingerprint;
+use crate::lossy_utf8::lossy_string_from_bytes;
 use crate::probe_cache::ProbeCache;
 use crate::subprocess::{ChildBudget, run_bounded_child};
 
@@ -504,7 +505,7 @@ impl AuthSignalFs for RealAuthSignalFs {
         // rather than throwing; `read_to_string`'s strict UTF-8 requirement
         // would refuse a config file this read only truncated mid-character,
         // not one that was ever actually malformed.
-        Ok(String::from_utf8_lossy(&buffer).into_owned())
+        Ok(lossy_string_from_bytes(buffer))
     }
 }
 
@@ -623,7 +624,7 @@ pub(crate) async fn probe_winget_ownership(cancel: &CancellationToken) -> Winget
     };
     match run_bounded_child(Path::new("winget"), &arg_refs, None, budget, cancel).await {
         Ok(outcome) => {
-            let stdout = String::from_utf8_lossy(&outcome.stdout).into_owned();
+            let stdout = lossy_string_from_bytes(outcome.stdout);
             parse_winget_list_output(
                 &stdout,
                 outcome.exit_code.map(i64::from),
