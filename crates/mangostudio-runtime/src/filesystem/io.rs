@@ -2164,13 +2164,48 @@ struct WindowsRenameInfo {
 
 #[cfg(windows)]
 impl WindowsRenameInfo {
-    fn as_mut_ptr(&mut self) -> *const core::ffi::c_void {
+    fn as_mut_ptr(&mut self) -> *mut core::ffi::c_void {
         self.storage.as_mut_ptr().cast()
     }
 
     fn len(&self) -> u32 {
         self.len
     }
+}
+
+/// Returns the address of the variable-length `FileName` tail of a
+/// `FILE_RENAME_INFO` without creating a reference to it.
+///
+/// `FileName` is declared as `[u16; 1]`, but the Win32 buffer holds
+/// `FileNameLength` bytes there. `(*info).FileName.as_mut_ptr()` would first
+/// take `&mut [u16; 1]`, and under Stacked Borrows that reference only grants
+/// access to two bytes, so a longer write or read through it is rejected. A raw
+/// field projection keeps the provenance of `info`.
+///
+/// # Safety
+///
+/// `info` must be non-null and aligned for `FILE_RENAME_INFO`, and point into
+/// an allocation that holds the whole struct. Reads and writes through the
+/// result must stay inside that allocation, and a write needs `info` to carry
+/// write provenance.
+///
+/// # Example
+///
+/// ```ignore
+/// let tail = unsafe { rename_info_tail(info) };
+/// unsafe { std::ptr::copy_nonoverlapping(name.as_ptr(), tail, name.len()) };
+/// ```
+#[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "projects a raw field pointer inside a Win32 variable-length buffer"
+)]
+unsafe fn rename_info_tail(
+    info: *mut windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO,
+) -> *mut u16 {
+    // SAFETY: the caller guarantees `info` is valid and aligned; `&raw mut`
+    // computes the field address without creating a reference.
+    unsafe { (&raw mut (*info).FileName).cast::<u16>() }
 }
 
 #[cfg(windows)]
@@ -2201,21 +2236,36 @@ fn windows_rename_info(
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     let len =
         u32::try_from(size).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // `filename_bytes <= size`, so it fits in `u32` whenever `len` did.
+    let name_length = u32::try_from(filename_bytes)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // Zero-filled `u64` words: 8-byte alignment is at least FILE_RENAME_INFO's
+    // pointer-sized alignment on x86, x86_64 and aarch64 Windows, and the zero
+    // fill initializes the union bytes and padding this function never writes.
     let mut storage = vec![0_u64; size.div_ceil(std::mem::size_of::<u64>())];
+    // Derived from the whole `Vec` allocation, so it carries provenance for
+    // `storage.len() * 8` bytes, not just for the fixed header.
     let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
-    // SAFETY: `storage` is aligned and sized for the fixed FILE_RENAME_INFO
-    // header plus every UTF-16 code unit copied into its trailing filename.
+    // SAFETY: `info` is the base of `storage`, which is aligned for
+    // FILE_RENAME_INFO and holds `size.div_ceil(8) * 8 >= size` initialized
+    // bytes, where `size = size_of::<FILE_RENAME_INFO>() + filename_bytes`.
+    // The header fields are written through place expressions on the raw
+    // pointer, so no reference to the struct is created. The filename lands at
+    // `offset_of!(FILE_RENAME_INFO, FileName)`, which is below
+    // `size_of::<FILE_RENAME_INFO>()`, so the `filename.len()` code units end
+    // at or before `size`, inside the allocation. `rename_info_tail` derives
+    // that destination from `info` without a reference to the declared
+    // one-element `FileName` array, which would narrow its provenance to two
+    // bytes. `filename` is a separate allocation, so the ranges cannot overlap.
     unsafe {
         (*info).Anonymous.ReplaceIfExists = false;
         (*info).RootDirectory = root_directory;
-        (*info).FileNameLength = u32::try_from(filename_bytes)
-            .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
-        std::ptr::copy_nonoverlapping(
-            filename.as_ptr(),
-            (*info).FileName.as_mut_ptr(),
-            filename.len(),
-        );
+        (*info).FileNameLength = name_length;
+        std::ptr::copy_nonoverlapping(filename.as_ptr(), rename_info_tail(info), filename.len());
     }
+    // `len` (== `size`) is the byte count `atomic_rename_no_replace` passes as
+    // the API buffer length: the fixed struct plus the full filename payload,
+    // never more than the `storage` allocation.
     Ok(WindowsRenameInfo { storage, len })
 }
 
@@ -4255,25 +4305,55 @@ mod tests {
         use windows_sys::Win32::Foundation::HANDLE;
         use windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO;
 
-        let root = 42_usize as HANDLE;
-        let mut buffer = windows_rename_info(root, Path::new("target.txt")).unwrap();
-        let info = buffer.storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
-        let expected: Vec<u16> = std::ffi::OsStr::new("target.txt").encode_wide().collect();
-        // SAFETY: `windows_rename_info` returned initialized, aligned storage;
-        // the expected slice length is the exact FileNameLength it encoded.
-        unsafe {
-            assert!(!(*info).Anonymous.ReplaceIfExists);
-            assert_eq!((*info).RootDirectory, root);
-            assert_eq!((*info).FileNameLength, (expected.len() * 2) as u32);
+        let header = std::mem::size_of::<FILE_RENAME_INFO>();
+        let tail_offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+        // On 64-bit Windows the 24-byte header makes "file.txt" fill its `u64`
+        // words exactly, while the other two leave padding; the last is also
+        // non-ASCII so no UTF-16 unit equals its byte.
+        for leaf in ["file.txt", "target.txt", "t\u{fc}rkis-\u{65e5}\u{672c}.txt"] {
+            let root = 42_usize as HANDLE;
+            let buffer = windows_rename_info(root, Path::new(leaf)).unwrap();
+            let expected: Vec<u16> = std::ffi::OsStr::new(leaf).encode_wide().collect();
+            let name_bytes = expected.len() * 2;
+            let allocated = buffer.storage.len() * std::mem::size_of::<u64>();
             assert_eq!(
-                std::slice::from_raw_parts((*info).FileName.as_ptr(), expected.len()),
-                expected
+                buffer.len() as usize,
+                header + name_bytes,
+                "expected API buffer length: header + name | leaf: {leaf}",
             );
+            assert!(
+                allocated >= buffer.len() as usize,
+                "expected allocation to cover the API buffer length | allocated: {allocated} | len: {} | leaf: {leaf}",
+                buffer.len(),
+            );
+            let base = buffer.storage.as_ptr();
+            let info = base.cast::<FILE_RENAME_INFO>();
+            // SAFETY: `windows_rename_info` returned zero-initialized `u64`
+            // storage, aligned for FILE_RENAME_INFO. Header fields are read
+            // through raw place expressions. The tail is addressed from the
+            // allocation base by byte offset, independently of production's
+            // field projection, and `tail_offset + name_bytes <= buffer.len()
+            // <= allocated` was asserted above. `base` derives from the whole
+            // `Vec`, so no reference narrows it to the one-element array.
+            unsafe {
+                assert!(!(*info).Anonymous.ReplaceIfExists);
+                assert_eq!((*info).RootDirectory, root);
+                assert_eq!((*info).FileNameLength as usize, name_bytes);
+                let tail = base.cast::<u8>().add(tail_offset).cast::<u16>();
+                assert_eq!(
+                    tail,
+                    rename_info_tail(info.cast_mut()),
+                    "expected rename_info_tail at offset_of!(FileName) | leaf: {leaf}",
+                );
+                assert_eq!(std::slice::from_raw_parts(tail, expected.len()), expected);
+                // Bytes past the name were never written, so the zero fill stays.
+                let after = base.cast::<u8>().add(tail_offset + name_bytes);
+                let padding =
+                    std::slice::from_raw_parts(after, allocated - tail_offset - name_bytes);
+                assert!(padding.iter().all(|byte| *byte == 0));
+            }
         }
-        assert_eq!(
-            buffer.len() as usize,
-            std::mem::size_of::<FILE_RENAME_INFO>() + expected.len() * 2
-        );
+        let root = 42_usize as HANDLE;
         assert!(windows_rename_info(root, Path::new("nested/target.txt")).is_err());
     }
 
