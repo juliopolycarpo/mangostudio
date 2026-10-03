@@ -1,14 +1,15 @@
 //! Windows halves of the lock protocol's two platform questions: is a pid
 //! still alive, and what does this machine call itself. Neither has a safe
-//! binding — `nix` is Unix-only — so this is one of this crate's two
-//! narrowly-scoped `unsafe` modules (the other is `owner_only`'s own
-//! private `platform` implementation, `owner_only/windows.rs`), mirroring
-//! `mango-protocol`'s own `transports/ipc/windows/security.rs`: every call
-//! below carries a SAFETY comment, and nothing outside this file needs to.
+//! binding — `nix` is Unix-only — so this is one of this crate's
+//! narrowly-scoped Windows `unsafe` modules (`owner_only/windows.rs`,
+//! `subprocess/windows_job.rs` and the `filesystem` Win32 helpers are the
+//! others), mirroring `mango-protocol`'s own
+//! `transports/ipc/windows/security.rs`: every call below carries a SAFETY
+//! comment, and nothing outside this file needs to.
 #![allow(
     unsafe_code,
-    reason = "OpenProcess/GetExitCodeProcess and GetComputerNameExW have no safe binding on \
-              Windows; every call is documented with what makes it sound"
+    reason = "OpenProcess/WaitForSingleObject and the WinSock hostname calls have no safe \
+              binding on Windows; every call is documented with what makes it sound"
 )]
 // `clippy::all` (the workspace's own lint level) does not include this
 // restriction lint, so nothing in the repo's own gate would have caught a
@@ -164,7 +165,7 @@ mod tests {
     }
 
     /// A pid this test has actually watched exit, which is the one case
-    /// `OpenProcess`/`GetExitCodeProcess` is guaranteed to answer "not
+    /// `OpenProcess`/`WaitForSingleObject` is guaranteed to answer "not
     /// alive" for rather than racing pid reuse.
     #[test]
     fn a_reaped_child_is_not_alive() {
