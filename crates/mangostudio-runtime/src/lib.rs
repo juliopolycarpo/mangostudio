@@ -139,6 +139,7 @@ mod hex;
 mod install;
 mod json_size;
 mod library;
+mod lossy_utf8;
 pub mod manifest;
 pub mod mcp;
 pub mod panic;

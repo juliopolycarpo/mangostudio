@@ -8,6 +8,8 @@
 
 use std::cmp::Ordering;
 
+use crate::lossy_utf8::lossy_string_from_bytes;
+
 /// Whether `c` is in ECMAScript's `WhiteSpace` or `LineTerminator` sets —
 /// the characters `String.prototype.trim` strips and the regex class `\s`
 /// matches. Differs from [`char::is_whitespace`]: U+FEFF is included and
@@ -53,21 +55,38 @@ pub(crate) fn utf16_len(value: &str) -> usize {
     value.encode_utf16().count()
 }
 
+/// The UTF-8 encoding of U+FEFF, which `TextDecoder` drops when it leads.
+const BYTE_ORDER_MARK: &[u8] = b"\xEF\xBB\xBF";
+
 /// `new TextDecoder().decode(bytes)`: lossy UTF-8 with maximal-subpart
 /// replacement, and one leading byte-order mark removed (`ignoreBOM` is
 /// false by default).
 #[must_use]
 pub(crate) fn text_decoder_decode(bytes: &[u8]) -> String {
-    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let bytes = bytes.strip_prefix(BYTE_ORDER_MARK).unwrap_or(bytes);
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// [`text_decoder_decode`] for a buffer the caller is done with: the same
+/// text, but valid UTF-8 keeps its allocation instead of being copied.
+///
+/// `text_decoder_decode_owned(b"\xEF\xBB\xBFhi".to_vec())` is `"hi"`.
+#[must_use]
+pub(crate) fn text_decoder_decode_owned(mut bytes: Vec<u8>) -> String {
+    if bytes.starts_with(BYTE_ORDER_MARK) {
+        bytes.drain(..BYTE_ORDER_MARK.len());
+    }
+    lossy_string_from_bytes(bytes)
 }
 
 /// `Buffer.prototype.toString('utf8')`: the same lossy decode as
 /// [`text_decoder_decode`], but a leading byte-order mark survives as
-/// U+FEFF.
+/// U+FEFF. Takes the buffer by value so valid UTF-8 is not copied.
+///
+/// `buffer_to_utf8_string(b"a\xFFb".to_vec())` is `"a\u{FFFD}b"`.
 #[must_use]
-pub(crate) fn buffer_to_utf8_string(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
+pub(crate) fn buffer_to_utf8_string(bytes: Vec<u8>) -> String {
+    lossy_string_from_bytes(bytes)
 }
 
 /// `Number(raw)` when it is finite, else `None` — the check
@@ -217,8 +236,49 @@ mod tests {
     #[test]
     fn decoders_differ_only_in_what_they_do_with_a_leading_bom() {
         assert_eq!(text_decoder_decode(b"\xEF\xBB\xBFhi"), "hi");
-        assert_eq!(buffer_to_utf8_string(b"\xEF\xBB\xBFhi"), "\u{FEFF}hi");
+        assert_eq!(
+            buffer_to_utf8_string(b"\xEF\xBB\xBFhi".to_vec()),
+            "\u{FEFF}hi"
+        );
         assert_eq!(text_decoder_decode(b"a\xFFb"), "a\u{FFFD}b");
+        assert_eq!(buffer_to_utf8_string(b"a\xFFb".to_vec()), "a\u{FFFD}b");
+    }
+
+    #[test]
+    fn the_owned_text_decoder_matches_the_borrowed_one() {
+        let cases: [&[u8]; 7] = [
+            b"",
+            b"plain",
+            b"\xEF\xBB\xBF",
+            b"\xEF\xBB\xBFhi",
+            // Only one leading mark is dropped.
+            b"\xEF\xBB\xBF\xEF\xBB\xBFhi",
+            b"\xEF\xBB\xBFa\xFFb\xE6\xBC",
+            // A mark cut short is not a mark.
+            b"\xEF\xBBhi",
+        ];
+        for input in cases {
+            let expected = text_decoder_decode(input);
+            let received = text_decoder_decode_owned(input.to_vec());
+            assert_eq!(
+                received, expected,
+                "expected the borrowed decoding of {input:?}: {expected:?} | received: {received:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_owned_text_decoder_keeps_the_allocation_with_or_without_a_mark() {
+        for input in [&b"plain \xE6\xBC\xA2"[..], &b"\xEF\xBB\xBFmarked"[..]] {
+            let bytes = input.to_vec();
+            let buffer = bytes.as_ptr();
+            let text = text_decoder_decode_owned(bytes);
+            assert!(
+                std::ptr::eq(text.as_ptr(), buffer),
+                "expected {input:?} to decode in its own allocation {buffer:p} | received: a copy at {:p}",
+                text.as_ptr()
+            );
+        }
     }
 
     #[test]

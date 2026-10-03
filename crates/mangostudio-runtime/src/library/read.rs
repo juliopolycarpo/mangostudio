@@ -12,7 +12,7 @@ use std::io::Read;
 use std::path::Path;
 
 use super::fs::canonicalize;
-use super::js::text_decoder_decode;
+use super::js::text_decoder_decode_owned;
 use super::types::ReadResult;
 use crate::filesystem::{ContainedOpenError, open_contained_file};
 use crate::probing::detection::path_env::{PathEnv, dirname_path};
@@ -155,7 +155,7 @@ fn read_bounded(
         .read_to_end(&mut bytes)
         .map_err(|_| Denial::Unreadable)?;
     Ok(ReadResult {
-        content: text_decoder_decode(&bytes),
+        content: text_decoder_decode_owned(bytes),
         truncated: over,
         size_bytes,
         denied: None,

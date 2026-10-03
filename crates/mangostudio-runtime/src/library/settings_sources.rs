@@ -231,7 +231,7 @@ fn read_bounded(path: &Path) -> Result<(String, u64), Option<ReadFailure>> {
     file.take(metadata.len())
         .read_to_end(&mut bytes)
         .map_err(|_| Some(ReadFailure::Unreadable))?;
-    Ok((buffer_to_utf8_string(&bytes), metadata.len()))
+    Ok((buffer_to_utf8_string(bytes), metadata.len()))
 }
 
 fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
