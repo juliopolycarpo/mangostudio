@@ -53,6 +53,13 @@ dele. O `target-msrv` existe porque o código `cfg(windows)` e
 (`check`): compilar todo tipo de alvo é toda a afirmação de versão mínima. O musl
 mantém a própria lane de clippy na 1.99.0 e não é alvo de Rust mínimo.
 
+O Windows ARM64 também tem testes nativos: o `workspace-windows-arm64` roda
+`cargo test -p mangostudio-runtime --all-targets --all-features --locked` em
+`windows-11-arm` sob o mesmo sinal Rust, porque a distribuição apenas compila esse
+alvo de forma cruzada e o smoke apenas inicia o binário gerado. Ele cobre só o
+pacote do runtime (os crates de protocolo e de contrato são neutros quanto à
+arquitetura e já são testados em x64) e alimenta o único `Cargo Shim / Gate`.
+
 ## Dependências Rust resolvidas do zero
 
 O `rust-fresh-dependencies.yml` resolve um novo lockfile Cargo da raiz toda terça

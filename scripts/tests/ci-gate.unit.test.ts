@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { evaluateGate, parseAllowedSkips, parseNeeds } from '../ci/evaluate-gate';
 import { ROOT_DIR } from '../lib/config';
+import { classifyChangedPaths } from '../lib/rust-lanes';
 import { readText } from './support/read-text';
 import {
   expectedGateNeeds,
@@ -323,6 +324,30 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(block).not.toContain('cargo test');
   });
 
+  test('the runtime tests also run natively on Windows ARM64, behind the Rust signal and the one Gate', () => {
+    // No other job runs `cargo test` on ARM64 Windows: distribution only
+    // cross-compiles it and smoke only boots the built binary. The lane hangs
+    // off the Rust signal (which `crates/**` selects), so a runtime-only change
+    // reaches it, and it joins the existing Gate rather than adding a name.
+    const block = extractJobBlock(workflow, 'workspace-windows-arm64');
+
+    expect(
+      block,
+      'workspace-windows-arm64 job missing: no cargo test runs on Windows ARM64'
+    ).not.toBe('');
+    expect(parseNeedsList(block)).toEqual(['changes']);
+    expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(block).toContain('runs-on: windows-11-arm');
+    expect(block).toContain(
+      'cargo test -p mangostudio-runtime --all-targets --all-features --locked'
+    );
+    expect(block).not.toContain('name: Gate');
+    expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('workspace-windows-arm64');
+    expect(classifyChangedPaths(['crates/mangostudio-runtime/src/filesystem/io.rs']).rust).toBe(
+      true
+    );
+  });
+
   test('every Rust-gated lane is an accepted skip only when the Rust signal is false', () => {
     // Derived from the workflow, so a new `rust`-gated lane that is left out of
     // ALLOWED_SKIPS fails the Gate on every irrelevant PR instead of here.
@@ -392,7 +417,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-msrv target-msrv launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 workspace-msrv target-msrv launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
     );
   });
 

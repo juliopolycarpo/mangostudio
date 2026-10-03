@@ -164,6 +164,40 @@ jobs:
 
       - run: cargo build --workspace --locked
 
+  workspace-windows-arm64:
+    # Nothing else runs `cargo test` on Windows ARM64: distribution only
+    # cross-compiles that target from an x64 runner and smoke-binary only boots
+    # the built binary. The runtime holds the Windows-specific I/O, named-pipe
+    # and process code, so its own tests run natively on the ARM64 runner, with
+    # the same flags as the x64 `workspace` job. Scoped to the runtime package:
+    # the protocol crate's and the contract's tests are architecture-neutral
+    # and already run on x64. Behind the same Rust signal as every lane here,
+    # which `crates/**` selects, and part of this workflow's one `Gate`.
+    name: Workspace (windows-11-arm)
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-11-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: windows-arm64
+
+      # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - run: cargo test -p mangostudio-runtime --all-targets --all-features --locked
+
   workspace-msrv:
     # The workspace floor is `rust-version` in the root Cargo.toml (stable minus
     # two minors), which every member but the launcher inherits. It lives here,
@@ -468,6 +502,7 @@ jobs:
     needs: [
       changes,
       workspace,
+      workspace-windows-arm64,
       workspace-msrv,
       target-msrv,
       launcher-msrv,
@@ -493,6 +528,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-msrv target-msrv launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 workspace-msrv target-msrv launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

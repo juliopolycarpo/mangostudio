@@ -52,6 +52,13 @@ say nothing about the floor. It only checks: compiling every target kind is the
 whole minimum-version claim, and running them would repeat `workspace`. Linux
 musl keeps its own 1.99.0 clippy lane and is not a minimum-Rust target.
 
+Windows ARM64 also gets native tests: `workspace-windows-arm64` runs
+`cargo test -p mangostudio-runtime --all-targets --all-features --locked` on
+`windows-11-arm` behind the same Rust signal, because distribution only
+cross-compiles that target and smoke only boots the built binary. It is scoped to
+the runtime package (the protocol and contract crates are architecture-neutral
+and already tested on x64) and feeds the one `Cargo Shim / Gate`.
+
 ## Fresh Rust dependencies
 
 `rust-fresh-dependencies.yml` resolves a new root Cargo lockfile each Tuesday and
