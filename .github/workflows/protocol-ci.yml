@@ -235,10 +235,10 @@ jobs:
       - run: cargo deny check
 
   # MSRV policy lives on `rust-version` in the workspace Cargo.toml: current stable minus two
-  # minors is 1.96, but this crate holds at 1.97 because dropping further buys nothing today.
-  # rust-toolchain.toml pins 1.98.1 for everything else, so 1.97.0 is installed and selected
+  # minors is 1.97, matching this crate's declared minimum.
+  # rust-toolchain.toml pins 1.99.0 for everything else, so 1.97.0 is installed and selected
   # explicitly here with the `+1.97.0` plus form, which outranks the root toolchain file. Any
-  # invocation added below that omits it would silently be checked against 1.98.1 instead.
+  # invocation added below that omits it would silently be checked against 1.99.0 instead.
   msrv:
     name: MSRV (1.97.0, policy on Cargo.toml's rust-version)
     needs: [changes]
@@ -250,7 +250,7 @@ jobs:
         with:
           persist-credentials: false
       - run: rustup toolchain install 1.97.0 --profile minimal
-      # Keyed apart from the `rust` job's cache: that one builds with the 1.98.1 default
+      # Keyed apart from the `rust` job's cache: that one builds with the 1.99.0 default
       # toolchain, this one with 1.97.0, and sharing a key would mix artefacts from both.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
