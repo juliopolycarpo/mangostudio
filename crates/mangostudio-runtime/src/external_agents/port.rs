@@ -213,7 +213,7 @@ pub(crate) trait EventStream: Send {
 /// A native observation owner; dropping it abandons work through the adapter's stream owner.
 pub(crate) struct TurnStream {
     pub dispatch: Dispatch,
-    pub native_id: Option<Result<String, RemoteError>>,
+    pub native_id: Result<String, RemoteError>,
     pub events: Box<dyn EventStream>,
 }
 impl TurnStream {

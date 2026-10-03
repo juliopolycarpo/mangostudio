@@ -167,7 +167,7 @@ impl OwnedLifecycleSession {
     fn stream(&self) -> TurnStream {
         TurnStream {
             dispatch: Dispatch::Accepted,
-            native_id: Some(Ok("owned-turn".into())),
+            native_id: Ok("owned-turn".into()),
             events: Box::new(OwnedLifecycleEvents {
                 log: Arc::clone(&self.0),
                 script: std::mem::take(&mut *self.0.script.lock().unwrap()),
@@ -397,7 +397,7 @@ pub(in crate::external_agents) async fn assert_spent_start_eviction(
         [CloseCause::Requested, CloseCause::Requested]
     );
 }
-fn configuration() -> wire::Configuration {
+pub(super) fn configuration() -> wire::Configuration {
     wire::Configuration {
         model: None,
         effort: None,

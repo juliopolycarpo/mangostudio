@@ -287,7 +287,7 @@ impl Supervisor {
         // lost reply by sending this same id again, and the receipt has to
         // hold what really happened, not that the first caller stopped waiting.
         let result = match live.session.start_turn(request).await {
-            Ok(mut stream) => match bounded_native_turn_id(&mut stream) {
+            Ok(stream) => match bounded_native_turn_id(&stream) {
                 Ok(native) => {
                     self.relay(&live, &params.client_message_id, stream);
                     Ok(TurnResult {
@@ -338,7 +338,7 @@ impl Supervisor {
             .start_review(params.client_message_id.clone())
             .await
         {
-            Ok(mut review) => match admissible_review(&live, &mut review) {
+            Ok(review) => match admissible_review(&live, &review) {
                 Ok(native) => {
                     self.relay(&live, &params.client_message_id, review.turn);
                     Ok(StartReviewResult {
@@ -799,11 +799,8 @@ fn release_turn(live: &LiveSession, client_message_id: &str) {
 /// ```ignore
 /// let native = bounded_native_turn_id(&stream)?;
 /// ```
-fn bounded_native_turn_id(stream: &mut TurnStream) -> Result<String, RemoteError> {
-    stream
-        .native_id
-        .take()
-        .expect("a started stream's admission is checked once")
+fn bounded_native_turn_id(stream: &TurnStream) -> Result<String, RemoteError> {
+    stream.native_id.clone()
 }
 
 /// A started review's handle, when the review also runs on the vendor thread
@@ -811,7 +808,7 @@ fn bounded_native_turn_id(stream: &mut TurnStream) -> Result<String, RemoteError
 /// thread would stream nothing this session hears and stall until the SDK's
 /// idle bound, so it is refused instead. Like a refused handle, the refusal
 /// carries the stream's dispatch: the vendor may already be running it.
-fn admissible_review(live: &LiveSession, review: &mut ReviewStream) -> Result<String, RemoteError> {
+fn admissible_review(live: &LiveSession, review: &ReviewStream) -> Result<String, RemoteError> {
     if review.review_thread_id != live.session.native_session_id() {
         return Err(tool_argument(format!(
             "External-agent review on session {:?} ran on another vendor thread than the session's; expected a review on the session's own thread.",
@@ -819,7 +816,7 @@ fn admissible_review(live: &LiveSession, review: &mut ReviewStream) -> Result<St
         ))
         .with_detail("dispatch", review.turn.dispatch.name()));
     }
-    bounded_native_turn_id(&mut review.turn)
+    bounded_native_turn_id(&review.turn)
 }
 
 /// A turn refused because the session is still running one, typically a

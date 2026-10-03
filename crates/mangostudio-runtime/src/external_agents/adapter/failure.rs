@@ -2,7 +2,7 @@
 use super::super::failure::{
     AgentFailure, CleanupOutcome, FailureCause, FailureContext, RetryAdvice, SessionUsability,
 };
-use super::super::port::Dispatch;
+use super::super::port::{AgentResult, Dispatch};
 use super::map;
 use mango_external_agents::{CancelReason, Error};
 use std::time::Duration;
@@ -81,26 +81,32 @@ pub(super) fn facts(error: Error) -> AgentFailure {
 /// Keeps the SDK error and its process lease until kill/wait settles or the bound expires.
 /// The guarded launcher still owns an unconfirmed tree and reaps it on drop/shutdown.
 pub(super) async fn settle(error: Error, timeout: Duration) -> AgentFailure {
-    let control = error.cleanup_control();
-    let reaped = match control {
-        Some(control) => Some(
-            tokio::time::timeout(timeout, async {
-                control.kill(CancelReason::Shutdown).await?;
-                control.wait().await.map(|_| ())
-            })
-            .await,
-        ),
-        None => None,
-    };
+    let mut settled = false;
+    if let Some(control) = error.cleanup_control() {
+        let reaped = tokio::time::timeout(timeout, async {
+            control.kill(CancelReason::Shutdown).await?;
+            control.wait().await.map(|_| ())
+        })
+        .await;
+        settled = matches!(reaped, Ok(Ok(())));
+    }
     let mut failure = facts(error);
-    match reaped {
-        Some(Ok(Ok(()))) => {
-            failure.cleanup = CleanupOutcome::Settled;
-        }
-        Some(_) => {}
-        None => {}
+    if settled {
+        failure.cleanup = CleanupOutcome::Settled;
     }
     failure
+}
+
+/// Passes an SDK success through, settling any failure's cleanup handle first.
+///
+/// ```ignore
+/// let page = settled(harness.list_sessions(&host, query).await, timeout).await?;
+/// ```
+pub(super) async fn settled<T>(result: Result<T, Error>, timeout: Duration) -> AgentResult<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => Err(settle(error, timeout).await),
+    }
 }
 
 #[cfg(test)]

@@ -374,7 +374,7 @@ impl AgentSession for OwnedSession {
         }
         Ok(TurnStream {
             dispatch: Dispatch::Accepted,
-            native_id: Some(Ok(request.turn_id.clone())),
+            native_id: Ok(request.turn_id.clone()),
             events: Box::new(FinishedEvents {
                 native: request.turn_id,
                 sent: false,
@@ -390,7 +390,7 @@ impl AgentSession for OwnedSession {
             review_thread_id: self.native_session_id(),
             turn: TurnStream {
                 dispatch: Dispatch::Accepted,
-                native_id: Some(Ok(turn_id.clone())),
+                native_id: Ok(turn_id.clone()),
                 events: Box::new(FinishedEvents {
                     native: turn_id,
                     sent: false,
@@ -518,13 +518,7 @@ async fn owned_rig(log: Arc<OwnedSessionLog>) -> OwnedRig {
         cleanup_timeout: super::CLEANUP_TIMEOUT,
         hard_turn_timeout: super::HARD_TURN_TIMEOUT,
     });
-    let configuration = wire::Configuration {
-        model: None,
-        effort: None,
-        level: wire::PermissionLevel::Default,
-        routing: wire::ApprovalRouting::User,
-        workspace_roots: Vec::new(),
-    };
+    let configuration = super::lifecycle_product_tests::configuration();
     let cancel = tokio_util::sync::CancellationToken::new();
     let opened = supervisor
         .open(

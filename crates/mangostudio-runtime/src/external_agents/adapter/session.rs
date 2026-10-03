@@ -1,5 +1,5 @@
 //! Pull-based session adaptation. Vendor owners remain here until their product handles drop.
-use super::super::interactions::{Answer, MappedEvent};
+use super::super::interactions::Answer;
 use super::super::port::{self, AgentResult, AgentSession, CancelReason, CloseCause, TurnEvent};
 use super::super::wire;
 use super::{failure, map, map_events};
@@ -24,13 +24,12 @@ impl SessionAdapter {
         }
     }
     async fn result<T>(&self, result: sdk::Result<T>) -> AgentResult<T> {
-        match result {
-            Ok(value) => Ok(value),
-            Err(error) => Err(failure::settle(error, self.cleanup_timeout).await),
-        }
+        failure::settled(result, self.cleanup_timeout).await
     }
 }
 
+/// The SDK call one hub answer routes to: a permission decision or question information.
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub(super) enum SdkAnswer {
     Permission(sdk::PermissionResponse),
     Question(sdk::QuestionResponse),
@@ -198,7 +197,7 @@ fn stream_adapter(stream: sdk::TurnStream, target: wire::TargetId) -> port::Turn
     };
     port::TurnStream {
         dispatch: failure::dispatch(stream.dispatch()),
-        native_id: Some(native_id),
+        native_id,
         events: Box::new(Events { stream, target }),
     }
 }
@@ -220,16 +219,10 @@ impl port::EventStream for Events {
                 reason: sdk::CancelReason::Timeout
             }
         );
-        let mapped = map_events::map_owned_event(self.target, event);
         Some(TurnEvent {
             at_ms,
             idle_timeout,
-            mapped: MappedEvent {
-                wire: mapped.wire,
-                opened: mapped.opened,
-                closed: mapped.closed,
-                unrenderable: mapped.unrenderable,
-            },
+            mapped: map_events::map_owned_event(self.target, event),
         })
     }
 }

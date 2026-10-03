@@ -64,9 +64,17 @@ pub(crate) enum Answer {
 /// What one mapped native event asks the product relay to retain or publish.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct MappedEvent {
+    /// What goes on the wire, if anything.
     pub wire: Option<wire::Event>,
+    /// A new interaction the supervisor must remember.
     pub opened: Option<PendingInteraction>,
+    /// An interaction that has ended (resolved, expired, cancelled).
+    ///
+    /// The supervisor must drop `wire` when this names an id it never
+    /// opened: a question declined as unrenderable still resolves in the SDK,
+    /// and the hub never saw a card for it.
     pub closed: Option<String>,
+    /// A question the product cannot render. The supervisor must answer it Declined, and the reason is logged.
     pub unrenderable: Option<(Answer, &'static str)>,
 }
 /// Validates the chosen product option before routing its distinct response operation.
@@ -117,7 +125,3 @@ fn unknown_option<'a>(received: &str, offered: impl Iterator<Item = &'a String>)
         "optionId \"{received}\" is not an option this request offered; expected one of {offered:?}."
     ))
 }
-
-// ---------------------------------------------------------------------------
-// Activities
-// ---------------------------------------------------------------------------

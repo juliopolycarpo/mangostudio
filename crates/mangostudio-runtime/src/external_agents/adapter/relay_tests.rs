@@ -72,7 +72,7 @@ fn current_nonexhaustive_event_fallback_does_not_fabricate_a_product_terminal() 
     });
     assert_eq!(
         super::map_events::map_event(wire::TargetId::Codex, &event),
-        super::map_events::MappedEvent::default()
+        crate::external_agents::interactions::MappedEvent::default()
     );
 }
 

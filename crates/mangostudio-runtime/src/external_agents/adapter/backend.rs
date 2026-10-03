@@ -94,6 +94,22 @@ impl Backend {
             cleanup_timeout,
         }
     }
+    /// Builds the SDK host with its own cancel token, returning the product token to link it to.
+    ///
+    /// ```ignore
+    /// let (cancel, sdk_cancel, host) = self.linked_host(host)?;
+    /// ```
+    fn linked_host(
+        &self,
+        host: Host,
+    ) -> AgentResult<(CancellationToken, CancelToken, HostContext)> {
+        let cancel = host.cancel.clone();
+        let sdk_cancel = CancelToken::new();
+        let context = self
+            .host(host, sdk_cancel.clone())
+            .map_err(failure::facts)?;
+        Ok((cancel, sdk_cancel, context))
+    }
     fn host(&self, host: Host, cancel: CancelToken) -> mango_external_agents::Result<HostContext> {
         let mut builder = HostContext::builder()
             .launcher(Arc::clone(&self.launcher))
@@ -137,27 +153,23 @@ impl AgentBackend for Backend {
         host: Host,
         key: Option<&AccountKey>,
     ) -> AgentResult<wire::Descriptor> {
-        let cancel = host.cancel.clone();
-        let sdk_cancel = CancelToken::new();
-        let host = self
-            .host(host, sdk_cancel.clone())
-            .map_err(failure::facts)?;
+        let (cancel, sdk_cancel, host) = self.linked_host(host)?;
         let key = key
             .map(|key| AccountFingerprintKey::new(key.bytes()).expect("the owned key is nonempty"));
         cancellable(cancel, sdk_cancel, async {
-            match self
-                .harnesses
-                .discover(target, executable, &host, key.as_ref())
-                .await
-            {
-                Ok(found) => Ok(map::descriptor(
-                    target,
-                    &found.discovery,
-                    found.account.as_ref(),
-                    crate::ports::wall_clock::epoch_millis(std::time::SystemTime::now()),
-                )),
-                Err(error) => Err(failure::settle(error, self.cleanup_timeout).await),
-            }
+            let found = failure::settled(
+                self.harnesses
+                    .discover(target, executable, &host, key.as_ref())
+                    .await,
+                self.cleanup_timeout,
+            )
+            .await?;
+            Ok(map::descriptor(
+                target,
+                &found.discovery,
+                found.account.as_ref(),
+                crate::ports::wall_clock::epoch_millis(std::time::SystemTime::now()),
+            ))
         })
         .await
     }
@@ -168,11 +180,7 @@ impl AgentBackend for Backend {
         host: Host,
         params: &wire::OpenParams,
     ) -> AgentResult<Box<dyn port::AgentSession>> {
-        let cancel = host.cancel.clone();
-        let sdk_cancel = CancelToken::new();
-        let host = self
-            .host(host, sdk_cancel.clone())
-            .map_err(failure::facts)?;
+        let (cancel, sdk_cancel, host) = self.linked_host(host)?;
         let harness = self.harnesses.harness(target, Some(executable));
         let mut request = mango_external_agents::OpenSession::new(params.session_id.clone())
             .with_configuration(map::configuration_patch(&params.configuration));
@@ -186,14 +194,16 @@ impl AgentBackend for Backend {
             );
         }
         cancellable(cancel, sdk_cancel, async {
-            match harness.open_session(&host, request).await {
-                Ok(inner) => Ok(Box::new(session::SessionAdapter::new(
-                    inner,
-                    target,
-                    self.cleanup_timeout,
-                )) as Box<dyn port::AgentSession>),
-                Err(error) => Err(failure::settle(error, self.cleanup_timeout).await),
-            }
+            let inner = failure::settled(
+                harness.open_session(&host, request).await,
+                self.cleanup_timeout,
+            )
+            .await?;
+            Ok(Box::new(session::SessionAdapter::new(
+                inner,
+                target,
+                self.cleanup_timeout,
+            )) as Box<dyn port::AgentSession>)
         })
         .await
     }
@@ -204,11 +214,7 @@ impl AgentBackend for Backend {
         host: Host,
         query: port::SessionQuery,
     ) -> AgentResult<wire::ListSessionsResult> {
-        let cancel = host.cancel.clone();
-        let sdk_cancel = CancelToken::new();
-        let host = self
-            .host(host, sdk_cancel.clone())
-            .map_err(failure::facts)?;
+        let (cancel, sdk_cancel, host) = self.linked_host(host)?;
         let harness = self.harnesses.harness(target, executable);
         let query = mango_external_agents::SessionQuery {
             cursor: query.cursor,
@@ -216,10 +222,12 @@ impl AgentBackend for Backend {
             workspace_path: query.workspace_path,
         };
         cancellable(cancel, sdk_cancel, async {
-            match harness.list_sessions(&host, query).await {
-                Ok(page) => Ok(map::native_sessions(target, page)),
-                Err(error) => Err(failure::settle(error, self.cleanup_timeout).await),
-            }
+            let page = failure::settled(
+                harness.list_sessions(&host, query).await,
+                self.cleanup_timeout,
+            )
+            .await?;
+            Ok(map::native_sessions(target, page))
         })
         .await
     }

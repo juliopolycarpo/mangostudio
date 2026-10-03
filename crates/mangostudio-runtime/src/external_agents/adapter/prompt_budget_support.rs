@@ -1,5 +1,5 @@
 //! A real ACP harness with a fake child that keeps frame sizes, never large frame bodies.
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,6 @@ use mango_external_agents::{ByteSink, LaunchSpec, Limits, ManagedProcess, Proces
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{Notify, Semaphore};
-use tokio_util::sync::CancellationToken;
 
 use super::super::{Backend, ProductHarnesses};
 use crate::external_agents::failure::{
@@ -44,25 +43,7 @@ pub(super) fn product_limits() -> ProductLimits {
     serde_json::from_str(include_str!("fixtures/prompt-limits.json")).unwrap()
 }
 
-pub(super) fn configuration() -> wire::Configuration {
-    wire::Configuration {
-        model: None,
-        effort: None,
-        level: wire::PermissionLevel::Default,
-        routing: wire::ApprovalRouting::User,
-        workspace_roots: Vec::new(),
-    }
-}
-
-pub(super) fn host(cwd: PathBuf) -> port::Host {
-    port::Host {
-        cwd,
-        scratch: None,
-        environment: BTreeMap::new(),
-        runtime_version: "synthetic-prompt-budget".into(),
-        cancel: CancellationToken::new(),
-    }
-}
+pub(super) use crate::external_agents::adapter::test_support::{configuration, host};
 
 pub(super) fn attachment(kind: wire::AttachmentKind, bytes: usize) -> port::Attachment {
     port::Attachment {
