@@ -172,7 +172,10 @@ jobs:
     # the same flags as the x64 `workspace` job. Scoped to the runtime package:
     # the protocol crate's and the contract's tests are architecture-neutral
     # and already run on x64. Behind the same Rust signal as every lane here,
-    # which `crates/**` selects, and part of this workflow's one `Gate`.
+    # which `crates/**` selects, and part of this workflow's one `Gate`. No
+    # rust-cache step: a cache entry is only ever saved from main and none
+    # exists for this runner yet, so nothing shows it would help, while the
+    # repository's Actions cache is already over its quota.
     name: Workspace (windows-11-arm)
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
@@ -184,12 +187,6 @@ jobs:
           persist-credentials: false
 
       - run: rustup show active-toolchain
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: windows-arm64
 
       # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -215,6 +212,10 @@ jobs:
     # the first is what `cargo build --workspace` ships (default features, lib
     # and bin targets); the second adds tests, examples and benches with every
     # feature on, so a floor-breaking API used only there fails too.
+    #
+    # No rust-cache step, on purpose: a `cargo check` of the workspace is a few
+    # minutes cold, the repository's Actions cache is already over its quota, and
+    # an entry per floor lane would only evict the entries the longer lanes need.
     name: Workspace MSRV (1.97.0)
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
@@ -229,14 +230,6 @@ jobs:
 
       - run: rustup toolchain install 1.97.0 --profile minimal
 
-      # Keyed apart from the 1.99.0 lanes' entries; the toolchain is part of
-      # rust-cache's own key, and `key` names this lane in the cache list.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: msrv
-
       - run: cargo check --workspace --locked
 
       - run: cargo check --workspace --all-targets --all-features --locked
@@ -245,13 +238,15 @@ jobs:
     # `cfg(windows)` and `cfg(target_os = "macos")` code (named pipes, handle
     # based file I/O, the guardian and probing backends) is not compiled by the
     # Linux lane above, and the native 1.99.0 tests in `workspace` prove nothing
-    # about the floor. A native `cargo check` on the floor toolchain closes
-    # that, one runner per target: macOS arm64 (the runner's own architecture),
-    # and both shipped Windows architectures, ARM64 cross-checked from the x64
-    # runner, whose image carries the ARM64 MSVC tools (runtime-build.yml
-    # builds the same target there). Check only: it compiles every target kind
+    # about the floor. A `cargo check` on the floor toolchain closes that, one
+    # runner per target: native on the macOS arm64 and Windows x64 runners, and
+    # Windows ARM64 cross-checked from the x64 `windows-latest` runner, whose
+    # image carries the ARM64 MSVC tools (runtime-build.yml builds the same
+    # target there). The native ARM64 tests are `workspace-windows-arm64`
+    # below, on the 1.99.0 toolchain. Check only: it compiles every target kind
     # without linking or running, which is all a minimum-version claim needs.
-    # musl keeps its own 1.99.0 clippy lane and is not repeated here.
+    # musl keeps its own 1.99.0 clippy lane and is not repeated here. No
+    # rust-cache step, for the same reason as `workspace-msrv`.
     name: Target MSRV (${{ matrix.target }})
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
@@ -281,12 +276,6 @@ jobs:
           persist-credentials: false
 
       - run: rustup toolchain install 1.97.0 --profile minimal --target "$TARGET"
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: msrv-${{ matrix.target }}
 
       - run: cargo check --workspace --all-targets --all-features --locked --target "$TARGET"
 
