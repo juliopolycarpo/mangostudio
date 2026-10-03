@@ -13,7 +13,7 @@ use mango_external_agents::{
 use super::backend::{Backend, ProductHarnesses};
 use super::test_support::{self as fixtures, CodexPeer, Rig};
 use crate::external_agents::failure::{CleanupOutcome, FailureCause, SessionUsability};
-use crate::external_agents::port::{AgentBackend, CloseCause, Host, TurnRequest};
+use crate::external_agents::port::{AgentBackend, CloseCause, TurnRequest};
 use crate::external_agents::wire;
 
 #[derive(Default)]
@@ -334,16 +334,6 @@ async fn requested_cancel_settles_only_the_turn_and_explicit_close_does_not_doub
     );
 }
 
-fn host(cwd: std::path::PathBuf) -> Host {
-    Host {
-        cwd,
-        scratch: None,
-        environment: Default::default(),
-        runtime_version: "sdk-lifecycle-test".into(),
-        cancel: tokio_util::sync::CancellationToken::new(),
-    }
-}
-
 #[tokio::test]
 async fn dropping_an_active_stream_settles_work_while_session_drop_reaps_the_child_once() {
     let fake = FakeLauncher::new();
@@ -360,7 +350,7 @@ async fn dropping_an_active_stream_settles_work_while_session_drop_reaps_the_chi
         .open(
             wire::TargetId::Codex,
             "/synthetic/codex".into(),
-            host(rig.params.workspace_path.clone().into()),
+            fixtures::host(rig.params.workspace_path.clone().into()),
             &rig.params,
         )
         .await
@@ -403,7 +393,7 @@ async fn dropping_an_active_stream_settles_work_while_session_drop_reaps_the_chi
         .open(
             wire::TargetId::Codex,
             "/synthetic/codex".into(),
-            host(rig.params.workspace_path.clone().into()),
+            fixtures::host(rig.params.workspace_path.clone().into()),
             &rig.params,
         )
         .await
@@ -454,7 +444,7 @@ async fn missing_stdin_cleanup_is_settled_or_explicitly_unconfirmed_with_control
             .open(
                 wire::TargetId::Cursor,
                 "/synthetic/cursor".into(),
-                host(rig.params.workspace_path.clone().into()),
+                fixtures::host(rig.params.workspace_path.clone().into()),
                 &rig.params,
             )
             .await

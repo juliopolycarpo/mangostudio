@@ -397,7 +397,7 @@ pub(in crate::external_agents) async fn assert_spent_start_eviction(
         [CloseCause::Requested, CloseCause::Requested]
     );
 }
-fn configuration() -> wire::Configuration {
+pub(super) fn configuration() -> wire::Configuration {
     wire::Configuration {
         model: None,
         effort: None,

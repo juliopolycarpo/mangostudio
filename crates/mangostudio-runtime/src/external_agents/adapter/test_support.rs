@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::backend::{Backend, ProductHarnesses};
-use crate::external_agents::port::CloseCause;
+use crate::external_agents::port::{self, CloseCause};
 use crate::external_agents::supervisor::{
     ExecutableResolver, PortFuture, Ports, Supervisor, WorkspaceAuthority,
 };
@@ -93,6 +93,15 @@ pub(super) fn configuration() -> wire::Configuration {
         level: wire::PermissionLevel::Default,
         routing: wire::ApprovalRouting::User,
         workspace_roots: Vec::new(),
+    }
+}
+pub(super) fn host(cwd: std::path::PathBuf) -> port::Host {
+    port::Host {
+        cwd,
+        scratch: None,
+        environment: Default::default(),
+        runtime_version: "sdk-lifecycle-test".into(),
+        cancel: CancellationToken::new(),
     }
 }
 
