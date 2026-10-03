@@ -334,14 +334,6 @@ impl std::error::Error for SetupError {
     }
 }
 
-impl SetupError {
-    /// `setup.ts`'s own convention: every failure path is exit code `1`.
-    #[must_use]
-    pub fn exit_code(&self) -> u8 {
-        1
-    }
-}
-
 /// Runs one non-interactive setup call: merges `request`'s preset with its
 /// `--allow` overrides and writes the result (plus a `setup.state` record
 /// stamped `configured`, `wall_clock.now()`, and `request`'s authority) to
