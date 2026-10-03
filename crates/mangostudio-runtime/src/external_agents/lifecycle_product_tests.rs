@@ -167,7 +167,7 @@ impl OwnedLifecycleSession {
     fn stream(&self) -> TurnStream {
         TurnStream {
             dispatch: Dispatch::Accepted,
-            native_id: Some(Ok("owned-turn".into())),
+            native_id: Ok("owned-turn".into()),
             events: Box::new(OwnedLifecycleEvents {
                 log: Arc::clone(&self.0),
                 script: std::mem::take(&mut *self.0.script.lock().unwrap()),

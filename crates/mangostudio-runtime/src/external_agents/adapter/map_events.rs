@@ -80,25 +80,7 @@ mod unrenderable {
     pub(super) const UNKNOWN_FORM: &str = "the question uses a form this runtime does not know";
 }
 
-/// What the supervisor needs to route a later answer to the right SDK call.
-use super::super::interactions::PendingInteraction;
-
-/// What one SDK event means to the supervisor.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct MappedEvent {
-    /// What goes on the wire, if anything.
-    pub wire: Option<wire::Event>,
-    /// A new interaction the supervisor must remember.
-    pub opened: Option<PendingInteraction>,
-    /// An interaction that has ended (resolved, expired, cancelled).
-    ///
-    /// The supervisor must drop `wire` when this names an id it never
-    /// opened: a question declined as unrenderable still resolves in the SDK,
-    /// and the hub never saw a card for it.
-    pub closed: Option<String>,
-    /// A question the product cannot render. The supervisor must answer it Declined, and the reason is logged.
-    pub unrenderable: Option<(super::super::interactions::Answer, &'static str)>,
-}
+use super::super::interactions::{MappedEvent, PendingInteraction};
 
 impl MappedEvent {
     fn wire(event: wire::Event) -> Self {
@@ -109,15 +91,8 @@ impl MappedEvent {
     }
 }
 
-/// The SDK answer for one hub `respond`.
 #[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Answer {
-    /// Goes to `Session::respond`: a permission decision.
-    Permission(sdk::PermissionResponse),
-    /// Goes to `Session::answer`: information, never authority.
-    Question(sdk::QuestionResponse),
-}
+pub(super) use super::session::SdkAnswer as Answer;
 
 /// Maps one SDK turn event to what the wire and the supervisor need.
 ///
@@ -240,12 +215,8 @@ mod benchmarks;
 /// }
 /// ```
 #[cfg(test)]
-pub(crate) fn answer(pending: &PendingInteraction, option_id: &str) -> Result<Answer, RemoteError> {
-    let answer = super::super::interactions::answer(pending, option_id)?;
-    Ok(match super::session::sdk_answer(answer) {
-        super::session::SdkAnswer::Permission(response) => Answer::Permission(response),
-        super::session::SdkAnswer::Question(response) => Answer::Question(response),
-    })
+pub(super) fn answer(pending: &PendingInteraction, option_id: &str) -> Result<Answer, RemoteError> {
+    super::super::interactions::answer(pending, option_id).map(super::session::sdk_answer)
 }
 
 fn activity_started(call_id: &str, activity: &sdk::Activity) -> wire::Event {

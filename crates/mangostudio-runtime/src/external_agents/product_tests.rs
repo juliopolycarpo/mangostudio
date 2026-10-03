@@ -374,7 +374,7 @@ impl AgentSession for OwnedSession {
         }
         Ok(TurnStream {
             dispatch: Dispatch::Accepted,
-            native_id: Some(Ok(request.turn_id.clone())),
+            native_id: Ok(request.turn_id.clone()),
             events: Box::new(FinishedEvents {
                 native: request.turn_id,
                 sent: false,
@@ -390,7 +390,7 @@ impl AgentSession for OwnedSession {
             review_thread_id: self.native_session_id(),
             turn: TurnStream {
                 dispatch: Dispatch::Accepted,
-                native_id: Some(Ok(turn_id.clone())),
+                native_id: Ok(turn_id.clone()),
                 events: Box::new(FinishedEvents {
                     native: turn_id,
                     sent: false,
