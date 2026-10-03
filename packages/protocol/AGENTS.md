@@ -27,8 +27,9 @@ Clippy over the feature powerset, `cargo doc`, the cross-language round trip —
 lane, so it stays out of every run of the repository gate. It is split across two path-filtered
 workflows: `.github/workflows/cargo-shim.yml` runs fmt, clippy, tests, doctests and `cargo doc` for
 the whole Rust workspace (the protocol crate included; `spec/**` and the other files the crates read
-select its rust lane), and `.github/workflows/protocol-ci.yml` runs what only the protocol needs —
-MSRV, the feature powerset, interop, semver checks, schema equality and the package lane.
+select its rust lane) and the minimum-Rust checks, and `.github/workflows/protocol-ci.yml` runs what
+only the protocol needs — the feature powerset, interop, semver checks, schema equality and the
+package lane.
 
 For any change under the paths above, run the full gate before handoff:
 

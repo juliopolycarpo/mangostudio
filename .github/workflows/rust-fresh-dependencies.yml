@@ -10,6 +10,8 @@ on:
     branches: [main, feat/external-agents-sdk-adoption]
     paths:
       - .github/workflows/rust-fresh-dependencies.yml
+      - scripts/ci/fresh-dependencies-receipt.mjs
+      - scripts/ci/report-fresh-dependencies.mjs
 
 permissions:
   contents: read
@@ -27,6 +29,15 @@ jobs:
     name: Resolve fresh Rust dependencies
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # What this job proved, for the receipt: whether the resolver itself
+    # succeeded and whether the lock upload did (separate from the job, which does
+    # both), the hash of the lock it wrote, and the compiler that resolved it.
+    outputs:
+      generation: ${{ steps.generate.outcome }}
+      retention: ${{ steps.retain.outcome }}
+      lock_sha256: ${{ steps.identity.outputs.lock_sha256 }}
+      rustc: ${{ steps.toolchain.outputs.rustc }}
+      cargo: ${{ steps.toolchain.outputs.cargo }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,13 +45,27 @@ jobs:
 
       - run: rustup show active-toolchain
 
-      - name: Resolve an independent dependency graph
+      # Before the resolver, so a resolution failure still names its compiler.
+      - id: toolchain
+        name: Record the resolving toolchain
+        run: |
+          echo "rustc=$(rustc -V)" >> "$GITHUB_OUTPUT"
+          echo "cargo=$(cargo -V)" >> "$GITHUB_OUTPUT"
+
+      - id: generate
+        name: Resolve an independent dependency graph
         run: |
           rm Cargo.lock
           cargo generate-lockfile
+
+      - id: identity
+        name: Record the resolved lock identity
+        run: |
+          echo "lock_sha256=$(sha256sum Cargo.lock | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           git diff -- Cargo.lock >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Preserve the resolved graph on success or failure
+      - id: retain
+        name: Preserve the resolved graph on success or failure
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -63,7 +88,7 @@ jobs:
         with:
           name: fresh-rust-lockfile
 
-      - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: cargo-deny
 
@@ -103,6 +128,46 @@ jobs:
       - run: cargo test --workspace --all-targets --all-features --locked
       - run: cargo test --doc --workspace --all-features --locked
 
+  receipt:
+    # The terminal outcome of every run that was not cancelled: source, compiler,
+    # the lock hash and each job's result, kept as an artifact beside the lock so
+    # a red run says which stage failed and which graph it judged without anyone
+    # reading logs. It records and never gates: its own failure is a defect in the
+    # receipt, not in the dependencies.
+    name: Record fresh dependency receipt
+    needs: [resolve, policy, fresh]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Write the receipt
+        env:
+          EVENT: ${{ github.event_name }}
+          NEEDS: ${{ toJSON(needs) }}
+          REF: ${{ github.ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_SHA: ${{ github.sha }}
+        # Dependency-free script; runs without `bun install`. It appends the same
+        # summary to $GITHUB_STEP_SUMMARY itself.
+        run: bun ./scripts/ci/fresh-dependencies-receipt.mjs "$RUNNER_TEMP/fresh-rust-receipt.json"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fresh-rust-receipt
+          path: ${{ runner.temp }}/fresh-rust-receipt.json
+          if-no-files-found: error
+          retention-days: 14
+
   report:
     name: Update compatibility issue
     needs: [resolve, policy, fresh]
@@ -122,13 +187,17 @@ jobs:
 
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          NEEDS: ${{ toJSON(needs) }}
           REVISION: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
-            const { reportFreshDependencies } = await import(
-              `${process.env.GITHUB_WORKSPACE}/scripts/ci/report-fresh-dependencies.mjs`
-            );
+            const scripts = `${process.env.GITHUB_WORKSPACE}/scripts/ci`;
+            const { classifyFreshRun } = await import(`${scripts}/fresh-dependencies-receipt.mjs`);
+            const { reportFreshDependencies } = await import(`${scripts}/report-fresh-dependencies.mjs`);
+            const needs = JSON.parse(process.env.NEEDS);
             await reportFreshDependencies({
               github, context, revision: process.env.REVISION, runUrl: process.env.RUN_URL,
+              outcome: classifyFreshRun(needs),
+              lockSha256: needs.resolve.outputs.lock_sha256 || null,
             });

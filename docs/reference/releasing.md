@@ -922,7 +922,7 @@ Design notes:
 - The root Rust CI lane (`.github/workflows/cargo-shim.yml`) triggers on every
   PR to either protected target, but a cheap `changes` job skips the toolchain
   when no Rust path changed. It builds and tests the locked workspace on Linux,
-  macOS and Windows, checks the launcher's declared MSRV, and resolves the
+  macOS and Windows, checks the workspace and launcher minimum Rust versions, and resolves the
   excluded fuzz workspace. The `Cargo Shim / Gate` name stays stable for
   repository rules (see [`ci.md`](./ci.md#branch-protection--required-checks)).
 - The `cargo-publish` release job checks crates.io before publishing and

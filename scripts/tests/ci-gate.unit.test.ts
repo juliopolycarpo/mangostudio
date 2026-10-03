@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { evaluateGate, parseAllowedSkips, parseNeeds } from '../ci/evaluate-gate';
 import { ROOT_DIR } from '../lib/config';
+import { classifyChangedPaths } from '../lib/rust-lanes';
 import { readText } from './support/read-text';
 import {
   expectedGateNeeds,
@@ -19,6 +20,7 @@ import {
 const GATED_WORKFLOWS = [
   '.github/workflows/ci.yml',
   '.github/workflows/cargo-shim.yml',
+  '.github/workflows/protocol-ci.yml',
   '.github/workflows/release-dry-run.yml',
 ] as const;
 
@@ -267,6 +269,119 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(msrvBlock).toContain('cargo test -p mangostudio --all-targets --locked');
   });
 
+  test('the workspace minimum-Rust lane runs whenever the changes job saw a Rust path', () => {
+    // A runtime-only edit is a Rust path, so it must reach the 1.97 floor; the
+    // lane hangs off the same signal as every other Rust lane, never off the
+    // protocol one.
+    const block = extractJobBlock(workflow, 'workspace-msrv');
+    const floor = /^rust-version = "([^"]+)"$/m.exec(readText('Cargo.toml'))?.[1];
+
+    expect(
+      block,
+      'workspace-msrv job missing: runtime-only PRs skip the minimum-Rust check'
+    ).not.toBe('');
+    expect(parseNeedsList(block)).toEqual(['changes']);
+    expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
+    // The toolchain follows the manifest's rust-version, so a floor bump that
+    // forgets this lane fails here instead of checking the old minimum.
+    expect(floor, 'workspace rust-version').toBeDefined();
+    expect(block).toContain(`RUSTUP_TOOLCHAIN: ${floor}`);
+    expect(block).toContain(`rustup toolchain install ${floor} --profile minimal`);
+    expect(block).toContain('cargo check --workspace --locked');
+    expect(block).toContain('cargo check --workspace --all-targets --all-features --locked');
+    // The launcher keeps its own, lower floor in its own lane.
+    expect(block).not.toContain('1.96.0');
+  });
+
+  test('the target minimum-Rust lane checks the Windows and macOS code the Linux lane never compiles', () => {
+    const block = extractJobBlock(workflow, 'target-msrv');
+    const floor = /^rust-version = "([^"]+)"$/m.exec(readText('Cargo.toml'))?.[1];
+
+    expect(
+      block,
+      'target-msrv job missing: cfg(windows) and cfg(macos) code has no minimum-Rust proof'
+    ).not.toBe('');
+    expect(parseNeedsList(block)).toEqual(['changes']);
+    expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(block).toContain(`RUSTUP_TOOLCHAIN: ${floor}`);
+    // The target reaches the scripts through the environment, never by
+    // interpolation into the script text.
+    expect(block).toContain(`TARGET: ${EXPR} matrix.target }}`);
+    expect(block).toContain(
+      `rustup toolchain install ${floor} --profile minimal --target "$TARGET"`
+    );
+    expect(block).toContain(
+      'cargo check --workspace --all-targets --all-features --locked --target "$TARGET"'
+    );
+    for (const target of [
+      'aarch64-apple-darwin',
+      'x86_64-pc-windows-msvc',
+      'aarch64-pc-windows-msvc',
+    ]) {
+      expect(block, `target ${target}`).toContain(`target: ${target}`);
+    }
+    // Check-only: the 1.99 native tests stay in `workspace`, and are not minimum proof.
+    expect(block).not.toContain('cargo test');
+  });
+
+  test('the runtime tests also run natively on Windows ARM64, behind the Rust signal and the one Gate', () => {
+    // No other job runs `cargo test` on ARM64 Windows: distribution only
+    // cross-compiles it and smoke only boots the built binary. The lane hangs
+    // off the Rust signal (which `crates/**` selects), so a runtime-only change
+    // reaches it, and it joins the existing Gate rather than adding a name.
+    const block = extractJobBlock(workflow, 'workspace-windows-arm64');
+
+    expect(
+      block,
+      'workspace-windows-arm64 job missing: no cargo test runs on Windows ARM64'
+    ).not.toBe('');
+    expect(parseNeedsList(block)).toEqual(['changes']);
+    expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(block).toContain('runs-on: windows-11-arm');
+    expect(block).toContain(
+      'cargo test -p mangostudio-runtime --all-targets --all-features --locked'
+    );
+    expect(block).not.toContain('name: Gate');
+    expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('workspace-windows-arm64');
+    expect(classifyChangedPaths(['crates/mangostudio-runtime/src/filesystem/io.rs']).rust).toBe(
+      true
+    );
+  });
+
+  test('the target minimum-Rust lane checks the launcher at its own lower floor on every target', () => {
+    // The launcher declares a lower rust-version than the workspace, and its
+    // Windows-only and target-specific code is compiled by no Linux lane, so the
+    // workspace's 1.97 check is no proof of the 1.96 floor on those targets.
+    const block = extractJobBlock(workflow, 'target-msrv');
+    const launcherFloor = /^rust-version = "([^"]+)"$/m.exec(
+      readText('crates/mangostudio-launcher/Cargo.toml')
+    )?.[1];
+
+    expect(launcherFloor, 'launcher rust-version').toBeDefined();
+    expect(
+      block,
+      'target-msrv has no launcher-floor check: launcher code on Windows and macOS is only checked at 1.97'
+    ).toContain('cargo check -p mangostudio --all-targets --locked --target "$TARGET"');
+    expect(block).toContain(`RUSTUP_TOOLCHAIN: ${launcherFloor}`);
+    expect(block).toContain(
+      `rustup toolchain install ${launcherFloor} --profile minimal --target "$TARGET"`
+    );
+  });
+
+  test('every Rust-gated lane is an accepted skip only when the Rust signal is false', () => {
+    // Derived from the workflow, so a new `rust`-gated lane that is left out of
+    // ALLOWED_SKIPS fails the Gate on every irrelevant PR instead of here.
+    const rustGated = extractJobBlocks(workflow)
+      .filter(({ block }) => block.includes("if: needs.changes.outputs.rust == 'true'"))
+      .map(({ job }) => job);
+    const skipExpression = /needs\.changes\.outputs\.rust == 'false' && '([^']*)'/.exec(
+      extractJobBlock(workflow, 'gate')
+    )?.[1];
+
+    expect(skipExpression, 'rust==false ALLOWED_SKIPS entry').toBeDefined();
+    expect((skipExpression as string).split(' ').sort()).toEqual(rustGated.sort());
+  });
+
   test('the musl clippy lane fails on musl-only warnings for both shipped musl targets', () => {
     const muslBlock = extractJobBlock(workflow, 'musl-clippy');
 
@@ -322,7 +437,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 workspace-msrv target-msrv launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
     );
   });
 
