@@ -331,9 +331,17 @@ describe('protocol lane selection', () => {
   test('protocol scoping preserves workspace coverage', () => {
     const protocol = readText('.github/workflows/protocol-ci.yml');
     expect(extractJobBlock(protocol, 'rust')).toContain('RUSTDOCFLAGS: -D warnings');
-    expect(extractJobBlock(protocol, 'msrv')).toContain(
-      'cargo +1.97.0 check --all-features --locked'
-    );
+    // The minimum-Rust check moved to cargo-shim, which runs it for every Rust
+    // path (the protocol crate's included) rather than only for protocol paths.
+    expect(
+      extractJobBlock(protocol, 'msrv'),
+      'protocol-ci must not own a second minimum-Rust job; cargo-shim workspace-msrv covers the crate'
+    ).toBe('');
+    const gate = extractJobBlock(protocol, 'gate');
+    expect(gate, 'protocol-ci Gate still waits on the removed msrv job').not.toMatch(/\bmsrv\b/);
+    expect(
+      extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace-msrv')
+    ).toContain('cargo check --workspace --all-targets --all-features --locked');
     expect(extractJobBlock(protocol, 'interop')).toContain(
       'cargo build --locked --example conformance_peer --features testing,websocket,spawn'
     );
@@ -352,7 +360,7 @@ describe('the protocol tree at the repository root', () => {
     // toolchain file would otherwise win when Cargo runs from the workspace.
     // Without the environment variable the crate silently stops being built
     // against its declared MSRV and the lane still reports green.
-    const workflow = readText('.github/workflows/cargo-shim.yml');
+    const workflow = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'launcher-msrv');
     const pinned = /toolchain: (\S+)/.exec(workflow)?.[1];
     expect(pinned).toBeDefined();
     expect(workflow).toContain(`RUSTUP_TOOLCHAIN: ${pinned}`);

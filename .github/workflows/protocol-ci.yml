@@ -2,9 +2,10 @@ name: Protocol CI
 
 # Lints, tests and cross-checks the Mango Protocol: the normative spec under
 # spec/, the TypeScript SDK under packages/protocol/, and the Rust crate under
-# crates/mango-protocol/. The heavy Rust matrix only runs when a protocol path
-# changes — but the workflow itself triggers on every pull request, because
-# path detection happens in the cheap `changes` job so the
+# crates/mango-protocol/. The minimum-Rust check is not here: Cargo Shim runs it
+# for every Rust path, the protocol crate's included. The heavy Rust matrix only
+# runs when a protocol path changes — but the workflow itself triggers on every
+# pull request, because path detection happens in the cheap `changes` job so the
 # "Protocol CI / Gate" check below always reports and is safe to require in
 # branch protection (a path-filtered workflow that never starts leaves a
 # required check pending forever). Pushes to main keep the path filter;
@@ -234,31 +235,6 @@ jobs:
           tool: cargo-deny
       - run: cargo deny check
 
-  # MSRV policy lives on `rust-version` in the workspace Cargo.toml: current stable minus two
-  # minors is 1.97, matching this crate's declared minimum.
-  # rust-toolchain.toml pins 1.99.0 for everything else, so 1.97.0 is installed and selected
-  # explicitly here with the `+1.97.0` plus form, which outranks the root toolchain file. Any
-  # invocation added below that omits it would silently be checked against 1.99.0 instead.
-  msrv:
-    name: MSRV (1.97.0, policy on Cargo.toml's rust-version)
-    needs: [changes]
-    if: needs.changes.outputs.protocol == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: rustup toolchain install 1.97.0 --profile minimal
-      # Keyed apart from the `rust` job's cache: that one builds with the 1.99.0 default
-      # toolchain, this one with 1.97.0, and sharing a key would mix artefacts from both.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: msrv
-      - run: cargo +1.97.0 check --all-features --locked
-
   # Informational, never gating: the crate is pre-1.0 and unreleased Rust API surface routinely
   # lands on the same pull request that would trip this. spec/versioning.md is explicit that
   # "0.x: the wire may still change in a minor package release", and this repository's own
@@ -329,7 +305,6 @@ jobs:
       transports,
       interop,
       deny,
-      msrv,
       semver-checks,
       schema-equality,
     ]
@@ -350,6 +325,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript package rust transports interop deny msrv semver-checks schema-equality' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript package rust transports interop deny semver-checks schema-equality' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

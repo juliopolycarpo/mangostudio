@@ -2,9 +2,12 @@ name: Cargo Shim
 
 # The workflow name stays stable because repository rules require its Gate
 # check. The implementation now owns the complete root Cargo workspace: all
-# workspace members build and test on the three supported runner OSes, while
-# the published launcher keeps its explicit MSRV lane. The fuzz crate remains
-# excluded from stable workspace builds and is resolved through its own lock.
+# workspace members build and test on the three supported runner OSes, and the
+# minimum supported Rust is enforced here for every Rust path: the workspace
+# floor (`workspace-msrv`, plus `target-msrv` for the Windows and macOS code
+# Linux never compiles) and the published launcher's lower, explicit floor
+# (`launcher-msrv`). The fuzz crate remains excluded from stable workspace
+# builds and is resolved through its own lock.
 #
 # Pull requests always start the workflow so the Gate check reports even when
 # the Rust lanes are irrelevant. Pushes to main keep a path filter.
@@ -160,6 +163,98 @@ jobs:
           RUSTDOCFLAGS: -D warnings
 
       - run: cargo build --workspace --locked
+
+  workspace-msrv:
+    # The workspace floor is `rust-version` in the root Cargo.toml (stable minus
+    # two minors), which every member but the launcher inherits. It lives here,
+    # on the shared Rust signal, rather than in Protocol CI: that workflow's
+    # signal is protocol paths only, so a runtime-only change skipped the floor
+    # entirely. Every path that can change what this compiles is already in
+    # RUST_WORKSPACE_PATHS, so a protocol-crate edit still reaches this lane.
+    #
+    # `RUSTUP_TOOLCHAIN` outranks the root rust-toolchain.toml (1.99.0) for every
+    # step, including rust-cache's compiler fingerprint and the build scripts'
+    # `rustc`, so no later command can silently be checked against 1.99.0.
+    # cargo-shim.yml's test pins this value to the manifest's rust-version.
+    #
+    # Two commands, because the shipped artefacts and the test tree differ:
+    # the first is what `cargo build --workspace` ships (default features, lib
+    # and bin targets); the second adds tests, examples and benches with every
+    # feature on, so a floor-breaking API used only there fails too.
+    name: Workspace MSRV (1.97.0)
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUSTUP_TOOLCHAIN: 1.97.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup toolchain install 1.97.0 --profile minimal
+
+      # Keyed apart from the 1.99.0 lanes' entries; the toolchain is part of
+      # rust-cache's own key, and `key` names this lane in the cache list.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: msrv
+
+      - run: cargo check --workspace --locked
+
+      - run: cargo check --workspace --all-targets --all-features --locked
+
+  target-msrv:
+    # `cfg(windows)` and `cfg(target_os = "macos")` code (named pipes, handle
+    # based file I/O, the guardian and probing backends) is not compiled by the
+    # Linux lane above, and the native 1.99.0 tests in `workspace` prove nothing
+    # about the floor. A native `cargo check` on the floor toolchain closes
+    # that, one runner per target: macOS arm64 (the runner's own architecture),
+    # and both shipped Windows architectures, ARM64 cross-checked from the x64
+    # runner, whose image carries the ARM64 MSVC tools (runtime-build.yml
+    # builds the same target there). Check only: it compiles every target kind
+    # without linking or running, which is all a minimum-version claim needs.
+    # musl keeps its own 1.99.0 clippy lane and is not repeated here.
+    name: Target MSRV (${{ matrix.target }})
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+    env:
+      RUSTUP_TOOLCHAIN: 1.97.0
+      # Through the environment, never interpolated into a script (zizmor's
+      # template-injection rule); bash on every runner so `$TARGET` expands.
+      TARGET: ${{ matrix.target }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup toolchain install 1.97.0 --profile minimal --target "$TARGET"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: msrv-${{ matrix.target }}
+
+      - run: cargo check --workspace --all-targets --all-features --locked --target "$TARGET"
 
   launcher-msrv:
     name: Launcher MSRV
@@ -373,6 +468,8 @@ jobs:
     needs: [
       changes,
       workspace,
+      workspace-msrv,
+      target-msrv,
       launcher-msrv,
       musl-clippy,
       fuzz-workspace,
@@ -396,6 +493,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-msrv target-msrv launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

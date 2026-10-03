@@ -82,6 +82,8 @@ describe('cargo-shim.yml push filter', () => {
 describe('classifyChangedPaths', () => {
   test.each([
     ['crates/mangostudio-runtime/src/lib.rs', true, true],
+    // A runtime-only edit, including Windows-only code, runs every Rust lane.
+    ['crates/mangostudio-runtime/src/filesystem/io.rs', true, true],
     ['Cargo.lock', true, true],
     ['apps/shared/src/runtime-home/schemas.ts', true, true],
     // #1099: hub modules the qualification suites exercise but no list named.

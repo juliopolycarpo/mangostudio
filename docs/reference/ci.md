@@ -11,16 +11,46 @@ results through `scripts/ci/evaluate-gate.ts`. Branch protection and Canary
 depend on these stable names instead of tracking internal job names, matrix
 shapes, or path filters.
 
-| Workflow check name      | Workflow                                | Role                                                                                                                                                                                                                                                 |
-| ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, `rust-coverage` when no Rust-relevant path changed, and `qa-metrics` on `workflow_dispatch`                |
-| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs the locked build on Linux, macOS and Windows, the plain test run on macOS and Windows (Linux's is `Rust Coverage` in `CI / Gate`), the launcher MSRV check, and fuzz-workspace resolution |
-| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                                                                                       |
+| Workflow check name      | Workflow                                | Role                                                                                                                                                                                                                                                             |
+| ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, `rust-coverage` when no Rust-relevant path changed, and `qa-metrics` on `workflow_dispatch`                            |
+| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs the locked build on Linux, macOS and Windows, the plain test run on macOS and Windows (Linux's is `Rust Coverage` in `CI / Gate`), the minimum-Rust checks (see below), and fuzz-workspace resolution |
+| `Protocol CI / Gate`     | `.github/workflows/protocol-ci.yml`     | Always reports; accepts every protocol lane skip when no protocol path changed                                                                                                                                                                                   |
+| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                                                                                                   |
+
+Repository rules match required checks by the name `Gate`, and all four workflows
+above emit a check with that name, so each must keep reporting on every pull
+request: no workflow-level `paths` filter on `pull_request`, and every conditional
+lane listed in the gate's `ALLOWED_SKIPS` only under its own relevance proof.
 
 Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
 `needs` from the workflow text: every job except the gate itself and any job
 that already depends on the gate. Adding a mandatory lane without wiring it into
 the gate fails the test.
+
+## Minimum supported Rust
+
+The minimum-Rust checks live in Cargo Shim, on the same Rust change signal
+(`RUST_WORKSPACE_PATHS` in `scripts/lib/rust-lanes.ts`) as every other Rust lane,
+so a runtime-only change runs them and a docs-only change skips them with the
+`Gate` still reporting. Protocol CI does not repeat them: its signal covers
+protocol paths only, and every path the protocol crate compiles from is a Rust
+path too. Each lane selects its toolchain with a job-level `RUSTUP_TOOLCHAIN`,
+which outranks `rust-toolchain.toml` (1.99.0) for every step.
+
+| Lane             | Toolchain | Runs                                                                                                                                                                                                 |
+| ---------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace-msrv` | 1.97.0    | Linux: `cargo check --workspace --locked`, then `--workspace --all-targets --all-features --locked`                                                                                                  |
+| `target-msrv`    | 1.97.0    | `cargo check --workspace --all-targets --all-features --locked --target <t>` for `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`, on native macOS and Windows runners |
+| `launcher-msrv`  | 1.96.0    | `cargo check`, `clippy` and `test` of the `mangostudio` launcher, whose published floor is lower                                                                                                     |
+
+The workspace floor is `rust-version` in the root `Cargo.toml`;
+`scripts/tests/ci-gate.unit.test.ts` fails when a lane's toolchain drifts from it.
+`target-msrv` exists because `cfg(windows)` and `cfg(target_os = "macos")` code is
+not compiled on Linux, and the native tests of `workspace` run on 1.99.0, so they
+say nothing about the floor. It only checks: compiling every target kind is the
+whole minimum-version claim, and running them would repeat `workspace`. Linux
+musl keeps its own 1.99.0 clippy lane and is not a minimum-Rust target.
 
 ## Fresh Rust dependencies
 
@@ -137,7 +167,7 @@ composite and asserts they have no external runtime imports.
 ## Branch protection / required checks
 
 Required checks on `main` and, while the Rust migration is active,
-`feat/rust-runtime` should be the three stable gates above, plus the independent
+`feat/rust-runtime` should be the stable `Gate` checks above, plus the independent
 security / process checks that are not folded into those gates:
 
 - `CI / Gate`
