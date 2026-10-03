@@ -29,7 +29,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use mango_agent_codex::account::AccountFingerprintKey;
+use super::port::AccountKey;
 use mangostudio_runtime_contract::manifest::{ExternalIdentityIsolation, IdentityIsolationMethod};
 
 use crate::hex::sha256_hex;
@@ -198,22 +198,23 @@ pub(crate) fn host_local_digest_key(home: &Path) -> Option<String> {
 /// ```ignore
 /// let key = detect_account_fingerprint_key();
 /// ```
-pub(crate) fn detect_account_fingerprint_key() -> Option<AccountFingerprintKey> {
+pub(crate) fn detect_account_fingerprint_key() -> Option<AccountKey> {
     let home = crate::runtime_home::home_dir().ok()?;
-    account_fingerprint_key(&host_local_digest_key(&home)?)
+    account_fingerprint_key(host_local_digest_key(&home)?)
 }
 
-/// The SDK key for a [`host_local_digest_key`]: the hex text's own bytes, the
+/// The account key for a [`host_local_digest_key`]: the hex text's own bytes, the
 /// way `codex/adapter.ts` handed the same string to `createHmac`, so every
 /// fingerprint equals the one the TypeScript adapter stored on a continuation.
+/// Takes the fresh digest's buffer so the adapter adds no intermediate copy.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let key = account_fingerprint_key(&host_local_digest_key(&home)?)?;
+/// let key = account_fingerprint_key(host_local_digest_key(&home)?)?;
 /// ```
-pub(crate) fn account_fingerprint_key(digest_key: &str) -> Option<AccountFingerprintKey> {
-    AccountFingerprintKey::new(digest_key.as_bytes()).ok()
+pub(crate) fn account_fingerprint_key(digest_key: String) -> Option<AccountKey> {
+    AccountKey::new(digest_key.into_bytes())
 }
 
 fn attestation(method: IdentityIsolationMethod, home: &Path) -> Option<ExternalIdentityIsolation> {
@@ -563,24 +564,26 @@ mod tests {
     #[test]
     fn an_empty_digest_key_yields_no_account_fingerprint_key() {
         assert!(
-            account_fingerprint_key("").is_none(),
+            account_fingerprint_key(String::new()).is_none(),
             "expected no key, so no unkeyed fingerprint, for an empty digest key"
         );
-        let key = account_fingerprint_key("host-local-key").expect("a non-empty key");
+        let key = account_fingerprint_key("host-local-key".into()).expect("a non-empty key");
         assert_eq!(
-            key.fingerprint("user@example.com").as_str(),
-            "bcd4e5c63495974573261faadb33d8be",
-            "expected the key to be the digest text's bytes, as `createHmac` used it"
+            key.bytes(),
+            b"host-local-key",
+            "expected the host digest text's bytes"
         );
-        // End to end from a host identity: `codex/adapter.ts` computed
-        // `createHmac('sha256', hostLocalDigestKey()).update('codex:' + email)`
-        // `.digest('hex').slice(0, 32)` with this identity's digest key.
-        let identity = identity_string("linux", Some(1000), "/home/ada", 66306, 12345);
-        let key = account_fingerprint_key(&digest_key_for(&identity)).expect("a host key");
+    }
+
+    #[test]
+    fn the_account_key_retains_the_fresh_digest_buffer() {
+        let digest = String::from("host-local-key");
+        let buffer = digest.as_ptr();
+        let key = account_fingerprint_key(digest).expect("a non-empty digest key");
         assert_eq!(
-            key.fingerprint("user@example.com").as_str(),
-            "5804f50595bc9d505930fc1468620036",
-            "expected the fingerprint the TypeScript adapter stored for this host"
+            key.bytes().as_ptr(),
+            buffer,
+            "expected the supplied allocation retained"
         );
     }
 
@@ -862,3 +865,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "adapter/key_tests.rs"]
+mod sdk_key_tests;

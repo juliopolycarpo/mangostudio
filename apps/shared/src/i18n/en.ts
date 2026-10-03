@@ -2038,6 +2038,7 @@ export const messages: Messages = {
         'This environment cannot open a terminal. It needs a shell and the shell permission.',
       runtimeUpdateRequired:
         'This environment’s runtime needs an update before terminals can open safely.',
+      runtimeUnavailable: 'The runtime could not open the terminal. Try again.',
       disconnected: 'The environment is not connected.',
     },
     page: {
@@ -3637,6 +3638,9 @@ export const messages: Messages = {
       noneDiscovered: 'No external agents found on this machine.',
       signedIn: 'signed in',
       authUnknown: 'sign-in state unknown',
+      discoveryUndetermined: 'availability undetermined',
+      discoveryUndeterminedHint:
+        'The probe could not confirm this agent or its version. You can still try a turn.',
       notInstalledIn: 'Not installed in {environment}',
       /** Stands in for a required version a runtime reported without naming. */
       unknownVersion: 'a newer version',

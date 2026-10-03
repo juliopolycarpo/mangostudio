@@ -2059,6 +2059,7 @@ export const messages = {
         'Este ambiente não pode abrir um terminal. Ele precisa de um shell e da permissão de shell.',
       runtimeUpdateRequired:
         'O runtime deste ambiente precisa de uma atualização antes que os terminais possam ser abertos com segurança.',
+      runtimeUnavailable: 'O runtime não conseguiu abrir o terminal. Tente novamente.',
       disconnected: 'O ambiente não está conectado.',
     },
     page: {
@@ -3640,6 +3641,9 @@ export const messages = {
       noneDiscovered: 'Nenhum agente externo encontrado nesta máquina.',
       signedIn: 'sessão iniciada',
       authUnknown: 'estado de login desconhecido',
+      discoveryUndetermined: 'disponibilidade indeterminada',
+      discoveryUndeterminedHint:
+        'A verificação não confirmou este agente ou sua versão. Você ainda pode tentar enviar uma mensagem.',
       notInstalledIn: 'Não instalado em {environment}',
       unknownVersion: 'uma versão mais recente',
       continueInNewChat: 'Continuar em um novo chat',

@@ -15,6 +15,7 @@
 import {
   CLOSE_CODES,
   type EventFrame,
+  isSessionClosedRequestError,
   type Port,
   RESERVED_ERROR_CODES,
   RemoteError,
@@ -369,7 +370,6 @@ export async function openHubSession(
         return Promise.reject(new RuntimeRequestNotSentError(method, session.closure));
       }
       return requestTaggingNoReply(
-        session,
         () => requestValidated(client, method, params, requestOptions),
         requestOptions?.timeoutMs
       );
@@ -388,11 +388,11 @@ export async function openHubSession(
  * The deadline is recognized by a marker timer armed before the SDK's own, for
  * the same duration: timers of equal delay fire in the order they were set, so
  * by the time the SDK's `TIMEOUT` rejection is handled the marker has fired,
- * and a `TIMEOUT` the runtime sent earlier finds it unfired. A close is
- * recognized by the session being closed when the `UNAVAILABLE` arrives.
+ * and a `TIMEOUT` the runtime sent earlier finds it unfired. A close carries
+ * the Session's private identity marker, so a remote response stays an answer
+ * even when a real close races after it and before this catch resumes.
  */
 async function requestTaggingNoReply<T>(
-  session: Session,
   run: () => Promise<T>,
   timeoutMs: number | undefined
 ): Promise<T> {
@@ -410,11 +410,7 @@ async function requestTaggingNoReply<T>(
     if (error.code === RESERVED_ERROR_CODES.TIMEOUT && deadlinePassed) {
       throw new RuntimeRequestNoReplyError(error, 'deadline');
     }
-    if (
-      error.code === RESERVED_ERROR_CODES.UNAVAILABLE &&
-      session.state === 'closed' &&
-      error.details?.closeCode !== undefined
-    ) {
+    if (isSessionClosedRequestError(error)) {
       throw new RuntimeRequestNoReplyError(error, 'connection-closed');
     }
     throw error;

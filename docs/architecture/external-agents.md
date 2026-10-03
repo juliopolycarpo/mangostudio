@@ -137,6 +137,12 @@ each one do* takes two tiers, in this order:
 
 The hub spawns no vendor CLI and keeps no second capability table.
 
+`discoveryState` records probe certainty separately from installation, authentication and permission
+support. An installed target with an inconclusive probe or absent version is `undetermined` and
+remains tryable when its other checks allow it. Home, the selector and Settings show this uncertainty.
+The field is optional for older runtimes; explicit refusals still make the affected target or
+permission combination unavailable.
+
 **Discovery is not free.** The authoritative pass is a subprocess on someone else's machine, so it
 carries a stated budget: a per-call timeout, a cache TTL per (user, environment), a single-flight
 so a burst of selector renders produces one probe, and a cap on concurrent discoveries per
@@ -845,14 +851,57 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.3.0). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.3.2). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
-These product facts come from SDK surfaces that `dyn Harness` alone does not cover:
+The product consumes `port.rs`'s `AgentBackend` and `AgentSession` operations for discovery,
+opening, native history, turns/reviews, responses, steering, cancellation, close and account usage.
+Discovery, accepted configuration, capabilities, commands and events use the existing Rust wire
+contracts. `interactions.rs` keeps permission decisions separate from question answers. Product
+unit tests construct owned backend/session/stream fakes, without SDK harnesses or process handles.
 
-- **Codex account fingerprint.** Discovery goes through `HarnessFactory::discover`, which the
-  product factory overrides so Codex runs `CodexHarness::discover_with_account`. The key is
+The private `adapter/` contains the four SDK crate imports, concrete harnesses, SDK session and
+stream owners, conversions and `GuardedProcessLauncher`. The custom launcher's fresh consent
+check, Unix guardian and Windows Job containment remain in force. The architecture test
+`tests/external_agent_sdk_boundary.rs` rejects SDK references in product source and tests, including
+re-exports, aliases and qualified types. Its only executable fixture exception is
+`examples/fake_cursor_agent.rs`; SDK-specific fixtures otherwise live under `adapter/`.
+
+The supervisor owns session admission, authorization, consent, scratch and durable submission
+receipts. It owns each `TurnStream` until draining finishes, including after a hub stops listening.
+The adapter pulls mapped events from the existing SDK stream and command subscription, preserving
+order and backpressure without a second queue. Dropping the owned stream drops its SDK observation
+owner; the SDK and guarded launcher retain native abandonment/containment responsibilities.
+Cancellation remains a distinct session operation. During discovery/open/history calls, the
+adapter propagates the owned host cancellation while continuing to poll the same SDK operation
+through the supervisor's cleanup grace, without a background cancellation task.
+
+`failure.rs` keeps cause, retry advice, observed dispatch, session usability and cleanup outcome
+separate from the wire error. Absence of observed dispatch stays unknown. The adapter retains an
+SDK cleanup handle while bounded kill/wait runs, reports an unconfirmed cleanup explicitly, and
+never hands a process control to product services. The guarded launcher still owns an unconfirmed
+process tree and reaps it on drop or runtime shutdown. Product scratch cleanup remains the
+supervisor's obligation.
+
+A definitely unsubmitted turn or review with a deterministic input/configuration refusal ends that
+message once as `external_agent_turn_refused`. Its receipt is forgotten so a corrected request can
+use the healthy session. Busy, accepted or uncertain dispatch, spent sessions and cleanup-bearing
+failures preserve their separate handling. Spent-session classification follows both operation and
+cleanup wrappers; settling a cleanup handle does not make a closed session usable again. Native
+reviews use the Hub's existing submission admission and recovery ledger before dispatch.
+
+The Hub's terminal fallback settles remaining running activities and reasoning for every terminal
+status while preserving explicit activity results. Terminal creation maps a timeout, a Hub-observed
+deadline or a remote `UNAVAILABLE` reply to `runtime-unavailable`. A locally observed closed
+transport reports `disconnected`; revoked terminal consent reports `unavailable`. Other remote
+refusals keep their own error codes. A vendor-session failure alone does not establish that its
+runtime environment is dead.
+
+These product facts come from SDK operations inside the adapter:
+
+- **Codex account fingerprint.** Discovery goes through `AgentBackend::discover`; its private
+  factory makes Codex run `CodexHarness::discover_with_account`. The key is
   `host_local_digest_key`'s hex text as bytes, read again for every Codex discovery, so
   `account.fingerprint` is the value `codex/adapter.ts` stored on continuations, and
   `account.planType` comes with it. The email is only the HMAC input inside the SDK. When the home
@@ -891,8 +940,9 @@ These product facts come from SDK surfaces that `dyn Harness` alone does not cov
 | `external-agent.refresh-account-usage` | `supervisor.rs` `refresh_account_usage` | `account_usage_without_a_live_session_is_nothing_to_report`, `account_usage_refuses_a_live_session_of_another_target`, `account_limits_carry_credits_spend_control_and_reset_credits_in_milliseconds`                                 |
 | `external-agent.event` topic           | `turns.rs` relay                        | `concurrent_emitters_never_reorder_or_skip_a_sequence`, `a_refused_frame_spends_no_sequence`, `a_turn_past_the_persisted_budget_ends_with_its_own_error_and_is_stopped`, `a_long_streaming_command_stays_inside_the_persisted_budget` |
 
-Rust tests live in `supervisor/tests.rs`, `turns.rs`, `launcher_tests.rs`, `isolation.rs`,
-`hub_authority_tests.rs`, `map_tests.rs` and `map_events_tests.rs` under that directory.
+Product tests live in `product_tests.rs`, `turns.rs`, `isolation.rs` and
+`hub_authority_tests.rs`. SDK-specific supervisor fixtures live in `adapter/integration_tests.rs`;
+launcher, mapping and key fixtures also stay under `adapter/`.
 
 ### Compiled-runtime qualification
 
@@ -936,7 +986,9 @@ read returns. This is an accepted asymmetry with the watcher.
 ### Cancellation on Windows
 
 Cancelling a turn is a protocol request for Codex (`turn/interrupt`) and Cursor (ACP
-`session/cancel`), so neither depends on a process signal. The qualification above demonstrates the ACP cancel-and-continue path on Windows, and the live smoke cancelled a streaming Codex turn on Windows and completed the next one on the same session. If a
+`session/cancel`), so neither depends on a process signal. The compiled qualification covers ACP
+cancel-and-continue on Windows. Authenticated Codex or Cursor smoke is separate and must be repeated
+for each runtime and SDK release. A historical pass does not qualify a later SDK pin. If a
 Codex cancel does not settle, the SDK tears the session down and it is reported lost (below). Claude has no protocol cancel: the SDK interrupts the
 process, and the Windows launcher reports interrupt as unsupported
 (`windows_interrupt_is_unsupported_and_kill_ends_the_job`), so a Claude cancel on Windows is a

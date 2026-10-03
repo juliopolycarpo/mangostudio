@@ -155,6 +155,7 @@ import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
 import { checkAgainstContract, schemaByDiscriminant } from './contract-schema';
 import { applyHubIsolationClaim, type HubSession } from './hub-session';
+import { isRequestNotSent, noReplyOf } from './request-not-sent';
 import { createTargetPaths, type TargetPaths } from './target-paths';
 
 const logger = createDiagnosticLogger('runtime-client');
@@ -741,7 +742,11 @@ export class RuntimeClient {
     try {
       return await this.hub.request(method, params, options);
     } catch (error) {
-      if (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE) {
+      if (
+        error instanceof RemoteError &&
+        error.code === RESERVED_ERROR_CODES.UNAVAILABLE &&
+        (isRequestNotSent(error) || noReplyOf(error)?.reason === 'connection-closed')
+      ) {
         this.onUnavailable?.();
       }
       throw translateRuntimeError(error);
@@ -881,7 +886,10 @@ function translateRuntimeError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
   }
   if (error.code === RESERVED_ERROR_CODES.CANCELLED) {
-    return new DOMException(error.message, 'AbortError');
+    const aborted = new DOMException(error.message, 'AbortError');
+    // Keep dispatch and cleanup facts without changing the AbortError facade.
+    Object.defineProperty(aborted, 'cause', { value: error });
+    return aborted;
   }
   if (error.code === RESERVED_ERROR_CODES.TIMEOUT) {
     // `cause` keeps whether the hub or the runtime decided it timed out.
@@ -940,7 +948,8 @@ function translateRuntimeError(error: unknown): Error {
     default:
       // `mcp_call` deliberately stays a RemoteError: the turn pipeline
       // classifies it from the `mcpFailure` detail the runtime attached, and
-      // wrapping it here would drop that.
+      // wrapping it here would drop that. External-agent refusals likewise
+      // retain their kind, dispatch and cleanup facts for the submission policy.
       return error;
   }
 }

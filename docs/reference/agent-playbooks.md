@@ -467,8 +467,9 @@ Open these first:
   a new reason cannot ship without one)
 - `crates/mangostudio-runtime/src/external_agents/` (the runtime host over the External Agents
   SDK — `service.rs` for the `external-agent.*` handlers, `supervisor.rs` for session lifecycle,
-  `launcher.rs` for authorized launch, `isolation.rs` for the attestation, and `map.rs` /
-  `map_events.rs` for the one mapper from SDK types to the wire)
+  `port.rs` for the owned agent operations, `turns.rs` for receipts and event relay,
+  `isolation.rs` for the attestation, and private `adapter/` for SDK construction, mapping
+  and guarded process launch)
 - The vendor adapters, their pins and the recorded vendor contracts live in the SDK repository,
   [juliopolycarpo/mango-external-agents](https://github.com/juliopolycarpo/mango-external-agents)
   (`mango-agent-claude`, `mango-agent-codex`, `mango-agent-acp`)

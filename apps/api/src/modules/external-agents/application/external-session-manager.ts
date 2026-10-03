@@ -29,10 +29,11 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentConfiguration,
   ExternalAgentEventEnvelope,
+  ExternalAgentStartReviewParams,
+  ExternalAgentStartReviewResult,
   ExternalAgentSteerResult,
   ExternalAgentTargetId,
   ExternalAgentTurnParams,
-  ExternalReviewTarget,
   ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
@@ -201,12 +202,29 @@ export interface ExternalSessionHandle {
    * permission change takes effect on the next ordinary turn, not by
    * reconfiguring this one.
    */
-  startReview(input: {
-    readonly clientMessageId: string;
-    readonly target: ExternalReviewTarget;
-  }): Promise<{ readonly nativeTurnId: string; readonly reviewThreadId: string }>;
+  startReview(input: ExternalReviewInput): Promise<ExternalAgentStartReviewResult>;
+  /**
+   * Builds the exact review request once, for a receipt-safe resend.
+   *
+   * @example
+   * const params = handle.reviewParams({ clientMessageId, target });
+   */
+  reviewParams(input: ExternalReviewInput): ExternalAgentStartReviewParams;
+  /**
+   * Sends the preserved review params without rebuilding them.
+   *
+   * @example
+   * const started = await handle.sendReview(params);
+   */
+  sendReview(params: ExternalAgentStartReviewParams): Promise<ExternalAgentStartReviewResult>;
   cancel(nativeTurnId?: string): Promise<void>;
 }
+
+/** The native review input, without the session owned by its handle. */
+export type ExternalReviewInput = Pick<
+  ExternalAgentStartReviewParams,
+  'clientMessageId' | 'target'
+>;
 
 export interface ExternalSessionManager {
   ensureSession(input: EnsureExternalSessionInput): Promise<ExternalSessionHandle>;
@@ -367,6 +385,15 @@ export function createExternalSessionManager(
       });
       return result.nativeTurnId;
     };
+    const reviewParams = (input: ExternalReviewInput): ExternalAgentStartReviewParams => ({
+      sessionId: record.sessionId,
+      clientMessageId: input.clientMessageId,
+      target: input.target,
+    });
+    const sendReview = (
+      params: ExternalAgentStartReviewParams
+    ): Promise<ExternalAgentStartReviewResult> =>
+      record.client.externalAgents.startReview(params, { timeoutMs: callTimeoutMs });
     return {
       sessionId: record.sessionId,
       nativeSessionId: record.open.nativeSessionId,
@@ -417,18 +444,11 @@ export function createExternalSessionManager(
           { timeoutMs: callTimeoutMs }
         );
       },
-      async startReview(input) {
-        // No `configuration`: Codex `review/start` has none, and a review must
-        // not reopen the session to apply a newer sandbox. The thread's
-        // existing policy is the one the user already accepted for this chat.
-        return await record.client.externalAgents.startReview(
-          {
-            sessionId: record.sessionId,
-            clientMessageId: input.clientMessageId,
-            target: input.target,
-          },
-          { timeoutMs: callTimeoutMs }
-        );
+      reviewParams,
+      sendReview,
+      startReview(input) {
+        // The session's existing policy applies: review/start has no configuration.
+        return sendReview(reviewParams(input));
       },
       async cancel(nativeTurnId) {
         await record.client.externalAgents.cancel(

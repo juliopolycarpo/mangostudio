@@ -210,12 +210,21 @@ pub(crate) enum DiscoverySource {
     Live,
 }
 
+/// Probe certainty, separate from the target's explicit unavailability and sign-in facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DiscoveryState {
+    Determined,
+    Undetermined,
+}
+
 /// `ExternalAgentRuntimeDescriptor` (the hub adds `environmentId`).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Descriptor {
     pub target_id: TargetId,
     pub installed: bool,
+    pub discovery_state: DiscoveryState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

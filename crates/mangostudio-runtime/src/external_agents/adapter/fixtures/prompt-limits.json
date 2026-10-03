@@ -1,0 +1,15 @@
+{
+  "attachmentBytes": 2097152,
+  "attachments": 4,
+  "attachmentIdUnits": 256,
+  "attachmentNameUnits": 512,
+  "attachmentMimeUnits": 255,
+  "nativeSessionIdUnits": 256,
+  "httpPromptUnits": 200000,
+  "runtimePromptUnits": 1048576,
+  "sessions": 4,
+  "protocolFrameBytes": 16777216,
+  "incomingBytes": 8388608,
+  "incomingLineBytes": 1048576,
+  "outboundBytes": 57671680
+}

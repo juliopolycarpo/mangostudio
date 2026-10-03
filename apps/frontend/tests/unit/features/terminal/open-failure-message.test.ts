@@ -11,6 +11,7 @@ describe('openFailureMessage', () => {
   it.each([
     ['disconnected', en.terminal.unavailable.disconnected],
     ['unavailable', en.terminal.unavailable.unavailable],
+    ['runtime-unavailable', en.terminal.unavailable.runtimeUnavailable],
     ['runtime-update-required', en.terminal.unavailable.runtimeUpdateRequired],
   ])('words a details.reason of %s as the availability view does', (reason, expected) => {
     expect(openFailureMessage(en, hubRefusal('UNSUPPORTED', { reason }))).toBe(expected);

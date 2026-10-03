@@ -999,6 +999,15 @@ export const ExternalAgentDiscoveryReportSchema = Type.Object(
 
 export type ExternalAgentDiscoveryReport = Static<typeof ExternalAgentDiscoveryReportSchema>;
 
+/** Probe certainty is separate from installation, sign-in and permission policy. */
+export const ExternalAgentDiscoveryStateSchema = Type.Union([
+  Type.Literal('determined'),
+  /** An inconclusive probe or missing version still permits trying an installed target. */
+  Type.Literal('undetermined'),
+]);
+
+export type ExternalAgentDiscoveryState = Static<typeof ExternalAgentDiscoveryStateSchema>;
+
 /**
  * One external agent, in one environment, as the selector needs it.
  *
@@ -1010,6 +1019,8 @@ export const ExternalAgentDescriptorSchema = Type.Object(
     targetId: ExternalAgentTargetIdSchema,
     environmentId: Type.String({ minLength: 1 }),
     installed: Type.Boolean(),
+    /** Optional for older runtimes. Uncertainty alone never makes a target unavailable. */
+    discoveryState: Type.Optional(ExternalAgentDiscoveryStateSchema),
     /**
      * Vendor-supplied, so bounded on `VendorText` terms: the runtime cuts both
      * fields to `accountLabel`'s 128 **code points**, and a plain

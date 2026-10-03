@@ -24,9 +24,16 @@ import {
   ExternalTurnRunnerMismatchError,
   ExternalTurnWorkspaceMissingError,
 } from '../../../../src/modules/external-agents/application/external-turn-controller';
+import type { CancellableSleep } from '../../../../src/modules/external-agents/application/external-turn-submission';
 import { readContinuation } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
+import { listAttemptsForMessage } from '../../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { cancelActiveTurn } from '../../../../src/modules/generation/application/active-turn-registry';
-import { RuntimeRequestNotSentError } from '../../../../src/services/runtime-client/request-not-sent';
+import {
+  RuntimeRequestNoReplyError,
+  RuntimeRequestNotSentError,
+} from '../../../../src/services/runtime-client/request-not-sent';
+import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
+import { createFakeBackoffClock } from '../../../support/external-agents/fake-backoff-clock';
 import {
   createFakeExternalRuntime,
   type FakeExternalRuntime,
@@ -74,9 +81,12 @@ async function insertChat(runnerKind: 'external' | 'mangostudio' = 'external'): 
 }
 
 function harness(
-  options: FakeExternalRuntimeOptions & { readonly steerTerminationGraceMs?: number } = {}
+  options: FakeExternalRuntimeOptions & {
+    readonly steerTerminationGraceMs?: number;
+    readonly sleep?: CancellableSleep;
+  } = {}
 ) {
-  const { steerTerminationGraceMs, ...runtimeOptions } = options;
+  const { steerTerminationGraceMs, sleep, ...runtimeOptions } = options;
   const runtime = createFakeExternalRuntime(runtimeOptions);
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
@@ -93,6 +103,7 @@ function harness(
     commandCatalog,
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
     ...(steerTerminationGraceMs !== undefined ? { steerTerminationGraceMs } : {}),
+    ...(sleep ? { sleep } : {}),
   });
   return { runtime, sessions, approvals, commandCatalog, controller };
 }
@@ -104,8 +115,8 @@ function harness(
  * this: everywhere else, the stub's shortcut past `RuntimeClient.externalAgents.onEvent`'s
  * own envelope filter is exactly what makes ordering and redelivery cheap to drive.
  */
-async function realHarness() {
-  const runtime = await createRealExternalRuntime();
+async function realHarness(options: Parameters<typeof createRealExternalRuntime>[0] = {}) {
+  const runtime = await createRealExternalRuntime(options);
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     newSessionId: () => 'session-1',
@@ -582,6 +593,43 @@ describe('external turn controller', () => {
     expect((await readAssistantRow()).text).toBe('half');
   });
 
+  it('reports a reopen deadline before any turn was sent as a vendor error', async () => {
+    const { runtime, sessions: base, approvals, commandCatalog } = harness();
+    let opened = false;
+    const sessions: typeof base = {
+      ...base,
+      async ensureSession(input) {
+        if (opened) {
+          throw new ToolExecutionTimedOutError('Session reopen timed out.', {
+            cause: new RuntimeRequestNoReplyError(
+              new RemoteError('TIMEOUT', 'Session reopen timed out.'),
+              'deadline'
+            ),
+          });
+        }
+        opened = true;
+        const handle = await base.ensureSession(input);
+        runtime.dropConnection();
+        return handle;
+      },
+    };
+    const ids = [userMessageId, assistantMessageId];
+    const controller = createExternalTurnController({
+      sessions,
+      approvals,
+      commandCatalog,
+      newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
+    });
+
+    const result = await startTurn(controller);
+
+    expect(runtime.calls.turn).toEqual([]);
+    expect(
+      result.reason,
+      `expected terminal reason: vendor-error | received: ${result.reason}`
+    ).toBe('vendor-error');
+  });
+
   it('terminates when consent is withdrawn mid-turn', async () => {
     const { runtime, controller, sessions } = harness();
     const running = startTurn(controller);
@@ -749,6 +797,159 @@ describe('external turn controller', () => {
     expect((await readAssistantRow()).generating).toBe(false);
   });
 
+  for (const dispatch of [undefined, 'not-submitted'] as const) {
+    it(`settles deterministic turn refusal once and reuses its healthy session (${dispatch ?? 'no dispatch'})`, async () => {
+      let refuse = true;
+      const clock = createFakeBackoffClock({ auto: false });
+      const { runtime, controller, sessions } = harness({
+        sleep: clock.sleep,
+        turnFailure: () =>
+          refuse
+            ? new RemoteError('INTERNAL', 'Input exceeds the 8 MiB limit.', {
+                kind: 'external_agent_turn_refused',
+                ...(dispatch ? { dispatch } : {}),
+              })
+            : undefined,
+      });
+      // A retry is the regression itself. Stop it immediately so the red run
+      // asserts the wrong terminal reason instead of timing out or leaking work.
+      clock.onWait(() => cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled'));
+      const result = await startTurn(controller);
+
+      expect(result.reason).toBe('vendor-error');
+      expect(result.error).toEqual({
+        code: 'turn-start',
+        message: 'Input exceeds the 8 MiB limit.',
+      });
+      expect(runtime.calls.turn).toHaveLength(1);
+      expect(clock.waits).toEqual([]);
+      expect(runtime.calls.close).toEqual([]);
+      expect(runtime.calls.cancel).toEqual([]);
+      expect(sessions.liveSessionCount()).toBe(1);
+      expect(await readContinuation(chatId, getDb())).toBeDefined();
+      expect(
+        (await listAttemptsForMessage(assistantMessageId, getDb())).map((row) => row.state)
+      ).toEqual(['terminal']);
+      const stored = await readAssistantRow();
+      expect(stored.generating).toBe(false);
+      expect(turnPartOf(stored.parts).terminalReason).toBe('vendor-error');
+
+      refuse = false;
+      const next = startTurn(controller);
+      await waitFor(() => runtime.calls.turn.length === 2, 'the next valid turn');
+      runtime.emit({ type: 'completed' });
+      expect((await next).reason).toBe('completed');
+      expect(runtime.calls.open).toHaveLength(1);
+      expect(runtime.calls.close).toEqual([]);
+      expect(runtime.calls.turn[1]?.sessionId).toBe(result.sessionId);
+    });
+  }
+
+  it('still retries Busy without reopening the session', async () => {
+    let calls = 0;
+    const clock = createFakeBackoffClock({ auto: true });
+    const { runtime, controller } = harness({
+      sleep: clock.sleep,
+      turnFailure: () => {
+        calls += 1;
+        return calls === 1
+          ? new RemoteError('INTERNAL', 'Session is busy.', {
+              kind: 'external_agent_busy',
+              dispatch: 'not-submitted',
+            })
+          : undefined;
+      },
+    });
+    const running = startTurn(controller);
+    await waitFor(() => runtime.calls.turn.length === 2, 'the Busy retry');
+    runtime.emit({ type: 'completed' });
+    expect((await running).reason).toBe('completed');
+    expect(clock.waits).toHaveLength(1);
+    expect(runtime.calls.open).toHaveLength(1);
+    expect(runtime.calls.close).toEqual([]);
+    expect(
+      (await listAttemptsForMessage(assistantMessageId, getDb())).map((row) => row.state)
+    ).toEqual(['terminal', 'terminal']);
+  });
+
+  it('preserves acceptance uncertainty and cleanup details without replay', async () => {
+    const clock = createFakeBackoffClock({ auto: false });
+    const { runtime, controller } = harness({
+      sleep: clock.sleep,
+      turnFailure: () =>
+        new RemoteError('UNAVAILABLE', 'Vendor link lost; cleanup unconfirmed.', {
+          kind: 'external_agent_link_lost',
+          dispatch: 'acceptance-unknown',
+          cleanupRequired: true,
+          cleanup: 'unconfirmed',
+        }),
+    });
+    const result = await startTurn(controller);
+    expect(result.reason).toBe('acceptance-unknown');
+    expect(runtime.calls.turn).toHaveLength(1);
+    expect(clock.waits).toEqual([]);
+    expect(runtime.calls.close).toEqual([]);
+    expect(
+      (await listAttemptsForMessage(assistantMessageId, getDb())).map((row) => row.state)
+    ).toEqual(['unresolved']);
+  });
+
+  for (const review of [false, true]) {
+    it(`keeps a message-local UNAVAILABLE ${review ? 'review' : 'turn'} refusal from closing the runtime`, async () => {
+      let refuse = true;
+      let unavailable = 0;
+      const failure = () =>
+        refuse
+          ? new RemoteError('UNAVAILABLE', 'This input is refused.', {
+              kind: 'external_agent_turn_refused',
+            })
+          : undefined;
+      const { runtime, controller, sessions } = await realHarness({
+        turnFailure: failure,
+        reviewFailure: failure,
+        onUnavailable() {
+          unavailable += 1;
+          // Matches the connection manager's unavailable callback: a response
+          // must not tear down a transport that is still serving requests.
+          void runtime.close();
+        },
+      });
+      const start = () =>
+        controller.start(
+          {
+            userId,
+            chatId,
+            prompt: 'This input is refused.',
+            configuration: CONFIGURATION,
+            canonicalWorkspacePath: '/work/repo',
+            vendorAccountFingerprint: 'account-a',
+            credentialHomeFingerprint: 'sha256:home-a',
+            ...(review ? { review: { target: { type: 'uncommittedChanges' as const } } } : {}),
+          },
+          getDb()
+        );
+      try {
+        const result = await start();
+        expect(result.reason).toBe('vendor-error');
+        expect(unavailable).toBe(0);
+        expect(sessions.liveSessionCount()).toBe(1);
+        expect(runtime.calls.close).toEqual([]);
+        expect(review ? runtime.calls.startReview.length : runtime.calls.turn.length).toBe(1);
+        refuse = false;
+        const next = start();
+        await waitFor(
+          () => (review ? runtime.calls.startReview.length : runtime.calls.turn.length) === 2,
+          'the next valid operation over the same runtime'
+        );
+        runtime.emit({ type: 'completed' });
+        expect((await next).reason).toBe('completed');
+        expect(runtime.calls.open).toHaveLength(1);
+      } finally {
+        await runtime.close();
+      }
+    });
+  }
+
   it('cancels the vendor when the hub itself ends the turn', async () => {
     const { runtime, controller } = harness();
     const running = startTurn(controller);
@@ -874,6 +1075,180 @@ describe('external turn controller', () => {
         },
         getDb()
       );
+    }
+
+    it('reports a review whose connection closed before it was sent as a disconnect', async () => {
+      const { runtime, sessions: base, approvals, commandCatalog } = await realHarness();
+      const sessions: typeof base = {
+        ...base,
+        async ensureSession(input) {
+          const handle = await base.ensureSession(input);
+          await runtime.close();
+          return handle;
+        },
+      };
+      const ids = [userMessageId, assistantMessageId];
+      const controller = createExternalTurnController({
+        sessions,
+        approvals,
+        commandCatalog,
+        newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
+      });
+      try {
+        const result = await startReview(controller);
+        expect(runtime.calls.startReview).toEqual([]);
+        expect(
+          result.reason,
+          `expected terminal reason: runtime-disconnected | received: ${result.reason}`
+        ).toBe('runtime-disconnected');
+      } finally {
+        await runtime.close();
+      }
+    });
+
+    it('reconciles an unanswered review deadline through the same-session receipt', async () => {
+      let lostReply = true;
+      function reviewDeadline(): Error | undefined {
+        if (!lostReply) return undefined;
+        lostReply = false;
+        return new ToolExecutionTimedOutError('Review acknowledgement timed out.', {
+          cause: new RuntimeRequestNoReplyError(
+            new RemoteError('TIMEOUT', 'Review acknowledgement timed out.'),
+            'deadline'
+          ),
+        });
+      }
+      const clock = createFakeBackoffClock({ auto: true });
+      const { runtime, controller } = harness({
+        capabilities: REVIEW_CAPABILITIES,
+        reviewFailure: reviewDeadline,
+        sleep: clock.sleep,
+      });
+      const running = startReview(controller);
+      await waitFor(() => runtime.calls.startReview.length === 2, 'the review receipt replay');
+      expect(runtime.calls.startReview[1]).toEqual(runtime.calls.startReview[0]);
+      runtime.emit({ type: 'completed' });
+      expect((await running).reason).toBe('completed');
+      expect(runtime.calls.close).toEqual([]);
+      expect(runtime.calls.cancel).toEqual([]);
+      expect(clock.waits).toHaveLength(1);
+    });
+
+    for (const dispatch of [undefined, 'not-submitted'] as const) {
+      it(`settles deterministic review refusal once and keeps the session usable (${dispatch ?? 'no dispatch'})`, async () => {
+        let refuse = true;
+        const { runtime, controller, sessions } = harness({
+          capabilities: REVIEW_CAPABILITIES,
+          reviewFailure: () =>
+            refuse
+              ? new RemoteError('INTERNAL', 'Review target is unsupported.', {
+                  kind: 'external_agent_turn_refused',
+                  ...(dispatch ? { dispatch } : {}),
+                })
+              : undefined,
+        });
+        const result = await startReview(controller);
+        expect(result.reason).toBe('vendor-error');
+        expect(result.error).toEqual({
+          code: 'review-start',
+          message: 'Review target is unsupported.',
+        });
+        expect(runtime.calls.startReview).toHaveLength(1);
+        expect(runtime.calls.turn).toEqual([]);
+        expect(runtime.calls.close).toEqual([]);
+        expect(runtime.calls.cancel).toEqual([]);
+        expect(sessions.liveSessionCount()).toBe(1);
+        expect(await readContinuation(chatId, getDb())).toBeDefined();
+        expect((await readAssistantRow()).generating).toBe(false);
+        expect(turnPartOf((await readAssistantRow()).parts).terminalReason).toBe('vendor-error');
+
+        refuse = false;
+        const next = startReview(controller);
+        await waitFor(() => runtime.calls.startReview.length === 2, 'the next valid review');
+        runtime.emit({ type: 'completed' });
+        expect((await next).reason).toBe('completed');
+        expect(runtime.calls.open).toHaveLength(1);
+        expect(runtime.calls.close).toEqual([]);
+        expect(runtime.calls.startReview[1]?.sessionId).toBe(result.sessionId);
+      });
+    }
+
+    for (const [label, code, details, expected] of [
+      [
+        'Busy',
+        'INTERNAL',
+        { kind: 'external_agent_busy', dispatch: 'not-submitted' },
+        'vendor-error',
+      ],
+      [
+        'Accepted',
+        'INTERNAL',
+        { kind: 'external_agent_vendor', dispatch: 'accepted', cleanupRequired: true },
+        'vendor-error',
+      ],
+      [
+        'AcceptanceUnknown',
+        'UNAVAILABLE',
+        {
+          kind: 'external_agent_link_lost',
+          dispatch: 'acceptance-unknown',
+          cleanupRequired: true,
+          cleanup: 'unconfirmed',
+        },
+        'acceptance-unknown',
+      ],
+      [
+        'contradictory cleanup refusal',
+        'INTERNAL',
+        { kind: 'external_agent_turn_refused', dispatch: 'not-submitted', cleanupRequired: true },
+        'acceptance-unknown',
+      ],
+      [
+        'malformed cleanup refusal',
+        'INTERNAL',
+        { kind: 'external_agent_turn_refused', cleanupRequired: 'true' },
+        'acceptance-unknown',
+      ],
+      [
+        'normalized timeout uncertainty',
+        'TIMEOUT',
+        { kind: 'external_agent_failure', dispatch: 'acceptance-unknown' },
+        'acceptance-unknown',
+      ],
+      [
+        'normalized cancellation uncertainty',
+        'CANCELLED',
+        { kind: 'external_agent_failure', dispatch: 'acceptance-unknown' },
+        'acceptance-unknown',
+      ],
+    ] as const) {
+      it(`preserves ${label} on a refused review start without retrying or reaping`, async () => {
+        const error = new RemoteError(code, `Review failed: ${label}.`, details);
+        function refuseReview(): Error {
+          return error;
+        }
+        const { runtime, controller, sessions } = await realHarness({
+          reviewFailure: refuseReview,
+        });
+        try {
+          const result = await startReview(controller);
+          expect(result.reason).toBe(expected);
+          expect(result.error).toEqual({
+            code: 'review-start',
+            message: `Review failed: ${label}.`,
+          });
+          expect(runtime.calls.startReview).toHaveLength(1);
+          expect(runtime.calls.turn).toEqual([]);
+          expect(runtime.calls.cancel).toEqual([]);
+          expect(runtime.calls.close).toEqual([]);
+          expect(sessions.liveSessionCount()).toBe(1);
+          const stored = await readAssistantRow();
+          expect(stored.generating).toBe(false);
+          expect(turnPartOf(stored.parts).terminalReason).toBe(expected);
+        } finally {
+          await runtime.close();
+        }
+      });
     }
 
     it('runs the review as an ordinary turn, on the same session and transcript', async () => {

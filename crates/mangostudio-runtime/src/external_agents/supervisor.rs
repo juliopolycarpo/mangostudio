@@ -33,28 +33,24 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
-use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
-use mango_external_agents::{
-    CancelToken, CloseReason, EnvSource, Error as SdkError, Harness, HostContext, Limits,
-    OpenSession, ProcessLauncher, ResumeMode as SdkResumeMode, Session, SessionQuery,
-};
+use super::failure::{AgentFailure, FailureCause, FailureContext};
+pub(crate) use super::port::CloseCause;
+use super::port::{AccountKey, AgentBackend, AgentSession, Host, SessionQuery};
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::Session as HubSession;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use super::map;
 use super::wire::{
     AckResult, CloseParams, Descriptor, DiscoverParams, DiscoverResult, ListSessionsParams,
     ListSessionsResult, OpenParams, OpenResult, RefreshAccountUsageParams,
-    RefreshAccountUsageResult, ResumeMode, TargetId,
+    RefreshAccountUsageResult, TargetId,
 };
 use crate::consent::read::{ConsentRead, ConsentReader};
 use crate::hex::hex;
-use crate::ports::wall_clock::epoch_millis;
 use crate::probing::detection::path_env::PathEnv;
 use crate::tool_argument::tool_argument;
 
@@ -112,95 +108,11 @@ pub(crate) trait ExecutableResolver: Send + Sync {
     ) -> PortFuture<'a, Option<PathBuf>>;
 }
 
-/// What one target's probe found, with the account facts only a Codex probe
-/// can report.
-pub(crate) struct TargetDiscovery {
-    /// The bounded discovery [`Harness::discover`] returns.
-    pub discovery: mango_external_agents::Discovery,
-    /// The signed-in Codex account's plan and keyed fingerprint, when known.
-    pub account: Option<CodexAccount>,
-}
-
-/// Builds the harness for one target around the executable it resolved.
-pub(crate) trait HarnessFactory: Send + Sync {
-    /// The harness `target` is served by, launching `executable` when known.
-    fn harness(&self, target: TargetId, executable: Option<PathBuf>) -> Arc<dyn Harness>;
-
-    /// Probes `target`. The default asks [`Harness::discover`] and reports no
-    /// account facts; the product factory overrides it so Codex reports its
-    /// keyed account fingerprint under `key`.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let found = factory.discover(TargetId::Codex, executable, &host, Some(&key)).await?;
-    /// ```
-    fn discover<'a>(
-        &'a self,
-        target: TargetId,
-        executable: Option<PathBuf>,
-        host: &'a HostContext,
-        key: Option<&'a AccountFingerprintKey>,
-    ) -> PortFuture<'a, mango_external_agents::Result<TargetDiscovery>> {
-        let _ = key;
-        let harness = self.harness(target, executable);
-        Box::pin(async move {
-            Ok(TargetDiscovery {
-                discovery: harness.discover(host).await?,
-                account: None,
-            })
-        })
-    }
-}
-
-/// The production factory: the three product harnesses, through [`map`].
-pub(crate) struct ProductHarnesses;
-
-impl HarnessFactory for ProductHarnesses {
-    fn harness(&self, target: TargetId, executable: Option<PathBuf>) -> Arc<dyn Harness> {
-        map::harness_for(target, executable)
-    }
-
-    /// Codex always discovers through
-    /// [`mango_agent_codex::CodexHarness::discover_with_account`]: the email
-    /// `account/read` returns is only the HMAC input inside the SDK and never
-    /// reaches this crate. Without a host key it runs under
-    /// [`map::plan_only_key`] and the fingerprint is dropped, so the plan
-    /// still arrives, as `codex/adapter.ts` sent it, and no fingerprint is
-    /// ever one the host did not key.
-    fn discover<'a>(
-        &'a self,
-        target: TargetId,
-        executable: Option<PathBuf>,
-        host: &'a HostContext,
-        key: Option<&'a AccountFingerprintKey>,
-    ) -> PortFuture<'a, mango_external_agents::Result<TargetDiscovery>> {
-        Box::pin(async move {
-            if target != TargetId::Codex {
-                return Ok(TargetDiscovery {
-                    discovery: map::harness_for(target, executable).discover(host).await?,
-                    account: None,
-                });
-            }
-            let found = map::codex_harness(executable)
-                .discover_with_account(host, key.unwrap_or_else(|| map::plan_only_key()))
-                .await?;
-            Ok(TargetDiscovery {
-                discovery: found.discovery,
-                account: match key {
-                    Some(_) => found.account,
-                    None => found.account.map(map::plan_only),
-                },
-            })
-        })
-    }
-}
-
 /// This machine's Codex account-fingerprint key, read fresh for each Codex
 /// discovery so a home that becomes readable later is picked up without a
 /// restart, as `hostLocalDigestKey()` was per call in the TypeScript adapter.
 /// Blocking: the production source stats the home.
-pub(crate) type AccountKeySource = Arc<dyn Fn() -> Option<AccountFingerprintKey> + Send + Sync>;
+pub(crate) type AccountKeySource = Arc<dyn Fn() -> Option<AccountKey> + Send + Sync>;
 
 /// Whether `externalAgents` consent is granted right now. A read that fails
 /// closed answers `false`.
@@ -209,10 +121,8 @@ pub(crate) type ConsentProbe = Arc<dyn Fn() -> bool + Send + Sync>;
 /// Everything the supervisor reaches outside itself, injected so tests use
 /// named fakes rather than a vendor CLI or the real consent store.
 pub(crate) struct Ports {
-    /// Spawns every vendor child, with the runtime's tree ownership.
-    pub launcher: Arc<dyn ProcessLauncher>,
     /// Builds a target's harness.
-    pub harnesses: Arc<dyn HarnessFactory>,
+    pub harnesses: Arc<dyn AgentBackend>,
     /// Authorises a session's workspace.
     pub workspaces: Arc<dyn WorkspaceAuthority>,
     /// Resolves a target's executable.
@@ -226,8 +136,6 @@ pub(crate) struct Ports {
     pub private_root: PathBuf,
     /// This runtime's version, sent to vendors as the client identity.
     pub runtime_version: String,
-    /// The SDK caps every harness reads.
-    pub limits: Limits,
     /// The host-local key Codex account fingerprints are computed under; see
     /// `isolation::account_fingerprint_key`. A `None` read sends no
     /// fingerprint.
@@ -245,27 +153,6 @@ pub(crate) struct Ports {
     pub hard_turn_timeout: Duration,
 }
 
-/// Why a session is being closed, in the product's vocabulary.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CloseCause {
-    /// The hub asked.
-    Requested,
-    /// The owner withdrew `externalAgents` consent.
-    ConsentRevoked,
-    /// The hub session ended or the runtime is stopping.
-    Shutdown,
-}
-
-impl CloseCause {
-    fn sdk(self) -> CloseReason {
-        match self {
-            Self::Requested => CloseReason::Requested,
-            Self::ConsentRevoked => CloseReason::ConsentRevoked,
-            Self::Shutdown => CloseReason::Shutdown,
-        }
-    }
-}
-
 /// One live session, as registered after its open succeeded.
 pub(crate) struct LiveSession {
     pub(super) session_id: String,
@@ -276,7 +163,7 @@ pub(crate) struct LiveSession {
     executable: Option<PathBuf>,
     opened_at: Instant,
     open_result: OpenResult,
-    pub(super) session: Box<dyn Session>,
+    pub(super) session: Box<dyn AgentSession>,
     scratch: PathBuf,
     pub(super) closing: AtomicBool,
     closed: watch::Sender<Option<Result<(), CloseFailure>>>,
@@ -584,28 +471,23 @@ impl Supervisor {
         deadline: Duration,
         cancel: &CancellationToken,
     ) -> Result<Descriptor, RemoteError> {
-        let host_cancel = CancelToken::new();
+        let host_cancel = CancellationToken::new();
         let work = async {
             let executable = self.ports.executables.resolve(target, cancel).await;
             let probe_dir = self.probe_dir()?;
-            let host = self.host_context(&probe_dir, None, None, &host_cancel)?;
+            let host = self.host_context(&probe_dir, None, None, &host_cancel);
             stopped_before_launch(cancel, &host_cancel)?;
             let key = self.account_key(target).await;
             let found = self
                 .ports
                 .harnesses
-                .discover(target, executable, &host, key.as_ref())
+                .discover(target, executable, host, key.as_ref())
                 .await;
             let found = match found {
                 Ok(found) => found,
-                Err(error) => return Err(self.sdk_failure(error).await),
+                Err(error) => return Err(error.into_remote()),
             };
-            Ok(map::descriptor(
-                target,
-                &found.discovery,
-                found.account.as_ref(),
-                epoch_millis(SystemTime::now()),
-            ))
+            Ok(found)
         };
         self.bounded(work, deadline, cancel, &host_cancel, || {
             format!(
@@ -727,7 +609,7 @@ impl Supervisor {
         hub: HubSession,
     ) -> Result<LiveSession, RemoteError> {
         let deadline = Duration::from_millis(params.timeout_ms);
-        let host_cancel = CancelToken::new();
+        let host_cancel = CancellationToken::new();
         let cancel = opening.cancel.clone();
         let target = params.target_id;
         let work = async {
@@ -762,26 +644,21 @@ impl Supervisor {
                 Some(&scratch),
                 params.toolchain.as_ref(),
                 &host_cancel,
-            )?;
-            let harness = self
-                .ports
-                .harnesses
-                .harness(target, Some(executable.clone()));
-            let mut request = OpenSession::new(params.session_id.clone())
-                .with_configuration(map::configuration_patch(&params.configuration));
-            if let Some(native) = &params.resume_ref {
-                request = request.resuming(native.clone(), sdk_resume_mode(params.resume_mode));
-            }
+            );
             if let Err(error) = stopped_before_launch(&cancel, &host_cancel) {
                 remove_scratch(&scratch);
                 return Err(error);
             }
-            let opened = harness.open_session(&host, request).await;
+            let opened = self
+                .ports
+                .harnesses
+                .open(target, executable.clone(), host, &params)
+                .await;
             match opened {
                 Ok(session) => Ok((session, workspace, authorized_roots, executable, scratch)),
                 Err(error) => {
                     remove_scratch(&scratch);
-                    Err(self.sdk_failure(error).await)
+                    Err(error.into_remote())
                 }
             }
         };
@@ -805,7 +682,7 @@ impl Supervisor {
                         CloseCause::Requested
                     });
                     let closed =
-                        tokio::time::timeout(self.close_bound(), session.close(cause.sdk())).await;
+                        tokio::time::timeout(self.close_bound(), session.close(cause)).await;
                     remove_scratch(&scratch);
                     opening.record_cleanup(match closed {
                         Ok(Ok(())) => Ok(()),
@@ -816,8 +693,7 @@ impl Supervisor {
                 return Err(stopped.error);
             }
         };
-        let snapshot = session.snapshot();
-        let open_result = map::open_result(&params.configuration, &snapshot, None);
+        let open_result = session.open_result(&params.configuration);
         let (closed, _) = watch::channel(None);
         Ok(LiveSession {
             session_id: params.session_id,
@@ -987,8 +863,7 @@ impl Supervisor {
 
     /// The vendor close, bounded, then the scratch leaf. Both always run.
     async fn finish_close(&self, live: &LiveSession, cause: CloseCause) -> Result<(), String> {
-        let vendor =
-            tokio::time::timeout(self.close_bound(), live.session.close(cause.sdk())).await;
+        let vendor = tokio::time::timeout(self.close_bound(), live.session.close(cause)).await;
         remove_scratch(&live.scratch);
         match vendor {
             Ok(Ok(())) => Ok(()),
@@ -1004,9 +879,7 @@ impl Supervisor {
     /// kill grace plus its shutdown timeout) with the cleanup bound on top,
     /// so a vendor that uses its whole grace is not reported as failed.
     fn close_bound(&self) -> Duration {
-        self.ports.limits.kill_grace
-            + self.ports.limits.shutdown_timeout
-            + self.ports.cleanup_timeout
+        self.ports.harnesses.close_budget() + self.ports.cleanup_timeout
     }
 
     /// `external-agent.list-sessions`: the vendor's own history for one target.
@@ -1022,7 +895,7 @@ impl Supervisor {
     ) -> Result<ListSessionsResult, RemoteError> {
         let live = self.live_for_target(params.session_id.as_deref(), params.target_id)?;
         let deadline = Duration::from_millis(params.timeout_ms);
-        let host_cancel = CancelToken::new();
+        let host_cancel = CancellationToken::new();
         let target = params.target_id;
         let work = async {
             let workspace = match &params.workspace_path {
@@ -1038,21 +911,29 @@ impl Supervisor {
                 (None, Some(live)) => live.workspace.clone(),
                 (None, None) => self.probe_dir()?,
             };
-            let host = self.host_context(&cwd, None, None, &host_cancel)?;
-            let harness = self.ports.harnesses.harness(target, executable);
+            let host = self.host_context(&cwd, None, None, &host_cancel);
             let query = SessionQuery {
                 cursor: params.cursor.clone(),
                 limit: params.limit.map(|limit| limit as usize),
                 workspace_path: workspace.clone(),
             };
             stopped_before_launch(cancel, &host_cancel)?;
-            match harness.list_sessions(&host, query).await {
-                Ok(page) => Ok(map::native_sessions(target, page)),
-                Err(SdkError::NotSupported { .. }) => Err(tool_argument(format!(
+            match self
+                .ports
+                .harnesses
+                .list_sessions(target, executable, host, query)
+                .await
+            {
+                Ok(page) => Ok(page),
+                Err(AgentFailure {
+                    cause: FailureCause::Unsupported,
+                    context: FailureContext::Direct,
+                    ..
+                }) => Err(tool_argument(format!(
                     "External-agent target {:?} cannot list sessions; expected a target with session listing.",
                     target.as_str()
                 ))),
-                Err(error) => Err(self.sdk_failure(error).await),
+                Err(error) => Err(error.into_remote()),
             }
         };
         self.bounded(work, deadline, cancel, &host_cancel, || {
@@ -1080,18 +961,17 @@ impl Supervisor {
             return Ok(RefreshAccountUsageResult::default());
         };
         let deadline = Duration::from_millis(params.timeout_ms);
-        let host_cancel = CancelToken::new();
+        let host_cancel = CancellationToken::new();
         let target = params.target_id;
         let work = async {
             match live.session.refresh_account_usage().await {
-                Ok(usage) => Ok(RefreshAccountUsageResult {
-                    limits: usage
-                        .limits
-                        .as_ref()
-                        .map(|limits| map::account_limits(target, limits, SystemTime::now())),
-                }),
-                Err(SdkError::NotSupported { .. }) => Ok(RefreshAccountUsageResult::default()),
-                Err(error) => Err(self.sdk_failure(error).await),
+                Ok(usage) => Ok(usage),
+                Err(AgentFailure {
+                    cause: FailureCause::Unsupported,
+                    context: FailureContext::Direct,
+                    ..
+                }) => Ok(RefreshAccountUsageResult::default()),
+                Err(error) => Err(error.into_remote()),
             }
         };
         self.bounded(work, deadline, cancel, &host_cancel, || {
@@ -1155,58 +1035,31 @@ impl Supervisor {
         Ok(canonical)
     }
 
-    /// Maps an SDK failure to the wire, first reaping any child the SDK
-    /// handed back because its own bounded cleanup did not finish.
-    ///
-    /// A failed reap is reported on the error rather than dropped: the child
-    /// may still be alive, and the caller has to hear that.
-    pub(super) async fn sdk_failure(&self, error: SdkError) -> RemoteError {
-        let mapped = map::remote_error(&error);
-        let Some(control) = error.cleanup_control() else {
-            return mapped;
-        };
-        let reaped = tokio::time::timeout(self.ports.cleanup_timeout, async {
-            control
-                .kill(mango_external_agents::CancelReason::Shutdown)
-                .await?;
-            control.wait().await.map(|_| ())
-        })
-        .await;
-        match reaped {
-            Ok(Ok(())) => without_detail(mapped, "cleanupRequired"),
-            _ => mapped.with_detail("cleanup", "unconfirmed"),
-        }
-    }
-
     fn host_context(
         &self,
         cwd: &Path,
         scratch: Option<&Path>,
         toolchain: Option<&crate::commands::toolchain::Selection>,
-        cancel: &CancelToken,
-    ) -> Result<HostContext, RemoteError> {
+        cancel: &CancellationToken,
+    ) -> Host {
         let path_env = (self.ports.environment)();
         let env = crate::commands::toolchain::build(
             &path_env,
             toolchain,
             &crate::commands::toolchain::NativeToolchainFs,
         );
-        let mut builder = HostContext::builder()
-            .launcher(Arc::clone(&self.ports.launcher))
-            .cwd(cwd.to_path_buf())
-            .environment(EnvSource::from_pairs(env))
-            .client_info("mangostudio-runtime", self.ports.runtime_version.clone())
-            .cancel(cancel.clone())
-            .limits(self.ports.limits);
-        if let Some(scratch) = scratch {
-            builder = builder.scratch(scratch.to_path_buf());
+        Host {
+            cwd: cwd.to_path_buf(),
+            scratch: scratch.map(Path::to_path_buf),
+            environment: env,
+            runtime_version: self.ports.runtime_version.clone(),
+            cancel: cancel.clone(),
         }
-        builder.build().map_err(|error| map::remote_error(&error))
     }
 
     /// The fingerprint key for a Codex discovery, read off the async runtime;
     /// no other target reports an account fingerprint, so none reads it.
-    async fn account_key(&self, target: TargetId) -> Option<AccountFingerprintKey> {
+    async fn account_key(&self, target: TargetId) -> Option<AccountKey> {
         if target != TargetId::Codex {
             return None;
         }
@@ -1249,7 +1102,7 @@ impl Supervisor {
         work: impl Future<Output = Result<T, RemoteError>>,
         deadline: Duration,
         cancel: &CancellationToken,
-        host_cancel: &CancelToken,
+        host_cancel: &CancellationToken,
         timed_out: impl FnOnce() -> String,
     ) -> Result<T, Interrupted<T>> {
         let mut work = std::pin::pin!(work);
@@ -1393,7 +1246,7 @@ pub(super) fn refuse_unoffered_configuration(
 /// Refuses to start anything new once an operation has been told to stop.
 fn stopped_before_launch(
     cancel: &CancellationToken,
-    host_cancel: &CancelToken,
+    host_cancel: &CancellationToken,
 ) -> Result<(), RemoteError> {
     if cancel.is_cancelled() || host_cancel.is_cancelled() {
         return Err(RemoteError::new(
@@ -1402,13 +1255,6 @@ fn stopped_before_launch(
         ));
     }
     Ok(())
-}
-
-fn sdk_resume_mode(mode: ResumeMode) -> SdkResumeMode {
-    match mode {
-        ResumeMode::Strict => SdkResumeMode::Strict,
-        ResumeMode::Fallback => SdkResumeMode::Fallback,
-    }
 }
 
 fn path_text(path: &Path) -> String {
@@ -1464,20 +1310,18 @@ fn create_private_dir(dir: &Path) -> Result<(), RemoteError> {
     Ok(())
 }
 
-/// `error` without the detail `key`, for a fact the supervisor has since resolved.
-fn without_detail(mut error: RemoteError, key: &str) -> RemoteError {
-    if let Some(details) = error.details.as_mut() {
-        details.remove(key);
-        if details.is_empty() {
-            error.details = None;
-        }
-    }
-    error
-}
-
 fn remove_scratch(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[cfg(test)]
+#[path = "product_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "adapter/integration_tests.rs"]
+mod sdk_tests;
+
+#[cfg(test)]
+#[path = "lifecycle_product_tests.rs"]
+pub(super) mod lifecycle_product_tests;

@@ -15,7 +15,7 @@ import { en } from '../../src/i18n';
 // scripts/tests/rust-lanes.unit.test.ts).
 
 const REPO_ROOT = join(import.meta.dir, '../../../..');
-const AGENTS_DIR = 'crates/mangostudio-runtime/src/external_agents';
+const AGENTS_DIR = 'crates/mangostudio-runtime/src/external_agents/adapter';
 const UNSUPPORTED_PREFIX = 'externalAgents.unsupported.';
 
 /**

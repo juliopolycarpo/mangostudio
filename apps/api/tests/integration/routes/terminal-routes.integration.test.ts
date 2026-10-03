@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import type { TerminalAvailability, TerminalSessionResponse } from '@mangostudio/shared/terminal';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import {
@@ -12,6 +13,10 @@ import {
 } from '../../../src/modules/terminals/application/terminal-session-service';
 import type { TerminalRuntimeClient } from '../../../src/modules/terminals/domain/terminal-runtime-client';
 import { createTerminalRoutes } from '../../../src/modules/terminals/http/terminal-routes';
+import {
+  RuntimeRequestNoReplyError,
+  RuntimeRequestNotSentError,
+} from '../../../src/services/runtime-client/request-not-sent';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   createLocalRuntimeConnector,
@@ -220,10 +225,29 @@ describe('terminal HTTP routes with a fake runtime', () => {
     expect(((await response.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
   });
 
-  it('maps a dropped runtime open to 409 instead of an internal error', async () => {
+  it.each([
+    [
+      'live runtime refusal',
+      new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'PTY capacity exhausted'),
+      'runtime-unavailable',
+    ],
+    [
+      'closed before dispatch',
+      new RuntimeRequestNotSentError('terminal.open', undefined),
+      'disconnected',
+    ],
+    [
+      'closed after dispatch',
+      new RuntimeRequestNoReplyError(
+        new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime closed'),
+        'connection-closed'
+      ),
+      'disconnected',
+    ],
+  ] as const)('maps %s to an explicit terminal refusal', async (_scenario, failure, reason) => {
     const user = await insertTestUser();
     client = new FakeTerminalRuntimeClient({
-      failFirstOpen: new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime disconnected'),
+      failFirstOpen: failure,
     });
     service = createTerminalSessionService({
       getConfig: () => ({
@@ -242,7 +266,9 @@ describe('terminal HTTP routes with a fake runtime', () => {
     );
 
     expect(response.status).toBe(409);
-    expect(((await response.json()) as { code: string }).code).toBe(ERROR_CODES.UNSUPPORTED);
+    const body = await response.json();
+    expect(Value.Check(ApiErrorResponseSchema, body)).toBe(true);
+    expect(body).toMatchObject({ code: ERROR_CODES.UNSUPPORTED, details: { reason } });
     expect(service.list(user.id)).toHaveLength(0);
   });
 

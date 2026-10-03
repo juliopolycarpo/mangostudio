@@ -1,0 +1,134 @@
+name: Rust fresh dependencies
+
+# Advisory compatibility evidence for downstream semver consumers. This workflow
+# is independent of the required PR gates and never writes a resolved lock back.
+on:
+  schedule:
+    - cron: "37 7 * * 2"
+  workflow_dispatch:
+  pull_request:
+    branches: [main, feat/external-agents-sdk-adoption]
+    paths:
+      - .github/workflows/rust-fresh-dependencies.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-fresh-dependencies-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  resolve:
+    name: Resolve fresh Rust dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: rustup show active-toolchain
+
+      - name: Resolve an independent dependency graph
+        run: |
+          rm Cargo.lock
+          cargo generate-lockfile
+          git diff -- Cargo.lock >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve the resolved graph on success or failure
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fresh-rust-lockfile
+          path: Cargo.lock
+          if-no-files-found: warn
+          retention-days: 14
+
+  policy:
+    name: Fresh Rust dependency policy
+    needs: [resolve]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fresh-rust-lockfile
+
+      - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        with:
+          tool: cargo-deny
+
+      - run: cargo deny check bans licenses sources
+
+  fresh:
+    name: Fresh Rust workspace (${{ matrix.os }})
+    needs: [resolve]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fresh-rust-lockfile
+
+      - run: rustup show active-toolchain
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          key: fresh-dependencies
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --workspace --all-targets --all-features --locked
+      - run: cargo test --doc --workspace --all-features --locked
+
+  report:
+    name: Update compatibility issue
+    needs: [resolve, policy, fresh]
+    if: ${{ !cancelled() && contains(needs.*.result, 'failure') && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: rust-fresh-dependencies-report-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write # create or update the bot-owned compatibility issue after failure
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REVISION: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const { reportFreshDependencies } = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/ci/report-fresh-dependencies.mjs`
+            );
+            await reportFreshDependencies({
+              github, context, revision: process.env.REVISION, runUrl: process.env.RUN_URL,
+            });

@@ -297,6 +297,102 @@ fn a_resolved_executable_replaces_the_program_name() {
 // Descriptors, per vendor
 // ---------------------------------------------------------------------------
 
+/// An inconclusive gate remains tryable but must not promise a determined discovery.
+#[test]
+fn unknown_discovery_is_undetermined_without_an_unavailable_reason() {
+    let mut discovery = claude_signed_in_subscription();
+    discovery.gate = sdk::GateVerdict::Unknown;
+    let received = describe(TargetId::Claude, &discovery);
+    assert_eq!(received["discoveryState"], "undetermined");
+    assert!(received.get("unavailableReason").is_none());
+    assert_eq!(received["authState"], "signed-in");
+    assert_eq!(received["supportedConfigurations"][2]["supported"], true);
+}
+
+/// Missing and empty versions give no visible label and no false discovery certainty.
+#[test]
+fn an_installed_target_without_a_version_is_undetermined() {
+    for version in [None, Some(String::new()), Some(String::from("   "))] {
+        let mut discovery = claude_signed_in_subscription();
+        discovery.version = version;
+        let received = describe(TargetId::Claude, &discovery);
+        assert_eq!(received["discoveryState"], "undetermined");
+        assert!(received.get("version").is_none());
+        assert!(received.get("unavailableReason").is_none());
+    }
+}
+
+/// An installed CLI's captured help is cut off by a controlled line-reader error.
+struct CutOffClaudeProbe {
+    launches: sdk::testing::FakeLauncher,
+}
+
+#[async_trait::async_trait]
+impl sdk::ProcessLauncher for CutOffClaudeProbe {
+    async fn spawn(&self, spec: sdk::LaunchSpec) -> sdk::Result<sdk::ManagedProcess> {
+        let lines = if spec.argv.iter().any(|arg| arg == "--help") {
+            let help =
+                include_str!("../../../tests/fixtures/external-agents/claude-help-2.1.270.txt");
+            let cut_at = help
+                .lines()
+                .position(|line| line.trim_start().starts_with("--permission-prompts"))
+                .expect("expected the recorded help to declare --permission-prompts");
+            let mut lines: Vec<String> = help.lines().map(String::from).collect();
+            lines.insert(cut_at, "x".repeat(8192));
+            lines
+        } else if spec.argv.iter().any(|arg| arg == "--version") {
+            vec![String::from("2.1.270 (Claude Code)")]
+        } else {
+            vec![String::from(
+                r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}"#,
+            )]
+        };
+        self.launches
+            .push(sdk::testing::FakeProcess::transcript(lines));
+        self.launches.spawn(spec).await
+    }
+}
+
+/// A cut-off probe keeps SDK uncertainty and an installed target that may still be tried.
+#[tokio::test]
+async fn a_cut_off_claude_probe_is_undetermined_without_a_version_refusal() {
+    let launcher = std::sync::Arc::new(CutOffClaudeProbe {
+        launches: sdk::testing::FakeLauncher::new(),
+    });
+    let host = sdk::HostContext::builder()
+        .launcher(launcher.clone())
+        .cwd(std::env::temp_dir())
+        .environment(sdk::EnvSource::from_pairs(
+            std::iter::empty::<(&str, &str)>(),
+        ))
+        .client_info("mangostudio-discovery-test", "1.0")
+        .limits(sdk::Limits {
+            line: sdk::LineLimits {
+                max_line_bytes: 4096,
+                max_buffered_bytes: 8192,
+            },
+            ..sdk::Limits::default()
+        })
+        .build()
+        .expect("expected the authorized fake host");
+    let discovery = mango_agent_claude::ClaudeHarness::new()
+        .discover(&host)
+        .await
+        .expect("expected a bounded discovery answer");
+    assert_eq!(
+        discovery.gate,
+        sdk::GateVerdict::Unknown,
+        "expected incomplete help to be inconclusive"
+    );
+    let received = describe(TargetId::Claude, &discovery);
+    assert_eq!(received["discoveryState"], "undetermined");
+    assert_eq!(received["installed"], true);
+    assert_eq!(received["version"], "2.1.270 (Claude Code)");
+    assert!(received.get("unavailableReason").is_none());
+    assert_eq!(received["supportedConfigurations"][2]["supported"], true);
+    assert_eq!(launcher.launches.live_children(), 0);
+}
+
 #[test]
 fn claude_signed_in_subscription_descriptor() {
     let received = describe(TargetId::Claude, &claude_signed_in_subscription());
@@ -307,6 +403,7 @@ fn claude_signed_in_subscription_descriptor() {
     let expected = json!({
         "targetId": "claude",
         "installed": true,
+        "discoveryState": "determined",
         "version": "2.1.211 (Claude Code)",
         "authState": "signed-in",
         "capabilities": {
@@ -412,6 +509,7 @@ fn claude_missing_surface_names_the_version_to_upgrade_to() {
     let expected = json!({
         "targetId": "claude",
         "installed": true,
+        "discoveryState": "determined",
         "version": "2.1.211 (Claude Code)",
         "requiredVersion": "2.1.211",
         "authState": "unknown",
@@ -498,6 +596,7 @@ fn codex_signed_in_descriptor() {
     let expected = json!({
         "targetId": "codex",
         "installed": true,
+        "discoveryState": "determined",
         "version": "codex-cli 0.147.0",
         "authState": "signed-in",
         "capabilities": {
@@ -566,6 +665,7 @@ fn codex_too_old_offers_nothing_selectable() {
     let expected = json!({
         "targetId": "codex",
         "installed": true,
+        "discoveryState": "determined",
         "version": "codex-cli 0.140.0",
         "requiredVersion": mango_agent_codex::MINIMUM_CODEX_VERSION,
         "authState": "unknown",
@@ -596,6 +696,7 @@ fn not_installed_matches_each_typescript_adapter() {
         let expected = json!({
             "targetId": target.as_str(),
             "installed": false,
+            "discoveryState": "determined",
             "authState": "unknown",
             "loginCommand": login,
             "capabilities": no_capabilities(),
@@ -619,6 +720,7 @@ fn cursor_current_descriptor_refuses_auto_review_and_full_access() {
     let expected = json!({
         "targetId": "cursor",
         "installed": true,
+        "discoveryState": "determined",
         "version": "2026.08.04-aaa8809",
         "authState": "unknown",
         "loginCommand": "cursor-agent login",
@@ -1379,7 +1481,9 @@ fn reset_credit_rows_drop_what_the_wire_refuses_and_cap_at_sixty_four() {
 /// What `CodexHarness::discover_with_account` reports for a ChatGPT sign-in
 /// under the runtime's key built from `digest_key`.
 fn codex_account(digest_key: &str, email: &str) -> CodexAccount {
-    let key = super::super::isolation::account_fingerprint_key(digest_key).expect("a key");
+    let key = crate::external_agents::isolation::account_fingerprint_key(digest_key.into())
+        .expect("a key");
+    let key = AccountFingerprintKey::new(key.bytes()).unwrap();
     CodexAccount::from_account_read(
         &json!({ "account": { "type": "chatgpt", "email": email, "planType": "plus" } }),
         &key,

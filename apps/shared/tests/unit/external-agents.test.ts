@@ -91,6 +91,18 @@ describe('external agent target identity', () => {
 });
 
 describe('external agent descriptor', () => {
+  it('accepts an explicit discovery state without refusing older descriptors', () => {
+    for (const discoveryState of ['determined', 'undetermined']) {
+      expect(Value.Check(ExternalAgentDescriptorSchema, { ...DESCRIPTOR, discoveryState })).toBe(
+        true
+      );
+    }
+    expect(Value.Check(ExternalAgentDescriptorSchema, DESCRIPTOR)).toBe(true);
+    expect(
+      Value.Check(ExternalAgentDescriptorSchema, { ...DESCRIPTOR, discoveryState: 'usable' })
+    ).toBe(false);
+  });
+
   it('validates a minimal descriptor and the list response around it', () => {
     expect(Value.Check(ExternalAgentDescriptorSchema, DESCRIPTOR)).toBe(true);
     expect(

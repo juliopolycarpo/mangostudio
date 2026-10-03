@@ -16,13 +16,16 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { Card } from '@/components/ui/Card';
-import { useExternalAgents } from '@/features/external-agents/useExternalAgents';
+import {
+  externalAgentSelectable,
+  useExternalAgents,
+} from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
 import { formatTimestamp } from '../utils';
 
 export function ExternalAgentDiscoveryLog() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const app = useApp();
   // `currentEnvironmentId` is derived from the open chat, and Settings is not a
   // chat. Without a fallback the query never runs for a user with no chats — a
@@ -60,9 +63,14 @@ export function ExternalAgentDiscoveryLog() {
                 </span>
                 <span className="text-xs text-on-surface-variant/60">{summary(agent, labels)}</span>
               </div>
+              {agent.discoveryState === 'undetermined' && externalAgentSelectable(agent) ? (
+                <p className="mt-1 text-xs text-on-surface-variant/70">
+                  {t.externalAgents.selector.discoveryUndeterminedHint}
+                </p>
+              ) : null}
               {agent.discovery ? (
                 <p className="mt-1 text-xs text-on-surface-variant/70">
-                  {formatTimestamp(agent.discovery.probedAtMs)}
+                  {formatTimestamp(agent.discovery.probedAtMs, locale)}
                   {agent.discovery.attempts > 1
                     ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`
                     : ''}

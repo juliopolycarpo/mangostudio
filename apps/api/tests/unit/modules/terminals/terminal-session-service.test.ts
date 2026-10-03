@@ -23,6 +23,10 @@ import {
   TerminalSessionNotFoundError,
   TerminalUnavailableError,
 } from '../../../../src/modules/terminals/domain/terminal-errors';
+import {
+  RuntimeRequestNoReplyError,
+  RuntimeRequestNotSentError,
+} from '../../../../src/services/runtime-client/request-not-sent';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 import {
   FAKE_TERMINAL_MANIFEST,
@@ -341,17 +345,61 @@ describe('terminalSessionService.open', () => {
   });
 
   test.each([
-    new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime disconnected'),
-    new RuntimeConsentDeniedError('shell access withdrawn'),
-    new ToolExecutionTimedOutError('terminal.open timed out'),
-  ])('maps an open refusal to TerminalUnavailableError: %s', async (failure) => {
+    [
+      'runtime capacity refusal',
+      new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'PTY capacity exhausted'),
+      'runtime-unavailable',
+    ],
+    [
+      'remote close fields',
+      new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime answered', {
+        reason: 'connection-closed',
+        closeCode: 1001,
+        dispatch: 'not-sent',
+      }),
+      'runtime-unavailable',
+    ],
+    [
+      'local deadline',
+      new ToolExecutionTimedOutError('terminal.open timed out'),
+      'runtime-unavailable',
+    ],
+    [
+      'local no-reply deadline',
+      new RuntimeRequestNoReplyError(
+        new RemoteError(RESERVED_ERROR_CODES.TIMEOUT, 'terminal.open timed out'),
+        'deadline'
+      ),
+      'runtime-unavailable',
+    ],
+    [
+      'closed before dispatch',
+      new RuntimeRequestNotSentError('terminal.open', undefined),
+      'disconnected',
+    ],
+    [
+      'closed after dispatch',
+      new RuntimeRequestNoReplyError(
+        new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'runtime closed'),
+        'connection-closed'
+      ),
+      'disconnected',
+    ],
+    ['withdrawn consent', new RuntimeConsentDeniedError('shell access withdrawn'), 'unavailable'],
+  ] as const)('maps %s using local connection evidence', async (_scenario, failure, reason) => {
     const client = new FakeTerminalRuntimeClient({ failFirstOpen: failure });
     const { service } = createHarness({ client });
-
-    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toBeInstanceOf(
-      TerminalUnavailableError
-    );
+    await expect(service.open(USER_ID, { environmentId: ENVIRONMENT_ID })).rejects.toMatchObject({
+      name: 'TerminalUnavailableError',
+      reason,
+    });
     expect(service.list(USER_ID)).toHaveLength(0);
+    expect(client.calls.close).toHaveLength(1);
+    if (reason === 'runtime-unavailable') {
+      expect((await service.availability(USER_ID, ENVIRONMENT_ID)).available).toBe(true);
+      await service.open(USER_ID, { environmentId: ENVIRONMENT_ID });
+      expect(client.calls.open).toHaveLength(2);
+    }
   });
 
   test('reconciles detached exits at the cap without evicting running sessions', async () => {

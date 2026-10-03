@@ -24,6 +24,7 @@ import type {
 import {
   EXTERNAL_TURN_MAX_EVENTS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
+  externalActivityStatusForTerminal,
 } from '@mangostudio/shared/external-agents';
 import type {
   ExternalActivityPart,
@@ -143,6 +144,10 @@ export class ExternalTurnTranscript {
     event: ExternalAgentEvent,
     context: { readonly sequence: number; readonly at: number }
   ): ExternalTranscriptApplication {
+    // A late close or completion cannot rewrite a settled result or reopen
+    // reasoning after the controller has already sealed this turn.
+    if (this.#terminated) return { durable: false };
+
     // Observational vendor state is streamed to the hub for display/cache only.
     // It must not consume transcript event/byte budgets or be able to terminate
     // the turn — the contract treats these as non-durable no-ops.
@@ -178,9 +183,12 @@ export class ExternalTurnTranscript {
   }
 
   /**
-   * Writes the terminal state onto the turn record. Idempotent — the first
-   * terminal writer wins, so a cancel racing a vendor's own completion cannot
-   * rewrite what already happened.
+   * Settles open activity/reasoning and writes the turn's terminal state.
+   * Explicit activity results survive a terminal that omits close events.
+   * Idempotent: the first terminal writer wins, so a cancel racing a vendor's
+   * own completion cannot rewrite what already happened.
+   *
+   * @example transcript.finalize('cancelled-by-user', Date.now());
    */
   finalize(reason: ExternalTurnTerminalReason, at: number): void {
     if (this.#terminated) return;
@@ -203,6 +211,14 @@ export class ExternalTurnTranscript {
     const openPhase = this.#closeThinking();
     if (reason !== 'completed') {
       this.#markIncomplete(stoppedInReasoning ? openPhase : this.#parts.at(-1));
+    }
+    const activityStatus = externalActivityStatusForTerminal(reason);
+    // Vendors may exhaust their event budget before emitting activity closes.
+    // Only settle work still running; an explicit result remains authoritative.
+    for (const activity of this.#activityByCallId.values()) {
+      if (activity.status !== 'running') continue;
+      activity.status = activityStatus;
+      if (activityStatus === 'failed') activity.isError = true;
     }
     this.#turnPart.status = 'terminal';
     this.#turnPart.terminalReason = reason;

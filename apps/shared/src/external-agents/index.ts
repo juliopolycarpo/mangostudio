@@ -109,6 +109,8 @@ export {
   ExternalAgentDiscoverResultSchema,
   type ExternalAgentDiscoveryReport,
   ExternalAgentDiscoveryReportSchema,
+  type ExternalAgentDiscoveryState,
+  ExternalAgentDiscoveryStateSchema,
   type ExternalAgentError,
   ExternalAgentErrorSchema,
   type ExternalAgentEvent,
@@ -209,6 +211,7 @@ export {
   isExternalAgentTargetId,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from './schemas';
+export { externalActivityStatusForTerminal } from './terminal-status';
 export {
   type ExternalContextUsage,
   externalContextUsage,

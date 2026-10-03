@@ -48,6 +48,106 @@ describe('classifySubmissionFailure', () => {
     expect(classifySubmissionFailure(localClose())).toBe('no-reply');
   });
 
+  it('does not replay a deterministic refusal even when nothing was submitted', () => {
+    expect(
+      classifySubmissionFailure(
+        new RemoteError('INTERNAL', 'Input too large.', {
+          kind: 'external_agent_turn_refused',
+          dispatch: 'not-submitted',
+        })
+      )
+    ).toBe('refused');
+  });
+
+  it('keeps accepted, uncertain and cleanup-bearing outcomes committed', () => {
+    for (const dispatch of ['accepted', 'acceptance-unknown'] as const) {
+      expect(
+        classifySubmissionFailure(
+          new RemoteError('INTERNAL', 'Vendor rejected input.', {
+            kind: 'external_agent_turn_refused',
+            dispatch,
+            cleanupRequired: true,
+            cleanup: 'unconfirmed',
+          })
+        )
+      ).toBe(dispatch === 'acceptance-unknown' ? 'acceptance-unknown' : 'refused');
+    }
+  });
+
+  it('does not treat cleanup-bearing deterministic markers as safe refusals or retries', () => {
+    for (const details of [
+      { cleanupRequired: true },
+      { cleanup: 'unconfirmed' },
+      { cleanupRequired: 'true' },
+    ]) {
+      expect(
+        classifySubmissionFailure(
+          new RemoteError('INTERNAL', 'Cleanup is not confirmed.', {
+            kind: 'external_agent_turn_refused',
+            dispatch: 'not-submitted',
+            ...details,
+          })
+        )
+      ).toBe('acceptance-unknown');
+    }
+  });
+
+  it('does not confuse a malformed refusal kind with a deterministic refusal', () => {
+    expect(
+      classifySubmissionFailure(
+        new RemoteError('INTERNAL', 'Busy.', {
+          kind: ['external_agent_turn_refused'],
+          dispatch: 'not-submitted',
+        })
+      )
+    ).toBe('not-submitted');
+  });
+
+  it('keeps local no-reply provenance ahead of a carried deterministic marker', () => {
+    const error = new RuntimeRequestNoReplyError(
+      new RemoteError('UNAVAILABLE', 'Closed.', {
+        kind: 'external_agent_turn_refused',
+        dispatch: 'not-submitted',
+      }),
+      'connection-closed'
+    );
+    expect(classifySubmissionFailure(error)).toBe('no-reply');
+  });
+
+  it('preserves dispatch and cleanup facts behind normalized runtime failures', () => {
+    const remote = new RemoteError('TIMEOUT', 'Vendor timeout.', {
+      kind: 'external_agent_failure',
+      dispatch: 'acceptance-unknown',
+      cleanupRequired: true,
+    });
+    expect(
+      classifySubmissionFailure(new ToolExecutionTimedOutError(remote.message, { cause: remote }))
+    ).toBe('acceptance-unknown');
+    expect(
+      classifySubmissionFailure(
+        new Error('normalized', {
+          cause: new RemoteError('INTERNAL', 'Input refused.', {
+            kind: 'external_agent_turn_refused',
+            dispatch: 'not-submitted',
+          }),
+        })
+      )
+    ).toBe('refused');
+  });
+
+  it('does not trust malformed cause details or loop on a cyclic cause', () => {
+    const cyclic = new Error('cyclic normalization');
+    Object.defineProperty(cyclic, 'cause', { value: cyclic });
+    expect(classifySubmissionFailure(cyclic)).toBe('refused');
+    expect(
+      classifySubmissionFailure(
+        new Error('malformed cause', {
+          cause: { code: 'UNAVAILABLE', details: { dispatch: 'acceptance-unknown' } },
+        })
+      )
+    ).toBe('refused');
+  });
+
   it('treats every runtime-sent reserved code as a committed refusal', () => {
     // What the Rust runtime answers for a signed-out vendor, an SDK timeout and a cancel,
     // after RuntimeClient translated them.

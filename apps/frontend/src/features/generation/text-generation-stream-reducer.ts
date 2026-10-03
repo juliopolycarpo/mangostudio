@@ -6,6 +6,7 @@ import type {
   ExternalTurnTerminalReason,
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
+import { externalActivityStatusForTerminal } from '@mangostudio/shared/external-agents';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type {
   ExternalActivityPart,
@@ -155,6 +156,14 @@ export function reduceTextGenerationStreamChunk(
   options: TextGenerationStreamReducerOptions
 ): TextGenerationStreamState {
   const nextState = clearChunkUpdates(state);
+  // Terminal handling owns the final external parts. Late vendor output must
+  // not reopen activity/reasoning or overwrite an explicit or settled result.
+  if (
+    chunk.type.startsWith('external_') &&
+    state.parts.some((part) => part.type === 'external_turn' && part.status === 'terminal')
+  ) {
+    return nextState;
+  }
 
   switch (chunk.type) {
     case 'user_message_id':
@@ -925,7 +934,16 @@ function reduceExternalTurnCompleted(
   const closed = closeThinkingAt(state.parts, state.openExternalThinkingIndex);
   const marked =
     reason === 'completed' ? closed.parts : markIncompleteAt(closed.parts, closed.stoppedInside);
-  const parts = updateExternalTurn(marked, (part) =>
+  const activityStatus = externalActivityStatusForTerminal(reason);
+  const settled = marked.map((part) => {
+    if (part.type !== 'external_activity' || part.status !== 'running') return part;
+    return {
+      ...part,
+      status: activityStatus,
+      ...(activityStatus === 'failed' ? { isError: true } : {}),
+    };
+  });
+  const parts = updateExternalTurn(settled, (part) =>
     part.status === 'terminal' ? part : { ...part, status: 'terminal', terminalReason: reason }
   );
   return withAiMessageUpdate({ ...state, parts, openExternalThinkingIndex: null }, { parts });

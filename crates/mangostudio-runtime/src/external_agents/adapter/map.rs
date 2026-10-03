@@ -30,7 +30,7 @@ use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
 use mango_external_agents as sdk;
 use mango_protocol::error::{RemoteError, codes};
 
-use super::wire::{self, TargetId};
+use super::super::wire::{self, TargetId};
 use crate::tool_argument::tool_argument;
 
 /// The only ACP profile the product drives.
@@ -258,6 +258,7 @@ fn not_installed(target: TargetId, report: Option<wire::DiscoveryReport>) -> wir
     wire::Descriptor {
         target_id: target,
         installed: false,
+        discovery_state: wire::DiscoveryState::Determined,
         version: None,
         required_version: None,
         auth_state: wire::AuthState::Unknown,
@@ -292,7 +293,11 @@ fn refused(
     wire::Descriptor {
         target_id: target,
         installed: true,
-        version: discovery.version.clone(),
+        discovery_state: wire::DiscoveryState::Determined,
+        version: discovery
+            .version
+            .clone()
+            .filter(|version| !version.trim().is_empty()),
         required_version: unavailable.and(floor),
         auth_state,
         login_command: login,
@@ -306,7 +311,7 @@ fn refused(
     }
 }
 
-/// A build the gate let through, or one it could not judge.
+/// A build the gate let through, preserving uncertainty when a probe or version was inconclusive.
 fn usable(
     target: TargetId,
     discovery: &sdk::Discovery,
@@ -319,6 +324,15 @@ fn usable(
         with_codex_account(account, facts);
     }
     let signed_out = auth_state == wire::AuthState::SignedOut;
+    let version = discovery
+        .version
+        .clone()
+        .filter(|version| !version.trim().is_empty());
+    let discovery_state = if discovery.gate == sdk::GateVerdict::Unknown || version.is_none() {
+        wire::DiscoveryState::Undetermined
+    } else {
+        wire::DiscoveryState::Determined
+    };
     let models: Vec<wire::Model> = discovery
         .models
         .iter()
@@ -327,7 +341,8 @@ fn usable(
     wire::Descriptor {
         target_id: target,
         installed: true,
-        version: discovery.version.clone(),
+        discovery_state,
+        version,
         required_version: None,
         auth_state,
         remedy: signed_out.then(|| remedy(wire::RemedyKind::SignIn, login.clone())),
@@ -889,7 +904,7 @@ pub(super) fn epoch_ms(time: SystemTime) -> Option<u64> {
 /// let error = remote_error(&sdk::Error::Busy.with_dispatch(sdk::Dispatch::NotSubmitted));
 /// assert_eq!(error.details.unwrap()["dispatch"], "not-submitted");
 /// ```
-pub(crate) fn remote_error(error: &sdk::Error) -> RemoteError {
+pub(super) fn remote_error(error: &sdk::Error) -> RemoteError {
     let mut remote = cause_error(error.cause());
     if let Some(dispatch) = dispatch_of(error) {
         remote = remote.with_detail("dispatch", dispatch_name(dispatch));
@@ -946,20 +961,6 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
 /// A session still running a turn: transient, so retryable.
 fn busy(message: String) -> RemoteError {
     external(codes::INTERNAL, message, "external_agent_busy").with_detail("retryable", true)
-}
-
-/// [`busy`] for a refusal this runtime made before anything reached the
-/// vendor, so it can say `not-submitted` and the hub retries it rather than
-/// reading it as a lost session.
-///
-/// # Example
-///
-/// ```ignore
-/// let error = busy_not_submitted("session \"one\" already has an active turn".into());
-/// assert_eq!(error.details.unwrap()["dispatch"], "not-submitted");
-/// ```
-pub(super) fn busy_not_submitted(message: String) -> RemoteError {
-    busy(message).with_detail("dispatch", "not-submitted")
 }
 
 fn external(code: &str, message: String, kind: &str) -> RemoteError {
