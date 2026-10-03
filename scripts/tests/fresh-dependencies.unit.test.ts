@@ -174,6 +174,7 @@ const policyFailedNeeds = {
     result: 'success',
     outputs: {
       generation: 'success',
+      retention: 'success',
       lock_sha256: lockSha256,
       rustc: 'rustc 1.99.0 (abcdef 2026-08-27)',
       cargo: 'cargo 1.99.0 (5f94df478 2026-08-27)',
@@ -210,7 +211,10 @@ describe('fresh dependency receipt', () => {
   test('a lock that was generated but not retained is its own outcome', () => {
     const needs = {
       ...policyFailedNeeds,
-      resolve: { ...policyFailedNeeds.resolve, result: 'failure' },
+      resolve: {
+        result: 'failure',
+        outputs: { ...policyFailedNeeds.resolve.outputs, retention: 'failure' },
+      },
       policy: { result: 'skipped', outputs: {} },
       fresh: { result: 'skipped', outputs: {} },
     };
@@ -239,6 +243,40 @@ describe('fresh dependency receipt', () => {
       `\`${lockSha256}\` (not retained`
     );
     expect(summary).not.toContain('artifact `fresh-rust-lockfile`');
+  });
+
+  test('a resolve failure after generation that is not the upload is incomplete, not a retention failure', () => {
+    // The hash step failed: generation succeeded, the upload still ran, and no
+    // hash exists. The receipt must record that instead of throwing.
+    const needs = {
+      ...policyFailedNeeds,
+      resolve: {
+        result: 'failure',
+        outputs: {
+          generation: 'success',
+          retention: 'success',
+          lock_sha256: '',
+          rustc: 'rustc 1.99.0',
+          cargo: 'cargo 1.99.0',
+        },
+      },
+      policy: { result: 'skipped', outputs: {} },
+      fresh: { result: 'skipped', outputs: {} },
+    };
+    expect(classifyFreshRun(needs)).toBe('incomplete');
+    const receipt = buildReceipt({
+      needs,
+      sourceSha: revision,
+      ref: 'refs/heads/main',
+      event: 'schedule',
+      runUrl,
+    });
+    expect(receipt.lock).toEqual({
+      produced: false,
+      retained: false,
+      sha256: null,
+      artifact: null,
+    });
   });
 
   test('the issue report does not link a lockfile that was not retained', async () => {
@@ -332,7 +370,7 @@ describe('fresh dependency receipt', () => {
       },
     };
     expect(() => buildReceipt({ ...base, needs: claimedLock })).toThrow(
-      'resolve reported generation "success" without a lock SHA-256; expected 64 lowercase hex characters'
+      'resolve reported success without a lock SHA-256; expected 64 lowercase hex characters'
     );
   });
 
@@ -449,6 +487,10 @@ describe('fresh dependency workflow', () => {
     expect(resolution).toContain('id: generate');
     expect(resolution).toContain(`generation: ${'$'}{{ steps.generate.outcome }}`);
     expect(resolution).toContain(`lock_sha256: ${'$'}{{ steps.identity.outputs.lock_sha256 }}`);
+    // The upload's own outcome, not the hash's presence, says whether the lock
+    // was retained.
+    expect(resolution).toContain(`retention: ${'$'}{{ steps.retain.outcome }}`);
+    expect(resolution).toContain('id: retain');
     expect(resolution).toContain(`rustc: ${'$'}{{ steps.toolchain.outputs.rustc }}`);
     expect(resolution).toContain(`cargo: ${'$'}{{ steps.toolchain.outputs.cargo }}`);
     // The hash is of the file the artifact uploads, taken before the upload.

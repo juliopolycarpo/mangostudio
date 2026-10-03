@@ -30,10 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # What this job proved, for the receipt: whether the resolver itself
-    # succeeded (separate from the job, which also uploads), the hash of the lock
-    # it wrote, and the compiler that resolved it.
+    # succeeded and whether the lock upload did (separate from the job, which does
+    # both), the hash of the lock it wrote, and the compiler that resolved it.
     outputs:
       generation: ${{ steps.generate.outcome }}
+      retention: ${{ steps.retain.outcome }}
       lock_sha256: ${{ steps.identity.outputs.lock_sha256 }}
       rustc: ${{ steps.toolchain.outputs.rustc }}
       cargo: ${{ steps.toolchain.outputs.cargo }}
@@ -63,7 +64,8 @@ jobs:
           echo "lock_sha256=$(sha256sum Cargo.lock | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           git diff -- Cargo.lock >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Preserve the resolved graph on success or failure
+      - id: retain
+        name: Preserve the resolved graph on success or failure
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

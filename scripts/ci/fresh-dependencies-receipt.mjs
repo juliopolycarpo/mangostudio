@@ -43,7 +43,11 @@ export function classifyFreshRun(needs) {
   const policy = job(needs, 'policy').result;
   const fresh = job(needs, 'fresh').result;
   if (resolve.result !== 'success') {
-    if (resolve.outputs.generation === 'success') return 'lock-not-retained';
+    if (resolve.outputs.generation === 'success') {
+      // Only the upload's own outcome says the artifact is missing; any other
+      // failure after generation (the hash step) is not a retention failure.
+      return resolve.outputs.retention === 'failure' ? 'lock-not-retained' : 'incomplete';
+    }
     return resolve.result === 'failure' ? 'resolution-failed' : 'incomplete';
   }
   if (policy === 'success' && fresh === 'success') return 'passed';
@@ -53,22 +57,25 @@ export function classifyFreshRun(needs) {
   return 'incomplete';
 }
 
-function lockIdentity(resolve, retained) {
+function lockIdentity(resolve) {
   const sha256 = resolve.outputs.lock_sha256 ?? '';
   if (sha256 !== '' && !SHA256.test(sha256)) {
     throw new Error(
       `Invalid lock SHA-256 ${JSON.stringify(sha256)}; expected 64 lowercase hex characters or empty`
     );
   }
-  if (resolve.outputs.generation === 'success' && sha256 === '') {
+  // A successful job ran the hash step, so a missing hash then is a defect.
+  if (resolve.result === 'success' && sha256 === '') {
     throw new Error(
-      'resolve reported generation "success" without a lock SHA-256; expected 64 lowercase hex characters'
+      'resolve reported success without a lock SHA-256; expected 64 lowercase hex characters'
     );
   }
   if (sha256 === '') return { produced: false, retained: false, sha256: null, artifact: null };
-  // A lock that was generated and hashed but never uploaded has no artifact to
-  // point at; the hash stays so the graph can still be identified.
-  if (retained === false) return { produced: true, retained: false, sha256, artifact: null };
+  // A lock that was hashed but never uploaded has no artifact to point at; the
+  // hash stays so the graph can still be identified.
+  if (resolve.outputs.retention !== 'success') {
+    return { produced: true, retained: false, sha256, artifact: null };
+  }
   return { produced: true, retained: true, sha256, artifact: LOCK_ARTIFACT };
 }
 
@@ -96,7 +103,7 @@ export function buildReceipt({ needs, sourceSha, ref, event, runUrl }) {
       rustc: resolve.outputs.rustc ?? '',
       cargo: resolve.outputs.cargo ?? '',
     },
-    lock: lockIdentity(resolve, outcome !== 'lock-not-retained'),
+    lock: lockIdentity(resolve),
     jobs: Object.fromEntries(JOBS.map((name) => [name, job(needs, name).result])),
   };
 }
