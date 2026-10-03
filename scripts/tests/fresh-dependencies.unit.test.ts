@@ -158,11 +158,14 @@ describe('fresh dependency workflow', () => {
     expect(fresh).not.toContain('issues: write');
   });
 
-  test('only reports a genuine failed scheduled or dispatched run', () => {
+  test('only reports a genuine failed scheduled or dispatched run of main', () => {
     const report = extractJobBlock(workflow, 'report');
+    const condition = report.split('\n').find((line) => line.startsWith('    if: ')) ?? '';
     expect(report).toContain('needs: [resolve, policy, fresh]');
-    expect(report).toContain("contains(needs.*.result, 'failure')");
-    expect(report).toContain("github.event_name != 'pull_request'");
+    expect(condition).toContain("contains(needs.*.result, 'failure')");
+    expect(condition).toContain("github.event_name != 'pull_request'");
+    // A dispatch on another ref says nothing about main, so it must not rewrite the shared issue.
+    expect(condition).toContain("&& github.ref == 'refs/heads/main'");
     expect(report).toContain('issues: write');
     expect(report).toContain('reportFreshDependencies');
   });
@@ -171,6 +174,8 @@ describe('fresh dependency workflow', () => {
     const report = extractJobBlock(workflow, 'report');
     expect(report).toContain('group: rust-fresh-dependencies-report-${{ github.repository }}');
     expect(report).toContain('cancel-in-progress: false');
-    expect(report).not.toContain('github.ref');
+    const groups = report.split('\n').filter((line) => line.trimStart().startsWith('group: '));
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).not.toContain('github.ref');
   });
 });
