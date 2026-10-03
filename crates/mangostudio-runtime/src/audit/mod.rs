@@ -560,7 +560,8 @@ mod tests {
     /// test holds one append in flight while producers enqueue; it then fails
     /// or lands per `outcome`. Later calls skip the pause and follow
     /// `outcome` at once, and every landed line is kept in `landed`, in
-    /// write order.
+    /// write order. Like the real append, it requires the caller to hold
+    /// `audit.write_lock` and panics naming that contract otherwise.
     struct PausedAppend {
         entered: Sender<String>,
         release: Mutex<Receiver<()>>,
@@ -570,7 +571,14 @@ mod tests {
     }
 
     impl AppendLine for PausedAppend {
-        fn append(&self, _audit: &FileAudit, line: &str) -> io::Result<()> {
+        fn append(&self, audit: &FileAudit, line: &str) -> io::Result<()> {
+            assert!(
+                matches!(
+                    audit.write_lock.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                ),
+                "expected AppendLine::append to run with write_lock held | received: write_lock free for line {line:?}"
+            );
             if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
                 self.entered.send(line.to_string()).unwrap();
                 lock(&self.release)
