@@ -53,7 +53,7 @@ export function classifyFreshRun(needs) {
   return 'incomplete';
 }
 
-function lockIdentity(resolve) {
+function lockIdentity(resolve, retained) {
   const sha256 = resolve.outputs.lock_sha256 ?? '';
   if (sha256 !== '' && !SHA256.test(sha256)) {
     throw new Error(
@@ -65,8 +65,11 @@ function lockIdentity(resolve) {
       'resolve reported generation "success" without a lock SHA-256; expected 64 lowercase hex characters'
     );
   }
-  if (sha256 === '') return { produced: false, sha256: null, artifact: null };
-  return { produced: true, sha256, artifact: LOCK_ARTIFACT };
+  if (sha256 === '') return { produced: false, retained: false, sha256: null, artifact: null };
+  // A lock that was generated and hashed but never uploaded has no artifact to
+  // point at; the hash stays so the graph can still be identified.
+  if (retained === false) return { produced: true, retained: false, sha256, artifact: null };
+  return { produced: true, retained: true, sha256, artifact: LOCK_ARTIFACT };
 }
 
 /**
@@ -93,7 +96,7 @@ export function buildReceipt({ needs, sourceSha, ref, event, runUrl }) {
       rustc: resolve.outputs.rustc ?? '',
       cargo: resolve.outputs.cargo ?? '',
     },
-    lock: lockIdentity(resolve),
+    lock: lockIdentity(resolve, outcome !== 'lock-not-retained'),
     jobs: Object.fromEntries(JOBS.map((name) => [name, job(needs, name).result])),
   };
 }
@@ -105,9 +108,12 @@ export function buildReceipt({ needs, sourceSha, ref, event, runUrl }) {
  * renderReceiptSummary(receipt); // '### Fresh Rust dependencies: policy-failed ...'
  */
 export function renderReceiptSummary(receipt) {
-  const lock = receipt.lock.produced
-    ? `\`${receipt.lock.sha256}\` (artifact \`${receipt.lock.artifact}\`)`
-    : 'none produced';
+  let lock = 'none produced';
+  if (receipt.lock.produced) {
+    lock = receipt.lock.retained
+      ? `\`${receipt.lock.sha256}\` (artifact \`${receipt.lock.artifact}\`)`
+      : `\`${receipt.lock.sha256}\` (not retained: the lock artifact upload failed)`;
+  }
   return [
     `### Fresh Rust dependencies: ${receipt.outcome}`,
     '',

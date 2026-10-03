@@ -80,7 +80,8 @@ judged (the file, not the artifact archive), and the result of the `resolve`,
 `platform-checks-failed`, `policy-and-platform-checks-failed`, `passed` or
 `incomplete`. The compatibility issue states the same stage, from the same
 classification (`scripts/ci/fresh-dependencies-receipt.mjs`), and links a lock
-only when one was produced. The `fresh` result covers the three operating
+only when its artifact was retained (a lock that was produced but not uploaded
+keeps its hash in the receipt, labelled not retained, without a link). The `fresh` result covers the three operating
 systems together. The graph is built and tested with the pinned development
 toolchain (1.99.0) and workspace-wide feature unification
 (`--workspace --all-features`): it says nothing about the 1.97 floor or about a

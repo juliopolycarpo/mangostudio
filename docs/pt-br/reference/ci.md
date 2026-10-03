@@ -81,7 +81,8 @@ resumo do passo ao lado do artefato `fresh-rust-lockfile`: o SHA do código, o
 `platform-checks-failed`, `policy-and-platform-checks-failed`, `passed` ou
 `incomplete`. A issue de compatibilidade informa a mesma etapa, pela mesma
 classificação (`scripts/ci/fresh-dependencies-receipt.mjs`), e só linka um lock
-quando ele foi produzido. O resultado de `fresh` cobre os três sistemas
+quando o artefato foi retido (um lock produzido mas não enviado mantém o hash no
+recibo, marcado como não retido, sem link). O resultado de `fresh` cobre os três sistemas
 operacionais juntos. O grafo é construído e testado com a toolchain de
 desenvolvimento fixada (1.99.0) e unificação de features em todo o workspace
 (`--workspace --all-features`): nada diz sobre o piso 1.97 nem sobre o conjunto

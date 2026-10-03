@@ -215,6 +215,48 @@ describe('fresh dependency receipt', () => {
       fresh: { result: 'skipped', outputs: {} },
     };
     expect(classifyFreshRun(needs)).toBe('lock-not-retained');
+
+    // The hash is kept, but no artifact exists to point at: the receipt must not
+    // name `fresh-rust-lockfile` as if a reader could download it.
+    const receipt = buildReceipt({
+      needs,
+      sourceSha: revision,
+      ref: 'refs/heads/main',
+      event: 'schedule',
+      runUrl,
+    });
+    expect(
+      receipt.lock,
+      'lock-not-retained must not name a lock artifact that was never uploaded'
+    ).toEqual({
+      produced: true,
+      retained: false,
+      sha256: lockSha256,
+      artifact: null,
+    });
+    const summary = renderReceiptSummary(receipt);
+    expect(summary, 'summary must label the hash as not retained').toContain(
+      `\`${lockSha256}\` (not retained`
+    );
+    expect(summary).not.toContain('artifact `fresh-rust-lockfile`');
+  });
+
+  test('the issue report does not link a lockfile that was not retained', async () => {
+    const github = new FakeIssueClient();
+    await reportFreshDependencies({
+      github,
+      context,
+      revision,
+      runUrl,
+      outcome: 'lock-not-retained',
+      lockSha256,
+    });
+    const body = github.issues[0].body;
+    expect(body, 'lock-not-retained report must not link a resolved lockfile').not.toContain(
+      'Workflow logs and resolved lockfile'
+    );
+    expect(body).toContain(`[Workflow logs](${runUrl})`);
+    expect(body).toContain(`lockfile SHA-256 \`${lockSha256}\` (not retained)`);
   });
 
   test('a failed policy gate still preserves lock, hash, source, compiler and every outcome', () => {
@@ -234,7 +276,7 @@ describe('fresh dependency receipt', () => {
         rustc: 'rustc 1.99.0 (abcdef 2026-08-27)',
         cargo: 'cargo 1.99.0 (5f94df478 2026-08-27)',
       },
-      lock: { produced: true, sha256: lockSha256, artifact: 'fresh-rust-lockfile' },
+      lock: { produced: true, retained: true, sha256: lockSha256, artifact: 'fresh-rust-lockfile' },
       jobs: { resolve: 'success', policy: 'failure', fresh: 'success' },
     });
   });
@@ -255,7 +297,12 @@ describe('fresh dependency receipt', () => {
       runUrl,
     });
     expect(receipt.outcome).toBe('resolution-failed');
-    expect(receipt.lock).toEqual({ produced: false, sha256: null, artifact: null });
+    expect(receipt.lock).toEqual({
+      produced: false,
+      retained: false,
+      sha256: null,
+      artifact: null,
+    });
     expect(receipt.jobs).toEqual({ resolve: 'failure', policy: 'skipped', fresh: 'skipped' });
   });
 

@@ -64,18 +64,25 @@ export async function reportFreshDependencies({
       `Received compatibility issues ${matches.map((issue) => issue.number).join(', ')}; expected at most one managed issue`
     );
   }
+  // A hash alone is not a lock a reader can fetch: only an outcome that retained
+  // the artifact links it.
+  const linkedLock = lockSha256 !== null && outcome !== 'lock-not-retained';
+  let lockLine = `[Workflow logs](${runUrl})`;
+  if (linkedLock) {
+    lockLine = `[Workflow logs and resolved lockfile](${runUrl}), lockfile SHA-256 \`${lockSha256}\`.`;
+  } else if (lockSha256 !== null) {
+    lockLine = `[Workflow logs](${runUrl}); lockfile SHA-256 \`${lockSha256}\` (not retained).`;
+  }
   const report = [
     START,
     `The fresh Rust dependency check failed at commit \`${revision}\`.`,
     '',
     STAGE_LINES[outcome],
     '',
-    lockSha256
-      ? `[Workflow logs and resolved lockfile](${runUrl}), lockfile SHA-256 \`${lockSha256}\`.`
-      : `[Workflow logs](${runUrl})`,
+    lockLine,
     '',
     `This scheduled check resolves compatible dependencies independently of the committed lockfile. Exact SDK pins remain exact. ${
-      lockSha256
+      linkedLock
         ? 'Inspect the failing command and resolved lockfile before proposing a dependency change.'
         : 'Inspect the failing command before proposing a dependency change.'
     }`,
