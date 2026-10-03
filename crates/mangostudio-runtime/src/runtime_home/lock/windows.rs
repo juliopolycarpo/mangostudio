@@ -1,11 +1,12 @@
 //! Windows halves of the lock protocol's two platform questions: is a pid
 //! still alive, and what does this machine call itself. Neither has a safe
 //! binding — `nix` is Unix-only — so this is one of this crate's
-//! narrowly-scoped Windows `unsafe` modules (`owner_only/windows.rs`,
-//! `subprocess/windows_job.rs` and the `filesystem` Win32 helpers are the
-//! others), mirroring `mango-protocol`'s own
+//! narrowly-scoped Windows `unsafe` sites, mirroring `mango-protocol`'s own
 //! `transports/ipc/windows/security.rs`: every call below carries a SAFETY
-//! comment, and nothing outside this file needs to.
+//! comment, and nothing outside this file needs to. The others are
+//! `owner_only/windows.rs`, `subprocess/windows_job.rs`,
+//! `file_identity.rs` (`GetFileInformationByHandle`) and the Win32 helpers in
+//! `filesystem/{capability,io,policy}.rs`.
 #![allow(
     unsafe_code,
     reason = "OpenProcess/WaitForSingleObject and the WinSock hostname calls have no safe \
@@ -13,9 +14,11 @@
 )]
 // `clippy::all` (the workspace's own lint level) does not include this
 // restriction lint, so nothing in the repo's own gate would have caught a
-// `SAFETY`-less `unsafe` block here. Denying it locally, only in the two
-// modules that actually contain `unsafe`, gates the invariant the module
-// doc above promises rather than resting it on review.
+// `SAFETY`-less `unsafe` block here. Denying it locally, in each module that
+// takes a module-wide `unsafe_code` allowance, gates the invariant the module
+// doc above promises rather than resting it on review. `file_identity.rs` and
+// `filesystem/io.rs` allow `unsafe_code` per function instead and do not carry
+// this lint.
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 use std::io;

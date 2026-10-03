@@ -15,9 +15,9 @@
 //! `DELETE` on it. A read/write grant would let the first write succeed and
 //! refuse every rotation after it.
 //!
-//! This is one of this crate's two narrowly-scoped `unsafe` modules (the
-//! other is [`crate::runtime_home::lock::windows`]); every call carries a
-//! SAFETY comment.
+//! This is one of this crate's narrowly-scoped Windows `unsafe` sites (the
+//! module doc of [`crate::runtime_home::lock::windows`] lists the others);
+//! every call carries a SAFETY comment.
 #![allow(
     unsafe_code,
     reason = "the token/SID lookup and the ACL rewrite have no safe binding on Windows; every \
@@ -25,9 +25,11 @@
 )]
 // `clippy::all` (the workspace's own lint level) does not include this
 // restriction lint, so nothing in the repo's own gate would have caught a
-// `SAFETY`-less `unsafe` block here. Denying it locally, only in the two
-// modules that actually contain `unsafe`, gates the invariant the module
-// doc above promises rather than resting it on review.
+// `SAFETY`-less `unsafe` block here. Denying it locally, in each module that
+// takes a module-wide `unsafe_code` allowance, gates the invariant the module
+// doc above promises rather than resting it on review. `file_identity.rs` and
+// `filesystem/io.rs` allow `unsafe_code` per function instead and do not carry
+// this lint.
 #![deny(clippy::undocumented_unsafe_blocks)]
 // `Vec<u8>`'s allocation only promises byte alignment, never the alignment
 // a typed Win32 struct read out of it needs — this lint is what would have
