@@ -332,8 +332,9 @@ function terminalReasonForAbort(
 function terminalReasonForCallFailure(error: unknown): ExternalTurnTerminalReason {
   if (error instanceof RuntimeConsentDeniedError) return 'consent-revoked';
   if (error instanceof Error && error.name === 'ToolArgumentError') return 'session-lost';
-  const failure = classifySubmissionFailure(error);
-  if (failure === 'acceptance-unknown' || failure === 'no-reply') return 'acceptance-unknown';
+  // Only the runtime's own uncertainty: a hub-observed no-reply that reaches
+  // here is a session reopen, sent before any turn was, so nothing is unknown.
+  if (classifySubmissionFailure(error) === 'acceptance-unknown') return 'acceptance-unknown';
   return 'vendor-error';
 }
 

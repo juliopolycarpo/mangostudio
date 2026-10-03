@@ -593,6 +593,43 @@ describe('external turn controller', () => {
     expect((await readAssistantRow()).text).toBe('half');
   });
 
+  it('reports a reopen deadline before any turn was sent as a vendor error', async () => {
+    const { runtime, sessions: base, approvals, commandCatalog } = harness();
+    let opened = false;
+    const sessions: typeof base = {
+      ...base,
+      async ensureSession(input) {
+        if (opened) {
+          throw new ToolExecutionTimedOutError('Session reopen timed out.', {
+            cause: new RuntimeRequestNoReplyError(
+              new RemoteError('TIMEOUT', 'Session reopen timed out.'),
+              'deadline'
+            ),
+          });
+        }
+        opened = true;
+        const handle = await base.ensureSession(input);
+        runtime.dropConnection();
+        return handle;
+      },
+    };
+    const ids = [userMessageId, assistantMessageId];
+    const controller = createExternalTurnController({
+      sessions,
+      approvals,
+      commandCatalog,
+      newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
+    });
+
+    const result = await startTurn(controller);
+
+    expect(runtime.calls.turn).toEqual([]);
+    expect(
+      result.reason,
+      `expected terminal reason: vendor-error | received: ${result.reason}`
+    ).toBe('vendor-error');
+  });
+
   it('terminates when consent is withdrawn mid-turn', async () => {
     const { runtime, controller, sessions } = harness();
     const running = startTurn(controller);
