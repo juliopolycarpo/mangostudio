@@ -94,8 +94,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for RecordingStream<S> {
         let before = buf.filled().len();
         let polled = Pin::new(&mut this.inner).poll_read(cx, buf);
         if this.recording && matches!(polled, Poll::Ready(Ok(()))) {
-            let read = buf.filled()[before..].to_vec();
-            this.record(&read);
+            this.record(&buf.filled()[before..]);
         }
         polled
     }
@@ -197,7 +196,10 @@ fn contains_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
 
     use super::{BindingHeader, RecordingStream, binding_header};
 
@@ -328,5 +330,30 @@ mod tests {
             "expected the stream to pass every byte through"
         );
         assert_eq!(head.binding(), BindingHeader::Key(KEY.to_owned()));
+    }
+
+    /// Only the bytes a read added belong to the head: whatever the caller's
+    /// buffer already held from an earlier fill is not part of this read.
+    #[test]
+    fn a_read_into_a_prefilled_buffer_records_only_the_bytes_it_added() {
+        let sent = request("authorization: Bearer t\r\n");
+        let (mut recording, head) = RecordingStream::new(std::io::Cursor::new(sent.clone()));
+        let mut storage = vec![0u8; sent.len() + 128];
+        let mut buf = ReadBuf::new(&mut storage);
+        let stale = format!("x-mangostudio-hub-binding: {KEY}\r\n");
+        buf.put_slice(stale.as_bytes());
+        let mut context = Context::from_waker(std::task::Waker::noop());
+
+        let polled = Pin::new(&mut recording).poll_read(&mut context, &mut buf);
+
+        assert!(
+            matches!(polled, Poll::Ready(Ok(()))) && buf.filled().ends_with(&sent),
+            "expected the read to pass the request through after the prefilled bytes | received: {polled:?}"
+        );
+        assert_eq!(
+            head.binding(),
+            BindingHeader::Absent,
+            "expected the prefilled binding header not to be recorded as part of this read"
+        );
     }
 }
