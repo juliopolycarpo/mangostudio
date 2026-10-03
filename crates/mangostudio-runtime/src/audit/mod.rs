@@ -301,8 +301,10 @@ impl FileAudit {
 
     /// Drains every currently buffered line, retrying its write. Mirrors
     /// `audit-log.ts`'s own drain-on-close loop; a line that still cannot
-    /// be written is put back (in order) and reported via the sidecar
-    /// error file rather than lost.
+    /// be written is put back (in order) while the buffer has room, and
+    /// reported via the sidecar error file. If producers refilled the
+    /// buffer to its cap meanwhile, that oldest line is dropped instead and
+    /// counted in the sidecar's dropped total.
     ///
     /// # Example
     ///
@@ -433,8 +435,11 @@ impl FileAudit {
     }
 
     /// Retries every currently buffered line, oldest first, stopping at the
-    /// first one that still fails and putting it back so ordering is
-    /// preserved for the next attempt. Holds `write_lock` for the whole
+    /// first one that still fails. That line goes back to the front, so
+    /// ordering is preserved for the next attempt, while the queue has
+    /// room; if producers refilled the queue to [`MAX_BUFFERED_RECORDS`]
+    /// during the write, it is the oldest record and is dropped and
+    /// counted instead (see `State::reinsert_oldest`). Holds `write_lock` for the whole
     /// drain rather than re-acquiring it one line at a time: two `record`
     /// calls each buffering their own line and then racing to drain used
     /// to let each drain snapshot a different, disjoint slice of
