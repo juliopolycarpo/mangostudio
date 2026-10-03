@@ -216,12 +216,16 @@ pub(crate) async fn build_capability_manifest(
     registry: &Registry,
     cancel: &CancellationToken,
 ) -> RuntimeCapabilityManifest {
+    // Exhaustive on purpose: a probe added to `CapabilitySnapshot` must be
+    // either gated into the manifest here or consciously ignored, not silently
+    // dropped by a `..` the way `build_health_report` could never drop it.
     let CapabilitySnapshot {
+        state: _,
+        fallback_source: _,
         resolved,
         shells,
         git: git_probe,
         gh: gh_probe,
-        ..
     } = collect_capability_snapshot(slot, mango_home, None, cancel).await;
     let git = git_probe.unwrap_or_else(|GitProbeCancelled| unavailable_git());
 
