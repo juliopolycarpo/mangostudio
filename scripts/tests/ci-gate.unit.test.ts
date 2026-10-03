@@ -348,6 +348,26 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     );
   });
 
+  test('the target minimum-Rust lane checks the launcher at its own lower floor on every target', () => {
+    // The launcher declares a lower rust-version than the workspace, and its
+    // Windows-only and target-specific code is compiled by no Linux lane, so the
+    // workspace's 1.97 check is no proof of the 1.96 floor on those targets.
+    const block = extractJobBlock(workflow, 'target-msrv');
+    const launcherFloor = /^rust-version = "([^"]+)"$/m.exec(
+      readText('crates/mangostudio-launcher/Cargo.toml')
+    )?.[1];
+
+    expect(launcherFloor, 'launcher rust-version').toBeDefined();
+    expect(
+      block,
+      'target-msrv has no launcher-floor check: launcher code on Windows and macOS is only checked at 1.97'
+    ).toContain('cargo check -p mangostudio --all-targets --locked --target "$TARGET"');
+    expect(block).toContain(`RUSTUP_TOOLCHAIN: ${launcherFloor}`);
+    expect(block).toContain(
+      `rustup toolchain install ${launcherFloor} --profile minimal --target "$TARGET"`
+    );
+  });
+
   test('every Rust-gated lane is an accepted skip only when the Rust signal is false', () => {
     // Derived from the workflow, so a new `rust`-gated lane that is left out of
     // ALLOWED_SKIPS fails the Gate on every irrelevant PR instead of here.

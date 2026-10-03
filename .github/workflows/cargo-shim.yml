@@ -279,6 +279,19 @@ jobs:
 
       - run: cargo check --workspace --all-targets --all-features --locked --target "$TARGET"
 
+      # The launcher declares a lower floor than the workspace, and its Windows
+      # and target-specific code is compiled by no Linux lane, so the 1.97 check
+      # above says nothing about 1.96 there. The step's own RUSTUP_TOOLCHAIN
+      # outranks the job's; cargo-shim.yml's test pins it to the launcher's
+      # rust-version.
+      - run: rustup toolchain install 1.96.0 --profile minimal --target "$TARGET"
+        env:
+          RUSTUP_TOOLCHAIN: 1.96.0
+
+      - run: cargo check -p mangostudio --all-targets --locked --target "$TARGET"
+        env:
+          RUSTUP_TOOLCHAIN: 1.96.0
+
   launcher-msrv:
     name: Launcher MSRV
     needs: [changes]

@@ -50,7 +50,10 @@ O piso do workspace é o `rust-version` do `Cargo.toml` raiz;
 dele. O `target-msrv` existe porque o código `cfg(windows)` e
 `cfg(target_os = "macos")` não é compilado no Linux, e os testes nativos do
 `workspace` rodam na 1.99.0, então nada dizem sobre o piso. Ele só verifica
-(`check`): compilar todo tipo de alvo é toda a afirmação de versão mínima. O
+(`check`): compilar todo tipo de alvo é toda a afirmação de versão mínima. Cada
+perna do `target-msrv` também verifica só o launcher (`cargo check -p mangostudio
+--all-targets --locked --target <t>`) na 1.96.0, o piso declarado dele, porque o
+código só de Windows e específico de alvo não é compilado por nenhuma lane Linux. O
 Windows ARM64 é verificado de forma cruzada a partir do runner x64, não de forma
 nativa; o runner ARM64 nativo só roda os testes abaixo. Nenhuma das duas lanes usa
 rust-cache: as verificações a frio levam minutos e o cache do Actions do

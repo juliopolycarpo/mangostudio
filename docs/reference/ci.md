@@ -49,7 +49,9 @@ The workspace floor is `rust-version` in the root `Cargo.toml`;
 `target-msrv` exists because `cfg(windows)` and `cfg(target_os = "macos")` code is
 not compiled on Linux, and the native tests of `workspace` run on 1.99.0, so they
 say nothing about the floor. It only checks: compiling every target kind is the
-whole minimum-version claim, and running them would repeat `workspace`. The
+whole minimum-version claim, and running them would repeat `workspace`. Each `target-msrv` leg also checks the launcher alone (`cargo check -p mangostudio
+--all-targets --locked --target <t>`) on 1.96.0, its own declared floor, because
+its Windows-only and target-specific code is compiled by no Linux lane. The
 Windows ARM64 leg is cross-checked from the x64 runner, not run natively; the
 native ARM64 runner only runs the tests below. Neither lane uses rust-cache:
 the cold checks take minutes and the repository's Actions cache is already over
