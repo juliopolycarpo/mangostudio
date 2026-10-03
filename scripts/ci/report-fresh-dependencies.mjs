@@ -1,14 +1,49 @@
 const START = '<!-- rust-fresh-dependencies -->';
 const END = '<!-- /rust-fresh-dependencies -->';
 
+// What each failed stage means for the reader. `passed` never reaches a report.
+const STAGE_LINES = {
+  'resolution-failed':
+    'Dependency resolution failed: no new lockfile was produced, so there is no resolved graph to inspect. Read the resolver step of the workflow logs.',
+  'lock-not-retained':
+    'Dependency resolution succeeded, but the resolved lockfile could not be retained; the policy and platform checks did not run.',
+  'policy-failed':
+    'The resolved graph was built and tested on every platform, but the dependency policy failed.',
+  'platform-checks-failed':
+    'The resolved graph passed the dependency policy, but a platform build, lint or test check failed.',
+  'policy-and-platform-checks-failed':
+    'The resolved graph failed both the dependency policy and a platform build, lint or test check.',
+  incomplete:
+    'A stage neither passed nor failed (it was skipped or cancelled), so the outcome is incomplete. Read the workflow logs.',
+};
+
 /**
  * Update the single bot-owned dependency compatibility issue, preserving maintainer notes.
- * // Usage: await reportFreshDependencies({ github, context, revision, runUrl });
+ * `outcome` is the stage `classifyFreshRun` named; `lockSha256` is the resolved lock's hash,
+ * or null when no lock was produced.
+ * // Usage: await reportFreshDependencies({ github, context, revision, runUrl, outcome: 'policy-failed', lockSha256 });
  */
-export async function reportFreshDependencies({ github, context, revision, runUrl }) {
+export async function reportFreshDependencies({
+  github,
+  context,
+  revision,
+  runUrl,
+  outcome,
+  lockSha256,
+}) {
   if (!/^[a-f0-9]{40}$/.test(revision)) {
     throw new Error(
       `Invalid revision ${JSON.stringify(revision)}; expected a 40-character Git SHA`
+    );
+  }
+  if (!(outcome in STAGE_LINES)) {
+    throw new Error(
+      `Invalid outcome ${JSON.stringify(outcome)}; expected one of ${Object.keys(STAGE_LINES).join(', ')}`
+    );
+  }
+  if (lockSha256 !== null && !/^[a-f0-9]{64}$/.test(lockSha256)) {
+    throw new Error(
+      `Invalid lock SHA-256 ${JSON.stringify(lockSha256)}; expected 64 lowercase hex characters or null`
     );
   }
   const repo = context.repo;
@@ -33,9 +68,17 @@ export async function reportFreshDependencies({ github, context, revision, runUr
     START,
     `The fresh Rust dependency check failed at commit \`${revision}\`.`,
     '',
-    `[Workflow logs and resolved lockfile](${runUrl})`,
+    STAGE_LINES[outcome],
     '',
-    'This scheduled check resolves compatible dependencies independently of the committed lockfile. Exact SDK pins remain exact. Inspect the failing command and resolved lockfile before proposing a dependency change.',
+    lockSha256
+      ? `[Workflow logs and resolved lockfile](${runUrl}), lockfile SHA-256 \`${lockSha256}\`.`
+      : `[Workflow logs](${runUrl})`,
+    '',
+    `This scheduled check resolves compatible dependencies independently of the committed lockfile. Exact SDK pins remain exact. ${
+      lockSha256
+        ? 'Inspect the failing command and resolved lockfile before proposing a dependency change.'
+        : 'Inspect the failing command before proposing a dependency change.'
+    }`,
     END,
   ].join('\n');
   const existing = matches[0];

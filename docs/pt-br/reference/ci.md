@@ -65,6 +65,22 @@ na `main` atualizam uma única issue do bot, preservando notas dos mantenedores;
 execução manual em outra ref e a validação do workflow em PRs nunca escrevem issues.
 O CI com lock e o Dependabot continuam independentes.
 
+Toda execução não cancelada também guarda um artefato `fresh-rust-receipt` e um
+resumo do passo ao lado do artefato `fresh-rust-lockfile`: o SHA do código, o
+`rustc` e o `cargo` que resolveram o grafo, o SHA-256 do arquivo de lock avaliado
+(o arquivo, não o arquivo compactado do artefato) e o resultado dos jobs
+`resolve`, `policy` e `fresh`. Ele nomeia a etapa em que a execução terminou:
+`resolution-failed` (nenhum lock existe), `lock-not-retained`, `policy-failed`,
+`platform-checks-failed`, `policy-and-platform-checks-failed`, `passed` ou
+`incomplete`. A issue de compatibilidade informa a mesma etapa, pela mesma
+classificação (`scripts/ci/fresh-dependencies-receipt.mjs`), e só linka um lock
+quando ele foi produzido. O resultado de `fresh` cobre os três sistemas
+operacionais juntos. O grafo é construído e testado com a toolchain de
+desenvolvimento fixada (1.99.0) e unificação de features em todo o workspace
+(`--workspace --all-features`): nada diz sobre o piso 1.97 nem sobre o conjunto
+de features de um crate isolado, que as lanes de Rust mínimo verificam apenas no
+lock commitado.
+
 ## Cobertura Rust
 
 A execução dos testes Rust no Ubuntu é o `.github/workflows/rust-coverage.yml`,

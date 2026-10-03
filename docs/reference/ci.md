@@ -64,6 +64,22 @@ one bot-owned compatibility issue, preserving maintainer notes; a manual run on
 another ref and PR validation of the workflow never write issues. Locked CI and
 Dependabot continue independently.
 
+Every run that is not cancelled also keeps a `fresh-rust-receipt` artifact and
+step summary beside the `fresh-rust-lockfile` artifact: the source SHA, the
+`rustc` and `cargo` that resolved the graph, the SHA-256 of the lock file it
+judged (the file, not the artifact archive), and the result of the `resolve`,
+`policy` and `fresh` jobs. It names the stage the run ended in:
+`resolution-failed` (no lock exists), `lock-not-retained`, `policy-failed`,
+`platform-checks-failed`, `policy-and-platform-checks-failed`, `passed` or
+`incomplete`. The compatibility issue states the same stage, from the same
+classification (`scripts/ci/fresh-dependencies-receipt.mjs`), and links a lock
+only when one was produced. The `fresh` result covers the three operating
+systems together. The graph is built and tested with the pinned development
+toolchain (1.99.0) and workspace-wide feature unification
+(`--workspace --all-features`): it says nothing about the 1.97 floor or about a
+single crate's own feature set, which the minimum-Rust lanes check only on the
+committed lock.
+
 ## Rust coverage
 
 The Ubuntu Rust test run is `.github/workflows/rust-coverage.yml`, called from
