@@ -1077,6 +1077,35 @@ describe('external turn controller', () => {
       );
     }
 
+    it('reports a review whose connection closed before it was sent as a disconnect', async () => {
+      const { runtime, sessions: base, approvals, commandCatalog } = await realHarness();
+      const sessions: typeof base = {
+        ...base,
+        async ensureSession(input) {
+          const handle = await base.ensureSession(input);
+          await runtime.close();
+          return handle;
+        },
+      };
+      const ids = [userMessageId, assistantMessageId];
+      const controller = createExternalTurnController({
+        sessions,
+        approvals,
+        commandCatalog,
+        newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
+      });
+      try {
+        const result = await startReview(controller);
+        expect(runtime.calls.startReview).toEqual([]);
+        expect(
+          result.reason,
+          `expected terminal reason: runtime-disconnected | received: ${result.reason}`
+        ).toBe('runtime-disconnected');
+      } finally {
+        await runtime.close();
+      }
+    });
+
     it('reconciles an unanswered review deadline through the same-session receipt', async () => {
       let lostReply = true;
       function reviewDeadline(): Error | undefined {

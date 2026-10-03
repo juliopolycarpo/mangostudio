@@ -54,6 +54,7 @@ import Value from 'typebox/value';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
+import { isRequestNotSent } from '../../../services/runtime-client/request-not-sent';
 import { getRuntimeConnectionManager } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
@@ -985,6 +986,14 @@ export function createExternalTurnController(
             terminate('vendor-error');
             return;
           case 'refused':
+            // A review is not resubmitted, and while it was submitting the
+            // session's teardown was deferred to it: a request the closed
+            // connection never sent is that disconnect, not a vendor answer.
+            // No English error part: the localized terminal notice says it.
+            if (input.review && isRequestNotSent(outcome.error)) {
+              terminate('runtime-disconnected');
+              return;
+            }
             failStart(outcome.error, input.review ? 'review-start' : 'turn-start');
             return;
           case 'stopped':
