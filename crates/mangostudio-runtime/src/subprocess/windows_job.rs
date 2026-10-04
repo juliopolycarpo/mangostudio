@@ -234,7 +234,7 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     startup.StartupInfo.hStdInput = inherited_handles[0];
     startup.StartupInfo.hStdOutput = inherited_handles[1];
     startup.StartupInfo.hStdError = inherited_handles[2];
-    startup.lpAttributeList = attributes.pointer();
+    startup.lpAttributeList = attributes.as_mut_ptr();
 
     let environment_pointer = environment
         .as_ref()
@@ -250,7 +250,10 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
     pipes.set_child_inheritable(true)?;
     // SAFETY: every UTF-16 buffer is NUL-terminated and remains live for this call; the command
     // line is writable; the Job and stdio backing handles remain owned by `job` and `pipes`; and
-    // `attributes` owns the initialized attribute list plus its aligned backing storage.
+    // `attributes` owns the initialized attribute list plus its aligned backing storage. The
+    // startup pointer is derived from the whole `STARTUPINFOEXW`, not from its first field,
+    // because EXTENDED_STARTUPINFO_PRESENT makes the API read `lpAttributeList` past
+    // `STARTUPINFOW`.
     let created = unsafe {
         CreateProcessW(
             application.as_ref().map_or(ptr::null(), Vec::as_ptr),
@@ -261,7 +264,7 @@ pub(super) fn spawn(request: &ProcessRequest) -> io::Result<WindowsJobChild> {
             flags,
             environment_pointer,
             current_directory_pointer,
-            &startup.StartupInfo,
+            (&raw const startup).cast(),
             &mut information,
         )
     };
@@ -396,7 +399,7 @@ pub(super) fn spawn_pty(
         u32::try_from(size_of::<STARTUPINFOEXW>()).expect("STARTUPINFOEXW fits u32");
     // Keep the inherited standard console handles out of the child. ConPTY supplies its own.
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.lpAttributeList = attributes.pointer();
+    startup.lpAttributeList = attributes.as_mut_ptr();
     let environment_pointer = environment
         .as_ref()
         .map_or(ptr::null(), |block| block.as_ptr().cast::<c_void>());
@@ -404,7 +407,10 @@ pub(super) fn spawn_pty(
     let mut information = PROCESS_INFORMATION::default();
     let flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
     // SAFETY: all UTF-16 buffers and both process attributes remain live throughout CreateProcessW;
-    // the Job and ConPTY are owned by this scope and move to the child wrapper on success.
+    // the Job and ConPTY are owned by this scope and move to the child wrapper on success. The
+    // startup pointer is derived from the whole `STARTUPINFOEXW`, not from its first field,
+    // because EXTENDED_STARTUPINFO_PRESENT makes the API read `lpAttributeList` past
+    // `STARTUPINFOW`.
     let created = unsafe {
         CreateProcessW(
             application.as_ref().map_or(ptr::null(), Vec::as_ptr),
@@ -415,7 +421,7 @@ pub(super) fn spawn_pty(
             flags,
             environment_pointer,
             current_directory_pointer,
-            &startup.StartupInfo,
+            (&raw const startup).cast(),
             &mut information,
         )
     };
@@ -709,11 +715,13 @@ impl AttributeList {
     }
 
     fn update(&mut self, attribute: usize, value: *const c_void, bytes: usize) -> io::Result<()> {
-        // SAFETY: the list is initialized; `value` points to `bytes` stable readable bytes through
-        // CreateProcessW; and the selected attributes accept HANDLE arrays of these exact sizes.
+        // SAFETY: the list is initialized; its pointer comes from `as_mut_ptr`, so it has write
+        // provenance over the whole `storage` allocation that the API mutates; `value` points to
+        // `bytes` stable readable bytes through CreateProcessW; and the selected attributes accept
+        // HANDLE arrays of these exact sizes.
         if unsafe {
             UpdateProcThreadAttribute(
-                self.pointer(),
+                self.as_mut_ptr(),
                 0,
                 attribute,
                 value,
@@ -729,15 +737,28 @@ impl AttributeList {
         }
     }
 
-    fn pointer(&self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
-        self.storage.as_ptr().cast_mut().cast()
+    /// The initialized list, derived from the backing allocation's mutable pointer.
+    ///
+    /// `UpdateProcThreadAttribute` and `DeleteProcThreadAttributeList` write through it, so it must
+    /// not come from a shared borrow of `storage`. `STARTUPINFOEXW::lpAttributeList` is a mutable
+    /// pointer too, so every use goes through this one accessor. Each call re-borrows `storage`,
+    /// so a pointer from an earlier call must not be used after the list is touched again, and the
+    /// list must not move out of its `Box` while a Win32 call holds it.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// startup.lpAttributeList = attributes.as_mut_ptr();
+    /// ```
+    fn as_mut_ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
+        self.storage.as_mut_ptr().cast()
     }
 }
 
 impl Drop for AttributeList {
     fn drop(&mut self) {
         // SAFETY: construction succeeds only after initialization and this is the sole owner.
-        unsafe { DeleteProcThreadAttributeList(self.pointer()) };
+        unsafe { DeleteProcThreadAttributeList(self.as_mut_ptr()) };
     }
 }
 

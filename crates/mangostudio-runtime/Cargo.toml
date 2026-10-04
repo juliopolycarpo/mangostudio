@@ -196,17 +196,21 @@ nix = { version = "0.31", default-features = false, features = [
 rustix = { version = "1.1", default-features = false, features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
-# Win32_Foundation: HANDLE, BOOL, CloseHandle, LocalFree, STILL_ACTIVE.
+# Win32_Foundation: HANDLE, CloseHandle, LocalFree, GetHandleInformation and the Win32 error codes.
 # Win32_Globalization: case-insensitive, non-lossy filesystem path comparison.
+# Win32_Networking_WinSock: WSAStartup/GetHostNameW, for the lock body's `host` field.
 # Win32_Security(_Authorization): the owner-only DACL rewrite.
-# Win32_Storage_FileSystem: the FILE_GENERIC_* / DELETE access mask.
+# Win32_Storage_FileSystem: access masks and file flags, GetFileInformationByHandle(Ex) for
+# object identity, GetFinalPathNameByHandleW for the capability root.
 # Wdk_Storage_FileSystem and Win32_System_IO: handle-relative no-replace rename.
-# Win32_System_SystemInformation: GetComputerNameExW, for the lock body's `host` field, and
-# GetSystemWindowsDirectoryW, which locates cmd.exe/powershell.exe for an inheriting child.
+# Win32_System_Console: the pseudoconsole and console control events for child terminals.
+# Win32_System_SystemInformation: GetSystemWindowsDirectoryW, which locates
+# cmd.exe/powershell.exe for an inheriting child.
 # Win32_System_JobObjects/Pipes/Threading: Windows child-tree containment uses a kill-on-close
 # Job atomically attached through CreateProcessW's attribute list, with explicit pipe inheritance.
-# Threading also provides OpenProcess/OpenProcessToken/GetExitCodeProcess for lock-holder liveness
-# and the owner-only module's own SID lookup.
+# Threading also provides OpenProcess/WaitForSingleObject for lock-holder liveness,
+# GetExitCodeProcess for the contained child, OpenProcessToken for the owner-only module's own
+# SID lookup, and CREATE_NO_WINDOW.
 windows-sys = { version = "0.61", features = [
   "Wdk_Storage_FileSystem",
   "Win32_Foundation",
