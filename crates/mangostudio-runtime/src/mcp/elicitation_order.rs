@@ -155,7 +155,8 @@ impl<R: AsyncRead + Unpin> AsyncRead for ObservedLines<R> {
         let before = buf.filled().len();
         let polled = Pin::new(&mut self.inner).poll_read(context, buf);
         if let Poll::Ready(Ok(())) = polled {
-            self.feed(&buf.filled()[before..]);
+            // An inner reader that shrank `filled` added nothing observable; do not index past it.
+            self.feed(buf.filled().get(before..).unwrap_or_default());
         }
         polled
     }
@@ -200,6 +201,21 @@ mod tests {
         ) -> Poll<std::io::Result<()>> {
             buf.put_slice(self.garbage);
             Poll::Ready(Err(std::io::Error::other("FailingRead: injected failure")))
+        }
+    }
+
+    /// Reports a successful read after emptying the buffer it was given, so `filled` ends
+    /// shorter than it started: no contract allows it, and no tokio reader does it.
+    struct ShrinkingRead;
+
+    impl AsyncRead for ShrinkingRead {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            buf.clear();
+            Poll::Ready(Ok(()))
         }
     }
 
@@ -346,6 +362,36 @@ mod tests {
             order.take("7"),
             Some(vec!["zeta".into(), "alpha".into(), "mid".into()]),
             "expected only this read's bytes observed, not the prefilled bytes glued to its line"
+        );
+    }
+
+    #[test]
+    fn an_inner_reader_that_shrinks_filled_is_passed_through_without_a_panic() {
+        let order = Arc::new(SchemaOrder::default());
+        let mut reader = ObservedLines::new(ShrinkingRead, Arc::clone(&order));
+        let mut storage = [0u8; 64];
+        let mut buf = ReadBuf::new(&mut storage);
+        buf.put_slice(b"prefilled by the caller");
+        let before = buf.filled().len();
+
+        let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            poll_once(&mut reader, &mut buf)
+        }));
+
+        assert!(
+            matches!(polled, Ok(Poll::Ready(Ok(())))),
+            "expected Ready(Ok) with nothing observed when filled shrinks from {before} to {} | received: {}",
+            buf.filled().len(),
+            if polled.is_err() {
+                "a panic".to_string()
+            } else {
+                format!("{polled:?}")
+            }
+        );
+        assert!(
+            reader.line.is_empty(),
+            "expected no bytes observed after a shrink | received: {:?}",
+            reader.line
         );
     }
 
