@@ -112,7 +112,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 # `mcp/http.rs` implements the SDK's HTTP client trait so it owns status
 # handling (the legacy SSE fallback needs the initialize POST's status) and
 # the TLS provider.
-rmcp = { version = "=3.4.1", default-features = false, features = [
+rmcp = { version = "=3.5.0", default-features = false, features = [
   "client",
   "transport-async-rw",
   "transport-streamable-http-client",
