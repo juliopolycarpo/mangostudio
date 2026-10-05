@@ -851,7 +851,7 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.4.2). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.4.3). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
