@@ -94,7 +94,8 @@ impl<S: AsyncRead + Unpin> AsyncRead for RecordingStream<S> {
         let before = buf.filled().len();
         let polled = Pin::new(&mut this.inner).poll_read(cx, buf);
         if this.recording && matches!(polled, Poll::Ready(Ok(()))) {
-            this.record(&buf.filled()[before..]);
+            // An inner reader that shrank `filled` added nothing to record; do not index past it.
+            this.record(buf.filled().get(before..).unwrap_or_default());
         }
         polled
     }
@@ -196,6 +197,7 @@ fn contains_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
@@ -354,6 +356,51 @@ mod tests {
             head.binding(),
             BindingHeader::Absent,
             "expected the prefilled binding header not to be recorded as part of this read"
+        );
+    }
+
+    /// Reports a successful read after emptying the buffer it was given, so `filled` ends
+    /// shorter than it started: no contract allows it, and no tokio reader does it.
+    struct ShrinkingRead;
+
+    impl AsyncRead for ShrinkingRead {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            buf.clear();
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[test]
+    fn an_inner_reader_that_shrinks_filled_records_nothing_and_does_not_panic() {
+        let (mut recording, head) = RecordingStream::new(ShrinkingRead);
+        let mut storage = [0u8; 64];
+        let mut buf = ReadBuf::new(&mut storage);
+        buf.put_slice(b"prefilled by the caller");
+        let before = buf.filled().len();
+        let mut context = Context::from_waker(std::task::Waker::noop());
+
+        let polled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Pin::new(&mut recording).poll_read(&mut context, &mut buf)
+        }));
+
+        assert!(
+            matches!(polled, Ok(Poll::Ready(Ok(())))),
+            "expected Ready(Ok) with nothing recorded when filled shrinks from {before} to {} | received: {}",
+            buf.filled().len(),
+            if polled.is_err() {
+                "a panic".to_string()
+            } else {
+                format!("{polled:?}")
+            }
+        );
+        assert_eq!(
+            head.binding(),
+            BindingHeader::Absent,
+            "expected no bytes recorded after a shrink"
         );
     }
 }
