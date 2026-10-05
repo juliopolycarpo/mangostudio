@@ -35,7 +35,7 @@
     "@mangostudio/protocol": "workspace:*",
     "@mangostudio/shared": "workspace:*",
     "better-auth": "^1.7.7",
-    "elysia": "2.0.0-beta.19",
+    "elysia": "2.0.0-beta.20",
     "exact-mirror": "1.2.6",
     "file-type": "^22.1.1",
     "kysely": "^0.29.6",
