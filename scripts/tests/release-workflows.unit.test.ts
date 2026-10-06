@@ -453,13 +453,39 @@ describe('release workflow binary gate', () => {
   });
 
   test('archive upload payloads skip artifact re-compression', () => {
-    const uploads = workflowFiles().flatMap((path) =>
-      uploadArtifactSteps(readText(path)).map((step) => ({
+    const uploads = workflowFiles().flatMap((path) => {
+      const workflow = readText(path);
+      const block =
+        path === '.github/workflows/protocol-ci.yml'
+          ? extractJobBlock(workflow, 'feature-measurement')
+          : '';
+      const measurementSteps = extractStepBlocks(block);
+      return uploadArtifactSteps(workflow).map((step) => ({
         path,
+        block,
         step,
+        measurement: measurementSteps.includes(step),
         archive: uploadPaths(step).some((payload) => ARCHIVE_PAYLOAD.test(payload)),
-      }))
-    );
+      }));
+    });
+
+    // This bounded manual experiment keeps its raw receipts uncompressed so
+    // artifact compression does not add variable work to the job comparison.
+    // Every production non-archive upload retains the normal compression default.
+    const measurementUploads = uploads.filter(({ measurement }) => measurement);
+    expect(measurementUploads).toHaveLength(1);
+    const expression = '$' + '{{';
+    for (const { block, step } of measurementUploads) {
+      expect(uploadPaths(step)).toEqual(['receipts']);
+      expect(block).toMatch(/^ {4}needs: \[gate\]$/m);
+      expect(block).toMatch(
+        /^ {4}if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/measure\/cargo-feature-partitions'$/m
+      );
+      expect(step).toContain(
+        `name: feature-${expression} matrix.repo }}-${expression} matrix.os }}-${expression} matrix.case }}-${expression} github.run_id }}-${expression} github.run_attempt }}`
+      );
+      expect(step).toMatch(/^\s*compression-level: 0$/m);
+    }
 
     // Eleven distribution bundles plus the dry-run's windows-x64 zip; a
     // thirteenth must make the same decision deliberately, instead of quietly
@@ -467,8 +493,10 @@ describe('release workflow binary gate', () => {
     // for the dry run, archive-assets.ts) already chose — or already chose to
     // skip.
     expect(uploads.filter((upload) => upload.archive)).toHaveLength(12);
-    for (const { path, step, archive } of uploads) {
+    for (const upload of uploads) {
+      const { path, step, archive } = upload;
       // Anchored so a commented-out key can neither satisfy nor trip the policy.
+      if (measurementUploads.includes(upload)) continue;
       if (archive) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
       else expect(step, path).not.toMatch(/^\s*compression-level:/m);
     }

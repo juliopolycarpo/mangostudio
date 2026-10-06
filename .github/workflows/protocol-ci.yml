@@ -328,3 +328,75 @@ jobs:
           ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript package rust transports interop deny semver-checks schema-equality' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
+
+  feature-measurement:
+    name: Feature measurement (${{ matrix.repo }} / ${{ matrix.os }} / ${{ matrix.case }})
+    needs: [gate]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/measure/cargo-feature-partitions'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 18
+      matrix:
+        repo: [protocol, sdk]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        case: [full, p1, p2]
+    steps:
+      - name: Check out measurement code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: harness
+          persist-credentials: false
+
+      - name: Check out immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ matrix.repo == 'protocol' && 'juliopolycarpo/mangostudio' || 'juliopolycarpo/mango-external-agents' }}
+          ref: ${{ matrix.repo == 'protocol' && '9a3d8ee5e5d329760accc840a5dcdf334083d3c4' || '24393ab644b93a3ffb194ffadb07429ca11278a0' }}
+          path: source
+          persist-credentials: false
+
+      - name: Read the measurement Bun pin
+        shell: bash
+        # The measurement branch preserves the baseline toolchain files. Setup
+        # reads the normal root filename; the harness also verifies Bun 1.4.2.
+        run: cp harness/.bun-version .bun-version
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install pinned Rust
+        shell: bash
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy
+
+      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: cargo-hack@0.6.45
+          checksum: true
+          fallback: none
+
+      - name: Measure fresh feature case
+        shell: bash
+        env:
+          FEATURE_REPO: ${{ matrix.repo }}
+          FEATURE_CASE: ${{ matrix.case }}
+          FEATURE_OS: ${{ matrix.os }}
+          FEATURE_SOURCE: source
+          FEATURE_OUTPUT: receipts
+        # Dependency-free script. Source fetch and enumeration are untimed setup;
+        # each case starts with its own empty target and Cargo source directory.
+        run: bun ./harness/scripts/bench/cargo-feature-measurement.ts measure
+
+      - name: Upload measurement receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: feature-${{ matrix.repo }}-${{ matrix.os }}-${{ matrix.case }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: receipts
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
