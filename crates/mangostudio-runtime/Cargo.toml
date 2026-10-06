@@ -71,7 +71,7 @@ icu_collator = "2.3"
 # exactly (draft 2020-12, offline, format assertions on): the result-check
 # gate has to run the same validator the peer contract crate embeds, with an
 # instance-path pointer neither of those crates exposes publicly.
-jsonschema = { version = "0.57", default-features = false }
+jsonschema = { version = "0.58", default-features = false }
 # External-agent hosting (`external_agents/`): the SDK's harness and session traits
 # plus the three product targets. Stdio only: every harness speaks line-framed
 # stdio through this crate's own launcher, so neither `websocket` nor the SDK's

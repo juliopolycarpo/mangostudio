@@ -26,7 +26,7 @@ workspace = true
 # `tokio`-gated dependency on it: the default feature pulls in `resolve-http`
 # (and reqwest's license/duplicate graph with it), which this crate's offline,
 # draft-2020-12-only compilation never needs.
-jsonschema = { version = "0.57", default-features = false }
+jsonschema = { version = "0.58", default-features = false }
 mango-protocol.workspace = true
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
