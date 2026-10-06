@@ -290,6 +290,43 @@ export interface CommandSpec {
   timeoutMs: number;
 }
 
+/** Bun 1.4.2 exposes CPU microseconds as bigint despite its number declarations. */
+export interface ResourceUsageInput extends Omit<Bun.ResourceUsage, 'cpuTime'> {
+  cpuTime: { user: number | bigint; system: number | bigint; total: number | bigint };
+}
+
+/** Owned JSON data; CPU microseconds use decimal strings to preserve bigint precision. */
+export interface SerializedResourceUsage extends Omit<Bun.ResourceUsage, 'cpuTime'> {
+  cpuTime: { user: string; system: string; total: string };
+}
+
+/**
+ * Copy native prototype getters into plain receipt fields without rounding CPU time.
+ * @example const wire = serializeResourceUsage(proc.resourceUsage()); JSON.stringify(wire);
+ */
+export function serializeResourceUsage(
+  usage: ResourceUsageInput | undefined
+): SerializedResourceUsage | null {
+  if (usage === undefined) return null;
+  return {
+    contextSwitches: {
+      voluntary: usage.contextSwitches.voluntary,
+      involuntary: usage.contextSwitches.involuntary,
+    },
+    cpuTime: {
+      user: String(usage.cpuTime.user),
+      system: String(usage.cpuTime.system),
+      total: String(usage.cpuTime.total),
+    },
+    maxRSS: usage.maxRSS,
+    messages: { sent: usage.messages.sent, received: usage.messages.received },
+    ops: { in: usage.ops.in, out: usage.ops.out },
+    shmSize: usage.shmSize,
+    signalCount: usage.signalCount,
+    swapCount: usage.swapCount,
+  };
+}
+
 export interface CommandSample extends CommandSpec {
   startedUtc: string;
   endedUtc: string;
@@ -298,7 +335,7 @@ export interface CommandSample extends CommandSpec {
   signal: string | number | null;
   timedOut: boolean;
   canceled: boolean;
-  resourceUsage: Bun.ResourceUsage | null;
+  resourceUsage: SerializedResourceUsage | null;
   stdout: string;
   stderr: string;
   error?: string;
@@ -842,7 +879,7 @@ export async function runMeasuredCommand(
     sample.stdout = captured[0];
     sample.stderr = captured[1];
     sample.signal = proc.signalCode ?? null;
-    sample.resourceUsage = proc.resourceUsage() ?? null;
+    sample.resourceUsage = serializeResourceUsage(proc.resourceUsage());
   } catch (caught) {
     sample.error = caught instanceof Error ? caught.message : String(caught);
     captureController.abort();
@@ -860,7 +897,7 @@ export async function runMeasuredCommand(
         sample.error += `\n${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`;
       }
       sample.signal = proc.signalCode ?? null;
-      sample.resourceUsage = proc.resourceUsage() ?? null;
+      sample.resourceUsage = serializeResourceUsage(proc.resourceUsage());
     }
   } finally {
     clearTimeout(timer);
@@ -974,6 +1011,7 @@ function hostMetadata(): Record<string, unknown> {
       provider: 'Bun 1.4.2 subprocess.resourceUsage()',
       maxRSSUnit: 'bytes',
       cpuTimeUnit: 'microseconds',
+      cpuTimeEncoding: 'decimal strings, preserving native bigint precision',
       qualification:
         'Raw OS subprocess accounting for cargo-hack; neither sampled process-tree RSS nor a sum of descendant peaks. Descendant CPU/RSS inclusion is platform dependent and has not been qualified, including on Windows.',
     },

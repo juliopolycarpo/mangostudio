@@ -21,9 +21,11 @@ import {
   parseExecutionLog,
   parseMeasurementArgs,
   type Repository,
+  type ResourceUsageInput,
   runMeasuredCommand,
   SOURCES,
   type SourceSnapshot,
+  serializeResourceUsage,
   settleCommandCleanup,
   validatePartitionUnion,
 } from '../bench/cargo-feature-measurement';
@@ -42,6 +44,68 @@ const IDENTITY = {
   GITHUB_REPOSITORY: 'juliopolycarpo/mangostudio',
   FEATURE_OS: 'ubuntu-latest',
 };
+
+class GetterResourceUsage implements ResourceUsageInput {
+  get contextSwitches(): Bun.ResourceUsage['contextSwitches'] {
+    return { voluntary: 3, involuntary: 4 };
+  }
+  get cpuTime(): ResourceUsageInput['cpuTime'] {
+    return { user: 9007199254740993n, system: 1n, total: 9007199254740994n };
+  }
+  get maxRSS(): number {
+    return 1048576;
+  }
+  get messages(): Bun.ResourceUsage['messages'] {
+    return { sent: 5, received: 6 };
+  }
+  get ops(): Bun.ResourceUsage['ops'] {
+    return { in: 7, out: 8 };
+  }
+  get shmSize(): number {
+    return 9;
+  }
+  get signalCount(): number {
+    return 10;
+  }
+  get swapCount(): number {
+    return 11;
+  }
+}
+
+describe('resource usage receipts', () => {
+  test('copies native getters and preserves CPU precision through JSON roundtrip', () => {
+    const native = new GetterResourceUsage();
+    expect(JSON.stringify(native)).toBe('{}');
+    const wire = serializeResourceUsage(native);
+    expect(JSON.parse(JSON.stringify(wire))).toEqual({
+      contextSwitches: { voluntary: 3, involuntary: 4 },
+      cpuTime: { user: '9007199254740993', system: '1', total: '9007199254740994' },
+      maxRSS: 1048576,
+      messages: { sent: 5, received: 6 },
+      ops: { in: 7, out: 8 },
+      shmSize: 9,
+      signalCount: 10,
+      swapCount: 11,
+    });
+    expect(wire && Object.getPrototypeOf(wire)).toBe(Object.prototype);
+    expect(wire && Object.getPrototypeOf(wire.cpuTime)).toBe(Object.prototype);
+  });
+
+  test('retains unavailable accounting and accepts the declared numeric CPU shape', () => {
+    expect(serializeResourceUsage(undefined)).toBeNull();
+    const snapshot = serializeResourceUsage(new GetterResourceUsage());
+    if (snapshot === null) throw new Error('Expected accounting for a supplied resource record');
+    const wire = serializeResourceUsage({
+      ...snapshot,
+      cpuTime: { user: 0, system: 42, total: 42 },
+    });
+    expect(JSON.parse(JSON.stringify(wire)).cpuTime).toEqual({
+      user: '0',
+      system: '42',
+      total: '42',
+    });
+  });
+});
 
 function snapshot(repo: Repository): SourceSnapshot {
   const files = ['Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', SOURCES[repo].manifest];
@@ -633,6 +697,9 @@ describe('subprocess capture', () => {
       expect(sample.error).toContain('Failed stdout capture for write-failure');
       expect(sample.error).toContain('expected writable regular receipt files');
       expect(sample.exitCode).not.toBeNull();
+      const persisted = JSON.parse(JSON.stringify(sample)) as CommandSample;
+      expect(persisted.resourceUsage?.cpuTime).toBeDefined();
+      expect(persisted.resourceUsage?.maxRSS).toBeGreaterThan(0);
       expect(sample.wallMs).toBeLessThan(1000);
       await Bun.sleep(120);
       expect(existsSync(join(output, 'late-write'))).toBe(false);
@@ -688,8 +755,13 @@ describe('subprocess capture', () => {
       expect(sample.stderr).toBe('failure text');
       expect(sample.exitCode).toBe(2);
       expect(sample.wallMs).toBeGreaterThan(0);
-      expect(sample.resourceUsage?.cpuTime.total).toBeGreaterThanOrEqual(0);
-      expect(sample.resourceUsage?.maxRSS).toBeGreaterThan(0);
+      const persisted = JSON.parse(JSON.stringify(sample)) as CommandSample;
+      expect(persisted.resourceUsage?.cpuTime).toBeDefined();
+      expect(persisted.resourceUsage?.maxRSS).toBeGreaterThan(0);
+      expect(String(persisted.resourceUsage?.cpuTime.total)).toMatch(/^\d+$/);
+      expect(typeof persisted.resourceUsage?.cpuTime.user).toBe('string');
+      expect(typeof persisted.resourceUsage?.cpuTime.system).toBe('string');
+      expect(typeof persisted.resourceUsage?.cpuTime.total).toBe('string');
       expect(readFileSync(join(output, 'tiny.stdout.txt'), 'utf8')).toBe('hello');
       expect(readFileSync(join(output, 'tiny.output.jsonl'), 'utf8')).toContain(
         '"channel":"stderr"'
