@@ -48,14 +48,7 @@ updates:
     # Five grouped PRs are possible in one week; keep headroom so ungrouped
     # major bumps are not starved out by the limit.
     open-pull-requests-limit: 10
-    # Elysia 2.0.0-beta.19 reads TypeBox's `buildResult.external`, which
-    # typebox 1.3.24 removed, so typebox stays at 1.3.23. Remove this when
-    # Elysia can compile validation schemas with newer TypeBox releases.
     ignore:
-      - dependency-name: typebox
-        update-types:
-          - version-update:semver-minor
-          - version-update:semver-patch
       # Elysia publishes an experimental `2.0.0-exp.*` channel beside the
       # `2.0.0-beta.*` line tracked here (npm tag `next`). Semver sorts `exp`
       # above `beta`, so Dependabot offers these older experimental builds as

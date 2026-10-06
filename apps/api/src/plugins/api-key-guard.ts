@@ -27,7 +27,7 @@
 
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
-import type { Elysia } from 'elysia';
+import { type Elysia, status } from 'elysia';
 import { getApiKeyApi, resolveApiKeyScope } from '../auth';
 import { getDb } from '../db/database';
 import { getSavedAppSettings } from '../modules/app-settings/infrastructure/app-settings-repository';
@@ -61,11 +61,6 @@ function isProtocolWebSocketPath(path: string): boolean {
   return path === '/ws' || path === '/api/ws' || isRuntimeSocketPath(path);
 }
 
-/** Mutable response controls Elysia exposes on the context. */
-interface ApiKeyGuardSet {
-  status?: number;
-}
-
 /**
  * Minimal slice of the Elysia context this guard needs. Kept narrow and cast
  * (rather than destructured in the hook's own parameter list) because Elysia
@@ -77,7 +72,6 @@ interface ApiKeyGuardSet {
 interface ApiKeyGuardContext {
   path?: string;
   request: Request;
-  set: ApiKeyGuardSet;
 }
 
 export function apiKeyGuard(app: Elysia) {
@@ -89,8 +83,10 @@ export function apiKeyGuard(app: Elysia) {
     const path = resolvePath(ctx.path, ctx.request.url);
 
     if (isAuthPath(path)) {
-      ctx.set.status = 401;
-      return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED } satisfies ApiErrorResponse;
+      return status(401, {
+        error: 'Unauthorized',
+        code: ERROR_CODES.UNAUTHORIZED,
+      } satisfies ApiErrorResponse);
     }
 
     // Key-management routes own a stricter cookie-session-only response. Let
@@ -104,26 +100,26 @@ export function apiKeyGuard(app: Elysia) {
 
     const result = await getApiKeyApi().verifyApiKey({ body: { key } });
     if (!result.valid || !result.key) {
-      ctx.set.status = 401;
-      return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED } satisfies ApiErrorResponse;
+      return status(401, {
+        error: 'Unauthorized',
+        code: ERROR_CODES.UNAUTHORIZED,
+      } satisfies ApiErrorResponse);
     }
 
     const settings = await getSavedAppSettings(getDb(), result.key.referenceId);
     if (!settings.externalApiSettings.enabled) {
-      ctx.set.status = 403;
-      return {
+      return status(403, {
         error: 'The external API is disabled for this account',
         code: ERROR_CODES.EXTERNAL_API_DISABLED,
-      } satisfies ApiErrorResponse;
+      } satisfies ApiErrorResponse);
     }
 
     const scope = resolveApiKeyScope(result.key.metadata);
     if (scope === 'read-only' && !SAFE_METHODS.has(ctx.request.method)) {
-      ctx.set.status = 403;
-      return {
+      return status(403, {
         error: 'This API key is read-only',
         code: ERROR_CODES.API_KEY_SCOPE_FORBIDDEN,
-      } satisfies ApiErrorResponse;
+      } satisfies ApiErrorResponse);
     }
   });
 }

@@ -118,13 +118,7 @@ describe('security workflows', () => {
     expect(bunBlock).toContain('prod-minor-patch:');
   });
 
-  test('Dependabot does not propose TypeBox patch or minor bumps while Elysia beta.19 requires 1.3.23', () => {
-    const api = JSON.parse(readText('apps/api/package.json')) as {
-      dependencies: { elysia: string; typebox: string };
-    };
-    expect(api.dependencies.elysia).toBe('2.0.0-beta.19');
-    expect(api.dependencies.typebox).toBe('1.3.23');
-
+  test('Dependabot allows TypeBox updates after the Elysia compiler compatibility fix', () => {
     const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as {
       updates: Array<{
         'package-ecosystem': string;
@@ -134,10 +128,7 @@ describe('security workflows', () => {
     const bunUpdates = config.updates.find((update) => update['package-ecosystem'] === 'bun');
     const typeboxIgnore = bunUpdates?.ignore?.find((rule) => rule['dependency-name'] === 'typebox');
 
-    expect(typeboxIgnore?.['update-types']).toEqual([
-      'version-update:semver-minor',
-      'version-update:semver-patch',
-    ]);
+    expect(typeboxIgnore).toBeUndefined();
   });
 
   test('Dependabot skips Elysia 2.0.0-exp builds only while Elysia 2 is in prerelease', () => {

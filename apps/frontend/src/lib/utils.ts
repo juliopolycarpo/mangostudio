@@ -44,10 +44,12 @@ export class ApiError extends Error {
 /**
  * Throws an `ApiError` from an Eden error channel that TypeScript sees as `{}`.
  *
- * Eden Treaty loses the error type for hyphenated route segments (`/api-keys`,
- * `/tool-identities`) even though the runtime payload carries `.value` like any
- * other. Narrowing here keeps those modules reading like the ones where the
- * type survives, instead of each restating the same cast.
+ * Eden Treaty can widen route errors to `{}`, including hyphenated routes and
+ * the GitHub route map. The runtime payload still carries `.value`. Narrowing
+ * here preserves the server's error body without repeating casts in callers.
+ *
+ * @example
+ * if (result.error) throwApiError(result.error);
  */
 export function throwApiError(error: unknown): never {
   const value =

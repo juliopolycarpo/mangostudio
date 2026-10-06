@@ -14,7 +14,7 @@ import type {
   GithubPrActionResponse,
 } from '@mangostudio/shared/github';
 import { client } from '@/lib/api-client';
-import { ApiError } from '@/lib/utils';
+import { throwApiError } from '@/lib/utils';
 
 /**
  * Opens a pull request for the chat's current branch.
@@ -28,7 +28,7 @@ import { ApiError } from '@/lib/utils';
  */
 export async function createPullRequest(body: GithubCreatePrBody): Promise<GithubCreatePrResponse> {
   const { data, error } = await client.api.github.pr.post(body);
-  if (error) throw new ApiError(error.value);
+  if (error) throwApiError(error);
   return data as GithubCreatePrResponse;
 }
 
@@ -42,7 +42,7 @@ export async function markPullRequestReady(
   body: GithubPrActionBody
 ): Promise<GithubPrActionResponse> {
   const { data, error } = await client.api.github.pr.ready.post(body);
-  if (error) throw new ApiError(error.value);
+  if (error) throwApiError(error);
   return data as GithubPrActionResponse;
 }
 
@@ -56,7 +56,7 @@ export async function checkoutPullRequest(
   body: GithubPrActionBody
 ): Promise<GithubPrActionResponse> {
   const { data, error } = await client.api.github.pr.checkout.post(body);
-  if (error) throw new ApiError(error.value);
+  if (error) throwApiError(error);
   return data as GithubPrActionResponse;
 }
 
@@ -74,5 +74,5 @@ export async function checkoutPullRequest(
  */
 export async function pushCurrentBranch(chatId: string): Promise<void> {
   const { error } = await client.api.git.push.post({ chatId });
-  if (error) throw new ApiError(error.value);
+  if (error) throwApiError(error);
 }

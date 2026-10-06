@@ -1,7 +1,7 @@
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { isAPIError } from 'better-auth/api';
-import { Elysia } from 'elysia';
+import { Elysia, status } from 'elysia';
 import { getAuth } from '../auth';
 
 /**
@@ -57,10 +57,12 @@ const authMiddleware = new Elysia({ name: 'auth-middleware' }).derive(
  */
 export const requireAuth = new Elysia({ name: 'require-auth' })
   .use(authMiddleware)
-  .beforeHandle('plugin', ({ user, set }) => {
+  .beforeHandle('plugin', ({ user }) => {
     if (!user) {
-      set.status = 401;
-      return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED } satisfies ApiErrorResponse;
+      return status(401, {
+        error: 'Unauthorized',
+        code: ERROR_CODES.UNAUTHORIZED,
+      } satisfies ApiErrorResponse);
     }
   })
   .as('plugin');
@@ -72,13 +74,12 @@ export const requireAuth = new Elysia({ name: 'require-auth' })
  */
 export const requireCookieAuth = new Elysia({ name: 'require-cookie-auth' })
   .use(requireAuth)
-  .beforeHandle('plugin', ({ authenticationMethod, set }) => {
+  .beforeHandle('plugin', ({ authenticationMethod }) => {
     if (authenticationMethod === 'api-key') {
-      set.status = 403;
-      return {
+      return status(403, {
         error: 'API keys cannot manage API keys',
         code: ERROR_CODES.API_KEY_SCOPE_FORBIDDEN,
-      } satisfies ApiErrorResponse;
+      } satisfies ApiErrorResponse);
     }
   })
   .as('plugin');

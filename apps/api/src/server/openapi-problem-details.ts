@@ -24,7 +24,7 @@ import {
   PROBLEM_JSON_MEDIA_TYPE,
   ProblemDetailsSchema,
 } from '@mangostudio/shared/errors';
-import { type Context, Elysia, NotFound, StatusMap } from 'elysia';
+import { type Context, Elysia, type ElysiaStatus, NotFound, StatusMap, status } from 'elysia';
 import { negotiateErrorRepresentation } from '../plugins/error-negotiation';
 
 /** Where the OpenAPI UI and its document are mounted. */
@@ -220,7 +220,7 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
       headers: { 'content-type': 'application/json;charset=utf-8' },
     });
   })
-  .error('global', ({ error, set, path }): ApiErrorResponse | undefined => {
+  .error('global', ({ error, path }): ElysiaStatus<500, ApiErrorResponse> | undefined => {
     // Scoped to the document route this module owns. A miss on that path —
     // POST, an unknown method — is still a NotFound, and rewriting it to
     // INTERNAL would be this arm classifying a 404 it does not own. Returning
@@ -234,6 +234,5 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
     // under this module's own tag rather than `[error-handler]`, so a failure
     // the error handler could not have produced is not filed under its name.
     console.error(`[openapi-spec][${error instanceof Error ? error.name : 'unknown'}]`, error);
-    set.status = 500;
-    return { error: 'An internal error occurred', code: ERROR_CODES.INTERNAL };
+    return status(500, { error: 'An internal error occurred', code: ERROR_CODES.INTERNAL });
   });
