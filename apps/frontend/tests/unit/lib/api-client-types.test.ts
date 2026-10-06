@@ -50,9 +50,14 @@ assertType<Equals<IsAny<HealthResponse>, false>>();
 assertType<Equals<HealthResponse['data'], { status: string; timestamp: number } | null>>();
 
 // 3. The transport-level error channel stays typed rather than becoming `any`.
-type HealthError = NonNullable<HealthResponse['error']>;
-assertType<Equals<IsAny<HealthError>, false>>();
-assertType<HealthError extends { status: number; value: ApiErrorResponse } ? true : false>();
+//    Exact on purpose: a channel that collapsed to `null` leaves `never` once
+//    `null` is stripped, and `never` satisfies any looser `extends` check.
+assertType<
+  Equals<
+    HealthResponse['error'],
+    { status: 429; value: ApiErrorResponse } | { status: 500; value: ApiErrorResponse } | null
+  >
+>();
 
 // 4. A schema-backed POST keeps its request body exactly as the TypeBox schema
 //    declares it: `title` required, `model` optional. This is the direction
