@@ -24,8 +24,8 @@ import {
   PROBLEM_JSON_MEDIA_TYPE,
   ProblemDetailsSchema,
 } from '@mangostudio/shared/errors';
-import { type Context, Elysia, type ElysiaStatus, NotFound, StatusMap, status } from 'elysia';
-import { negotiateErrorRepresentation } from '../plugins/error-negotiation';
+import { Elysia, type ElysiaStatus, NotFound, status } from 'elysia';
+import { negotiateErrorRepresentation, resolveStatus } from '../plugins/error-negotiation';
 
 /** Where the OpenAPI UI and its document are mounted. */
 export const OPENAPI_PATH = '/scalar';
@@ -163,23 +163,6 @@ export function withProblemDetailsMedia<T>(document: T): T {
 }
 
 /**
- * Is this response a failure rather than the generated document?
- *
- * `set.status` is the only signal available before the body is inspected, and
- * it carries two spellings — a number from `set.status = 500` and a reason
- * phrase from `set.status = 'Internal Server Error'`. Reading only the first
- * would let a phrase-spelled failure through as a document.
- */
-function isFailureStatus(status: Context['set']['status']): boolean {
-  if (typeof status === 'number') return status >= 400;
-  if (typeof status === 'string') {
-    const mapped = StatusMap[status as keyof typeof StatusMap];
-    return typeof mapped === 'number' && mapped >= 400;
-  }
-  return false;
-}
-
-/**
  * Spec-route hooks: amend the document, and sanitize a failed generation.
  *
  * Both must be registered on the app *before* `openapi()`, which is why they
@@ -212,7 +195,12 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
     // cannot reach here — it is mounted inside `/api`, after `openapi` — and a
     // spec failure answering only `application/json` while every other failure
     // negotiates would be an inconsistency owed entirely to hook order.
-    if (isFailureStatus(set.status)) {
+    //
+    // `resolveStatus` rather than `set.status` alone: a hook that answers
+    // `status(429, body)` carries the code on the wrapper and leaves
+    // `set.status` unset, and that refusal is no more a document than a 500.
+    const failure = resolveStatus(responseValue, set);
+    if (failure !== null && failure >= 400) {
       return negotiateErrorRepresentation(request, set, responseValue);
     }
 
