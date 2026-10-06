@@ -22,6 +22,46 @@ const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/hea
 // manifest, so the root manifest's profiles never apply to it. It is exempt
 // from the prefix-key policy only; it still saves only from main.
 const RUST_PREFIX_KEY_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
+const SNAPSHOT_JOBS = ['turbo-snapshot-prime', 'turbo-snapshot-change', 'turbo-snapshot-replay'];
+
+/** Strip only independently validated manual experiment jobs. @example snapshotExperimentWithoutJobs(workflow); */
+function snapshotExperimentWithoutJobs(workflow: string): string {
+  let remaining = workflow;
+  for (const { job, block } of extractJobBlocks(workflow)) {
+    if (!SNAPSHOT_JOBS.includes(job)) continue;
+    expect(block, job).toMatch(/^ {4}needs: \[gate(?:, turbo-snapshot-(?:prime|change))?\]$/m);
+    expect(block, job).toMatch(
+      /^ {4}if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/measure\/turbo-snapshot-cache'$/m
+    );
+    expect(block, job).toContain('ref: 9a3d8ee5e5d329760accc840a5dcdf334083d3c4');
+    expect(block, job).toContain('variant: [baseline, candidate]');
+    expect(block, job).not.toContain('continue-on-error:');
+    const steps = extractStepBlocksAtIndent(block, 6);
+    const caches = steps.filter((step) => step.includes('uses: actions/cache'));
+    expect(caches, job).toHaveLength(2);
+    expect(block.match(/uses: actions\/cache[^\n]*/g), job).toHaveLength(2);
+    expect(caches[0], job).toContain(`uses: actions/cache/restore@${CACHE_ACTION_SHA} # v6.1.0`);
+    expect(caches[1], job).toContain(`uses: actions/cache/save@${CACHE_ACTION_SHA} # v6.1.0`);
+    for (const step of caches) {
+      expect(step, job).toMatch(/^ {10}path: source\/\.mango\/turbo-snapshot$/m);
+      expect(step, job).not.toMatch(/node_modules|\.bun|cargo|tsbuildinfo/);
+    }
+    expect(caches[0], job).toContain(`key: ${EXPRESSION_START} steps.prepare.outputs.key }}`);
+    expect(caches[0], job).toContain(
+      `restore-keys: ${EXPRESSION_START} steps.prepare.outputs.restore_prefix }}`
+    );
+    expect(caches[1], job).toContain(`key: ${EXPRESSION_START} steps.prepare.outputs.save_key }}`);
+    expect(caches[1], job).toContain(
+      "if: env.SNAPSHOT_PHASE != 'replay' && steps.cap.outputs.bounded == 'true'"
+    );
+    const cap = steps.findIndex((step) => step.includes('id: cap\n'));
+    expect(cap, job).toBeGreaterThanOrEqual(0);
+    expect(steps[cap], job).toContain('turbo-snapshot-measurement.ts cap');
+    expect(cap, job).toBeLessThan(steps.indexOf(caches[1]));
+    remaining = remaining.replace(block, '');
+  }
+  return remaining;
+}
 
 interface RustCacheStep {
   readonly file: string;
@@ -52,7 +92,11 @@ describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {
     for (const file of [...workflowFiles(), ...compositeActionFiles()]) {
       if (file.includes('/cache-scoped/')) continue;
-      expect(readText(file), file).not.toContain('uses: actions/cache');
+      const text = readText(file);
+      expect(
+        file === '.github/workflows/protocol-ci.yml' ? snapshotExperimentWithoutJobs(text) : text,
+        file
+      ).not.toContain('uses: actions/cache');
     }
 
     const manifest = readText('.github/actions/cache-scoped/action.yml');
@@ -62,6 +106,21 @@ describe('CI cache policy', () => {
     for (const use of cacheUses) {
       expect(use).toContain(`@${CACHE_ACTION_SHA} # v6.1.0`);
     }
+  });
+
+  test('the snapshot exception rejects ordinary branches, uncapped saves, foreign paths and extra writers', () => {
+    const workflow = readText('.github/workflows/protocol-ci.yml');
+    expect(SNAPSHOT_JOBS.every((job) => extractJobBlock(workflow, job) !== '')).toBe(true);
+    for (const invalid of [
+      workflow.replaceAll('refs/heads/measure/turbo-snapshot-cache', 'refs/heads/main'),
+      workflow.replaceAll("steps.cap.outputs.bounded == 'true'", 'true'),
+      workflow.replaceAll('path: source/.mango/turbo-snapshot', 'path: source/node_modules'),
+      workflow.replace(
+        'name: Restore private snapshot',
+        `uses: actions/cache@${CACHE_ACTION_SHA}\n        name: Restore private snapshot`
+      ),
+    ])
+      expect(() => snapshotExperimentWithoutJobs(invalid)).toThrow();
   });
 
   test('centralizes trusted main restore prefixes and standardized diagnostics', () => {

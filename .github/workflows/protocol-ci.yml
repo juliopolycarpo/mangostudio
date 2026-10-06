@@ -400,3 +400,305 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+  turbo-snapshot-prime:
+    # This manual experiment never changes a production cache key or task.
+    name: Turbo snapshot (prime / ${{ matrix.variant }})
+    needs: [gate]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/measure/turbo-snapshot-cache'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        variant: [baseline, candidate]
+    env:
+      SNAPSHOT_PHASE: prime
+      SNAPSHOT_VARIANT: ${{ matrix.variant }}
+      SNAPSHOT_SOURCE: source
+      SNAPSHOT_OUTPUT: receipts
+    steps:
+      - name: Check out measurement code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 9a3d8ee5e5d329760accc840a5dcdf334083d3c4
+          path: source
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Prepare pinned source and frozen tools
+        id: prepare
+        run: bun scripts/bench/turbo-snapshot-measurement.ts prepare
+
+      - name: Restore private snapshot
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: source/.mango/turbo-snapshot
+          key: ${{ steps.prepare.outputs.key }}
+          restore-keys: ${{ steps.prepare.outputs.restore_prefix }}
+
+      - name: Measure four real typechecks
+        id: measure
+        run: bun scripts/bench/turbo-snapshot-measurement.ts measure
+
+      - name: Inspect and cap the private payload at 1 MiB
+        id: cap
+        run: bun scripts/bench/turbo-snapshot-measurement.ts cap
+
+      - name: Save bounded private snapshot
+        id: save
+        # Baseline explicitly attempts K0 again: save success cannot prove that
+        # an immutable existing key was updated. Replay inspects actual bytes.
+        if: env.SNAPSHOT_PHASE != 'replay' && steps.cap.outputs.bounded == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: source/.mango/turbo-snapshot
+          key: ${{ steps.prepare.outputs.save_key }}
+
+      - name: Stage local outcomes
+        if: always()
+        env:
+          SNAPSHOT_PREPARE: ${{ steps.prepare.outcome }}
+          SNAPSHOT_RESTORE: ${{ steps.restore.outcome }}
+          SNAPSHOT_MEASURE: ${{ steps.measure.outcome }}
+          SNAPSHOT_CAP: ${{ steps.cap.outcome }}
+          SNAPSHOT_SAVE: ${{ steps.save.outcome }}
+          SNAPSHOT_HIT: ${{ steps.restore.outputs.cache-hit }}
+          SNAPSHOT_MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+        run: bun scripts/bench/turbo-snapshot-measurement.ts finish
+
+      - name: Upload snapshot receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: turbo-snapshot-prime-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: receipts
+          if-no-files-found: error
+          retention-days: 14
+
+  turbo-snapshot-change:
+    # This manual experiment never changes a production cache key or task.
+    name: Turbo snapshot (change / ${{ matrix.variant }})
+    needs: [gate, turbo-snapshot-prime]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/measure/turbo-snapshot-cache'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        variant: [baseline, candidate]
+    env:
+      SNAPSHOT_PHASE: change
+      SNAPSHOT_VARIANT: ${{ matrix.variant }}
+      SNAPSHOT_SOURCE: source
+      SNAPSHOT_OUTPUT: receipts
+    steps:
+      - name: Check out measurement code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 9a3d8ee5e5d329760accc840a5dcdf334083d3c4
+          path: source
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Prepare pinned source and frozen tools
+        id: prepare
+        run: bun scripts/bench/turbo-snapshot-measurement.ts prepare
+
+      - name: Restore private snapshot
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: source/.mango/turbo-snapshot
+          key: ${{ steps.prepare.outputs.key }}
+          restore-keys: ${{ steps.prepare.outputs.restore_prefix }}
+
+      - name: Measure four real typechecks
+        id: measure
+        run: bun scripts/bench/turbo-snapshot-measurement.ts measure
+
+      - name: Inspect and cap the private payload at 1 MiB
+        id: cap
+        run: bun scripts/bench/turbo-snapshot-measurement.ts cap
+
+      - name: Save bounded private snapshot
+        id: save
+        # Baseline explicitly attempts K0 again: save success cannot prove that
+        # an immutable existing key was updated. Replay inspects actual bytes.
+        if: env.SNAPSHOT_PHASE != 'replay' && steps.cap.outputs.bounded == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: source/.mango/turbo-snapshot
+          key: ${{ steps.prepare.outputs.save_key }}
+
+      - name: Stage local outcomes
+        if: always()
+        env:
+          SNAPSHOT_PREPARE: ${{ steps.prepare.outcome }}
+          SNAPSHOT_RESTORE: ${{ steps.restore.outcome }}
+          SNAPSHOT_MEASURE: ${{ steps.measure.outcome }}
+          SNAPSHOT_CAP: ${{ steps.cap.outcome }}
+          SNAPSHOT_SAVE: ${{ steps.save.outcome }}
+          SNAPSHOT_HIT: ${{ steps.restore.outputs.cache-hit }}
+          SNAPSHOT_MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+        run: bun scripts/bench/turbo-snapshot-measurement.ts finish
+
+      - name: Upload snapshot receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: turbo-snapshot-change-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: receipts
+          if-no-files-found: error
+          retention-days: 14
+
+  turbo-snapshot-replay:
+    # This manual experiment never changes a production cache key or task.
+    name: Turbo snapshot (replay / ${{ matrix.variant }})
+    needs: [gate, turbo-snapshot-change]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/measure/turbo-snapshot-cache'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        variant: [baseline, candidate]
+    env:
+      SNAPSHOT_PHASE: replay
+      SNAPSHOT_VARIANT: ${{ matrix.variant }}
+      SNAPSHOT_SOURCE: source
+      SNAPSHOT_OUTPUT: receipts
+    steps:
+      - name: Check out measurement code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 9a3d8ee5e5d329760accc840a5dcdf334083d3c4
+          path: source
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Prepare pinned source and frozen tools
+        id: prepare
+        run: bun scripts/bench/turbo-snapshot-measurement.ts prepare
+
+      - name: Restore private snapshot
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: source/.mango/turbo-snapshot
+          key: ${{ steps.prepare.outputs.key }}
+          restore-keys: ${{ steps.prepare.outputs.restore_prefix }}
+
+      - name: Measure four real typechecks
+        id: measure
+        run: bun scripts/bench/turbo-snapshot-measurement.ts measure
+
+      - name: Inspect and cap the private payload at 1 MiB
+        id: cap
+        run: bun scripts/bench/turbo-snapshot-measurement.ts cap
+
+      - name: Save bounded private snapshot
+        id: save
+        # Baseline explicitly attempts K0 again: save success cannot prove that
+        # an immutable existing key was updated. Replay inspects actual bytes.
+        if: env.SNAPSHOT_PHASE != 'replay' && steps.cap.outputs.bounded == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: source/.mango/turbo-snapshot
+          key: ${{ steps.prepare.outputs.save_key }}
+
+      - name: Stage local outcomes
+        if: always()
+        env:
+          SNAPSHOT_PREPARE: ${{ steps.prepare.outcome }}
+          SNAPSHOT_RESTORE: ${{ steps.restore.outcome }}
+          SNAPSHOT_MEASURE: ${{ steps.measure.outcome }}
+          SNAPSHOT_CAP: ${{ steps.cap.outcome }}
+          SNAPSHOT_SAVE: ${{ steps.save.outcome }}
+          SNAPSHOT_HIT: ${{ steps.restore.outputs.cache-hit }}
+          SNAPSHOT_MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+        run: bun scripts/bench/turbo-snapshot-measurement.ts finish
+
+      - name: Upload snapshot receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: turbo-snapshot-replay-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: receipts
+          if-no-files-found: error
+          retention-days: 14
+
+  turbo-snapshot-collect:
+    name: Turbo snapshot persistence receipts
+    needs: [gate, turbo-snapshot-prime, turbo-snapshot-change, turbo-snapshot-replay]
+    if: always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/measure/turbo-snapshot-cache' && needs.gate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # Read this run's job outcomes and private cache size metadata.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Download all available snapshot receipts
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: turbo-snapshot-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: collected
+
+      - name: Verify persistence and read hosted job/action wall times
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SNAPSHOT_INPUT: collected
+          SNAPSHOT_OUTPUT: collected-summary
+        run: bun scripts/bench/turbo-snapshot-measurement.ts collect
+
+      - name: Upload comparison and raw hosted job outcomes
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: turbo-snapshot-comparison-${{ github.run_id }}-${{ github.run_attempt }}
+          path: collected-summary
+          if-no-files-found: error
+          retention-days: 14

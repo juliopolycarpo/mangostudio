@@ -464,7 +464,7 @@ describe('release workflow binary gate', () => {
         path,
         block,
         step,
-        measurement: measurementSteps.includes(step),
+        measurement: measurementSteps.some((measurement) => measurement.trim() === step.trim()),
         archive: uploadPaths(step).some((payload) => ARCHIVE_PAYLOAD.test(payload)),
       }));
     });
