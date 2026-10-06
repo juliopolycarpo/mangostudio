@@ -31,7 +31,7 @@
     "@elysia/cors": "2.0.0-beta.1",
     "@elysia/openapi": "2.0.0-beta.4",
     "@elysia/static": "2.0.0-beta.2",
-    "@google/genai": "^2.26.0",
+    "@google/genai": "^2.27.0",
     "@mangostudio/protocol": "workspace:*",
     "@mangostudio/shared": "workspace:*",
     "better-auth": "^1.7.7",
