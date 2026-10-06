@@ -24,8 +24,8 @@ import {
   PROBLEM_JSON_MEDIA_TYPE,
   ProblemDetailsSchema,
 } from '@mangostudio/shared/errors';
-import { type Context, Elysia, NotFound, StatusMap } from 'elysia';
-import { negotiateErrorRepresentation } from '../plugins/error-negotiation';
+import { Elysia, type ElysiaStatus, NotFound, status } from 'elysia';
+import { negotiateErrorRepresentation, resolveStatus } from '../plugins/error-negotiation';
 
 /** Where the OpenAPI UI and its document are mounted. */
 export const OPENAPI_PATH = '/scalar';
@@ -163,23 +163,6 @@ export function withProblemDetailsMedia<T>(document: T): T {
 }
 
 /**
- * Is this response a failure rather than the generated document?
- *
- * `set.status` is the only signal available before the body is inspected, and
- * it carries two spellings — a number from `set.status = 500` and a reason
- * phrase from `set.status = 'Internal Server Error'`. Reading only the first
- * would let a phrase-spelled failure through as a document.
- */
-function isFailureStatus(status: Context['set']['status']): boolean {
-  if (typeof status === 'number') return status >= 400;
-  if (typeof status === 'string') {
-    const mapped = StatusMap[status as keyof typeof StatusMap];
-    return typeof mapped === 'number' && mapped >= 400;
-  }
-  return false;
-}
-
-/**
  * Spec-route hooks: amend the document, and sanitize a failed generation.
  *
  * Both must be registered on the app *before* `openapi()`, which is why they
@@ -212,7 +195,12 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
     // cannot reach here — it is mounted inside `/api`, after `openapi` — and a
     // spec failure answering only `application/json` while every other failure
     // negotiates would be an inconsistency owed entirely to hook order.
-    if (isFailureStatus(set.status)) {
+    //
+    // `resolveStatus` rather than `set.status` alone: a hook that answers
+    // `status(429, body)` carries the code on the wrapper and leaves
+    // `set.status` unset, and that refusal is no more a document than a 500.
+    const failure = resolveStatus(responseValue, set);
+    if (failure !== null && failure >= 400) {
       return negotiateErrorRepresentation(request, set, responseValue);
     }
 
@@ -220,7 +208,7 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
       headers: { 'content-type': 'application/json;charset=utf-8' },
     });
   })
-  .error('global', ({ error, set, path }): ApiErrorResponse | undefined => {
+  .error('global', ({ error, path }): ElysiaStatus<500, ApiErrorResponse> | undefined => {
     // Scoped to the document route this module owns. A miss on that path —
     // POST, an unknown method — is still a NotFound, and rewriting it to
     // INTERNAL would be this arm classifying a 404 it does not own. Returning
@@ -234,6 +222,5 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
     // under this module's own tag rather than `[error-handler]`, so a failure
     // the error handler could not have produced is not filed under its name.
     console.error(`[openapi-spec][${error instanceof Error ? error.name : 'unknown'}]`, error);
-    set.status = 500;
-    return { error: 'An internal error occurred', code: ERROR_CODES.INTERNAL };
+    return status(500, { error: 'An internal error occurred', code: ERROR_CODES.INTERNAL });
   });

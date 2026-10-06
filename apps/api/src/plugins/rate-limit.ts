@@ -14,7 +14,7 @@
  */
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
-import type { Elysia } from 'elysia';
+import { type Elysia, type ElysiaStatus, status } from 'elysia';
 import { extractClientIp } from '../lib/client-ip';
 import { resolveRateLimitClientId } from './rate-limit-policy';
 import { type RateLimitEntry, RateLimitStore } from './rate-limit-store';
@@ -52,7 +52,6 @@ interface RateLimitConfig {
 /** Mutable response controls Elysia exposes on the context. */
 interface RateLimitSet {
   headers?: Record<string, string>;
-  status?: number;
 }
 
 /** Minimal slice of the Bun server needed to resolve the peer socket address. */
@@ -131,16 +130,15 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
     set.headers['X-RateLimit-Reset'] = Math.ceil(entry.resetTime / 1000).toString();
   }
 
-  /** Build the 429 response, setting status and a Retry-After header. */
+  /** Build the 429 response with a Retry-After header. */
   function rejectOverLimit(
     set: RateLimitSet,
     entry: RateLimitEntry,
     now: number
-  ): ApiErrorResponse {
-    set.status = 429;
+  ): ElysiaStatus<429, ApiErrorResponse> {
     set.headers ??= {};
     set.headers['Retry-After'] = Math.max(1, Math.ceil((entry.resetTime - now) / 1000)).toString();
-    return { error: mergedConfig.message, code: ERROR_CODES.RATE_LIMITED };
+    return status(429, { error: mergedConfig.message, code: ERROR_CODES.RATE_LIMITED });
   }
 
   const plugin = (app: Elysia) => {

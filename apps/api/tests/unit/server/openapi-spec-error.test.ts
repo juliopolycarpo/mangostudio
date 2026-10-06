@@ -25,7 +25,7 @@ import {
   ProblemDetailsSchema,
   problemTypeUri,
 } from '@mangostudio/shared/errors';
-import { Elysia } from 'elysia';
+import { Elysia, status } from 'elysia';
 import Value from 'typebox/value';
 import { errorHandler } from '../../../src/plugins/error-handler';
 import {
@@ -190,5 +190,40 @@ describe('a spec route that fails to generate', () => {
 
     expect(response.status).toBe(500);
     expect(await response.text()).toContain('hunter2');
+  });
+});
+
+describe('a spec request a hook refuses with status()', () => {
+  const REFUSAL = { error: 'Too many requests', code: ERROR_CODES.RATE_LIMITED };
+
+  // A `beforeHandle` that answers `status(429, body)` leaves `set.status`
+  // unset: the code lives on the wrapper. Reading only `set.status` would take
+  // the refusal for a document, amend it and serve it as a 200.
+  function refusingSpecApp() {
+    return new Elysia()
+      .use(openapiProblemDetails)
+      .beforeHandle('global', () => status(429, REFUSAL))
+      .use(openapi({ path: OPENAPI_PATH }));
+  }
+
+  it('keeps the refusal status and body instead of amending it as a document', async () => {
+    const response = await refusingSpecApp().handle(
+      new Request(`http://localhost${OPENAPI_SPEC_PATH}`)
+    );
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual(REFUSAL);
+  });
+
+  it('negotiates the refusal as problem details', async () => {
+    const response = await refusingSpecApp().handle(
+      new Request(`http://localhost${OPENAPI_SPEC_PATH}`, {
+        headers: { accept: PROBLEM_JSON_ACCEPT },
+      })
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('content-type')).toContain(PROBLEM_JSON_MEDIA_TYPE);
+    expect(Value.Check(ProblemDetailsSchema, await response.json())).toBe(true);
   });
 });

@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { client } from '../../../src/lib/api-client';
 
 /**
@@ -43,21 +44,20 @@ type ChatsGetResponse = Awaited<ReturnType<typeof client.api.chats.get>>;
 assertType<Equals<IsAny<typeof client.api>, false>>();
 assertType<Equals<IsAny<HealthResponse>, false>>();
 
-// 2. A representative GET keeps its response shape. The health route declares
-//    no response schema, so Eden unions the handler's return with the shared
-//    error body — that union *is* the contract, and flattening it to `unknown`
-//    is the failure this catches.
-assertType<
-  Equals<
-    HealthResponse['data'],
-    | { error: string; code?: string; details?: { [x: string]: string } }
-    | { status: string; timestamp: number }
-    | null
-  >
->();
+// 2. Shared error hooks carry explicit status codes. Elysia beta.21 propagates
+//    inherited hook responses into route types, so a plain error object with
+//    only `set.status` would incorrectly enter Eden's successful `data` here.
+assertType<Equals<HealthResponse['data'], { status: string; timestamp: number } | null>>();
 
 // 3. The transport-level error channel stays typed rather than becoming `any`.
-assertType<Equals<HealthResponse['error'], { status: unknown; value: unknown } | null>>();
+//    Exact on purpose: a channel that collapsed to `null` leaves `never` once
+//    `null` is stripped, and `never` satisfies any looser `extends` check.
+assertType<
+  Equals<
+    HealthResponse['error'],
+    { status: 429; value: ApiErrorResponse } | { status: 500; value: ApiErrorResponse } | null
+  >
+>();
 
 // 4. A schema-backed POST keeps its request body exactly as the TypeBox schema
 //    declares it: `title` required, `model` optional. This is the direction

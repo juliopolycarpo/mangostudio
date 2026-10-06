@@ -50,8 +50,12 @@ function asApiErrorResponse(value: unknown): ApiErrorResponse | null {
  * only one of the two would emit a problem document whose `status` member
  * disagreed with its own HTTP status — the one thing RFC 9457 requires it not
  * to do.
+ *
+ * @example
+ * const status = resolveStatus(responseValue, set);
+ * if (status !== null && status >= 400) { ... }
  */
-function resolveStatus(responseValue: unknown, set: Context['set']): number | null {
+export function resolveStatus(responseValue: unknown, set: Context['set']): number | null {
   const raw = responseValue instanceof ElysiaStatus ? responseValue.status : set.status;
 
   if (typeof raw === 'number') return raw;
