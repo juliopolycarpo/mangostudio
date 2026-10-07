@@ -12,7 +12,7 @@
 //! # Spawning is not routed through [`crate::blocking::run_blocking`]
 //!
 //! `tokio::process::Command::spawn` looks async-friendly, but its own
-//! source (`tokio-1.53.1/src/process/mod.rs`) calls
+//! source (`tokio-1.53.2/src/process/mod.rs`) calls
 //! `std::process::Command::spawn` — the ordinary, synchronous
 //! `fork`+`exec`/`posix_spawn` — directly on whatever task calls it, not
 //! through Tokio's blocking pool. That is exactly the "synchronous OS call
