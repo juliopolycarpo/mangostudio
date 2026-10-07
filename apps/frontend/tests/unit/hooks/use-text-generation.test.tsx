@@ -4,8 +4,8 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock, spyOn } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import { en } from '@mangostudio/shared/i18n';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,

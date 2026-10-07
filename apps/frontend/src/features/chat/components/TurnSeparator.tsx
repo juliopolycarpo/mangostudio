@@ -1,6 +1,7 @@
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { TOOL_AVATAR_SIZE_CLASS, ToolAvatar } from '@/components/ui/ToolAvatar';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';

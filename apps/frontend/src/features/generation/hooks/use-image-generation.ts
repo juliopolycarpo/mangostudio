@@ -1,6 +1,6 @@
 /* global console */
 
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import type { useChats } from '@/features/chat/hooks/use-chats';

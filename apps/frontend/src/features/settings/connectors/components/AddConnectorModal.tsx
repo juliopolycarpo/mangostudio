@@ -1,5 +1,5 @@
-import type { ProviderType } from '@mangostudio/shared';
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
+import type { ProviderType } from '@mangostudio/shared/types';
 import {
   Database,
   Eye,

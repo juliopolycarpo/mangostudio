@@ -2,7 +2,8 @@
  * Hook: model enable/disable state, search/filter, and save.
  */
 
-import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
+import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
+import type { Connector } from '@mangostudio/shared/connectors';
 import { useRef, useState } from 'react';
 import { updateConnectorModels } from '../api';
 

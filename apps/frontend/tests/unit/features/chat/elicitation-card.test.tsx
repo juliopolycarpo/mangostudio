@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, jest, mock } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { fireEvent, render, screen, waitFor } from '../../../support/harness/render';
 
 const respondMock = jest.fn();

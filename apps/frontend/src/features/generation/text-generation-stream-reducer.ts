@@ -1,4 +1,4 @@
-import type { GeneratedImagePart, Message, MessagePart } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import type {
   ExternalAgentError,
   ExternalAgentTargetId,
@@ -11,6 +11,8 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type {
   ExternalActivityPart,
   ExternalTurnPart,
+  GeneratedImagePart,
+  MessagePart,
   SubagentTraceEvent,
   SubagentTraceEventName,
 } from '@mangostudio/shared/types';

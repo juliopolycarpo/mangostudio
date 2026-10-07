@@ -13,19 +13,15 @@
  * everything one tap from the surface and hides nothing permanently.
  */
 
-import type {
-  ModelCatalogResponse,
-  ModelOption,
-  ProviderType,
-  ReasoningEffort,
-} from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import type {
   ExternalAgentDescriptor,
   ExternalApprovalRouting,
   ExternalPermissionLevel,
   ExternalThreadUsage,
 } from '@mangostudio/shared/external-agents';
+import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
 import { ChevronDown } from 'lucide-react';
 import { Fragment, type ReactNode, useState } from 'react';
 import { ModelSelector } from '@/components/layout/ModelSelector';

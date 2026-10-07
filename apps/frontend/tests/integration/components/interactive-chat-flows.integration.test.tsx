@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
+import type { MessagePart } from '@mangostudio/shared/types';
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,

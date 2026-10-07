@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
 import { act, fireEvent, renderHook, waitFor } from '../../../support/harness/render';

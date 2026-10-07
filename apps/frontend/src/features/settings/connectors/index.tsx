@@ -1,6 +1,7 @@
 /* global console */
 
-import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
+import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
+import type { Connector } from '@mangostudio/shared/connectors';
 import { useState } from 'react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';

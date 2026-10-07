@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from '@mangostudio/shared';
+import type { ReasoningEffort } from '@mangostudio/shared/types';
 
 export const EFFORT_DISPLAY_ORDER: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 

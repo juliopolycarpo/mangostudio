@@ -5,8 +5,7 @@
  * firing rules are unit-testable; the hook owns wiring events to toasts.
  */
 
-import type { Connector } from '@mangostudio/shared';
-import type { ChatGptUsageWindowKey } from '@mangostudio/shared/connectors';
+import type { ChatGptUsageWindowKey, Connector } from '@mangostudio/shared/connectors';
 
 /** Alert threshold in used-percent; null means alerts are off. */
 export type UsageAlertThreshold = 75 | 90 | null;

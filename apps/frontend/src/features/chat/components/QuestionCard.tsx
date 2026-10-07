@@ -1,5 +1,5 @@
-import type { MessagePart } from '@mangostudio/shared';
 import { formatQuestionAnswers, type QuestionAnswer } from '@mangostudio/shared/questions';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { Check, CircleHelp } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';

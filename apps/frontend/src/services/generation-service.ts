@@ -1,7 +1,11 @@
 /* global console */
-import type { GenerateImageResponse } from '@mangostudio/shared';
+
 import type { ExternalReviewTarget } from '@mangostudio/shared/external-agents';
-import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/generation';
+import type {
+  GenerateImageBody,
+  GenerateImageResponse,
+  RespondStreamBody,
+} from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getApiBaseUrl } from '../lib/api-base-url';
 import { client } from '../lib/api-client';

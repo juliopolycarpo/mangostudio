@@ -1,4 +1,4 @@
-import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared';
+import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface ContinuationEventMarkerProps {

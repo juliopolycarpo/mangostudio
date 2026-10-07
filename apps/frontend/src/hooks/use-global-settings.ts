@@ -1,4 +1,3 @@
-import type { ReasoningEffort } from '@mangostudio/shared';
 import type { ChatDisplaySettings, DiffPreviewMode } from '@mangostudio/shared/app-settings';
 import {
   type AppSettings,
@@ -20,6 +19,7 @@ import {
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
 import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '@mangostudio/shared/git';
 import type { RuleFileSetting } from '@mangostudio/shared/prompt-rules';
+import type { ReasoningEffort } from '@mangostudio/shared/types';
 import {
   RECENT_WORKDIRS_MAX,
   type WorkspacePanelId,

@@ -1,4 +1,4 @@
-import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import { isDeprecatedModelId } from '@mangostudio/shared/provider-settings';
 
 export const EMPTY_MODEL_CATALOG: ModelCatalogResponse = {

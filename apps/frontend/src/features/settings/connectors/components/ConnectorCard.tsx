@@ -1,4 +1,4 @@
-import type { Connector } from '@mangostudio/shared';
+import type { Connector } from '@mangostudio/shared/connectors';
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import { Link } from '@tanstack/react-router';
 import {

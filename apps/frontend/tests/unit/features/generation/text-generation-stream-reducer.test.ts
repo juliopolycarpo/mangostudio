@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
+import type { MessagePart } from '@mangostudio/shared/types';
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,

@@ -1,8 +1,9 @@
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import {
   type ExternalAgentTargetId,
   isExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { deriveMonogram } from '@/features/environments/identity/resolve';
 
 /**

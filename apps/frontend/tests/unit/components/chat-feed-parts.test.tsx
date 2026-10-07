@@ -6,7 +6,8 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { fireEvent, screen } from '@testing-library/react';
 import { flushAsyncRender, render } from '../../support/harness/render';
 

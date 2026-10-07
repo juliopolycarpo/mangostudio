@@ -8,7 +8,7 @@
  * the gallery has usually already cached.
  */
 
-import type { GalleryItem } from '@mangostudio/shared';
+import type { GalleryItem } from '@mangostudio/shared/types';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Image, ImagePlus, LayoutGrid } from 'lucide-react';
 import { useState } from 'react';
