@@ -2,7 +2,7 @@
  * The deepest container a TOML metadata document may hold, the root table
  * being depth 0.
  *
- * `smol-toml` accepts dotted keys and table headers of any depth, while the
+ * TOML parsers accept deeply nested dotted keys and table headers, while the
  * Rust runtime host's `toml` crate stops at 80 levels and would otherwise
  * recurse once per level. Both hosts narrow validity to this limit instead
  * (`crates/mangostudio-runtime/src/library/smol_toml.rs` mirrors it), so a
@@ -12,12 +12,12 @@ export const TOML_NESTING_LIMIT = 64;
 
 /**
  * Whether no array or plain object inside `value` sits more than
- * {@link TOML_NESTING_LIMIT} levels below it. A `Date` (smol-toml's
- * `TomlDate`) is a scalar. Iterative, because `smol-toml` builds values
- * hundreds of thousands of levels deep from a long dotted key.
+ * {@link TOML_NESTING_LIMIT} levels below it. Dates and Bun's Temporal values
+ * are scalars, since neither is a plain table. The walk is iterative so a long
+ * dotted key cannot exhaust the call stack.
  *
  * @example
- * tomlNestingWithinLimit(parseToml('a.b.c = 1')); // true: `a` and `b` are depths 1 and 2
+ * tomlNestingWithinLimit({ a: { b: { c: 1 } } }); // true: `a` and `b` are depths 1 and 2
  */
 export function tomlNestingWithinLimit(value: unknown): boolean {
   const pending: { readonly value: unknown; readonly depth: number }[] = [{ value, depth: 0 }];
@@ -38,5 +38,8 @@ function containerChildren(value: unknown): unknown[] {
 }
 
 function isContainer(value: unknown): value is object {
-  return typeof value === 'object' && value !== null && !(value instanceof Date);
+  if (Array.isArray(value)) return true;
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
