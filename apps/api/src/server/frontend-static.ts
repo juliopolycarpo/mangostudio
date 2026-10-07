@@ -5,8 +5,7 @@
 
 import { existsSync, readFileSync, realpathSync, type Stats, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
-import { staticPlugin } from '@elysia/static';
-import { BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
+import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { NotFound } from 'elysia';
 import type { App } from '../app';
 import { contentEtag, fileEtag, matchesEtag } from '../lib/http-cache';
@@ -255,7 +254,7 @@ function registerEmbeddedSpa(
     // percent escapes before matching them, so `/favicon%2eico` never reaches
     // `/favicon.ico`'s route and arrives here instead. `isSpaRoute` *does*
     // decode, recognises a root file and declines — a 404 for a file the same
-    // build serves fine from disk, where `resolveUnhashedFile` decodes first.
+    // build serves fine from disk, where `resolveFrontendFile` decodes first.
     // The shipped binary is this branch, so the decode has to happen here too.
     // An exact key lookup is the whole guard: a decoded traversal, backslash
     // or NUL form is simply not a manifest key and falls through below.
@@ -306,12 +305,9 @@ const HASHED_CACHE_CONTROL = `public, max-age=${HASHED_MAX_AGE}, immutable`;
 const SHELL_CACHE_CONTROL = 'no-cache';
 
 /**
- * Unhashed root files (favicon, icons, manifest, build-info) previously sat
- * behind `staticPlugin({ prefix: '/' })`, which served them with its defaults:
- * `Cache-Control: public, max-age=86400`, an ETag and a 304 short-circuit.
- * The per-file routes that replaced that wildcard (see `registerSpa`) keep the
- * same behavior. The ETag derives from size and mtime per request, so a dev
- * rebuild that replaces the file invalidates the cached copy.
+ * Unhashed root files (favicon, icons, manifest, build-info) retain a day-long
+ * cache with ETag revalidation. The ETag derives from size and mtime per request,
+ * so a dev rebuild that replaces the file invalidates the cached copy.
  */
 const UNHASHED_CACHE_CONTROL = 'public, max-age=86400';
 
@@ -339,9 +335,9 @@ function statFile(path: string): Stats | null {
 }
 
 /**
- * An unhashed disk file whose stat the caller already has: ETag, 304
+ * A disk file whose stat the caller already has: ETag, 304
  * short-circuit, body. The filesystem branch answers with this from
- * `setFrontendFallback`, holding a `statSync` result from `resolveUnhashedFile`;
+ * `setFrontendFallback`, holding a `statSync` result from `resolveFrontendFile`;
  * the stat both proves the file exists — `build.ts` publishes `dist/` by
  * rename, so there is a window with nothing at the path, and a miss must be a
  * 404 rather than an ENOENT thrown out of the handler — and spells the
@@ -362,22 +358,17 @@ function serveStattedFile(
 }
 
 /**
- * The absolute path of an unhashed file `pathname` names inside `frontendDir`,
+ * The absolute path of a file `pathname` names inside `frontendDir`,
  * or null when the request does not name one that exists.
  *
- * This replaced a boot-time enumeration of `dist/`. Enumerating once looked
- * safe — the names outside `assets/` are fixed (favicon, icons, manifest,
- * build-info) — but the *set* is not: a dev rebuild lands while this server is
- * running, so a file added to `public/` after boot had no route, fell through
- * to the SPA fallback, and was answered with `index.html` at 200 `text/html`.
- * Resolving per request is what `/assets/*` already does, and for the same
- * reason.
+ * Resolving per request keeps both newly hashed bundles and public files
+ * available after a dev rebuild without registering a catch-all GET route.
  *
  * Only the last segment's extension makes a path a candidate, and the file has
  * to exist: that keeps SPA deep links whose final segment happens to be dotted
  * (`/library/my-skill.md`) falling through to the shell as they do today.
  */
-function resolveUnhashedFile(
+function resolveFrontendFile(
   frontendDir: string,
   frontendRoot: string | null,
   pathname: string
@@ -409,6 +400,8 @@ function resolveUnhashedFile(
   // still resolve outward, and only a realpath comparison catches that.
   const real = realpathSyncSafe(filePath);
   if (!real || !frontendRoot || !real.startsWith(frontendRoot + sep)) return null;
+  // A symlink can give private build metadata a public-looking asset name.
+  if (real === join(frontendRoot, BUILD_STATE_FILE)) return null;
 
   // `statFile`, not `statSync`: a dangling symlink or a file removed between
   // the resolve and the stat must answer 404, not throw out of the handler.
@@ -428,19 +421,9 @@ function realpathSyncSafe(path: string): string | null {
 /**
  * Serve a built frontend from disk without a root catch-all wildcard.
  *
- * `staticPlugin({ prefix: '/' })` registers `GET /*` unless `alwaysStatic` is on
- * (it keys off `NODE_ENV === 'production'`, which nothing here sets). Once
- * `.listen()` promotes routes into Bun's native table, that root wildcard wins
- * over every `.all('/*')` route in the app — at the root, inside a `.group()`
- * and inside a mounted prefixed instance alike — while literal routes and
- * `.get('/*')` wildcards keep matching. Better Auth is mounted as `.all('/*')`
- * in `routes/auth.ts`, so sign-in, sign-up and get-session all answered 404
- * while `/api/auth/ok` worked. `app.handle()` resolves the same request
- * correctly, so nothing that drives the app in-process can see it.
- *
- * So the prefix is narrowed to `/assets`, which is where the only
- * rebuild-renamed files live, and everything else gets an explicit route. This
- * mirrors what `registerEmbeddedSpa` already does for the same reason.
+ * Bun's native routing table promotes a root GET wildcard ahead of mounted
+ * `.all('/*')` handlers, including Better Auth. Keep only the literal shell
+ * route and serve files through the existing NotFound fallback instead.
  */
 function registerSpa(app: App, frontendDir: string): void {
   const indexPath = join(frontendDir, 'index.html');
@@ -462,26 +445,7 @@ function registerSpa(app: App, frontendDir: string): void {
       ? serveIndexFile(indexPath, fileEtag(stats), request)
       : new Response(null, { status: 404 });
   };
-  const assetsDir = join(frontendDir, HASHED_ASSET_DIR);
-
-  // Registered before the plugin: the static plugin may register GET / with an
-  // undefined handler inside a compiled Bun binary (htmlBundle.default is
-  // undefined for a generated HTML file), so this explicit route guarantees
-  // that GET / always returns index.html.
   app.get('/', ({ request }) => serveIndex(request));
-
-  if (existsSync(assetsDir)) {
-    // A year, not the plugin's 86400 default: these filenames carry a content
-    // hash, so a changed file is a different URL and the old one can never go
-    // stale. The embedded branch says `public, max-age=31536000, immutable` for
-    // the same files; `immutable` is the one part not expressible here, because
-    // the plugin builds the header as `${directive}, max-age=${maxAge}` from a
-    // single-token `directive` and overwrites anything `headers` set. The
-    // freshness lifetime is the part that matters, and it now matches.
-    app.use(
-      staticPlugin({ assets: assetsDir, prefix: `/${HASHED_ASSET_DIR}`, maxAge: HASHED_MAX_AGE })
-    );
-  }
 
   app.error(NotFound, ({ request }) => frontendNotFound(request));
 
@@ -496,16 +460,16 @@ function registerSpa(app: App, frontendDir: string): void {
     // request is what serves a dev rebuild's freshly hashed names without a
     // restart.
     if (isApiOwnedPath(pathname)) return undefined;
-    // Unhashed files resolve here rather than through routes pinned at boot, so
-    // a `public/` file a rebuild added since boot is served instead of being
-    // answered with the SPA shell. A root-level file that does not
-    // exist falls past `isSpaRoute` to `frontendNotFound`, which is a 404.
-    const resolved = resolveUnhashedFile(frontendDir, frontendRoot, pathname);
+    // Files resolve here rather than through routes pinned at boot. A missing
+    // asset or root file falls past `isSpaRoute` to a 404 instead of the shell.
+    const resolved = resolveFrontendFile(frontendDir, frontendRoot, pathname);
     if (resolved) {
       return serveStattedFile(
         resolved.filePath,
         resolved.stats,
-        unhashedCacheControl(resolved.urlPath),
+        resolved.urlPath.startsWith(`/${HASHED_ASSET_DIR}/`)
+          ? HASHED_CACHE_CONTROL
+          : unhashedCacheControl(resolved.urlPath),
         request
       );
     }

@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { Elysia, NotFound } from 'elysia';
@@ -48,6 +48,14 @@ async function expectJsonNotFound(response: Response): Promise<void> {
   const payload: unknown = await response.json();
   expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
   expect(payload).toEqual({ error: 'Not found', code: ERROR_CODES.NOT_FOUND });
+}
+
+/**
+ * Named auth stand-in: preserve the mounted wildcard shape without invoking Better Auth.
+ * Usage: app.all('/*', { parse: 'none' }, fakeMountedAuthHandler).
+ */
+function fakeMountedAuthHandler({ path }: { path: string }): string {
+  return `wildcard:${path}`;
 }
 
 beforeEach(() => {
@@ -130,7 +138,7 @@ describe('registerFrontend with embedded assets', () => {
   // normalise percent escapes first, so an encoded spelling falls through to
   // the fallback. It used to end there: `isSpaRoute` decodes, sees a root file
   // and declines, so the shipped binary 404'd a file it holds — while the same
-  // request off disk was served, because `resolveUnhashedFile` decodes.
+  // request off disk was served, because `resolveFrontendFile` decodes.
   describe('percent-encoded paths', () => {
     function registerWithRootFiles(): (path: string) => Promise<Response> {
       writeFileSync(join(assetDir, 'favicon.ico'), UPLOAD_BYTES);
@@ -250,12 +258,7 @@ describe('registerFrontend from the filesystem', () => {
       .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, frontendDir);
 
-    // The frontend's `/assets` plugin enumerates its directory asynchronously,
-    // so both its routes and the `onError` fallback chained after it land on a
-    // later tick.
-    // A request issued before that resolves sees a half-registered app — which
-    // is a real property of this wiring worth knowing during a plugin swap, and
-    // a race that silently rewrites every assertion below if it is not awaited.
+    // Finish mounted plugins before issuing in-process requests.
     await app.modules;
 
     temporaryDirs.push(frontendDir, uploadsDir);
@@ -266,8 +269,7 @@ describe('registerFrontend from the filesystem', () => {
     const get = await buildFilesystemApp();
     const response = await get('/');
 
-    // The explicit `GET /` registered ahead of staticPlugin, with the same
-    // directive as the embedded path: every build renames the hashed bundles
+    // The shell uses the same directive as the embedded path: every build renames the hashed bundles
     // the shell points at, so a heuristically cached shell would ask for
     // scripts that no longer exist and render a blank page.
     expect(response.status).toBe(200);
@@ -276,15 +278,13 @@ describe('registerFrontend from the filesystem', () => {
     expect(await response.text()).toBe(INDEX_HTML);
   });
 
-  test('serves a hashed asset through the static plugin', async () => {
+  test('serves a hashed disk asset with immutable caching', async () => {
     const get = await buildFilesystemApp();
     const response = await get('/assets/index-AbCd1234.js');
 
-    // A year, the same freshness the embedded branch gives these files. The
-    // plugin composes `${directive}, max-age=${maxAge}` from a single-token
-    // directive, so `immutable` cannot be added alongside `public` here.
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(response.headers.get('content-type')).toStartWith('text/javascript');
     expect(await response.text()).toBe(ASSET_JS);
   });
 
@@ -401,7 +401,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
   const SHADOWED_SHAPE = '/api/auth';
   const SURVIVING_SHAPE = '/images';
 
-  async function startFilesystemServer(): Promise<{
+  async function startFilesystemServer(assetsAtBoot = true): Promise<{
     get: (path: string, headers?: Record<string, string>) => Promise<Response>;
     origin: string;
     frontendDir: string;
@@ -409,10 +409,13 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     stop: () => Promise<void>;
   }> {
     const frontendDir = mkdtempSync(join(tmpdir(), 'listen-frontend-'));
-    mkdirSync(join(frontendDir, 'assets'), { recursive: true });
     writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
     writeFileSync(join(frontendDir, 'favicon.ico'), UPLOAD_BYTES);
-    writeFileSync(join(frontendDir, 'assets', 'index-AbCd1234.js'), ASSET_JS);
+    writeFileSync(join(frontendDir, BUILD_STATE_FILE), '{"apiUrl":"https://secret.example.test"}');
+    if (assetsAtBoot) {
+      mkdirSync(join(frontendDir, 'assets'), { recursive: true });
+      writeFileSync(join(frontendDir, 'assets', 'index-AbCd1234.js'), ASSET_JS);
+    }
     temporaryDirs.push(frontendDir);
 
     // Stand-ins for the real routes, so the assertion is about routing
@@ -420,7 +423,11 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     // is the load-bearing part: `.all` is the shape that broke, `.get` is the
     // control that never did, so the guard cannot pass for the wrong reason.
     const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
-    app.all(`${SHADOWED_SHAPE}/*`, ({ path }) => `wildcard:${path}`);
+    app.use(
+      new Elysia({ prefix: '/api' }).group('/auth', (auth) =>
+        auth.all('/*', { parse: 'none' }, fakeMountedAuthHandler)
+      )
+    );
     app.get(`${SURVIVING_SHAPE}/*`, ({ path }) => `wildcard:${path}`);
     // The real uploads route, so its wildcard shares the native table with the
     // shapes above exactly as it does in `app.ts`.
@@ -453,6 +460,44 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
 
         expect(response.status).toBe(200);
         expect(await response.text()).toBe(`wildcard:${path}`);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('reaches the mounted auth wildcard for GET and POST over a real listener', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const [method, suffix] of [
+        ['GET', 'get-session'],
+        ['POST', 'sign-in/email'],
+        ['POST', 'sign-up/email'],
+      ]) {
+        const path = `${SHADOWED_SHAPE}/${suffix}`;
+        const response = await fetch(`${server.origin}${path}`, { method });
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(`wildcard:${path}`);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves hashed disk assets with immutable caching and JavaScript MIME over a real listener', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const path of [
+        '/assets/index-AbCd1234.js',
+        '/%61ssets/index-AbCd1234.js',
+        '/assets/index-AbCd1234%2ejs',
+      ]) {
+        const response = await server.get(path);
+        const body = await response.text();
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+        expect(response.headers.get('content-type')).toStartWith('text/javascript');
+        expect(body).toBe(ASSET_JS);
       }
     } finally {
       await server.stop();
@@ -548,6 +593,23 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
 
       const response = await server.get('/assets/index-Rebuilt1.js');
       expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(response.headers.get('content-type')).toStartWith('text/javascript');
+      expect(await response.text()).toBe(ASSET_JS);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves an assets directory first created after startup with immutable caching', async () => {
+    const server = await startFilesystemServer(false);
+    try {
+      mkdirSync(join(server.frontendDir, 'assets'));
+      writeFileSync(join(server.frontendDir, 'assets', 'index-Rebuilt1.js'), ASSET_JS);
+
+      const response = await server.get('/assets/index-Rebuilt1.js');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
       expect(await response.text()).toBe(ASSET_JS);
     } finally {
       await server.stop();
@@ -714,6 +776,81 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       const response = await server.get('/..%2fescaped-secret.txt');
       expect(response.status).toBe(404);
       expect(await response.text()).not.toBe('secret');
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('404s literal and encoded asset traversal without exposing outside bytes', async () => {
+    const server = await startFilesystemServer();
+    try {
+      const outsideName = `${basename(server.frontendDir)}-secret.txt`;
+      const outside = join(server.frontendDir, '..', outsideName);
+      const secret = 'outside frontend fixture bytes';
+      writeFileSync(outside, secret);
+      temporaryDirs.push(outside);
+      for (const path of [
+        `/assets/../${outsideName}`,
+        `/assets/..%2f..%2f${outsideName}`,
+        `/assets/%2e%2e%2f%2e%2e%2f${outsideName}`,
+        `/assets/..%5c..%5c${outsideName}`,
+        '/assets/index-AbCd1234.js%00',
+      ]) {
+        const response = await server.get(path);
+        const body = await response.text();
+        expect(response.status, body).toBe(404);
+        expect(body).not.toContain(secret);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('404s an asset symlink that points outside the frontend directory', async () => {
+    const server = await startFilesystemServer();
+    try {
+      const outsideName = `${basename(server.frontendDir)}-secret.js`;
+      const outside = join(server.frontendDir, '..', outsideName);
+      const secret = 'outside symlink fixture bytes';
+      writeFileSync(outside, secret);
+      temporaryDirs.push(outside);
+      symlinkSync(outside, join(server.frontendDir, 'assets', 'linked-AbCd1234.js'));
+      const response = await server.get('/assets/linked-AbCd1234.js');
+      const body = await response.text();
+      expect(response.status, body).toBe(404);
+      expect(body).not.toContain(secret);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('404s a symlink alias for private build state inside the frontend directory', async () => {
+    const server = await startFilesystemServer();
+    try {
+      symlinkSync(
+        join(server.frontendDir, BUILD_STATE_FILE),
+        join(server.frontendDir, 'assets', 'state-AbCd1234.json')
+      );
+      const response = await server.get('/assets/state-AbCd1234.json');
+      const body = await response.text();
+      expect(response.status, body).toBe(404);
+      expect(body).not.toContain('secret.example.test');
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves an asset symlink whose target stays inside the frontend directory', async () => {
+    const server = await startFilesystemServer();
+    try {
+      symlinkSync(
+        join(server.frontendDir, 'assets', 'index-AbCd1234.js'),
+        join(server.frontendDir, 'assets', 'linked-AbCd1234.js')
+      );
+      const response = await server.get('/assets/linked-AbCd1234.js');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(await response.text()).toBe(ASSET_JS);
     } finally {
       await server.stop();
     }
