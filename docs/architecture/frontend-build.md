@@ -157,8 +157,11 @@ version previously used by the CLI. `build.ts` and the manual
 `bun run --filter @mangostudio/frontend routes` command share `scripts/routes.ts`. The helper
 resolves `tsr.config.json`, route paths and temporary files from the frontend root. Production
 builds always regenerate. Dev builds skip when the generated tree is newer than the route
-files, their directories and the config. After an unchanged dev generation, the helper updates
-the output's mtime so the next build can skip. Directory mtimes also catch route deletions and
+files, their directories, the config and `scripts/routes.ts`. The API's dev startup also
+includes that helper when deciding whether to reuse `dist/`; a missing helper invalidates
+both checks. Other scripts and their directory mtime are ignored, so test and artifact churn
+keeps a clean build current. After an unchanged dev generation, the helper updates the
+output's mtime so the next build can skip. Directory mtimes also catch route deletions and
 renames. The route-generation test compares a temporary generated tree byte for byte with the
 checked-in file and reports the first differing line.
 

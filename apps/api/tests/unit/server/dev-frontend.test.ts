@@ -76,6 +76,8 @@ function fixture(): string {
   mkdirSync(join(root, 'public'), { recursive: true });
   mkdirSync(join(root, 'dist', 'assets'), { recursive: true });
   mkdirSync(join(root, 'node_modules', 'pkg'), { recursive: true });
+  mkdirSync(join(root, 'scripts'));
+  writeAt(join(root, 'scripts', 'routes.ts'), OLD);
   utimesSync(join(root, 'src', 'routes'), OLD, OLD);
   holdDirs(root);
   return root;
@@ -97,12 +99,13 @@ describe('newestSourceMtime', () => {
         'package.json',
         'tsconfig.json',
         'tsr.config.json',
+        join('scripts', 'routes.ts'),
         join('public', 'logo.svg'),
       ]) {
         writeAt(join(root, path), NEW);
         holdDirs(root);
         expect(newestSourceMtime(root)).toBe(NEW * 1000);
-        rmSync(join(root, path));
+        writeAt(join(root, path), OLD);
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -166,6 +169,8 @@ describe('newestSourceMtime', () => {
         'AGENTS.md',
         'tsconfig.test.json',
         'turbo.json',
+        join('scripts', 'routes.test.ts'),
+        join('scripts', 'generation.log'),
       ]) {
         mkdirSync(join(root, dirname(path)), { recursive: true });
         writeAt(join(root, path), NEW);
@@ -218,7 +223,7 @@ describe('newestSourceMtime', () => {
       // Counting directory mtimes must not reopen what the allowlist closed:
       // `dist/` is recreated by every build and `node_modules/` by every
       // install, and either one reading as an input is a rebuild loop.
-      for (const directory of ['dist', join('dist', 'assets'), 'node_modules']) {
+      for (const directory of ['dist', join('dist', 'assets'), 'node_modules', 'scripts']) {
         utimesSync(join(root, directory), NEW, NEW);
       }
       holdDirs(root);
@@ -231,9 +236,79 @@ describe('newestSourceMtime', () => {
   test('reports 0 for a directory that does not exist, which reads as stale', () => {
     expect(newestSourceMtime(join(tmpdir(), 'dev-frontend-absent-fixture'))).toBe(0);
   });
+
+  test('reports 0 when the required route generation helper is missing', () => {
+    const root = fixture();
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      rmSync(join(root, 'scripts', 'routes.ts'));
+      holdDirs(root);
+      expect(newestSourceMtime(root)).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('distIsCurrent', () => {
+  test('treats a route generation helper edit as stale', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
+
+      writeAt(join(root, 'scripts', 'routes.ts'), NEW + 1);
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed when the route generation helper is missing', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
+
+      rmSync(join(root, 'scripts', 'routes.ts'));
+      expect(distIsCurrent(root, shared, repository)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('reuses a clean bundle after unrelated scripts and directory churn', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+
+      for (const file of ['routes.test.ts', 'generation.log']) {
+        writeAt(join(root, 'scripts', file), NEW + 1);
+      }
+      utimesSync(join(root, 'scripts'), NEW + 1, NEW + 1);
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('treats a shared source edit as stale', () => {
     const root = fixture();
     const shared = sharedFixture(root);

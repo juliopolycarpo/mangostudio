@@ -32,6 +32,7 @@ export async function generateRouteTree(root: string = FRONTEND_ROOT): Promise<v
 
 /**
  * Check route inputs and directory mtimes so edits, renames and deletions invalidate the tree.
+ * The generator helper is an input too; other scripts and their directory mtime are ignored.
  * Missing or mid-removal entries are stale and must be settled by the generator.
  *
  * @example
@@ -43,7 +44,11 @@ export function routeTreeIsCurrent(root: string = FRONTEND_ROOT): boolean {
     const generated = statSync(join(root, 'src', 'routeTree.gen.ts')).mtimeMs;
     const inputs = readdirSync(routesDir, { recursive: true, encoding: 'utf8' }).reduce(
       (newest, entry) => Math.max(newest, statSync(join(routesDir, entry)).mtimeMs),
-      Math.max(statSync(routesDir).mtimeMs, statSync(join(root, 'tsr.config.json')).mtimeMs)
+      Math.max(
+        statSync(routesDir).mtimeMs,
+        statSync(join(root, 'tsr.config.json')).mtimeMs,
+        statSync(join(root, 'scripts', 'routes.ts')).mtimeMs
+      )
     );
     return generated >= inputs;
   } catch {

@@ -59,11 +59,14 @@ const CHANGED_TIME = new Date('2020-01-03T00:00:00Z');
 async function createCurrentFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'frontend-route-freshness-'));
   await mkdir(join(root, 'src/routes/nested'), { recursive: true });
+  await mkdir(join(root, 'scripts'));
+  await writeFile(join(root, 'scripts/routes.ts'), 'route generation helper');
   await writeFile(join(root, 'tsr.config.json'), '{}');
   await writeFile(join(root, 'src/routes/nested/index.tsx'), 'route input');
   await writeFile(join(root, 'src/routeTree.gen.ts'), 'generated output');
   for (const path of [
     'tsr.config.json',
+    'scripts/routes.ts',
     'src/routes/nested/index.tsx',
     'src/routes/nested',
     'src/routes',
@@ -187,20 +190,23 @@ describe('routeTreeIsCurrent', () => {
     }
   });
 
-  test.each(['src/routes/nested/index.tsx', 'src/routes/nested', 'src/routes', 'tsr.config.json'])(
-    'rejects newer %s',
-    async (input) => {
-      const root = await createCurrentFixture();
-      try {
-        await utimes(join(root, input), CHANGED_TIME, CHANGED_TIME);
-        expect(routeTreeIsCurrent(root)).toBe(false);
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
+  test.each([
+    'src/routes/nested/index.tsx',
+    'src/routes/nested',
+    'src/routes',
+    'tsr.config.json',
+    'scripts/routes.ts',
+  ])('rejects newer %s', async (input) => {
+    const root = await createCurrentFixture();
+    try {
+      await utimes(join(root, input), CHANGED_TIME, CHANGED_TIME);
+      expect(routeTreeIsCurrent(root)).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
-  );
+  });
 
-  test.each(['src/routeTree.gen.ts', 'src/routes', 'tsr.config.json'])(
+  test.each(['src/routeTree.gen.ts', 'src/routes', 'tsr.config.json', 'scripts/routes.ts'])(
     'rejects missing %s',
     async (input) => {
       const root = await createCurrentFixture();
@@ -250,17 +256,37 @@ describe('updateRouteTree', () => {
     }
   });
 
-  test('generates a changed dev tree and restamps unchanged output so the next build skips', async () => {
+  test.each(['src/routes/nested/index.tsx', 'scripts/routes.ts'])(
+    'generates after changing %s and restamps unchanged output so the next build skips',
+    async (input) => {
+      const root = await createCurrentFixture();
+      const generation = new RecordingGeneration();
+      try {
+        await utimes(join(root, input), CHANGED_TIME, CHANGED_TIME);
+        expect(await updateRouteTree({ root }, generation.generate)).toBe(true);
+        expect(generation.roots).toEqual([root]);
+        expect(await readFile(join(root, 'src/routeTree.gen.ts'), 'utf8')).toBe('generated output');
+        expect(routeTreeIsCurrent(root)).toBe(true);
+        expect(await updateRouteTree({ root }, generation.generate)).toBe(false);
+        expect(generation.roots).toEqual([root]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  test('ignores other scripts and their directory mtime when deciding to skip', async () => {
     const root = await createCurrentFixture();
     const generation = new RecordingGeneration();
     try {
-      await utimes(join(root, 'src/routes/nested/index.tsx'), CHANGED_TIME, CHANGED_TIME);
-      expect(await updateRouteTree({ root }, generation.generate)).toBe(true);
-      expect(generation.roots).toEqual([root]);
-      expect(await readFile(join(root, 'src/routeTree.gen.ts'), 'utf8')).toBe('generated output');
+      for (const file of ['routes.test.ts', 'generation.log']) {
+        await writeFile(join(root, 'scripts', file), 'unrelated input');
+        await utimes(join(root, 'scripts', file), CHANGED_TIME, CHANGED_TIME);
+      }
+      await utimes(join(root, 'scripts'), CHANGED_TIME, CHANGED_TIME);
       expect(routeTreeIsCurrent(root)).toBe(true);
       expect(await updateRouteTree({ root }, generation.generate)).toBe(false);
-      expect(generation.roots).toEqual([root]);
+      expect(generation.roots).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
