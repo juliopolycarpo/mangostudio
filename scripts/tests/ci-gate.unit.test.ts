@@ -339,7 +339,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
     expect(block).toContain('runs-on: windows-11-arm');
     expect(block).toContain(
-      'cargo test -p mangostudio-runtime --all-targets --all-features --locked'
+      'cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0'
     );
     expect(block).not.toContain('name: Gate');
     expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('workspace-windows-arm64');

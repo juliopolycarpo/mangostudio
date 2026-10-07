@@ -11,7 +11,6 @@
         "scripts/bench/runtime-handshake.ts",
         "scripts/bench/grep.ts",
         "scripts/bench/library-walk.ts",
-        "scripts/bench/rust-test-inventory.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,verify-cross-runtimes}.ts",
         "scripts/examples/external-api-smoke.ts",
         "scripts/protocol/*.test.ts",

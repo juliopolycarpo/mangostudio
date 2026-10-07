@@ -315,7 +315,8 @@ bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
 `capture` (libtest) and `capture-nextest` write every case keyed `<package>/<kind>/<binary>::<test>`,
 folding the modules of a consolidated `tests/it/main.rs` back under their former binary names, and
 `compare` exits 1 on a missing, added, or re-flagged (`#[ignore]`) case. `summarize` totals a
-libtest log's `test result:` lines.
+libtest log's `test result:` lines. Cargo Shim's workspace job runs `capture`, `capture-nextest` and
+`compare` on every OS, so the nextest gate cannot list fewer cases than `cargo test` does.
 
 ```bash
 bun run scripts/bench/rust-test-inventory.ts capture before.json

@@ -181,7 +181,9 @@ describe('Test workflow shape', () => {
   test('leaves the Windows runtime slot tests to the cargo workspace matrix', () => {
     const cargo = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
     expect(cargo).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
-    expect(cargo).toContain('cargo test --workspace --all-targets --all-features --locked');
+    expect(cargo).toContain(
+      'cargo nextest run --workspace --all-targets --all-features --locked --retries 0'
+    );
     expect(workflow).not.toContain('windows-latest');
   });
 

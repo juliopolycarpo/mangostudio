@@ -244,7 +244,8 @@ describe('protocol lane selection', () => {
   const shimWorkspace: Record<string, string> = {
     'protocol:clippy':
       'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings',
-    'protocol:cargo-test': 'cargo test --workspace --all-targets --all-features --locked',
+    'protocol:cargo-test':
+      'cargo nextest run --workspace --all-targets --all-features --locked --retries 0',
     'protocol:cargo-test-doc': 'cargo test --doc --workspace --all-features --locked',
     'protocol:doc': 'cargo doc --no-deps --workspace --all-features --locked',
   };
@@ -300,7 +301,9 @@ describe('protocol lane selection', () => {
       expect(
         readText('.github/workflows/rust-coverage.yml'),
         `${label}: expected rust-coverage to run the Ubuntu copy instrumented`
-      ).toContain(`cargo llvm-cov --no-report ${shimCommand.replace('cargo test ', '')}`);
+      ).toContain(
+        `cargo llvm-cov --no-report ${shimCommand.replace('cargo nextest run ', '').replace(' --retries 0', '')}`
+      );
       expect(
         protocolStep,
         `${label}: "${scoped}" duplicates cargo-shim; expected it only in cargo-shim`
