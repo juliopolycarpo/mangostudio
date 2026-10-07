@@ -1,7 +1,7 @@
 # Continuous Integration
 
-How MangoStudio gates merges on `main` and the temporary `feat/rust-runtime`
-integration branch, and which GitHub checks are safe to require in repository rules.
+How MangoStudio gates merges on `main`, and which GitHub checks are safe to require in
+repository rules.
 
 ## Aggregate gates
 
@@ -196,8 +196,7 @@ composite and asserts they have no external runtime imports.
 
 ## Branch protection / required checks
 
-Required checks on `main` and, while the Rust migration is active,
-`feat/rust-runtime` should be the stable `Gate` checks above, plus the independent
+Required checks on `main` should be the stable `Gate` checks above, plus the independent
 security / process checks that are not folded into those gates:
 
 - `CI / Gate`
@@ -214,8 +213,19 @@ that every mandatory lane feeds a gate.
 
 Updating the repository ruleset itself is a GitHub settings operation, not a
 commit. After changing which checks are required, keep this section in sync.
-Publishing remains restricted to tags and pushes to `main`; a pull request that
-targets `feat/rust-runtime` must run checks without gaining a publish path.
+Publishing remains restricted to tags and pushes to `main`.
+
+### Temporary integration branches
+
+The gated workflows filter `pull_request` by base branch, and the list is `[main]`. A pull
+request that targets any other branch starts none of them. A temporary integration branch turns
+them on by adding its own name to those lists in a commit on that branch, together with the
+assertions in `scripts/tests/ci-gate.unit.test.ts` and
+`scripts/tests/security-workflows.unit.test.ts` that pin the lists. Such a pull request must run
+checks without gaining a publish path.
+
+Remove the entry when the branch is retired. `main` should not name a branch that no longer
+exists.
 
 ## Related
 
