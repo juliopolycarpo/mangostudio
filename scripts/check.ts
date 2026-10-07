@@ -13,6 +13,7 @@ import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
 } from './lib/dependency-policy';
+import { assertFrontendApiImportBoundary } from './lib/frontend-api-import-boundary';
 import { assertNoProductionNodeEnvBranches } from './lib/no-node-env-branches';
 import { touchesProtocolSurface } from './lib/protocol';
 import { assertVersionsInLockstep } from './lib/release-version';
@@ -185,6 +186,12 @@ const tasks: Array<() => Promise<RunResult>> = [];
 if (effectiveWorkspaces.length > 0) {
   info('\nWorkspaces');
   tasks.push(...createWorkspaceTasks(effectiveWorkspaces));
+}
+
+if (effectiveWorkspaces.includes('frontend')) {
+  tasks.push(() =>
+    runTask('frontend:api-import-boundary', () => assertFrontendApiImportBoundary())
+  );
 }
 
 if (effectiveIncludeRoot) {
