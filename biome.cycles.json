@@ -10,7 +10,7 @@
   "assist": { "enabled": false },
   "linter": {
     "enabled": true,
-    "includes": ["**/*.{ts,tsx}"],
+    "includes": ["**/*.{ts,tsx,js,jsx,mjs,cjs}"],
     "rules": {
       "preset": "none",
       "suspicious": {

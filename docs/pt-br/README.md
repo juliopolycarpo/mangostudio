@@ -408,7 +408,7 @@ Configurado em `dprint.json` com o seguinte escopo e configurações:
 
 ### Dependências Circulares
 
-O Biome verifica os ciclos de importação como parte do `bun run check`, incluindo imports de valores, de tipos e do próprio módulo. Cada workspace verifica todo o seu diretório, incluindo arquivos TypeScript na raiz. Os caminhos gerados e ignorados seguem o `biome.json` da raiz.
+O Biome verifica os ciclos de importação como parte do `bun run check`, incluindo imports de valores, de tipos e do próprio módulo. Cada workspace verifica arquivos TS, TSX, JS, JSX, MJS e CJS, incluindo arquivos na raiz, arquivos gerados e saídas de build ignoradas pelo Git, com o `biome.cycles.json`. Arquivos JavaScript são verificados como dependências de arquivos TypeScript e como raízes independentes. Somente `node_modules` e `.git` são excluídos da verificação de ciclos. A formatação e os demais checks de lint continuam seguindo o `biome.json`.
 
 ### Detecção de Código Duplicado
 

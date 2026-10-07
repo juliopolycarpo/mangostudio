@@ -13,7 +13,7 @@ scripts/
 ├── build-runtime.ts  Build the cargo mangostudio-runtime per release target (bun run build:runtime)
 ├── check.ts          Biome lint/format + import cycles + dprint + tsc + workflow static analysis, in parallel (bun run check)
 ├── check-import-cycles.ts
-│                     Cycle-only TS/TSX scan, including generated and gitignored files
+│                     Cycle-only TS/JS scan, including generated and gitignored files
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
@@ -60,8 +60,10 @@ importing the specific module in new code:
 
 Workspace `check:quick` scripts run normal Biome checks followed by
 `check-import-cycles.ts`. The cycle pass uses the independent
-`biome.cycles.json`, so formatting exclusions and `.gitignore` cannot hide TS/TSX
-cycles. It includes declarations and generated/build files, excludes only
+`biome.cycles.json`, so formatting exclusions and `.gitignore` cannot hide TS/JS
+cycles. It checks TS, TSX, JS, JSX, MJS and CJS files, including JavaScript
+dependencies reached from TypeScript roots and independent JavaScript roots.
+It includes declarations and generated/build files, excludes only
 `node_modules` and `.git`, and raises the file-size limit to JavaScript's largest
 safe integer instead of inheriting Biome's one-MiB limit. Turbo always reruns
 `check:quick` because ignored files are absent from its VCS cache inputs.
@@ -159,7 +161,7 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   same file. That is the observable symptom of shards reading different timings,
   which means they did not cover the suite between them while all exiting 0.
 - `collect/circular.ts` — count Biome cycle witnesses across the discovered JS
-  workspaces and `scripts/`, using the same independent TS/TSX scope and command
+  workspaces and `scripts/`, using the same independent TS/JS scope and command
   as required workspace checks, including type-only and self imports. A complete
   JSON scan returns zero directly when clean. For cycles, the text reporter
   supplies closed paths that are matched to every JSON diagnostic, split at

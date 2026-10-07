@@ -1,8 +1,9 @@
 /**
- * Build a cycle-only Biome command for TS/TSX roots, independent of formatting
+ * Build a cycle-only Biome command for TS/JS-family roots, independent of formatting
  * and VCS exclusions. Run it from the repository root so the shared config is
  * resolved there. Both required workspace checks and QA use this command.
- * // Usage: createImportCycleCommand(['apps/api'], 'json')
+ * @example
+ * createImportCycleCommand(['apps/api'], 'json')
  */
 export function createImportCycleCommand(
   roots: readonly string[],

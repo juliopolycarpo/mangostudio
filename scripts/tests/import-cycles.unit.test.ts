@@ -42,7 +42,15 @@ function createCheckFixture(): string {
   expect(git.exitCode, git.stderr.toString()).toBe(0);
   mkdirSync(join(root, 'node_modules'), { recursive: true });
   // Windows .bin wrappers resolve package paths relative to node_modules.
-  for (const dependency of ['.bin', '@biomejs', '@typescript', '@dprint', 'turbo', 'dprint']) {
+  for (const dependency of [
+    '.bin',
+    '@biomejs',
+    '@typescript',
+    '@dprint',
+    'turbo',
+    'dprint',
+    'typescript',
+  ]) {
     symlinkSync(
       join(ROOT_DIR, `node_modules/${dependency}`),
       join(root, `node_modules/${dependency}`),
@@ -89,6 +97,94 @@ function runCheck(root: string, workspace: string): string {
 }
 
 describe('Biome import cycle checks', () => {
+  for (const extension of ['js', 'jsx', 'mjs', 'cjs']) {
+    for (const kind of ['pair', 'self']) {
+      test(`rejects and counts a TS-imported ${extension} ${kind} cycle with real typechecking`, async () => {
+        const root = createCheckFixture();
+        try {
+          const first = `a.${extension}`;
+          const second = kind === 'self' ? first : `b.${extension}`;
+          const files =
+            extension === 'cjs'
+              ? {
+                  [first]:
+                    kind === 'self'
+                      ? `const { a: again } = require('./${first}');\nexports.a = () => again();\n`
+                      : `const { b } = require('./${second}');\nexports.a = () => b();\n`,
+                  ...(kind === 'pair'
+                    ? { [second]: `const { a } = require('./${first}');\nexports.b = () => a();\n` }
+                    : {}),
+                }
+              : {
+                  [first]:
+                    kind === 'self'
+                      ? `import { a as again } from './${first}';\nexport const a = () => again();\n`
+                      : `import { b } from './${second}';\nexport const a = () => b();\n`,
+                  ...(kind === 'pair'
+                    ? { [second]: `import { a } from './${first}';\nexport const b = () => a();\n` }
+                    : {}),
+                };
+          injectCycle(root, 'apps/frontend/dist', files);
+          injectCycle(root, 'apps/frontend/src', {
+            'entry.ts': `import '../dist/${first}';\n\nexport const value = 1;\n`,
+          });
+          writeFileSync(
+            join(root, 'apps/frontend/package.json'),
+            readText('apps/frontend/package.json')
+          );
+          writeFileSync(
+            join(root, 'apps/frontend/tsconfig.json'),
+            `${JSON.stringify(
+              {
+                compilerOptions: {
+                  target: 'ES2022',
+                  module: 'ESNext',
+                  moduleResolution: 'bundler',
+                  jsx: 'preserve',
+                  noEmit: true,
+                  strict: true,
+                  types: [],
+                },
+                include: ['src/**/*.ts'],
+              },
+              null,
+              2
+            )}\n`
+          );
+          const formatConfig = Bun.spawnSync(
+            ['bunx', 'biome', 'format', '--write', 'apps/frontend/tsconfig.json'],
+            { cwd: root, stdout: 'pipe', stderr: 'pipe' }
+          );
+          expect(formatConfig.exitCode, formatConfig.stderr.toString()).toBe(0);
+          const typecheck = Bun.spawnSync(['bun', 'run', 'typecheck'], {
+            cwd: join(root, 'apps/frontend'),
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const required = Bun.spawnSync(['bun', 'run', 'check', '--frontend'], {
+            cwd: root,
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+          const circularDeps = await countCircularDeps(['apps/frontend'], runBiome);
+          const output = required.stdout.toString() + required.stderr.toString();
+          expect(
+            { typecheck: typecheck.exitCode, required: required.exitCode, circularDeps },
+            typecheck.stderr.toString() + output
+          ).toEqual({ typecheck: 0, required: 1, circularDeps: 1 });
+          expect(output).toContain(
+            kind === 'self' ? 'lint/nursery/noSelfImport' : 'lint/suspicious/noImportCycles'
+          );
+          expect(output).toContain(`dist/${first}`);
+          expect(output).toContain(`dist/${second}`);
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+
   for (const workspace of WORKSPACES) {
     test(`${workspace} rejects and counts a cycle under ignored dist with the actual config`, async () => {
       const root = createCheckFixture();
@@ -196,14 +292,15 @@ describe('Biome import cycle checks', () => {
     }
   });
 
-  test('keeps node_modules, git internals and independent JavaScript outside the TS scan', async () => {
+  test('keeps node_modules and git internals outside the TS/JS scan', async () => {
     const root = createCheckFixture();
     try {
-      injectCycle(root, 'apps/api/node_modules/fixture-dependency', TYPE_CYCLE);
-      injectCycle(root, 'apps/api/.git', TYPE_CYCLE);
-      injectCycle(root, 'apps/api/dist', {
+      const files = {
+        ...TYPE_CYCLE,
         'self.js': "import { self } from './self.js';\nexport { self };\n",
-      });
+      };
+      injectCycle(root, 'apps/api/node_modules/fixture-dependency', files);
+      injectCycle(root, 'apps/api/.git', files);
       const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
       expect(await countCircularDeps(['apps/api'], runBiome)).toBe(0);
       const clean = Bun.spawnSync(['bun', 'run', 'check', '--api'], {
@@ -212,6 +309,23 @@ describe('Biome import cycle checks', () => {
         stderr: 'pipe',
       });
       expect(clean.exitCode, clean.stdout.toString() + clean.stderr.toString()).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects and counts an independent JavaScript cycle without a TS importer', async () => {
+    const root = createCheckFixture();
+    try {
+      injectCycle(root, 'apps/api/dist', {
+        'self.js':
+          "import { self as again } from './self.js';\nexport const self = () => again();\n",
+      });
+      const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+      expect(await countCircularDeps(['apps/api'], runBiome)).toBe(1);
+      const output = runCheck(root, 'apps/api');
+      expect(output).toContain('lint/nursery/noSelfImport');
+      expect(output).toContain('dist/self.js');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
