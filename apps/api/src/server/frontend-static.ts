@@ -406,7 +406,14 @@ function resolveFrontendFile(
   // `statFile`, not `statSync`: a dangling symlink or a file removed between
   // the resolve and the stat must answer 404, not throw out of the handler.
   const stats = statFile(real);
-  return stats?.isFile() === true ? { filePath: real, stats, urlPath: decoded } : null;
+  if (!stats?.isFile()) return null;
+  // Hardlinks have different realpaths but share file identity with the private
+  // metadata. Check per request because a rebuild can replace that metadata.
+  const buildStateStats = statFile(join(frontendRoot, BUILD_STATE_FILE));
+  if (buildStateStats && stats.dev === buildStateStats.dev && stats.ino === buildStateStats.ino) {
+    return null;
+  }
+  return { filePath: real, stats, urlPath: decoded };
 }
 
 /** `realpathSync`, or null when the path cannot be resolved. */

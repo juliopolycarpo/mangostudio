@@ -6,7 +6,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
@@ -269,9 +277,8 @@ describe('registerFrontend from the filesystem', () => {
     const get = await buildFilesystemApp();
     const response = await get('/');
 
-    // The shell uses the same directive as the embedded path: every build renames the hashed bundles
-    // the shell points at, so a heuristically cached shell would ask for
-    // scripts that no longer exist and render a blank page.
+    // Every build renames the bundles the shell points at, so a cached shell
+    // would request scripts that no longer exist and render a blank page.
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('text/html');
     expect(response.headers.get('cache-control')).toBe('no-cache');
@@ -840,6 +847,22 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     }
   });
 
+  test('404s a hardlink alias for private build state inside the frontend directory', async () => {
+    const server = await startFilesystemServer();
+    try {
+      linkSync(
+        join(server.frontendDir, BUILD_STATE_FILE),
+        join(server.frontendDir, 'assets', 'state-AbCd1234.json')
+      );
+      const response = await server.get('/assets/state-AbCd1234.json');
+      const body = await response.text();
+      expect(response.status, body).toBe(404);
+      expect(body).not.toContain('secret.example.test');
+    } finally {
+      await server.stop();
+    }
+  });
+
   test('serves an asset symlink whose target stays inside the frontend directory', async () => {
     const server = await startFilesystemServer();
     try {
@@ -848,6 +871,35 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
         join(server.frontendDir, 'assets', 'linked-AbCd1234.js')
       );
       const response = await server.get('/assets/linked-AbCd1234.js');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(await response.text()).toBe(ASSET_JS);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves a hardlinked asset that does not alias private build state', async () => {
+    const server = await startFilesystemServer();
+    try {
+      linkSync(
+        join(server.frontendDir, 'assets', 'index-AbCd1234.js'),
+        join(server.frontendDir, 'assets', 'linked-AbCd1234.js')
+      );
+      const response = await server.get('/assets/linked-AbCd1234.js');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(await response.text()).toBe(ASSET_JS);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves assets when private build state is absent', async () => {
+    const server = await startFilesystemServer();
+    try {
+      rmSync(join(server.frontendDir, BUILD_STATE_FILE));
+      const response = await server.get('/assets/index-AbCd1234.js');
       expect(response.status).toBe(200);
       expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
       expect(await response.text()).toBe(ASSET_JS);
