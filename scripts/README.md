@@ -42,6 +42,7 @@ importing the specific module in new code:
 | `args.ts`              | CLI argument + workspace-selection parsing                                                               |
 | `git.ts`               | Change detection (`Bun.spawnSync`), workspace mapping                                                    |
 | `exec.ts`              | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
+| `process-tree.ts`      | Child limit and cancellation behind `runCommand`: process groups on POSIX, a job object on Windows       |
 | `summary.ts`           | Pass/fail reporting + exit handling                                                                      |
 | `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                           |
 | `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
@@ -54,6 +55,29 @@ importing the specific module in new code:
 | `runtime-build.ts`     | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
 | `executable-header.ts` | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
 | `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
+
+### Cancelling a runner
+
+`runCommand` is the one place a runner starts children, so it owns what happens to them.
+
+- **Limit.** At most `MANGO_RUNNER_CONCURRENCY` (default 16) children run at once per runner
+  process, counted across every nested `runParallel` / `mapWithConcurrency` call in it; the rest
+  wait for a slot. The widest fan-out today is `bun run protocol:check` with 12 tasks. The limit is
+  per process: a runner started as a child holds its own pool.
+- **POSIX.** Each child leads its own process group. On SIGINT, SIGTERM or SIGHUP the runner
+  signals every child group once, waits 5 s, SIGKILLs what is left, and exits 128 + the signal. A
+  Ctrl-C therefore reaches each process once: the terminal signals only the runner's group. A
+  child that inherits stdin (`stdin: 'inherit'`) stays in the terminal's foreground group so it can
+  read the terminal, and is not sent SIGINT a second time. A runner started by another runner
+  (`MANGO_RUNNER_GROUP` is set) leaves its children in the group it was given.
+- **Windows.** There are no process groups to signal. The first `runCommand` puts the runner into
+  a job object that kills every member when the runner ends (Ctrl-C, `taskkill /F` and a crash
+  alike). Bun's own job only holds a runner's direct children and lets theirs break away, so
+  anything started through `cmd.exe` (every `.cmd` shim: `bunx`, `turbo`, `tsc`) outlived a killed
+  runner before. `detached: true` leaves the job, so it is never used here, and the runner
+  installs no signal handler.
+- **Not covered.** On POSIX, SIGKILL of the runner cannot be caught; the children it already
+  started keep running.
 
 ## The runtime binary: cargo, not Bun
 

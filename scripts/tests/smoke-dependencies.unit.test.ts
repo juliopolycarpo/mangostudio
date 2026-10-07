@@ -70,6 +70,14 @@ describe('smoke matrix runtime dependencies', () => {
     expect(externalSpecifiers.has('typebox')).toBe(true);
   });
 
+  test('bun: builtins are not external packages, but real packages still are', () => {
+    // process-tree.ts loads `bun:ffi` on Windows, and every smoke entrypoint that
+    // reaches exec.ts reaches it.
+    const { files, externalSpecifiers } = walkRuntimeImports('scripts/lib/process-tree.ts');
+    expect([...files].some((file) => file.endsWith('scripts/lib/process-tree.ts'))).toBe(true);
+    expect([...externalSpecifiers.keys()]).toEqual([]);
+  });
+
   test('smoke jobs install dependencies only when rebuild is enabled', () => {
     const workflow = readText('.github/workflows/smoke-binary.yml');
     for (const job of ['binary', 'docker'] as const) {
