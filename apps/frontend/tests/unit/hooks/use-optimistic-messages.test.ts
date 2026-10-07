@@ -3,8 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { Message } from '@mangostudio/shared';
-import type { MessagesPage } from '@mangostudio/shared/chat';
+import type { Message, MessagesPage } from '@mangostudio/shared/chat';
 import type { InfiniteData } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
 import { messageKeys } from '../../../src/features/chat/queries';

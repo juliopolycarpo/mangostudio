@@ -1,5 +1,5 @@
-import type { TodoPart } from '@mangostudio/shared';
 import { summarizeTodos } from '@mangostudio/shared/todos';
+import type { TodoPart } from '@mangostudio/shared/types';
 import { ListTodo } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { TodoItemRow } from './TodoItemRow';

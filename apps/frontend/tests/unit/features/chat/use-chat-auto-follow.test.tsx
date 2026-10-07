@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { fireEvent, render } from '@testing-library/react';
 import {
   isNearBottom,

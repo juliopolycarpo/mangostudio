@@ -5,7 +5,7 @@
  * in the user's own day, not UTC's.
  */
 
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 
 export type ChatGroup =
   | { kind: 'today' | 'yesterday' | 'thisWeek'; key: string; chats: Chat[] }

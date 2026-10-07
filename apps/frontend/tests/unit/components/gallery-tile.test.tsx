@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
-import type { GalleryItem } from '@mangostudio/shared';
+import type { GalleryItem } from '@mangostudio/shared/types';
 import userEvent from '@testing-library/user-event';
 import { GalleryTile } from '../../../src/features/gallery/components/GalleryTile';
 import { render, screen } from '../../support/harness/render';

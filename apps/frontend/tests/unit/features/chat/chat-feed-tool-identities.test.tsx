@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it, jest, mock } from 'bun:test';
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { useId } from 'react';
 import { flushAsyncRender, render } from '../../../support/harness/render';

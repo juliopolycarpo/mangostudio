@@ -1,4 +1,4 @@
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, Loader2, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';

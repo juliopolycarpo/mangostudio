@@ -1,5 +1,6 @@
 import { describe, expect, it, jest } from 'bun:test';
-import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
+import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
+import type { Connector } from '@mangostudio/shared/connectors';
 import userEvent from '@testing-library/user-event';
 import { ConnectorModelsModal } from '../../../src/features/settings/connectors/components/ConnectorModelsModal';
 import { fireEvent, render, screen } from '../../support/harness/render';

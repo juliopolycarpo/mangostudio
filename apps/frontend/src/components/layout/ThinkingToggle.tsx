@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from '@mangostudio/shared';
+import type { ReasoningEffort } from '@mangostudio/shared/types';
 import { Brain } from 'lucide-react';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { useI18n } from '@/hooks/use-i18n';

@@ -1,5 +1,6 @@
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { mergeMessageParts } from '@mangostudio/shared/generation';
+import type { MessagePart } from '@mangostudio/shared/types';
 
 /**
  * Collapses token-level streaming parts into stable display blocks.

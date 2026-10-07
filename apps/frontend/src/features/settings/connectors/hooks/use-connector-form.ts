@@ -2,7 +2,8 @@
  * Hook: add-connector form state, validation, and submission.
  */
 
-import type { Connector, ProviderType } from '@mangostudio/shared';
+import type { Connector } from '@mangostudio/shared/connectors';
+import type { ProviderType } from '@mangostudio/shared/types';
 import { useState } from 'react';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { addConnector } from '../api';
