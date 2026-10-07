@@ -69,6 +69,9 @@
     "typebox": "1.3.34",
     "typescript": "7.0.2"
   },
+  "overrides": {
+    "bun": "file:./scripts/bun-host-peer"
+  },
   "patchedDependencies": {
     "@elysia/openapi@2.0.0-beta.4": "patches/@elysia%2Fopenapi@2.0.0-beta.4.patch"
   }
