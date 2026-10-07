@@ -1,7 +1,7 @@
 # Integração Contínua
 
-Como o MangoStudio faz o gate de merges em `main` e na branch temporária
-`feat/rust-runtime`, e quais checks do GitHub são seguros para exigir no ruleset.
+Como o MangoStudio faz o gate de merges em `main`, e quais checks do GitHub são seguros para
+exigir no ruleset.
 
 ## Gates agregados
 
@@ -114,8 +114,7 @@ crates `unsupported` (não é lacuna); job devido que não entregou nada é
 
 ## Proteção de branch / checks obrigatórios
 
-Os checks obrigatórios em `main` e, durante a migração Rust, em
-`feat/rust-runtime` devem ser os checks `Gate` estáveis acima, mais os checks
+Os checks obrigatórios em `main` devem ser os checks `Gate` estáveis acima, mais os checks
 independentes de segurança / processo que não entram nesses gates:
 
 - `CI / Gate`
@@ -134,8 +133,19 @@ Atualizar o ruleset do repositório é uma operação de settings do GitHub, nã
 commit. Depois de mudar quais checks são obrigatórios, mantenha esta seção
 alinhada.
 
-Publicação continua limitada a tags e pushes em `main`; PRs para
-`feat/rust-runtime` executam checks sem ganhar um caminho de publicação.
+Publicação continua limitada a tags e pushes em `main`.
+
+### Branches temporárias de integração
+
+Os workflows com gate filtram `pull_request` pela branch base, e a lista é `[main]`. Um PR para
+qualquer outra branch não inicia nenhum deles. Uma branch temporária de integração liga esses
+workflows adicionando o próprio nome a essas listas em um commit na própria branch, junto com
+as asserções em `scripts/tests/ci-gate.unit.test.ts` e
+`scripts/tests/security-workflows.unit.test.ts` que fixam as listas. Um PR desses executa checks
+sem ganhar um caminho de publicação.
+
+Remova a entrada quando a branch for aposentada. `main` não deve citar uma branch que não existe
+mais.
 
 ## Relacionado
 

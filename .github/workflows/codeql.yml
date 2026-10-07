@@ -5,7 +5,7 @@ name: CodeQL
 # results" PR check, while ci.yml owns build/test correctness.
 on:
   pull_request:
-    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]
+    branches: [main]
   push:
     branches: [main]
   schedule:
