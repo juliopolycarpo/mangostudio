@@ -98,13 +98,13 @@ importing it is invisible to `--changed`, so CI keeps running everything.
 
 ### Lane Taxonomy
 
-| Lane        | Task name          | Workspaces            | Runner              | Turbo cached |
-| ----------- | ------------------ | --------------------- | ------------------- | ------------ |
-| unit        | `test:unit`        | api, frontend, shared | bun test            | yes          |
-| integration | `test:integration` | api, frontend         | bun test            | no           |
-| coverage    | `test:coverage`    | api, frontend, shared | bun test            | no           |
-| e2e         | —                  | root (browser-smoke)  | Playwright Chromium | —            |
-| scripts     | `//#test:scripts`  | root                  | bun test            | yes          |
+| Lane        | Task name          | Workspaces            | Runner                                                | Turbo cached |
+| ----------- | ------------------ | --------------------- | ----------------------------------------------------- | ------------ |
+| unit        | `test:unit`        | api, frontend, shared | bun test (api: [worker processes](#api-unit-workers)) | yes          |
+| integration | `test:integration` | api, frontend         | bun test                                              | no           |
+| coverage    | `test:coverage`    | api, frontend, shared | bun test                                              | no           |
+| e2e         | —                  | root (browser-smoke)  | Playwright Chromium                                   | —            |
+| scripts     | `//#test:scripts`  | root                  | bun test                                              | yes          |
 
 Turbo skips packages that do not define a given task, so passing all workspace
 filters is safe — no per-workspace metadata is needed to gate lane participation.
@@ -139,7 +139,8 @@ and reach for a real filesystem only when the test is about the filesystem.
 that as "one worker, isolated" rather than "no parallelism": Bun's
 `--parallel=N` runs files in N worker processes and **implies `--isolate`**,
 which gives each file a fresh global object. Isolation is the load-bearing
-half. Bun's default — no `--parallel` at all — runs every file in one process
+half. (`test:unit` then runs that one isolated worker several times, as
+separate processes: see [API unit workers](#api-unit-workers).) Bun's default — no `--parallel` at all — runs every file in one process
 off a single module graph, where the in-memory database from
 `setupTestEnvironment()` and any `mock.module` registration outlive the file
 that made them.
@@ -278,8 +279,11 @@ is the messenger.
 Redirecting the run to a file makes it likelier but is not the cause; it happens
 through a pipe too, which is what CI gives it.
 
-So the unit lane cannot take worker parallelism yet. The integration lane can:
-12 of 12 clean at four workers on a runner, 50.6s against 71–75s unflagged.
+So the unit lane cannot take Bun's *in-process* worker parallelism yet (the
+integration lane can: 12 of 12 clean at four workers on a runner, 50.6s against
+71–75s unflagged). It does take separate processes, each of them a one-worker
+`bun test` that never shares an isolate with another: see
+[API unit workers](#api-unit-workers).
 
 #### The isolate runner can hang
 
@@ -392,6 +396,122 @@ job pays and the merge job's fixed cost, so measured per-shard test time of 70s
 three-line change: `SHARD_COUNT`, the matrix list, and the shard job's `name`
 (`env` is not one of the contexts available to `jobs.<id>.name`, so the `/8`
 there cannot interpolate the value).
+
+#### API unit workers
+
+`bun run test` (and `bun run --filter @mangostudio/api test:unit`) splits the API
+unit lane across worker processes. The script is
+`scripts/run-test-workers.ts --lane=api-unit -- bun test --timeout 15000
+--parallel=1 tests/unit`: the command after `--` is the serial lane, unchanged,
+and the runner starts it N times with `--shard=i/N`.
+
+| Worker owns  | How                                                                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| its files    | Bun's `--shard=i/N`: round-robin over the sorted file list, so a file set always splits the same way                                                           |
+| its home     | each worker starts through `scripts/with-test-home.ts`, a `<tmpdir>/mangostudio-test-home-<random>` of its own, which also scopes the managed config directory |
+| its database | the preload's `:memory:` database, one per process                                                                                                             |
+| its ports    | every unit test binds port 0 (audited: no fixed-port bind under `tests/unit` or `tests/support`)                                                               |
+| its report   | `--reporter=junit` to `worker-<i>-of-<N>.xml` in a directory made for this run and removed at the end                                                          |
+
+Each worker also runs with `--no-orphans`, so the `bun test` behind a launcher
+that gets a `SIGKILL` (the last step when a cancelled worker ignores `SIGTERM`)
+exits with it, and takes down what its tests started. (`--parallel=1` runs the
+files in that one process; there is no separate test worker.) The launcher cannot
+forward that signal and cannot clean its home, so that home stays in the OS temp
+directory, as the launcher's section below says it does.
+
+Width is six, capped at `floor(cpus/2)`. The cap is there because the lane
+shares the host with the other lanes of `bun run test` (the root scripts, frontend
+and shared lanes run beside it, the integration lane after it), and the 15s case
+timeouts are what an oversubscribed CPU breaks first. `MANGO_TEST_WORKERS=<1-8>`
+overrides it; `1` is the serial lane. The variable is a Turbo `passThroughEnv` of the
+task, not an `env` entry: the merged result is the same at any width, so it stays out of
+the cache key. The runner and everything it loads are in the task's `inputs`
+(`apps/api/turbo.json`; `api-lanes-hermetic.unit.test.ts` derives the import closure and
+fails on a file missing from it).
+
+**On Windows the default is one worker**, the serial lane. With six concurrent processes
+`chatgpt-loopback.test.ts` failed with `ECONNRESET` in 12 of 72 runs (0 of 40 serially),
+and a bare Bun server that sends `Connection: close`, or stops while it answers, was reset
+in about 40% of requests under six processes there (3 of 100 in one process), with no
+MangoStudio code involved. That is a connection-teardown problem to understand before
+Windows goes wide. `resolveWorkerCount` carries the `win32` branch to lift, and
+`MANGO_TEST_WORKERS=6` overrides it meanwhile.
+
+The lane fails, naming `api-unit worker i/N`, when a worker:
+
+- exits non-zero, is killed by a signal (an OOM kill reaches the runner as
+  `128 + 9`), cannot be started, or is cancelled (an interrupt of the runner
+  stops every worker, then exits `128 + signal`);
+- exits 0 but wrote no report, wrote a cut-off one, or ran no case.
+
+A failing worker does not stop its siblings, because the serial lane also
+reports every failure. After the workers end, the files their reports name must
+be exactly the files under `tests/unit`, each in one report: a file in two
+reports, in none, or outside the directory fails the lane and names the first.
+A test file that registers no case at all is invisible to JUnit and so fails
+that last check; register a skipped case instead of an empty file.
+
+The merged report is written to `.mango/artifacts/test-workers/api-unit.xml`
+only when every worker left a whole report, and the previous one is removed
+first, so a failed lane (or a selected run, which writes none) cannot leave the
+last green run's totals. It is deliberately not the lane's `junitPath` under
+`.mango/artifacts/junit/`: that is the coverage run's evidence, read by the QA
+gate and the shard merge, and a plain run must never leave a green report there
+for a coverage lane that died before writing its own.
+It holds every worker's `<testsuite>`, with the header counters summed. The case
+and outcome set equals the single-worker lane's, which
+`test-workers.unit.test.ts` asserts with named fake workers (and names the first
+missing or extra case when it does not).
+
+Things this deliberately does not do:
+
+- **Coverage stays one process.** `test:coverage:unit` keeps a single
+  `--parallel=1` worker: a union of per-process LCOV carried 3,501 extra zero-hit
+  line keys across 249 sources on two strict comparisons, with identical cases and
+  covered lines, and nobody has found the cause. CI's Test job is coverage with
+  shards, so it does not change.
+- **No timings file.** The split would then depend on an untracked file that every
+  coverage run refreshes, and rotate between runs (see
+  [Why the unisolated lane opts out too](#why-the-unisolated-lane-opts-out-too)
+  for what that costs). Round-robin is a function of the file set.
+- **A selected run is one process.** `bun run test --changed` appends
+  `--changed=<sha>` after the lane directory; anything there selects files, so the
+  runner starts the command through the launcher as it always was. A split run would
+  hand some workers no file, and the file-set check would have nothing to compare.
+
+A fixed port or a fixed path under the shared temp directory is what would break
+here. The rule in
+[Never bind a well-known port in a test](#never-bind-a-well-known-port-in-a-test)
+therefore covers the unit lane too: a test that breaks that rule fails only when
+two workers happen to run it side by side.
+
+The lane trades memory for wall time. Measured on a 34-CPU WSL host (Bun 1.4.2,
+the same 5,231 cases in 428 files at every width, merged JUnit equal to the serial
+one, median of three interleaved runs, lane run directly):
+
+| Workers | Wall    | CPU (user+sys) | Peak resident memory, process tree, sampled |
+| ------- | ------- | -------------- | ------------------------------------------- |
+| 1       | 253.2 s | 328 s          | 1.1 GB                                      |
+| 4       | 76.0 s  | 342 s          | 1.8 GB                                      |
+| 6       | 48.6 s  | 306 s          | 2.4 GB                                      |
+| 8       | 38.1 s  | 295 s          | 3.1 GB                                      |
+
+The default is six: the rule fixed before the 6 and 8 runs was to move
+off four only for a width whose median wall time was at least 10% lower with every
+report equal and no failure, and to take the smaller if both qualified. Both did
+(0.64 and 0.50 of the four-worker time), so eight is available through
+`MANGO_TEST_WORKERS=8` for a run of this lane alone, but it is not the default:
+inside `bun run test` the unit phase is bound by the root scripts lane (about
+160 s), which a wider API lane does not shorten. At every width one worker holds
+the wall, 17% to 25% above the mean, and it is the same one run after run, because
+the split is a function of the file set.
+
+`scripts/tests/test-workers-shard-contract.unit.test.ts` pins what the check relies
+on from Bun (every file in exactly one shard, the same split twice, the same files
+`bun test` discovers, and that `--no-orphans` takes a killed launcher's `bun test`
+and the child one of its tests started down with it) by running real Bun over a
+throwaway tree.
 
 #### Balancing the split by time
 
@@ -866,7 +986,8 @@ so a preload or a test cannot redirect it. The `test:unit`, `test:integration` a
 `test:coverage:*` scripts of `apps/api` therefore start `bun test` through
 `scripts/with-test-home.ts`, which creates a fresh `<tmpdir>/mangostudio-test-home-<random>`,
 starts the tests with `HOME` (and `USERPROFILE`) pointing at it, and removes it when the run
-ends. That one change covers `bun run test`, the CI shards behind the watchdog, the coverage
+ends. `test:unit` reaches it through the [worker runner](#api-unit-workers), which starts every
+worker through the launcher, so each worker has a home of its own. That one change covers `bun run test`, the CI shards behind the watchdog, the coverage
 orchestrator and a direct `bun run test:unit` from `apps/api`; the nightly randomized-order
 workflow wraps its `bun test` the same way.
 

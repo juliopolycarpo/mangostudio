@@ -3,7 +3,13 @@ import { dirname, join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
 import { parseShard, shardedCoverageWorkspaces, testLaneEnv } from '../lib/test';
-import { laneById, SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
+import {
+  JUNIT_DIR,
+  laneById,
+  SHARDED_LCOV_PATHS,
+  TEST_LANES,
+  workerReportPath,
+} from '../lib/test-lanes';
 
 const readScripts = async (manifest: string): Promise<Record<string, string>> => {
   const json = (await Bun.file(join(ROOT_DIR, manifest)).json()) as {
@@ -172,6 +178,53 @@ describe('api lanes', () => {
     expect(script).toContain('tests/unit');
     expect(script).not.toContain('tests/integration');
   });
+
+  // The plain unit run is several processes, each a complete `--parallel=1`
+  // `bun test`. The runner takes the serial command after `--` unchanged and
+  // the lane table says which directory it owns, so the two have to agree:
+  // a runner told `tests/unit` over a command that runs `tests/integration`
+  // would split, count and merge the wrong suite.
+  it('runs the plain unit script through the worker runner over the lane directory', async () => {
+    const lane = laneById('api-unit');
+    const scripts = await readScripts(lane.manifest);
+    const script = scripts['test:unit'] ?? '';
+    expect(lane.workers).toEqual({ testDir: 'tests/unit' });
+    expect(script).toContain(`run-test-workers.ts --lane=${lane.id} -- bun test`);
+    expect(script).toContain('--parallel=1');
+    expect(script.endsWith(` ${lane.workers?.testDir}`)).toBe(true);
+    expect(script).not.toContain('--shard');
+  });
+
+  // A lane's `junitPath` is its coverage run's evidence: the QA gate and the
+  // shard merge read it. The worker runner's merged report from a plain run must
+  // never land there, or a green report outlives a coverage lane that died
+  // before writing its own.
+  it.each(TEST_LANES.filter((lane) => lane.workers))(
+    'writes the $id worker report away from every lane’s coverage evidence',
+    (lane) => {
+      const path = workerReportPath(lane);
+      expect(
+        TEST_LANES.map((candidate) => candidate.junitPath),
+        `expected the worker report ${path} to be no lane's junitPath`
+      ).not.toContain(path);
+      expect(
+        path.startsWith(`${JUNIT_DIR}/`),
+        `expected the worker report outside ${JUNIT_DIR}/ | received: ${path}`
+      ).toBe(false);
+    }
+  );
+
+  // The coverage script of the same lane is one process: partitioned LCOV
+  // failed strict comparison twice (3,501 extra zero-hit line keys), so the
+  // fan-out stays out of the lane that produces it.
+  it.each(TEST_LANES.filter((lane) => lane.workers))(
+    'keeps the $id coverage script a single bun test process',
+    async (lane) => {
+      const scripts = await readScripts(lane.manifest);
+      expect(scripts[lane.coverageScript]).not.toContain('run-test-workers');
+      expect(scripts[lane.coverageScript]).toContain('--parallel=1');
+    }
+  );
 
   it('keeps the integration lane out of isolate mode', async () => {
     const scripts = await readScripts(laneById('api-integration').manifest);
