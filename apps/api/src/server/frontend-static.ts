@@ -3,7 +3,7 @@
  * Extracted from the server entrypoint so it can be reused and tested.
  */
 
-import { existsSync, readFileSync, realpathSync, type Stats, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { NotFound } from 'elysia';
@@ -325,10 +325,27 @@ function unhashedCacheControl(urlPath: string): string {
   return urlPath === RUNTIME_CONFIG_PATH ? SHELL_CACHE_CONTROL : UNHASHED_CACHE_CONTROL;
 }
 
-/** `statSync`, or null when the entry is gone or unreadable. */
-function statFile(path: string): Stats | null {
+/** File metadata for numeric cache validators and lossless filesystem identity. */
+interface FrontendFileStats {
+  size: number;
+  mtimeMs: number;
+  dev: bigint;
+  ino: bigint;
+}
+
+/** A regular file's stat, or null when the entry is gone, unreadable or not a file. */
+function statFile(path: string): FrontendFileStats | null {
   try {
-    return statSync(path);
+    // NTFS file IDs can exceed Number.MAX_SAFE_INTEGER: two different inodes
+    // can round to the same number and make a public asset look like metadata.
+    const stats = statSync(path, { bigint: true });
+    if (!stats.isFile()) return null;
+    return {
+      size: Number(stats.size),
+      mtimeMs: Number(stats.mtimeMs),
+      dev: stats.dev,
+      ino: stats.ino,
+    };
   } catch {
     return null;
   }
@@ -345,7 +362,7 @@ function statFile(path: string): Stats | null {
  */
 function serveStattedFile(
   filePath: string,
-  stats: Stats,
+  stats: FrontendFileStats,
   cacheControl: string,
   request: Request
 ): Response {
@@ -371,7 +388,7 @@ function serveStattedFile(
 function resolveFrontendFile(
   frontendDir: string,
   pathname: string
-): { filePath: string; stats: Stats; urlPath: string } | null {
+): { filePath: string; stats: FrontendFileStats; urlPath: string } | null {
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
@@ -406,7 +423,7 @@ function resolveFrontendFile(
   // `statFile`, not `statSync`: a dangling symlink or a file removed between
   // the resolve and the stat must answer 404, not throw out of the handler.
   const stats = statFile(real);
-  if (!stats?.isFile()) return null;
+  if (!stats) return null;
   // Hardlinks have different realpaths but share file identity with the private
   // metadata. Check per request because a rebuild can replace that metadata.
   const buildStateStats = statFile(join(frontendRoot, BUILD_STATE_FILE));
