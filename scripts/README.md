@@ -11,7 +11,7 @@ scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── build-runtime.ts  Build the cargo mangostudio-runtime per release target (bun run build:runtime)
-├── check.ts          Biome + dprint + madge + tsc + workflow static analysis, in parallel (bun run check)
+├── check.ts          Biome lint/format + import cycles + dprint + tsc + workflow static analysis, in parallel (bun run check)
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
@@ -144,6 +144,14 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   that balance the next run's split, and fail the run if two shards claimed the
   same file. That is the observable symptom of shards reading different timings,
   which means they did not cover the suite between them while all exiting 0.
+- `collect/circular.ts` — count Biome cycle witnesses across the discovered JS
+  workspaces and `scripts/`, including type-only and self imports. A complete
+  JSON scan returns zero directly when clean. For cycles, the text reporter
+  supplies closed paths that are matched to every JSON diagnostic, split at
+  repeated files and deduplicated by rotation. This counts reported cycles,
+  not individual imports; overlapping graphs can differ from the former
+  madge DFS count. Skipped files, truncated output, other errors or a reporter
+  format change make the metric unavailable.
 - `collect.ts` + `collect/*` — discover the repository's components and merge
   the test fragment with per-component static LoC, coverage and type-check
   results plus bundle, dependency, duplication, and tooling metrics into the v4

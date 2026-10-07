@@ -35,7 +35,7 @@ import {
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Biome, dprint, madge circular checks, tsc typechecks, Knip code health,
+Runs Biome lint/format and import-cycle checks, dprint, tsc typechecks, Knip code health,
 generated contract-artifact freshness, lockfile dedupe, the Mango Protocol
 lanes (spec, schema equality, fixtures, Cargo) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.

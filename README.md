@@ -285,16 +285,15 @@ mangostudio/
 
 ## Development Tooling
 
-| Tool           | Scope                                        | Primary Functionality                              |
-| -------------- | -------------------------------------------- | -------------------------------------------------- |
-| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML     | Linter and formatter with unified rule sets        |
-| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile        | Pluggable formatter with WASM-based plugins        |
-| **lefthook**   | Git hooks (pre-commit)                       | Git hooks manager that runs checks on staged files |
-| **madge**      | JS/TS dependency graphs                      | Circular dependency detection across workspaces    |
-| **Knip**       | Root and workspace entry graphs              | Unused code and dependency detection               |
-| **jscpd**      | All source files                             | Copy/paste detection for code duplication alerts   |
-| **bun:test**   | Every workspace's unit and integration tests | Fast native test runner with LCOV coverage         |
-| **Playwright** | End-to-end browser smoke tests               | Chromium-based browser automation for auth flows   |
+| Tool           | Scope                                        | Primary Functionality                                 |
+| -------------- | -------------------------------------------- | ----------------------------------------------------- |
+| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML     | Lint, format, value and type-only import-cycle checks |
+| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile        | Pluggable formatter with WASM-based plugins           |
+| **lefthook**   | Git hooks (pre-commit)                       | Git hooks manager that runs checks on staged files    |
+| **Knip**       | Root and workspace entry graphs              | Unused code and dependency detection                  |
+| **jscpd**      | All source files                             | Copy/paste detection for code duplication alerts      |
+| **bun:test**   | Every workspace's unit and integration tests | Fast native test runner with LCOV coverage            |
+| **Playwright** | End-to-end browser smoke tests               | Chromium-based browser automation for auth flows      |
 
 These binaries are installed as devDependencies and invoked through the root `bun run` scripts. No global installation is required.
 
@@ -412,7 +411,7 @@ Configured in `dprint.json` with the following scope and settings:
 
 ### Circular Dependencies
 
-Detected via `madge` as part of `bun run check`. The check fails if any circular import paths exist across the workspace packages.
+Biome checks imports as part of `bun run check`, including value, type-only and self-import cycles. Each workspace checks its whole directory, including top-level TypeScript helpers. Generated and ignored paths follow the root `biome.json`.
 
 ### Copy/Paste Detection
 

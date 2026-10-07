@@ -9,7 +9,6 @@ describe('check script', () => {
       'run',
       'check:quick',
       'typecheck',
-      'circular',
       '--ui=stream',
       '--filter=@mangostudio/api',
       '--filter=@mangostudio/shared',
@@ -67,15 +66,17 @@ describe('check script', () => {
     expect(turboConfig).toContain('"$TURBO_DEFAULT$"');
   });
 
-  test('exposes circular checks in TypeScript workspaces', () => {
+  test('checks each whole TypeScript workspace with Biome instead of a separate cycle task', () => {
     for (const manifestPath of [
       'apps/api/package.json',
       'apps/frontend/package.json',
       'apps/shared/package.json',
+      'packages/protocol/package.json',
     ]) {
       const manifest = JSON.parse(readText(manifestPath)) as { scripts?: Record<string, string> };
 
-      expect(manifest.scripts?.circular).toBe('madge --circular --extensions ts,tsx .');
+      expect(manifest.scripts?.['check:quick']).toBe('biome check .');
+      expect(manifest.scripts?.circular).toBeUndefined();
     }
   });
 });

@@ -64,7 +64,6 @@
       // re-validates buildinfo on disk, so it is left out of the Turbo cache.
       "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"]
     },
-    "circular": {},
     "test:unit": {
       "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
     },

@@ -85,15 +85,15 @@ const CARGO_CLIPPY = [
 function typescriptCheckTasks(tsOnly: boolean, cargo: boolean): ProtocolTask[] {
   return [
     {
-      // Through Turbo rather than a bare `tsc`, so both tasks are cached the
-      // same way the application workspaces' are. Biome and dprint are absent
-      // on purpose: the repository root already lints this package's sources.
+      // Biome checks the whole workspace, including type-only cycles and
+      // top-level build helpers. Keep it here so standalone/scoped protocol
+      // checks enforce the same rule as the repository gate.
       label: 'protocol:workspace',
       cmd: [
         'turbo',
         'run',
+        'check:quick',
         'typecheck',
-        'circular',
         '--ui=stream',
         '--filter=@mangostudio/protocol',
       ],
