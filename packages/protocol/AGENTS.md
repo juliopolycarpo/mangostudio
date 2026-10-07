@@ -38,7 +38,15 @@ bun run protocol:check     # adds rustfmt, Clippy, cargo doc, the feature powers
 bun run protocol:test      # adds cargo test and the interop suites
 ```
 
-Both degrade to the TypeScript half with a warning when `cargo` is not on PATH.
+Both degrade to the TypeScript half with a warning when `cargo` is not on PATH. The feature
+powerset also needs `cargo-hack`; without it that one task is skipped with its own warning.
+
+`protocol:check` runs the 36-configuration powerset as two disjoint `cargo hack --partition`
+slices at the same time, each in a Cargo target directory of its own: `target/protocol-powerset-1`
+and `-2` (under `CARGO_TARGET_DIR` when that is set), about 0.2 GB more than one target. Slices that
+share a target queue on its build-directory lock and gain almost nothing. The task fails unless both
+slices ran and passed, so a dropped, failed or cancelled slice is never a shorter green run;
+`scripts/tests/protocol-powerset.unit.test.ts` pins the split. `rm -rf target` removes them.
 
 The Rust SDK is a member of the root Cargo workspace and uses the root `Cargo.lock`. The
 `mangostudio` launcher shares that workspace but not the protocol version or MSRV. Keep protocol
