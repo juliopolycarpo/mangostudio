@@ -16,6 +16,7 @@ import {
   runCommand,
   runParallel,
 } from './lib/runner';
+import { RUNTIME_BINARY_DIGEST_ENV, runtimeBinaryDigestEnv } from './lib/runtime-binary-digest';
 import {
   type ChangedLane,
   type ChangedLaneRun,
@@ -227,6 +228,32 @@ const protocolTask = runProtocol
   ? [() => runCommand('root:test:protocol', PROTOCOL_TEST_COMMAND, { cwd: ROOT_DIR })]
   : [];
 
+/**
+ * The environment of the unit phase's Turbo commands: the lane env plus the
+ * SHA-256 of the runtime binary the API unit tests spawn. Turbo caches
+ * `test:unit` and hashes only the binary's path, so without the digest a
+ * replaced or rebuilt binary replays the pass recorded against the old one.
+ * Taken once, before Turbo starts, however many commands the phase runs. With
+ * no binary the env is unchanged and the tests report that themselves.
+ */
+let unitPhaseEnv: Promise<Record<string, string>> | undefined;
+
+function unitLaneEnv(): Promise<Record<string, string>> {
+  unitPhaseEnv ??= (async () => {
+    if (!laneWorkspaces.includes('api')) return laneEnv;
+    try {
+      const digest = await runtimeBinaryDigestEnv();
+      const sha256 = digest[RUNTIME_BINARY_DIGEST_ENV];
+      if (sha256)
+        info(`  runtime binary sha256 ${sha256.slice(0, 12)}… keys the cached API unit tests`);
+      return { ...laneEnv, ...digest };
+    } catch (caught) {
+      return fatal(caught instanceof Error ? caught.message : String(caught));
+    }
+  })();
+  return unitPhaseEnv;
+}
+
 /** One task per Turbo invocation a workspace test phase needs. */
 function workspaceLaneTasks(task: TestLaneTask): (() => Promise<RunResult>)[] {
   const commands = changedRun
@@ -234,8 +261,11 @@ function workspaceLaneTasks(task: TestLaneTask): (() => Promise<RunResult>)[] {
     : [createTurboTestCommand(task, laneWorkspaces)];
   return commands.map((command) => {
     const scoped = command.at(-1)?.startsWith('--changed=') ? ':changed' : '';
-    return () =>
-      runCommand(`workspaces:${task}${scoped}`, command, { cwd: ROOT_DIR, env: laneEnv });
+    return async () =>
+      runCommand(`workspaces:${task}${scoped}`, command, {
+        cwd: ROOT_DIR,
+        env: task === 'test:unit' ? await unitLaneEnv() : laneEnv,
+      });
   });
 }
 
