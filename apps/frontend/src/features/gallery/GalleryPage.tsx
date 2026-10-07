@@ -1,4 +1,4 @@
-import type { GalleryItem } from '@mangostudio/shared';
+import type { GalleryItem } from '@mangostudio/shared/types';
 import { LayoutGrid, Loader2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';

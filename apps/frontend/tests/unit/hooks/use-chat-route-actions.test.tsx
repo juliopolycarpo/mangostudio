@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { act } from '@testing-library/react';
 import { useChatRouteActions } from '../../../src/hooks/use-chat-route-actions';
 import { renderHook, screen } from '../../support/harness/render';

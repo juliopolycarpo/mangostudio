@@ -1,4 +1,4 @@
-import type { ModelOption } from '@mangostudio/shared';
+import type { ModelOption } from '@mangostudio/shared/catalog';
 import {
   type ExternalAgentTargetId,
   normalizeApprovalRouting,

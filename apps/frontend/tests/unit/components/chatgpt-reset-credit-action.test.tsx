@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
-import type { Connector } from '@mangostudio/shared';
-import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
+import type { ChatGptUsageSnapshot, Connector } from '@mangostudio/shared/connectors';
 import { fireEvent, render, screen, waitFor } from '../../support/harness/render';
 
 const mockRedeemChatGptResetCredit = jest.fn();

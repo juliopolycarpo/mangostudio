@@ -6,8 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from 'bun:test';
-import type { GenerateImageResponse } from '@mangostudio/shared';
-import type { RespondStreamBody } from '@mangostudio/shared/generation';
+import type { GenerateImageResponse, RespondStreamBody } from '@mangostudio/shared/generation';
 import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type * as ApiClient from '../../../src/lib/api-client';

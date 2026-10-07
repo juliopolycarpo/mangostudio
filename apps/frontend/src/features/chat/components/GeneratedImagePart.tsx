@@ -1,4 +1,4 @@
-import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared';
+import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared/types';
 import {
   AlertCircle,
   Bookmark,

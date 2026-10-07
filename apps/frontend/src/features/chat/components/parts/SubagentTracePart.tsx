@@ -1,4 +1,4 @@
-import type { MessagePart } from '@mangostudio/shared';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';

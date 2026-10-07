@@ -1,4 +1,4 @@
-import type { MessagePart } from '@mangostudio/shared';
+import type { MessagePart } from '@mangostudio/shared/types';
 
 /**
  * What one turn is doing, at the altitude a renderer cares about.

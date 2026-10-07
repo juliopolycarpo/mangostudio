@@ -1,4 +1,4 @@
-import type { GalleryItem } from '@mangostudio/shared';
+import type { GalleryItem } from '@mangostudio/shared/types';
 import { Download, Maximize2 } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';

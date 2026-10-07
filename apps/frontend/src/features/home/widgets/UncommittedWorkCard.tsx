@@ -7,7 +7,7 @@
  * everything else is committed and pushed, which is most days.
  */
 
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { useQuery } from '@tanstack/react-query';
 import { GitBranch } from 'lucide-react';
 import { useMemo } from 'react';

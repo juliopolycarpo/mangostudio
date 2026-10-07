@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { useQueryClient } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '../../../support/harness/render';
 import { FakeTranscriptApi } from '../../../support/mocks/fake-transcript-api';

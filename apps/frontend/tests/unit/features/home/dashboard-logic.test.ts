@@ -9,8 +9,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { Chat } from '@mangostudio/shared';
-import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type { Chat, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import {
   groupChatsByWorkdir,

@@ -1,5 +1,4 @@
-import type { Chat, UpdateChatBody } from '@mangostudio/shared';
-import type { MessagesPage } from '@mangostudio/shared/chat';
+import type { Chat, MessagesPage, UpdateChatBody } from '@mangostudio/shared/chat';
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import {
   infiniteQueryOptions,

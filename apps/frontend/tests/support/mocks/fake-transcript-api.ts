@@ -1,4 +1,4 @@
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 
 /**
  * A fake hub for `GET /api/chats/:id/messages` that pages like the real one.

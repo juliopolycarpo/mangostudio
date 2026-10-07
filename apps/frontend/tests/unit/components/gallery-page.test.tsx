@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
-import type { GalleryItem } from '@mangostudio/shared';
+import type { GalleryItem } from '@mangostudio/shared/types';
 import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor } from '../../support/harness/render';
 
