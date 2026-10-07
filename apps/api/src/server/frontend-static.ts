@@ -370,7 +370,6 @@ function serveStattedFile(
  */
 function resolveFrontendFile(
   frontendDir: string,
-  frontendRoot: string | null,
   pathname: string
 ): { filePath: string; stats: Stats; urlPath: string } | null {
   let decoded: string;
@@ -381,9 +380,6 @@ function resolveFrontendFile(
     return null;
   }
   if (!decoded.startsWith('/') || !/\.[A-Za-z0-9]+$/.test(decoded)) return null;
-  // index.html is the shell. It is served by the explicit GET / route and by
-  // the SPA fallback, with revalidation headers this path would not apply.
-  if (decoded === '/index.html') return null;
   // Build freshness metadata is an internal input, never a public frontend
   // asset. The embedded branch never sees it — `listDistFiles` drops it before
   // the manifest is generated — but this branch resolves against a live `dist/`,
@@ -395,11 +391,15 @@ function resolveFrontendFile(
   const segments = decoded.slice(1).split('/');
   if (segments.some((s) => s === '' || s === '.' || s === '..' || /[\\\0]/.test(s))) return null;
 
-  const filePath = join(frontendDir, ...segments);
+  // Deployers can switch a frontend directory link to a new release at runtime.
+  // Resolve it for each file and use that same root for all eligibility checks.
+  const frontendRoot = realpathSyncSafe(frontendDir);
+  if (!frontendRoot) return null;
+  const filePath = join(frontendRoot, ...segments);
   // Defence in depth behind the segment check: a symlink inside dist/ could
   // still resolve outward, and only a realpath comparison catches that.
   const real = realpathSyncSafe(filePath);
-  if (!real || !frontendRoot || !real.startsWith(frontendRoot + sep)) return null;
+  if (!real?.startsWith(frontendRoot + sep)) return null;
   // A symlink can give private build metadata a public-looking asset name.
   if (real === join(frontendRoot, BUILD_STATE_FILE)) return null;
 
@@ -433,23 +433,12 @@ function realpathSyncSafe(path: string): string | null {
  * route and serve files through the existing NotFound fallback instead.
  */
 function registerSpa(app: App, frontendDir: string): void {
-  const indexPath = join(frontendDir, 'index.html');
-  // Resolved once here rather than per request: `frontendDir` does not change
-  // for the life of the server, so re-resolving it on every SPA-fallback
-  // request bought nothing but a repeated syscall.
-  const frontendRoot = realpathSyncSafe(frontendDir);
-  // Stat-checked because `dist/` can be momentarily empty under a live dev
-  // server: `build.ts` publishes by rename, which has a window with nothing at
-  // the path, and the binary build prunes `dist/` outright before rebuilding —
-  // and a `Bun.file` that is not there answers 500 with Bun's own error page
-  // once the body is read, on `/` and on every deep link alike. A 404 is the
-  // honest answer for that window. The stat that proves existence also spells
-  // the validator: size+mtime, so a rebuild's new mtime invalidates cached
-  // shells.
+  // The shell follows the same eligibility checks as every other disk file.
+  // Missing files during a rebuild and ineligible links both answer 404.
   const serveIndex = (request: Request): Response => {
-    const stats = statFile(indexPath);
-    return stats
-      ? serveIndexFile(indexPath, fileEtag(stats), request)
+    const resolved = resolveFrontendFile(frontendDir, '/index.html');
+    return resolved
+      ? serveIndexFile(resolved.filePath, fileEtag(resolved.stats), request)
       : new Response(null, { status: 404 });
   };
   app.get('/', ({ request }) => serveIndex(request));
@@ -469,8 +458,11 @@ function registerSpa(app: App, frontendDir: string): void {
     if (isApiOwnedPath(pathname)) return undefined;
     // Files resolve here rather than through routes pinned at boot. A missing
     // asset or root file falls past `isSpaRoute` to a 404 instead of the shell.
-    const resolved = resolveFrontendFile(frontendDir, frontendRoot, pathname);
+    const resolved = resolveFrontendFile(frontendDir, pathname);
     if (resolved) {
+      if (resolved.urlPath === '/index.html') {
+        return serveIndexFile(resolved.filePath, fileEtag(resolved.stats), request);
+      }
       return serveStattedFile(
         resolved.filePath,
         resolved.stats,

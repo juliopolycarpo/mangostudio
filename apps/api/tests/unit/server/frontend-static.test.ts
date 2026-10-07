@@ -35,6 +35,7 @@ import { registerFrontend } from '../../../src/server/frontend-static';
 const INDEX_HTML = '<html><body>embedded index</body></html>';
 const ASSET_JS = 'console.log("embedded")';
 const UPLOAD_BYTES = 'not-really-a-png';
+const SHELL_PATHS = ['/', '/settings', '/index.html', '/index%2ehtml'];
 /** What `build.ts` emits as the deployer-editable runtime config. */
 const RUNTIME_CONFIG_JS = 'window.__MANGO_CONFIG__ = { apiUrl: "" };\n';
 
@@ -408,14 +409,16 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
   const SHADOWED_SHAPE = '/api/auth';
   const SURVIVING_SHAPE = '/images';
 
-  async function startFilesystemServer(assetsAtBoot = true): Promise<{
+  async function startFilesystemServer(
+    assetsAtBoot = true,
+    frontendDir = mkdtempSync(join(tmpdir(), 'listen-frontend-'))
+  ): Promise<{
     get: (path: string, headers?: Record<string, string>) => Promise<Response>;
     origin: string;
     frontendDir: string;
     uploadsDir: string;
     stop: () => Promise<void>;
   }> {
-    const frontendDir = mkdtempSync(join(tmpdir(), 'listen-frontend-'));
     writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
     writeFileSync(join(frontendDir, 'favicon.ico'), UPLOAD_BYTES);
     writeFileSync(join(frontendDir, BUILD_STATE_FILE), '{"apiUrl":"https://secret.example.test"}');
@@ -895,7 +898,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     }
   });
 
-  test('serves assets when private build state is absent', async () => {
+  test('serves assets and the shell when private build state is absent', async () => {
     const server = await startFilesystemServer();
     try {
       rmSync(join(server.frontendDir, BUILD_STATE_FILE));
@@ -903,6 +906,158 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       expect(response.status).toBe(200);
       expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
       expect(await response.text()).toBe(ASSET_JS);
+      for (const path of SHELL_PATHS) {
+        const shell = await server.get(path);
+        expect(shell.status).toBe(200);
+        expect(shell.headers.get('cache-control')).toBe('no-cache');
+        expect(await shell.text()).toBe(INDEX_HTML);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves a release switched through the frontend directory link after startup', async () => {
+    const releases = mkdtempSync(join(tmpdir(), 'frontend-releases-'));
+    temporaryDirs.push(releases);
+    const releaseA = join(releases, 'release-a');
+    const releaseB = join(releases, 'release-b');
+    const current = join(releases, 'current');
+    mkdirSync(releaseA);
+    mkdirSync(join(releaseB, 'assets'), { recursive: true });
+    const nextIndex = `${INDEX_HTML}\n<!-- release B -->`;
+    const nextAsset = `${ASSET_JS}; // release B`;
+    writeFileSync(join(releaseB, 'index.html'), nextIndex);
+    writeFileSync(join(releaseB, 'assets', 'index-ReleaseB.js'), nextAsset);
+    writeFileSync(join(releaseB, 'favicon.ico'), UPLOAD_BYTES);
+    // Junctions are directory links on Windows without the file-symlink privilege.
+    symlinkSync(releaseA, current, 'junction');
+    const server = await startFilesystemServer(true, current);
+    try {
+      const previous = await server.get('/');
+      const previousEtag = previous.headers.get('etag') ?? '';
+      expect(await previous.text()).toBe(INDEX_HTML);
+      expect(previousEtag).not.toBe('');
+
+      rmSync(current, { recursive: true, force: true });
+      symlinkSync(releaseB, current, 'junction');
+      const asset = await server.get('/assets/index-ReleaseB.js');
+      const assetBody = await asset.text();
+      expect(asset.status, assetBody).toBe(200);
+      expect(asset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(asset.headers.get('content-type')).toStartWith('text/javascript');
+      expect(assetBody).toBe(nextAsset);
+      expect((await server.get('/favicon.ico')).status).toBe(200);
+
+      for (const path of SHELL_PATHS) {
+        const shell = await server.get(path, { 'If-None-Match': previousEtag });
+        expect(shell.status).toBe(200);
+        expect(shell.headers.get('cache-control')).toBe('no-cache');
+        expect(await shell.text()).toBe(nextIndex);
+      }
+      const currentShell = await server.get('/');
+      const currentEtag = currentShell.headers.get('etag') ?? '';
+      await currentShell.text();
+      expect(currentEtag).not.toBe('');
+      expect(currentEtag).not.toBe(previousEtag);
+      const cached = await server.get('/settings', { 'If-None-Match': currentEtag });
+      expect(cached.status).toBe(304);
+      expect(await cached.text()).toBe('');
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test.each(['symlink', 'hardlink'])(
+    '404s a shell %s alias for private build state',
+    async (kind) => {
+      const server = await startFilesystemServer();
+      try {
+        const index = join(server.frontendDir, 'index.html');
+        const state = join(server.frontendDir, BUILD_STATE_FILE);
+        rmSync(index);
+        if (kind === 'hardlink') linkSync(state, index);
+        else symlinkSync(state, index);
+        for (const path of SHELL_PATHS) {
+          const response = await server.get(path);
+          const body = await response.text();
+          expect(response.status, body).toBe(404);
+          expect(body).not.toContain('secret.example.test');
+        }
+      } finally {
+        await server.stop();
+      }
+    }
+  );
+
+  test('404s a shell link outside the frontend directory without exposing the fixture', async () => {
+    const server = await startFilesystemServer();
+    const outside = mkdtempSync(join(tmpdir(), 'outside-shell-fixture-'));
+    temporaryDirs.push(outside);
+    try {
+      const outsideShell = join(outside, 'outside.html');
+      const outsideBody = '<html>synthetic outside build fixture</html>';
+      writeFileSync(outsideShell, outsideBody);
+      const index = join(server.frontendDir, 'index.html');
+      rmSync(index);
+      symlinkSync(outsideShell, index);
+      for (const path of SHELL_PATHS) {
+        const response = await server.get(path);
+        const body = await response.text();
+        expect(response.status, body).toBe(404);
+        expect(body).not.toContain(outsideBody);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test.each(['symlink', 'hardlink'])(
+    'serves and revalidates a valid inside-directory shell %s',
+    async (kind) => {
+      const server = await startFilesystemServer();
+      try {
+        const linkedShell = join(server.frontendDir, 'linked-shell.txt');
+        const body = `${INDEX_HTML}\n<!-- linked shell -->`;
+        writeFileSync(linkedShell, body);
+        const index = join(server.frontendDir, 'index.html');
+        rmSync(index);
+        if (kind === 'hardlink') linkSync(linkedShell, index);
+        else symlinkSync(linkedShell, index);
+        for (const path of SHELL_PATHS) {
+          const response = await server.get(path);
+          const etag = response.headers.get('etag') ?? '';
+          expect(response.status).toBe(200);
+          expect(response.headers.get('content-type')).toBe('text/html');
+          expect(response.headers.get('cache-control')).toBe('no-cache');
+          expect(await response.text()).toBe(body);
+          expect(etag).not.toBe('');
+          const cached = await server.get(path, { 'If-None-Match': etag });
+          expect(cached.status).toBe(304);
+          expect(await cached.text()).toBe('');
+        }
+      } finally {
+        await server.stop();
+      }
+    }
+  );
+
+  test('rejects a shell alias when private build state first appears after startup', async () => {
+    const server = await startFilesystemServer();
+    try {
+      const state = join(server.frontendDir, BUILD_STATE_FILE);
+      rmSync(state);
+      const before = await server.get('/settings');
+      expect(before.status).toBe(200);
+      expect(await before.text()).toBe(INDEX_HTML);
+      linkSync(join(server.frontendDir, 'index.html'), state);
+      writeFileSync(state, '{"apiUrl":"https://new-private.example.test"}');
+      for (const path of SHELL_PATHS) {
+        const response = await server.get(path);
+        const body = await response.text();
+        expect(response.status, body).toBe(404);
+        expect(body).not.toContain('new-private.example.test');
+      }
     } finally {
       await server.stop();
     }
