@@ -31,18 +31,14 @@ function createCheckFixture(): string {
   config.formatter.enabled = false;
   writeFileSync(join(root, 'biome.json'), JSON.stringify(config));
   mkdirSync(join(root, 'node_modules'), { recursive: true });
-  symlinkSync(join(ROOT_DIR, 'node_modules/.bin'), join(root, 'node_modules/.bin'), 'junction');
-  symlinkSync(
-    join(ROOT_DIR, 'node_modules/@typescript'),
-    join(root, 'node_modules/@typescript'),
-    'junction'
-  );
-  symlinkSync(join(ROOT_DIR, 'node_modules/turbo'), join(root, 'node_modules/turbo'), 'junction');
-  symlinkSync(
-    join(ROOT_DIR, 'node_modules/@dprint'),
-    join(root, 'node_modules/@dprint'),
-    'junction'
-  );
+  // Windows .bin wrappers resolve package paths relative to node_modules.
+  for (const dependency of ['.bin', '@biomejs', '@typescript', '@dprint', 'turbo', 'dprint']) {
+    symlinkSync(
+      join(ROOT_DIR, `node_modules/${dependency}`),
+      join(root, `node_modules/${dependency}`),
+      'junction'
+    );
+  }
   for (const workspace of WORKSPACES) {
     mkdirSync(join(root, workspace, 'src'), { recursive: true });
     mkdirSync(join(root, workspace, 'tests'), { recursive: true });
