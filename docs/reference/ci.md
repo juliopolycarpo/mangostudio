@@ -122,6 +122,14 @@ collector or a second privileged reader of PR-produced bytes.
   SHA-pinned `taiki-e/install-action`) and `llvm-tools-preview` is added in
   that job only, not to `rust-toolchain.toml`.
 
+## Protocol feature powerset
+
+`protocol-ci.yml` runs `cargo hack clippy -p mango-protocol --feature-powerset`
+(36 configurations of the crate's features) on Linux, macOS and Windows.
+cargo-hack is pinned by version there and in `protocol-release.yml` (through the
+SHA-pinned `taiki-e/install-action`), and `protocol-package.unit.test.ts` keeps
+the two equal, so the pull request lane and a release re-run check the same set.
+
 ## Concurrency policy
 
 Workflows that declare `concurrency` follow a small set of rules so overlapping
