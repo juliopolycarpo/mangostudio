@@ -61,7 +61,7 @@ importing the specific module in new code:
 Workspace `check:quick` scripts run normal Biome checks followed by
 `check-import-cycles.ts`. The cycle pass uses the independent
 `biome.cycles.json`, so formatting exclusions and `.gitignore` cannot hide TS/JS
-cycles. It checks TS, TSX, JS, JSX, MJS and CJS files, including JavaScript
+cycles. It checks TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including JavaScript
 dependencies reached from TypeScript roots and independent JavaScript roots.
 It includes declarations and generated/build files, excludes only
 `node_modules` and `.git`, and raises the file-size limit to JavaScript's largest

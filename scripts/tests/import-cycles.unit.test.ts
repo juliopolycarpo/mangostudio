@@ -97,13 +97,14 @@ function runCheck(root: string, workspace: string): string {
 }
 
 describe('Biome import cycle checks', () => {
-  for (const extension of ['js', 'jsx', 'mjs', 'cjs']) {
+  for (const extension of ['js', 'jsx', 'mjs', 'cjs', 'mts', 'cts']) {
     for (const kind of ['pair', 'self']) {
       test(`rejects and counts a TS-imported ${extension} ${kind} cycle with real typechecking`, async () => {
         const root = createCheckFixture();
         try {
           const first = `a.${extension}`;
           const second = kind === 'self' ? first : `b.${extension}`;
+          const returnType = extension === 'mts' || extension === 'cts' ? ': number' : '';
           const files =
             extension === 'cjs'
               ? {
@@ -118,10 +119,12 @@ describe('Biome import cycle checks', () => {
               : {
                   [first]:
                     kind === 'self'
-                      ? `import { a as again } from './${first}';\nexport const a = () => again();\n`
-                      : `import { b } from './${second}';\nexport const a = () => b();\n`,
+                      ? `import { a as again } from './${first}';\nexport const a = ()${returnType} => again();\n`
+                      : `import { b } from './${second}';\nexport const a = ()${returnType} => b();\n`,
                   ...(kind === 'pair'
-                    ? { [second]: `import { a } from './${first}';\nexport const b = () => a();\n` }
+                    ? {
+                        [second]: `import { a } from './${first}';\nexport const b = ()${returnType} => a();\n`,
+                      }
                     : {}),
                 };
           injectCycle(root, 'apps/frontend/dist', files);
@@ -140,6 +143,7 @@ describe('Biome import cycle checks', () => {
                   target: 'ES2022',
                   module: 'ESNext',
                   moduleResolution: 'bundler',
+                  allowImportingTsExtensions: true,
                   jsx: 'preserve',
                   noEmit: true,
                   strict: true,

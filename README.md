@@ -411,7 +411,7 @@ Configured in `dprint.json` with the following scope and settings:
 
 ### Circular Dependencies
 
-Biome checks imports as part of `bun run check`, including value, type-only and self-import cycles. Each workspace scans TS, TSX, JS, JSX, MJS and CJS files, including top-level helpers, generated files and gitignored build output, through `biome.cycles.json`. JavaScript files are checked both as dependencies of TypeScript files and as independent roots. Only `node_modules` and `.git` are excluded from the cycle scan. Normal formatting and lint still follow `biome.json`.
+Biome checks imports as part of `bun run check`, including value, type-only and self-import cycles. Each workspace scans TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including top-level helpers, generated files and gitignored build output, through `biome.cycles.json`. JavaScript files are checked both as dependencies of TypeScript files and as independent roots. Only `node_modules` and `.git` are excluded from the cycle scan. Normal formatting and lint still follow `biome.json`.
 
 ### Copy/Paste Detection
 
