@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
-import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
+import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
+import type { Connector } from '@mangostudio/shared/connectors';
 import { act, renderHook } from '../../support/harness/render';
 
 const mockUpdateConnectorModels = jest.fn();

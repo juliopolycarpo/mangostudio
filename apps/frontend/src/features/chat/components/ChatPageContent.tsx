@@ -1,4 +1,4 @@
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { Loader2 } from 'lucide-react';
 import { WorkspaceHub, type WorkspaceHubProps } from '@/features/home/WorkspaceHub';
 import type { OlderMessages } from '../hooks/use-chat-page-state';

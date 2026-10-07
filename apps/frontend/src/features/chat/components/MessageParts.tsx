@@ -1,6 +1,6 @@
-import type { MessagePart } from '@mangostudio/shared';
 import { ASK_USER_QUESTION_TOOL_NAME } from '@mangostudio/shared/questions';
 import { TODO_WRITE_TOOL_NAME } from '@mangostudio/shared/todos';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { useMemo } from 'react';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import type { TurnStatus } from '../lib/turn-status';

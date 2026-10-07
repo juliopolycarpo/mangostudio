@@ -1,4 +1,4 @@
-import type { GalleryItem } from '@mangostudio/shared';
+import type { GalleryItem } from '@mangostudio/shared/types';
 import { Download, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useRef } from 'react';

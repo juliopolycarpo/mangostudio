@@ -8,8 +8,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import { createMockMessage } from '@mangostudio/shared/test-utils';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { screen } from '@testing-library/react';
 import { TurnSeparator } from '../../../src/features/chat/components/TurnSeparator';
 import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';

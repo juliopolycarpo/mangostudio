@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { act, renderHook } from '../../support/harness/render';
 import { useFakeTimers } from '../../support/harness/timers';

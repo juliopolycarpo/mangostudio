@@ -1,4 +1,4 @@
-import type { MessagePart } from '@mangostudio/shared';
+import type { MessagePart } from '@mangostudio/shared/types';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import type { TurnStatus } from '../lib/turn-status';

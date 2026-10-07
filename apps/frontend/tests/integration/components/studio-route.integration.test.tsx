@@ -7,7 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
-import type { GalleryItem } from '@mangostudio/shared';
+import type { GalleryItem } from '@mangostudio/shared/types';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AppContext } from '../../../src/lib/app-context';

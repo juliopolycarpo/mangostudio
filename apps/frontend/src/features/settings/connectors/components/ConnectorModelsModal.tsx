@@ -1,4 +1,5 @@
-import type { Connector, ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
+import type { Connector } from '@mangostudio/shared/connectors';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { ModelToggleList } from './ModelToggleList';

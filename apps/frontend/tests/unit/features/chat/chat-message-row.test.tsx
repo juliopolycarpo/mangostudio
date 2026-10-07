@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, mock } from 'bun:test';
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { useCallback } from 'react';
 import { render } from '../../../support/harness/render';
 import { ToolIdentitiesProbe } from '../../../support/mocks/tool-identities';
