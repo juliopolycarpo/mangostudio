@@ -38,7 +38,7 @@ describe('shared TOML library boundary', () => {
         cwd: SHARED_ROOT,
         onlyFiles: true,
       }),
-    ];
+    ].map((path) => path.replaceAll('\\', '/'));
     expect(paths).toContain('src/library/machine/instance-reader.ts');
     expect(paths).toContain('tests/unit/library/machine/toml-library-boundary.test.ts');
     const offenders = paths.filter((path) =>
