@@ -26,7 +26,7 @@ describe('security workflows', () => {
     const languageExpression = '$' + '{{ matrix.language }}';
     expect(workflow).toContain(`languages: ${languageExpression}`);
 
-    expect(workflow).toContain('pull_request:\n    branches: [main]');
+    expect(workflow).toContain('pull_request:\n    branches: [main, chore/ts-dependency-hygiene]');
     expect(workflow).toContain('push:\n    branches: [main]');
     expect(workflow).toContain('schedule:');
     expect(workflow).toContain('workflow_dispatch:');
@@ -51,7 +51,7 @@ describe('security workflows', () => {
   test('dependency review is a PR-only vulnerability gate with no license policy', () => {
     const workflow = readText('.github/workflows/dependency-review.yml');
 
-    expect(workflow).toContain('pull_request:\n    branches: [main]');
+    expect(workflow).toContain('pull_request:\n    branches: [main, chore/ts-dependency-hygiene]');
     expect(workflow).not.toContain('push:');
     expect(workflow).toContain('permissions:\n  contents: read');
     expect(workflow).toContain('fail-on-severity: moderate');

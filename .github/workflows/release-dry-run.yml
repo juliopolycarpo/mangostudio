@@ -7,7 +7,7 @@ name: Release Dry Run
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, chore/ts-dependency-hygiene]
   workflow_dispatch:
   schedule:
     - cron: "0 7 * * 1"

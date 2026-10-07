@@ -30,6 +30,7 @@ const INTEGRATION_PR_WORKFLOWS = [
   '.github/workflows/codeql.yml',
   '.github/workflows/dependency-review.yml',
   '.github/workflows/dependency-audit.yml',
+  '.github/workflows/rust-fresh-dependencies.yml',
   '.github/workflows/protocol-ci.yml',
   '.github/workflows/release-dry-run.yml',
 ] as const;
@@ -41,10 +42,10 @@ const EXPR = '$' + '{{';
 
 describe('Integration branch coverage', () => {
   test.each([...INTEGRATION_PR_WORKFLOWS])(
-    '%s runs for PRs that target main and no retired integration branch',
+    '%s runs for PRs that target main or the dependency hygiene branch',
     (path) => {
       const onBlock = extractOnBlock(readText(path));
-      expect(onBlock).toContain('pull_request:\n    branches: [main]');
+      expect(onBlock).toContain('pull_request:\n    branches: [main, chore/ts-dependency-hygiene]');
     }
   );
 });
@@ -123,7 +124,7 @@ describe('ci.yml trigger and concurrency policy', () => {
     const onBlock = extractOnBlock(workflow);
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
-    expect(onBlock).toContain('pull_request:\n    branches: [main]');
+    expect(onBlock).toContain('pull_request:\n    branches: [main, chore/ts-dependency-hygiene]');
     expect(onBlock).toContain('push:\n    branches: [main]');
     // No branch-prefix allowlist: development branches get CI via their PR.
     expect(onBlock).not.toContain('/**');
@@ -225,7 +226,9 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
     // pull_request must not be path-filtered, or the Gate check would hang as
     // "expected" on non-Rust PRs.
-    expect(onBlock).toContain('pull_request:\n    branches: [main]\n  push:');
+    expect(onBlock).toContain(
+      'pull_request:\n    branches: [main, chore/ts-dependency-hygiene]\n  push:'
+    );
     expect(onBlock).toContain('- "crates/**"');
     expect(onBlock).toContain('- "Cargo.toml"');
     expect(onBlock).toContain('- "Cargo.lock"');
@@ -490,7 +493,9 @@ describe('release-dry-run.yml always-reporting gate', () => {
     const onBlock = extractOnBlock(workflow);
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'workflow_dispatch', 'schedule']);
-    expect(onBlock).toContain('pull_request:\n    branches: [main]\n  workflow_dispatch:');
+    expect(onBlock).toContain(
+      'pull_request:\n    branches: [main, chore/ts-dependency-hygiene]\n  workflow_dispatch:'
+    );
   });
 
   test('each dry-run lane runs only when its relevance predicate is true', () => {

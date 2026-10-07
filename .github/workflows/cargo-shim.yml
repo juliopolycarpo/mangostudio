@@ -18,7 +18,7 @@ name: Cargo Shim
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, chore/ts-dependency-hygiene]
   push:
     branches: [main]
     paths:
