@@ -45,7 +45,7 @@ describe('Integration branch coverage', () => {
     (path) => {
       const onBlock = extractOnBlock(readText(path));
       expect(onBlock).toContain(
-        'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]'
+        'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption, perf/build-throughput]'
       );
     }
   );
@@ -126,7 +126,7 @@ describe('ci.yml trigger and concurrency policy', () => {
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
     expect(onBlock).toContain(
-      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]'
+      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption, perf/build-throughput]'
     );
     expect(onBlock).toContain('push:\n    branches: [main]');
     // No branch-prefix allowlist: development branches get CI via their PR.
@@ -230,7 +230,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     // pull_request must not be path-filtered, or the Gate check would hang as
     // "expected" on non-Rust PRs.
     expect(onBlock).toContain(
-      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]\n  push:'
+      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption, perf/build-throughput]\n  push:'
     );
     expect(onBlock).toContain('- "crates/**"');
     expect(onBlock).toContain('- "Cargo.toml"');
@@ -497,7 +497,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'workflow_dispatch', 'schedule']);
     expect(onBlock).toContain(
-      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]\n  workflow_dispatch:'
+      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption, perf/build-throughput]\n  workflow_dispatch:'
     );
   });
 

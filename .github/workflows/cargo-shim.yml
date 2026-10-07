@@ -18,7 +18,7 @@ name: Cargo Shim
 
 on:
   pull_request:
-    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]
+    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption, perf/build-throughput]
   push:
     branches: [main]
     paths:

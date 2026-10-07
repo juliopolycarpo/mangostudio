@@ -27,7 +27,7 @@ describe('security workflows', () => {
     expect(workflow).toContain(`languages: ${languageExpression}`);
 
     expect(workflow).toContain(
-      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]'
+      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption, perf/build-throughput]'
     );
     expect(workflow).toContain('push:\n    branches: [main]');
     expect(workflow).toContain('schedule:');
@@ -54,7 +54,7 @@ describe('security workflows', () => {
     const workflow = readText('.github/workflows/dependency-review.yml');
 
     expect(workflow).toContain(
-      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption]'
+      'pull_request:\n    branches: [main, feat/rust-runtime, feat/external-agents-sdk-adoption, perf/build-throughput]'
     );
     expect(workflow).not.toContain('push:');
     expect(workflow).toContain('permissions:\n  contents: read');
