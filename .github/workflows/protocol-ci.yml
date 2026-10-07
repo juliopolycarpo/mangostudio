@@ -125,8 +125,15 @@ jobs:
       # importing every subpath out of a clean install is the only proof.
       - run: bun ./scripts/protocol/verify-package.ts
 
+  # The feature powerset is 36 `cargo clippy` runs of the one crate. Each system
+  # runs it as two `cargo hack --partition M/2` legs on separate runners, which
+  # is also two separate Cargo targets: partitions that shared a target would
+  # wait on one build lock. `Gate` reads this job's single `needs.rust.result`,
+  # which is `success` only when all six legs ran and passed; a skipped or
+  # cancelled leg fails it. scripts/tests/protocol-powerset-ci.unit.test.ts
+  # holds the matrix, the flags and the Gate's `needs` to that.
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust (${{ matrix.os }}, partition ${{ matrix.partition }}/2)
     needs: [changes]
     if: needs.changes.outputs.protocol == 'true'
     timeout-minutes: 25
@@ -134,6 +141,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        partition: [1, 2]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -142,13 +150,20 @@ jobs:
       - run: rustup show active-toolchain
       # Every rust-cache step keys on the root manifest and saves only from
       # main; scripts/tests/cache-policy.unit.test.ts explains and pins both.
+      # The legs share a job id, so `key` keeps their targets apart: each
+      # partition's artifacts differ, and one shared entry would hold only
+      # whichever leg reserved it first.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          key: partition-${{ matrix.partition }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Pinned: the chunking `--partition` applies and the powerset it chunks
+      # are cargo-hack's own, so a release re-run and this lane must agree on
+      # the version. protocol-release.yml installs the same one.
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
-          tool: cargo-hack
+          tool: cargo-hack@0.6.45
       # Cargo Shim runs `cargo fmt --all`, then clippy and the tests of the whole
       # workspace with `--all-features` (a superset of `-p mango-protocol
       # --all-features`), on these same three OSes, whenever a path this crate
@@ -156,16 +171,26 @@ jobs:
       # scripts/tests/rust-lanes.unit.test.ts keeps in step with every file the
       # crates include or read. Running them here too only paid twice. What
       # follows is what Cargo Shim does not run.
-      - run: cargo hack clippy -p mango-protocol --feature-powerset --all-targets --locked -- -D warnings
+      # Chunks of ceil(36 / 2) = 18 runs in cargo-hack's order, so partition 1 is
+      # the first 18 and partition 2 the last 18; none is skipped and none is
+      # repeated. No `--depth`, `--skip` or group flag may narrow the powerset.
+      # The partition reaches the script through env, as data, and bash gives
+      # the Windows runner the same `"$PARTITION"` spelling.
+      - name: Clippy over feature-powerset partition ${{ matrix.partition }}/2
+        shell: bash
+        env:
+          PARTITION: ${{ matrix.partition }}/2
+        run: cargo hack clippy -p mango-protocol --feature-powerset --all-targets --locked --partition "$PARTITION" -- -D warnings
       # Cargo Shim runs the workspace doctests and `cargo doc` on Ubuntu only. The
       # crate has `cfg`-gated transports (unix sockets, Windows named pipes) whose
       # doctests and intra-doc links exist on one platform, so macOS and Windows
-      # keep their own copy.
+      # keep their own copy, once per system: on partition 1, whose first runs
+      # already check the all-features build `cargo doc` reuses.
       - name: Run doctests
-        if: matrix.os != 'ubuntu-latest'
+        if: matrix.os != 'ubuntu-latest' && matrix.partition == 1
         run: cargo test -p mango-protocol --doc --all-features --locked
       - name: Build API docs (deny warnings)
-        if: matrix.os != 'ubuntu-latest'
+        if: matrix.os != 'ubuntu-latest' && matrix.partition == 1
         run: cargo doc -p mango-protocol --no-deps --all-features --locked
         env:
           RUSTDOCFLAGS: -D warnings

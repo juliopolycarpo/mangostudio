@@ -122,6 +122,26 @@ collector or a second privileged reader of PR-produced bytes.
   SHA-pinned `taiki-e/install-action`) and `llvm-tools-preview` is added in
   that job only, not to `rust-toolchain.toml`.
 
+## Protocol feature powerset
+
+`protocol-ci.yml` runs `cargo hack clippy -p mango-protocol --feature-powerset`
+on Linux, macOS and Windows: 36 configurations of the crate's features.
+
+- Each system runs it as two `--partition M/2` legs of the `rust` job, 18
+  configurations each, on separate runners with separate Cargo targets. macOS and
+  Windows also run the doctests and `cargo doc`, once each, on partition 1.
+- `Protocol CI / Gate` reads the job's single `needs.rust.result`, which is
+  `success` only when all six legs ran and passed. A skipped or cancelled leg
+  fails it, and a skip is accepted only when no protocol path changed.
+- `protocol-powerset-ci.unit.test.ts` fails if a leg leaves the matrix, a flag
+  narrows the powerset, the Gate stops requiring `rust`, or a configuration
+  falls outside both partitions. It checks them against the 36 runs cargo-hack
+  0.6.45 prints for the crate, so a new feature surfaces there.
+- cargo-hack is pinned by version in `protocol-ci.yml` and `protocol-release.yml`
+  (through the SHA-pinned `taiki-e/install-action`), and
+  `protocol-package.unit.test.ts` keeps the two equal. The release job runs the
+  powerset through `bun run protocol:check`, not through these legs.
+
 ## Concurrency policy
 
 Workflows that declare `concurrency` follow a small set of rules so overlapping

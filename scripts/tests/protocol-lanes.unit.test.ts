@@ -279,11 +279,17 @@ describe('protocol lane selection', () => {
 
     const scoped = command.join(' ');
     const protocolRust = extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'rust');
-    const protocolStep = stepRunning(protocolRust, scoped);
+    // protocol-ci runs the powerset as `--partition M/2` legs of the same command
+    // (protocol-powerset-ci.unit.test.ts pins the partitions themselves).
+    const ciCommand =
+      label === 'protocol:feature-powerset'
+        ? scoped.replace(' -- ', ' --partition "$PARTITION" -- ')
+        : scoped;
+    const protocolStep = stepRunning(protocolRust, ciCommand);
     const shimCommand = shimWorkspace[label];
     if (!shimCommand) {
       // Nothing in cargo-shim runs the feature powerset: protocol-ci owns it.
-      expect(protocolStep, `${label}: expected protocol-ci to run "${scoped}"`).toBeDefined();
+      expect(protocolStep, `${label}: expected protocol-ci to run "${ciCommand}"`).toBeDefined();
       return;
     }
 
