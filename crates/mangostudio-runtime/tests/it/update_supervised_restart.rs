@@ -35,7 +35,7 @@ fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_mangostudio-runtime")
 }
 
-/// The release the binary reports, the same expression as `src/cli.rs`.
+/// The release the binary reports, the same expression as `src/main.rs`.
 fn installed_version() -> &'static str {
     option_env!("MANGOSTUDIO_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
@@ -179,6 +179,26 @@ async fn dial(port: u16, serve: &RuntimeProcess) -> Session {
     }
 }
 
+/// Checks that the runtime on the far side of `session`, reached over `transport`, reports this
+/// build's release in its hello and in `runtime.health`: the two places a hub reads it from.
+async fn assert_session_reports_installed_version(transport: &str, session: &Session) {
+    let remote = session
+        .ready()
+        .await
+        .expect("the runtime completes its handshake");
+    let health = session
+        .request("runtime.health", json!({}))
+        .await
+        .unwrap_or_else(|error| panic!("expected runtime.health: ok | received: {error:?}"));
+    super::cli::assert_all_report_stamp(&[
+        (&format!("{transport} hello peer"), &remote.peer.version),
+        (
+            &format!("{transport} runtime.health runtimeVersion"),
+            &super::cli::runtime_version_of(&health),
+        ),
+    ]);
+}
+
 /// Streams `bytes` as `NEXT_VERSION` and returns the commit's answer.
 async fn stream_update(session: &Session, bytes: &[u8]) -> Value {
     let digest: String = Sha256::digest(bytes)
@@ -271,6 +291,7 @@ async fn a_committed_update_over_serve_exits_for_the_supervisor_to_restart() {
     );
 
     let session = dial(port, &serve).await;
+    assert_session_reports_installed_version("serve", &session).await;
     assert_update_restarts(&session, &mut serve, &home).await;
 }
 
@@ -313,9 +334,6 @@ async fn a_committed_update_over_connect_exits_for_the_supervisor_to_restart() {
     .await
     .expect("the runtime completes the WebSocket upgrade");
     let (session, _driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
-    session
-        .ready()
-        .await
-        .expect("the runtime completes its handshake");
+    assert_session_reports_installed_version("connect", &session).await;
     assert_update_restarts(&session, &mut connect, &home).await;
 }

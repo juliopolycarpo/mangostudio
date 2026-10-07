@@ -7,7 +7,7 @@ name = "mangostudio-runtime"
 # the app release (via `bun run check:versions`, bumped by
 # `bumpLockstepVersions` on release — this manifest's version is never
 # hand-maintained). Distribution builds stamp the exact release version in at
-# compile time (`MANGOSTUDIO_RELEASE_VERSION`, see `src/cli.rs`); this version
+# compile time (`MANGOSTUDIO_RELEASE_VERSION`, see `src/main.rs`); this version
 # is what a plain `cargo build` reports, never the protocol version.
 version = "0.1.1"
 authors.workspace = true
