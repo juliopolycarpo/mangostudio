@@ -53,6 +53,9 @@
       "outputs": ["dist/**"]
     },
     "check:quick": {
+      // Cycles include generated and gitignored TS/TSX files, which are absent
+      // from Turbo's VCS inputs. Always scan them instead of replaying a cache.
+      "cache": false,
       "inputs": ["$TURBO_ROOT$/biome.json", "$TURBO_DEFAULT$"]
     },
     "typecheck": {

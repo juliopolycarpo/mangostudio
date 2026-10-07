@@ -8,7 +8,7 @@
     "build": "bun ./build.ts",
     "routes": "tsr generate",
     "check": "bun run check:quick && bun run typecheck",
-    "check:quick": "biome check .",
+    "check:quick": "biome check . && bun ../../scripts/check-import-cycles.ts .",
     "typecheck": "tsc --noEmit",
     "fix": "biome check --write src tests",
     "test": "bun run test:unit && bun run test:integration",

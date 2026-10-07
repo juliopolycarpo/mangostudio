@@ -1,5 +1,6 @@
 // Import cycle witnesses across discovered JS workspaces and Bun scripts.
 
+import { createImportCycleCommand } from '../../lib/import-cycles';
 import { countBiomeCycleWitnesses, parseBiomeCycleReport } from './biome-cycles';
 import type { ComponentSpec } from './registry';
 import { runCapture } from './support';
@@ -30,21 +31,7 @@ export const countCircularDeps = async (
   run: Run = runCapture
 ): Promise<number> => {
   if (roots.length === 0) return 0;
-  const command = [
-    'bunx',
-    'biome',
-    'lint',
-    '--only=suspicious/noImportCycles',
-    '--only=nursery/noSelfImport',
-    '--max-diagnostics=none',
-    '--diagnostic-level=error',
-    '--error-on-warnings',
-    '--colors=off',
-  ];
-  const diagnostics = parseBiomeCycleReport(await run([...command, '--reporter=json', ...roots]));
+  const diagnostics = parseBiomeCycleReport(await run(createImportCycleCommand(roots, 'json')));
   if (diagnostics.length === 0) return 0;
-  return countBiomeCycleWitnesses(
-    diagnostics,
-    await run([...command, '--reporter=default', ...roots])
-  );
+  return countBiomeCycleWitnesses(diagnostics, await run(createImportCycleCommand(roots)));
 };

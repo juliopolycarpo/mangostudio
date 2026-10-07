@@ -40,6 +40,7 @@ generated contract-artifact freshness, lockfile dedupe, the Mango Protocol
 lanes (spec, schema equality, fixtures, Cargo) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.
 Default workspace selection: --all
+Workspace cycle scans include generated and gitignored TS/TSX files.
 
 Workspace flags:
   --frontend

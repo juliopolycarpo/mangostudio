@@ -1,8 +1,28 @@
 import { describe, expect, test } from 'bun:test';
 import { createTurboCheckCommand, createWorkspaceDprintCommand } from '../lib/check';
+import { createImportCycleCommand } from '../lib/import-cycles';
 import { readText } from './support/read-text';
 
 describe('check script', () => {
+  test('shares a cycle-only command with explicit configuration, complete diagnostics and roots', () => {
+    const roots = ['apps/api', 'packages/protocol'];
+    expect(createImportCycleCommand(roots)).toEqual([
+      'bunx',
+      'biome',
+      'lint',
+      '--config-path=biome.cycles.json',
+      '--only=suspicious/noImportCycles',
+      '--only=nursery/noSelfImport',
+      '--max-diagnostics=none',
+      '--diagnostic-level=error',
+      '--error-on-warnings',
+      '--colors=off',
+      '--reporter=default',
+      ...roots,
+    ]);
+    expect(createImportCycleCommand(roots, 'json')).toContain('--reporter=json');
+    expect(roots).toEqual(['apps/api', 'packages/protocol']);
+  });
   test('creates one filtered Turbo invocation for selected workspaces', () => {
     expect(createTurboCheckCommand(['api', 'shared'])).toEqual([
       'turbo',
@@ -75,7 +95,9 @@ describe('check script', () => {
     ]) {
       const manifest = JSON.parse(readText(manifestPath)) as { scripts?: Record<string, string> };
 
-      expect(manifest.scripts?.['check:quick']).toBe('biome check .');
+      expect(manifest.scripts?.['check:quick']).toBe(
+        'biome check . && bun ../../scripts/check-import-cycles.ts .'
+      );
       expect(manifest.scripts?.circular).toBeUndefined();
     }
   });

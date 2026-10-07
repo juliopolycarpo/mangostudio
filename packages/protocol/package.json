@@ -68,7 +68,7 @@
   },
   "scripts": {
     "build": "bun ./build.ts",
-    "check:quick": "biome check .",
+    "check:quick": "biome check . && bun ../../scripts/check-import-cycles.ts .",
     "typecheck": "tsc --noEmit",
     "prepack": "bun ./build.ts"
   },

@@ -23,13 +23,23 @@ function createCheckFixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'mango-import-cycles-'));
   cpSync(join(ROOT_DIR, 'scripts/lib'), join(root, 'scripts/lib'), { recursive: true });
   writeFileSync(join(root, 'scripts/check.ts'), readText('scripts/check.ts'));
-  for (const file of ['package.json', 'bun.lock', 'turbo.jsonc', 'dprint.json']) {
+  writeFileSync(
+    join(root, 'scripts/check-import-cycles.ts'),
+    readText('scripts/check-import-cycles.ts')
+  );
+  for (const file of [
+    'package.json',
+    'bun.lock',
+    'turbo.jsonc',
+    'dprint.json',
+    'biome.json',
+    'biome.cycles.json',
+    '.gitignore',
+  ]) {
     writeFileSync(join(root, file), readText(file));
   }
-  const config = JSON.parse(readText('biome.json'));
-  config.vcs.enabled = false;
-  config.formatter.enabled = false;
-  writeFileSync(join(root, 'biome.json'), JSON.stringify(config));
+  const git = Bun.spawnSync(['git', 'init', '-q'], { cwd: root, stderr: 'pipe' });
+  expect(git.exitCode, git.stderr.toString()).toBe(0);
   mkdirSync(join(root, 'node_modules'), { recursive: true });
   // Windows .bin wrappers resolve package paths relative to node_modules.
   for (const dependency of ['.bin', '@biomejs', '@typescript', '@dprint', 'turbo', 'dprint']) {
@@ -43,12 +53,14 @@ function createCheckFixture(): string {
     mkdirSync(join(root, workspace, 'src'), { recursive: true });
     mkdirSync(join(root, workspace, 'tests'), { recursive: true });
     writeFileSync(join(root, workspace, 'src/index.ts'), 'export const leaf = 1;\n');
-    const manifest = JSON.parse(readText(`${workspace}/package.json`));
     // Keep the actual lint/check scripts. This named fake isolates typecheck
     // I/O so a missing application fixture never causes the expected failure.
-    manifest.scripts.typecheck = 'bun ./fake-typecheck.ts';
+    const manifest = readText(`${workspace}/package.json`).replace(
+      '"typecheck": "tsc --noEmit"',
+      '"typecheck": "bun ./fake-typecheck.ts"'
+    );
     writeFileSync(join(root, workspace, 'fake-typecheck.ts'), 'process.exit(0);\n');
-    writeFileSync(join(root, workspace, 'package.json'), JSON.stringify(manifest));
+    writeFileSync(join(root, workspace, 'package.json'), manifest);
     if (workspace.startsWith('apps/')) {
       for (const file of ['AGENTS.md', 'bunfig.toml']) {
         writeFileSync(join(root, workspace, file), readText(`${workspace}/${file}`));
@@ -59,6 +71,7 @@ function createCheckFixture(): string {
 }
 
 function injectCycle(root: string, workspace: string, files: Record<string, string>): void {
+  mkdirSync(join(root, workspace), { recursive: true });
   for (const [name, contents] of Object.entries(files)) {
     writeFileSync(join(root, workspace, name), contents);
   }
@@ -76,6 +89,134 @@ function runCheck(root: string, workspace: string): string {
 }
 
 describe('Biome import cycle checks', () => {
+  for (const workspace of WORKSPACES) {
+    test(`${workspace} rejects and counts a cycle under ignored dist with the actual config`, async () => {
+      const root = createCheckFixture();
+      try {
+        injectCycle(root, `${workspace}/dist`, TYPE_CYCLE);
+        const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+        expect(await countCircularDeps([workspace], runBiome)).toBe(1);
+        const output = runCheck(root, workspace);
+        expect(output).toContain('lint/suspicious/noImportCycles');
+        expect(output).toContain('dist/a.ts');
+        expect(output).toContain('dist/b.ts');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test('rejects and counts a generated route tree self-import with the actual config', async () => {
+    const root = createCheckFixture();
+    try {
+      injectCycle(root, 'apps/frontend/src', {
+        'routeTree.gen.ts':
+          "import { routeTree as self } from './routeTree.gen';\nexport const routeTree = () => self();\n",
+      });
+      const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+      expect(await countCircularDeps(['apps/frontend'], runBiome)).toBe(1);
+      const output = runCheck(root, 'apps/frontend');
+      expect(output).toContain('lint/nursery/noSelfImport');
+      expect(output).toContain('routeTree.gen.ts');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects and counts a generated runtime-contract cycle with the actual config', async () => {
+    const root = createCheckFixture();
+    try {
+      injectCycle(root, 'apps/shared/src/runtime-contract/generated', TYPE_CYCLE);
+      const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+      expect(await countCircularDeps(['apps/shared'], runBiome)).toBe(1);
+      expect(runCheck(root, 'apps/shared')).toContain('lint/suspicious/noImportCycles');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects and counts TSX cycles excluded only by the actual gitignore', async () => {
+    const root = createCheckFixture();
+    try {
+      injectCycle(root, 'apps/frontend/build', {
+        'a.tsx': "import { b } from './b';\nexport const a = () => b();\n",
+        'b.tsx': "import { a } from './a';\nexport const b = () => a();\n",
+      });
+      const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+      expect(await countCircularDeps(['apps/frontend'], runBiome)).toBe(1);
+      expect(runCheck(root, 'apps/frontend')).toContain('lint/suspicious/noImportCycles');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an ignored cycle introduced after a clean required workspace check', () => {
+    const root = createCheckFixture();
+    try {
+      const clean = Bun.spawnSync(['bun', 'run', 'check', '--api'], {
+        cwd: root,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      expect(clean.exitCode, clean.stdout.toString() + clean.stderr.toString()).toBe(0);
+      injectCycle(root, 'apps/api/dist', TYPE_CYCLE);
+      expect(runCheck(root, 'apps/api')).toContain('lint/suspicious/noImportCycles');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects and counts declaration cycles under an ignored directory', async () => {
+    const root = createCheckFixture();
+    try {
+      injectCycle(root, 'packages/protocol/dist', {
+        'a.d.ts': TYPE_CYCLE['a.ts'],
+        'b.d.ts': TYPE_CYCLE['b.ts'],
+      });
+      const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+      expect(await countCircularDeps(['packages/protocol'], runBiome)).toBe(1);
+      expect(runCheck(root, 'packages/protocol')).toContain('lint/suspicious/noImportCycles');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps TS cycle files larger than the normal Biome one-MiB limit', async () => {
+    const root = createCheckFixture();
+    try {
+      injectCycle(root, 'apps/api/dist', {
+        ...TYPE_CYCLE,
+        'a.ts': `/*${'x'.repeat(1024 * 1024)}*/\n${TYPE_CYCLE['a.ts']}`,
+      });
+      const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+      expect(await countCircularDeps(['apps/api'], runBiome)).toBe(1);
+      expect(runCheck(root, 'apps/api')).toContain('lint/suspicious/noImportCycles');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps node_modules, git internals and independent JavaScript outside the TS scan', async () => {
+    const root = createCheckFixture();
+    try {
+      injectCycle(root, 'apps/api/node_modules/fixture-dependency', TYPE_CYCLE);
+      injectCycle(root, 'apps/api/.git', TYPE_CYCLE);
+      injectCycle(root, 'apps/api/dist', {
+        'self.js': "import { self } from './self.js';\nexport { self };\n",
+      });
+      const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+      expect(await countCircularDeps(['apps/api'], runBiome)).toBe(0);
+      const clean = Bun.spawnSync(['bun', 'run', 'check', '--api'], {
+        cwd: root,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      expect(clean.exitCode, clean.stdout.toString() + clean.stderr.toString()).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   for (const workspace of WORKSPACES) {
     for (const [kind, files] of Object.entries({ value: VALUE_CYCLE, type: TYPE_CYCLE })) {
       test(`${workspace} rejects a ${kind} cycle outside src/tests and names both files`, () => {
@@ -101,6 +242,10 @@ describe('Biome import cycle checks', () => {
     dynamic: {
       'a.ts': "export const a = () => import('./b');\n",
       'b.ts': "export const b = () => import('./a');\n",
+    },
+    CommonJS: {
+      'a.ts': "const { b } = require('./b');\nexports.a = () => b();\n",
+      'b.ts': "const { a } = require('./a');\nexports.b = () => a();\n",
     },
     'named type': {
       'a.ts': "import { type B } from './b';\nexport type A = { b?: B };\n",

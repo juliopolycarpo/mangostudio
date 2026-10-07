@@ -70,6 +70,7 @@ describe('countCircularDeps', () => {
         'bunx',
         'biome',
         'lint',
+        '--config-path=biome.cycles.json',
         '--only=suspicious/noImportCycles',
         '--only=nursery/noSelfImport',
         '--max-diagnostics=none',

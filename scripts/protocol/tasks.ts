@@ -85,9 +85,9 @@ const CARGO_CLIPPY = [
 function typescriptCheckTasks(tsOnly: boolean, cargo: boolean): ProtocolTask[] {
   return [
     {
-      // Biome checks the whole workspace, including type-only cycles and
-      // top-level build helpers. Keep it here so standalone/scoped protocol
-      // checks enforce the same rule as the repository gate.
+      // check:quick keeps normal lint exclusions separate from the full TS/TSX
+      // cycle scan, including generated files and top-level build helpers.
+      // Standalone/scoped protocol checks enforce the repository's same rules.
       label: 'protocol:workspace',
       cmd: [
         'turbo',
