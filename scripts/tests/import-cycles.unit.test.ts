@@ -123,6 +123,24 @@ describe('Biome import cycle checks', () => {
     });
   }
 
+  test('ignores witness-like source comments in actual Biome diagnostics', async () => {
+    const root = createCheckFixture();
+    try {
+      injectCycle(root, 'apps/api', {
+        ...VALUE_CYCLE,
+        'a.ts':
+          "import { b } from './b'; // This import resolves to bogus.ts\n" +
+          '// ... which imports spoof.ts\n' +
+          '// ... which imports bogus.ts\n' +
+          'export const a = () => b();\n',
+      });
+      const runBiome = (cmd: readonly string[]) => runCapture(cmd, { cwd: root });
+      expect(await countCircularDeps(['apps/api'], runBiome)).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('reports an independent scripts cycle even while all workspace graphs are clean', async () => {
     const root = createCheckFixture();
     try {

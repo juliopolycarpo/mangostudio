@@ -96,11 +96,11 @@ const signature = ({ category, path, line, column }: CycleDiagnostic): string =>
 
 function witnessPaths(diagnostic: CycleDiagnostic, body: string): string[][] {
   if (diagnostic.category === 'lint/nursery/noSelfImport') return [[diagnostic.path]];
-  const resolved = body.match(/This import resolves to (.+)\r?$/m)?.[1];
-  const imports = [...body.matchAll(/\.\.\. which imports (.+)\r?$/gm)].map((match) =>
+  const resolved = body.match(/^ {2}i This import resolves to (.+)\r?$/m)?.[1];
+  const imports = [...body.matchAll(/^ {8}\.\.\. which imports (.+)\r?$/gm)].map((match) =>
     pathName(match[1].trim())
   );
-  if (!resolved || !body.includes("... which is the file we're importing from.")) {
+  if (!resolved || !/^ {8}\.\.\. which is the file we're importing from\.\r?$/m.test(body)) {
     return invalid(body, 'a complete Biome cycle path');
   }
   if (imports.at(-1) !== diagnostic.path)

@@ -119,6 +119,18 @@ describe('countCircularDeps', () => {
     expect(await countCircularDeps(['scripts'], biome.run)).toBe(2);
   });
 
+  it('ignores source excerpts that imitate cycle witness advice', async () => {
+    const text = cycleText('a.ts', ['b.ts', 'a.ts']).replace(
+      '  i This import resolves to b.ts',
+      '  > 1 │ // This import resolves to bogus.ts\n' +
+        '    2 │ // ... which imports spoof.ts\n' +
+        '    3 │ // ... which imports bogus.ts\n' +
+        '  i This import resolves to b.ts'
+    );
+    const biome = fakeBiome(jsonResult(report([diagnostic('a.ts')]), 1), textResult(text, 1));
+    expect(await countCircularDeps(['scripts'], biome.run)).toBe(1);
+  });
+
   it('counts a three-file cycle and a self-import with Windows paths', async () => {
     const diagnostics = [
       diagnostic('a.ts'),
