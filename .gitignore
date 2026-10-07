@@ -6,6 +6,11 @@ dist/
 .dist-backup-*/
 .dist-metafile-staging-*
 .dist-metafile-backup-*
+# The standalone build parks the previous frontend bundle here while it rebuilds
+# (`frontendDistAsidePath` in scripts/lib/build.ts). Turbo hashes every file Git
+# does not ignore, so an unignored copy changes the frontend task hash and turns
+# a cache hit into a rebuild.
+/apps/frontend/dist.aside-*/
 dist-npm/
 dist-metafile.json
 release-assets/
