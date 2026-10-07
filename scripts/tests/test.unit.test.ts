@@ -78,8 +78,8 @@ describe('test script', () => {
 
   test('leaves the shared JUnit directory out of per-workspace outputs', () => {
     // Every workspace writes into one directory, so declaring it would have
-    // four tasks claiming the same glob — the overlap the typecheck task's own
-    // comment warns cross-contaminates a restored cache.
+    // four tasks claiming the same glob, and overlapping globs cross-contaminate
+    // a restored cache.
     for (const task of ['test:unit', 'test:integration', 'test:coverage']) {
       for (const output of turboConfig.tasks[task]?.outputs ?? []) {
         expect(output).not.toContain('junit');
