@@ -146,9 +146,12 @@ jobs:
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Pinned: `--feature-powerset` decides which feature sets this lane checks,
+      # so a release re-run (protocol-release.yml pins the same version) and this
+      # lane must not drift apart as cargo-hack publishes.
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
-          tool: cargo-hack
+          tool: cargo-hack@0.6.45
       # Cargo Shim runs `cargo fmt --all`, then clippy and the tests of the whole
       # workspace with `--all-features` (a superset of `-p mango-protocol
       # --all-features`), on these same three OSes, whenever a path this crate
