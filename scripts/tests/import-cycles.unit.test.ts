@@ -176,8 +176,8 @@ describe('Biome import cycle checks', () => {
           expect(output).toContain(
             kind === 'self' ? 'lint/nursery/noSelfImport' : 'lint/suspicious/noImportCycles'
           );
-          expect(output).toContain(`dist/${first}`);
-          expect(output).toContain(`dist/${second}`);
+          expect(output).toContain(join('dist', first));
+          expect(output).toContain(join('dist', second));
         } finally {
           rmSync(root, { recursive: true, force: true });
         }
@@ -194,8 +194,8 @@ describe('Biome import cycle checks', () => {
         expect(await countCircularDeps([workspace], runBiome)).toBe(1);
         const output = runCheck(root, workspace);
         expect(output).toContain('lint/suspicious/noImportCycles');
-        expect(output).toContain('dist/a.ts');
-        expect(output).toContain('dist/b.ts');
+        expect(output).toContain(join('dist', 'a.ts'));
+        expect(output).toContain(join('dist', 'b.ts'));
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -325,7 +325,7 @@ describe('Biome import cycle checks', () => {
       expect(await countCircularDeps(['apps/api'], runBiome)).toBe(1);
       const output = runCheck(root, 'apps/api');
       expect(output).toContain('lint/nursery/noSelfImport');
-      expect(output).toContain('dist/self.js');
+      expect(output).toContain(join('dist', 'self.js'));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
