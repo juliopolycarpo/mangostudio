@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import ts from '@typescript/typescript6';
 
 import { ROOT_DIR } from './config';
+import { isRequire, unwrapExpression } from './import-specifiers';
 
 const PARITY_TEST =
   'apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts';
@@ -13,39 +14,6 @@ interface ImportViolation {
   readonly line: number;
   readonly column: number;
   readonly specifier: string;
-}
-
-function unwrapExpression(node: ts.Node | undefined): ts.Node | undefined {
-  while (
-    node &&
-    (ts.isParenthesizedExpression(node) ||
-      ts.isNonNullExpression(node) ||
-      ts.isAsExpression(node) ||
-      ts.isSatisfiesExpression(node) ||
-      ts.isTypeAssertionExpression(node))
-  ) {
-    node = node.expression;
-  }
-  return node;
-}
-
-function literalText(node: ts.Node | undefined): string | undefined {
-  const literal = unwrapExpression(node);
-  return literal && ts.isStringLiteralLike(literal) ? literal.text : undefined;
-}
-
-function isRequire(expression: ts.Expression): boolean {
-  const unwrapped = unwrapExpression(expression);
-  if (!unwrapped) return false;
-  if (ts.isIdentifier(unwrapped)) return unwrapped.text === 'require';
-  if (!ts.isPropertyAccessExpression(unwrapped) && !ts.isElementAccessExpression(unwrapped)) {
-    return false;
-  }
-  const receiver = unwrapExpression(unwrapped.expression);
-  if (!receiver || !ts.isIdentifier(receiver) || receiver.text !== 'module') return false;
-  return ts.isPropertyAccessExpression(unwrapped)
-    ? unwrapped.name.text === 'require'
-    : literalText(unwrapped.argumentExpression) === 'require';
 }
 
 function isTypeOnlyImport(clause: ts.ImportClause | undefined): boolean {

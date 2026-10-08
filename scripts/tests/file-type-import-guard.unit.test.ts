@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import ts from '@typescript/typescript6';
+import { isRequire, unwrapExpression } from '../lib/import-specifiers';
 
 const REPO_ROOT = resolve(import.meta.dir, '../..');
 const API_SRC = join(REPO_ROOT, 'apps/api/src');
@@ -11,36 +12,6 @@ interface FileTypeImport {
   file: string;
   line: number;
   specifier: string;
-}
-
-function unwrapExpression(node: ts.Node | undefined): ts.Node | undefined {
-  while (
-    node &&
-    (ts.isParenthesizedExpression(node) ||
-      ts.isNonNullExpression(node) ||
-      ts.isAsExpression(node) ||
-      ts.isSatisfiesExpression(node) ||
-      ts.isTypeAssertionExpression(node))
-  ) {
-    node = node.expression;
-  }
-  return node;
-}
-
-function isRequireExpression(expression: ts.Expression): boolean {
-  const loader = unwrapExpression(expression);
-  if (!loader) return false;
-  if (ts.isIdentifier(loader)) return loader.text === 'require';
-  if (!ts.isPropertyAccessExpression(loader) && !ts.isElementAccessExpression(loader)) {
-    return false;
-  }
-  const receiver = unwrapExpression(loader.expression);
-  if (!receiver || !ts.isIdentifier(receiver) || receiver.text !== 'module') {
-    return false;
-  }
-  if (ts.isPropertyAccessExpression(loader)) return loader.name.text === 'require';
-  const member = unwrapExpression(loader.argumentExpression);
-  return !!member && ts.isStringLiteralLike(member) && member.text === 'require';
 }
 
 function findFileTypeImports(source: string, file: string): FileTypeImport[] {
@@ -70,7 +41,7 @@ function findFileTypeImports(source: string, file: string): FileTypeImport[] {
     }
     if (
       ts.isCallExpression(node) &&
-      (node.expression.kind === ts.SyntaxKind.ImportKeyword || isRequireExpression(node.expression))
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword || isRequire(node.expression))
     ) {
       recordImport(node.arguments[0]);
     }
