@@ -18,7 +18,7 @@ scripts/
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
 ├── test.ts           Run unit/integration/e2e/coverage lanes, whole, sharded, or --changed (bun run test)
 ├── run-test-workers.ts
-│                     Run one test lane as isolated worker processes, one merged report (API test:unit, root test:scripts:workers)
+│                     Run one test lane in worker processes with one merged report (API unit/integration, root test:scripts:workers)
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)

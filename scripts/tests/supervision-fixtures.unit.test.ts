@@ -54,6 +54,16 @@ async function runFixture(pattern: string, file: string) {
 }
 
 describe('controlled process fixtures under a root worker', () => {
+  it.skipIf(process.platform !== 'linux')(
+    'keeps resistant token children available for cancellation under the root orphan policy',
+    async () => {
+      await runFixture(
+        'reaps SIGTERM-resistant leaders and token children before the outer deadline',
+        'scripts/tests/test-workers-cancel.unit.test.ts'
+      );
+    }
+  );
+
   it('keeps the inherited-stdout failure and the original child exit status', async () => {
     await runFixture(
       'keeps the exit status of a child that died holding stdout open',

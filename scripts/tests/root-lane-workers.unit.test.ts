@@ -228,6 +228,21 @@ describe('the coverage script and the CI shards stay what they were', () => {
 });
 
 describe('the runner over the root tree', () => {
+  it.each([
+    { label: 'four on a large POSIX host', cpus: 34, platform: 'linux' as const, count: 4 },
+    { label: 'half the cores on a smaller host', cpus: 6, platform: 'linux' as const, count: 3 },
+    { label: 'one on a single-core host', cpus: 1, platform: 'linux' as const, count: 1 },
+    { label: 'one on Windows', cpus: 34, platform: 'win32' as const, count: 1 },
+  ])('defaults to $label when the worker override is absent', async ({ cpus, platform, count }) => {
+    const run = harness(diskWorker(REAL_FILES));
+
+    expect(await main(laneArgv(), { ...run.deps, cpus, platform })).toBe(0);
+    expect(run.started).toHaveLength(count);
+    expect(run.lines[0]).toContain(
+      `root: ${count} worker${count === 1 ? '' : 's'}, ${REAL_FILES.length} files`
+    );
+  });
+
   it('census the real scripts tree and exits 0 when every worker passes', async () => {
     expect(REAL_FILES.length, 'expected the scripts tree to hold test files').toBeGreaterThan(100);
     const run = harness(diskWorker(REAL_FILES), { [WORKERS_ENV]: '4' });

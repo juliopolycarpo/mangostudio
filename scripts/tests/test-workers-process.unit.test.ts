@@ -101,9 +101,13 @@ const isAlive = (pid: number): boolean => {
 
 describe('four real worker processes', () => {
   it('discards an ambient runtime home before starting workers', async () => {
-    const { verdict, lines } = await runLane(2, {}, {
-      env: { ...process.env, MANGO_HOME: '/ambient/runtime-home' },
-    });
+    const { verdict, lines } = await runLane(
+      2,
+      {},
+      {
+        env: { ...process.env, MANGO_HOME: '/ambient/runtime-home' },
+      }
+    );
     expect(verdict.failures).toEqual([]);
     expect(lines).toContain('[api-unit 1/2] mango-home=<unset>');
     expect(lines).toContain('[api-unit 2/2] mango-home=<unset>');

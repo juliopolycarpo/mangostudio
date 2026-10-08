@@ -144,6 +144,7 @@ export const TEST_LANES: readonly TestLane[] = [
     // matches disagree.
     workers: {
       testDir: 'scripts',
+      defaultWidth: 4,
       alsoRuns: [
         'apps/api/tests/integration/modules/environments/wsl-runtime-scripts.integration.test.ts',
         'apps/api/tests/unit/modules/environments/runtime-slot-scripts.test.ts',
