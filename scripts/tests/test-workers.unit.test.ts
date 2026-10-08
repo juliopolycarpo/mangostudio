@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
+import { WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
 import {
   describeCaseDifference,
   discoverTestFiles,
@@ -33,6 +34,8 @@ import {
   shardOf,
   silentWorker,
   unstartableWorker,
+  withLeftovers,
+  withUnreadableProcessTable,
   withWorker,
   writingWorker,
 } from './support/test-worker-fakes';
@@ -46,6 +49,7 @@ const SPEC: WorkerLaneSpec = {
   command: SERIAL_COMMAND,
   testDir: TEST_DIR,
   launcher: ['/bin/bun', '/work/scripts/with-test-home.ts'],
+  settle: false,
 };
 
 /** Runs `count` fake workers over `lane` and judges them as the runner does. */
@@ -95,6 +99,13 @@ describe('resolveWorkerCount', () => {
       ).toBe(1);
     }
     expect(resolveWorkerCount({ [WORKERS_ENV]: '' }, 36, 'win32')).toBe(1);
+  });
+
+  it('takes the lane’s own default when it names one, still capped by the cores and still one on Windows', () => {
+    expect(resolveWorkerCount({}, 34, 'linux', 4)).toBe(4);
+    expect(resolveWorkerCount({}, 6, 'linux', 4)).toBe(3);
+    expect(resolveWorkerCount({}, 34, 'win32', 4)).toBe(1);
+    expect(resolveWorkerCount({ [WORKERS_ENV]: '8' }, 34, 'linux', 4)).toBe(8);
   });
 
   it('lets an explicit width win on Windows, and validates it as anywhere', () => {
@@ -176,6 +187,24 @@ describe('planWorkers', () => {
     expect(first?.argv.at(-1)).toBe(TEST_DIR);
     expect(first?.argv).toContain('--parallel=1');
     expect(first?.argv).toContain('--timeout');
+  });
+
+  it('leaves --no-orphans off a worker that must settle, and gives each its own token', () => {
+    const settling = planWorkers({ ...SPEC, settle: true }, 4, '/reports/run-1');
+    for (const plan of settling) {
+      expect(
+        plan.argv,
+        `worker ${plan.index} must not run --no-orphans, which kills the evidence`
+      ).not.toContain('--no-orphans');
+      expect(plan.settle).toBe(true);
+    }
+    const tokens = settling.map((plan) => plan.env[WORKER_TOKEN_ENV]);
+    expect(tokens.every((token) => typeof token === 'string' && token.length > 8)).toBe(true);
+    expect(new Set(tokens).size).toBe(4);
+    for (const plan of plans) {
+      expect(plan.settle).toBe(false);
+      expect(plan.env).toEqual({});
+    }
   });
 
   it('starts every worker with --no-orphans so a killed launcher takes its bun test with it', () => {
@@ -443,6 +472,78 @@ describe('a worker that does not finish cleanly fails the lane, naming its index
         /\| expected: .+ \| received: .+/
       );
     }
+  });
+});
+
+describe('a worker that leaves a process behind fails the lane', () => {
+  const lane = fakeLane(8, 2);
+  const leaked = [{ pid: 4242, command: 'sleep 600' }];
+
+  it('names the worker, the count and the child’s pid and command', async () => {
+    const disk = new FakeReportDisk();
+    const leaking = (plan: Parameters<StartWorker>[0]) =>
+      (plan.index === 2
+        ? withLeftovers(healthyWorker(lane, disk), leaked)
+        : healthyWorker(lane, disk))(plan);
+    const verdict = await judgeFakeLane(lane, 4, leaking, disk);
+
+    expect(verdict.failures).toEqual([
+      'api-unit worker 2/4 left processes behind | expected live descendants: 0 | received: 1 (pid 4242: sleep 600)',
+    ]);
+    expect(verdict.workers[1]?.ended).toBe('exit 0, left 1 running');
+    // The reports are whole and equal, so the lane keeps its merged report: the
+    // failure is the leak, not the cases.
+    expect(verdict.mergedXml).not.toBeNull();
+  });
+
+  it('lists the first five leftovers and counts the rest', async () => {
+    const disk = new FakeReportDisk();
+    const many = Array.from({ length: 7 }, (_, offset) => ({
+      pid: 5000 + offset,
+      command: `runtime ${offset}`,
+    }));
+    const verdict = await judgeFakeLane(
+      lane,
+      2,
+      withLeftovers(healthyWorker(lane, disk), many),
+      disk
+    );
+    expect(verdict.failures[0]).toContain('received: 7 (pid 5000: runtime 0;');
+    expect(verdict.failures[0]).toContain('pid 5004: runtime 4; and 2 more)');
+  });
+
+  it('passes a worker that settled', async () => {
+    const disk = new FakeReportDisk();
+    const verdict = await judgeFakeLane(
+      lane,
+      4,
+      withLeftovers(healthyWorker(lane, disk), []),
+      disk
+    );
+    expect(verdict.failures).toEqual([]);
+  });
+
+  it('fails a worker that requests settlement without providing the guard', async () => {
+    const disk = new FakeReportDisk();
+    const plans = planWorkers({ ...SPEC, settle: true }, 1, '/reports/unchecked');
+    const runs = await runWorkers(plans, writingWorker(reportOf(lane), disk));
+    const verdict = judgeWorkers({ runs, readReport: disk.read, census: null, testDir: TEST_DIR });
+    expect(verdict.failures).toEqual([
+      'api-unit worker 1/1 could not be checked for leftover processes | expected: a readable process table | received: worker requested settlement but provided no guard',
+    ]);
+  });
+
+  it('fails a worker whose process table could not be read, rather than passing it', async () => {
+    const disk = new FakeReportDisk();
+    const verdict = await judgeFakeLane(
+      lane,
+      2,
+      withUnreadableProcessTable(healthyWorker(lane, disk), 'ps: exit 1'),
+      disk
+    );
+    expect(verdict.failures[0]).toBe(
+      'api-unit worker 1/2 could not be checked for leftover processes | expected: a readable process table | received: ps: exit 1'
+    );
   });
 });
 

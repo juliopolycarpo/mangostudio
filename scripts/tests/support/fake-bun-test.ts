@@ -10,6 +10,12 @@
 //   hang            waits for a signal; writes MANGOSTUDIO_FAKE_PID_DIR/worker-<i>.pid first
 //   grandchild      report, exit 0 — but first leaves a child holding stdout and stderr open
 //                   (its pid in MANGOSTUDIO_FAKE_PID_DIR/grandchild-<i>.pid)
+//   leak            report, exit 0, leaving a quiet child running in the worker's group
+//                   (its pid in MANGOSTUDIO_FAKE_PID_DIR/leak-<i>.pid)
+//   leak-session    like leak, but the child starts a session of its own (it keeps the environment)
+//   tidy            report, exit 0, with a child that exits 300 ms later (a runtime shutting down)
+//   hang-tree       like hang, with a quiet child of its own; pids in
+//                   MANGOSTUDIO_FAKE_PID_DIR/tree-worker-<i>.pid and tree-child-<i>.pid
 //
 // Usage: see scripts/tests/test-workers-process.unit.test.ts
 
@@ -25,7 +31,17 @@ export const FAKE_BUN_TEST = import.meta.path;
 /** The cases the fake gives every file it finds. */
 export const FAKE_CASES_PER_FILE = 2;
 
-type Mode = 'pass' | 'exit1' | 'no-report' | 'sigkill' | 'hang' | 'grandchild';
+type Mode =
+  | 'pass'
+  | 'exit1'
+  | 'no-report'
+  | 'sigkill'
+  | 'hang'
+  | 'grandchild'
+  | 'leak'
+  | 'leak-session'
+  | 'tidy'
+  | 'hang-tree';
 
 function main(argv: readonly string[]): void {
   const flag = (name: string): string | undefined =>
@@ -36,15 +52,31 @@ function main(argv: readonly string[]): void {
     'pass') as Mode;
 
   console.log(`fake worker ${index}/${count} starting (${mode})`);
+  console.log(`mango-home=${process.env.MANGO_HOME ?? '<unset>'}`);
   console.error(`fake worker ${index}/${count} stderr`);
 
-  const files = discoverTestFiles(process.cwd(), 'tests/unit').map((path) => ({
+  // The lane's directory is the last argument, as in the real command.
+  const testDir = argv.at(-1) ?? 'tests/unit';
+  const files = discoverTestFiles(process.cwd(), testDir).map((path) => ({
     path,
     cases: Array.from({ length: FAKE_CASES_PER_FILE }, (_, item) => `case ${item}`),
     outcome: mode === 'exit1' ? ('fail' as const) : undefined,
   }));
 
   if (mode === 'sigkill') process.kill(process.pid, 'SIGKILL');
+  if (mode === 'hang-tree') {
+    const child = Bun.spawn({
+      cmd: [process.execPath, '-e', 'setInterval(() => undefined, 1000)'],
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    const dir = process.env.MANGOSTUDIO_FAKE_PID_DIR as string;
+    writeFileSync(join(dir, `tree-child-${index}.pid`), `${child.pid}`);
+    writeFileSync(join(dir, `tree-worker-${index}.pid`), `${process.pid}`);
+    setInterval(() => undefined, 1_000);
+    return;
+  }
   if (mode === 'hang') {
     writeFileSync(
       join(process.env.MANGOSTUDIO_FAKE_PID_DIR as string, `worker-${index}.pid`),
@@ -62,6 +94,24 @@ function main(argv: readonly string[]): void {
     });
     writeFileSync(
       join(process.env.MANGOSTUDIO_FAKE_PID_DIR as string, `grandchild-${index}.pid`),
+      `${leaked.pid}`
+    );
+    leaked.unref();
+  }
+  if (mode === 'leak' || mode === 'leak-session' || mode === 'tidy') {
+    const lifetime =
+      mode === 'tidy'
+        ? 'setTimeout(() => process.exit(0), 300)'
+        : 'setInterval(() => undefined, 1000)';
+    const leaked = Bun.spawn({
+      cmd: [process.execPath, '-e', lifetime],
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+      detached: mode === 'leak-session',
+    });
+    writeFileSync(
+      join(process.env.MANGOSTUDIO_FAKE_PID_DIR as string, `${mode}-${index}.pid`),
       `${leaked.pid}`
     );
     leaked.unref();

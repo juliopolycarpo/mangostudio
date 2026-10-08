@@ -28,6 +28,7 @@ import { Glob } from 'bun';
 import { ROOT_DIR } from './config';
 import { endOfOpenTag, type JunitCounts, parseJunitXml, readAttributes } from './junit-report';
 import type { TestLane } from './test-lanes';
+import { type Leftover, WORKER_TOKEN_ENV } from './test-worker-settle';
 
 /** Overrides the worker count; read by the runner, kept out of Turbo's cache key. */
 export const WORKERS_ENV = 'MANGO_TEST_WORKERS';
@@ -56,20 +57,24 @@ const DEFAULT_WORKERS = 6;
  * script with no MangoStudio code. Lift this when that is understood. An
  * explicit `MANGO_TEST_WORKERS` still wins, with the same validation.
  *
+ * A lane may name a default of its own (`laneDefault`); six is the unit lane's.
+ *
  * @example
  * resolveWorkerCount({}, 34, 'linux'); // => 6
+ * resolveWorkerCount({}, 34, 'linux', 4); // => 4
  * resolveWorkerCount({}, 34, 'win32'); // => 1
  * resolveWorkerCount({ MANGO_TEST_WORKERS: '2' }, 34, 'win32'); // => 2
  */
 export function resolveWorkerCount(
   env: Readonly<Record<string, string | undefined>>,
   cpus: number,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  laneDefault: number = DEFAULT_WORKERS
 ): number {
   const raw = env[WORKERS_ENV]?.trim();
   if (!raw) {
     if (platform === 'win32') return 1;
-    return Math.max(1, Math.min(DEFAULT_WORKERS, Math.floor(cpus / 2)));
+    return Math.max(1, Math.min(laneDefault, Math.floor(cpus / 2)));
   }
 
   const count = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
@@ -91,6 +96,12 @@ export interface WorkerLaneSpec {
   readonly testDir: string;
   /** What starts each worker's `bun test`: the temporary-HOME launcher. */
   readonly launcher: readonly string[];
+  /**
+   * Whether a worker must prove it left no process behind. A worker that settles
+   * leads a process group of its own and does not run `--no-orphans`, which would
+   * kill the evidence on its way out.
+   */
+  readonly settle: boolean;
 }
 
 /**
@@ -102,7 +113,12 @@ export interface WorkerLaneSpec {
  * laneSpec(laneById('api-unit'), ['bun', 'test', '--parallel=1', 'tests/unit']).testDir;
  * // => 'tests/unit'
  */
-export function laneSpec(lane: TestLane, command: readonly string[]): WorkerLaneSpec {
+export function laneSpec(
+  lane: TestLane,
+  command: readonly string[],
+  launcher?: readonly string[],
+  platform: NodeJS.Platform = process.platform
+): WorkerLaneSpec {
   if (!lane.workers) {
     throw new Error(
       `test workers: expected a lane with workers | received: ${lane.id} (see scripts/lib/test-lanes.ts)`
@@ -113,7 +129,10 @@ export function laneSpec(lane: TestLane, command: readonly string[]): WorkerLane
     cwd: join(ROOT_DIR, dirname(lane.manifest)),
     command,
     testDir: lane.workers.testDir,
-    launcher: [process.execPath, join(ROOT_DIR, 'scripts', 'with-test-home.ts')],
+    launcher: launcher ?? [process.execPath, join(ROOT_DIR, 'scripts', 'with-test-home.ts')],
+    // Windows keeps the serial default and Bun's orphan cleanup. It has no
+    // POSIX process group for the replacement settlement guard to inspect.
+    settle: (lane.workers.settle ?? false) && platform !== 'win32',
   };
 }
 
@@ -126,6 +145,10 @@ export interface WorkerPlan {
   readonly cwd: string;
   readonly argv: readonly string[];
   readonly reportPath: string;
+  /** This worker leads its own process group and must leave nothing running. */
+  readonly settle: boolean;
+  /** Variables set for this worker beyond the inherited environment. */
+  readonly env: Readonly<Record<string, string>>;
 }
 
 /** `api-unit worker 3/4`, the name every message about a worker starts with. */
@@ -185,8 +208,10 @@ export function planWorkers(
     const flags = [
       // The worker dies with its launcher and takes its own descendants along, so
       // the SIGKILL that ends a cancelled lane (which no launcher can forward) does
-      // not leave a `bun test`, or a process one of its tests started, behind.
-      '--no-orphans',
+      // not leave a `bun test`, or a process one of its tests started, behind. A
+      // lane that settles leaves the flag off: it would kill the very processes the
+      // settlement check exists to find, and its cancellation is a group signal.
+      ...(spec.settle ? [] : ['--no-orphans']),
       '--reporter=junit',
       `--reporter-outfile=${reportPath}`,
       ...(count > 1 ? [`--shard=${index}/${count}`] : []),
@@ -199,6 +224,11 @@ export function planWorkers(
       cwd: spec.cwd,
       argv: [...spec.launcher, program as string, subcommand as string, ...flags, ...rest],
       reportPath,
+      settle: spec.settle,
+      env: (spec.settle ? { [WORKER_TOKEN_ENV]: crypto.randomUUID() } : {}) as Record<
+        string,
+        string
+      >,
     };
   });
 }
@@ -209,10 +239,15 @@ export interface WorkerExit {
   readonly signal: string | null;
 }
 
-/** A started worker. `kill` asks it to stop; `exited` settles once it has. */
+/** A started worker. `kill` asks it to stop (its whole group, where it leads one); `exited` settles once it has. */
 export interface WorkerHandle {
   readonly exited: Promise<WorkerExit>;
   kill(signal: 'SIGTERM' | 'SIGKILL'): void;
+  /**
+   * Present on a worker that must settle: resolves, once it has exited, with the
+   * processes it left running (and has killed). Empty is a worker that settled.
+   */
+  settle?(): Promise<readonly Leftover[]>;
 }
 
 /** Starts a worker process; the real one is `startWorkerProcess`. */
@@ -228,6 +263,10 @@ export interface WorkerRun {
   /** Cancellation reached the worker before it ended on its own. */
   readonly cancelled: boolean;
   readonly durationMs: number;
+  /** Processes still running after the worker exited; always empty for a worker that does not settle. */
+  readonly leftovers: readonly Leftover[];
+  /** Why the check for leftovers could not be made. */
+  readonly settleError: string | null;
 }
 
 export interface RunWorkersOptions {
@@ -240,14 +279,26 @@ export interface RunWorkersOptions {
 const errorText = (caught: unknown): string =>
   caught instanceof Error ? caught.message : String(caught);
 
+/**
+ * A worker that leads its own group is signalled by the runner of the runner
+ * above, which gives its own children `CANCEL_GRACE_MS` (5 s) before it SIGKILLs
+ * them: ours must be gone, or killed, before that.
+ */
+const GROUP_KILL_AFTER_MS = 3_000;
+
 async function runWorker(
   plan: WorkerPlan,
   start: StartWorker,
   { signal, killAfterMs = 10_000 }: RunWorkersOptions
 ): Promise<WorkerRun> {
   const began = performance.now();
-  const settle = (partial: Pick<WorkerRun, 'exit' | 'startError' | 'cancelled'>): WorkerRun => ({
+  const settle = (
+    partial: Pick<WorkerRun, 'exit' | 'startError' | 'cancelled'> &
+      Partial<Pick<WorkerRun, 'leftovers' | 'settleError'>>
+  ): WorkerRun => ({
     plan,
+    leftovers: [],
+    settleError: null,
     ...partial,
     durationMs: Math.round(performance.now() - began),
   });
@@ -266,13 +317,31 @@ async function runWorker(
     if (ended) return;
     cancelled = true;
     handle.kill('SIGTERM');
-    escalation = setTimeout(() => handle.kill('SIGKILL'), killAfterMs);
+    escalation = setTimeout(
+      () => handle.kill('SIGKILL'),
+      plan.settle ? Math.min(killAfterMs, GROUP_KILL_AFTER_MS) : killAfterMs
+    );
   };
   if (signal?.aborted) cancel();
   else signal?.addEventListener('abort', cancel, { once: true });
 
   try {
-    return settle({ exit: await handle.exited, startError: null, cancelled });
+    const exit = await handle.exited;
+    ended = true;
+    clearTimeout(escalation);
+    if (!handle.settle) {
+      return settle({
+        exit,
+        startError: null,
+        cancelled,
+        settleError: plan.settle ? 'worker requested settlement but provided no guard' : null,
+      });
+    }
+    try {
+      return settle({ exit, startError: null, cancelled, leftovers: await handle.settle() });
+    } catch (caught) {
+      return settle({ exit, startError: null, cancelled, settleError: errorText(caught) });
+    }
   } catch (caught) {
     return settle({ exit: null, startError: errorText(caught), cancelled });
   } finally {
@@ -450,8 +519,29 @@ const problem = (run: WorkerRun, what: string, expected: string, received: strin
 function endedWith(run: WorkerRun): string {
   if (run.startError) return 'did not start';
   if (run.cancelled) return 'cancelled';
-  if (run.exit?.signal) return `killed by ${run.exit.signal}`;
-  return `exit ${run.exit?.exitCode ?? '?'}`;
+  const left = run.leftovers.length > 0 ? `, left ${run.leftovers.length} running` : '';
+  if (run.exit?.signal) return `killed by ${run.exit.signal}${left}`;
+  return `exit ${run.exit?.exitCode ?? '?'}${left}`;
+}
+
+/** A worker that must settle has no descendant running once it has exited. */
+function settlementProblem(run: WorkerRun): string | null {
+  if (run.settleError) {
+    return problem(
+      run,
+      'could not be checked for leftover processes',
+      'a readable process table',
+      run.settleError
+    );
+  }
+  const { leftovers } = run;
+  if (leftovers.length === 0) return null;
+  const shown = leftovers
+    .slice(0, 5)
+    .map(({ pid, command }) => `pid ${pid}: ${command.slice(0, 120)}`)
+    .join('; ');
+  const more = leftovers.length > 5 ? `; and ${leftovers.length - 5} more` : '';
+  return `${workerName(run.plan)} left processes behind | expected live descendants: 0 | received: ${leftovers.length} (${shown}${more})`;
 }
 
 function exitProblem(run: WorkerRun): string | null {
@@ -562,6 +652,8 @@ export function judgeWorkers(input: JudgeInput): LaneVerdict {
   for (const run of input.runs) {
     const exit = exitProblem(run);
     if (exit) failures.push(exit);
+    const unsettled = settlementProblem(run);
+    if (unsettled) failures.push(unsettled);
     const report = readWorkerReport(run, input.readReport, failures);
     if (!report) continue;
     reports.push(report);

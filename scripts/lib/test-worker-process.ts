@@ -2,12 +2,34 @@
 // its output line by line under the worker's name, and reports how it ended.
 // The verdict logic is in ./test-workers.ts and never sees a process.
 
+import { settleWorker, WORKER_TOKEN_ENV } from './test-worker-settle';
 import type { WorkerExit, WorkerHandle, WorkerPlan } from './test-workers';
 
 /** Where a worker's output lines go; the real ones are `process.stdout` and `process.stderr`. */
 export interface LineSinks {
   readonly out: (line: string) => void;
   readonly err: (line: string) => void;
+}
+
+/**
+ * The environment a worker starts with: the runner's own, less the variables
+ * that would point every worker at one shared home. `MANGO_HOME` moves the
+ * runtime's state (`runtime.json`, its lock files, the audit log) out of the
+ * temporary HOME the launcher gives each worker, so a developer who exports it
+ * would have all workers contend for one directory (and tests written for the
+ * real runtime would write into it). A test that needs one sets its own.
+ *
+ * @example
+ * workerEnvironment({ MANGO_HOME: '/home/me/.mango', PATH: '/bin' }, plan); // => { PATH: '/bin', ... }
+ */
+export function workerEnvironment(
+  ambient: Readonly<Record<string, string | undefined>>,
+  plan: Pick<WorkerPlan, 'env'>
+): Record<string, string> {
+  const inherited = Object.entries(ambient).filter(
+    (entry): entry is [string, string] => entry[0] !== 'MANGO_HOME' && entry[1] !== undefined
+  );
+  return { ...Object.fromEntries(inherited), ...plan.env };
 }
 
 /** How long to keep reading a pipe after the worker has exited, in case a grandchild still holds it. */
@@ -74,6 +96,12 @@ const stdSinks: LineSinks = {
  * lane open until it died; after the grace the readers are cancelled and the
  * worker is reported as it ended.
  *
+ * A worker whose plan settles (POSIX) leads a process group of its own, so a
+ * signal to `kill` reaches everything it started, and `settle` reports what is
+ * still running in that group, or carrying the worker's token, once it has
+ * exited. Windows has no group to lead; there the worker is a plain child and
+ * has nothing to settle.
+ *
  * @example
  * const handle = startWorkerProcess(plan, '[api-unit 2/4] ');
  * const { exitCode } = await handle.exited;
@@ -84,13 +112,15 @@ export function startWorkerProcess(
   sinks: LineSinks = stdSinks,
   drainGraceMs: number = DRAIN_GRACE_MS
 ): WorkerHandle {
+  const leadsGroup = plan.settle && process.platform !== 'win32';
   const child = Bun.spawn({
     cmd: [...plan.argv],
     cwd: plan.cwd,
-    env: process.env as Record<string, string>,
+    env: workerEnvironment(process.env, plan),
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
+    detached: leadsGroup,
   });
   const stopReading = new AbortController();
   const pumps = [
@@ -106,5 +136,21 @@ export function startWorkerProcess(
     return { exitCode: child.exitCode, signal: child.signalCode };
   })();
 
-  return { exited, kill: (signal) => child.kill(signal) };
+  const token = plan.env[WORKER_TOKEN_ENV];
+  return {
+    exited,
+    kill: (signal) => {
+      if (!leadsGroup) {
+        child.kill(signal);
+        return;
+      }
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        // The group emptied between the decision and the signal.
+      }
+    },
+    settle:
+      leadsGroup && token ? () => settleWorker({ who: { pgid: child.pid, token } }) : undefined,
+  };
 }
