@@ -222,9 +222,31 @@ describe('api lanes', () => {
     async (lane) => {
       const scripts = await readScripts(lane.manifest);
       expect(scripts[lane.coverageScript]).not.toContain('run-test-workers');
-      expect(scripts[lane.coverageScript]).toContain('--parallel=1');
+      expect(scripts[lane.coverageScript]).toContain('bun test');
     }
   );
+
+  // The integration lane's plain script takes the same runner, with the same
+  // agreement between table and script, and keeps the flags that keep it out of
+  // Bun's isolate machinery (the runner adds `--shard`, never `--isolate`).
+  it('runs the plain integration script through the worker runner, unisolated, and settling', async () => {
+    const lane = laneById('api-integration');
+    const scripts = await readScripts(lane.manifest);
+    const script = scripts['test:integration'] ?? '';
+    expect(lane.workers).toEqual({ testDir: 'tests/integration', defaultWidth: 4, settle: true });
+    expect(script).toContain(`run-test-workers.ts --lane=${lane.id} -- bun test`);
+    expect(script.endsWith(` ${lane.workers?.testDir}`)).toBe(true);
+    expect(script).not.toContain('--parallel');
+    expect(script).not.toContain('--isolate');
+    expect(script).not.toContain('--shard');
+  });
+
+  it('settles the integration lane and not the unit lane', () => {
+    expect(laneById('api-integration').workers?.settle).toBe(true);
+    // `--no-orphans` kills the evidence the settlement check looks for, so the
+    // unit lane (which runs with it) must not claim to settle.
+    expect(laneById('api-unit').workers?.settle).toBeUndefined();
+  });
 
   it('keeps the integration lane out of isolate mode', async () => {
     const scripts = await readScripts(laneById('api-integration').manifest);

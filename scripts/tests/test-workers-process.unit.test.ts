@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
-import { pumpLines, startWorkerProcess } from '../lib/test-worker-process';
+import { pumpLines, startWorkerProcess, workerEnvironment } from '../lib/test-worker-process';
 import { runWorkerLane, type WorkerLaneSpec } from '../lib/test-workers';
 import { FAKE_BUN_TEST, FAKE_CASES_PER_FILE } from './support/fake-bun-test';
 import { fakeLane } from './support/test-worker-fakes';
@@ -36,6 +36,7 @@ function workspace() {
     command: ['bun', 'test', '--timeout', '15000', '--parallel=1', TEST_DIR],
     testDir: TEST_DIR,
     launcher: [process.execPath, FAKE_BUN_TEST],
+    settle: false,
   };
   return { root, spec, mergedPath: join(root, 'out', 'api-unit.xml'), scratch: join(root, 'tmp') };
 }
@@ -44,9 +45,14 @@ function workspace() {
 async function runLane(
   count: number,
   modes: Record<number, string>,
-  options: { signal?: AbortSignal; pidDir?: string; drainGraceMs?: number } = {}
+  options: { signal?: AbortSignal; pidDir?: string; drainGraceMs?: number; settle?: boolean } = {}
 ) {
-  const { spec, mergedPath, scratch } = workspace();
+  const { spec: base, mergedPath, scratch } = workspace();
+  const spec = {
+    ...base,
+    id: options.settle ? 'api-integration' : base.id,
+    settle: options.settle ?? false,
+  };
   mkdirSync(scratch);
   process.env.MANGOSTUDIO_FAKE_WORKER_MODES = JSON.stringify(modes);
   process.env.MANGOSTUDIO_FAKE_PID_DIR = options.pidDir ?? scratch;
@@ -65,8 +71,10 @@ async function runLane(
       killAfterMs: 2_000,
       start: (plan) =>
         startWorkerProcess(
-          plan,
-          `[api-unit ${plan.index}/${plan.count}] `,
+          // Keep the named fake's deliberately leaked children available to
+          // the guard, including when a root worker runs with --no-orphans.
+          { ...plan, env: { ...plan.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' } },
+          `[${spec.id} ${plan.index}/${plan.count}] `,
           sinks,
           options.drainGraceMs
         ),
@@ -88,6 +96,20 @@ const isAlive = (pid: number): boolean => {
 };
 
 describe('four real worker processes', () => {
+  it('discards an ambient runtime home before starting workers', async () => {
+    const previous = process.env.MANGO_HOME;
+    process.env.MANGO_HOME = '/ambient/runtime-home';
+    try {
+      const { verdict, lines } = await runLane(2, {});
+      expect(verdict.failures).toEqual([]);
+      expect(lines).toContain('[api-unit 1/2] mango-home=<unset>');
+      expect(lines).toContain('[api-unit 2/2] mango-home=<unset>');
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(process.env, 'MANGO_HOME');
+      else process.env.MANGO_HOME = previous;
+    }
+  });
+
   it('pass, and their merged report holds every case', async () => {
     const { verdict, mergedPath } = await runLane(4, {});
     expect(verdict.failures).toEqual([]);
@@ -137,6 +159,114 @@ describe('four real worker processes', () => {
     expect(readdirSync(failed.scratch)).toEqual([]);
   });
 });
+
+const readPid = (dir: string, name: string): number =>
+  Number(readFileSync(join(dir, name), 'utf8'));
+
+// Settlement is POSIX: Windows has no group to lead (the runner says so there).
+describe.skipIf(process.platform === 'win32')('workers that must settle', () => {
+  it('signals the whole group on cancellation without relying on settlement to reap a child', async () => {
+    const pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
+    workspaces.push(pidDir);
+    const controller = new AbortController();
+    const running = runLane(
+      2,
+      { 1: 'hang-tree', 2: 'hang-tree' },
+      {
+        settle: true,
+        signal: controller.signal,
+        pidDir,
+      }
+    );
+    const up = await until(() => readdirSync(pidDir).length === 4, 10_000);
+    const pids = readdirSync(pidDir).map((name) => readPid(pidDir, name));
+    try {
+      expect(up, 'expected two workers and two children running before cancellation').toBe(true);
+      controller.abort();
+      const { verdict } = await running;
+      expect(verdict.failures).toHaveLength(2);
+      expect(verdict.failures.every((failure) => failure.includes('was cancelled'))).toBe(true);
+      expect(pids.filter(isAlive), 'expected no live descendants after cancellation').toEqual([]);
+    } finally {
+      controller.abort();
+      for (const pid of pids) {
+        if (isAlive(pid)) process.kill(pid, 'SIGKILL');
+      }
+    }
+  });
+
+  it('pass, in a group of their own, when nothing outlives them', async () => {
+    const { verdict } = await runLane(3, {}, { settle: true });
+    expect(verdict.failures).toEqual([]);
+    expect(verdict.workers.map((worker) => worker.ended)).toEqual(['exit 0', 'exit 0', 'exit 0']);
+  });
+
+  it('pass when a child is still shutting down as the worker exits', async () => {
+    const { verdict } = await runLane(2, { 1: 'tidy' }, { settle: true });
+    expect(verdict.failures).toEqual([]);
+  });
+
+  it('fail the lane naming the leaked child’s pid and command, and kill it', async () => {
+    const { verdict, scratch } = await runLane(4, { 2: 'leak' }, { settle: true });
+    const leaked = readPid(scratch, 'leak-2.pid');
+    try {
+      expect(verdict.failures).toHaveLength(1);
+      expect(verdict.failures[0]).toContain(
+        'api-integration worker 2/4 left processes behind | expected live descendants: 0 | received: 1'
+      );
+      expect(verdict.failures[0]).toContain(`pid ${leaked}: `);
+      expect(verdict.failures[0]).toContain('setInterval');
+      expect(verdict.workers[1]?.ended).toBe('exit 0, left 1 running');
+      const stillAlive = await until(() => !isAlive(leaked), 3_000);
+      expect(
+        stillAlive,
+        `expected the lane to kill the leaked process ${leaked} | received: still running`
+      ).toBe(true);
+    } finally {
+      if (isAlive(leaked)) process.kill(leaked, 'SIGKILL');
+    }
+  });
+
+  // On Linux the environment token finds a descendant that started a session of its own.
+  it.skipIf(process.platform !== 'linux')(
+    'find a leaked child that left the group for a session of its own',
+    async () => {
+      const { verdict, scratch } = await runLane(2, { 1: 'leak-session' }, { settle: true });
+      const leaked = readPid(scratch, 'leak-session-1.pid');
+      try {
+        expect(verdict.failures).toHaveLength(1);
+        expect(verdict.failures[0]).toContain('api-integration worker 1/2 left processes behind');
+        expect(verdict.failures[0]).toContain(`pid ${leaked}: `);
+        const reaped = await until(() => !isAlive(leaked), 3_000);
+        expect(
+          reaped,
+          `expected the lane to kill detached child ${leaked} before test cleanup | received: still running`
+        ).toBe(true);
+      } finally {
+        if (isAlive(leaked)) process.kill(leaked, 'SIGKILL');
+      }
+    }
+  );
+
+  it('are not checked when the lane does not ask for it', async () => {
+    const { verdict, scratch } = await runLane(2, { 1: 'leak' }, { settle: false });
+    const leaked = readPid(scratch, 'leak-1.pid');
+    try {
+      expect(verdict.failures).toEqual([]);
+    } finally {
+      if (isAlive(leaked)) process.kill(leaked, 'SIGKILL');
+    }
+  });
+});
+
+async function until(ready: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (ready()) return true;
+    await Bun.sleep(25);
+  }
+  return ready();
+}
 
 describe('a worker that leaks a process holding its pipes', () => {
   it('does not hold the lane open past the drain grace, and still passes', async () => {
@@ -251,5 +381,27 @@ describe('pumpLines', () => {
     });
     await pumpLines(stream, (line) => lines.push(line));
     expect(lines).toEqual(['é']);
+  });
+});
+
+describe('workerEnvironment', () => {
+  it('drops MANGO_HOME, which would give every worker one runtime home', () => {
+    const env = workerEnvironment(
+      { MANGO_HOME: '/home/me/.mango', PATH: '/bin', HOME: '/home/me' },
+      { env: {} }
+    );
+    expect(env, 'expected MANGO_HOME absent from a worker’s environment').toEqual({
+      PATH: '/bin',
+      HOME: '/home/me',
+    });
+  });
+
+  it('adds the worker’s own variables over the inherited ones', () => {
+    const env = workerEnvironment({ A: '1', B: '2' }, { env: { B: 'own', C: '3' } });
+    expect(env).toEqual({ A: '1', B: 'own', C: '3' });
+  });
+
+  it('omits variables that are unset', () => {
+    expect(workerEnvironment({ A: undefined, B: '2' }, { env: {} })).toEqual({ B: '2' });
   });
 });
