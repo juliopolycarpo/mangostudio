@@ -32,10 +32,13 @@ describe('ContextBadge', () => {
   });
 
   it('keeps the exact counts and the continuation mode in the panel', () => {
-    const { container } = render(<ContextBadge info={info({ mode: 'stateless-loop' })} />);
+    const context = info({ mode: 'stateless-loop' });
+    const { container } = render(<ContextBadge info={context} />);
+    const numbers = new Intl.NumberFormat();
+    const counts = `${numbers.format(context.estimatedInputTokens)} / ${numbers.format(context.contextLimit)}`;
 
     expect(container.querySelector('[data-testid="context-badge-tokens"]')?.textContent).toContain(
-      '9,600 / 1,000,000'
+      counts
     );
     // Named, not leaked as its id.
     expect(container.querySelector('[data-testid="context-badge-mode"]')?.textContent).toContain(
