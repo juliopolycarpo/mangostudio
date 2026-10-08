@@ -801,4 +801,44 @@ describe('runWorkerLane', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('accepts files outside the directory when the lane also runs them', async () => {
+    const outside: FakeTestFile = { path: 'other/also.test.ts', cases: ['outside'] };
+    const lane = [...fakeLane(4, 1), outside];
+    const { root, spec, writeShard, mergedPath } = workspaceOf(lane);
+    try {
+      const { verdict } = await runWorkerLane({
+        spec: { ...spec, alsoRuns: [outside.path] },
+        count: 2,
+        start: writeShard(lane),
+        mergedPath,
+      });
+
+      expect(verdict.failures).toEqual([]);
+      expect(verdict.totals.files).toBe(lane.length);
+      expect(parseJunitXml(readFileSync(mergedPath, 'utf8')).tests).toBe(lane.length);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('requires every file the lane also runs, even outside the directory', async () => {
+    const lane = fakeLane(4, 1);
+    const outside: FakeTestFile = { path: 'other/also.test.ts', cases: ['outside'] };
+    const { root, spec, writeShard, mergedPath } = workspaceOf([...lane, outside]);
+    try {
+      const { verdict } = await runWorkerLane({
+        spec: { ...spec, alsoRuns: [outside.path] },
+        count: 2,
+        start: writeShard(lane),
+        mergedPath,
+      });
+
+      expect(verdict.failures).toEqual([
+        `no worker reported ${outside.path} | expected: all 5 files under ${TEST_DIR} | received: 1 unreported`,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

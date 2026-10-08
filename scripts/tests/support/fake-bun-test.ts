@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // A stand-in for `bun test` that a worker launcher can start in its place: it
 // reads the flags the runner plans (`--shard=i/N`, `--reporter-outfile=...`),
 // writes the report its shard of the workspace's `tests/unit` files would
@@ -23,8 +24,8 @@
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-
 import { discoverTestFiles } from '../../lib/test-workers';
+import { fixtureChildEnvironment } from './child-supervision';
 import { reportOf, shardOf } from './test-worker-fakes';
 
 /** Where the fake lives, for the launcher in `WorkerLaneSpec`. */
@@ -80,7 +81,7 @@ function main(argv: readonly string[]): void {
       ],
       // Preserve the fake's deliberate lifetime under a root --no-orphans
       // worker; token signaling, rather than Bun's policy, must end it.
-      env: { ...process.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' },
+      env: fixtureChildEnvironment(),
       stdin: 'ignore',
       stdout: 'inherit',
       stderr: 'inherit',

@@ -223,6 +223,8 @@ describe('api lanes', () => {
       const scripts = await readScripts(lane.manifest);
       expect(scripts[lane.coverageScript]).not.toContain('run-test-workers');
       expect(scripts[lane.coverageScript]).toContain('bun test');
+      // The api-unit lane isolates its files; the root lane never did.
+      if (lane.id === 'api-unit') expect(scripts[lane.coverageScript]).toContain('--parallel=1');
     }
   );
 

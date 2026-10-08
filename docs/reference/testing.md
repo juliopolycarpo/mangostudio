@@ -405,6 +405,57 @@ three-line change: `SHARD_COUNT`, the matrix list, and the shard job's `name`
 (`env` is not one of the contexts available to `jobs.<id>.name`, so the `/8`
 there cannot interpolate the value).
 
+#### Root scripts workers
+
+The unit phase of `bun run test` runs `test:scripts:workers` through
+`scripts/run-test-workers.ts --lane=root`. The command after `--` remains
+`bun test --timeout 15000 scripts`. Four workers is the POSIX default, capped
+at half the CPU cores with a minimum of one. Windows defaults to one;
+`MANGO_TEST_WORKERS=<1-8>` overrides either default.
+
+The original `test:scripts` command remains serial for coverage, CI shards,
+and changed-file selection. Its report is `.mango/artifacts/junit/root.xml`;
+the plain workers merge into `.mango/artifacts/test-workers/root.xml`, away
+from coverage evidence. The worker task is cached with its runner import
+closure and test inputs. Worker width is a Turbo `passThroughEnv`, so changing
+width reuses the same successful result.
+
+`bun test scripts` matches paths containing `scripts`, including two API
+files outside `scripts/`: `wsl-runtime-scripts.integration.test.ts` and
+`runtime-slot-scripts.test.ts`. The root lane inventories both. The runner
+requires every file exactly once and complete, nonempty worker reports before
+accepting its merged report. Serial comparisons qualify case and outcome parity.
+
+The width comparison used three serial samples and three at each candidate
+width on source `49bb715f686620f94e04e650c229ca34a8b5ca96`, under WSL with direct
+lane commands and no Turbo hits. All reports contained 2,599 cases across 182
+files: 2,586 pass, 13 skip, zero fail. The rule selected the smallest clean
+width within 10% of the fastest median; four was within that band and reduced
+median wall time by 54.59% from serial. One cell overlapped known external host
+activity and was replaced under the original conditions, preserving its
+original parity evidence.
+
+| Width  | Median wall | User CPU | System CPU | Linux process-tree peak RSS |
+| ------ | ----------- | -------- | ---------- | --------------------------- |
+| Serial | 211.51s     | 61.89s   | 39.24s     | 562,796 KiB                 |
+| Four   | 96.05s      | 68.99s   | 42.13s     | 990,940 KiB                 |
+| Six    | 109.21s     | 69.81s   | 40.67s     | 1,330,468 KiB               |
+| Eight  | 90.12s      | 68.27s   | 39.87s     | 1,790,156 KiB               |
+
+These medians compare the same runtime feature set: the measurement runtime
+was built together with the fake Cursor example, enabling the SDK testing
+feature. They do not qualify a default-only runtime or native Windows width.
+Process-tree RSS counts shared pages per process and excludes native
+PowerShell memory. Final correctness uses a separately built default runtime,
+whose checksum must remain unchanged while building the fake example.
+
+The actual root workers and launchers retain `--no-orphans`. Named handshake,
+signal, watchdog and cancellation fakes use `fixtureChildEnvironment()` with
+Bun's inherited orphan marker set to zero, so their deliberately surviving
+children remain available to the existing lifetime and cleanup assertions.
+The regression cases run through the actual root worker and require the
+selected outcome plus the full lane census.
+
 #### API unit workers
 
 `bun run test` (and `bun run --filter @mangostudio/api test:unit`) splits the API

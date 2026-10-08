@@ -47,7 +47,8 @@ describe('test script', () => {
   test('runs root script tests through Turbo and keeps browser smoke outside', () => {
     const testScript = readText('scripts/test.ts');
 
-    expect(testScript).toContain("'//#test:scripts'");
+    expect(testScript).toContain('createRootScriptsCommand');
+    expect(readText('scripts/lib/test.ts')).toContain("'//#test:scripts'");
     expect(testScript).toContain("runCommand('e2e', [...BROWSER_SMOKE_TEST_COMMAND]");
     expect(testScript).not.toContain("createTurboTestCommand('test:e2e'");
   });

@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 // Runs a test lane as several isolated `bun test` processes and reports it as
-// one lane. The API workspace's `test:unit` script is the caller:
+// one lane. The API workspace's `test:unit` script and the root
+// `test:scripts:workers` script are the callers:
 //
 //   bun ../../scripts/run-test-workers.ts --lane=api-unit -- bun test --timeout 15000 --parallel=1 tests/unit
+//   bun ./scripts/run-test-workers.ts --lane=root -- bun test --timeout 15000 scripts
 //
 // The lane (scripts/lib/test-lanes.ts) says which directory it owns; the
 // command after `--` is the serial command, unchanged. `MANGO_TEST_WORKERS`
