@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import {
   assertTemporarySmokeHome,
   describeSmokeHomeShape,
@@ -220,28 +220,59 @@ describe('removeSmokeHome', () => {
 });
 
 describe('smoke home lifetime across process exit', () => {
+  interface HomeProbe {
+    status: number;
+    home: string;
+    canonicalHome: string;
+    tmpDir: string;
+    realHome: string;
+  }
+
   /** Runs prepareSmokeHome in a fresh process on the real OS temp directory. */
-  function runPrepare(published: string | undefined): { status: number; home: string } {
+  function runPrepare(published: string | undefined, tmpDir?: string): HomeProbe {
     const script = join(sandbox, 'prepare.ts');
     const modulePath = join(import.meta.dir, '../../tests/browser-smoke/support/smoke-home');
     writeFileSync(
       script,
       `import { prepareSmokeHome } from ${JSON.stringify(modulePath)};\n` +
-        `console.log(prepareSmokeHome(process.env));\n`
+        `import { realpathSync } from 'node:fs';\n` +
+        `import { homedir, tmpdir } from 'node:os';\n` +
+        `const home = prepareSmokeHome(process.env);\n` +
+        `console.log(JSON.stringify({ home, canonicalHome: realpathSync(home), tmpDir: realpathSync(tmpdir()), realHome: realpathSync(homedir()) }));\n`
     );
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     delete env[SMOKE_HOME_ENV];
     if (published) env[SMOKE_HOME_ENV] = published;
+    if (tmpDir) Object.assign(env, { TMPDIR: tmpDir, TEMP: tmpDir, TMP: tmpDir });
     const run = Bun.spawnSync([process.execPath, script], { env, stdout: 'pipe', stderr: 'pipe' });
-    return { status: run.exitCode ?? -1, home: run.stdout.toString().trim() };
+    expect(run.exitCode, `prepareSmokeHome child stderr: ${run.stderr.toString()}`).toBe(0);
+    return { status: run.exitCode ?? -1, ...JSON.parse(run.stdout.toString().trim()) };
   }
 
   test('deletes the directory it created when the process exits', () => {
-    const { status, home } = runPrepare(undefined);
+    const { status, home, canonicalHome, tmpDir, realHome } = runPrepare(undefined);
 
     expect(status, `expected exit status: 0 | received: ${status}`).toBe(0);
-    expect(home.startsWith(join(realpathSync(tmpdir()), SMOKE_HOME_PREFIX))).toBe(true);
+    expect(dirname(canonicalHome)).toBe(tmpDir);
+    expect(basename(canonicalHome).startsWith(SMOKE_HOME_PREFIX)).toBe(true);
+    const fromRealHome = relative(realHome, canonicalHome);
+    expect(
+      fromRealHome === '..' || fromRealHome.startsWith(`..${sep}`) || isAbsolute(fromRealHome)
+    ).toBe(true);
     expect(existsSync(home), `expected directory removed on exit: ${home}`).toBe(false);
+  });
+
+  test('uses its own temp directory through an alias and removes only its fresh home', () => {
+    const alias = join(sandbox, 'child-temp-alias');
+    symlinkSync(host.tmpDir, alias, 'junction');
+    const { home, canonicalHome, tmpDir, realHome } = runPrepare(undefined, alias);
+
+    expect(tmpDir).toBe(realpathSync(host.tmpDir));
+    expect(dirname(canonicalHome)).toBe(tmpDir);
+    expect(basename(canonicalHome).startsWith(SMOKE_HOME_PREFIX)).toBe(true);
+    expect(() => assertTemporarySmokeHome(canonicalHome, { tmpDir, realHome })).not.toThrow();
+    expect(existsSync(home)).toBe(false);
+    expect(existsSync(host.tmpDir)).toBe(true);
   });
 
   test('never deletes a directory it was given through MANGO_SMOKE_HOME', () => {

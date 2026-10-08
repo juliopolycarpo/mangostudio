@@ -10,9 +10,9 @@
  */
 
 import { afterAll, describe, expect, test } from 'bun:test';
-import { realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { removeSmokeHome, SMOKE_HOME_ENV } from '../../tests/browser-smoke/support/smoke-home';
 
 /** Env keys that place hub state; each must resolve inside the temporary home. */
@@ -53,8 +53,12 @@ function isInside(parent: string, child: string): boolean {
 function canonical(path: string): string {
   try {
     return realpathSync(path);
-  } catch {
-    return resolve(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const resolved = resolve(path);
+    const parent = dirname(resolved);
+    if (parent === resolved) throw error;
+    return join(canonical(parent), basename(resolved));
   }
 }
 
@@ -76,16 +80,38 @@ describe('browser smoke lane hermeticity', () => {
     ).toBeGreaterThan(0);
   });
 
+  test('canonicalizes future storage paths through a temp directory alias', () => {
+    const sandbox = mkdtempSync(join(tmpdir(), 'smoke-storage-alias-'));
+    try {
+      const physical = join(sandbox, 'physical');
+      const alias = join(sandbox, 'alias');
+      mkdirSync(physical);
+      symlinkSync(physical, alias, 'junction');
+      const future = join(alias, 'mangostudio-smoke-fresh', '.mango', 'uploads');
+      expect(canonical(future)).toBe(
+        join(realpathSync(physical), 'mangostudio-smoke-fresh', '.mango', 'uploads')
+      );
+      expect(isInside(canonical(physical), canonical(future))).toBe(true);
+      expect(isInside(canonical(future), canonical(physical))).toBe(false);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   for (const key of HOME_KEYS) {
     test(`${key} of the smoke hub resolves inside a temporary directory`, () => {
-      const realMangoDir = join(homedir(), '.mango');
+      const realMangoDir = canonical(join(homedir(), '.mango'));
       const temporaryRoot = canonical(tmpdir());
+      const smokeHome = canonical(process.env[SMOKE_HOME_ENV] ?? '');
 
       for (const server of webServers()) {
         const resolved = effectiveEnv(server, key);
-        const usable = resolved !== '' && isInside(temporaryRoot, canonical(resolved));
+        const usable =
+          resolved !== '' &&
+          isInside(temporaryRoot, canonical(resolved)) &&
+          isInside(smokeHome, canonical(resolved));
         expect(
-          usable && !isInside(realMangoDir, resolved),
+          usable && !isInside(realMangoDir, canonical(resolved)),
           `smoke hub ${key} must be a fresh temporary path | expected shape: ${EXPECTED_SHAPE}/... | resolved: ${resolved || '(unset, inherits the real home)'} | real home: ${realMangoDir}`
         ).toBe(true);
       }

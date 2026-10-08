@@ -11,9 +11,17 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { REAL_HOME_ENV, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
 
 const ROOT = join(import.meta.dir, '..', '..');
@@ -41,8 +49,12 @@ const realHome = process.env[REAL_HOME_ENV]?.trim() || homedir();
 function canonical(path: string): string {
   try {
     return realpathSync(path);
-  } catch {
-    return resolve(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const resolved = resolve(path);
+    const parent = dirname(resolved);
+    if (parent === resolved) throw error;
+    return join(canonical(parent), basename(resolved));
   }
 }
 
@@ -93,6 +105,24 @@ describe('API lane scripts start bun test through the temporary-home launcher', 
 });
 
 describe('what an API lane process sees as its home', () => {
+  test('canonicalizes a removed test home through a temp directory alias', () => {
+    const sandbox = mkdtempSync(join(tmpdir(), 'api-home-alias-'));
+    try {
+      const physical = join(sandbox, 'physical');
+      const alias = join(sandbox, 'alias');
+      mkdirSync(physical);
+      symlinkSync(physical, alias, 'junction');
+      const home = mkdtempSync(join(alias, TEST_HOME_PREFIX));
+      const expected = realpathSync(home);
+      rmSync(home, { recursive: true });
+      expect(canonical(home)).toBe(expected);
+      expect(dirname(canonical(home))).toBe(canonical(physical));
+      expect(isInside(canonical(home), canonical(realHome))).toBe(false);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
   for (const name of LANE_SCRIPTS) {
     test(`apps/api ${name} resolves homedir() inside a fresh temporary directory`, async () => {
       const launcher = launcherCommand(scripts[name] ?? '');
@@ -102,7 +132,7 @@ describe('what an API lane process sees as its home', () => {
           ...launcher,
           'bun',
           '-e',
-          'console.log(JSON.stringify({ home: require("node:os").homedir() }))',
+          'const { homedir, tmpdir } = require("node:os"); const { realpathSync } = require("node:fs"); console.log(JSON.stringify({ home: homedir(), canonicalHome: realpathSync(homedir()), tmpDir: realpathSync(tmpdir()) }))',
         ],
         cwd: API_DIR,
         env: process.env as Record<string, string>,
@@ -115,13 +145,23 @@ describe('what an API lane process sees as its home', () => {
         probe.exited,
       ]);
       expect(code, `expected launcher exit: 0 | received: ${code} | stderr: ${err.trim()}`).toBe(0);
-      const { home } = JSON.parse(out.trim().split('\n').at(-1) as string) as { home: string };
+      const { home, canonicalHome, tmpDir } = JSON.parse(
+        out.trim().split('\n').at(-1) as string
+      ) as {
+        home: string;
+        canonicalHome: string;
+        tmpDir: string;
+      };
 
+      expect(canonical(home), 'expected removed home to retain its canonical OS path').toBe(
+        canonicalHome
+      );
+      const canonicalRealHome = canonical(realHome);
       const usable =
-        isInside(canonical(tmpdir()), canonical(home)) &&
-        !isInside(realHome, home) &&
-        !isInside(home, realHome) &&
-        home.includes(TEST_HOME_PREFIX);
+        dirname(canonicalHome) === canonical(tmpDir) &&
+        !isInside(canonicalRealHome, canonicalHome) &&
+        !isInside(canonicalHome, canonicalRealHome) &&
+        basename(canonicalHome).startsWith(TEST_HOME_PREFIX);
       expect(
         usable,
         `apps/api ${name} must start tests with a fresh temporary home | expected shape: ${EXPECTED_SHAPE} | resolved homedir(): ${home} | real home: ${realHome}`
