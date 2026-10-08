@@ -4,7 +4,7 @@
  * with per-user caching and TTL-based refresh.
  */
 
-import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { setBounded } from '../../lib/bounded-map';

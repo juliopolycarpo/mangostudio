@@ -5,7 +5,7 @@
  * agentic tool loop and the plain text-streaming path.
  */
 
-import type { ReasoningEffort } from '@mangostudio/shared';
+import type { ReasoningEffort } from '@mangostudio/shared/types';
 
 export interface AnthropicThinkingConfig {
   type: 'enabled';

@@ -2,7 +2,7 @@
  * Use case: list all connectors for a user across all providers.
  */
 
-import type { Connector, ConnectorStatus } from '@mangostudio/shared';
+import type { Connector, ConnectorStatus } from '@mangostudio/shared/connectors';
 import { getChatGptUsage } from '../../../services/providers/chatgpt/usage-fetch';
 import {
   getProvider,

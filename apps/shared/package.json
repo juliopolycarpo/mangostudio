@@ -14,7 +14,6 @@
     "test:coverage": "bun test --timings=../../.mango/artifacts/timings/shared.json --update-timings --coverage --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/shared.xml $MANGOSTUDIO_BUN_TEST_ARGS"
   },
   "exports": {
-    ".": "./src/index.ts",
     "./activity": "./src/activity/index.ts",
     "./chat": "./src/chat/index.ts",
     "./generation": "./src/generation/index.ts",

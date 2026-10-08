@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import { isTurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { getDb } from '../../../src/db/database';
 import { createTurnCheckpointPart } from '../../../src/modules/generation/application/turn-checkpoint';
 import { turnRecoveryRoutes } from '../../../src/modules/generation/http/turn-recovery-routes';

@@ -32,7 +32,6 @@
  */
 
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-import type { InteractionMode } from '@mangostudio/shared';
 import {
   type ExternalAgentAttachment,
   type ExternalAgentConfiguration,
@@ -49,6 +48,7 @@ import {
 } from '@mangostudio/shared/external-agents';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import type { TurnInterruptionReasonCode } from '@mangostudio/shared/turn-recovery';
+import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import Value from 'typebox/value';
 import type { Database } from '../../../db/types';
