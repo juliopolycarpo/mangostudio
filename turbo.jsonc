@@ -5,6 +5,9 @@
   // whenever it detects an AI coding agent. AGENTS.md is hand-maintained here
   // and an agent session must not leave it modified, so the block stays off.
   "agentGuidance": false,
+  // Bun records a patch's path in the lockfile, not its bytes. A patch-only edit
+  // changes installed dependency code and must invalidate cached tasks too.
+  "globalDependencies": ["patches/**"],
   // Env vars read by the root build/release/CI scripts (scripts/build.ts,
   // scripts/test-build.ts, scripts/release/*, scripts/lib/release-version.ts,
   // scripts/ci/*), which run via `bun run` outside turbo tasks. Declared as pass-through so
