@@ -1,4 +1,4 @@
-import type { PackageManifest } from './dependency-policy';
+import { MANIFEST_SECTIONS, manifestLabel, type PackageManifest } from './dependency-policy';
 
 export interface BunDependencyLock {
   readonly workspaces?: Readonly<Record<string, PackageManifest>>;
@@ -6,12 +6,6 @@ export interface BunDependencyLock {
   readonly packages: Readonly<Record<string, readonly [string, ...unknown[]]>>;
 }
 
-const DEPENDENCY_SECTIONS = [
-  'dependencies',
-  'devDependencies',
-  'peerDependencies',
-  'optionalDependencies',
-] as const;
 const HOST_PEER_KEY = 'bun-plugin-tailwind/bun';
 const HOST_PEER_SOURCE = 'bun@file:./scripts/bun-host-peer';
 
@@ -34,7 +28,7 @@ function describeReferences(
   key: string,
   packageName: string
 ): string[] {
-  return DEPENDENCY_SECTIONS.flatMap((section) =>
+  return MANIFEST_SECTIONS.flatMap((section) =>
     Object.entries(manifest[section] ?? {})
       .filter(([name]) => name === packageName || key === name || key.endsWith(`/${name}`))
       .map(([name, range]) => `${label} ${section}.${name} (${range})`)
@@ -44,7 +38,7 @@ function describeReferences(
 function describeImporters(lock: BunDependencyLock, key: string, resolution: string): string {
   const packageName = resolution.slice(0, resolution.indexOf('@', 1));
   const workspaceReferences = Object.entries(lock.workspaces ?? {}).flatMap(([path, manifest]) =>
-    describeReferences(path ? `${path}/package.json` : 'package.json', manifest, key, packageName)
+    describeReferences(manifestLabel(path), manifest, key, packageName)
   );
   const packageReferences = Object.values(lock.packages).flatMap((entry) => {
     const metadata = entry.length === 2 ? entry[1] : entry[2];
