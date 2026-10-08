@@ -1533,6 +1533,11 @@ Inside the Turbo task output family each task is keyed by Turbo's own hash. The 
 API unit task includes the SHA-256 of the runtime binary in it (see [API](#api)); without
 that, a rebuilt binary would replay a stale pass out of this cache.
 
+Root Bun dependency patches are global Turbo inputs through `patches/**` in `turbo.jsonc`.
+The Bun lockfile records their paths, so changing only patch bytes otherwise leaves task
+keys unchanged. Editing a patch invalidates every cached task, including build, typecheck
+and unit lanes, while unchanged patches retain the same keys.
+
 `mode` selects `restore-save` (default), `restore`, or `save`. Exact-restore
 families (`lint-tools`, `playwright`) set `exact-restore: true` so a loose
 prefix hit cannot mark `cache-restored` and skip a required install —
