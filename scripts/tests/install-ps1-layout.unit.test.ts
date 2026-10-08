@@ -12,6 +12,8 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { FIXTURE_DIR_PREFIX, pruneFixtureUserPath } from './support/windows-user-path';
+
 // Same matrix as install-sh-layout.unit.test.ts, run against the real host
 // PowerShell (powershell.exe on PATH via WSL interop) instead of bash.
 //
@@ -93,14 +95,11 @@ beforeAll(() => {
 // it, but not every case in this matrix uninstalls (prune bookkeeping,
 // unknown-line survival, the failure paths), so sweep by the mkdtemp prefix
 // unconditionally rather than tracking which layouts actually ran a path
-// mutation.
+// mutation. The sweep reads the PATH after every case but writes it (about
+// 7 s, a settings broadcast) only when an entry carries that prefix, and a
+// failed write fails the case; see support/windows-user-path.ts.
 function pruneStalePathEntries(): void {
-  const command = [
-    "$path = [Environment]::GetEnvironmentVariable('Path','User')",
-    "$entries = $path -split ';' | Where-Object { $_ -and $_ -notmatch 'mango-ps1-' }",
-    "[Environment]::SetEnvironmentVariable('Path', ($entries -join ';'), 'User')",
-  ].join('; ');
-  sh([POWERSHELL as string, '-NoProfile', '-Command', command]);
+  pruneFixtureUserPath(POWERSHELL as string);
 }
 
 afterEach(() => {
@@ -130,7 +129,7 @@ interface Layout {
 }
 
 function layout(): Layout {
-  const linuxDir = mkdtempSync(join(windowsTempMount, 'mango-ps1-'));
+  const linuxDir = mkdtempSync(join(windowsTempMount, FIXTURE_DIR_PREFIX));
   tempDirs.push(linuxDir);
   const windowsDir = toWindowsPath(linuxDir);
 
@@ -253,7 +252,7 @@ function buildNpmTarball(
 
 /** The real binary's own reported version, discovered once and reused as "the good version". */
 function discoverRealVersion(): string {
-  const linuxDir = mkdtempSync(join(windowsTempMount, 'mango-ps1-probe-'));
+  const linuxDir = mkdtempSync(join(windowsTempMount, `${FIXTURE_DIR_PREFIX}probe-`));
   tempDirs.push(linuxDir);
   const exePath = join(linuxDir, 'mangostudio.exe');
   copyFileSync(WINDOWS_BINARY as string, exePath);
