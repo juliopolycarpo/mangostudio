@@ -422,8 +422,9 @@ width reuses the same successful result.
 
 `bun test scripts` matches paths containing `scripts`, including two API
 files outside `scripts/`: `wsl-runtime-scripts.integration.test.ts` and
-`runtime-slot-scripts.test.ts`. The root lane inventories both, and the runner
-requires every case and file before accepting its merged report.
+`runtime-slot-scripts.test.ts`. The root lane inventories both. The runner
+requires every file exactly once and complete, nonempty worker reports before
+accepting its merged report. Serial comparisons qualify case and outcome parity.
 
 The width comparison used three serial samples and three at each candidate
 width on source `49bb715f686620f94e04e650c229ca34a8b5ca96`, under WSL with direct
