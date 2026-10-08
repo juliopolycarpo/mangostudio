@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "bun ./build.ts",
-    "routes": "tsr generate",
+    "routes": "bun ./scripts/routes.ts",
     "check": "bun run check:quick && bun run typecheck",
     "check:quick": "biome check . && bun ../../scripts/check-import-cycles.ts .",
     "typecheck": "tsc --noEmit",
@@ -45,7 +45,7 @@
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.5",
     "@mangostudio/api": "workspace:*",
-    "@tanstack/router-cli": "1.167.40",
+    "@tanstack/router-generator": "1.167.40",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
