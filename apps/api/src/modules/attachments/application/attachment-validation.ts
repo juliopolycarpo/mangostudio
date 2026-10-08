@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
-import { fileTypeFromBuffer } from 'file-type';
+import { detectFileType } from '../../../lib/file-type-detector';
 
 const IMAGE_MIME_EXTENSIONS = {
   'image/jpeg': ['jpg', 'jpeg'],
@@ -58,7 +58,7 @@ export async function validateChatAttachmentFile(file: File): Promise<ValidatedA
   }
 
   const originalExtension = getLowercaseExtension(file.name);
-  const detectedType = await fileTypeFromBuffer(buffer);
+  const detectedType = await detectFileType(buffer);
 
   if (detectedType?.mime && isImageMime(detectedType.mime)) {
     assertExtensionAllowed(detectedType.mime, originalExtension);
