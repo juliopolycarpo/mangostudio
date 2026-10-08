@@ -135,6 +135,23 @@ function waitForTerminalText(viewer: Connected, marker: string): Promise<Termina
   });
 }
 
+/**
+ * Sends a command after the shell has emitted its complete prompt.
+ *
+ * @example
+ * await writeAfterTerminalText(viewer, 'PS C:\\work> ', "Write-Output ('h' + 'i')\r\n");
+ */
+async function writeAfterTerminalText(
+  viewer: Connected,
+  readyMarker: string,
+  command: string
+): Promise<void> {
+  await waitForTerminalText(viewer, readyMarker);
+  viewer.socket.send(
+    encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode(command) })
+  );
+}
+
 async function waitForOpen(socket: WebSocket): Promise<void> {
   if (socket.readyState === WebSocket.OPEN) return;
   await new Promise<void>((resolve, reject) => {
@@ -261,6 +278,59 @@ describe('terminal socket relay', () => {
     expect(viewer.messages.filter((message) => message.type === 'data')).toHaveLength(
       chunks.length
     );
+  });
+
+  it('waits for the complete shell prompt before sending a command', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+    const command = "Write-Output ('h' + 'i')\r\n";
+    const written = runtime.waitForCall('write');
+    const sent = writeAfterTerminalText(viewer, `PS ${session.cwd}> `, command);
+
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from(`PS ${session.cwd}`).toString('base64'),
+    });
+    await viewer.nextMessage((message) => message.type === 'data');
+    expect(
+      runtime.calls.write,
+      'expected no command before the complete shell prompt'
+    ).toHaveLength(0);
+
+    runtime.emitOutput(session.id, { kind: 'data', data: Buffer.from('> ').toString('base64') });
+    await sent;
+    await written;
+    expect(runtime.calls.write).toEqual([
+      { sessionId: session.id, data: Buffer.from(command).toString('base64') },
+    ]);
+  });
+
+  it('does not send a command when the shell prompt never arrives', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+    const sent = writeAfterTerminalText(
+      viewer,
+      `PS ${session.cwd}> `,
+      "Write-Output ('h' + 'i')\r\n"
+    );
+
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from('startup diagnostic > ').toString('base64'),
+    });
+
+    await expect(sent).rejects.toThrow('Timed out waiting for a terminal socket message');
+    expect(runtime.calls.write).toHaveLength(0);
   });
 
   it('does not match terminal control frames as output text', async () => {
@@ -658,15 +728,17 @@ describe('terminal socket over a real Rust runtime', () => {
         const viewer = connect(`${hub.url}/${session.id}`, {}, 5_000);
         await waitForOpen(viewer.socket);
 
-        viewer.socket.send(
-          encodeTerminalClientMessage({
-            type: 'data',
-            // Construct the marker so echoed input cannot satisfy the output assertion.
-            data: new TextEncoder().encode(
-              shell === 'powershell' ? "Write-Output ('h' + 'i')\r\n" : "printf h''i\n"
-            ),
-          })
-        );
+        // Construct the marker so echoed input cannot satisfy the output assertion.
+        const command = shell === 'powershell' ? "Write-Output ('h' + 'i')\r\n" : "printf h''i\n";
+        if (shell === 'powershell') {
+          // Observe the default PowerShell prompt for the returned cwd before sending input.
+          // Profiles stay as configured; custom prompt text is outside this fixture's scope.
+          await writeAfterTerminalText(viewer, `PS ${session.cwd}> `, command);
+        } else {
+          viewer.socket.send(
+            encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode(command) })
+          );
+        }
 
         const withHi = await waitForTerminalText(viewer, 'hi');
         expect(withHi).toBeDefined();
