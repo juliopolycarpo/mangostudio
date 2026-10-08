@@ -59,7 +59,7 @@ its quota. Linux musl keeps its own 1.99.0 clippy lane and is not a minimum-Rust
 target.
 
 Windows ARM64 also gets native tests (not a minimum-Rust check; they run on the 1.99.0 development toolchain): `workspace-windows-arm64` runs
-`cargo test -p mangostudio-runtime --all-targets --all-features --locked` on
+`cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0` on
 `windows-11-arm` behind the same Rust signal, because distribution only
 cross-compiles that target and smoke only boots the built binary. It is scoped to
 the runtime package (the protocol and contract crates are architecture-neutral
@@ -110,7 +110,10 @@ collector or a second privileged reader of PR-produced bytes.
   pushes, so every main envelope is a Rust baseline. `CI / Gate` accepts its
   skip only under that proof, so a Rust test failure is a `CI / Gate` failure.
 - Doctests, the `--ignored` fixture run and real-binary qualification stay in
-  Cargo Shim, uninstrumented; macOS and Windows keep the plain run there.
+  Cargo Shim, uninstrumented; macOS and Windows run the plain set there under
+  `cargo nextest run --workspace --all-targets --all-features --locked --retries 0`,
+  and every OS checks that nextest lists the same tests as libtest
+  (`rust-test-inventory.ts`). `docs/reference/testing.md` has the details.
 - The job holds `contents: read` and uploads `qa-rust-coverage` (`llvm-cov.json`
   and `receipt.json`, 1 day). `scripts/qa-gate/rust-coverage/` reads it in the
   collector into one coverage measurement per crate. When the lane was skipped
