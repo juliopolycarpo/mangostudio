@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { parseJunitXml } from '../lib/junit-report';
 import { pumpLines, startWorkerProcess, workerEnvironment } from '../lib/test-worker-process';
 import { runWorkerLane, type WorkerLaneSpec } from '../lib/test-workers';
+import { fixtureChildEnvironment } from './support/child-supervision';
 import { FAKE_BUN_TEST, FAKE_CASES_PER_FILE } from './support/fake-bun-test';
 import { fakeLane } from './support/test-worker-fakes';
 
@@ -45,7 +46,13 @@ function workspace() {
 async function runLane(
   count: number,
   modes: Record<number, string>,
-  options: { signal?: AbortSignal; pidDir?: string; drainGraceMs?: number; settle?: boolean } = {}
+  options: {
+    signal?: AbortSignal;
+    pidDir?: string;
+    drainGraceMs?: number;
+    settle?: boolean;
+    env?: NodeJS.ProcessEnv;
+  } = {}
 ) {
   const { spec: base, mergedPath, scratch } = workspace();
   const spec = {
@@ -54,36 +61,33 @@ async function runLane(
     settle: options.settle ?? false,
   };
   mkdirSync(scratch);
-  process.env.MANGOSTUDIO_FAKE_WORKER_MODES = JSON.stringify(modes);
-  process.env.MANGOSTUDIO_FAKE_PID_DIR = options.pidDir ?? scratch;
+  const env = fixtureChildEnvironment({
+    ...(options.env ?? process.env),
+    MANGOSTUDIO_FAKE_WORKER_MODES: JSON.stringify(modes),
+    MANGOSTUDIO_FAKE_PID_DIR: options.pidDir ?? scratch,
+  });
   const lines: string[] = [];
   const sinks = {
     out: (line: string) => lines.push(line),
     err: (line: string) => lines.push(line),
   };
-  try {
-    const result = await runWorkerLane({
-      spec,
-      count,
-      mergedPath,
-      scratchRoot: scratch,
-      signal: options.signal,
-      killAfterMs: 2_000,
-      start: (plan) =>
-        startWorkerProcess(
-          // Keep the named fake's deliberately leaked children available to
-          // the guard, including when a root worker runs with --no-orphans.
-          { ...plan, env: { ...plan.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' } },
-          `[${spec.id} ${plan.index}/${plan.count}] `,
-          sinks,
-          options.drainGraceMs
-        ),
-    });
-    return { ...result, lines, mergedPath, scratch };
-  } finally {
-    Reflect.deleteProperty(process.env, 'MANGOSTUDIO_FAKE_WORKER_MODES');
-    Reflect.deleteProperty(process.env, 'MANGOSTUDIO_FAKE_PID_DIR');
-  }
+  const result = await runWorkerLane({
+    spec,
+    count,
+    mergedPath,
+    scratchRoot: scratch,
+    signal: options.signal,
+    killAfterMs: 2_000,
+    start: (plan) =>
+      startWorkerProcess(
+        plan,
+        `[${spec.id} ${plan.index}/${plan.count}] `,
+        sinks,
+        options.drainGraceMs,
+        env
+      ),
+  });
+  return { ...result, lines, mergedPath, scratch };
 }
 
 const isAlive = (pid: number): boolean => {
@@ -97,17 +101,12 @@ const isAlive = (pid: number): boolean => {
 
 describe('four real worker processes', () => {
   it('discards an ambient runtime home before starting workers', async () => {
-    const previous = process.env.MANGO_HOME;
-    process.env.MANGO_HOME = '/ambient/runtime-home';
-    try {
-      const { verdict, lines } = await runLane(2, {});
-      expect(verdict.failures).toEqual([]);
-      expect(lines).toContain('[api-unit 1/2] mango-home=<unset>');
-      expect(lines).toContain('[api-unit 2/2] mango-home=<unset>');
-    } finally {
-      if (previous === undefined) Reflect.deleteProperty(process.env, 'MANGO_HOME');
-      else process.env.MANGO_HOME = previous;
-    }
+    const { verdict, lines } = await runLane(2, {}, {
+      env: { ...process.env, MANGO_HOME: '/ambient/runtime-home' },
+    });
+    expect(verdict.failures).toEqual([]);
+    expect(lines).toContain('[api-unit 1/2] mango-home=<unset>');
+    expect(lines).toContain('[api-unit 2/2] mango-home=<unset>');
   });
 
   it('pass, and their merged report holds every case', async () => {
@@ -274,12 +273,29 @@ describe('a worker that leaks a process holding its pipes', () => {
     workspaces.push(pidDir);
     const began = Date.now();
 
-    const { verdict } = await runLane(2, { 1: 'grandchild' }, { pidDir, drainGraceMs: 300 });
+    const { verdict } = await runLane(
+      2,
+      { 1: 'grandchild' },
+      {
+        pidDir,
+        drainGraceMs: 300,
+        env: fixtureChildEnvironment(),
+      }
+    );
     const elapsed = Date.now() - began;
 
     const leaked = Number(readFileSync(join(pidDir, 'grandchild-1.pid'), 'utf8'));
     try {
       expect(verdict.failures).toEqual([]);
+      if (process.platform !== 'win32') {
+        expect(isAlive(leaked), 'expected the named orphan fixture to keep the pipes open').toBe(
+          true
+        );
+        expect(
+          elapsed,
+          'expected the inherited pipes to require the drain grace'
+        ).toBeGreaterThanOrEqual(300);
+      }
       expect(
         elapsed,
         `expected the lane to end soon after the drain grace | received ${elapsed} ms with a leaked process holding the pipes`

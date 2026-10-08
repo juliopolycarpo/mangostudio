@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { runCommand, runParallel } from '../lib/exec';
+import { fixtureChildEnvironment } from './support/child-supervision';
 import {
   ECHO_STDERR,
   ECHO_STDOUT,
@@ -37,14 +38,16 @@ const SETTLE_TIMEOUT_MS = 1_000;
 type RunnerProcess = ReturnType<typeof Bun.spawn>;
 
 /**
- * The variables that make a runner behave as nested or bound its fan-out. They
- * are scrubbed from the environment the fakes inherit, because this suite runs
- * under `bun run test`, whose runner has set them for its own children.
+ * Inherited supervision settings are scrubbed from the fakes so these tests
+ * exercise the runner's own groups and signal forwarding. Bun's worker flag
+ * carries --no-orphans to children through an internal environment variable;
+ * its automatic teardown would compete with the fake's signal handlers.
+ * The test worker itself keeps that policy, including its descendant cleanup.
  */
 const RUNNER_ENV = ['MANGO_RUNNER_GROUP', 'MANGO_RUNNER_CONCURRENCY'] as const;
 
 function fakeEnv(extra: Record<string, string> = {}): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = { ...process.env };
+  const env = fixtureChildEnvironment();
   for (const name of RUNNER_ENV) delete env[name];
   return { ...env, ...extra };
 }

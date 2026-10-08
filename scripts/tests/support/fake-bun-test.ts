@@ -21,6 +21,7 @@
 //
 // Usage: see scripts/tests/test-workers-process.unit.test.ts
 
+import { fixtureChildEnvironment } from './child-supervision';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -80,7 +81,7 @@ function main(argv: readonly string[]): void {
       ],
       // Preserve the fake's deliberate lifetime under a root --no-orphans
       // worker; token signaling, rather than Bun's policy, must end it.
-      env: { ...process.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' },
+      env: fixtureChildEnvironment(),
       stdin: 'ignore',
       stdout: 'inherit',
       stderr: 'inherit',

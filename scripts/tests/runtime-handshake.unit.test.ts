@@ -7,6 +7,7 @@ import {
   resolveHandshakeBudgetMs,
   WIN32_HANDSHAKE_BUDGET_MS,
 } from '../lib/runtime-handshake';
+import { BUN_ORPHAN_POLICY_ENV, fixtureChildEnvironment } from './support/child-supervision';
 import { stubProcessPlatform } from './support/process-platform';
 
 /**
@@ -96,6 +97,19 @@ describe('scripts/lib/runtime-handshake', () => {
   });
 
   describe('probeRuntimeHandshake', () => {
+    test('passes an explicit environment only to the probe child', async () => {
+      const parentPolicy = process.env[BUN_ORPHAN_POLICY_ENV];
+      const probe = await probeRuntimeHandshake({
+        command: standIn('console.log(process.env.MANGOSTUDIO_FAKE_HANDSHAKE_ENV)'),
+        env: { ...fixtureChildEnvironment(), MANGOSTUDIO_FAKE_HANDSHAKE_ENV: 'probe-child' },
+      });
+
+      expect(probe.hello).toBe('probe-child');
+      expect(probe.failure).toBeNull();
+      expect(process.env.MANGOSTUDIO_FAKE_HANDSHAKE_ENV).toBeUndefined();
+      expect(process.env[BUN_ORPHAN_POLICY_ENV]).toBe(parentPolicy);
+    });
+
     test('returns the handshake line and still drains stderr', async () => {
       const probe = await probeRuntimeHandshake({
         command: standIn(
@@ -248,11 +262,13 @@ describe('scripts/lib/runtime-handshake', () => {
     // times out. The dead child's own status is the diagnostic, so our kill
     // must not overwrite it with nothing.
     test('keeps the exit status of a child that died holding stdout open', async () => {
+      // This stand-in must leave its child alive to exercise the inherited
+      // pipe. The worker retains --no-orphans; the named fixture disables the
+      // inherited policy that would otherwise kill its holder at parent exit.
       const probe = await probeRuntimeHandshake({
         command: standIn(
-          // Wait for the grandchild to inherit stdout before this parent dies.
-          // Exiting immediately after spawn can close the pipe before the
-          // grandchild starts, so the probe correctly reports EOF instead.
+          // Confirm the grandchild has inherited stdout before this parent
+          // dies; without readiness, EOF is a valid result of the fixture.
           `const holder = Bun.spawn({ cmd: [process.execPath, '-e',` +
             ` "await Bun.write(Bun.stderr, 'ready'); setTimeout(() => process.exit(0), 3000);"],` +
             ` stdout: 'inherit', stderr: 'pipe', stdin: 'ignore' });` +
@@ -260,6 +276,7 @@ describe('scripts/lib/runtime-handshake', () => {
             `await Bun.write(Bun.stderr, 'dying\\n');` +
             `process.exit(7);`
         ),
+        env: fixtureChildEnvironment(),
         timeoutMs: HANGING_TIMEOUT_MS,
         exitGraceMs: 200,
       });

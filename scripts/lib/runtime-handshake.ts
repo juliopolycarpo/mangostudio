@@ -61,6 +61,8 @@ export function resolveHandshakeBudgetMs(): number {
 export interface RuntimeHandshakeProbeOptions {
   /** Full argv, e.g. `[runtimeBinaryPath, '--stdio']`. */
   readonly command: readonly string[];
+  /** Child environment; omitted callers keep Bun's inherited environment. */
+  readonly env?: NodeJS.ProcessEnv;
   /** Budget for the first stdout record. Overrides the platform default. */
   readonly timeoutMs?: number;
   /** How long a child that closed stdout gets to exit; defaults to 2s. */
@@ -121,6 +123,7 @@ export async function probeRuntimeHandshake(
 
   const child = Bun.spawn({
     cmd: [...command],
+    env: options.env,
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
