@@ -10,7 +10,7 @@
     "check": "bun run check:quick && bun run typecheck",
     "check:quick": "biome check . && bun ../../scripts/check-import-cycles.ts .",
     "typecheck": "tsc --noEmit",
-    "fix": "biome check --write src tests",
+    "fix": "biome check --write .",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/unit",
     "test:integration": "bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/integration",
