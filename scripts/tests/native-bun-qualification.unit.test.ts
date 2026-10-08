@@ -248,6 +248,7 @@ describe('qualification inputs and seals', () => {
     const env = nativeQualificationEnvironment({
       PATH: '/fixture/path',
       MANGOSTUDIO_BUN_TEST_ARGS: '--shard=1/8',
+      MANGO_TEST_WORKERS: '8',
       MANGOSTUDIO_RUNTIME_BINARY: '/old/runtime',
       TURBO_TOKEN: 'private',
       TURBO_FORCE: 'false',
@@ -264,6 +265,7 @@ describe('qualification inputs and seals', () => {
       'RUSTFLAGS',
       'CARGO_TARGET_DIR',
       'DATABASE_PATH',
+      'MANGO_TEST_WORKERS',
     ])
       expect(env[key]).toBeUndefined();
   });
