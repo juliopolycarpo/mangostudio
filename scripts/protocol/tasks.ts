@@ -8,6 +8,7 @@
  */
 
 import { join } from 'node:path';
+import { TYPECHECK_TASK } from '../lib/check';
 import { ROOT_DIR } from '../lib/config';
 import { cargoTargetDir } from '../lib/runtime-build';
 import { hasCargo, hasCargoHack, warnNoCargo, warnNoCargoHack } from './toolchain';
@@ -108,7 +109,7 @@ function typescriptCheckTasks(tsOnly: boolean, cargo: boolean): ProtocolTask[] {
       cmd: [
         'turbo',
         'run',
-        'typecheck',
+        TYPECHECK_TASK,
         'circular',
         '--ui=stream',
         '--filter=@mangostudio/protocol',

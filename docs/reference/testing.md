@@ -1393,13 +1393,12 @@ a `validity` string (toolchain versions plus content hashes). `setup-mango`
 wraps the Bun install family; every other family is invoked from the workflow
 that produces or consumes it.
 
-| Family                | Producer / consumer           | Path                            | Invalidators                                             | Restore behavior                  |
-| --------------------- | ----------------------------- | ------------------------------- | -------------------------------------------------------- | --------------------------------- |
-| Bun install           | every job using `setup-mango` | `~/.bun/install/cache`          | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
-| Turbo task output     | check, test, build            | `.turbo/cache`                  | OS, arch, Bun revision, Turbo version, lane, task config | lane-scoped trusted-`main` prefix |
-| TypeScript build info | check                         | `.mango/artifacts/tsbuildinfo/` | TypeScript version, tsconfig graph, TS sources           | version-scoped trusted-`main`     |
-| Workflow lint tools   | check                         | `.mango/artifacts/tools/`       | pinned tool manifest                                     | exact trusted restore only        |
-| Playwright browser    | browser smoke                 | `~/.cache/ms-playwright`        | OS, arch, Playwright version                             | exact trusted restore only        |
+| Family              | Producer / consumer           | Path                      | Invalidators                                             | Restore behavior                  |
+| ------------------- | ----------------------------- | ------------------------- | -------------------------------------------------------- | --------------------------------- |
+| Bun install         | every job using `setup-mango` | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
+| Turbo task output   | check, test, build            | `.turbo/cache`            | OS, arch, Bun revision, Turbo version, lane, task config | lane-scoped trusted-`main` prefix |
+| Workflow lint tools | check                         | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only        |
+| Playwright browser  | browser smoke                 | `~/.cache/ms-playwright`  | OS, arch, Playwright version                             | exact trusted restore only        |
 
 Inside the Turbo task output family each task is keyed by Turbo's own hash. The cached
 API unit task includes the SHA-256 of the runtime binary in it (see [API](#api)); without
