@@ -11,7 +11,9 @@ scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── build-runtime.ts  Build the cargo mangostudio-runtime per release target (bun run build:runtime)
-├── check.ts          Biome + dprint + madge + tsc + workflow static analysis, in parallel (bun run check)
+├── check.ts          Biome lint/format + import cycles + dprint + tsc + workflow static analysis, in parallel (bun run check)
+├── check-import-cycles.ts
+│                     Cycle-only TS/JS scan, including generated and gitignored files
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
@@ -49,6 +51,7 @@ importing the specific module in new code:
 | `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                           |
 | `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
 | `config.ts`            | Workspace definitions + root lint/format path lists                                                      |
+| `import-cycles.ts`     | Shared cycle-only Biome command for required workspace checks and QA                                     |
 | `changelog.ts`         | git-cliff arg/format logic (wrapped behind a project API)                                                |
 | `npm-pack.ts`          | npm distribution manifest builders                                                                       |
 | `release-version.ts`   | Canonical release version resolver + lockstep consistency check                                          |
@@ -59,6 +62,19 @@ importing the specific module in new code:
 | `test-workers.ts`      | Test-lane worker plan, strict verdict, JUnit merge (+ test-worker-process.ts)                            |
 | `junit-report.ts`      | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
+
+Workspace `check:quick` scripts run normal Biome checks followed by
+`check-import-cycles.ts`. The cycle pass uses the independent
+`biome.cycles.json`, so formatting exclusions and `.gitignore` cannot hide TS/JS
+cycles. It checks TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including JavaScript
+dependencies reached from TypeScript roots and independent JavaScript roots.
+It includes declarations and generated/build files, excludes only
+`node_modules` and `.git`, and raises the file-size limit to JavaScript's largest
+safe integer instead of inheriting Biome's one-MiB limit. Turbo always reruns
+`check:quick` because ignored files are absent from its VCS cache inputs.
+
+Run one scan from the repository root with
+`bun scripts/check-import-cycles.ts apps/api`.
 
 ### Cancelling a runner
 
@@ -201,6 +217,15 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   that balance the next run's split, and fail the run if two shards claimed the
   same file. That is the observable symptom of shards reading different timings,
   which means they did not cover the suite between them while all exiting 0.
+- `collect/circular.ts` — count Biome cycle witnesses across the discovered JS
+  workspaces and `scripts/`, using the same independent TS/JS scope and command
+  as required workspace checks, including type-only and self imports. A complete
+  JSON scan returns zero directly when clean. For cycles, the text reporter
+  supplies closed paths that are matched to every JSON diagnostic, split at
+  repeated files and deduplicated by rotation. This counts reported cycles,
+  not individual imports; overlapping graphs can differ from the former
+  madge DFS count. Skipped files, truncated output, other errors or a reporter
+  format change make the metric unavailable.
 - `collect.ts` + `collect/*` — discover the repository's components and merge
   the test fragment with per-component static LoC, coverage and type-check
   results plus bundle, dependency, duplication, and tooling metrics into the v4

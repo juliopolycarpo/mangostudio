@@ -1,0 +1,22 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "vcs": { "enabled": false },
+  "files": {
+    "ignoreUnknown": true,
+    "maxSize": 9007199254740991,
+    "includes": ["**", "!!**/node_modules", "!!**/.git"]
+  },
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "includes": ["**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"],
+    "rules": {
+      "preset": "none",
+      "suspicious": {
+        "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } }
+      },
+      "nursery": { "noSelfImport": "error" }
+    }
+  }
+}

@@ -48,38 +48,23 @@ const CHECK_RUNS: Record<string, { filtered: string[]; args: string[] }> = {
 const TASKS_BEFORE_THE_GRAPH_CHANGE: Record<string, string[]> = {
   full: [
     `${API}#check:quick`,
-    `${API}#circular`,
     `${API}#typecheck`,
     `${FRONTEND}#check:quick`,
-    `${FRONTEND}#circular`,
     `${FRONTEND}#typecheck`,
     `${PROTOCOL}#typecheck`,
     `${SHARED}#check:quick`,
-    `${SHARED}#circular`,
     `${SHARED}#typecheck`,
   ],
   frontend: [
     `${API}#typecheck`,
     `${FRONTEND}#check:quick`,
-    `${FRONTEND}#circular`,
     `${FRONTEND}#typecheck`,
     `${PROTOCOL}#typecheck`,
     `${SHARED}#typecheck`,
   ],
-  api: [
-    `${API}#check:quick`,
-    `${API}#circular`,
-    `${API}#typecheck`,
-    `${PROTOCOL}#typecheck`,
-    `${SHARED}#typecheck`,
-  ],
-  shared: [
-    `${PROTOCOL}#typecheck`,
-    `${SHARED}#check:quick`,
-    `${SHARED}#circular`,
-    `${SHARED}#typecheck`,
-  ],
-  protocol: [`${PROTOCOL}#circular`, `${PROTOCOL}#typecheck`],
+  api: [`${API}#check:quick`, `${API}#typecheck`, `${PROTOCOL}#typecheck`, `${SHARED}#typecheck`],
+  shared: [`${PROTOCOL}#typecheck`, `${SHARED}#check:quick`, `${SHARED}#typecheck`],
+  protocol: [`${PROTOCOL}#check:quick`, `${PROTOCOL}#typecheck`],
 };
 
 describe('typecheck closure guard', () => {
@@ -116,7 +101,7 @@ describe('typecheck closure guard', () => {
       findClosureViolations(
         [api, shared],
         [API],
-        [typecheckTaskId(API), typecheckTaskId(SHARED), `${API}#circular`]
+        [typecheckTaskId(API), typecheckTaskId(SHARED), `${API}#check:quick`]
       )
     ).toEqual([]);
   });

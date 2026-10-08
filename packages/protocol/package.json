@@ -68,8 +68,8 @@
   },
   "scripts": {
     "build": "bun ./build.ts",
+    "check:quick": "biome check . && bun ../../scripts/check-import-cycles.ts .",
     "typecheck": "tsc --noEmit",
-    "circular": "madge --circular --extensions ts .",
     "prepack": "bun ./build.ts"
   },
   "dependencies": {
