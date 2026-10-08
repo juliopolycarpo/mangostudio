@@ -33,6 +33,7 @@ mod cli;
 mod consent;
 mod consent_ts_compat;
 mod dispatch;
+mod injected_version;
 mod layout;
 mod library_stdio;
 mod mcp_stdio_ownership;

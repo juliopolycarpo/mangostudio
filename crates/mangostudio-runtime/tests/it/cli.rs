@@ -30,23 +30,35 @@ pub(super) fn assert_reports_stamp(site: &str, received: &str) {
     );
 }
 
-/// Fails unless every `(site, received)` pair is [`expected_version`], and names every site that
-/// is not, so a binary that reports the manifest version under a stamped build shows all the
-/// reads it miswired and not only the first one the test reached.
+/// Fails unless every `(site, received)` pair is `expected`, and names every site that is not, so
+/// a binary that reports the wrong version shows all the reads it miswired and not only the first
+/// one the test reached.
 ///
-/// Usage: `assert_all_report_stamp(&[("hello", hello_version), ("health", health_version)])`.
-pub(super) fn assert_all_report_stamp(reports: &[(&str, &str)]) {
+/// Usage: `assert_all_report("9.8.7", &[("hello", hello_version), ("health", health_version)])`.
+pub(super) fn assert_all_report(expected: &str, reports: &[(&str, &str)]) {
     let wrong: Vec<String> = reports
         .iter()
-        .filter(|(_, received)| *received != expected_version())
+        .filter(|(_, received)| *received != expected)
         .map(|(site, received)| format!("{site}={received}"))
         .collect();
     assert!(
         wrong.is_empty(),
-        "expected every site to report version: {} | received: {}",
-        expected_version(),
+        "expected every site to report version: {expected} | received: {}",
         wrong.join(", ")
     );
+}
+
+/// [`assert_all_report`] against [`expected_version`], the release this build was stamped with.
+pub(super) fn assert_all_report_stamp(reports: &[(&str, &str)]) {
+    assert_all_report(expected_version(), reports);
+}
+
+/// A borrowed view of owned `(site, version)` pairs, for [`assert_all_report`].
+pub(super) fn borrowed(reports: &[(String, String)]) -> Vec<(&str, &str)> {
+    reports
+        .iter()
+        .map(|(site, version)| (site.as_str(), version.as_str()))
+        .collect()
 }
 
 /// The `runtimeVersion` of a health report, or a marker naming what was there instead.

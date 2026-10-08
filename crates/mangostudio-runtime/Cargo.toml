@@ -29,6 +29,19 @@ workspace = true
 name = "mangostudio-runtime"
 path = "src/main.rs"
 
+# A test fixture, not a product: the runtime's CLI with a version chosen at run time, so a test can
+# tell a site that reports the version it was handed from one that reports the package version in
+# a build that carries no release stamp. Built only with its feature, which every `--all-features`
+# lane enables; `cargo build` and the release build leave it out.
+[[bin]]
+name = "injected-version-runtime"
+path = "tests/fixtures/injected_version_runtime.rs"
+required-features = ["injected-version-fixture"]
+
+[features]
+# Builds the `injected-version-runtime` fixture above. No release build enables it.
+injected-version-fixture = []
+
 [dependencies]
 # The SDK's process and launcher ports are `async_trait` traits; already in the graph through
 # `mango-external-agents` at this version.
