@@ -96,7 +96,7 @@ function safeTomlParserError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
   let safeMessage = message;
   const describesShape =
-    /^TOML Parse error: (?:Expected |Invalid (?:date|time|date-time offset): expected )/.test(
+    /^TOML Parse error: (?:Expected |Invalid (?:date|time|date-time offset): expected |Unterminated (?:array|inline table); expected |Missing value after '=')/.test(
       message
     );
   for (let index = 0; index < message.length; index++) {

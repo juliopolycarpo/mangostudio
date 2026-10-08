@@ -14,6 +14,38 @@ import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 
 const SECRET = 'sk-private-fixture-SECRET';
 const INVALID_DOCUMENT = `secret = ${SECRET}`;
+const FIXED_SHAPE_DIAGNOSTICS = [
+  {
+    label: 'array at EOF',
+    content: 'values = [',
+    message: "TOML Parse error: Unterminated array; expected ']'",
+  },
+  {
+    label: 'inline table at EOF',
+    content: 'value = {',
+    message: "TOML Parse error: Unterminated inline table; expected '}'",
+  },
+  {
+    label: 'array with a trailing private comment',
+    content: `values = [ # ${SECRET}\n`,
+    message: "TOML Parse error: Unterminated array; expected ']'",
+  },
+  {
+    label: 'inline table with a trailing private comment',
+    content: `value = { # ${SECRET}\n`,
+    message: "TOML Parse error: Unterminated inline table; expected '}'",
+  },
+  {
+    label: 'missing value at EOF',
+    content: 'value =',
+    message: "TOML Parse error: Missing value after '='",
+  },
+  {
+    label: 'missing value before a newline',
+    content: `value =\nsecret = "${SECRET}"`,
+    message: "TOML Parse error: Missing value after '='; values must be on the same line",
+  },
+];
 let directory: string;
 let configPath: string;
 let warnings: unknown[][];
@@ -116,6 +148,53 @@ describe('TOML parser diagnostics', () => {
       "TOML Parse error: Invalid date-time offset: expected ':' between hours and minutes"
     );
   });
+
+  it.each(FIXED_SHAPE_DIAGNOSTICS)(
+    'keeps a direct expected-shape diagnostic for $label',
+    ({ content, message }) => {
+      for (const parse of [parseTomlDocument, parseTomlStringSections]) {
+        expect(() => parse(content)).toThrow(message);
+      }
+    }
+  );
+
+  it.each(FIXED_SHAPE_DIAGNOSTICS)(
+    'keeps a file expected-shape diagnostic for $label',
+    ({ content, message }) => {
+      writeFileSync(configPath, content);
+      let error: Error | undefined;
+      try {
+        readTomlDocument(configPath);
+      } catch (caught) {
+        error = caught as Error;
+      }
+      expect(error).toBeInstanceOf(Error);
+      expect(error?.message).toBe(
+        `Cannot parse TOML file ${JSON.stringify(configPath)}: ${JSON.stringify(message)}`
+      );
+      expect((error?.cause as Error)?.message).toBe(message);
+      expect(error?.stack).not.toContain(SECRET);
+    }
+  );
+
+  it.each(FIXED_SHAPE_DIAGNOSTICS)(
+    'keeps a public subagent expected-shape diagnostic for $label',
+    async ({ content, message }) => {
+      const adapter = createSubagentAdapter('toml-agent', 'markdown-frontmatter');
+      const result = await adapter.adapt({
+        content,
+        kind: 'subagent',
+        from: 'toml-agent',
+        to: 'markdown-frontmatter',
+        resourceKey: 'subagent:reviewer',
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('Expected malformed TOML to reject conversion.');
+      expect(result.error.message).toBe(message);
+      expect(result.error.message).not.toContain(SECRET);
+      expect(result.error.code).toBe('invalid-source');
+    }
+  );
 
   it('keeps a malformed config warning useful without logging its private value', () => {
     writeFileSync(configPath, INVALID_DOCUMENT);
