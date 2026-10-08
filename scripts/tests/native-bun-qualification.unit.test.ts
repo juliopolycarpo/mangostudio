@@ -291,6 +291,32 @@ describe('qualification inputs and seals', () => {
       )
     ).rejects.toThrow('Unknown default test producer');
   });
+
+  test('refuses source scripts that select cases or repeat attempts', async () => {
+    const source = await checkout();
+    const seal = await sealNativeSource(source.root);
+    for (const selector of [
+      '--test-name-pattern=selected',
+      '-t selected',
+      '-tselected',
+      '--only',
+      '--changed=main',
+      '--shard=1/2',
+      '--path-ignore-patterns=ignored',
+      '--retry=2',
+      '--rerun-each=2',
+    ]) {
+      const manifest = await Bun.file(join(source.root, 'package.json')).json();
+      manifest.scripts['test:scripts'] = `bun test scripts ${selector}`;
+      await file(join(source.root, 'package.json'), JSON.stringify(manifest));
+      await expect(
+        nativeTestInventory(
+          source.root,
+          seal.files.map((entry) => entry.path)
+        )
+      ).rejects.toThrow('expected an unfiltered single-attempt suite');
+    }
+  });
 });
 
 describe('full qualification receipts', () => {
@@ -320,6 +346,7 @@ describe('full qualification receipts', () => {
     expect(new Set(targets).size).toBe(2);
     expect(targets.every((target) => target?.startsWith(join(source.out, 'targets')))).toBe(true);
     const testCall = fake.calls.find((call) => call.label === 'test');
+    expect(fake.calls.find((call) => call.label === 'rustc-version')?.timeoutSeconds).toBe(180);
     expect(testCall?.env.MANGOSTUDIO_RUNTIME_BINARY).toBe(receipt.artifactsBefore[0].path);
     expect(testCall?.env.MANGOSTUDIO_FAKE_CURSOR_AGENT).toBe(receipt.artifactsBefore[1].path);
     expect(JSON.parse(await readFile(join(source.out, 'receipt.json'), 'utf8')).status).toBe(

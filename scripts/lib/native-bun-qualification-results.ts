@@ -100,6 +100,15 @@ export async function nativeTestInventory(
         `Invalid ${manifest} ${key}: ${JSON.stringify(script)}; expected ${directory} suite`
       );
     }
+    if (
+      /(?:^|\s)(?:-t[^\s]*|--(?:test-name-pattern|only|changed|shard|path-ignore-patterns|retry|rerun-each|pass-with-no-tests)(?:\s|=|$))/.test(
+        script
+      )
+    ) {
+      throw new Error(
+        `Invalid ${manifest} ${key}: ${JSON.stringify(script)}; expected an unfiltered single-attempt suite`
+      );
+    }
     const prefix = cwd ? `${cwd}/${directory}/` : `${directory}/`;
     const files = trackedFiles.filter((file) => file.startsWith(prefix) && TEST_FILE.test(file));
     if (!files.length)
@@ -116,7 +125,9 @@ interface MutableLane {
   cases: NativeCaseRecord[];
   recap: boolean;
   recaps: NativeCaseRecord[];
-  summaries: { tests: number; files: number }[];
+  summaries: { tests: number; files: number; line: number }[];
+  passFooters: number[];
+  filtered: { count: number; line: number }[];
   errors: string[];
 }
 
@@ -151,7 +162,10 @@ function recordLine(lane: MutableLane, body: string, line: number, cwd: string):
     else lane.cases.push(record);
   }
   const summary = /^Ran (\d+) tests? across (\d+) files?\./.exec(body);
-  if (summary) lane.summaries.push({ tests: Number(summary[1]), files: Number(summary[2]) });
+  if (summary) lane.summaries.push({ tests: Number(summary[1]), files: Number(summary[2]), line });
+  if (/^\d+ pass$/.test(body)) lane.passFooters.push(line);
+  const filtered = /^([1-9]\d*) filtered out$/.exec(body);
+  if (filtered) lane.filtered.push({ count: Number(filtered[1]), line });
   if (
     /^# Unhandled error between tests|^[1-9]\d* errors?$|oh no: Bun has crashed|panic\(main thread\)/.test(
       body
@@ -180,6 +194,8 @@ export function parseNativeTestLog(
       recap: false,
       recaps: [],
       summaries: [],
+      passFooters: [],
+      filtered: [],
       errors: [],
     })
   );
@@ -194,11 +210,9 @@ export function parseNativeTestLog(
   return lanes.map((lane, index) => {
     const spec = inventory[index];
     const errors = [...lane.errors];
-    const summary = lane.summaries.length === 1 ? lane.summaries[0] : null;
+    const record = lane.summaries.length === 1 ? lane.summaries[0] : null;
+    const summary = record ? { tests: record.tests, files: record.files } : null;
     const files = [...lane.files];
-    const missing = spec.files.filter((file) => !lane.files.has(file));
-    if (missing.length)
-      errors.push(`Missing ${missing.length} required files: ${missing.join(', ')}`);
     if (lane.id === 'root') {
       if (!rootJunit || rootJunit.truncated || rootJunit.tests === 0)
         errors.push('Missing, empty, or truncated root JUnit');
@@ -211,17 +225,34 @@ export function parseNativeTestLog(
         name: testCase.identity,
         outcome: testCase.outcome,
       }));
+      const junitFiles = new Set(cases.flatMap((testCase) => testCase.file ?? []));
+      const missing = spec.files.filter((file) => !junitFiles.has(file));
+      if (missing.length)
+        errors.push(`Missing ${missing.length} required JUnit files: ${missing.join(', ')}`);
+      const lastSummary = lane.summaries.at(-1);
+      const footerStart = [...lane.passFooters]
+        .reverse()
+        .find((line) => line < (lastSummary?.line ?? 0));
+      if (lastSummary && footerStart !== undefined) {
+        for (const filtered of lane.filtered) {
+          if (filtered.line > footerStart && filtered.line < lastSummary.line)
+            errors.push(`${filtered.count} filtered testcases; expected the full default suite`);
+        }
+      }
       return {
         id: lane.id,
-        files,
+        files: [...junitFiles],
         cases,
         recaps: [],
-        summary: rootJunit
-          ? { tests: rootJunit.tests, files: new Set(cases.map((testCase) => testCase.file)).size }
-          : null,
+        summary: rootJunit ? { tests: rootJunit.tests, files: junitFiles.size } : null,
         errors: errors.filter((error) => !error.startsWith('line ')),
       };
     }
+    const missing = spec.files.filter((file) => !lane.files.has(file));
+    if (missing.length)
+      errors.push(`Missing ${missing.length} required files: ${missing.join(', ')}`);
+    for (const filtered of lane.filtered)
+      errors.push(`${filtered.count} filtered testcases; expected the full default suite`);
     if (!summary)
       errors.push(`Expected one complete Bun summary; received ${lane.summaries.length}`);
     if (summary && (summary.tests !== lane.cases.length || summary.files !== files.length)) {

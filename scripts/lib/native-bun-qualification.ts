@@ -204,7 +204,9 @@ async function runSetup(
       ['cargo', 'tree', '-p', 'mangostudio-runtime', '--edges', 'normal', '--locked'],
     ],
   ] as const) {
-    const result = await run(label, command, label === 'cargo-normal-tree' ? 120 : 30);
+    // The first Rust invocation can install the checkout's pinned toolchain.
+    const timeout = label === 'rustc-version' ? 180 : label === 'cargo-normal-tree' ? 120 : 30;
+    const result = await run(label, command, timeout);
     receipt.setupErrors.push(...commandFailures(result));
     receipt.toolchain[label] = await readFile(join(receipt.out, result.log), 'utf8');
     if (receipt.setupErrors.length) return [];

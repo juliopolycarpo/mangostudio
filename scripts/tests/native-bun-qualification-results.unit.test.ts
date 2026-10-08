@@ -77,6 +77,46 @@ describe('default suite raw evidence', () => {
     expect(lanes[2].cases[0].outcome).toBe('skipped');
   });
 
+  test('rejects filtered cases even when every required file has a reporter header', () => {
+    const filtered = completeLog().replace(
+      '@mangostudio/api:test:unit: 0 fail',
+      '@mangostudio/api:test:unit: 9 filtered out\n@mangostudio/api:test:unit: 0 fail'
+    );
+    const lanes = parseNativeTestLog(filtered, inventory, root);
+    expect(lanes[1].errors.join('\n')).toContain('9 filtered testcases');
+  });
+
+  test('requires every root file to have an authoritative JUnit testcase', () => {
+    const required = [
+      { ...inventory[0], files: [...inventory[0].files, 'scripts/filtered.test.ts'] },
+    ];
+    const headers = `${completeLog()}\n//:test:scripts: scripts/filtered.test.ts:`;
+    const lanes = parseNativeTestLog(headers, required, root);
+    expect(lanes[0].errors.join('\n')).toContain(
+      'Missing 1 required JUnit files: scripts/filtered.test.ts'
+    );
+  });
+
+  test('rejects the real root filtered footer while ignoring quoted fixture footers', () => {
+    const fixture = completeLog().replace(
+      '//:test:scripts: 1 error',
+      '//:test:scripts: 1 pass\n//:test:scripts: 9 filtered out\n//:test:scripts: Ran 1 test across 1 file.'
+    );
+    const footer = [
+      '//:test:scripts: 1 pass',
+      '//:test:scripts: 0 fail',
+      '//:test:scripts: Ran 1 test across 1 file.',
+    ].join('\n');
+    expect(parseNativeTestLog(`${fixture}\n${footer}`, inventory, root)[0].errors).toEqual([]);
+    const filtered = footer.replace(
+      '//:test:scripts: 0 fail',
+      '//:test:scripts: 9 filtered out\n//:test:scripts: 0 fail'
+    );
+    expect(
+      parseNativeTestLog(`${fixture}\n${filtered}`, inventory, root)[0].errors.join('\n')
+    ).toContain('9 filtered testcases');
+  });
+
   test('refuses a zero-exit shape with missing lanes or no case records', () => {
     const absent = parseNativeTestLog('//:test:scripts: scripts/root.test.ts:', inventory, root);
     expect(absent[1].errors.join('\n')).toContain('Missing 1 required files');
