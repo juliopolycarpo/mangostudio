@@ -55,6 +55,15 @@ export interface TestLane {
    * directly from its own coverage dir, with nothing to merge.
    */
   readonly lcovPath?: string;
+  /**
+   * Set on a lane whose plain (non-coverage) run `scripts/run-test-workers.ts`
+   * splits across worker processes. The coverage script of the same lane is not
+   * affected: Bun's LCOV is not union-mergeable across processes (see below).
+   */
+  readonly workers?: {
+    /** Workspace-relative directory of the lane's files, the last argument of its test script. */
+    readonly testDir: string;
+  };
   /** Repo-relative manifest declaring the lane's coverage script. */
   readonly manifest: string;
   /** Script key inside that manifest. */
@@ -64,6 +73,18 @@ export interface TestLane {
 }
 
 export const JUNIT_DIR = '.mango/artifacts/junit';
+
+/**
+ * Where the worker runner puts a lane's merged report. Deliberately not
+ * `JUNIT_DIR`: a lane's `junitPath` is its coverage run's evidence (the QA gate
+ * and the shard merge read it), and a plain run that wrote there could leave a
+ * green report behind for a coverage lane that died before writing its own.
+ *
+ * @example
+ * workerReportPath(laneById('api-unit')); // => '.mango/artifacts/test-workers/api-unit.xml'
+ */
+export const workerReportPath = (lane: Pick<TestLane, 'id'>): string =>
+  `.mango/artifacts/test-workers/${lane.id}.xml`;
 
 /**
  * Where each lane's `--timings` file lives.
@@ -102,7 +123,11 @@ export const TEST_LANES: readonly TestLane[] = [
   // The api workspace is two lanes, not one, because its two suites need
   // opposite isolation settings. Unit keeps `--parallel=1` (= one worker,
   // `--isolate`): dropping isolation there costs 172 failures (measured; see
-  // docs/reference/testing.md). Integration runs with no `--parallel` at all —
+  // docs/reference/testing.md). Its plain `test:unit` run is the one place that
+  // goes wider, as several processes that each keep `--parallel=1` (`workers`
+  // below); `test:coverage:unit` stays a single process, because a union of
+  // per-process LCOV carried 3,501 extra zero-hit line keys on two strict
+  // comparisons and nobody has explained why. Integration runs with no `--parallel` at all —
   // it passes without isolation by design, and Bun's isolate machinery is what
   // intermittently wedges the whole invocation in CI (oven-sh/bun#39709 — the
   // runner never exits, or `spawnSync` stalls inside isolate workers), so the
@@ -124,6 +149,7 @@ export const TEST_LANES: readonly TestLane[] = [
     junitPath: `${JUNIT_DIR}/api-unit.xml`,
     timingsPath: `${TIMINGS_DIR}/api-unit.json`,
     lcovPath: '.mango/artifacts/coverage/api-unit/lcov.info',
+    workers: { testDir: 'tests/unit' },
     manifest: 'apps/api/package.json',
     coverageScript: 'test:coverage:unit',
   },

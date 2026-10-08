@@ -23,6 +23,8 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { REAL_HOME_ENV, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
+import { laneById, type TestLaneId } from '../lib/test-lanes';
+import { laneSpec, planWorkers, WORKERS_ENV } from '../lib/test-workers';
 import { canonicalPath as canonical } from './support/canonical-path';
 
 const ROOT = join(import.meta.dir, '..', '..');
@@ -52,10 +54,24 @@ function isInside(parent: string, child: string): boolean {
   return rel === '' || !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel));
 }
 
-/** What precedes `bun test` in a lane script, e.g. `... bun ../../scripts/with-test-home.ts`. */
+/** The worker runner's call in a lane script: the lane it splits and the serial command it is given. */
+function runnerCall(script: string): { laneId: TestLaneId; command: string[] } | null {
+  const match = /run-test-workers\.ts\s+--lane=(\S+)\s+--\s+(bun test\b.*)$/.exec(script);
+  if (!match?.[1] || !match[2]) return null;
+  return { laneId: match[1] as TestLaneId, command: match[2].trim().split(/\s+/) };
+}
+
+/**
+ * What precedes `bun test` in a lane script: the launcher itself, e.g.
+ * `... bun ../../scripts/with-test-home.ts`, or for a script that goes through
+ * the worker runner the launcher the runner starts every worker with.
+ */
 function launcherCommand(script: string): string[] | null {
   const match = /(\S+\/with-test-home\.ts)\s+bun test\b/.exec(script);
-  return match?.[1] ? [process.execPath, match[1]] : null;
+  if (match?.[1]) return [process.execPath, match[1]];
+  const call = runnerCall(script);
+  if (!call) return null;
+  return [...laneSpec(laneById(call.laneId), call.command).launcher];
 }
 
 describe('API lane scripts start bun test through the temporary-home launcher', () => {
@@ -78,6 +94,34 @@ describe('API lane scripts start bun test through the temporary-home launcher', 
         `apps/api script ${name} runs bun test with the real home | expected: through ${LAUNCHER} | received: ${script}`
       ).not.toBeNull();
     }
+  });
+
+  test('apps/api test:unit splits the lane across workers that each start through the launcher', () => {
+    const call = runnerCall(scripts['test:unit'] ?? '');
+    if (!call) {
+      throw new Error(
+        `apps/api test:unit must run through the worker runner | expected: ... bun ../../scripts/run-test-workers.ts --lane=api-unit -- bun test ... | received: ${scripts['test:unit']}`
+      );
+    }
+    const spec = laneSpec(laneById(call.laneId), call.command);
+    expect(
+      spec.launcher.at(-1)?.replaceAll('\\', '/'),
+      'the workers must start through the temporary-home launcher'
+    ).toEndWith(`/${LAUNCHER}`);
+
+    for (const plan of planWorkers(spec, 4, tmpdir())) {
+      expect(
+        plan.argv.slice(0, spec.launcher.length + 2),
+        `worker ${plan.index}/${plan.count} must start bun test through ${LAUNCHER}, which gives it a temporary HOME of its own | received: ${plan.argv.join(' ')}`
+      ).toEqual([...spec.launcher, 'bun', 'test']);
+    }
+  });
+
+  test('the coverage lane stays one process: partitioned LCOV was not reproducible', () => {
+    expect(
+      runnerCall(scripts['test:coverage:unit'] ?? ''),
+      'apps/api test:coverage:unit must stay a single bun test | expected: no run-test-workers.ts | received: a worker runner call'
+    ).toBeNull();
   });
 
   test('the nightly randomized-order lane goes through the launcher too', () => {
@@ -212,27 +256,38 @@ describe('Turbo task definitions of the API lanes', () => {
 
   interface DryRunTask {
     taskId: string;
+    hash: string;
     inputs: Record<string, string>;
     resolvedTaskDefinition: { cache: boolean; passThroughEnv: string[] | null };
   }
 
-  /** The `scripts/` files the launcher loads: its own and every relative import, transitively. */
-  function launcherFiles(entry = 'scripts/with-test-home.ts', seen = new Set<string>()): string[] {
-    if (seen.has(entry)) return [...seen];
-    seen.add(entry);
-    const source = readFileSync(join(ROOT, entry), 'utf8');
-    for (const match of source.matchAll(/from '(\.{1,2}\/[^']+)'/g)) {
-      launcherFiles(posix.join(posix.dirname(entry), `${match[1]}.ts`), seen);
+  /**
+   * The `scripts/` files the test:unit script loads: the launcher and the worker
+   * runner, and every relative import of either, transitively.
+   */
+  function launcherFiles(
+    entries: readonly string[] = ['scripts/with-test-home.ts', 'scripts/run-test-workers.ts'],
+    seen = new Set<string>()
+  ): string[] {
+    for (const entry of entries) {
+      if (seen.has(entry)) continue;
+      seen.add(entry);
+      const source = readFileSync(join(ROOT, entry), 'utf8');
+      // `from './x'` (imports and re-exports), a bare `import './x'`, and `import('./x')`.
+      const imports = [...source.matchAll(/(?:from\s*|import\s*\(?\s*)'(\.{1,2}\/[^']+)'/g)].map(
+        (match) => posix.join(posix.dirname(entry), `${match[1]}.ts`)
+      );
+      launcherFiles(imports, seen);
     }
     return [...seen];
   }
 
-  async function dryRun(): Promise<Map<string, DryRunTask>> {
+  async function dryRun(extraEnv: Record<string, string> = {}): Promise<Map<string, DryRunTask>> {
     const turbo = join(ROOT, 'node_modules', '.bin', 'turbo');
     const probe = Bun.spawn({
       cmd: [turbo, 'run', ...TURBO_LANES, '--filter=@mangostudio/api', '--dry=json'],
       cwd: ROOT,
-      env: process.env as Record<string, string>,
+      env: { ...(process.env as Record<string, string>), ...extraEnv },
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -248,15 +303,22 @@ describe('Turbo task definitions of the API lanes', () => {
     return new Map(tasks.map((task) => [task.taskId.replace('@mangostudio/api#', ''), task]));
   }
 
-  test('the launcher closure is the three files the cache key names', () => {
+  test('the test:unit closure is the ten files the cache key names', () => {
     expect(launcherFiles().sort()).toEqual([
+      'scripts/lib/config.ts',
+      'scripts/lib/junit-report.ts',
+      'scripts/lib/log.ts',
       'scripts/lib/temp-home.ts',
       'scripts/lib/test-home.ts',
+      'scripts/lib/test-lanes.ts',
+      'scripts/lib/test-worker-process.ts',
+      'scripts/lib/test-workers.ts',
+      'scripts/run-test-workers.ts',
       'scripts/with-test-home.ts',
     ]);
   });
 
-  test('the cached test:unit lane hashes every launcher file', async () => {
+  test('the cached test:unit lane hashes every file its script loads', async () => {
     const task = (await dryRun()).get('test:unit');
     expect(task, 'expected a @mangostudio/api#test:unit task in the Turbo dry run').toBeDefined();
     expect(
@@ -288,6 +350,29 @@ describe('Turbo task definitions of the API lanes', () => {
         ).toContain(variable);
       }
     }
+  });
+
+  // The merged result is the same at any width, so a developer asking for two
+  // workers must hit the cache entry the default width wrote. The variable still has
+  // to reach the runner, and Turbo's strict environment drops anything
+  // undeclared, so it is a pass-through and not an `env` entry.
+  test('the worker count reaches the runner without changing the cached lane’s hash', async () => {
+    const [unset, narrow, other] = [
+      await dryRun(),
+      await dryRun({ [WORKERS_ENV]: '2' }),
+      await dryRun({ MANGOSTUDIO_SOMETHING_ELSE: '2' }),
+    ];
+    const passThrough = unset.get('test:unit')?.resolvedTaskDefinition.passThroughEnv ?? [];
+    expect(
+      passThrough,
+      `Turbo's strict environment drops ${WORKERS_ENV} before the runner reads it | expected: "${WORKERS_ENV}" in passThroughEnv of @mangostudio/api test:unit | received: [${passThrough.join(', ')}]`
+    ).toContain(WORKERS_ENV);
+    expect(
+      narrow.get('test:unit')?.hash,
+      `${WORKERS_ENV}=2 must hit the entry written without it | expected: the unset hash ${unset.get('test:unit')?.hash} | received: ${narrow.get('test:unit')?.hash}`
+    ).toBe(unset.get('test:unit')?.hash);
+    // The control: a MANGOSTUDIO_* variable is hashed, so the comparison can differ.
+    expect(other.get('test:unit')?.hash).not.toBe(unset.get('test:unit')?.hash);
   });
 
   test('the pass-through list covers every toolchain variable the launcher pins', () => {
