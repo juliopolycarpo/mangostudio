@@ -172,6 +172,11 @@ async function requireFreshSource(root: string): Promise<void> {
 
 function commandFailures(receipt: NativeCommandReceipt): string[] {
   const errors = [...receipt.errors];
+  if (
+    ['install', 'build-runtime', 'build-fake-agent', 'check', 'test'].includes(receipt.label) &&
+    !receipt.settlement.rootObserved
+  )
+    errors.push('command root was never observed; expected positive ownership during execution');
   if (receipt.exitCode !== 0) errors.push(`exit ${receipt.exitCode}, signal ${receipt.signal}`);
   if (receipt.timedOut) errors.push(`timed out after ${receipt.timeoutSeconds}s`);
   if (!receipt.settlement.empty)

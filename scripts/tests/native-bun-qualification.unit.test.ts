@@ -50,7 +50,11 @@ async function checkout(): Promise<{ root: string; out: string; sha: string }> {
     join(root, 'package.json'),
     JSON.stringify({
       packageManager: 'bun@1.4.2',
-      scripts: { test: 'bun ./scripts/test.ts', 'test:scripts': 'bun test scripts' },
+      scripts: {
+        test: 'bun ./scripts/test.ts',
+        'test:scripts':
+          'mkdir -p .mango/artifacts/junit && bun test --timeout 15000 --reporter=junit --reporter-outfile=.mango/artifacts/junit/root.xml $MANGOSTUDIO_BUN_TEST_ARGS scripts',
+      },
     })
   );
   await file(
@@ -64,14 +68,26 @@ async function checkout(): Promise<{ root: string; out: string; sha: string }> {
   await file(join(root, 'scripts/root.test.ts'), '// tracked root test\n');
   await file(join(root, 'packages/protocol/protocol.test.ts'), '// tracked protocol test\n');
   await file(join(root, '.gitignore'), 'node_modules/\n.turbo/\n.mango/artifacts/\n');
-  for (const workspace of ['api', 'shared', 'frontend']) {
+  const scripts = {
+    api: {
+      'test:unit':
+        'MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --timeout 15000 --parallel=1 tests/unit',
+      'test:integration':
+        'MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --timeout 15000 tests/integration',
+    },
+    shared: { 'test:unit': 'bun test --timeout 15000 tests/unit' },
+    frontend: {
+      'test:unit':
+        'bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/unit',
+      'test:integration':
+        'bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/integration',
+    },
+  };
+  for (const workspace of ['api', 'shared', 'frontend'] as const) {
     await file(
       join(root, `apps/${workspace}/package.json`),
       JSON.stringify({
-        scripts: {
-          'test:unit': 'bun test tests/unit',
-          ...(workspace !== 'shared' ? { 'test:integration': 'bun test tests/integration' } : {}),
-        },
+        scripts: scripts[workspace],
       })
     );
     await file(join(root, `apps/${workspace}/tests/unit/unit.test.ts`), '// tracked unit test\n');
@@ -111,6 +127,7 @@ class FakeNativeCommands {
   omitIntegration = false;
   mutateSource = false;
   mutateArtifact = false;
+  unobservedLabel: string | null = null;
 
   run = async (options: NativeCommandOptions): Promise<NativeCommandReceipt> => {
     this.calls.push(options);
@@ -171,7 +188,7 @@ class FakeNativeCommands {
       log: `logs/${options.label}.log`,
       settlement: {
         scope: 'observed descendants and command process group',
-        rootObserved: true,
+        rootObserved: options.label !== this.unobservedLabel,
         pollIntervalMs: 1_000,
         observed: [],
         survivors: [],
@@ -371,6 +388,31 @@ describe('full qualification receipts', () => {
     expect(fake.calls.filter((call) => call.label === 'test')).toHaveLength(1);
     expect(receipt.tests?.complete).toBe(true);
     expect(receipt.validationErrors.join('\n')).toContain('check: exit 1');
+  });
+
+  test('requires an observed full-suite root while recording fast metadata scope honestly', async () => {
+    const source = await checkout();
+    const fake = new FakeNativeCommands();
+    fake.unobservedLabel = 'check';
+    const receipt = await runNativeQualification(source, {
+      runCommand: fake.run,
+      snapshotProcesses: emptyNativeCensus,
+    });
+    expect(receipt.status).toBe('validation-failed');
+    expect(receipt.validationErrors.join('\n')).toContain('check: command root was never observed');
+    expect(fake.calls.filter((call) => call.label === 'test')).toHaveLength(1);
+    const metadataSource = await checkout();
+    const metadata = new FakeNativeCommands();
+    metadata.unobservedLabel = 'rustc-version';
+    const qualified = await runNativeQualification(metadataSource, {
+      runCommand: metadata.run,
+      snapshotProcesses: emptyNativeCensus,
+    });
+    expect(qualified.status).toBe('qualified');
+    expect(
+      qualified.commands.find((command) => command.label === 'rustc-version')?.settlement
+        .rootObserved
+    ).toBe(false);
   });
 
   test('refuses misleading zero-exit receipts with skipped integration lanes', async () => {
