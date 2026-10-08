@@ -9,6 +9,12 @@ export interface SettingsRedactionOptions {
 /** Compiled once per document; recompiling it per leaf dominated the walk. */
 type HomePattern = RegExp | null;
 
+/**
+ * Flatten settings into display fields while hiding credentials and private state.
+ *
+ * @example
+ * redactSettingsDocument({ model: 'local' }, { homeDir: '/home/ada' });
+ */
 export function redactSettingsDocument(
   document: unknown,
   options: SettingsRedactionOptions
@@ -62,7 +68,7 @@ function collectFields(
     return;
   }
 
-  const renderedValue = value instanceof Date ? value.toISOString() : String(value);
+  const renderedValue = renderScalarValue(value);
   const fieldPath = relativizeHome(path || '$', home);
   if (inheritsCredential || isCredentialField(fieldName, renderedValue)) {
     fields.push({ path: fieldPath, presentation: 'redacted' });
@@ -74,6 +80,25 @@ function collectFields(
     presentation: 'value',
     value: relativizeHome(renderedValue, home),
   });
+}
+
+/**
+ * Keep exactly the existing millisecond date display without changing stored precision.
+ *
+ * @example
+ * renderScalarValue(new Date('1979-05-27T07:32:00Z')); // '1979-05-27T07:32:00.000Z'
+ */
+function renderScalarValue(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return String(value);
+  if (value instanceof Date) return value.toISOString();
+  const rendered = String(value);
+  const tag = Object.prototype.toString.call(value);
+  if (!/^\[object Temporal\.(?:Instant|PlainDateTime|PlainTime)\]$/.test(tag)) return rendered;
+  return rendered.replace(
+    /(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})?$/,
+    (_match, fraction: string | undefined, zone: string | undefined) =>
+      `.${(fraction ?? '').padEnd(3, '0').slice(0, 3)}${zone ?? ''}`
+  );
 }
 
 function isCredentialField(name: string, value: string): boolean {
@@ -113,6 +138,10 @@ function shouldOmitSubtree(key: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
-    typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date)
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !(value instanceof Date) &&
+    !Object.prototype.toString.call(value).startsWith('[object Temporal.')
   );
 }
