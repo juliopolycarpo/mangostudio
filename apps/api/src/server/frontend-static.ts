@@ -285,7 +285,11 @@ function decodedManifestKey(pathname: string): string | null {
 
 /** Cache directive for an embedded asset, given the manifest key it lives at. */
 function embeddedCacheControl(urlPath: string): string {
-  if (urlPath === '/index.html') return SHELL_CACHE_CONTROL;
+  return urlPath === '/index.html' ? SHELL_CACHE_CONTROL : assetCacheControl(urlPath);
+}
+
+/** Cache directive for any file but the shell, hashed or not, on either branch. */
+function assetCacheControl(urlPath: string): string {
   return urlPath.startsWith(`/${HASHED_ASSET_DIR}/`)
     ? HASHED_CACHE_CONTROL
     : unhashedCacheControl(urlPath);
@@ -483,9 +487,7 @@ function registerSpa(app: App, frontendDir: string): void {
       return serveStattedFile(
         resolved.filePath,
         resolved.stats,
-        resolved.urlPath.startsWith(`/${HASHED_ASSET_DIR}/`)
-          ? HASHED_CACHE_CONTROL
-          : unhashedCacheControl(resolved.urlPath),
+        assetCacheControl(resolved.urlPath),
         request
       );
     }

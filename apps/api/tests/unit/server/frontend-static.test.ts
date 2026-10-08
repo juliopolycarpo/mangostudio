@@ -834,69 +834,43 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     }
   });
 
-  test('404s a symlink alias for private build state inside the frontend directory', async () => {
-    const server = await startFilesystemServer();
-    try {
-      symlinkSync(
-        join(server.frontendDir, BUILD_STATE_FILE),
-        join(server.frontendDir, 'assets', 'state-AbCd1234.json')
-      );
-      const response = await server.get('/assets/state-AbCd1234.json');
-      const body = await response.text();
-      expect(response.status, body).toBe(404);
-      expect(body).not.toContain('secret.example.test');
-    } finally {
-      await server.stop();
+  test.each(['symlink', 'hardlink'])(
+    '404s a %s alias for private build state inside the frontend directory',
+    async (kind) => {
+      const server = await startFilesystemServer();
+      try {
+        const state = join(server.frontendDir, BUILD_STATE_FILE);
+        const alias = join(server.frontendDir, 'assets', 'state-AbCd1234.json');
+        if (kind === 'hardlink') linkSync(state, alias);
+        else symlinkSync(state, alias);
+        const response = await server.get('/assets/state-AbCd1234.json');
+        const body = await response.text();
+        expect(response.status, body).toBe(404);
+        expect(body).not.toContain('secret.example.test');
+      } finally {
+        await server.stop();
+      }
     }
-  });
+  );
 
-  test('404s a hardlink alias for private build state inside the frontend directory', async () => {
-    const server = await startFilesystemServer();
-    try {
-      linkSync(
-        join(server.frontendDir, BUILD_STATE_FILE),
-        join(server.frontendDir, 'assets', 'state-AbCd1234.json')
-      );
-      const response = await server.get('/assets/state-AbCd1234.json');
-      const body = await response.text();
-      expect(response.status, body).toBe(404);
-      expect(body).not.toContain('secret.example.test');
-    } finally {
-      await server.stop();
+  test.each(['symlink', 'hardlink'])(
+    'serves an asset %s that stays inside the frontend directory and off private build state',
+    async (kind) => {
+      const server = await startFilesystemServer();
+      try {
+        const asset = join(server.frontendDir, 'assets', 'index-AbCd1234.js');
+        const alias = join(server.frontendDir, 'assets', 'linked-AbCd1234.js');
+        if (kind === 'hardlink') linkSync(asset, alias);
+        else symlinkSync(asset, alias);
+        const response = await server.get('/assets/linked-AbCd1234.js');
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+        expect(await response.text()).toBe(ASSET_JS);
+      } finally {
+        await server.stop();
+      }
     }
-  });
-
-  test('serves an asset symlink whose target stays inside the frontend directory', async () => {
-    const server = await startFilesystemServer();
-    try {
-      symlinkSync(
-        join(server.frontendDir, 'assets', 'index-AbCd1234.js'),
-        join(server.frontendDir, 'assets', 'linked-AbCd1234.js')
-      );
-      const response = await server.get('/assets/linked-AbCd1234.js');
-      expect(response.status).toBe(200);
-      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
-      expect(await response.text()).toBe(ASSET_JS);
-    } finally {
-      await server.stop();
-    }
-  });
-
-  test('serves a hardlinked asset that does not alias private build state', async () => {
-    const server = await startFilesystemServer();
-    try {
-      linkSync(
-        join(server.frontendDir, 'assets', 'index-AbCd1234.js'),
-        join(server.frontendDir, 'assets', 'linked-AbCd1234.js')
-      );
-      const response = await server.get('/assets/linked-AbCd1234.js');
-      expect(response.status).toBe(200);
-      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
-      expect(await response.text()).toBe(ASSET_JS);
-    } finally {
-      await server.stop();
-    }
-  });
+  );
 
   test('serves assets and the shell when private build state is absent', async () => {
     const server = await startFilesystemServer();
