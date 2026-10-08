@@ -13,19 +13,34 @@ interface FileTypeImport {
   specifier: string;
 }
 
+function unwrapExpression(node: ts.Node | undefined): ts.Node | undefined {
+  while (
+    node &&
+    (ts.isParenthesizedExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isSatisfiesExpression(node) ||
+      ts.isTypeAssertionExpression(node))
+  ) {
+    node = node.expression;
+  }
+  return node;
+}
+
 function isRequireExpression(expression: ts.Expression): boolean {
-  if (ts.isIdentifier(expression)) return expression.text === 'require';
-  if (!ts.isPropertyAccessExpression(expression) && !ts.isElementAccessExpression(expression)) {
+  const loader = unwrapExpression(expression);
+  if (!loader) return false;
+  if (ts.isIdentifier(loader)) return loader.text === 'require';
+  if (!ts.isPropertyAccessExpression(loader) && !ts.isElementAccessExpression(loader)) {
     return false;
   }
-  if (!ts.isIdentifier(expression.expression) || expression.expression.text !== 'module') {
+  const receiver = unwrapExpression(loader.expression);
+  if (!receiver || !ts.isIdentifier(receiver) || receiver.text !== 'module') {
     return false;
   }
-  if (ts.isPropertyAccessExpression(expression)) return expression.name.text === 'require';
-  return (
-    ts.isStringLiteralLike(expression.argumentExpression) &&
-    expression.argumentExpression.text === 'require'
-  );
+  if (ts.isPropertyAccessExpression(loader)) return loader.name.text === 'require';
+  const member = unwrapExpression(loader.argumentExpression);
+  return !!member && ts.isStringLiteralLike(member) && member.text === 'require';
 }
 
 function findFileTypeImports(source: string, file: string): FileTypeImport[] {
@@ -33,6 +48,7 @@ function findFileTypeImports(source: string, file: string): FileTypeImport[] {
   const imports: FileTypeImport[] = [];
 
   function recordImport(node: ts.Node | undefined): void {
+    node = unwrapExpression(node);
     if (!node || !ts.isStringLiteralLike(node)) return;
     if (node.text !== 'file-type' && !node.text.startsWith('file-type/')) return;
     imports.push({
@@ -119,6 +135,43 @@ describe('API file-type import boundary', () => {
     expect(imports).toHaveLength(1);
     expect(imports[0].specifier).toMatch(/^file-type(?:\/|$)/);
     expect(() => assertFileTypeBoundary(imports)).toThrow('apps/api/src/new-importer.ts:');
+  });
+
+  it.each([
+    "const detector = (require)('file-type');",
+    "const detector = require!('file-type');",
+    "const detector = (require as typeof require)('file-type');",
+    "const detector = (require satisfies typeof require)('file-type');",
+    "const detector = (<typeof require>require)('file-type');",
+    "const detector = (module.require)('file-type');",
+    "const detector = module.require!('file-type');",
+    "const detector = (module.require as typeof module.require)('file-type');",
+    "const detector = (module.require satisfies typeof module.require)('file-type');",
+    "const detector = (<typeof module.require>module.require)('file-type');",
+    "const detector = (module).require('file-type');",
+    "const detector = module!.require('file-type');",
+    "const detector = (module as typeof module).require('file-type');",
+    "const detector = (module satisfies typeof module).require('file-type');",
+    "const detector = (<typeof module>module).require('file-type');",
+    "const detector = module[('require')]('file-type');",
+    "const detector = module['require'!]('file-type');",
+    "const detector = module['require' as const]('file-type');",
+    "const detector = module['require' satisfies string]('file-type');",
+    "const detector = module[<string>'require']('file-type');",
+    "const detector = require(('file-type'));",
+    "const detector = module.require('file-type'!);",
+    "const detector = require('file-type' as const);",
+    "const detector = require('file-type' satisfies string);",
+    "const detector = require(<string>'file-type');",
+    "const detector = await import(('file-type/core') as string);",
+    'const detector = ((module as typeof module)[(`require` satisfies string)]!)(`file-type/core` as const);',
+  ])('recognizes transparent loader and literal wrappers in %s', (source) => {
+    const parsed = ts.transpileModule(source, { fileName: 'wrapped.ts', reportDiagnostics: true });
+    expect(parsed.diagnostics ?? []).toHaveLength(0);
+    const imports = findFileTypeImports(source, 'apps/api/src/wrapped.ts');
+    expect(imports).toHaveLength(1);
+    expect(imports[0].specifier).toMatch(/^file-type(?:\/|$)/);
+    expect(() => assertFileTypeBoundary(imports)).toThrow('apps/api/src/wrapped.ts:');
   });
 
   it.each([
