@@ -307,8 +307,9 @@ jobs:
           fi
           cp spec/schema/1/protocol.json mango-protocol-schema-1-protocol.json
           cp spec/schema/1/catalog.json mango-protocol-schema-1-catalog.json
-          flags=()
-          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          # Positional arguments allow an empty optional flag list with Bash 3.2 nounset.
+          set --
+          if [ "$PRERELEASE" = "true" ]; then set -- --prerelease; fi
           # `--verify-tag` so a missing tag aborts. Without it `gh` invents one
           # from the default branch, which would publish an immutable release
           # against a commit no one chose.
@@ -322,6 +323,6 @@ jobs:
             --latest=false \
             --title "Mango Protocol v$VERSION" \
             --notes-file release-notes.md \
-            "${flags[@]}" \
+            "$@" \
             mango-protocol-schema-1-protocol.json \
             mango-protocol-schema-1-catalog.json

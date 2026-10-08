@@ -876,17 +876,21 @@ exit 0
     };
   };
 
-  test('creates the release when none exists, verifying the tag it was given', () => {
-    const result = run('absent', 'false');
-    expect(result.exitCode).toBe(0);
-    expect(result.ghCalls).toContain('release create protocol-v0.2.1');
-    // Without --verify-tag, gh invents a tag from the default branch — an
-    // immutable release against a commit nobody chose.
-    expect(result.ghCalls).toContain('--verify-tag');
-    expect(result.ghCalls).toContain('mango-protocol-schema-1-protocol.json');
-    expect(result.ghCalls).toContain('mango-protocol-schema-1-catalog.json');
-    expect(result.ghCalls).not.toContain('--prerelease');
-  });
+  test.each(['false', 'true'])(
+    'creates an absent release with prerelease=%s, verifying its tag',
+    (prerelease) => {
+      const result = run('absent', prerelease);
+      expect(result.exitCode, result.stdout).toBe(0);
+      expect(result.ghCalls).toContain('release create protocol-v0.2.1');
+      // Without --verify-tag, gh invents a tag from the default branch — an
+      // immutable release against a commit nobody chose.
+      expect(result.ghCalls).toContain('--verify-tag');
+      expect(result.ghCalls).toContain('mango-protocol-schema-1-protocol.json');
+      expect(result.ghCalls).toContain('mango-protocol-schema-1-catalog.json');
+      expect(result.ghCalls).toContain('--latest=false');
+      expect(result.ghCalls.includes('--prerelease')).toBe(prerelease === 'true');
+    }
+  );
 
   test('skips instead of failing when the release is already published', () => {
     // The whole point: an immutable release cannot be replaced, so a rerun of
