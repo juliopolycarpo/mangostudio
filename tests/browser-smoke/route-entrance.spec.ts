@@ -1,5 +1,4 @@
 import { expect, type Page, test } from '@playwright/test';
-import { dismissWorkdirPicker } from './support/workdir-picker';
 
 /**
  * The authenticated layout's route container, in a real browser: the first
@@ -60,8 +59,10 @@ test('the first page appears settled and later pages still fade in', async ({ pa
   page.on('pageerror', (error) => consoleErrors.push(error.message));
   await page.addInitScript(recordRouteContainerEntries, ROUTE_CONTAINER);
 
-  await page.goto('/');
-  await expect(page.getByTestId('composer')).toBeVisible({ timeout: 20_000 });
+  // The dashboard has no chat picker to reopen when another smoke spec changes
+  // the shared account's active chat. It exercises the same first-page latch.
+  await page.goto('/home');
+  await expect(page.getByTestId('home-dashboard')).toBeVisible({ timeout: 20_000 });
 
   const firstLoad = await routeContainerEntries(page);
   expect(
@@ -75,7 +76,6 @@ test('the first page appears settled and later pages still fade in', async ({ pa
 
   // In-app, never `page.goto`: a full load mounts the layout again and takes
   // the first-page path, which is exactly what this half must not measure.
-  await dismissWorkdirPicker(page, 10_000);
   await page
     .getByRole('button', { name: 'Gallery', exact: true })
     .filter({ visible: true })
