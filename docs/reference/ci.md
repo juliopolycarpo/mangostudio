@@ -148,6 +148,32 @@ governs called workflows on a PR. Callables that also support
 `workflow_dispatch` declare their own group to cover direct runs (for example
 `browser-smoke.yml` keys on `github.ref`).
 
+## Native Bun qualification
+
+`.github/workflows/native-bun-qualification.yml` runs the complete
+`bun run check` and `bun run test` commands on hosted Linux, macOS and Windows
+x64 runners. Changes to the qualification producer or workflow-analysis tools
+run both the untouched PR base and the candidate. Other PRs retain the existing
+CI gates without repeating these full native suites.
+
+To qualify a branch after rebasing it, dispatch the workflow at that branch:
+
+```sh
+gh workflow run native-bun-qualification.yml --ref <branch>
+```
+
+The optional `baseline_sha` input adds a baseline at a full commit SHA. Every
+run records immutable source identity, toolchains, separate default-runtime and
+fake-vendor builds, binary hashes, setup/check/test results, case outcomes and
+scoped terminal process observations. Each native job owns its source checkout
+and two Cargo targets; it restores no test-result or Cargo-target cache.
+
+Baseline failures remain visible in the receipts and logs. Candidate failures
+fail the job. A check failure still permits the complete test command to run,
+so workflow-tool setup cannot hide test failures. Hosted native results cover
+these producers and their observed process settlement; interactive Ctrl-C,
+local hardware and live vendors require their own evidence.
+
 ## Workflow hygiene
 
 `scripts/tests/workflow-hygiene.unit.test.ts` enforces repository-wide workflow

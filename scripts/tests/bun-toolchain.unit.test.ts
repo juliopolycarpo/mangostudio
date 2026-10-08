@@ -100,11 +100,18 @@ describe('Bun toolchain pins', () => {
         // Release authentication cannot take its executable pin from the tag
         // it is authenticating; those two bootstraps read protected main's
         // archived .bun-version before any tagged code can execute.
-        const expected =
+        let expected = '.bun-version';
+        if (
           index === 0 &&
           (file === 'workflows/release.yml' || file === 'workflows/protocol-release.yml')
-            ? '${{ runner.temp }}/release-trust/.bun-version'
-            : '.bun-version';
+        ) {
+          expected = '${{ runner.temp }}/release-trust/.bun-version';
+        }
+        // Native qualification runs its producer against a separate source
+        // checkout, including an untouched baseline with its own Bun pin.
+        if (file === 'workflows/native-bun-qualification.yml' && index === 1) {
+          expected = 'source/.bun-version';
+        }
         expect(match[1].trim(), file).toBe(expected);
       }
     }
