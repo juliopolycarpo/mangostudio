@@ -14,13 +14,11 @@ import { type CaptureResult, captureCommand } from '../lib/exec';
 import { assertSafeToDelete } from '../lib/fs-assert';
 import { ALL_BINARY_TARGETS, releaseArchiveFileName } from '../lib/release-targets';
 import { assertNoUnexpectedArguments, error, parseArgs, success } from '../lib/runner';
+import { zipArchiveCommands } from '../lib/zip-archive';
+
+export { zipArchiveCommands } from '../lib/zip-archive';
 
 type CommandRunner = (command: string[]) => Promise<CaptureResult>;
-
-interface ArchiveCommands {
-  readonly list: readonly string[];
-  readonly extract: readonly string[];
-}
 
 interface ExtractTargetArchiveOptions {
   readonly archivePath: string;
@@ -35,55 +33,6 @@ interface ExtractTargetArchiveDependencies {
   readonly runCommand?: CommandRunner;
   readonly unzipCommand?: string | null;
   readonly platform?: NodeJS.Platform;
-}
-
-/**
- * Commands for the zip half of the release lane. Only Windows targets ship zip
- * (`release-targets.ts`), and `Bun.Archive` reads tar only, so these two
- * archives keep the subprocess on both ends while every tar.gz is read
- * in-process.
- */
-export function zipArchiveCommands(
-  archivePath: string,
-  destination: string,
-  unzipCommand: string | null,
-  platform: NodeJS.Platform = process.platform
-): ArchiveCommands {
-  if (unzipCommand) {
-    const toUnzipPath = (path: string): string =>
-      platform === 'win32' ? path.replaceAll('\\', '/') : path;
-    return {
-      list: [unzipCommand, '-Z1', toUnzipPath(archivePath)],
-      extract: [unzipCommand, '-q', toUnzipPath(archivePath), '-d', toUnzipPath(destination)],
-    };
-  }
-
-  const archive = powerShellLiteral(archivePath);
-  const target = powerShellLiteral(destination);
-  return {
-    list: [
-      'powershell',
-      '-NoProfile',
-      '-Command',
-      [
-        // Without Stop, a non-terminating cmdlet error still exits 0 and the
-        // caller would treat a partial listing as the whole archive.
-        "$ErrorActionPreference = 'Stop'",
-        'Add-Type -AssemblyName System.IO.Compression.FileSystem',
-        `$zip = [IO.Compression.ZipFile]::OpenRead('${archive}')`,
-        // [Console] rather than the pipeline: PowerShell's formatter hard-wraps
-        // emitted strings at the host buffer width, which would split deep
-        // sidecar entry names into fragments the safety check cannot judge.
-        'try { $zip.Entries | ForEach-Object { [Console]::Out.WriteLine($_.FullName) } } finally { $zip.Dispose() }',
-      ].join('; '),
-    ],
-    extract: [
-      'powershell',
-      '-NoProfile',
-      '-Command',
-      `$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath '${archive}' -DestinationPath '${target}' -Force`,
-    ],
-  };
 }
 
 export async function extractTargetArchive(
@@ -193,10 +142,6 @@ function assertWorkspacePath(path: string, rootDir: string, label: string): void
   if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
     throw new Error(`${label} escapes the workspace: ${path}`);
   }
-}
-
-function powerShellLiteral(value: string): string {
-  return value.replaceAll("'", "''");
 }
 
 async function main(): Promise<void> {

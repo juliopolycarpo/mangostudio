@@ -6,10 +6,11 @@
 
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, win32 } from 'node:path';
 
 import { extractTarArchive, openTarArchive } from '../archive';
 import { ROOT_DIR } from '../config';
+import { openZipArchive, type ZipArchiveDependencies } from '../zip-archive';
 import {
   type PlatformKey,
   resolvePlatformKey,
@@ -22,11 +23,8 @@ import {
 const TOOL_CACHE_DIR = join(ROOT_DIR, '.mango', 'artifacts', 'tools');
 
 /**
- * Injectable I/O surface so unit tests never touch the network or the
- * filesystem. The default implementation reads archives with `Bun.Archive`,
- * which handles **gzipped tar only** — a manifest entry pinning a `.tar.xz` or a
- * `.zip` asset would fail with `Unrecognized archive format` where GNU tar used
- * to auto-detect it. `actions-lint.unit.test.ts` holds the manifest to `.tar.gz`.
+ * Injectable download and archive I/O. The default implementation reads tar
+ * archives with Bun.Archive and ZIP archives with unzip or PowerShell.
  */
 export interface BootstrapIo {
   download(url: string): Promise<Uint8Array>;
@@ -34,21 +32,36 @@ export interface BootstrapIo {
   extractArchive(archivePath: string, destDir: string): Promise<void>;
 }
 
-const defaultBootstrapIo: BootstrapIo = {
-  async download(url) {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Download failed (${response.status} ${response.statusText}): ${url}`);
-    }
-    return new Uint8Array(await response.arrayBuffer());
-  },
-  async listArchiveEntries(archivePath) {
-    return [...(await openTarArchive(archivePath)).entries];
-  },
-  async extractArchive(archivePath, destDir) {
-    await extractTarArchive(archivePath, destDir);
-  },
-};
+/**
+ * Build archive I/O with injectable ZIP commands for hosts without unzip.
+ * // Usage: const io = createBootstrapIo({ unzipCommand: null, platform: 'win32' });
+ */
+export function createBootstrapIo(zipDependencies: ZipArchiveDependencies = {}): BootstrapIo {
+  return {
+    async download(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Download failed (${response.status} ${response.statusText}): ${url}`);
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    },
+    async listArchiveEntries(archivePath) {
+      const archive = archivePath.endsWith('.zip')
+        ? await openZipArchive(archivePath, zipDependencies)
+        : await openTarArchive(archivePath);
+      return [...archive.entries];
+    },
+    async extractArchive(archivePath, destDir) {
+      if (archivePath.endsWith('.zip')) {
+        await (await openZipArchive(archivePath, zipDependencies)).extract(destDir);
+        return;
+      }
+      await extractTarArchive(archivePath, destDir);
+    },
+  };
+}
+
+const defaultBootstrapIo = createBootstrapIo();
 
 export interface BootstrapOptions {
   cacheDir?: string;
@@ -57,13 +70,22 @@ export interface BootstrapOptions {
   io?: BootstrapIo;
 }
 
-/** Reject entries that would escape the extraction directory. */
+/**
+ * Reject entries that would escape extraction on either POSIX or Windows.
+ * // Usage: assertSafeArchiveEntries(['actionlint.exe', 'LICENSE.txt']);
+ */
 export function assertSafeArchiveEntries(entries: string[]): void {
   for (const entry of entries) {
     const unsafe =
-      isAbsolute(entry) || /^[a-zA-Z]:[\\/]/.test(entry) || entry.split(/[\\/]/).includes('..');
+      isAbsolute(entry) ||
+      win32.isAbsolute(entry) ||
+      /^[a-zA-Z]:/.test(entry) ||
+      entry.split(/[\\/]/).includes('..');
     if (unsafe) {
-      throw new Error(`Refusing to extract archive with unsafe entry path: ${entry}`);
+      throw new Error(
+        `Refusing to extract archive with unsafe entry path: ${entry}. ` +
+          `Expected a relative path without a drive prefix or '..' segments.`
+      );
     }
   }
 }
@@ -73,8 +95,8 @@ function sha256Hex(bytes: Uint8Array): string {
 }
 
 /** Cache location of a tool's extracted install directory. */
-function toolInstallDir(cacheDir: string, entry: ToolManifestEntry): string {
-  return join(cacheDir, entry.name, entry.version);
+function toolInstallDir(cacheDir: string, entry: ToolManifestEntry, platform: PlatformKey): string {
+  return join(cacheDir, entry.name, entry.version, platform);
 }
 
 const inflight = new Map<string, Promise<string>>();
@@ -86,12 +108,12 @@ const inflight = new Map<string, Promise<string>>();
  */
 export function ensureTool(name: ToolName, options: BootstrapOptions = {}): Promise<string> {
   const cacheDir = options.cacheDir ?? TOOL_CACHE_DIR;
-  const key = `${name}:${cacheDir}`;
+  const platform = resolvePlatformKey(options.platform, options.arch);
+  const key = `${name}:${platform}:${cacheDir}`;
   const pending = inflight.get(key);
   if (pending) return pending;
 
   const entry = TOOL_MANIFEST[name];
-  const platform = resolvePlatformKey(options.platform, options.arch);
   const io = options.io ?? defaultBootstrapIo;
   const task = installTool(entry, platform, cacheDir, io).finally(() => {
     inflight.delete(key);
@@ -100,20 +122,24 @@ export function ensureTool(name: ToolName, options: BootstrapOptions = {}): Prom
   return task;
 }
 
-/** Verified download → checksum → safe-extract → cache pipeline for one tool. */
+/**
+ * Download, verify, safely extract, and cache one tool for the requested platform.
+ * // Usage: await installTool(TOOL_MANIFEST.actionlint, 'win32-x64', cacheDir, io);
+ */
 export async function installTool(
   entry: ToolManifestEntry,
   platform: PlatformKey,
   cacheDir: string,
   io: BootstrapIo
 ): Promise<string> {
-  const installDir = toolInstallDir(cacheDir, entry);
-  const binaryPath = join(installDir, entry.binaryPath);
+  const asset = entry.assets[platform];
+  const archiveBinaryPath = asset.binaryPath ?? entry.binaryPath;
+  const installDir = toolInstallDir(cacheDir, entry, platform);
+  const binaryPath = join(installDir, archiveBinaryPath);
   if (await Bun.file(binaryPath).exists()) {
     return binaryPath;
   }
 
-  const asset = entry.assets[platform];
   const url = toolAssetUrl(entry, platform);
   const bytes = await io.download(url);
 
@@ -137,10 +163,10 @@ export async function installTool(
     await mkdir(extractDir, { recursive: true });
     await io.extractArchive(archivePath, extractDir);
 
-    const extractedBinary = join(extractDir, entry.binaryPath);
+    const extractedBinary = join(extractDir, archiveBinaryPath);
     if (!(await Bun.file(extractedBinary).exists())) {
       throw new Error(
-        `Archive ${asset.assetName} did not contain expected binary ${entry.binaryPath}`
+        `Archive ${asset.assetName} did not contain expected binary ${archiveBinaryPath}`
       );
     }
     await chmod(extractedBinary, 0o755);
