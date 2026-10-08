@@ -22,7 +22,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
+import { startFakeChatGptServer } from '@mangostudio/api/test-support/chatgpt/fake-server';
 import { extractTarArchive } from './lib/archive';
 import { pumpStream } from './lib/child-streams';
 import { collectContentEncodingProblems } from './lib/content-encoding-smoke';

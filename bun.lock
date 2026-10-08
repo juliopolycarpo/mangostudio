@@ -9,6 +9,7 @@
         "@dprint/dockerfile": "^0.6.0",
         "@dprint/markdown": "^0.26.0",
         "@dprint/toml": "^0.8.0",
+        "@mangostudio/api": "workspace:*",
         "@mangostudio/protocol": "workspace:*",
         "@mangostudio/shared": "workspace:*",
         "@playwright/test": "^1.63.0",
