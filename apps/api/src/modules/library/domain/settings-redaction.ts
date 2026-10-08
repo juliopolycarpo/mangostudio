@@ -1,5 +1,6 @@
 import type { SettingsField } from '@mangostudio/shared/library';
 import { looksCredentialShaped } from '../../../lib/credential-policy';
+import { tomlOffsetLiteral } from '../../../lib/toml-offsets';
 
 export interface SettingsRedactionOptions {
   readonly homeDir: string;
@@ -9,6 +10,12 @@ export interface SettingsRedactionOptions {
 /** Compiled once per document; recompiling it per leaf dominated the walk. */
 type HomePattern = RegExp | null;
 
+/**
+ * Flatten settings into display fields while hiding credentials and private state.
+ *
+ * @example
+ * redactSettingsDocument({ model: 'local' }, { homeDir: '/home/ada' });
+ */
 export function redactSettingsDocument(
   document: unknown,
   options: SettingsRedactionOptions
@@ -62,7 +69,7 @@ function collectFields(
     return;
   }
 
-  const renderedValue = value instanceof Date ? value.toISOString() : String(value);
+  const renderedValue = renderScalarValue(value);
   const fieldPath = relativizeHome(path || '$', home);
   if (inheritsCredential || isCredentialField(fieldName, renderedValue)) {
     fields.push({ path: fieldPath, presentation: 'redacted' });
@@ -74,6 +81,27 @@ function collectFields(
     presentation: 'value',
     value: relativizeHome(renderedValue, home),
   });
+}
+
+/**
+ * Keep the existing millisecond date display and any available nanoseconds.
+ *
+ * @example
+ * renderScalarValue(new Date('1979-05-27T07:32:00Z')); // '1979-05-27T07:32:00.000Z'
+ */
+function renderScalarValue(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return String(value);
+  if (value instanceof Date) return value.toISOString();
+  const retained = tomlOffsetLiteral(value);
+  if (retained !== undefined) return retained;
+  const rendered = String(value);
+  const tag = Object.prototype.toString.call(value);
+  if (!/^\[object Temporal\.(?:Instant|PlainDateTime|PlainTime)\]$/.test(tag)) return rendered;
+  return rendered.replace(
+    /(?:\.(\d+))?(Z)?$/,
+    (_match, fraction: string | undefined, zone: string | undefined) =>
+      `.${(fraction ?? '').padEnd(3, '0')}${zone ?? ''}`
+  );
 }
 
 function isCredentialField(name: string, value: string): boolean {
@@ -113,6 +141,10 @@ function shouldOmitSubtree(key: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
-    typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date)
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !(value instanceof Date) &&
+    !Object.prototype.toString.call(value).startsWith('[object Temporal.')
   );
 }
