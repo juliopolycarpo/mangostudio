@@ -133,7 +133,7 @@ describe('readSourceStatementCoverageSummary', () => {
     );
 
     await expect(readSourceStatementCoverageSummary(lcovPath, workspaceDir)).rejects.toThrow(
-      'src/example.ts'
+      join('src', 'example.ts')
     );
   });
 });

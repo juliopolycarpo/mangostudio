@@ -86,9 +86,9 @@ describe('Bun toolchain pins', () => {
     // Every workflow and composite action is scanned rather than a listed few:
     // the regression this guards against is a *new* call site copying the old
     // `bun-version-file: package.json`, which a hardcoded list cannot see.
-    const files = [
-      ...new Bun.Glob('**/*.{yml,yaml}').scanSync({ cwd: join(ROOT_DIR, '.github') }),
-    ].sort();
+    const files = [...new Bun.Glob('**/*.{yml,yaml}').scanSync({ cwd: join(ROOT_DIR, '.github') })]
+      .map((file) => file.replaceAll('\\', '/'))
+      .sort();
 
     let seen = 0;
     for (const file of files) {
