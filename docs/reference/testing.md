@@ -831,6 +831,24 @@ bun run --filter @mangostudio/api test:integration
 > the TypeScript runtime wrote. No API test imports the TypeScript runtime or
 > spawns it by path; `runtime-module-allow-list.test.ts` fails the lane if one does.
 
+> **The cached unit lane keys on the binary's content.** `test:unit` is a cached Turbo
+> task. Turbo hashes the *path* `MANGOSTUDIO_RUNTIME_BINARY` names (the task allows
+> `MANGOSTUDIO_*`), never the file behind it, and a default `target/debug` build is not in
+> the key at all, so a rebuilt or replaced runtime used to replay the pass recorded against
+> the old one. `bun run test` now takes the SHA-256 of the binary the tests spawn once,
+> before Turbo starts, and exports it as `MANGOSTUDIO_RUNTIME_BINARY_SHA256`: replacing the
+> bytes is a cache miss, an unchanged binary is a hit, and neither the path nor the mtime
+> counts. The binary is the one `MANGOSTUDIO_RUNTIME_BINARY` names (a relative path from
+> `apps/api`, where the tests run), otherwise the newest of `target/debug` and
+> `target/release` under `CARGO_TARGET_DIR`, debug on a tie — the resolution
+> `resolveRustRuntimeBinary` and the hub share, pinned by
+> `scripts/tests/runtime-binary-digest.unit.test.ts`. With no binary the variable is left
+> out and the tests skip or fail with their own message. The hub never reads it, so
+> `apps/api/src/lib/config.ts` is untouched. The allowlist is shared by every `test:unit`
+> task in the same Turbo run, so a new runtime build also re-runs the frontend and shared
+> unit tests. `bun run test` is the supported entry: a direct `turbo run test:unit` skips
+> `scripts/test.ts` and gets no digest, no worse than before.
+
 > **Run API tests from the workspace.** `apps/api/bunfig.toml` declares the test
 > preload, and Bun resolves `bunfig.toml` relative to the current directory. Running
 > `bun test apps/api/...` from the repo root silently skips the preload — so always use
@@ -1382,6 +1400,10 @@ that produces or consumes it.
 | TypeScript build info | check                         | `.mango/artifacts/tsbuildinfo/` | TypeScript version, tsconfig graph, TS sources           | version-scoped trusted-`main`     |
 | Workflow lint tools   | check                         | `.mango/artifacts/tools/`       | pinned tool manifest                                     | exact trusted restore only        |
 | Playwright browser    | browser smoke                 | `~/.cache/ms-playwright`        | OS, arch, Playwright version                             | exact trusted restore only        |
+
+Inside the Turbo task output family each task is keyed by Turbo's own hash. The cached
+API unit task includes the SHA-256 of the runtime binary in it (see [API](#api)); without
+that, a rebuilt binary would replay a stale pass out of this cache.
 
 `mode` selects `restore-save` (default), `restore`, or `save`. Exact-restore
 families (`lint-tools`, `playwright`) set `exact-restore: true` so a loose
