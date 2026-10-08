@@ -120,7 +120,7 @@ be removed.
 ## Turborepo
 
 This monorepo uses [Turborepo](https://turborepo.dev) **2.x** (currently
-`2.10.8`) as its shared build-system layer. Turborepo orchestrates task
+`2.11.7`) as its shared build-system layer. Turborepo orchestrates task
 execution across workspaces and provides a content-addressable cache so that
 unchanged work is never rebuilt.
 
@@ -167,18 +167,16 @@ Current task definitions:
 Turborepo writes its local task-output cache to `.turbo/cache` at the repository
 root. This directory is gitignored and should never be committed.
 
-CI persists the local Turbo cache with `actions/cache` in the check, test, and
-build lanes. Each lane uses a separate key prefix so the lanes never share a
-cache entry — each saves and restores only its own snapshot:
+CI persists the local Turbo cache through the shared `cache-scoped` composite.
+Check, test and build keep separate lane validity and write scopes. Successful
+runs save a rotated snapshot only when Turbo writes new `*.tar.zst` payloads;
+the run ID and attempt distinguish each save, while a run that only hits saves
+nothing. Pull requests restore their own earlier snapshots and trusted `main`
+entries; `main` never restores a pull request's cache.
 
-```text
-${{ runner.os }}-${{ env.CACHE_VERSION }}-turbo-<lane>-${{ github.sha }}
-```
-
-The `github.sha` suffix makes every successful run save a fresh cache, while the
-lane restore prefix restores the most recent cache for that lane. Bumping
-`CACHE_VERSION` still invalidates all CI caches when a cache-poisoning rollback
-is needed.
+`CI_CACHE_EPOCH` is the repository-wide emergency invalidation variable, with a
+`v1` fallback. The key policy, restore order, retention and invalidators are
+specified in [CI Cache Policy](./testing.md#ci-cache-policy).
 
 The check lane has no separate TypeScript build-info cache. `incremental` is off
 in every tsconfig, so `tsc` leaves no build info behind to cache, and TypeScript

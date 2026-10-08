@@ -19,7 +19,7 @@ scripts/
 ├── test.ts           Run unit/integration/e2e/coverage lanes, whole, sharded, or --changed (bun run test)
 ├── run-test-workers.ts
 │                     Run one test lane in worker processes with one merged report (API unit/integration, root test:scripts:workers)
-├── verify.ts         check → test → build gate (bun run verify)
+├── verify.ts         check → test --coverage → build --all (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts, library-walk.ts + its fixture plans)
@@ -67,7 +67,7 @@ importing the specific module in new code:
 - **Limit.** At most `MANGO_RUNNER_CONCURRENCY` (default 16) children run at once **per runner
   process**, not per run: every nested `runParallel` / `mapWithConcurrency` call in that process
   shares the pool, but a runner started as a child holds a pool of its own, so the whole tree can
-  hold more. The widest fan-out today is `bun run protocol:check` with 12 tasks.
+  hold more. The widest fan-out today is `bun run protocol:check` with 13 tasks.
 - **POSIX.** Each child leads its own process group, in a new session. On SIGINT, SIGTERM or SIGHUP
   the runner signals every child group once, waits until every group is empty (a leader that exits
   while a member keeps running does not end the wait), SIGKILLs what is still running after 5 s, and
@@ -123,6 +123,21 @@ compile time (`MANGOSTUDIO_RELEASE_VERSION`) — or `dev` with `--dev`, the vers
 source checkout's hub accepts — and check each binary's header —
 and its `--version`, when this machine can run it — before it is staged.
 `docs/reference/releasing.md` records the per-target toolchains and the floor.
+
+### Build backups and smoke commands
+
+Frontend bundle and metafile staging/backup paths, including `dist.aside-*`,
+are gitignored so parked outputs cannot change Turbo's frontend task hash.
+The publishing transaction is described in
+[Frontend Build](../docs/architecture/frontend-build.md).
+
+`scripts/test-build.ts` awaits the supervised `captureCommand` helper for its
+build, archive and installer probes. Await completion before checking output
+or exit status so the event loop remains available for child supervision.
+See [Binary Smoke](../docs/reference/testing.md#binary-smoke).
+
+Keep each worktree's Cargo target separate; see
+[Cargo targets in worktrees](../docs/reference/testing.md#cargo-targets-in-worktrees).
 
 ## actions-lint/ — workflow static analysis
 

@@ -4,11 +4,14 @@ import { exitWithResults, header, info, type RunResult, runCommand } from './lib
 function printHelp(): never {
   console.log(`Usage: bun run verify
 
-Runs the full local CI gate: check → test --coverage → build --all.
+Runs the local gate: check → test --coverage → build --all.
 Stops on first failure.
 
-This matches the CI pipeline (ci.yml) minus the smoke jobs, which require
-platform runners not available in every local environment:
+Add bun run protocol:test --ts-only for the protocol TypeScript tests omitted
+by the coverage phase. Relevant changes also require the
+full Rust and protocol contributor gates documented in docs/reference/testing.md.
+
+Run smoke jobs separately:
   - Browser smoke:  bun run test --e2e
   - Binary smoke:   bun scripts/test-build.ts
 
@@ -21,7 +24,7 @@ if (process.argv.includes('--help')) {
   printHelp();
 }
 
-header('Verify (full CI gate)');
+header('Verify (local check/coverage/build gate)');
 
 const results: RunResult[] = [];
 

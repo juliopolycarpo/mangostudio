@@ -78,7 +78,7 @@ bun run test --coverage     # coverage collection across applicable workspaces
 bun run test --all          # all lanes including e2e
 bun run test --changed      # only tests affected since merge-base HEAD origin/main
 bun run test --changed --base <ref>  # ... since merge-base HEAD <ref>
-bun run verify              # full local CI gate: check → test --coverage → build --all
+bun run verify              # local gate: check → test --coverage → build --all
 ```
 
 `--changed` is a local fast loop, not a gate. It diffs the merge-base against
@@ -1546,6 +1546,41 @@ ordinary shards instead of skipping.
   owns the paths that make the lane relevant, so a new Rust-backed test needs no workflow
   edit; `scripts/tests/rust-lanes.unit.test.ts` fails if one would be missed.
 
+### API serve shutdown fixture
+
+The serve signal case in `rust-runtime-qualification.integration.test.ts` gives
+its never-finishing installer a 10-second deadline. An independent
+`expectRuntimeChildAlive(child, 5_000)` observer starts before SIGTERM and rejects
+an exit during the next five seconds. The eventual runtime exit, installer-PID
+cleanup and 30-second case budget still apply. A three-second installer deadline
+was shown to fail the live observer against the real binary. Other stdio fixture
+holds and their default 20-second installer deadline are retained. The serve
+signal case remains skipped on Windows. This deadline applies to the qualification fixture.
+
+## Cargo targets in worktrees
+
+Each worktree must own its writable Cargo target directory. Sharing one across
+worktrees with different sources or version stamps can make Cargo exit zero
+while the binary still reports the other worktree's version. A successful build
+alone therefore does not establish source identity.
+
+Keep the default `<worktree>/target/`, or set a dedicated real-disk
+`CARGO_TARGET_DIR` for that worktree. Derive runtime and fixture paths from that
+same target. No two active worktrees may write the same target.
+
+For runtime-backed API tests, build the normal runtime first, then the named
+fixture in a separate invocation so the fixture's SDK testing feature does not
+enter the runtime build:
+
+```bash
+cargo build --locked -p mangostudio-runtime --bin mangostudio-runtime
+cargo build --locked -p mangostudio-runtime --example fake_cursor_agent
+```
+
+Confirm that the runtime's checksum remains unchanged after the fixture build,
+and point `MANGOSTUDIO_RUNTIME_BINARY` and `MANGOSTUDIO_FAKE_CURSOR_AGENT` at
+those qualified files when they are outside the default paths.
+
 ## Rust Workspace Tests
 
 The Rust workspace tests run under [cargo-nextest](https://nexte.st), locally and in
@@ -1553,8 +1588,11 @@ The Rust workspace tests run under [cargo-nextest](https://nexte.st), locally an
 
 ```bash
 cargo install cargo-nextest --locked --version 0.9.144
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo nextest run --workspace --all-targets --all-features --locked --retries 0
 cargo test --doc --workspace --all-features --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
 ```
 
 The version is the one `cargo-shim.yml` installs through the SHA-pinned
@@ -1753,11 +1791,18 @@ Before merging, run:
 ```bash
 bun run check
 bun run test
-# or use the full local CI gate shortcut (check → test --coverage → build --all):
+# Local check, coverage and build gate:
 bun run verify
 ```
 
-`bun run verify` matches the CI pipeline minus the smoke jobs (browser and binary),
-which require platform runners not available in every local environment. Run those
-separately with `bun run test --e2e` and
-`PLATFORM=linux-x64 bun run scripts/test-build.ts`.
+`bun run verify` runs `check → test --coverage → build --all` and stops at the
+first failure. Its coverage phase does not schedule the protocol TypeScript
+tests; add `bun run protocol:test --ts-only` to cover them. The ordinary
+`bun run test` unit phase includes that protocol suite.
+
+Relevant changes still require the full Rust and protocol contributor gates:
+use the [Rust workspace validation](#rust-workspace-tests) and the protocol's
+`bun run protocol:check && bun run protocol:test` commands. The TypeScript-only
+complement does not replace Rust, feature-powerset or interop qualification.
+Run browser and binary smoke separately with `bun run test --e2e` and
+`PLATFORM=linux-x64 bun run scripts/test-build.ts` on matching runners.
