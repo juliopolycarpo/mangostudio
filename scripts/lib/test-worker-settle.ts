@@ -141,6 +141,45 @@ function psTable(): ProcessEntry[] {
  */
 const systemProcessTable: ProcessTable = () => linuxTable() ?? psTable();
 
+export interface SignalWorkerOptions {
+  readonly table?: ProcessTable;
+  readonly sendSignal?: (pid: number, signal: NodeJS.Signals) => void;
+}
+
+/**
+ * Signals the worker's group and token-bearing children that left it. A group
+ * member receives the group signal once; other workers and zombies are ignored.
+ * Detached children must receive cancellation before output draining can hold
+ * the runner past its outer supervisor's deadline. An empty token signals only
+ * the group; the lane still rejects a worker without a settlement guard.
+ *
+ * @example
+ * signalWorker({ pgid: child.pid, token }, 'SIGKILL');
+ */
+export function signalWorker(
+  who: WorkerIdentity,
+  signal: NodeJS.Signals,
+  options: SignalWorkerOptions = {}
+): void {
+  const { table = systemProcessTable, sendSignal = process.kill } = options;
+  if (who.pgid !== null) {
+    try {
+      sendSignal(-who.pgid, signal);
+    } catch {
+      // The group emptied between the decision and the signal.
+    }
+  }
+  if (!who.token) return;
+  const escaped = table().filter((entry) => entry.pgid !== who.pgid);
+  for (const { pid } of findLeftovers(escaped, { pgid: null, token: who.token })) {
+    try {
+      sendSignal(pid, signal);
+    } catch {
+      // The child exited between the table read and the signal.
+    }
+  }
+}
+
 export interface SettleOptions {
   readonly who: WorkerIdentity;
   readonly table?: ProcessTable;

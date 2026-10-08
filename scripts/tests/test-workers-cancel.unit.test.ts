@@ -48,7 +48,10 @@ async function until(ready: () => boolean, timeoutMs: number): Promise<boolean> 
 }
 
 /** Starts `command` with the fake lane environment: three hanging workers, each with a child. */
-function startLane(command: readonly string[]) {
+function startLane(
+  command: readonly string[],
+  mode: 'hang-tree' | 'hang-session-pipes' = 'hang-tree'
+) {
   const dir = mkdtempSync(join(tmpdir(), 'mangostudio-cancel-'));
   dirs.push(dir);
   mkdirSync(join(dir, 'pids'));
@@ -59,9 +62,9 @@ function startLane(command: readonly string[]) {
       ...process.env,
       MANGO_TEST_WORKERS: '3',
       MANGOSTUDIO_FAKE_WORKER_MODES: JSON.stringify({
-        1: 'hang-tree',
-        2: 'hang-tree',
-        3: 'hang-tree',
+        1: mode,
+        2: mode,
+        3: mode,
       }),
       MANGOSTUDIO_FAKE_PID_DIR: join(dir, 'pids'),
       MANGOSTUDIO_FAKE_MERGED_PATH: join(dir, 'merged.xml'),
@@ -133,3 +136,35 @@ describe.skipIf(process.platform === 'win32')('cancelling the integration lane m
     ).toEqual([]);
   });
 });
+
+describe.skipIf(process.platform !== 'linux')(
+  'cancellation with detached children holding worker pipes',
+  () => {
+    it('reaps SIGTERM-resistant leaders and token children before the outer deadline', async () => {
+      const lane = startLane(
+        [process.execPath, FAKE_ROOT_RUNNER, process.execPath, FAKE_LANE_MAIN],
+        'hang-session-pipes'
+      );
+      const up = await until(() => lane.pidFiles().length === 6, 30_000);
+      const pids = lane.pids();
+      pidsToReap.push(...pids);
+      expect(up, 'expected 3 resistant workers and 3 detached children ready').toBe(true);
+      expect(
+        pids.filter(isAlive),
+        'expected every worker and detached child live before cancellation'
+      ).toHaveLength(6);
+      const began = performance.now();
+      lane.child.kill('SIGTERM');
+      expect(await lane.child.exited, 'expected root cancellation exit 143').toBe(143);
+      const survivors = pids.filter(isAlive);
+      expect(
+        survivors,
+        `expected live descendants: 0 | received: ${survivors.length} (pids ${survivors})`
+      ).toEqual([]);
+      expect(
+        performance.now() - began,
+        'expected worker cancellation before outer 5000ms deadline'
+      ).toBeLessThan(4500);
+    });
+  }
+);

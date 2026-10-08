@@ -540,7 +540,8 @@ runner kills it before returning the failure. An unreadable process table also
 fails. Zombies are excluded because they hold no ports or locks. `--no-orphans`
 is omitted on this path so Bun cannot kill the evidence before the check.
 
-Cancellation sends SIGTERM to the whole worker group and escalates to SIGKILL
+Cancellation sends SIGTERM to the whole worker group and, on Linux, to
+token-bearing children that left the group. It escalates both to SIGKILL
 after at most three seconds, before the outer runner's five-second deadline.
 Output readers have a bounded drain grace so an inherited pipe cannot hold the
 lane open forever. The worker, settlement and cancellation regression tests use

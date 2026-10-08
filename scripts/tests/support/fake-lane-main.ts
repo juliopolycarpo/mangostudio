@@ -13,9 +13,18 @@ export const FAKE_LANE_MAIN = import.meta.path;
 
 if (import.meta.main) {
   const mergedPath = process.env.MANGOSTUDIO_FAKE_MERGED_PATH as string;
+  const deps = systemDeps();
   const code = await main(
     ['--lane=api-integration', '--', 'bun', 'test', '--timeout', '15000', 'tests/integration'],
-    { ...systemDeps(), launcher: [process.execPath, FAKE_BUN_TEST], mergedPath }
+    {
+      ...deps,
+      // Only the controlled fake loses Bun's automatic orphan cleanup. The
+      // test worker keeps its policy; cancellation must end the fake's children.
+      start: (plan) =>
+        deps.start({ ...plan, env: { ...plan.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' } }),
+      launcher: [process.execPath, FAKE_BUN_TEST],
+      mergedPath,
+    }
   );
   process.exit(code);
 }

@@ -71,7 +71,9 @@ async function runLane(
       killAfterMs: 2_000,
       start: (plan) =>
         startWorkerProcess(
-          plan,
+          // Keep the named fake's deliberately leaked children available to
+          // the guard, including when a root worker runs with --no-orphans.
+          { ...plan, env: { ...plan.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' } },
           `[${spec.id} ${plan.index}/${plan.count}] `,
           sinks,
           options.drainGraceMs
@@ -235,6 +237,11 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
         expect(verdict.failures).toHaveLength(1);
         expect(verdict.failures[0]).toContain('api-integration worker 1/2 left processes behind');
         expect(verdict.failures[0]).toContain(`pid ${leaked}: `);
+        const reaped = await until(() => !isAlive(leaked), 3_000);
+        expect(
+          reaped,
+          `expected the lane to kill detached child ${leaked} before test cleanup | received: still running`
+        ).toBe(true);
       } finally {
         if (isAlive(leaked)) process.kill(leaked, 'SIGKILL');
       }

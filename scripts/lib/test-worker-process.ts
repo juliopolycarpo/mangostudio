@@ -2,7 +2,7 @@
 // its output line by line under the worker's name, and reports how it ended.
 // The verdict logic is in ./test-workers.ts and never sees a process.
 
-import { settleWorker, WORKER_TOKEN_ENV } from './test-worker-settle';
+import { settleWorker, signalWorker, WORKER_TOKEN_ENV } from './test-worker-settle';
 import type { WorkerExit, WorkerHandle, WorkerPlan } from './test-workers';
 
 /** Where a worker's output lines go; the real ones are `process.stdout` and `process.stderr`. */
@@ -137,6 +137,7 @@ export function startWorkerProcess(
   })();
 
   const token = plan.env[WORKER_TOKEN_ENV];
+  let signalError: { readonly cause: unknown } | undefined;
   return {
     exited,
     kill: (signal) => {
@@ -145,12 +146,20 @@ export function startWorkerProcess(
         return;
       }
       try {
-        process.kill(-child.pid, signal);
-      } catch {
-        // The group emptied between the decision and the signal.
+        signalWorker({ pgid: child.pid, token: token ?? '' }, signal);
+      } catch (caught) {
+        // Keep the escalation timer alive. Settlement retries the table and
+        // reports the signaling failure after cleaning up what it can find.
+        signalError ??= { cause: caught };
       }
     },
     settle:
-      leadsGroup && token ? () => settleWorker({ who: { pgid: child.pid, token } }) : undefined,
+      leadsGroup && token
+        ? async () => {
+            const leftovers = await settleWorker({ who: { pgid: child.pid, token } });
+            if (signalError) throw signalError.cause;
+            return leftovers;
+          }
+        : undefined,
   };
 }

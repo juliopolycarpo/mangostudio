@@ -16,6 +16,8 @@
 //   tidy            report, exit 0, with a child that exits 300 ms later (a runtime shutting down)
 //   hang-tree       like hang, with a quiet child of its own; pids in
 //                   MANGOSTUDIO_FAKE_PID_DIR/tree-worker-<i>.pid and tree-child-<i>.pid
+//   hang-session-pipes  a SIGTERM-resistant leader and detached token child that
+//                   holds the worker's output pipes; writes both pids once ready
 //
 // Usage: see scripts/tests/test-workers-process.unit.test.ts
 
@@ -41,7 +43,8 @@ type Mode =
   | 'leak'
   | 'leak-session'
   | 'tidy'
-  | 'hang-tree';
+  | 'hang-tree'
+  | 'hang-session-pipes';
 
 function main(argv: readonly string[]): void {
   const flag = (name: string): string | undefined =>
@@ -64,6 +67,29 @@ function main(argv: readonly string[]): void {
   }));
 
   if (mode === 'sigkill') process.kill(process.pid, 'SIGKILL');
+  if (mode === 'hang-session-pipes') {
+    process.on('SIGTERM', () => undefined);
+    const dir = process.env.MANGOSTUDIO_FAKE_PID_DIR as string;
+    const childReady = join(dir, `session-child-${index}.pid`);
+    const child = Bun.spawn({
+      cmd: [
+        process.execPath,
+        '-e',
+        `process.on('SIGTERM', () => undefined); require('node:fs').writeFileSync(${JSON.stringify(childReady)}, String(process.pid)); setInterval(() => undefined, 1000)`,
+      ],
+      // Preserve the fake's deliberate lifetime under a root --no-orphans
+      // worker; token signaling, rather than Bun's policy, must end it.
+      env: { ...process.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' },
+      stdin: 'ignore',
+      stdout: 'inherit',
+      stderr: 'inherit',
+      detached: true,
+    });
+    child.unref();
+    writeFileSync(join(dir, `session-worker-${index}.pid`), `${process.pid}`);
+    setInterval(() => undefined, 1000);
+    return;
+  }
   if (mode === 'hang-tree') {
     const child = Bun.spawn({
       cmd: [process.execPath, '-e', 'setInterval(() => undefined, 1000)'],

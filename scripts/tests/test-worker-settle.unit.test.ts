@@ -6,6 +6,7 @@ import {
   type ProcessEntry,
   type ProcessTable,
   settleWorker,
+  signalWorker,
   WORKER_TOKEN_ENV,
   type WorkerIdentity,
 } from '../lib/test-worker-settle';
@@ -18,6 +19,79 @@ const entry = (overrides: Partial<ProcessEntry> & Pick<ProcessEntry, 'pid'>): Pr
 });
 
 const WHO: WorkerIdentity = { pgid: 4000, token: 'worker-2-token' };
+
+/** Records signal delivery and can model a vanished group or an unreadable table. */
+class SignalHost {
+  readonly sent: { pid: number; signal: NodeJS.Signals }[] = [];
+  reads = 0;
+  groupVanished = false;
+  unreadable = false;
+
+  constructor(readonly entries: readonly ProcessEntry[]) {}
+
+  readonly table: ProcessTable = () => {
+    this.reads += 1;
+    if (this.unreadable) throw new Error('ps: exit 1');
+    return this.entries;
+  };
+
+  readonly sendSignal = (pid: number, signal: NodeJS.Signals): void => {
+    this.sent.push({ pid, signal });
+    if (pid < 0 && this.groupVanished) throw new Error('group already gone');
+  };
+}
+
+describe('signalWorker', () => {
+  it('signals the group once and only live escaped children with its exact token', () => {
+    const host = new SignalHost([
+      entry({ pid: 4100, pgid: 4000, environ: `${WORKER_TOKEN_ENV}=${WHO.token}` }),
+      entry({ pid: 4200, pgid: 4200, environ: `${WORKER_TOKEN_ENV}=sibling-token` }),
+      entry({ pid: 4300, pgid: 4300, environ: `${WORKER_TOKEN_ENV}=${WHO.token}` }),
+      entry({ pid: 4400, pgid: 4400, environ: `${WORKER_TOKEN_ENV}=${WHO.token}-extra` }),
+      entry({ pid: 4500, pgid: 4500, state: 'Z', environ: `${WORKER_TOKEN_ENV}=${WHO.token}` }),
+    ]);
+    signalWorker(WHO, 'SIGTERM', host);
+    expect(host.sent).toEqual([
+      { pid: -4000, signal: 'SIGTERM' },
+      { pid: 4300, signal: 'SIGTERM' },
+    ]);
+  });
+
+  it('still signals an escaped child when the group has already gone', () => {
+    const host = new SignalHost([
+      entry({ pid: 4300, pgid: 4300, environ: `${WORKER_TOKEN_ENV}=${WHO.token}` }),
+    ]);
+    host.groupVanished = true;
+    signalWorker(WHO, 'SIGKILL', host);
+    expect(host.sent).toEqual([
+      { pid: -4000, signal: 'SIGKILL' },
+      { pid: 4300, signal: 'SIGKILL' },
+    ]);
+  });
+
+  it('signals only token members when there is no group', () => {
+    const host = new SignalHost([
+      entry({ pid: 4300, pgid: 4300, environ: `${WORKER_TOKEN_ENV}=${WHO.token}` }),
+    ]);
+    signalWorker({ ...WHO, pgid: null }, 'SIGTERM', host);
+    expect(host.sent).toEqual([{ pid: 4300, signal: 'SIGTERM' }]);
+  });
+
+  it('signals only the group when no token is available', () => {
+    const host = new SignalHost([]);
+    host.unreadable = true;
+    signalWorker({ ...WHO, token: '' }, 'SIGKILL', host);
+    expect(host.sent).toEqual([{ pid: -4000, signal: 'SIGKILL' }]);
+    expect(host.reads).toBe(0);
+  });
+
+  it('reports an unreadable table after delivering the group signal', () => {
+    const host = new SignalHost([]);
+    host.unreadable = true;
+    expect(() => signalWorker(WHO, 'SIGTERM', host)).toThrow('ps: exit 1');
+    expect(host.sent).toEqual([{ pid: -4000, signal: 'SIGTERM' }]);
+  });
+});
 
 describe('findLeftovers', () => {
   it('finds a process in the worker’s group', () => {
