@@ -63,6 +63,15 @@ export interface TestLane {
   readonly workers?: {
     /** Workspace-relative directory of the lane's files, the last argument of its test script. */
     readonly testDir: string;
+    /**
+     * Each worker must prove it left no process behind: it leads a process group
+     * of its own, runs without `--no-orphans` (which would kill the evidence), and
+     * the lane fails, naming the process, when one outlives it. For lanes whose
+     * tests spawn the runtime, servers and shells.
+     */
+    readonly settle?: boolean;
+    /** The lane's own default width, when it is not the runner's (six). */
+    readonly defaultWidth?: number;
   };
   /** Repo-relative manifest declaring the lane's coverage script. */
   readonly manifest: string;
@@ -181,7 +190,16 @@ export const TEST_LANES: readonly TestLane[] = [
     // set, not across them. Adding or deleting an integration file shifts the
     // whole stride. Detection of the leak class itself is the randomized-order
     // nightly's job (`.github/workflows/randomized-order-nightly.yml`).
+    //
+    // The plain `test:integration` run is the one place the lane goes wider: as
+    // several processes, each an unisolated `bun test` over the round-robin
+    // slice `--shard=i/N` gives it, so a worker's companions are the same ones a
+    // CI shard of that width has. `settle` makes each worker prove it left no
+    // process behind (these tests spawn the runtime, servers and shells).
+    // `test:coverage:integration` stays one process, for the reason the api-unit
+    // entry gives.
     lcovPath: '.mango/artifacts/coverage/api-integration/lcov.info',
+    workers: { testDir: 'tests/integration', defaultWidth: 4, settle: true },
     manifest: 'apps/api/package.json',
     coverageScript: 'test:coverage:integration',
   },

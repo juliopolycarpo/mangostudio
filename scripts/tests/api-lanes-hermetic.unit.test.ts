@@ -117,6 +117,25 @@ describe('API lane scripts start bun test through the temporary-home launcher', 
     }
   });
 
+  test('apps/api test:integration splits the lane across workers that each start through the launcher', () => {
+    const call = runnerCall(scripts['test:integration'] ?? '');
+    if (!call) {
+      throw new Error(
+        `apps/api test:integration must run through the worker runner | expected: ... bun ../../scripts/run-test-workers.ts --lane=api-integration -- bun test ... | received: ${scripts['test:integration']}`
+      );
+    }
+    const spec = laneSpec(laneById(call.laneId), call.command);
+    for (const plan of planWorkers(spec, 4, tmpdir())) {
+      expect(
+        plan.argv.slice(0, spec.launcher.length + 2),
+        `worker ${plan.index}/${plan.count} must start bun test through ${LAUNCHER} | received: ${plan.argv.join(' ')}`
+      ).toEqual([...spec.launcher, 'bun', 'test']);
+      expect(plan.argv, 'the integration lane stays out of isolate mode').not.toContain(
+        '--isolate'
+      );
+    }
+  });
+
   test('the coverage lane stays one process: partitioned LCOV was not reproducible', () => {
     expect(
       runnerCall(scripts['test:coverage:unit'] ?? ''),
@@ -303,7 +322,7 @@ describe('Turbo task definitions of the API lanes', () => {
     return new Map(tasks.map((task) => [task.taskId.replace('@mangostudio/api#', ''), task]));
   }
 
-  test('the test:unit closure is the ten files the cache key names', () => {
+  test('the test:unit closure is the eleven files the cache key names', () => {
     expect(launcherFiles().sort()).toEqual([
       'scripts/lib/config.ts',
       'scripts/lib/junit-report.ts',
@@ -312,6 +331,7 @@ describe('Turbo task definitions of the API lanes', () => {
       'scripts/lib/test-home.ts',
       'scripts/lib/test-lanes.ts',
       'scripts/lib/test-worker-process.ts',
+      'scripts/lib/test-worker-settle.ts',
       'scripts/lib/test-workers.ts',
       'scripts/run-test-workers.ts',
       'scripts/with-test-home.ts',

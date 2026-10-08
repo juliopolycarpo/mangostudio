@@ -11,15 +11,23 @@ import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import { parseJunitXml } from '../lib/junit-report';
 import { laneById, workerReportPath } from '../lib/test-lanes';
-import { discoverTestFiles, type StartWorker, WORKERS_ENV } from '../lib/test-workers';
-import { main, type RunnerDeps } from '../run-test-workers';
+import {
+  describeCaseDifference,
+  discoverTestFiles,
+  type StartWorker,
+  WORKERS_ENV,
+  type WorkerPlan,
+} from '../lib/test-workers';
+import { main, type RunnerDeps, systemDeps } from '../run-test-workers';
 import {
   crashingWorker,
   diskWorker,
   type FakeTestFile,
   HangingWorker,
   killedWorker,
+  reportOf,
   silentWorker,
+  withLeftovers,
   withWorker,
 } from './support/test-worker-fakes';
 
@@ -30,7 +38,26 @@ const REAL_FILES: FakeTestFile[] = discoverTestFiles(
   'tests/unit'
 ).map((path) => ({ path, cases: ['one', 'two'] }));
 
+const INTEGRATION_ARGV = [
+  '--lane=api-integration',
+  '--',
+  'bun',
+  'test',
+  '--timeout',
+  '15000',
+  'tests/integration',
+];
+const INTEGRATION_FILES: FakeTestFile[] = discoverTestFiles(
+  join(ROOT_DIR, 'apps', 'api'),
+  'tests/integration'
+).map((path) => ({ path, cases: ['one'] }));
+
 const scratch: string[] = [];
+const RUNTIME_HOME_PROBE = [
+  'bun',
+  '-e',
+  'process.exit(process.env.MANGO_HOME === undefined ? 0 : 27)',
+];
 afterEach(() => {
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -72,6 +99,17 @@ function harness(start: StartWorker, env: Record<string, string> = {}) {
 }
 
 describe('run-test-workers', () => {
+  it('discards an ambient runtime home on the selected-run fallback', async () => {
+    const previous = process.env.MANGO_HOME;
+    process.env.MANGO_HOME = '/ambient/runtime-home';
+    try {
+      expect(await systemDeps().runSerial(RUNTIME_HOME_PROBE)).toBe(0);
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(process.env, 'MANGO_HOME');
+      else process.env.MANGO_HOME = previous;
+    }
+  });
+
   it('has the real lane’s files to census', () => {
     expect(REAL_FILES.length).toBeGreaterThan(100);
   });
@@ -196,6 +234,51 @@ describe('run-test-workers', () => {
     expect(existsSync(run.mergedPath)).toBe(false);
   });
 
+  it('splits the integration lane the same way, and fails it when a worker leaks a process', async () => {
+    const run = harness(diskWorker(INTEGRATION_FILES), { [WORKERS_ENV]: '4' });
+    expect(await main(INTEGRATION_ARGV, run.deps)).toBe(0);
+    expect(run.started.sort()).toEqual([1, 2, 3, 4]);
+    expect(run.lines[0]).toContain(`api-integration: 4 workers, ${INTEGRATION_FILES.length} files`);
+
+    const leaky = harness(
+      withLeftovers(diskWorker(INTEGRATION_FILES), [
+        { pid: 4242, command: 'mangostudio-runtime serve' },
+      ]),
+      { [WORKERS_ENV]: '2' }
+    );
+    expect(await main(INTEGRATION_ARGV, leaky.deps)).toBe(1);
+    expect(leaky.lines.filter((line) => line.startsWith('FAILED '))[0]).toContain(
+      'api-integration worker 1/2 left processes behind | expected live descendants: 0 | received: 1 (pid 4242: mangostudio-runtime serve)'
+    );
+  });
+
+  it('defaults the integration lane to four workers and preserves every case and outcome', async () => {
+    const files = INTEGRATION_FILES.map((file, index) => ({
+      ...file,
+      outcome: index % 7 === 0 ? ('skip' as const) : ('pass' as const),
+    }));
+    const run = harness(diskWorker(files));
+    expect(await main(INTEGRATION_ARGV, run.deps)).toBe(0);
+    expect(run.started.sort()).toEqual([1, 2, 3, 4]);
+    const serial = parseJunitXml(reportOf(files));
+    const merged = parseJunitXml(readFileSync(run.mergedPath, 'utf8'));
+    expect(describeCaseDifference(serial.cases, merged.cases)).toBeNull();
+  });
+
+  it('retains serial Windows integration with Bun orphan cleanup', async () => {
+    const plans: WorkerPlan[] = [];
+    const worker = diskWorker(INTEGRATION_FILES);
+    const run = harness((plan) => {
+      plans.push(plan);
+      return worker(plan);
+    });
+    expect(await main(INTEGRATION_ARGV, { ...run.deps, platform: 'win32' })).toBe(0);
+    expect(run.started).toEqual([1]);
+    expect(plans[0]?.settle).toBe(false);
+    expect(plans[0]?.argv).toContain('--no-orphans');
+    expect(plans[0]?.argv.some((arg) => arg.startsWith('--shard='))).toBe(false);
+  });
+
   it('refuses arguments that name no lane or no command', async () => {
     const run = harness(diskWorker(REAL_FILES));
     await expect(main(['bun', 'test'], run.deps)).rejects.toThrow(
@@ -207,8 +290,8 @@ describe('run-test-workers', () => {
   it('refuses a lane that declares no workers', async () => {
     const run = harness(diskWorker(REAL_FILES));
     await expect(
-      main(['--lane=api-integration', '--', 'bun', 'test', 'tests/integration'], run.deps)
-    ).rejects.toThrow('expected a lane with workers | received: api-integration');
+      main(['--lane=shared', '--', 'bun', 'test', 'tests/unit'], run.deps)
+    ).rejects.toThrow('expected a lane with workers | received: shared');
   });
 
   it('refuses a worker count outside 1 to 8 before starting anything', async () => {

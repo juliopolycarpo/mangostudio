@@ -521,6 +521,53 @@ on from Bun (every file in exactly one shard, the same split twice, the same fil
 and the child one of its tests started down with it) by running real Bun over a
 throwaway tree.
 
+#### API integration workers
+
+`bun run test` and `bun run --filter @mangostudio/api test:integration` also use
+`scripts/run-test-workers.ts`. Integration defaults to four workers, capped at
+half the available cores. `MANGO_TEST_WORKERS=<1-8>` overrides the width. Each
+worker runs the unchanged unisolated command, `bun test --timeout 15000
+tests/integration`, over its deterministic `--shard=i/N` slice. It does not use
+Bun's in-process `--parallel` or a timings file. Coverage keeps its existing
+single-process command and CI shard matrix.
+
+The integration workers own their temporary homes and managed config paths,
+in-memory databases, OS-assigned ports and separate reports, as the unit workers
+do. Helpers that start a real server or runtime create a fresh scratch directory
+and request port 0. An ambient `MANGO_HOME` is removed before starting a worker,
+so it cannot redirect every runtime to the developer's shared home. Selected
+runs use the same filter before taking the serial fallback. A fixture
+that needs a runtime home sets its own scratch path on the child.
+
+On POSIX each integration worker leads its own process group. After it exits,
+the runner gives descendants two seconds to finish and checks for live members
+of that group. On Linux it also looks for the worker's unique environment token,
+which finds children that started another session. A live descendant fails the
+lane with `expected live descendants: 0 | received: N`, its PID and command. The
+runner kills it before returning the failure. An unreadable process table also
+fails. Zombies are excluded because they hold no ports or locks. `--no-orphans`
+is omitted on this path so Bun cannot kill the evidence before the check.
+
+Cancellation sends SIGTERM to the whole worker group and, on Linux, to
+token-bearing children that left the group. It escalates both to SIGKILL
+after at most three seconds, before the outer runner's five-second deadline.
+Output readers have a bounded drain grace so an inherited pipe cannot hold the
+lane open forever. The worker, settlement and cancellation regression tests use
+real fake processes as well as named process-table fakes.
+
+Windows retains a serial default with `--no-orphans`. The POSIX settlement guard
+does not run there; Windows integration concurrency and leftover diagnostics
+are unqualified. The override is available for explicit experiments. On macOS
+the guard sees group members through `ps`, but has no Linux environment-token
+fallback. A process that starts a new session and discards its inherited
+environment is outside the Linux guard's evidence too.
+
+The report goes to `.mango/artifacts/test-workers/api-integration.xml`, leaving
+coverage evidence alone. Every owned file must occur in exactly one whole
+worker report. Named fake workers compare the full merged case and outcome
+multiset with the serial lane, including skips. The live soak compares the same
+sets and records post-run descendants independently of the runner's guard.
+
 #### Balancing the split by time
 
 > An earlier revision of this section concluded that **no timings file was
@@ -994,8 +1041,9 @@ so a preload or a test cannot redirect it. The `test:unit`, `test:integration` a
 `test:coverage:*` scripts of `apps/api` therefore start `bun test` through
 `scripts/with-test-home.ts`, which creates a fresh `<tmpdir>/mangostudio-test-home-<random>`,
 starts the tests with `HOME` (and `USERPROFILE`) pointing at it, and removes it when the run
-ends. `test:unit` reaches it through the [worker runner](#api-unit-workers), which starts every
-worker through the launcher, so each worker has a home of its own. That one change covers `bun run test`, the CI shards behind the watchdog, the coverage
+ends. `test:unit` and `test:integration` reach it through the
+[worker runner](#api-unit-workers), which starts every worker through the
+launcher, so each worker has a home of its own. That covers `bun run test`, the CI shards behind the watchdog, the coverage
 orchestrator and a direct `bun run test:unit` from `apps/api`; the nightly randomized-order
 workflow wraps its `bun test` the same way.
 

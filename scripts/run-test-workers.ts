@@ -6,7 +6,8 @@
 //
 // The lane (scripts/lib/test-lanes.ts) says which directory it owns; the
 // command after `--` is the serial command, unchanged. `MANGO_TEST_WORKERS`
-// sets the width (1 to 8, default six, never more than half the cores, and one on
+// sets the width (1 to 8, default six for unit and four for integration, never
+// more than half the cores, and one on
 // Windows: see resolveWorkerCount).
 //
 // A command with anything after the lane's directory (`bun run test --changed`
@@ -27,7 +28,7 @@ import { ROOT_DIR } from './lib/config';
 import { error, info, log } from './lib/log';
 import { runWithTestHome } from './lib/test-home';
 import { laneById, type TestLaneId, workerReportPath } from './lib/test-lanes';
-import { startWorkerProcess } from './lib/test-worker-process';
+import { startWorkerProcess, workerEnvironment } from './lib/test-worker-process';
 import {
   formatLaneSummary,
   laneSpec,
@@ -57,15 +58,17 @@ export interface RunnerDeps {
   readonly mergedPath?: string;
   /** The repository root the default merged path is under. */
   readonly rootDir?: string;
+  /** What starts each worker's `bun test`; the temporary-HOME launcher by default. */
+  readonly launcher?: readonly string[];
 }
 
-const systemDeps = (): RunnerDeps => ({
+export const systemDeps = (): RunnerDeps => ({
   env: process.env,
   cpus: availableParallelism(),
   platform: process.platform,
   start: (plan) =>
     startWorkerProcess(plan, plan.count > 1 ? `[${plan.laneId} ${plan.index}/${plan.count}] ` : ''),
-  runSerial: (command) => runWithTestHome(command),
+  runSerial: (command) => runWithTestHome(command, workerEnvironment(process.env, { env: {} })),
   onInterrupt: (handler) => {
     for (const name of INTERRUPTS) process.on(name, () => handler(name));
   },
@@ -96,7 +99,7 @@ export async function main(
 ): Promise<number> {
   const { laneId, command } = parseArguments(argv);
   const lane = laneById(laneId as TestLaneId);
-  const spec = laneSpec(lane, command);
+  const spec = laneSpec(lane, command, deps.launcher, deps.platform);
   const mergedPath = deps.mergedPath ?? join(deps.rootDir ?? ROOT_DIR, workerReportPath(lane));
 
   const { extra } = splitLaneCommand(command, spec.testDir);
@@ -107,7 +110,7 @@ export async function main(
     return deps.runSerial(command);
   }
 
-  const count = resolveWorkerCount(deps.env, deps.cpus, deps.platform);
+  const count = resolveWorkerCount(deps.env, deps.cpus, deps.platform, lane.workers?.defaultWidth);
   const cancellation = new AbortController();
   const interrupt: { by: Interrupt | null } = { by: null };
   deps.onInterrupt((signal) => {

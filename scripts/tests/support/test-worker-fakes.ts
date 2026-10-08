@@ -4,6 +4,7 @@
 
 import { writeFileSync } from 'node:fs';
 
+import type { Leftover } from '../../lib/test-worker-settle';
 import type { StartWorker, WorkerExit, WorkerHandle, WorkerPlan } from '../../lib/test-workers';
 
 /** A test file and the names of the cases it registers. */
@@ -102,7 +103,10 @@ export const healthyWorker =
   (lane: readonly FakeTestFile[], disk: FakeReportDisk): StartWorker =>
   (plan) => {
     disk.write(plan.reportPath, reportOf(shardOf(lane, plan)));
-    return settled({ exitCode: 0, signal: null });
+    return {
+      ...settled({ exitCode: 0, signal: null }),
+      settle: plan.settle ? () => Promise.resolve([]) : undefined,
+    };
   };
 
 /** Like {@link healthyWorker}, but the report lands on the real disk, where `runWorkerLane` reads it. */
@@ -110,7 +114,10 @@ export const diskWorker =
   (lane: readonly FakeTestFile[]): StartWorker =>
   (plan) => {
     writeFileSync(plan.reportPath, reportOf(shardOf(lane, plan)));
-    return settled({ exitCode: 0, signal: null });
+    return {
+      ...settled({ exitCode: 0, signal: null }),
+      settle: plan.settle ? () => Promise.resolve([]) : undefined,
+    };
   };
 
 /** Like {@link healthyWorker}, except `index` ends with `exit` instead. */
@@ -179,3 +186,17 @@ export class HangingWorker {
     };
   };
 }
+
+/**
+ * The same worker, with a settlement check that finds `leftovers` still running
+ * once it has exited, as a worker whose test leaked a child would.
+ * // Usage: withLeftovers(healthyWorker(lane, disk), [{ pid: 4242, command: 'sleep 600' }])
+ */
+export const withLeftovers =
+  (inner: StartWorker, leftovers: readonly Leftover[]): StartWorker =>
+  (plan) => ({ ...inner(plan), settle: () => Promise.resolve(leftovers) });
+
+/** The same worker, whose settlement check cannot read the process table. */
+export const withUnreadableProcessTable =
+  (inner: StartWorker, reason: string): StartWorker =>
+  (plan) => ({ ...inner(plan), settle: () => Promise.reject(new Error(reason)) });

@@ -14,6 +14,7 @@
         "$TURBO_ROOT$/scripts/run-test-workers.ts",
         "$TURBO_ROOT$/scripts/lib/test-workers.ts",
         "$TURBO_ROOT$/scripts/lib/test-worker-process.ts",
+        "$TURBO_ROOT$/scripts/lib/test-worker-settle.ts",
         "$TURBO_ROOT$/scripts/lib/junit-report.ts",
         "$TURBO_ROOT$/scripts/lib/test-lanes.ts",
         "$TURBO_ROOT$/scripts/lib/config.ts",
@@ -28,7 +29,13 @@
       ]
     },
     "test:integration": {
-      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "BUN_INSTALL", "BUN_INSTALL_CACHE_DIR"]
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "BUN_INSTALL",
+        "BUN_INSTALL_CACHE_DIR",
+        "MANGO_TEST_WORKERS"
+      ]
     },
     "test:coverage": {
       "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "BUN_INSTALL", "BUN_INSTALL_CACHE_DIR"]
