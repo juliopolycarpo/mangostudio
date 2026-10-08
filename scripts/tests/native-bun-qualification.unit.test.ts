@@ -171,6 +171,7 @@ class FakeNativeCommands {
       log: `logs/${options.label}.log`,
       settlement: {
         scope: 'observed descendants and command process group',
+        rootObserved: true,
         pollIntervalMs: 1_000,
         observed: [],
         survivors: [],

@@ -22,6 +22,7 @@ export interface NativeProcessScope {
 interface NativeSettlement {
   readonly scope: 'observed descendants and command process group';
   readonly pollIntervalMs: number;
+  readonly rootObserved: boolean;
   readonly observed: readonly NativeProcess[];
   readonly survivors: readonly NativeProcess[];
   readonly snapshotErrors: readonly string[];
@@ -74,7 +75,8 @@ export function parseNativeProcesses(text: string, platform: NodeJS.Platform): N
         pid < 0 ||
         !Number.isInteger(parentPid) ||
         typeof value.created !== 'string' ||
-        !value.created
+        !value.created ||
+        !Number.isFinite(Date.parse(value.created))
       ) {
         throw new Error(
           `Invalid CIM process ${JSON.stringify(value)}; expected PID, parent PID, and creation time`
@@ -111,6 +113,34 @@ export function parseNativeProcesses(text: string, platform: NodeJS.Platform): N
         command: match[5],
       };
     });
+}
+
+function processStart(row: NativeProcess): { clock: 'ticks' | 'time'; value: bigint } | null {
+  const prefix = `${row.pid}:`;
+  if (!row.identity.startsWith(prefix)) return null;
+  const text = row.identity.slice(prefix.length);
+  if (/^\d+$/.test(text)) return { clock: 'ticks', value: BigInt(text) };
+  const utc = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(Z|\+00:00)$/.exec(text);
+  if (utc) {
+    const milliseconds = Date.parse(`${utc[1]}${utc[3]}`);
+    if (!Number.isFinite(milliseconds)) return null;
+    // CIM's UTC creation timestamp carries 100 ns precision. Date.parse alone loses it.
+    const fraction = BigInt((utc[2] ?? '').padEnd(7, '0'));
+    return { clock: 'time', value: BigInt(milliseconds) * 10_000n + fraction };
+  }
+  const milliseconds = Date.parse(text);
+  return Number.isFinite(milliseconds)
+    ? { clock: 'time', value: BigInt(milliseconds) * 10_000n }
+    : null;
+}
+
+function validParentEdge(child: NativeProcess, parent: NativeProcess): boolean {
+  const childStart = processStart(child);
+  const parentStart = processStart(parent);
+  if (childStart && parentStart && childStart.clock === parentStart.clock)
+    return childStart.value >= parentStart.value;
+  // POSIX reports a current parent; Windows retains its creation-time parent PID after reuse.
+  return child.group !== null && parent.group !== null;
 }
 
 async function captureSnapshot(command: readonly string[]): Promise<string> {
@@ -201,12 +231,13 @@ export function scopeNativeProcesses(
   let changed = true;
   while (changed) {
     changed = false;
-    const ownedPids = new Set([...current.values()].map((row) => row.pid));
+    const ownedPids = new Map([...current.values()].map((row) => [row.pid, row]));
     const groupAnchored = [...current.values()].some((row) => row.group === scope.rootPid);
     for (const row of snapshot) {
       if (current.has(row.identity)) continue;
-      if (!ownedPids.has(row.parentPid) && !(groupAnchored && row.group === scope.rootPid))
-        continue;
+      const parent = ownedPids.get(row.parentPid);
+      const ownedParent = parent ? validParentEdge(row, parent) : false;
+      if (!ownedParent && !(groupAnchored && row.group === scope.rootPid)) continue;
       current.set(row.identity, row);
       changed = true;
     }
@@ -309,10 +340,27 @@ export async function runNativeCommand(
     })
   );
   const census = async (): Promise<void> => {
+    const rootAliveAtDispatch = !exited;
+    const dispatchedAt = new Date().toISOString();
     try {
-      const scoped = scopeNativeProcesses(await snapshot(), {
+      const rows = await snapshot();
+      const root = rows.find((row) => row.pid === child.pid);
+      let rootAlive = rootAliveAtDispatch;
+      if (
+        root &&
+        rootIdentity === null &&
+        rootAlive &&
+        (root.parentPid !== process.pid ||
+          (process.platform !== 'win32' && root.group !== child.pid))
+      ) {
+        snapshotErrors.push(
+          `unexpected root origin for PID ${root.pid}: parent ${root.parentPid}, group ${root.group}; expected parent ${process.pid}${process.platform === 'win32' ? '' : ` and group ${child.pid}`}`
+        );
+        rootAlive = false;
+      }
+      const scoped = scopeNativeProcesses(rows, {
         rootPid: child.pid ?? -1,
-        rootAlive: !exited,
+        rootAlive,
         rootIdentity,
         observed,
       });
@@ -321,7 +369,7 @@ export async function runNativeCommand(
       current = scoped.current;
       await appendFile(
         join(options.out, `terminal-${options.label}.jsonl`),
-        `${JSON.stringify({ at: new Date().toISOString(), rootAlive: !exited, processes: current })}\n`
+        `${JSON.stringify({ at: new Date().toISOString(), dispatchedAt, rootAlive: rootAliveAtDispatch, rootAliveAtCompletion: !exited, processes: current })}\n`
       );
     } catch (error) {
       snapshotErrors.push(String(error));
@@ -344,6 +392,7 @@ export async function runNativeCommand(
   };
   let timeoutCleanup: Promise<void> | null = null;
   const timeout = setTimeout(() => {
+    if (exited) return;
     timedOut = true;
     timeoutCleanup = terminate().catch((error) => {
       errors.push(`Timeout cleanup failed: ${String(error)}`);
@@ -384,6 +433,7 @@ export async function runNativeCommand(
   const settlement: NativeSettlement = {
     scope: 'observed descendants and command process group',
     pollIntervalMs,
+    rootObserved: rootIdentity !== null,
     observed,
     survivors: current,
     snapshotErrors,
