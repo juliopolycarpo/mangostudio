@@ -13,6 +13,21 @@ interface FileTypeImport {
   specifier: string;
 }
 
+function isRequireExpression(expression: ts.Expression): boolean {
+  if (ts.isIdentifier(expression)) return expression.text === 'require';
+  if (!ts.isPropertyAccessExpression(expression) && !ts.isElementAccessExpression(expression)) {
+    return false;
+  }
+  if (!ts.isIdentifier(expression.expression) || expression.expression.text !== 'module') {
+    return false;
+  }
+  if (ts.isPropertyAccessExpression(expression)) return expression.name.text === 'require';
+  return (
+    ts.isStringLiteralLike(expression.argumentExpression) &&
+    expression.argumentExpression.text === 'require'
+  );
+}
+
 function findFileTypeImports(source: string, file: string): FileTypeImport[] {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   const imports: FileTypeImport[] = [];
@@ -39,8 +54,7 @@ function findFileTypeImports(source: string, file: string): FileTypeImport[] {
     }
     if (
       ts.isCallExpression(node) &&
-      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-        (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword || isRequireExpression(node.expression))
     ) {
       recordImport(node.arguments[0]);
     }
@@ -93,6 +107,10 @@ describe('API file-type import boundary', () => {
     'const detector = await import(`file-type/core`);',
     "const detector = require('file-type');",
     "const detector = require('file-type/core');",
+    "const detector = module.require('file-type');",
+    "const detector = module['require']('file-type');",
+    'const detector = module["require"]("file-type/core");',
+    'const detector = module[`require`](`file-type/core`);',
     "import detector = require('file-type');",
     "type Result = import('file-type').FileTypeResult;",
     "import {\n fileTypeFromBuffer\n} from /* comment */ 'file-type/core';",
@@ -111,6 +129,9 @@ describe('API file-type import boundary', () => {
     "import { detectFileType } from './file-type-detector';",
     "import detector from 'file-types';",
     "const detector = import('file-type-detector');",
+    "const detector = other.require('file-type');",
+    "const detector = module.other('file-type');",
+    "const detector = module[method]('file-type');",
   ])('ignores comments, strings, and unrelated modules in %s', (source) => {
     expect(findFileTypeImports(source, 'apps/api/src/example.ts')).toEqual([]);
   });
