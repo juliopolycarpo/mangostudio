@@ -19,6 +19,7 @@
     "DISTRIBUTION_CHANNEL",
     "DISTRIBUTION_MANIFEST_PATH",
     "DRY_RUN",
+    "GITHUB_ACTIONS",
     "GITHUB_OUTPUT",
     // Names the repository whose Actions cache usage the gate job reports.
     "GITHUB_REPOSITORY",
@@ -36,6 +37,7 @@
     "ONLY_PLATFORM",
     "PLATFORM",
     "QA_FRONTEND_DIST",
+    "RUNNER_OS",
     // Prebuilt cargo runtimes `scripts/build.ts --binary` stages beside each hub.
     "RUNTIME_DIR",
     "SKIP_BUILD",
