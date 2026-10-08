@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -364,7 +364,8 @@ describe('full qualification receipts', () => {
       .filter((call) => call.label.startsWith('build-'))
       .map((call) => call.env.CARGO_TARGET_DIR);
     expect(new Set(targets).size).toBe(2);
-    expect(targets.every((target) => target?.startsWith(join(source.out, 'targets')))).toBe(true);
+    const physicalTargets = join(await realpath(source.out), 'targets');
+    expect(targets.every((target) => target?.startsWith(physicalTargets))).toBe(true);
     const testCall = fake.calls.find((call) => call.label === 'test');
     expect(fake.calls.find((call) => call.label === 'rustc-version')?.timeoutSeconds).toBe(180);
     expect(testCall?.env.MANGOSTUDIO_RUNTIME_BINARY).toBe(receipt.artifactsBefore[0].path);

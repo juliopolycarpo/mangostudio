@@ -210,7 +210,7 @@ function splitTask(line: string): { task: string; body: string } {
     );
   return {
     task: match?.[1].replace('//:test:scripts', '//#test:scripts') ?? '',
-    body: (match ? clean.slice(match[0].length) : clean).trim(),
+    body: (match ? clean.slice(match[0].length) : clean).trim().replace(/^::group::/, ''),
   };
 }
 

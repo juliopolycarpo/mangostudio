@@ -171,6 +171,17 @@ describe('default suite raw evidence', () => {
     expect(lanes[1].files).toEqual(['apps/api/tests/unit/real.test.ts']);
     expect(lanes[1].errors).toEqual([]);
   });
+
+  test('retains required file ownership inside GitHub Actions reporter groups', () => {
+    const grouped = completeLog().replace(
+      /((?:^|\n)(?:[^\n]+: )?)([^\n]+\.(?:test|spec)\.[cm]?[jt]sx?:)/g,
+      '$1::group::$2'
+    );
+    const lanes = parseNativeTestLog(grouped, inventory, root);
+    expect(lanes.map((lane) => lane.errors)).toEqual([[], [], []]);
+    expect(lanes[1].cases[0].file).toBe('apps/api/tests/unit/real.test.ts');
+    expect(lanes[2].cases[0].file).toBe('packages/protocol/real.test.ts');
+  });
 });
 
 const temporary: string[] = [];
