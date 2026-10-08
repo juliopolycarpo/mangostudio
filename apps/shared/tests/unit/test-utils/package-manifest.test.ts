@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SHARED_ROOT = '@mangostudio/shared';
+const SHARED_DIR = fileURLToPath(new URL('../../../', import.meta.url));
 
 async function readSharedManifest() {
   return (await Bun.file(new URL('../../../package.json', import.meta.url)).json()) as {
@@ -9,6 +14,28 @@ async function readSharedManifest() {
 }
 
 describe('shared package manifest', () => {
+  it('removes the private root export and source barrel', async () => {
+    const manifest = await readSharedManifest();
+
+    expect(manifest.exports?.['.']).toBeUndefined();
+    expect(await Bun.file(new URL('../../../src/index.ts', import.meta.url)).exists()).toBe(false);
+    expect(() => Bun.resolveSync(SHARED_ROOT, SHARED_DIR)).toThrow('Cannot find package');
+  });
+
+  it('resolves every retained subpath, including the compatibility contracts barrel', async () => {
+    const manifest = await readSharedManifest();
+
+    expect(manifest.exports?.['./contracts']).toBe('./src/contracts/index.ts');
+    expect(manifest.exports?.['./generation']).toBe('./src/generation/index.ts');
+    expect(Object.keys(manifest.exports ?? {}).length).toBeGreaterThan(30);
+    for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
+      expect(subpath.startsWith('./')).toBe(true);
+      expect(Bun.resolveSync(`${SHARED_ROOT}/${subpath.slice(2)}`, SHARED_DIR)).toBe(
+        resolve(SHARED_DIR, target)
+      );
+    }
+  });
+
   it('keeps test-utils as an explicit public export', async () => {
     const manifest = await readSharedManifest();
 

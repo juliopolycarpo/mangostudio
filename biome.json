@@ -47,7 +47,17 @@
       "performance": { "noDelete": "warn" },
       "style": {
         "noNestedTernary": "off",
-        "useBlockStatements": "off"
+        "useBlockStatements": "off",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@mangostudio/shared": {
+                "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
+              }
+            }
+          }
+        }
       },
       "suspicious": {}
     }
@@ -119,6 +129,9 @@
                   },
                   "@mangostudio/shared/i18n/pt-BR": {
                     "message": "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()."
+                  },
+                  "@mangostudio/shared": {
+                    "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
                   }
                 }
               }
@@ -177,7 +190,22 @@
         "apps/frontend/src/lib/locale-dictionaries.ts",
         "apps/frontend/tests/**/*.{ts,tsx}"
       ],
-      "linter": { "rules": { "style": { "noRestrictedImports": "off" } } }
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@mangostudio/shared": {
+                    "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     },
     {
       "includes": [

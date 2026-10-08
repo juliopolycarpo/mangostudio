@@ -8,7 +8,7 @@
  * budget. Gemini 2.0 and older do not support thinking at all.
  */
 
-import type { ReasoningEffort } from '@mangostudio/shared';
+import type { ReasoningEffort } from '@mangostudio/shared/types';
 
 // ---------------------------------------------------------------------------
 // Model-family detection

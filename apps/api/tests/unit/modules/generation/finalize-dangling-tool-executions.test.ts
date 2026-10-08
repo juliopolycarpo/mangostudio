@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import {
   applyToolExecutionTransition,
   createToolExecutionSnapshot,
 } from '@mangostudio/shared/tool-executions';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { finalizeDanglingToolExecutions } from '../../../../src/modules/generation/application/stream-text-turn-helpers';
 
 describe('finalizeDanglingToolExecutions', () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
+import type { MessagePart } from '@mangostudio/shared/types';
 import type { GenerateImageToolOutcome } from '../../../../src/services/tools/builtin/generate-image';
 import * as realGenerateImage from '../../../../src/services/tools/builtin/generate-image';
 import { registerTools } from '../../../../src/services/tools/register-tools';

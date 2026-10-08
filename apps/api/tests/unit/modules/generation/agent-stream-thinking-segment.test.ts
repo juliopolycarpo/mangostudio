@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import { mergeMessageParts } from '@mangostudio/shared/generation';
+import type { MessagePart } from '@mangostudio/shared/types';
 import {
   emitAgentStreamEvent,
   type StreamTextTurnSession,

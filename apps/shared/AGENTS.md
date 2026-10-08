@@ -22,7 +22,7 @@ Read `../../AGENTS.md` first. This file only adds shared-workspace entrypoints, 
 
 - Keep this workspace framework-agnostic.
 - Shared contracts are schema-first: define each shape once as a TypeBox schema in `src/<module>/schemas.ts` and derive its public type with `Static<>`. Never hand-write a duplicate interface; use `ReadonlyArraySchema` / `Type.Unsafe` (see `src/schema-helpers.ts`) when the derived type needs `ReadonlyArray` or template-literal precision.
-- `src/contracts/index.ts` re-exports those types for backward compatibility only; new code should import from the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`).
+- `src/contracts/index.ts` re-exports those types for backward compatibility only; imports must use the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`).
 - `tests/unit/contract-schema-parity.test.ts` enforces that hand-written domain unions and the compatibility barrel stay in lockstep with the schemas — extend it when adding cross-cutting types.
 - Contract changes must update both consumers in the same task.
 - `src/i18n/pt-BR.ts` is the source of truth for message keys.

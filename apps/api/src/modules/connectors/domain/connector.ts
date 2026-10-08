@@ -2,7 +2,7 @@
  * Connector domain types, constants, and pure domain helpers.
  */
 
-import type { Connector } from '@mangostudio/shared';
+import type { Connector } from '@mangostudio/shared/connectors';
 import type { ProviderType, SecretMetadataRow, SecretSource } from '@mangostudio/shared/types';
 import { parseStringArray } from '../../../utils/json';
 

@@ -1,4 +1,3 @@
-import type { MessagePart } from '@mangostudio/shared';
 import type { AgentId } from '@mangostudio/shared/agents';
 import {
   applyToolExecutionTransition,
@@ -12,6 +11,7 @@ import {
   type TurnCheckpointPart,
   type TurnInterruptionReasonCode,
 } from '@mangostudio/shared/turn-recovery';
+import type { MessagePart } from '@mangostudio/shared/types';
 import type { Kysely, Transaction } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
