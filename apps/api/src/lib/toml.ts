@@ -101,9 +101,10 @@ export function readTomlDocument(filePath: string): Record<string, unknown> {
 function safeTomlParserError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
   let safeMessage = message;
-  const describesShape = /^TOML Parse error: (?:Expected |Invalid (?:date|time): expected )/.test(
-    message
-  );
+  const describesShape =
+    /^TOML Parse error: (?:Expected |Invalid (?:date|time|date-time offset): expected )/.test(
+      message
+    );
   for (let index = 0; index < message.length; index++) {
     if (message[index] !== '"' && message[index] !== "'") continue;
     const punctuation = describesShape && message.slice(index).match(/^'[[\]{}=,:.-]+'/);

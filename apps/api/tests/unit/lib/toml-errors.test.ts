@@ -78,20 +78,44 @@ describe('TOML parser diagnostics', () => {
     expect(() => parseTomlDocument('when = 1979-02-30')).toThrow('day is out of range');
   });
 
-  it.each(['[auth\nsecret = "s"', '[[auth\nsecret = "s"', 'when = 1979-05x27'])(
-    'keeps native structural punctuation in file diagnostics: %s',
-    (content) => {
-      writeFileSync(configPath, content);
-      let nativeMessage = '';
-      try {
-        Bun.TOML.parse(content);
-      } catch (error) {
-        nativeMessage = (error as Error).message;
-      }
-      expect(nativeMessage).toContain('TOML Parse error');
-      expect(() => readTomlDocument(configPath)).toThrow(JSON.stringify(nativeMessage));
+  it.each([
+    '[auth\nsecret = "s"',
+    '[[auth\nsecret = "s"',
+    'when = 1979-05x27',
+    'when = 1979-05-27T00:32+0100',
+  ])('keeps native structural punctuation in file diagnostics: %s', (content) => {
+    writeFileSync(configPath, content);
+    let nativeMessage = '';
+    try {
+      Bun.TOML.parse(content);
+    } catch (error) {
+      nativeMessage = (error as Error).message;
     }
-  );
+    expect(nativeMessage).toContain('TOML Parse error');
+    expect(() => readTomlDocument(configPath)).toThrow(JSON.stringify(nativeMessage));
+  });
+
+  it('keeps the expected offset separator in a direct parser diagnostic', () => {
+    expect(() => parseTomlDocument('when = 1979-05-27T00:32+0100')).toThrow(
+      "TOML Parse error: Invalid date-time offset: expected ':' between hours and minutes"
+    );
+  });
+
+  it('keeps the expected offset separator in a public subagent diagnostic', async () => {
+    const adapter = createSubagentAdapter('toml-agent', 'markdown-frontmatter');
+    const result = await adapter.adapt({
+      content: 'when = 1979-05-27T00:32+0100',
+      kind: 'subagent',
+      from: 'toml-agent',
+      to: 'markdown-frontmatter',
+      resourceKey: 'subagent:reviewer',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected an invalid timestamp offset to reject conversion.');
+    expect(result.error.message).toBe(
+      "TOML Parse error: Invalid date-time offset: expected ':' between hours and minutes"
+    );
+  });
 
   it('keeps a malformed config warning useful without logging its private value', () => {
     writeFileSync(configPath, INVALID_DOCUMENT);
