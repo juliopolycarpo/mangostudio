@@ -101,4 +101,16 @@ describe('check script', () => {
       expect(manifest.scripts?.circular).toBeUndefined();
     }
   });
+
+  test('fixes the same whole workspace that check:quick lints', () => {
+    for (const manifestPath of [
+      'apps/api/package.json',
+      'apps/frontend/package.json',
+      'apps/shared/package.json',
+    ]) {
+      const manifest = JSON.parse(readText(manifestPath)) as { scripts?: Record<string, string> };
+
+      expect(manifest.scripts?.fix, `${manifestPath} fix script`).toBe('biome check --write .');
+    }
+  });
 });
