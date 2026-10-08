@@ -12,6 +12,11 @@
 //                grandchild, writes `ready.json` once the grandchild is up, then
 //                waits to be stopped
 //   grandchild   the fake grandchild (the `rustc`): only waits
+//
+// `child` and `grandchild` take a stop behaviour for SIGINT and SIGTERM:
+// `linger:<ms>` (the default, 300) logs the signal and exits that long after it,
+// so a duplicate delivery is also logged; `ignore` logs it and keeps running,
+// the way a worker with a handler that swallows it does.
 //   worker       one unit of fan-out work: logs `start`, waits for the test to
 //                create `release`, logs `end`
 //   fan-out      the fake nested runner: `groups` x `perGroup` workers through
@@ -34,6 +39,9 @@ export interface ReadyPids {
   readonly child: number;
   readonly grandchild: number;
 }
+
+/** How a fake reacts to SIGINT and SIGTERM: `linger:<ms>` or `ignore`. */
+type StopBehaviour = `linger:${number}` | 'ignore';
 
 /** What the fakes saw, one line per signal: `<role> <signal>`. */
 export const SIGNALS_LOG = 'signals.log';
@@ -125,6 +133,35 @@ export function forceKill(pid: number): void {
   }
 }
 
+/** The grandchild's own pid, once it wrote it (before `ready.json` exists). */
+export function readGrandchildPid(dir: string): number | undefined {
+  const file = join(dir, GRANDCHILD_UP);
+  if (!existsSync(file)) return undefined;
+  const pid = Number(readFileSync(file, 'utf8'));
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+/** Every worker pid that logged a start, for cleanup after a failed test. */
+export function readWorkerPids(dir: string): number[] {
+  const file = join(dir, WORKERS_LOG);
+  if (!existsSync(file)) return [];
+  const pids: number[] = [];
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    const [, event, pid] = line.split(' ');
+    if (event === 'start' && pid) pids.push(Number(pid));
+  }
+  return pids;
+}
+
+/** Kills a whole process group (POSIX only); a missing group is the wanted state. */
+export function forceKillGroup(pid: number): void {
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    // Not a group, or already empty.
+  }
+}
+
 async function runFakeRunner(dir: string, childRole: string, extra: string[]): Promise<number> {
   const interactive = childRole === 'interactive';
   const role = interactive ? 'child' : childRole;
@@ -140,8 +177,8 @@ async function runFakeRunner(dir: string, childRole: string, extra: string[]): P
  * real worker is cmd.exe's child, a link that Bun's own job object lets break
  * away from the runner's tree.
  */
-function grandchildLaunch(dir: string): string[] {
-  const command = fixtureCommand('grandchild', dir);
+function grandchildLaunch(dir: string, stop: StopBehaviour): string[] {
+  const command = fixtureCommand('grandchild', dir, stop);
   if (process.platform !== 'win32') return command;
 
   const shim = join(dir, 'grandchild.cmd');
@@ -150,9 +187,17 @@ function grandchildLaunch(dir: string): string[] {
   return [shim];
 }
 
-async function runFakeChild(dir: string): Promise<void> {
-  recordSignals('child', dir);
-  Bun.spawn(grandchildLaunch(dir), { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+async function runFakeChild(
+  dir: string,
+  childStop: StopBehaviour,
+  grandchildStop: StopBehaviour
+): Promise<void> {
+  recordSignals('child', dir, childStop);
+  Bun.spawn(grandchildLaunch(dir, grandchildStop), {
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
   // Ready means both can take a signal: before its handlers exist a process
   // just dies of one, which would make the delivery counts depend on startup.
   // The grandchild reports its own pid, because the one spawn returns may be
@@ -164,14 +209,19 @@ async function runFakeChild(dir: string): Promise<void> {
   await Bun.sleep(FAKE_LIFETIME_MS);
 }
 
-/** Logs a received signal, then lingers so a duplicate delivery is also logged. */
-function recordSignals(role: string, dir: string): void {
+/** Logs a received signal, then reacts as `stop` says. */
+function recordSignals(role: string, dir: string, stop: StopBehaviour): void {
   for (const name of ['SIGINT', 'SIGTERM'] as const) {
     process.on(name, () => {
       appendFileSync(join(dir, SIGNALS_LOG), `${role} ${name}\n`);
-      setTimeout(() => process.exit(0), 300);
+      if (stop === 'ignore') return;
+      setTimeout(() => process.exit(0), Number(stop.slice('linger:'.length)));
     });
   }
+}
+
+function stopBehaviour(raw: string | undefined): StopBehaviour {
+  return raw === 'ignore' || raw?.startsWith('linger:') ? (raw as StopBehaviour) : 'linger:300';
 }
 
 async function runFakeWorker(dir: string): Promise<void> {
@@ -202,9 +252,9 @@ if (import.meta.main) {
   const [role, dir = '', ...rest] = process.argv.slice(2);
   const numbers = rest.map(Number);
   if (role === 'runner') process.exit(await runFakeRunner(dir, rest[0] ?? 'child', rest.slice(1)));
-  if (role === 'child') await runFakeChild(dir);
+  if (role === 'child') await runFakeChild(dir, stopBehaviour(rest[0]), stopBehaviour(rest[1]));
   if (role === 'grandchild') {
-    recordSignals('grandchild', dir);
+    recordSignals('grandchild', dir, stopBehaviour(rest[0]));
     writeFileSync(join(dir, GRANDCHILD_UP), String(process.pid));
     await Bun.sleep(FAKE_LIFETIME_MS);
   }

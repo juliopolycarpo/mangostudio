@@ -12,6 +12,7 @@ import {
   bindDescendantsToRunner,
   ChildSupervisor,
   childLimit,
+  isNestedRunner,
   processHost,
   RUNNER_GROUP_ENV,
   SlotPool,
@@ -60,6 +61,13 @@ export async function captureCommand(
 /** Built on first use, so a bad MANGO_RUNNER_CONCURRENCY fails the command that hits it. */
 let childSlots: SlotPool | undefined;
 const supervisor = new ChildSupervisor(processHost());
+
+/** Whether the runner above owns this process's group; read once, as it cannot change. */
+let nestedRunner: boolean | undefined;
+function runsNested(): boolean {
+  nestedRunner ??= process.platform !== 'win32' && isNestedRunner();
+  return nestedRunner;
+}
 
 /**
  * Spawn a command and resolve once it exits, capturing label/exit code/duration.
@@ -110,7 +118,7 @@ async function spawnAndWait(
   const start = performance.now();
   dim(`  $ ${cmd.join(' ')}`);
 
-  const mode = supervisionMode(opts?.stdin);
+  const mode = supervisionMode(opts?.stdin, process.platform, runsNested());
   const proc = Bun.spawn({
     cmd,
     cwd: opts?.cwd ?? ROOT_DIR,

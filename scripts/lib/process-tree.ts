@@ -6,10 +6,12 @@
 // included, however deep. Moving a child out of the terminal's foreground group
 // means the kernel no longer delivers Ctrl-C to it, so the runner catches
 // SIGINT, SIGTERM and SIGHUP and forwards each to every child group exactly
-// once. After a grace period it SIGKILLs what is left, then exits with the
-// conventional 128 + signal status. A runner that is itself a child of another
-// runner (`MANGO_RUNNER_GROUP` is set) leaves its children in the group it was
-// given, so the one group signal from above is the only one they ever see.
+// once. It then waits until every group is empty, not merely until the leaders
+// have exited, SIGKILLs the groups still running after a grace period, and
+// exits with the conventional 128 + signal status. A runner that is itself a
+// child of another runner (`MANGO_RUNNER_GROUP` names that runner) leaves its
+// children in the group it was given, so the one group signal from above is the
+// only one they ever see.
 //
 // Not covered: SIGKILL of the runner itself. It cannot be caught, and the
 // children it already moved to their own groups outlive it.
@@ -20,9 +22,11 @@
 // own, but that job lets their children break away, so a chain that passes
 // through cmd.exe (every `.cmd` shim: bunx, turbo, tsc) outlives the runner.
 // `detached: true` leaves the job, so nothing here uses it on Windows, and
-// nothing installs a signal handler there.
+// nothing installs a signal handler there. Creating the job fails open.
 
+import { readFileSync } from 'node:fs';
 import { constants } from 'node:os';
+import { isatty } from 'node:tty';
 
 import { error } from './log';
 
@@ -32,9 +36,10 @@ export type CancelSignal = 'SIGINT' | 'SIGTERM' | 'SIGHUP';
 const CANCEL_SIGNALS: readonly CancelSignal[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 /**
- * Set in the environment of a child that leads a group a runner owns. A runner
- * that finds it set is nested: the group signal it receives already reaches its
- * own children, so it neither regroups them nor forwards.
+ * Set, to its own pid, in the environment of a child that leads a group a runner
+ * owns. A runner that finds it set and true (see {@link isNestedRunner}) is
+ * nested: the group signal it receives already reaches its own children, so it
+ * neither regroups them nor forwards.
  */
 export const RUNNER_GROUP_ENV = 'MANGO_RUNNER_GROUP';
 
@@ -64,6 +69,15 @@ const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9;
 /** A second signal this soon after the first is the same keypress, not impatience. */
 const REPEAT_WINDOW_MS = 1_000;
 
+/** How often a cancelled runner looks for group members that are still running. */
+const GROUP_POLL_MS = 25;
+
+/**
+ * How long an interactive child gets to act on a SIGINT it may already have had
+ * from the terminal before the runner asks again, with SIGTERM.
+ */
+export const DIRECT_SIGINT_DELAY_MS = 1_000;
+
 /**
  * The child limit a runner process runs under.
  *
@@ -81,10 +95,68 @@ export function childLimit(env: Record<string, string | undefined> = process.env
   return parsed;
 }
 
-/** True when a runner above this process already owns the group it runs in. */
-function isNestedRunner(env: Record<string, string | undefined>): boolean {
-  const owner = env[RUNNER_GROUP_ENV];
-  return owner !== undefined && owner !== '';
+/** The parent and process group of a process, or `undefined` when it cannot be read. */
+export type ProcessProbe = (pid: number) => { ppid: number; pgid: number } | undefined;
+
+/**
+ * Reads a process's parent and group from `/proc` where there is one, and from
+ * `ps` everywhere else.
+ *
+ * @example
+ * psProbe(process.pid); // { ppid: 4242, pgid: 4242 }
+ */
+export function psProbe(pid: number): { ppid: number; pgid: number } | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    // "pid (comm) state ppid pgrp ...": comm may hold spaces and parentheses.
+    const found = parentAndGroup(
+      stat
+        .slice(stat.lastIndexOf(')') + 2)
+        .split(' ')
+        .slice(1, 3)
+    );
+    if (found) return found;
+  } catch {
+    // No procfs (macOS) or no such process; ask ps.
+  }
+  const ps = Bun.spawnSync(['ps', '-o', 'ppid=,pgid=', '-p', String(pid)], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+  return ps.exitCode === 0 ? parentAndGroup(ps.stdout.toString().trim().split(/\s+/)) : undefined;
+}
+
+function parentAndGroup(fields: string[]): { ppid: number; pgid: number } | undefined {
+  const ppid = Number(fields[0]);
+  const pgid = Number(fields[1]);
+  return Number.isInteger(ppid) && Number.isInteger(pgid) ? { ppid, pgid } : undefined;
+}
+
+/**
+ * True when a runner above this process owns the group it runs in, and so
+ * signals it. The marker names that runner, and the group it created is led by
+ * the child it spawned, so the marker is only believed while this process is in
+ * a group whose live leader is a child of the named runner. One inherited by a
+ * process that left the group, or outlived the runner, describes nothing: it
+ * protects no one, and the runner has to act as the root it is.
+ *
+ * @example
+ * isNestedRunner({ MANGO_RUNNER_GROUP: '4242' }, probe, process.pid);
+ */
+export function isNestedRunner(
+  env: Record<string, string | undefined> = process.env,
+  probe: ProcessProbe = psProbe,
+  self: number = process.pid
+): boolean {
+  const raw = env[RUNNER_GROUP_ENV];
+  if (raw === undefined || raw === '') return false;
+
+  const owner = Number(raw);
+  if (!Number.isInteger(owner) || owner < 1) return false;
+
+  const me = probe(self);
+  const leader = me && probe(me.pgid);
+  return leader?.ppid === owner;
 }
 
 /**
@@ -98,14 +170,14 @@ function isNestedRunner(env: Record<string, string | undefined>): boolean {
  *   nested runner, whose children already share the group the runner above owns.
  *
  * @example
- * supervisionMode('ignore', 'linux', {}); // 'group'
+ * supervisionMode('ignore', 'linux', false); // 'group'
  */
 export function supervisionMode(
   stdin: 'inherit' | 'ignore' | undefined,
   platform: NodeJS.Platform = process.platform,
-  env: Record<string, string | undefined> = process.env
+  nested = false
 ): 'group' | 'direct' | 'none' {
-  if (platform === 'win32' || isNestedRunner(env)) return 'none';
+  if (platform === 'win32' || nested) return 'none';
   return stdin === 'inherit' ? 'direct' : 'group';
 }
 
@@ -120,28 +192,45 @@ export function cancelExitStatus(signal: CancelSignal): number {
   return 128 + constants.signals[signal];
 }
 
-let descendantsBound: Promise<void> | undefined;
-
 /**
  * Windows only; resolves at once elsewhere. Puts this process into a job object
  * that terminates every member when its handle closes, and this process holds
  * the only handle, so whatever it started (at any depth, through cmd.exe or
- * not) ends when it does. Best effort: where the job cannot be created, say so
- * once and carry on as before.
+ * not) ends when it does.
+ *
+ * Fails open: where the job cannot be created (a parent job that forbids
+ * nesting), it says so once on stderr and the run carries on without the
+ * guarantee. A build must not fail because a safety net could not be hung, and
+ * the net only matters when the runner is killed.
  *
  * @example
- * await bindDescendantsToRunner();
+ * const bind = createDescendantBinder('win32', createKillOnCloseJob, console.error);
+ * await bind();
  */
-export function bindDescendantsToRunner(
-  platform: NodeJS.Platform = process.platform
-): Promise<void> {
-  if (platform !== 'win32') return Promise.resolve();
-  descendantsBound ??= createKillOnCloseJob().catch((caught: unknown) => {
-    const reason = caught instanceof Error ? caught.message : String(caught);
-    error(`runner: no job object (${reason}); children may outlive this process if it is killed`);
-  });
-  return descendantsBound;
+export function createDescendantBinder(
+  platform: NodeJS.Platform,
+  createJob: () => Promise<void>,
+  report: (message: string) => void
+): () => Promise<void> {
+  let bound: Promise<void> | undefined;
+  return () => {
+    if (platform !== 'win32') return Promise.resolve();
+    bound ??= createJob().catch((caught: unknown) => {
+      const reason = caught instanceof Error ? caught.message : String(caught);
+      report(
+        `runner: could not create a job object (${reason}); if this runner is killed, commands behind a .cmd shim may keep running`
+      );
+    });
+    return bound;
+  };
 }
+
+/** The binder `runCommand` uses: once per process, on Windows only. */
+export const bindDescendantsToRunner = createDescendantBinder(
+  process.platform,
+  createKillOnCloseJob,
+  error
+);
 
 async function createKillOnCloseJob(): Promise<void> {
   const { dlopen, FFIType, ptr } = await import('bun:ffi');
@@ -251,6 +340,10 @@ export interface SupervisorHost {
   onExit(handler: () => void): () => void;
   /** Signals every process in group `pid`; a vanished group is not an error. */
   killGroup(pid: number, signal: NodeJS.Signals): void;
+  /** True while any process, a zombie included, is left in group `pid`. */
+  groupAlive(pid: number): boolean;
+  /** True when stdin is a terminal, so a Ctrl-C may already have reached an interactive child. */
+  stdinIsTerminal(): boolean;
   exit(status: number): never;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -280,6 +373,16 @@ export function processHost(): SupervisorHost {
         // The group can be fully reaped between the decision and the call.
       }
     },
+    groupAlive(pid) {
+      try {
+        process.kill(-pid, 0);
+        return true;
+      } catch (caught) {
+        // EPERM means it exists but is not ours to signal; only ESRCH is gone.
+        return (caught as NodeJS.ErrnoException).code !== 'ESRCH';
+      }
+    },
+    stdinIsTerminal: () => isatty(0),
     exit: (status) => process.exit(status),
     sleep: (ms) => Bun.sleep(ms),
     now: () => Date.now(),
@@ -307,6 +410,12 @@ export class ChildSupervisor {
   private readonly live = new Set<SupervisedChild>();
   private removeHandlers: Array<() => void> = [];
   private firstSignalAt: number | null = null;
+  /**
+   * The children a cancellation is stopping. A leader leaves `live` the moment
+   * it exits, but its group can hold running members long after, so what a
+   * cancelled runner waits for and kills is this snapshot, not `live`.
+   */
+  private targets: SupervisedChild[] = [];
 
   constructor(private readonly host: SupervisorHost) {}
 
@@ -343,9 +452,9 @@ export class ChildSupervisor {
     this.removeHandlers = [];
   }
 
-  /** Delivers `signal` to every live child, the group of each that has one. */
+  /** Delivers `signal` to every child still being watched, the group of each that has one. */
   private stopAll(signal: NodeJS.Signals): void {
-    for (const child of this.live) {
+    for (const child of new Set([...this.targets, ...this.live])) {
       if (child.ownsGroup) this.host.killGroup(child.pid, signal);
       else child.signal(signal);
     }
@@ -359,42 +468,78 @@ export class ChildSupervisor {
       return this.host.exit(cancelExitStatus(name));
     }
     this.firstSignalAt = now;
+    this.targets = [...this.live];
 
-    const labels = [...this.live].map((child) => child.label);
-    if (labels.length > 0) {
-      this.host.report(
-        `\n${name}: stopping ${labels.length} running command(s): ${labels.join(', ')}`
-      );
+    if (this.targets.length > 0) {
+      const labels = this.targets.map((child) => child.label).join(', ');
+      this.host.report(`\n${name}: stopping ${this.targets.length} running command(s): ${labels}`);
     }
     this.forward(name);
 
-    if (!(await this.exitedWithin(this.host.graceMs))) {
-      const left = [...this.live].map((child) => child.label).join(', ');
+    if (!(await this.settledWithin(this.host.graceMs))) {
+      const left = this.unsettled()
+        .map((child) => child.label)
+        .join(', ');
       this.host.report(`${name}: still running after ${this.host.graceMs}ms, killing: ${left}`);
-      this.stopAll('SIGKILL');
-      await this.exitedWithin(KILL_WAIT_MS);
+      this.stopUnsettled('SIGKILL');
+      await this.settledWithin(KILL_WAIT_MS);
     }
     return this.host.exit(cancelExitStatus(name));
   }
 
   /**
    * Passes the signal on. A child in its own group gets it from here and only
-   * from here. An interactive child shares the terminal's foreground group, so
-   * a Ctrl-C already reached it from the kernel; sending SIGINT again would
-   * make it see two.
+   * from here. An interactive child shares the terminal's foreground group; see
+   * {@link forwardToInteractive} for what it gets.
    */
   private forward(name: CancelSignal): void {
-    for (const child of this.live) {
+    for (const child of this.targets) {
       if (child.ownsGroup) this.host.killGroup(child.pid, name);
-      else if (name !== 'SIGINT') child.signal(name);
+      else this.forwardToInteractive(child, name);
     }
   }
 
-  /** Waits for every live child to exit, up to `ms`; reports whether they did. */
-  private exitedWithin(ms: number): Promise<boolean> {
-    const everyone = Promise.allSettled([...this.live].map((child) => child.exited)).then(
-      () => true
+  /**
+   * A Ctrl-C typed at the terminal reaches an interactive child from the kernel,
+   * so SIGINT must not be sent again; but a SIGINT sent to the runner alone
+   * (`kill -INT`, a supervisor) reaches nothing, and the two look the same from
+   * here. With no terminal on stdin there is nothing to have typed it, so the
+   * child gets the SIGINT. With one, the child gets a second to act on what it
+   * may already have had, and SIGTERM if it is still running: never a second
+   * SIGINT, which many tools read as "stop waiting and kill".
+   */
+  private forwardToInteractive(child: SupervisedChild, name: CancelSignal): void {
+    if (name !== 'SIGINT' || !this.host.stdinIsTerminal()) {
+      child.signal(name);
+      return;
+    }
+
+    void this.host.sleep(DIRECT_SIGINT_DELAY_MS).then(() => {
+      if (this.live.has(child)) child.signal('SIGTERM');
+    });
+  }
+
+  /** The watched children that are not yet gone: a leader running, or a group with members. */
+  private unsettled(): SupervisedChild[] {
+    return this.targets.filter((child) =>
+      child.ownsGroup ? this.host.groupAlive(child.pid) : this.live.has(child)
     );
-    return Promise.race([everyone, this.host.sleep(ms).then(() => false)]);
+  }
+
+  private stopUnsettled(signal: NodeJS.Signals): void {
+    for (const child of this.unsettled()) {
+      if (child.ownsGroup) this.host.killGroup(child.pid, signal);
+      else child.signal(signal);
+    }
+  }
+
+  /** Waits until every watched child and every member of its group is gone, up to `ms`. */
+  private async settledWithin(ms: number): Promise<boolean> {
+    const deadline = this.host.now() + ms;
+    while (this.unsettled().length > 0) {
+      if (this.host.now() >= deadline) return false;
+      await this.host.sleep(GROUP_POLL_MS);
+    }
+    return true;
   }
 }

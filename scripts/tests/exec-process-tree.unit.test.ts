@@ -9,11 +9,14 @@ import {
   ECHO_STDOUT,
   fixtureCommand,
   forceKill,
+  forceKillGroup,
   isAlive,
   processGroupOf,
   RELEASE_FILE,
   type ReadyPids,
+  readGrandchildPid,
   readReadyPids,
+  readWorkerPids,
   SIGNALS_LOG,
   WORKERS_LOG,
   waitFor,
@@ -26,7 +29,10 @@ import {
 
 const IS_WINDOWS = process.platform === 'win32';
 const READY_TIMEOUT_MS = 10_000;
-const SETTLE_TIMEOUT_MS = 4_000;
+// Slack for init to reap a killed process, which `kill(pid, 0)` still sees until it
+// does. Everything a runner started must be gone by the time the runner is, so
+// this is deliberately shorter than the 3 s the slow grandchild takes to stop.
+const SETTLE_TIMEOUT_MS = 1_000;
 
 type RunnerProcess = ReturnType<typeof Bun.spawn>;
 
@@ -54,13 +60,20 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // A failing assertion must not leave 60-second fakes behind.
-  for (const runner of spawned.splice(0)) forceKill(runner.pid);
+  // A failing assertion must not leave 60-second fakes behind: stop the runner's
+  // group, every pid the fakes reported, and every worker that logged a start.
+  for (const runner of spawned.splice(0)) {
+    forceKillGroup(runner.pid);
+    forceKill(runner.pid);
+  }
   const pids = readReadyPids(dir);
   if (pids) {
     forceKill(pids.child);
     forceKill(pids.grandchild);
   }
+  const grandchild = readGrandchildPid(dir);
+  if (grandchild) forceKill(grandchild);
+  for (const worker of readWorkerPids(dir)) forceKill(worker);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -83,6 +96,27 @@ function startRunner(
   });
   spawned.push(runner);
   return runner;
+}
+
+/** A runner whose stdin, stdout and stderr are the terminal it leads. */
+interface TerminalRunner {
+  readonly proc: RunnerProcess;
+  /** Types at the terminal, as a person would: `type('\x03')` is Ctrl-C. */
+  type(text: string): void;
+}
+
+/**
+ * Starts the fake runner on a pseudo-terminal it is the session leader of, so a
+ * Ctrl-C typed at it is delivered by the kernel to the foreground group exactly
+ * as it is in a shell, and the runner's stdin is a TTY.
+ */
+function startTerminalRunner(args: string[] = []): TerminalRunner {
+  const proc = Bun.spawn(fixtureCommand('runner', dir, ...args), {
+    terminal: { cols: 100, rows: 30, data: () => undefined },
+    env: fakeEnv(),
+  });
+  spawned.push(proc);
+  return { proc, type: (text) => proc.terminal?.write(text) };
 }
 
 async function readyPids(): Promise<ReadyPids> {
@@ -187,6 +221,67 @@ describe('cancelling a runner', () => {
     }
   );
 
+  // The leader dying says nothing about the rest of its group: a worker with a
+  // handler that swallows SIGTERM, or one that takes seconds to wind down, is
+  // still running when the leader is gone. Nothing may outlive the runner.
+  describe.skipIf(IS_WINDOWS)('a group member that outlives its leader', () => {
+    test('SIGTERM still stops a grandchild that ignores it', async () => {
+      const runner = startRunner(['child', 'linger:0', 'ignore']);
+      const pids = await readyPids();
+
+      runner.kill('SIGTERM');
+      await runner.exited;
+
+      await expectNothingLeft(pids);
+    });
+
+    test('the runner waits for a grandchild that needs 3 s to stop', async () => {
+      const runner = startRunner(['child', 'linger:0', 'linger:3000']);
+      const pids = await readyPids();
+
+      runner.kill('SIGTERM');
+      await runner.exited;
+
+      await expectNothingLeft(pids);
+    });
+  });
+
+  // An interactive child shares the runner's group, so a Ctrl-C typed at the
+  // terminal reaches it from the kernel. A SIGINT sent to the runner alone (a
+  // `kill -INT`, a supervisor) reaches nothing, and the runner has to pass it on.
+  describe.skipIf(IS_WINDOWS)('an interactive child (stdin inherited)', () => {
+    test('gets a SIGINT that came from no terminal, once', async () => {
+      const runner = startRunner(['interactive']);
+      await readyPids();
+
+      runner.kill('SIGINT');
+      await runner.exited;
+
+      expectValue('SIGINT deliveries', 'child SIGINT x1', signalDeliveries());
+    });
+
+    test('gets Ctrl-C typed at the terminal exactly once', async () => {
+      const runner = startTerminalRunner(['interactive']);
+      const pids = await readyPids();
+
+      runner.type('\x03');
+      await runner.proc.exited;
+      await expectNothingLeft(pids);
+
+      expectValue('SIGINT deliveries', ONCE_EACH, signalDeliveries());
+    });
+
+    test('gets SIGTERM, not a second SIGINT, when a terminal run is interrupted from outside', async () => {
+      const runner = startTerminalRunner(['interactive']);
+      await readyPids();
+
+      runner.proc.kill('SIGINT');
+      await runner.proc.exited;
+
+      expectValue('deliveries', 'child SIGTERM x1', signalDeliveries());
+    });
+  });
+
   describe.skipIf(IS_WINDOWS)('process groups', () => {
     test('a plain child leads a group of its own, apart from its runner', async () => {
       const runner = startRunner([], true);
@@ -208,6 +303,24 @@ describe('cancelling a runner', () => {
         runner.pid,
         processGroupOf(pids.grandchild)
       );
+    });
+
+    // The marker names the runner that spawned the group leader. One that does
+    // not (inherited by a process that left the group, or outlived its owner)
+    // protects nothing, so the runner has to protect itself.
+    test('a marker that does not describe this process is ignored', async () => {
+      const runner = startRunner([], true, { MANGO_RUNNER_GROUP: '1' });
+      const pids = await readyPids();
+
+      expectValue(
+        'child process group under a stale marker',
+        pids.child,
+        processGroupOf(pids.child)
+      );
+
+      runner.kill('SIGTERM');
+      await runner.exited;
+      await expectNothingLeft(pids);
     });
 
     test('an interactive child stays in the runner group, which holds the terminal', async () => {
@@ -234,21 +347,21 @@ describe('cancelling a runner', () => {
       expectValue('SIGINT deliveries', ONCE_EACH, signalDeliveries());
     });
 
-    // The runner above owns the group both of them are in, so the group signal
-    // is the only one; a nested runner that forwarded too would make it two.
-    test('reaches the children of a nested runner exactly once', async () => {
-      const runner = startRunner([], true, { MANGO_RUNNER_GROUP: String(process.pid) });
+    test('typed at a real terminal, reaches each of them exactly once', async () => {
+      const runner = startTerminalRunner();
       const pids = await readyPids();
 
-      process.kill(-runner.pid, 'SIGINT');
-      await runner.exited;
+      runner.type('\x03');
+      await runner.proc.exited;
       await expectNothingLeft(pids);
 
       expectValue('SIGINT deliveries', ONCE_EACH, signalDeliveries());
     });
 
-    test('reaches an interactive child (stdin inherited) exactly once', async () => {
-      const runner = startRunner(['interactive'], true);
+    // The runner above owns the group both of them are in, so the group signal
+    // is the only one; a nested runner that forwarded too would make it two.
+    test('reaches the children of a nested runner exactly once', async () => {
+      const runner = startRunner([], true, { MANGO_RUNNER_GROUP: String(process.pid) });
       const pids = await readyPids();
 
       process.kill(-runner.pid, 'SIGINT');

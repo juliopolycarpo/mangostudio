@@ -74,7 +74,9 @@ describe('smoke matrix runtime dependencies', () => {
     // process-tree.ts loads `bun:ffi` on Windows, and every smoke entrypoint that
     // reaches exec.ts reaches it.
     const { files, externalSpecifiers } = walkRuntimeImports('scripts/lib/process-tree.ts');
-    expect([...files].some((file) => file.endsWith('scripts/lib/process-tree.ts'))).toBe(true);
+    expect(
+      [...files].some((file) => file.replaceAll('\\', '/').endsWith('scripts/lib/process-tree.ts'))
+    ).toBe(true);
     expect([...externalSpecifiers.keys()]).toEqual([]);
   });
 
