@@ -519,9 +519,13 @@ describe('Turbo snapshot rotation', () => {
       );
       await withTempDir(async (dir) => {
         const turbo = join(ROOT_DIR, 'node_modules', '.bin', 'turbo');
-        const run = async (extra: Record<string, string>) => {
+        const run = async (
+          extra: Record<string, string>,
+          task = 'build',
+          args: readonly string[] = []
+        ) => {
           const proc = Bun.spawn({
-            cmd: [turbo, 'run', 'build', '--ui=stream'],
+            cmd: [turbo, 'run', task, '--ui=stream', ...args],
             cwd: dir,
             env: {
               PATH: process.env.PATH ?? '/usr/bin:/bin',
@@ -532,7 +536,15 @@ describe('Turbo snapshot rotation', () => {
             stdout: 'pipe',
             stderr: 'pipe',
           });
-          const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+          const [stdout, stderr, exitCode] = await Promise.all([
+            new Response(proc.stdout).text(),
+            new Response(proc.stderr).text(),
+            proc.exited,
+          ]);
+          expect(
+            exitCode,
+            `expected Turbo ${task} to exit 0 | received: ${exitCode}\n${stdout}\n${stderr}`
+          ).toBe(0);
           return (
             /Cached:\s+(\d+) cached, (\d+) total/.exec(stdout)?.slice(1, 3).join('/') ?? stdout
           );
@@ -545,11 +557,31 @@ describe('Turbo snapshot rotation', () => {
             private: true,
             packageManager: 'bun@1.4.2',
             workspaces: ['packages/*'],
+            scripts: { 'observe-eviction': 'bun observe-eviction.ts' },
           })
         );
         writeFileSync(
           join(dir, 'turbo.json'),
-          JSON.stringify({ tasks: { build: { outputs: ['out/**'] } } })
+          JSON.stringify({
+            tasks: {
+              build: { outputs: ['out/**'] },
+              '//#observe-eviction': { cache: false },
+            },
+          })
+        );
+        writeFileSync(
+          join(dir, 'observe-eviction.ts'),
+          `import { existsSync } from 'node:fs';
+const archive = process.argv[2];
+if (!archive) throw new Error('expected cache archive path | received: missing');
+const deadline = Date.now() + 5000;
+while (existsSync(archive)) {
+  if (Date.now() >= deadline) {
+    throw new Error('expected oldest cache archive removed | received: ' + archive + ' still exists');
+  }
+  await Bun.sleep(10);
+}
+`
         );
         writeFileSync(join(dir, '.gitignore'), 'out\n.turbo\n');
         for (const name of ['a', 'b']) {
@@ -599,8 +631,18 @@ describe('Turbo snapshot rotation', () => {
         expect(names, 'expected the workflows to set TURBO_CACHE_MAX_SIZE | received').toEqual([
           'TURBO_CACHE_MAX_SIZE',
         ]);
+        // Turbo evicts in a background thread. A build can fetch both entries
+        // before eviction finishes, or recreate a removed entry as it builds.
+        // An uncached observer leaves the archives alone and keeps Turbo alive
+        // until the oldest one is gone, then a separate build proves the miss.
+        const agedArchive = join(cache, `${agedHash}.tar.zst`);
+        await run(bound, 'observe-eviction', ['--', agedArchive]);
         expect(
-          await run(bound),
+          existsSync(agedArchive),
+          `expected oldest cache archive removed | received: ${agedArchive} still exists`
+        ).toBe(false);
+        expect(
+          await run({}),
           `expected the oldest entry evicted under ${names[0]}: cached/total | received`
         ).toBe('1/2');
       });
