@@ -1,61 +1,23 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import ts from '@typescript/typescript6';
 import { ROOT_DIR } from '../lib/config';
 import { assertFrontendApiImportBoundary } from '../lib/frontend-api-import-boundary';
+import {
+  createSourceTree,
+  lintSource,
+  removeSourceTrees,
+  transparentLoaderForms,
+  writeSource,
+} from './support/boundary-fixtures';
 
 const PARITY_TEST =
   'apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts';
 const TRANSCRIPT =
   '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
-const tempRoots: string[] = [];
 
-function createSourceTree(path: string, content: string): string {
-  const root = mkdtempSync(join(tmpdir(), 'mango-frontend-api-boundary-'));
-  tempRoots.push(root);
-  writeSource(root, path, content);
-  return root;
-}
-
-function writeSource(root: string, path: string, content: string): void {
-  const absolute = join(root, path.replaceAll('\\', '/'));
-  mkdirSync(dirname(absolute), { recursive: true });
-  writeFileSync(absolute, content);
-}
-
-function lintSource(path: string, content: string): { exitCode: number; output: string } {
-  const root = createSourceTree(path, content);
-  const config = JSON.parse(readFileSync(join(ROOT_DIR, 'biome.json'), 'utf8')) as {
-    vcs: { enabled: boolean };
-  };
-  // The isolated fixture has no Git checkout; all rule options and overrides
-  // remain the repository's real configuration.
-  config.vcs.enabled = false;
-  writeFileSync(join(root, 'biome.json'), JSON.stringify(config));
-  const result = Bun.spawnSync(
-    [
-      process.execPath,
-      'x',
-      '--no-install',
-      'biome',
-      'lint',
-      '--config-path',
-      root,
-      '--only=style/noRestrictedImports',
-      join(root, path),
-    ],
-    { cwd: ROOT_DIR, stdout: 'pipe', stderr: 'pipe' }
-  );
-  return { exitCode: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
-}
-
-afterEach(() => {
-  while (tempRoots.length > 0) {
-    rmSync(tempRoots.pop() as string, { recursive: true, force: true });
-  }
-});
+afterEach(removeSourceTrees);
 
 describe('frontend API-internal Biome restriction', () => {
   it.each([
@@ -167,40 +129,16 @@ describe('frontend shared entrypoint Biome restriction', () => {
 });
 
 describe('frontend API-internal check guard', () => {
-  it.each([
-    `(require)('${TRANSCRIPT}');`,
-    `((require))('${TRANSCRIPT}');`,
-    `require!('${TRANSCRIPT}');`,
-    `(require as typeof require)('${TRANSCRIPT}');`,
-    `(require satisfies typeof require)('${TRANSCRIPT}');`,
-    `(<typeof require>require)('${TRANSCRIPT}');`,
-    `(module.require)('${TRANSCRIPT}');`,
-    `(module.require as typeof require)('${TRANSCRIPT}');`,
-    `(module['require'])('${TRANSCRIPT}');`,
-    `(module as typeof module).require('${TRANSCRIPT}');`,
-    `module!.require('${TRANSCRIPT}');`,
-    `(module satisfies typeof module)['require']('${TRANSCRIPT}');`,
-    `(<typeof module>module).require('${TRANSCRIPT}');`,
-    `module[('require')]('${TRANSCRIPT}');`,
-    `module['require' as const]('${TRANSCRIPT}');`,
-    `module[('require' satisfies string)]('${TRANSCRIPT}');`,
-    `module[(<'require'>'require')]('${TRANSCRIPT}');`,
-    `require(('${TRANSCRIPT}'));`,
-    `require('${TRANSCRIPT}' as const);`,
-    `require(('${TRANSCRIPT}' satisfies string));`,
-    `require((<'${TRANSCRIPT}'>'${TRANSCRIPT}'));`,
-    `require(('${TRANSCRIPT}')!);`,
-    `import(('${TRANSCRIPT}'));`,
-    `import(('${TRANSCRIPT}' as const));`,
-    `import((\`${TRANSCRIPT}\` satisfies string));`,
-    `((require! as typeof require) satisfies typeof require)((('${TRANSCRIPT}' as const)!));`,
-  ])('rejects transparent literal loader syntax: %s', (source) => {
-    expect(ts.transpileModule(source, { reportDiagnostics: true }).diagnostics ?? []).toEqual([]);
-    const root = createSourceTree('apps/frontend/src/forbidden.ts', source);
-    expect(() => assertFrontendApiImportBoundary(root)).toThrow(
-      'apps/frontend/src/forbidden.ts:1:'
-    );
-  });
+  it.each(transparentLoaderForms(TRANSCRIPT))(
+    'rejects transparent literal loader syntax: %s',
+    (source) => {
+      expect(ts.transpileModule(source, { reportDiagnostics: true }).diagnostics ?? []).toEqual([]);
+      const root = createSourceTree('apps/frontend/src/forbidden.ts', source);
+      expect(() => assertFrontendApiImportBoundary(root)).toThrow(
+        'apps/frontend/src/forbidden.ts:1:'
+      );
+    }
+  );
 
   it.each(['dist', 'coverage', 'node_modules', '.turbo', '.mango'])(
     'checks nested frontend source directory %s',

@@ -182,19 +182,11 @@ if (flags['--staged']) {
   includeProtocol = touchesProtocolSurface(files);
 }
 
-const tasks: Array<() => Promise<RunResult>> = [
-  () => runTask('root:shared-import-boundary', () => assertNoSharedRootImports()),
-];
+const tasks: Array<() => Promise<RunResult>> = [];
 
 if (effectiveWorkspaces.length > 0) {
   info('\nWorkspaces');
   tasks.push(...createWorkspaceTasks(effectiveWorkspaces));
-}
-
-if (effectiveWorkspaces.includes('frontend')) {
-  tasks.push(() =>
-    runTask('frontend:api-import-boundary', () => assertFrontendApiImportBoundary())
-  );
 }
 
 if (effectiveIncludeRoot) {
@@ -235,10 +227,14 @@ if (includeCodeHealth) {
   );
 }
 
-if (tasks.length === 0) {
-  info('No affected workspaces — nothing to check.');
-  process.exit(0);
+// The source scans below parse synchronously on this thread, so they go last:
+// every subprocess task above is already spawned and runs alongside them.
+if (effectiveWorkspaces.includes('frontend')) {
+  tasks.push(() =>
+    runTask('frontend:api-import-boundary', () => assertFrontendApiImportBoundary())
+  );
 }
+tasks.push(() => runTask('root:shared-import-boundary', () => assertNoSharedRootImports()));
 
 const results = await runParallel(tasks);
 
