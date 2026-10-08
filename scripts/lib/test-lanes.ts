@@ -72,6 +72,13 @@ export interface TestLane {
     readonly settle?: boolean;
     /** The lane's own default width, when it is not the runner's (six). */
     readonly defaultWidth?: number;
+    /**
+     * Test files outside `testDir` that the lane's command also runs, as the
+     * `file` attribute of their JUnit cases spells them. For a lane whose last
+     * argument is a path *filter* and not a directory, which `bun test`
+     * matches as a substring of every test file's path.
+     */
+    readonly alsoRuns?: readonly string[];
   };
   /** Repo-relative manifest declaring the lane's coverage script. */
   readonly manifest: string;
@@ -126,6 +133,22 @@ export const TEST_LANES: readonly TestLane[] = [
     // cache key — shard i would restore a `root.xml` produced when the split
     // put different files on shard i. Balancing this lane is worth 0.5s of its
     // own and 0.6s overall (measured), which does not pay for that hazard.
+    // The plain run (`test:scripts:workers`, the unit phase of `bun run test`)
+    // is split across worker processes; `test:scripts` stays one `bun test`
+    // because it is the coverage phase's and CI's, and writes `junitPath`.
+    //
+    // `scripts` is a substring filter, not a directory: `bun test scripts` also
+    // runs the two api files below, whose names end in `-scripts`. They are in
+    // both lanes today and stay in both, so the lanes run the same tests;
+    // `root-lane-workers.unit.test.ts` fails when this list and the filter's
+    // matches disagree.
+    workers: {
+      testDir: 'scripts',
+      alsoRuns: [
+        'apps/api/tests/integration/modules/environments/wsl-runtime-scripts.integration.test.ts',
+        'apps/api/tests/unit/modules/environments/runtime-slot-scripts.test.ts',
+      ],
+    },
     manifest: 'package.json',
     coverageScript: 'test:scripts',
   },

@@ -20,29 +20,18 @@ import { RUNTIME_BINARY_DIGEST_ENV, runtimeBinaryDigestEnv } from './lib/runtime
 import {
   type ChangedLane,
   type ChangedLaneRun,
-  changedTestArg,
   createChangedTurboTestCommands,
+  createRootScriptsCommand,
   createTurboTestCommand,
   parseShard,
   planChangedLanes,
+  type RootScriptsPhase,
   shardedCoverageWorkspaces,
   type TestLaneTask,
   type TestShard,
   testLaneEnv,
 } from './lib/test';
 import { JUNIT_DIR, TIMINGS_DIR } from './lib/test-lanes';
-
-// `--log-order=stream` for the same reason createTurboTestCommand carries it:
-// this lane runs concurrently with the workspace fan-out inside the same
-// watchdogged CI step, and Turbo's CI default buffers a task's log until it
-// exits — so a lane that never exits contributes nothing to the job log.
-const ROOT_SCRIPTS_TEST_COMMAND = [
-  'turbo',
-  'run',
-  '//#test:scripts',
-  '--ui=stream',
-  '--log-order=stream',
-];
 
 // The protocol is not a `WorkspaceName` (see scripts/lib/config.ts), so the
 // Turbo fan-out below never reaches it. `--ts-only` for the same reason
@@ -213,13 +202,18 @@ function planChangedRun(): { base: string; files: string[]; runs: ChangedLaneRun
 
 const changedRun = planChangedRun();
 const rootRun = changedRun?.runs.find((run) => run.lane === 'root');
-const rootScriptsCommand =
-  changedRun && rootRun?.mode === 'changed'
-    ? [...ROOT_SCRIPTS_TEST_COMMAND, '--', changedTestArg(changedRun.base)]
-    : ROOT_SCRIPTS_TEST_COMMAND;
-const rootScriptsTask = runRootScripts
-  ? [() => runCommand('root:test:scripts', rootScriptsCommand, { cwd: ROOT_DIR, env: laneEnv })]
-  : [];
+const rootScriptsBase = changedRun && rootRun?.mode === 'changed' ? changedRun.base : null;
+/** The root scripts lane as a phase runs it, or nothing under `--only`. */
+const rootScriptsTask = (phase: RootScriptsPhase): (() => Promise<RunResult>)[] =>
+  runRootScripts
+    ? [
+        () =>
+          runCommand('root:test:scripts', createRootScriptsCommand(phase, rootScriptsBase), {
+            cwd: ROOT_DIR,
+            env: laneEnv,
+          }),
+      ]
+    : [];
 // The protocol suite is seconds and has no Bun-traceable boundary with the
 // spec fixtures and Rust sources it reads, so --changed runs it whole or not
 // at all, on the same predicate scripts/check.ts scopes it with.
@@ -292,7 +286,7 @@ const results: RunResult[] = [];
 if (shouldRunUnit) {
   info('\nPhase: unit');
   const unitResults = await runParallel([
-    ...rootScriptsTask,
+    ...rootScriptsTask('unit'),
     ...protocolTask,
     ...workspaceLaneTasks('test:unit'),
   ]);
@@ -330,7 +324,7 @@ if (runCoverage) {
   // here so `--coverage` is a self-contained replacement for `--unit
   // --integration --coverage` on CI, avoiding a duplicate test pass.
   const coverageResults = await runParallel([
-    ...rootScriptsTask,
+    ...rootScriptsTask('coverage'),
     () =>
       runCommand(
         'workspaces:test:coverage',

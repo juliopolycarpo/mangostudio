@@ -250,8 +250,13 @@ describe('scripts/lib/runtime-handshake', () => {
     test('keeps the exit status of a child that died holding stdout open', async () => {
       const probe = await probeRuntimeHandshake({
         command: standIn(
-          `Bun.spawn({ cmd: [process.execPath, '-e', 'setTimeout(() => process.exit(0), 3000);'],` +
-            ` stdout: 'inherit', stderr: 'ignore', stdin: 'ignore' });` +
+          // Wait for the grandchild to inherit stdout before this parent dies.
+          // Exiting immediately after spawn can close the pipe before the
+          // grandchild starts, so the probe correctly reports EOF instead.
+          `const holder = Bun.spawn({ cmd: [process.execPath, '-e',` +
+            ` "await Bun.write(Bun.stderr, 'ready'); setTimeout(() => process.exit(0), 3000);"],` +
+            ` stdout: 'inherit', stderr: 'pipe', stdin: 'ignore' });` +
+            `await holder.stderr.getReader().read();` +
             `await Bun.write(Bun.stderr, 'dying\\n');` +
             `process.exit(7);`
         ),
