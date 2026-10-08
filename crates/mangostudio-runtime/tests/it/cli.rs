@@ -11,9 +11,61 @@ fn binary_path() -> &'static str {
 }
 
 /// The release the binary reports: the compile-time stamp when the build set
-/// one, the manifest version otherwise — the same expression as `src/cli.rs`.
-fn expected_version() -> &'static str {
+/// one, the manifest version otherwise — the same expression as `src/main.rs`.
+pub(super) fn expected_version() -> &'static str {
     option_env!("MANGOSTUDIO_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+/// Fails unless `received`, what `site` reported, is [`expected_version`].
+///
+/// A binary that reports the manifest version under a stamped build fails
+/// here with both values, whichever of its version reads was miswired.
+///
+/// Usage: `assert_reports_stamp("--version", stdout.trim())`.
+pub(super) fn assert_reports_stamp(site: &str, received: &str) {
+    assert!(
+        received == expected_version(),
+        "expected {site} version: {} | received: {received}",
+        expected_version()
+    );
+}
+
+/// Fails unless every `(site, received)` pair is `expected`, and names every site that is not, so
+/// a binary that reports the wrong version shows all the reads it miswired and not only the first
+/// one the test reached.
+///
+/// Usage: `assert_all_report("9.8.7", &[("hello", hello_version), ("health", health_version)])`.
+pub(super) fn assert_all_report(expected: &str, reports: &[(&str, &str)]) {
+    let wrong: Vec<String> = reports
+        .iter()
+        .filter(|(_, received)| *received != expected)
+        .map(|(site, received)| format!("{site}={received}"))
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "expected every site to report version: {expected} | received: {}",
+        wrong.join(", ")
+    );
+}
+
+/// [`assert_all_report`] against [`expected_version`], the release this build was stamped with.
+pub(super) fn assert_all_report_stamp(reports: &[(&str, &str)]) {
+    assert_all_report(expected_version(), reports);
+}
+
+/// A borrowed view of owned `(site, version)` pairs, for [`assert_all_report`].
+pub(super) fn borrowed(reports: &[(String, String)]) -> Vec<(&str, &str)> {
+    reports
+        .iter()
+        .map(|(site, version)| (site.as_str(), version.as_str()))
+        .collect()
+}
+
+/// The `runtimeVersion` of a health report, or a marker naming what was there instead.
+pub(super) fn runtime_version_of(report: &serde_json::Value) -> String {
+    report["runtimeVersion"]
+        .as_str()
+        .map_or_else(|| format!("<not a string: {report}>"), str::to_owned)
 }
 
 #[test]
@@ -24,7 +76,7 @@ fn version_flag_prints_the_crate_version_and_exits_zero() {
         .expect("the binary runs");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
-    assert_eq!(stdout.trim(), expected_version());
+    assert_reports_stamp("--version", stdout.trim());
 }
 
 #[test]
@@ -36,6 +88,13 @@ fn help_flag_prints_usage_and_exits_zero() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
     assert!(stdout.contains("Usage: mangostudio-runtime"));
+    let header = stdout.lines().next().unwrap_or_default();
+    assert_reports_stamp(
+        "--help header",
+        header
+            .strip_prefix("mangostudio-runtime ")
+            .unwrap_or(header),
+    );
 }
 
 #[test]
@@ -105,12 +164,21 @@ fn doctor_reports_a_stale_slot_pointer_and_reinstall_recovers_without_reconfigur
         .output()
         .expect("the binary runs");
     assert!(reinstall.status.success());
-    assert_eq!(
-        std::fs::read_link(&current).unwrap(),
-        std::path::Path::new(expected_version())
-    );
+    let installed: serde_json::Value = serde_json::from_slice(&reinstall.stdout).unwrap();
     let mut after: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+    let current_target = std::fs::read_link(&current).unwrap();
+    assert_all_report_stamp(&[
+        ("install current link", &current_target.to_string_lossy()),
+        (
+            "install --json version",
+            installed["version"].as_str().unwrap_or("<missing>"),
+        ),
+        (
+            "install-recorded config version",
+            after["version"].as_str().unwrap_or("<missing>"),
+        ),
+    ]);
     for field in ["version", "binaryPath", "digest"] {
         configured.as_object_mut().unwrap().remove(field);
         after.as_object_mut().unwrap().remove(field);
@@ -682,6 +750,10 @@ fn setup_json_reports_the_answer_that_health_and_doctor_then_read() {
         .output()
         .expect("the binary runs");
     let health: serde_json::Value = serde_json::from_slice(&health.stdout).unwrap();
+    assert_all_report_stamp(&[
+        ("setup --json runtimeVersion", &runtime_version_of(&report)),
+        ("health --json runtimeVersion", &runtime_version_of(&health)),
+    ]);
     assert!(
         health["slot"] == "host" && health["allow"]["shell"] == false,
         "expected slot host with shell denied | received: {health}"
@@ -698,6 +770,94 @@ fn setup_json_reports_the_answer_that_health_and_doctor_then_read() {
         "expected doctor exit 0 with an ok Consent line | received: {:?} {stdout:?}",
         doctor.status.code()
     );
+}
+
+/// `health` prints the version its caller handed it on a line of its own, and
+/// `doctor --json` embeds the same health report: two reads apart from the
+/// `runtimeVersion` that `setup --json` and `health --json` carry.
+#[test]
+fn health_text_and_doctor_json_report_the_stamped_version() {
+    let home = scratch_mango_home("health-doctor-version");
+    let setup = Command::new(binary_path())
+        .args(["setup", "--profile", "readonly", "--yes"])
+        .env("MANGO_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary runs");
+    assert!(setup.status.success());
+
+    let health = Command::new(binary_path())
+        .arg("health")
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    let stdout = String::from_utf8(health.stdout).expect("utf8 stdout");
+    let version_line = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("version "))
+        .map_or("<no version line>", str::trim);
+
+    let doctor = Command::new(binary_path())
+        .args(["doctor", "--json"])
+        .env("MANGO_HOME", &home)
+        .output()
+        .expect("the binary runs");
+    let doctor: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    assert_all_report_stamp(&[
+        ("health version line", version_line),
+        (
+            "doctor --json health.runtimeVersion",
+            &runtime_version_of(&doctor["health"]),
+        ),
+    ]);
+}
+
+/// The first `serve` or `connect` on a fresh remote slot records its own
+/// consent, and with it the release that was running. That record is what a
+/// later `doctor` compares against, so it must carry the stamp.
+#[test]
+fn serve_and_connect_record_the_stamped_version_with_their_first_consent() {
+    let cases: [(&str, &[&str]); 2] = [
+        ("serve", &["serve", "--listen", "0"]),
+        ("connect", &["connect", "--hub", "ws://127.0.0.1:1/"]),
+    ];
+    let mut recorded = Vec::new();
+    for (command, args) in cases {
+        let home = scratch_mango_home(&format!("consent-version-{command}"));
+        let mut child = Command::new(binary_path())
+            .args(args)
+            .env("MANGO_HOME", &home)
+            .env("MANGOSTUDIO_RUNTIME_TOKEN", "the-pairing-token")
+            .env_remove("MANGOSTUDIO_RUNTIME_SERVE_TOKEN")
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("the binary runs");
+
+        let config = home.join("runtime").join("remote").join("runtime.json");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline && !config.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let written = std::fs::read_to_string(&config).unwrap_or_else(|error| {
+            panic!(
+                "expected {command} to record consent in {} | received: {error}",
+                config.display()
+            )
+        });
+        let stored: serde_json::Value = serde_json::from_str(&written).unwrap();
+        recorded.push((
+            format!("{command} consent-recorded version"),
+            stored["version"].as_str().unwrap_or("<missing>").to_owned(),
+        ));
+    }
+    let recorded: Vec<(&str, &str)> = recorded
+        .iter()
+        .map(|(site, version)| (site.as_str(), version.as_str()))
+        .collect();
+    assert_all_report_stamp(&recorded);
 }
 
 /// A slot an installer armed `pending` fails `doctor` on Consent, and the

@@ -699,7 +699,7 @@ describe('release workflow binary gate', () => {
     expect('Cargo.lock').toMatch(pattern);
     expect('Dockerfile').toMatch(pattern);
     // The runtime that ships beside the hub is the cargo crate, built by its own workflow.
-    expect('crates/mangostudio-runtime/src/cli.rs').toMatch(pattern);
+    expect('crates/mangostudio-runtime/src/main.rs').toMatch(pattern);
     expect('.github/workflows/runtime-build.yml').toMatch(pattern);
     expect('scripts/build-runtime.ts').toMatch(pattern);
     expect('rust-toolchain.toml').toMatch(pattern);
