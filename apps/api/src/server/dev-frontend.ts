@@ -171,9 +171,23 @@ function newestMtime(
  * `index.html`, the configs) is still invisible to this scan; each of those
  * breaks the build loudly the moment it does run, unlike a quietly dropped
  * route.
+ *
+ * The route generation helper is checked by exact path. A failed source walk or
+ * missing helper returns 0 so the caller rebuilds; other scripts and their
+ * directory mtime are ignored.
+ *
+ * @example
+ * const sourceMtime = newestSourceMtime(frontendDirectory);
  */
 export function newestSourceMtime(directory: string): number {
-  return newestMtime(directory, isBuildInput, true);
+  const sourceMtime = newestMtime(directory, isBuildInput, true);
+  if (sourceMtime === 0) return 0;
+  try {
+    const routeHelperMtime = statSync(join(directory, 'scripts', 'routes.ts')).mtimeMs;
+    return Math.max(sourceMtime, routeHelperMtime);
+  } catch {
+    return 0;
+  }
 }
 
 /** Newest required root dependency input, or 0 when any input cannot be read. */

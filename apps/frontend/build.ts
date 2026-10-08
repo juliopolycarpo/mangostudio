@@ -11,12 +11,13 @@
  * Usage: bun ./build.ts [--dev]
  */
 
-import { existsSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { existsSync, renameSync, rmSync, statSync } from 'node:fs';
 import { chmod, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BUILD_STATE_FILE, listDistFiles } from '@mangostudio/shared/utils/dist-files';
 import tailwind from 'bun-plugin-tailwind';
+import { updateRouteTree } from './scripts/routes';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DIST = join(ROOT, 'dist');
@@ -169,53 +170,6 @@ function isFileIdentity(path: string, expected: FileIdentity): boolean {
 }
 
 /**
- * Regenerate `src/routeTree.gen.ts` from `src/routes/`. Was the Vite plugin's
- * job; `@tanstack/router-cli` produces a byte-identical file. Routed through the
- * `routes` package script rather than invoked directly so the dependency stays
- * visible to knip.
- */
-async function generateRouteTree(): Promise<void> {
-  const proc = Bun.spawn(['bun', 'run', 'routes'], {
-    cwd: ROOT,
-    // `ignore`, not `pipe`: nothing reads stdout, and an undrained pipe leaks a
-    // descriptor per run — the dev loop calls this on every rebuild.
-    stdout: 'ignore',
-    stderr: 'pipe',
-  });
-  // Drained unconditionally, for the same reason: reading it only on failure
-  // leaks the descriptor on every successful build.
-  const stderr = await new Response(proc.stderr).text();
-  if ((await proc.exited) !== 0) {
-    throw new Error(`tsr generate failed:\n${stderr}`);
-  }
-}
-
-/**
- * True when `src/routeTree.gen.ts` is newer than everything that feeds it, so
- * a dev rebuild can skip the `tsr generate` spawn — measured at ~1.1s of a ~3s
- * dev rebuild, paid on every rebuild that touches anything under `src/`.
- *
- * Directory mtimes are compared on purpose: deleting or renaming a route file
- * bumps no surviving file's mtime, only its parent directory's, so a file-only
- * scan would keep serving the deleted route.
- */
-function routeTreeIsCurrent(): boolean {
-  const routesDir = join(ROOT, 'src', 'routes');
-  try {
-    const generated = statSync(join(ROOT, 'src', 'routeTree.gen.ts')).mtimeMs;
-    const inputs = readdirSync(routesDir, { recursive: true, encoding: 'utf8' }).reduce(
-      (newest, entry) => Math.max(newest, statSync(join(routesDir, entry)).mtimeMs),
-      Math.max(statSync(routesDir).mtimeMs, statSync(join(ROOT, 'tsr.config.json')).mtimeMs)
-    );
-    return generated >= inputs;
-  } catch {
-    // A missing or mid-removal entry means the answer is unknowable — say
-    // stale and let the generator settle it.
-    return false;
-  }
-}
-
-/**
  * The split-deployment API base URL, from `MANGO_API_URL` or the deprecated
  * `VITE_API_URL` alias.
  *
@@ -284,17 +238,7 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
   const apiUrlOverride = resolveApiUrlOverride();
   // Only the dev loop skips: a production build must be byte-identical to one
   // from a clean checkout, whatever the mtimes say.
-  if (production || !routeTreeIsCurrent()) {
-    await generateRouteTree();
-    if (!production) {
-      // `tsr generate` leaves the file untouched when the tree is unchanged,
-      // which would otherwise disarm the mtime comparison for good after any
-      // edit under `src/routes` — restamp so the next rebuild measures
-      // against this run. Content is untouched; only the timestamp moves.
-      const now = new Date();
-      utimesSync(join(ROOT, 'src', 'routeTree.gen.ts'), now, now);
-    }
-  }
+  await updateRouteTree({ force: production });
   // Build beside dist/, then publish only after every output and post-build
   // assertion succeeds. A failed dev rebuild therefore leaves the bundle the
   // API is already serving intact.
