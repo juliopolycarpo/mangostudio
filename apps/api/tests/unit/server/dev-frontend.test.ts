@@ -251,6 +251,62 @@ describe('newestSourceMtime', () => {
 });
 
 describe('distIsCurrent', () => {
+  test('fails closed when the source walk fails but the route helper is readable', () => {
+    const root = fixture();
+    const shared = sharedFixture(root);
+    const repository = dependencyFixture(root);
+    try {
+      writeAt(join(root, 'src', 'main.tsx'), OLD);
+      writeAt(join(root, 'dist', 'index.html'), NEW);
+      writeBuildState(root, effectiveApiUrl());
+      holdDirs(root);
+      expect(distIsCurrent(root, shared, repository)).toBe(true);
+
+      // Keep the module fake in a separate process so unrelated tests retain
+      // the real filesystem, including on hosts that cannot chmod a fixture.
+      const moduleUrl = new URL('../../../src/server/dev-frontend.ts', import.meta.url).href;
+      const program = `
+        import { mock } from 'bun:test';
+        import * as fs from 'node:fs';
+        import { join } from 'node:path';
+        const originalFs = { ...fs };
+        const frontend = ${JSON.stringify(root)};
+        let blockedReads = 0;
+        function fakeUnreadableSourceReaddir(path, ...args) {
+          if (String(path) === frontend) {
+            blockedReads++;
+            throw Object.assign(new Error('EACCES: unreadable frontend source root'), { code: 'EACCES' });
+          }
+          return originalFs.readdirSync(path, ...args);
+        }
+        function fakeUnreadableSourceFs() {
+          return { ...originalFs, readdirSync: fakeUnreadableSourceReaddir };
+        }
+        mock.module('node:fs', fakeUnreadableSourceFs);
+        const { newestSourceMtime, distIsCurrent } = await import(${JSON.stringify(moduleUrl)});
+        console.log(JSON.stringify({
+          sourceMtime: newestSourceMtime(frontend),
+          current: distIsCurrent(frontend, ${JSON.stringify(shared)}, ${JSON.stringify(repository)}),
+          helperIsRegularFile: originalFs.statSync(join(frontend, 'scripts', 'routes.ts')).isFile(),
+          blockedReads,
+        }));
+      `;
+      const child = Bun.spawnSync([process.execPath, '--eval', program], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      expect(child.exitCode).toBe(0);
+      expect(JSON.parse(new TextDecoder().decode(child.stdout))).toEqual({
+        sourceMtime: 0,
+        current: false,
+        helperIsRegularFile: true,
+        blockedReads: 2,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('treats a route generation helper edit as stale', () => {
     const root = fixture();
     const shared = sharedFixture(root);
