@@ -82,6 +82,8 @@ export interface WatchdogOptions {
    */
   readonly timingsDir?: string;
   readonly cwd?: string;
+  /** Attempt environment; omitted callers keep the inherited environment. */
+  readonly env?: NodeJS.ProcessEnv;
   /**
    * Retry once, same seed, when a non-hung attempt looks like an isolate-runner
    * abort rather than a real test failure (SIGABRT/134, or a crash marker in
@@ -260,6 +262,7 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
   // turbo and the bun test workers it spawned, not just the top process.
   const child = spawn(executable, args, {
     cwd: options.cwd ?? ROOT_DIR,
+    env: options.env,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });

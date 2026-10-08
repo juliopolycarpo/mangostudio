@@ -5,7 +5,9 @@
 //
 // Usage: see scripts/tests/test-workers-cancel.unit.test.ts
 
+import { startWorkerProcess } from '../../lib/test-worker-process';
 import { main, systemDeps } from '../../run-test-workers';
+import { fixtureChildEnvironment } from './child-supervision';
 import { FAKE_BUN_TEST } from './fake-bun-test';
 
 /** Where this file lives, for the root runner that starts it. */
@@ -21,7 +23,13 @@ if (import.meta.main) {
       // Only the controlled fake loses Bun's automatic orphan cleanup. The
       // test worker keeps its policy; cancellation must end the fake's children.
       start: (plan) =>
-        deps.start({ ...plan, env: { ...plan.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' } }),
+        startWorkerProcess(
+          plan,
+          `[${plan.laneId} ${plan.index}/${plan.count}] `,
+          undefined,
+          undefined,
+          fixtureChildEnvironment()
+        ),
       launcher: [process.execPath, FAKE_BUN_TEST],
       mergedPath,
     }

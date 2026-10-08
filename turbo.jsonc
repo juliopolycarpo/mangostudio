@@ -130,6 +130,27 @@
       "inputs": ["$TURBO_DEFAULT$", "scripts/**"],
       "outputs": ["$TURBO_ROOT$/.mango/artifacts/junit/root.xml"],
       "env": ["CI", "MANGOSTUDIO_*"]
+    },
+    // The same tests as `//#test:scripts`, split across worker processes by
+    // scripts/run-test-workers.ts (the `bun run test` unit phase; the coverage
+    // phase and CI's shards keep the task above, which is the one that writes
+    // the coverage evidence `root.xml`). Cached, so the runner and everything
+    // it loads are inputs: `scripts/**` covers them, `$TURBO_DEFAULT$` the
+    // files the tests read from outside `scripts/`. The merged report is
+    // nobody's evidence, so there is no output to restore. The worker count is
+    // a pass-through and not an `env` entry: the result is the same at any
+    // width, so it stays out of the key. The toolchain homes are pass-through
+    // for the launcher that pins them (scripts/lib/test-home.ts).
+    "//#test:scripts:workers": {
+      "inputs": ["$TURBO_DEFAULT$", "scripts/**"],
+      "env": ["CI", "MANGOSTUDIO_*"],
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "BUN_INSTALL",
+        "BUN_INSTALL_CACHE_DIR",
+        "MANGO_TEST_WORKERS"
+      ]
     }
   }
 }

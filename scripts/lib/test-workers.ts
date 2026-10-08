@@ -94,6 +94,8 @@ export interface WorkerLaneSpec {
   readonly command: readonly string[];
   /** Workspace-relative directory the command's last argument names. */
   readonly testDir: string;
+  /** Files outside `testDir` the command also runs; see `TestLane.workers.alsoRuns`. */
+  readonly alsoRuns?: readonly string[];
   /** What starts each worker's `bun test`: the temporary-HOME launcher. */
   readonly launcher: readonly string[];
   /**
@@ -129,6 +131,7 @@ export function laneSpec(
     cwd: join(ROOT_DIR, dirname(lane.manifest)),
     command,
     testDir: lane.workers.testDir,
+    alsoRuns: lane.workers.alsoRuns,
     launcher: launcher ?? [process.execPath, join(ROOT_DIR, 'scripts', 'with-test-home.ts')],
     // Windows keeps the serial default and Bun's orphan cleanup. It has no
     // POSIX process group for the replacement settlement guard to inspect.
@@ -751,7 +754,7 @@ export async function runWorkerLane(
   mkdirSync(dirname(options.mergedPath), { recursive: true });
 
   // Counted before any worker runs: this is the file set the lane owned when it started.
-  const census = discoverTestFiles(spec.cwd, spec.testDir);
+  const census = [...discoverTestFiles(spec.cwd, spec.testDir), ...(spec.alsoRuns ?? [])].sort();
   const reportDir = mkdtempSync(join(options.scratchRoot ?? tmpdir(), 'mangostudio-test-workers-'));
   try {
     const plans = planWorkers(spec, options.count, reportDir);

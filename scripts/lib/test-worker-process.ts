@@ -95,6 +95,8 @@ const stdSinks: LineSinks = {
  * that inherited them (a test that leaked a process) would otherwise hold the
  * lane open until it died; after the grace the readers are cancelled and the
  * worker is reported as it ended.
+ * `env` defaults to the current process environment; controlled fixtures can
+ * supply their own child environment without changing the worker's policy.
  *
  * A worker whose plan settles (POSIX) leads a process group of its own, so a
  * signal to `kill` reaches everything it started, and `settle` reports what is
@@ -110,13 +112,14 @@ export function startWorkerProcess(
   plan: WorkerPlan,
   prefix: string,
   sinks: LineSinks = stdSinks,
-  drainGraceMs: number = DRAIN_GRACE_MS
+  drainGraceMs: number = DRAIN_GRACE_MS,
+  env: NodeJS.ProcessEnv = process.env
 ): WorkerHandle {
   const leadsGroup = plan.settle && process.platform !== 'win32';
   const child = Bun.spawn({
     cmd: [...plan.argv],
     cwd: plan.cwd,
-    env: workerEnvironment(process.env, plan),
+    env: workerEnvironment(env, plan),
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
