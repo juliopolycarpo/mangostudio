@@ -6,9 +6,8 @@
  * denied, Clippy again over the full feature powerset, and the cross-language
  * round trip.
  *
- * Biome and dprint are deliberately absent: the repository root lints this
- * package's sources with everything else (`ROOT_BIOME_PATHS` covers
- * `packages`), and running them again from here would lint the monorepo twice.
+ * The workspace Biome task enforces value, type-only and self-import cycles
+ * even when this command runs alone. The repository root owns dprint.
  *
  * Flags: `--skip-format` (no rustfmt), `--ts-only`, `--rs-only`.
  *

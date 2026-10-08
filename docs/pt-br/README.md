@@ -270,7 +270,7 @@ mangostudio/
 | `bun run dev --api`       | Inicia apenas o servidor de dev da API                                 |
 | `bun run build`           | Build do frontend para produção                                        |
 | `bun run build --binary`  | Gera os binários standalone do host (hub + runtime cargo)              |
-| `bun run check`           | Executa Biome, dprint, madge e typecheck                               |
+| `bun run check`           | Executa Biome, dprint, ciclos de importação e typecheck                |
 | `bun run test`            | Executa as lanes unit e integration                                    |
 | `bun run test --unit`     | Executa apenas as suítes unitárias                                     |
 | `bun run test:e2e:setup`  | Instala Playwright Chromium para browser smoke                         |
@@ -288,7 +288,6 @@ mangostudio/
 | **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML                | Linter e formatador com regras unificadas         |
 | **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile                   | Formatador plugável com plugins WASM              |
 | **lefthook**   | Git hooks (pre-commit)                                  | Gerenciador de hooks Git para validação em commit |
-| **madge**      | Grafos de dependência JS/TS                             | Detecção de dependências circulares               |
 | **jscpd**      | Todos os arquivos fonte                                 | Detecção de código duplicado                      |
 | **bun:test**   | Testes unitários e de integração de todos os workspaces | Executor nativo rápido com cobertura LCOV         |
 | **Playwright** | Testes end-to-end no Chromium                           | Automação de navegador para fluxos de auth        |
@@ -409,7 +408,7 @@ Configurado em `dprint.json` com o seguinte escopo e configurações:
 
 ### Dependências Circulares
 
-Detectadas via `madge` como parte do `bun run check`. A verificação falha se existirem caminhos de importação circular entre os pacotes do workspace.
+O Biome verifica os ciclos de importação como parte do `bun run check`, incluindo imports de valores, de tipos e do próprio módulo. Cada workspace verifica arquivos TS, TSX, MTS, CTS, JS, JSX, MJS e CJS, incluindo arquivos na raiz, arquivos gerados e saídas de build ignoradas pelo Git, com o `biome.cycles.json`. Arquivos JavaScript são verificados como dependências de arquivos TypeScript e como raízes independentes. Somente `node_modules` e `.git` são excluídos da verificação de ciclos. A formatação e os demais checks de lint continuam seguindo o `biome.json`.
 
 ### Detecção de Código Duplicado
 
