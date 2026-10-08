@@ -143,6 +143,29 @@ describe('frontend API-internal Biome restriction', () => {
   });
 });
 
+describe('frontend shared entrypoint Biome restriction', () => {
+  const paths = [
+    'apps/frontend/src/shared-root.ts',
+    'apps/frontend/src/hooks/use-i18n.tsx',
+    'apps/frontend/src/lib/locale-dictionaries.ts',
+    'apps/frontend/tests/unit/shared-root.test.ts',
+  ];
+
+  it.each(paths)('rejects the shared root in %s', (path) => {
+    const result = lintSource(path, "import '@mangostudio/shared';");
+    expect(result.exitCode, result.output).toBe(1);
+    expect(result.output).toContain('lint/style/noRestrictedImports');
+    expect(result.output).toContain(
+      'Use a bounded-context entrypoint such as @mangostudio/shared/agents.'
+    );
+  });
+
+  it.each(paths)('accepts a bounded shared entrypoint in %s', (path) => {
+    const result = lintSource(path, "import '@mangostudio/shared/agents';");
+    expect(result.exitCode, result.output).toBe(0);
+  });
+});
+
 describe('frontend API-internal check guard', () => {
   it.each([
     `(require)('${TRANSCRIPT}');`,

@@ -238,6 +238,9 @@
               "level": "error",
               "options": {
                 "paths": {
+                  "@mangostudio/shared": {
+                    "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
+                  },
                   "@mangostudio/shared/i18n": {
                     "allowImportNames": ["Locale", "Messages", "defaultLocale"],
                     "message": "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests."
@@ -274,6 +277,11 @@
             "noRestrictedImports": {
               "level": "error",
               "options": {
+                "paths": {
+                  "@mangostudio/shared": {
+                    "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
+                  }
+                },
                 "patterns": [
                   {
                     "group": ["@mangostudio/api/internal/**"],
