@@ -8,8 +8,10 @@ describe('Settings timestamp formatting', () => {
     const english = formatTimestamp(TIMESTAMP, 'en');
     const portuguese = formatTimestamp(TIMESTAMP, 'pt-BR');
 
-    expect(english).toMatch(/Nov \d{1,2}, 2023, \d{1,2}:\d{2}\s(AM|PM)/);
-    expect(portuguese).toMatch(/\d{1,2} de nov\. de 2023, \d{2}:\d{2}/);
+    expect(english).toMatch(/^Nov \d{1,2}, 2023/);
+    expect(english).toMatch(/\d{1,2}:\d{2}\s(AM|PM)$/);
+    expect(portuguese).toMatch(/^\d{1,2} de nov\. de 2023/);
+    expect(portuguese).toMatch(/\d{2}:\d{2}$/);
     expect(portuguese).not.toMatch(/AM|PM/);
     expect(formatTimestamp(TIMESTAMP, 'en')).toBe(english);
   });
