@@ -114,6 +114,13 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
+      # Bounds the snapshot this job restores and saves back. Each save carries
+      # everything restored plus the new outputs, so without a bound the chain
+      # of snapshots only grows. At the start of the run Turbo deletes the
+      # oldest entries (by mtime, which the cache archive preserves) until the
+      # rest fit. The value is the same in every lane; see "CI Cache Policy" in
+      # docs/reference/testing.md.
+      TURBO_CACHE_MAX_SIZE: 16MB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -137,16 +144,18 @@ jobs:
           fi
           echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
 
-      # Only the first shard saves. All eight resolve the same primary key, so
-      # letting each one save turns seven post-job steps into "cache already
-      # exists" warnings that read like a cache fault and are not one.
-      - uses: ./.github/actions/cache-scoped
+      # Every shard restores; only the first one saves, after its tests. All
+      # eight would save under keys that differ only by the run, so the extra
+      # seven would upload copies of one snapshot.
+      - id: turbo-cache
+        uses: ./.github/actions/cache-scoped
         with:
           family: turbo
           path: .turbo/cache
-          validity: test-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'package.json', 'apps/*/package.json', 'packages/*/package.json') }}
+          validity: test-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'bun.lock', 'package.json', 'apps/*/package.json', 'apps/*/turbo.json', 'packages/*/package.json', 'packages/*/turbo.json') }}
           restore-prefix: test-
-          mode: ${{ matrix.shard == 1 && 'restore-save' || 'restore' }}
+          mode: restore
+          rotate: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       # Per-file durations from a previous run, used to balance `--shard` by
@@ -202,6 +211,21 @@ jobs:
         run: |
           bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=210 \
             -- bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}"
+
+      # Saves only when this shard's run wrote cache entries the restored
+      # snapshot did not hold, under a key that extends the stable restore
+      # prefix.
+      - name: Save new Turbo outputs
+        if: success() && matrix.shard == 1
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: turbo
+          path: .turbo/cache
+          validity: ${{ steps.turbo-cache.outputs.validity }}
+          mode: save
+          rotate: "true"
+          payload-glob: "*.tar.zst"
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       # Unhandled errors never reach the JUnit report: Bun's "# Unhandled error
       # between tests" block leaves failures="0" with no failing case while the
