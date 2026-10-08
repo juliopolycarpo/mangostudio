@@ -227,12 +227,15 @@ describe('protocol lane selection', () => {
   });
 
   test('the feature-powerset lane appears only when cargo-hack is installed', () => {
-    expect(labels(protocolCheckTasks(['--rs-only'], INSTALLED))).toContain(
-      'protocol:feature-powerset'
-    );
-    expect(
-      labels(protocolCheckTasks(['--rs-only'], { cargo: true, cargoHack: false }))
-    ).not.toContain('protocol:feature-powerset');
+    const powerset = (probe: ToolchainProbe): string[] =>
+      labels(protocolCheckTasks(['--rs-only'], probe)).filter((label) =>
+        label.startsWith('protocol:feature-powerset')
+      );
+    expect(powerset(INSTALLED)).toEqual([
+      'protocol:feature-powerset (1/2)',
+      'protocol:feature-powerset (2/2)',
+    ]);
+    expect(powerset({ cargo: true, cargoHack: false })).toEqual([]);
   });
 
   // Where CI runs each local protocol check. Every entry of `shimWorkspace` is one
@@ -268,9 +271,16 @@ describe('protocol lane selection', () => {
       ...protocolCheckTasks(['--rs-only'], INSTALLED),
       ...protocolTestTasks(['--rs-only'], [], INSTALLED),
     ];
-    const task = tasks.find((entry) => entry.label === label);
+    // The powerset runs as `<label> (<i>/<n>)` partitions: the same command plus
+    // `--partition <i>/<n>`, which protocol-powerset.unit.test.ts pins. CI is
+    // compared on the command itself.
+    const task = tasks.find(
+      (entry) => entry.label === label || entry.label.startsWith(`${label} (`)
+    );
     expect(task, label).toBeDefined();
-    const command = task?.cmd ?? [];
+    const whole = task?.cmd ?? [];
+    const slice = whole.indexOf('--partition');
+    const command = slice === -1 ? whole : [...whole.slice(0, slice), ...whole.slice(slice + 2)];
     const packageIndex = command.indexOf('-p');
     expect(packageIndex, `${label}: missing package selection`).toBeGreaterThan(0);
     expect(command[packageIndex + 1]).toBe('mango-protocol');

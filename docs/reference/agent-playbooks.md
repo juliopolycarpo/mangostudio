@@ -826,7 +826,7 @@ a fixed order and is reviewed as one.
 - Conformance corpus both SDKs read: `spec/fixtures/1/`
 - TypeScript SDK: `packages/protocol/src/` (entries `index`, `stdio`, `ipc`, `in-process`, `ws`, `spawn`, `testing`)
 - Rust crate: `crates/mango-protocol/src/`; fuzz targets in `crates/mango-protocol/fuzz/`
-- Lanes: `scripts/protocol/{check,test,fix}.ts`, driven by `bun run protocol:check` / `protocol:test`
+- Lanes: `scripts/protocol/{check,test,fix}.ts`, driven by `bun run protocol:check` / `protocol:test`; which tasks run is `tasks.ts`, and `run-tasks.ts` fails the check unless every feature-powerset partition ran and passed
 - Packing and publishing: `scripts/protocol/{pack,verify-package,release-prepare}.ts`
 - CI: `.github/workflows/protocol-{ci,release,fuzz}.yml`, path-filtered on the directories above
 - Where the repository records all of this once: `scripts/lib/protocol.ts`
