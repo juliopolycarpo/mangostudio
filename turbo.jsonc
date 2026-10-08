@@ -63,14 +63,30 @@
     "check:quick": {
       "inputs": ["$TURBO_ROOT$/biome.json", "$TURBO_DEFAULT$"]
     },
+    // Script-less: no workspace defines a `transit` script, so it runs nothing
+    // and orders nothing. It exists for its hash. Turbo folds the hash of each
+    // `dependsOn` task into the dependent's own, so a task that depends on
+    // `transit` is rebuilt whenever a workspace it imports changes, yet starts
+    // at once. A task that reads its dependencies' sources and writes nothing
+    // for them to wait on opts in with `"dependsOn": ["transit"]`.
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
-      // tsbuildinfo is per-workspace gitignored incremental state that all
-      // workspaces write into one shared root dir. Declaring it as an output
-      // here makes every workspace's typecheck task claim the same glob, which
-      // overlaps across tasks and cross-contaminates the restored cache. tsc
-      // re-validates buildinfo on disk, so it is left out of the Turbo cache.
+      "dependsOn": ["transit"],
+      // No outputs: `incremental` is off, so tsc leaves no build info to cache
+      // (scripts/tests/typescript-incremental.unit.test.ts pins that).
       "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"]
+    },
+    // Script-less, and the task `bun run check` requests. `transit` selects
+    // nothing, so `typecheck` alone would drop the upstream workspaces from a
+    // filtered run. This task depends on its own `typecheck` and on those of
+    // the workspaces it imports (`^`), which orders only these markers: every
+    // `typecheck` still starts at once. Do not select upstream with `with`
+    // instead: Turbo stops a `with` task when the task that lists it exits, so a
+    // slower workspace's type error is lost and its cache entry never written.
+    "typecheck:with-deps": {
+      "dependsOn": ["typecheck", "^typecheck:with-deps"]
     },
     "circular": {},
     "test:unit": {
@@ -82,9 +98,9 @@
     },
     // The JUnit reports these lanes write are deliberately not declared as
     // outputs. The task is uncached, so there is nothing to restore, and every
-    // workspace writes into one shared directory — the same overlapping-glob
-    // shape the typecheck comment above warns about, which would cross-
-    // contaminate if anyone ever turned caching on here.
+    // workspace writes into one shared directory. Declared, it would give every
+    // workspace's task the same glob, and overlapping globs cross-contaminate a
+    // restored cache if anyone ever turned caching on here.
     "test:coverage": {
       "cache": false,
       "outputs": ["$TURBO_ROOT$/.mango/artifacts/coverage/**"],

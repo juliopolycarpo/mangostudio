@@ -437,7 +437,7 @@ describe('the protocol tree at the repository root', () => {
       files: string[];
     };
     // Nothing in the Turbo graph builds dist/ before a typecheck or a test lane
-    // (`typecheck` is dependsOn ["^typecheck"], the test lanes declare none), so
+    // (`typecheck` is dependsOn ["transit"], the test lanes declare none), so
     // a dist-pointing workspace link is unresolvable on a clean checkout.
     for (const [subpath, target] of Object.entries(manifest.exports)) {
       if (subpath === './package.json') continue;

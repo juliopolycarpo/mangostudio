@@ -57,9 +57,11 @@ nightly workspace with its own lockfile.
 ## Resolving from the workspace, publishing from a build
 
 `exports` points at `src/`, like every other workspace here. Nothing in the Turbo graph builds
-`dist/` before a typecheck or a test lane (`typecheck` is `dependsOn: ["^typecheck"]`, the
-`test:*` lanes declare none), so a `dist`-pointing workspace link would be unresolvable on a clean
-checkout.
+`dist/` before a typecheck or a test lane (`typecheck` is `dependsOn: ["transit"]`, a script-less
+hash-only task, and the `test:*` lanes declare none), so a `dist`-pointing workspace link would be
+unresolvable on a clean checkout. `typecheck` orders nothing, so a plain
+`turbo run typecheck --filter=@mangostudio/shared` no longer checks this package; `bun run check`
+requests `typecheck:with-deps`, which does.
 
 The published map lives in `publishConfig.exports` and points at `dist/` — but **npm does not
 apply it**. Measured on npm 11.19.0: `npm pack` copies `publishConfig` into the tarball verbatim
