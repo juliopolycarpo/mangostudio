@@ -11,7 +11,7 @@
 
 import { chmod, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { posix } from 'node:path';
 import { HIDDEN_WINDOW } from '../process';
 import { RuntimeServiceManagementError } from '../runtime-contract/service-errors';
 import type { UserServicePlatform, UserServiceStatus } from '../runtime-home';
@@ -113,12 +113,16 @@ export function isUserServiceAction(value: string | undefined): value is UserSer
   return (USER_SERVICE_ACTIONS as readonly string[]).includes(value ?? '');
 }
 
+/**
+ * Resolves a systemd user unit in the Linux host's POSIX path layout.
+ * // Usage: systemdUserUnitPath('/home/me', 'example.service')
+ */
 export function systemdUserUnitPath(home: string, unitName: string): string {
-  return join(home, '.config', 'systemd', 'user', unitName);
+  return posix.join(home, '.config', 'systemd', 'user', unitName);
 }
 
 function launchdAgentPlistPath(home: string, label: string): string {
-  return join(home, 'Library', 'LaunchAgents', `${label}.plist`);
+  return posix.join(home, 'Library', 'LaunchAgents', `${label}.plist`);
 }
 
 export function renderSystemdUnitFile(definition: UserServiceDefinition): string {
@@ -616,7 +620,7 @@ export function createUserServiceManager(
   const linux = {
     async install(definition: UserServiceDefinition) {
       await requireSystemd();
-      await deps.mkdir(join(deps.home, '.config', 'systemd', 'user'));
+      await deps.mkdir(posix.join(deps.home, '.config', 'systemd', 'user'));
       await deps.writeFile(unitPath as string, renderSystemdUnitFile(definition));
       await requireCommand(['systemctl', '--user', 'daemon-reload'], 'systemctl daemon-reload');
       await requireCommand(
@@ -707,7 +711,7 @@ export function createUserServiceManager(
   };
   const darwin = {
     async install(definition: UserServiceDefinition) {
-      await deps.mkdir(join(deps.home, 'Library', 'LaunchAgents'));
+      await deps.mkdir(posix.join(deps.home, 'Library', 'LaunchAgents'));
       await deps.writeFile(
         unitPath as string,
         renderLaunchdPlistFile(identity.launchdLabel, definition)
