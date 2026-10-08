@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import { isTurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
+import type { MessagePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import { getDb } from '../../../../src/db/database';
 import type { Database } from '../../../../src/db/types';

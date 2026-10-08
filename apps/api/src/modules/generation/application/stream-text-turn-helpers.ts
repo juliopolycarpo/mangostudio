@@ -1,8 +1,8 @@
-import type { GeneratedImagePart, MessagePart, ProviderType } from '@mangostudio/shared';
 import {
   applyToolExecutionTransition,
   isTerminalToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
+import type { GeneratedImagePart, MessagePart, ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';

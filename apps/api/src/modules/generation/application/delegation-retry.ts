@@ -1,10 +1,11 @@
-import type { AgentId, SubagentTraceEvent } from '@mangostudio/shared';
+import type { AgentId } from '@mangostudio/shared/agents';
 import {
   DELEGATION_BACKOFF_BASE_MS,
   DELEGATION_BACKOFF_MAX_MS,
   DELEGATION_MAX_RETRIES,
-  mergeSubagentTraceEvents,
-} from '@mangostudio/shared';
+} from '@mangostudio/shared/generation';
+import type { SubagentTraceEvent } from '@mangostudio/shared/types';
+import { mergeSubagentTraceEvents } from '@mangostudio/shared/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getSubagentCachedEntry } from './subagent-response-cache';
 import {

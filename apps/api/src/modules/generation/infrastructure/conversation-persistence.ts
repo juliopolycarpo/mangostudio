@@ -1,6 +1,5 @@
-import type { InteractionMode } from '@mangostudio/shared';
 import type { ChatAttachment } from '@mangostudio/shared/chat';
-import type { MessagePart } from '@mangostudio/shared/types';
+import type { InteractionMode, MessagePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { linkAttachmentsToMessage } from '../../attachments/infrastructure/attachment-repository';

@@ -31,6 +31,7 @@ import {
   runParallel,
   runTask,
 } from './lib/runner';
+import { assertNoSharedRootImports } from './lib/shared-root-import-boundary';
 
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
@@ -180,7 +181,9 @@ if (flags['--staged']) {
   includeProtocol = touchesProtocolSurface(files);
 }
 
-const tasks: Array<() => Promise<RunResult>> = [];
+const tasks: Array<() => Promise<RunResult>> = [
+  () => runTask('root:shared-import-boundary', () => assertNoSharedRootImports()),
+];
 
 if (effectiveWorkspaces.length > 0) {
   info('\nWorkspaces');

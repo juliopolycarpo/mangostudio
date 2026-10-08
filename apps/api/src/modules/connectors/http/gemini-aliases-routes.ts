@@ -3,7 +3,8 @@
  * Delegates to existing Gemini service for legacy API consumers.
  */
 
-import type { Connector, ConnectorStatus, ModelCatalogResponse } from '@mangostudio/shared';
+import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
+import type { Connector, ConnectorStatus } from '@mangostudio/shared/connectors';
 import {
   AddConnectorBodySchema,
   UpdateConnectorModelsBodySchema,

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import type { AgentEvent } from '@mangostudio/shared';
+import type { AgentEvent } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
 import {
   IMAGE_ABANDONED_ERROR,

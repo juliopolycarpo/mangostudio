@@ -1,4 +1,3 @@
-import type { ProviderType, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
@@ -6,6 +5,7 @@ import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
+import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {

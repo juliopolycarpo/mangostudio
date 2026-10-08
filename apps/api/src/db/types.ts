@@ -2,8 +2,8 @@
  * Kysely database types for the MangoStudio SQLite schema.
  */
 
-import type { InteractionMode } from '@mangostudio/shared';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
+import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
 
 interface ChatsTable {

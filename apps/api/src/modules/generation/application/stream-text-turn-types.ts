@@ -1,3 +1,8 @@
+import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { ContextSettings } from '@mangostudio/shared/chat';
+import type { ImageGenerationErrorCode, ToolIntent } from '@mangostudio/shared/generation';
+import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
+import type { TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type {
   ContinuationReasonCode,
   McpMediaPart,
@@ -5,12 +10,7 @@ import type {
   QuestionPart,
   ReasoningEffort,
   TodoPart,
-} from '@mangostudio/shared';
-import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
-import type { ContextSettings } from '@mangostudio/shared/chat';
-import type { ImageGenerationErrorCode, ToolIntent } from '@mangostudio/shared/generation';
-import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
-import type { TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
+} from '@mangostudio/shared/types';
 import type {
   ContextSeverity,
   ContinuationDisplayMode,
