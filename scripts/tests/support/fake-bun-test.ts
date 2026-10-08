@@ -75,7 +75,8 @@ function main(argv: readonly string[]): void {
       cmd: [
         process.execPath,
         '-e',
-        `process.on('SIGTERM', () => undefined); require('node:fs').writeFileSync(${JSON.stringify(childReady)}, String(process.pid)); setInterval(() => undefined, 1000)`,
+        "process.on('SIGTERM', () => undefined); require('node:fs').writeFileSync(process.argv.at(-1), String(process.pid)); setInterval(() => undefined, 1000)",
+        childReady,
       ],
       // Preserve the fake's deliberate lifetime under a root --no-orphans
       // worker; token signaling, rather than Bun's policy, must end it.
