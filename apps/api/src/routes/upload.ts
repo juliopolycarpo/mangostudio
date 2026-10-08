@@ -8,10 +8,9 @@ import { extname, join } from 'node:path';
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { type Elysia, t } from 'elysia';
-import { fileTypeFromBuffer } from 'file-type';
 import { getDb } from '../db/database';
 import { getConfig } from '../lib/config';
-import { registerFileTypeDetector } from '../lib/file-type-detector';
+import { detectFileType, registerFileTypeDetector } from '../lib/file-type-detector';
 import { createDiagnosticLogger } from '../lib/logger';
 import {
   buildAttachmentStoragePath,
@@ -72,7 +71,7 @@ export const uploadRoutes = (app: Elysia) =>
           const buffer = await file.arrayBuffer();
 
           // Validate file content using magic bytes
-          const fileType = await fileTypeFromBuffer(buffer);
+          const fileType = await detectFileType(buffer);
           if (!fileType) {
             set.status = 400;
             return {

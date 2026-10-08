@@ -11,7 +11,7 @@ import {
   TOOL_IMAGE_MIME_TYPES,
   type ToolImageMimeType,
 } from '@mangostudio/shared/tool-identity';
-import { fileTypeFromBuffer } from 'file-type';
+import { detectFileType } from '../../../lib/file-type-detector';
 
 export class InvalidToolImageError extends Error {
   constructor(message: string) {
@@ -71,7 +71,7 @@ export async function validateToolImageBytes(bytes: Uint8Array): Promise<Validat
     throw new InvalidToolImageError('SVG images are not accepted. Use PNG, JPEG, or WebP.');
   }
 
-  const detected = await fileTypeFromBuffer(bytes);
+  const detected = await detectFileType(bytes);
   if (!detected || !isAllowedMime(detected.mime)) {
     throw new InvalidToolImageError('The image must be a PNG, JPEG, or WebP file.');
   }
