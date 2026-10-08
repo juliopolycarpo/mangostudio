@@ -2,44 +2,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from '@typescript/typescript6';
 import { ROOT_DIR } from './config';
+import { isRequire, literalText } from './import-specifiers';
 
 const SHARED_ROOT = '@mangostudio/shared';
 const BOUNDARY_MESSAGE =
   'Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath.';
 const SOURCE_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/;
-
-function unwrapExpression(node: ts.Node | undefined): ts.Node | undefined {
-  while (
-    node &&
-    (ts.isParenthesizedExpression(node) ||
-      ts.isNonNullExpression(node) ||
-      ts.isAsExpression(node) ||
-      ts.isSatisfiesExpression(node) ||
-      ts.isTypeAssertionExpression(node))
-  ) {
-    node = node.expression;
-  }
-  return node;
-}
-
-function literalText(node: ts.Node | undefined): string | undefined {
-  const literal = unwrapExpression(node);
-  return literal && ts.isStringLiteralLike(literal) ? literal.text : undefined;
-}
-
-function isRequire(expression: ts.Expression): boolean {
-  const unwrapped = unwrapExpression(expression);
-  if (!unwrapped) return false;
-  if (ts.isIdentifier(unwrapped)) return unwrapped.text === 'require';
-  if (!ts.isPropertyAccessExpression(unwrapped) && !ts.isElementAccessExpression(unwrapped)) {
-    return false;
-  }
-  const receiver = unwrapExpression(unwrapped.expression);
-  if (!receiver || !ts.isIdentifier(receiver) || receiver.text !== 'module') return false;
-  return ts.isPropertyAccessExpression(unwrapped)
-    ? unwrapped.name.text === 'require'
-    : literalText(unwrapped.argumentExpression) === 'require';
-}
 
 function rootImportLocations(source: ts.SourceFile): ts.Node[] {
   const locations: ts.Node[] = [];
