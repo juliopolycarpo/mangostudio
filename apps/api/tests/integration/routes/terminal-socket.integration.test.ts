@@ -119,6 +119,22 @@ function connect(
   return { socket, messages, closed, nextMessage };
 }
 
+/**
+ * Waits for terminal data containing a marker, including text split across frames.
+ *
+ * @example
+ * await waitForTerminalText(viewer, 'hi');
+ */
+function waitForTerminalText(viewer: Connected, marker: string): Promise<TerminalServerMessage> {
+  const decoder = new TextDecoder();
+  let output = '';
+  return viewer.nextMessage((message) => {
+    if (message.type !== 'data') return false;
+    output += decoder.decode(message.data, { stream: true });
+    return output.includes(marker);
+  });
+}
+
 async function waitForOpen(socket: WebSocket): Promise<void> {
   if (socket.readyState === WebSocket.OPEN) return;
   await new Promise<void>((resolve, reject) => {
@@ -219,6 +235,51 @@ describe('terminal socket relay', () => {
       this.emitOutput(sessionId, { kind: 'data', data: Buffer.from(text).toString('base64') });
     }
   }
+
+  it.each([
+    { label: 'ASCII', marker: 'hi', chunks: [Buffer.from('h'), Buffer.from('i')] },
+    {
+      label: 'UTF-8',
+      marker: 'hé',
+      chunks: [Buffer.from('h'), Buffer.from([0xc3]), Buffer.from([0xa9])],
+    },
+  ])('matches output across separate $label terminal data frames', async ({ marker, chunks }) => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+    const matched = waitForTerminalText(viewer, marker);
+
+    for (const chunk of chunks) {
+      runtime.emitOutput(session.id, { kind: 'data', data: chunk.toString('base64') });
+    }
+
+    expect((await matched).type).toBe('data');
+    expect(viewer.messages.filter((message) => message.type === 'data')).toHaveLength(
+      chunks.length
+    );
+  });
+
+  it('does not match terminal control frames as output text', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+    const matched = waitForTerminalText(viewer, 'pong');
+
+    viewer.socket.send(encodeTerminalClientMessage({ type: 'ping' }));
+
+    await expect(matched).rejects.toThrow('Timed out waiting for a terminal socket message');
+    expect(await viewer.nextMessage((message) => message.type === 'pong')).toEqual({
+      type: 'pong',
+    });
+  });
 
   it('keeps the default two-second observation bounded for fake runtime frames', async () => {
     const user = await insertTestUser();
@@ -572,13 +633,14 @@ const binary = resolveRustRuntimeBinary();
 
 describe('terminal socket over a real Rust runtime', () => {
   it.skipIf(skipWithoutRustBinary(binary, 'terminal-socket'))(
-    'opens, attaches, and relays real PTY output for printf hi',
+    'opens, attaches, and relays real PTY output from the platform shell',
     async () => {
+      const shell = process.platform === 'win32' ? 'powershell' : 'bash';
       const user = await insertTestUser();
       const runtime = await spawnRustStdioRuntime(binary.path, { label: 'terminal-socket' });
       try {
         // Consent and ability together: a fresh host slot grants shell, and
-        // this build answers terminal.* on a machine with a PTY and bash.
+        // this build answers terminal.* on a machine with a PTY and its platform shell.
         expect(runtime.client.manifest.terminal).toBe(true);
         // The attestation gate is covered by the unit tests; this case proves
         // the PTY relay from a real runtime through the hub's socket route.
@@ -588,7 +650,7 @@ describe('terminal socket over a real Rust runtime', () => {
         });
         const session = await service.open(user.id, {
           environmentId: 'rust-terminal',
-          shell: 'bash',
+          shell,
         });
         const hub = await startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
         // Native PTY startup can exceed the fake runtime's two-second budget.
@@ -599,14 +661,14 @@ describe('terminal socket over a real Rust runtime', () => {
         viewer.socket.send(
           encodeTerminalClientMessage({
             type: 'data',
-            data: new TextEncoder().encode('printf hi\n'),
+            // Construct the marker so echoed input cannot satisfy the output assertion.
+            data: new TextEncoder().encode(
+              shell === 'powershell' ? "Write-Output ('h' + 'i')\r\n" : "printf h''i\n"
+            ),
           })
         );
 
-        const withHi = await viewer.nextMessage(
-          (message) =>
-            message.type === 'data' && Buffer.from(message.data).toString().includes('hi')
-        );
+        const withHi = await waitForTerminalText(viewer, 'hi');
         expect(withHi).toBeDefined();
 
         await service.close(user.id, session.id);
