@@ -45,6 +45,11 @@ const FIXED_SHAPE_DIAGNOSTICS = [
     content: `value =\nsecret = "${SECRET}"`,
     message: "TOML Parse error: Missing value after '='; values must be on the same line",
   },
+  {
+    label: 'offset without a separator',
+    content: 'when = 1979-05-27T00:32+0100',
+    message: "TOML Parse error: Invalid date-time offset: expected ':' between hours and minutes",
+  },
 ];
 let directory: string;
 let configPath: string;
@@ -125,28 +130,6 @@ describe('TOML parser diagnostics', () => {
     }
     expect(nativeMessage).toContain('TOML Parse error');
     expect(() => readTomlDocument(configPath)).toThrow(JSON.stringify(nativeMessage));
-  });
-
-  it('keeps the expected offset separator in a direct parser diagnostic', () => {
-    expect(() => parseTomlDocument('when = 1979-05-27T00:32+0100')).toThrow(
-      "TOML Parse error: Invalid date-time offset: expected ':' between hours and minutes"
-    );
-  });
-
-  it('keeps the expected offset separator in a public subagent diagnostic', async () => {
-    const adapter = createSubagentAdapter('toml-agent', 'markdown-frontmatter');
-    const result = await adapter.adapt({
-      content: 'when = 1979-05-27T00:32+0100',
-      kind: 'subagent',
-      from: 'toml-agent',
-      to: 'markdown-frontmatter',
-      resourceKey: 'subagent:reviewer',
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('Expected an invalid timestamp offset to reject conversion.');
-    expect(result.error.message).toBe(
-      "TOML Parse error: Invalid date-time offset: expected ':' between hours and minutes"
-    );
   });
 
   it.each(FIXED_SHAPE_DIAGNOSTICS)(
