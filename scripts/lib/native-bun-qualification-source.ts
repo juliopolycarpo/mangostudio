@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readlink } from 'node:fs/promises';
+import { readFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 interface SourceFileSeal {
@@ -90,6 +90,18 @@ async function git(root: string, args: readonly string[]): Promise<string> {
   return out;
 }
 
+async function trackedSourceBytes(path: string, mode: string): Promise<Buffer> {
+  if (mode !== '120000') return readFile(path);
+  try {
+    return Buffer.from(await readlink(path));
+  } catch (error) {
+    throw new Error(
+      `Invalid tracked symlink ${path}: ${String(error)}; expected filesystem symlink matching Git mode 120000`,
+      { cause: error }
+    );
+  }
+}
+
 /**
  * Seal HEAD, its tree, index entries, and the actual bytes of every tracked file.
  * CRLF checkouts keep their actual byte hashes, even when git normalizes them.
@@ -105,15 +117,14 @@ export async function sealNativeSource(root: string): Promise<SourceSeal> {
   const files: SourceFileSeal[] = [];
   for (const entry of index.split('\0').filter(Boolean)) {
     const match = /^(\d+) ([a-f0-9]+) (\d)\t(.+)$/s.exec(entry);
-    if (match?.[3] !== '0' || match[1] === '160000') {
-      throw new Error(`Invalid tracked entry ${JSON.stringify(entry)}; expected a stage-0 file`);
+    if (match?.[3] !== '0' || !['100644', '100755', '120000'].includes(match[1])) {
+      throw new Error(
+        `Invalid tracked entry ${JSON.stringify(entry)}; expected a stage-0 regular file or symlink`
+      );
     }
     const path = match[4];
     const file = join(root, path);
-    const metadata = await lstat(file);
-    const bytes = metadata.isSymbolicLink()
-      ? Buffer.from(await readlink(file))
-      : await readFile(file);
+    const bytes = await trackedSourceBytes(file, match[1]);
     files.push({
       path,
       mode: match[1],

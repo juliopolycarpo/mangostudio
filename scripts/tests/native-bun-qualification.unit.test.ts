@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -285,6 +285,24 @@ describe('qualification inputs and seals', () => {
     const artifact = await sealNativeArtifact(binary);
     await file(binary, 'after');
     expect((await sealNativeArtifact(binary)).sha256).not.toBe(artifact.sha256);
+  });
+
+  test('seals tracked symlink text and rejects a replacement with regular file bytes', async () => {
+    const source = await checkout();
+    const link = join(source.root, 'tracked-link');
+    git(source.root, ['config', 'core.symlinks', 'true']);
+    await symlink('scripts/root.test.ts', link);
+    git(source.root, ['add', 'tracked-link']);
+    const seal = await sealNativeSource(source.root);
+    expect(seal.files.find((entry) => entry.path === 'tracked-link')?.mode).toBe('120000');
+    expect(seal.files.find((entry) => entry.path === 'tracked-link')?.bytes).toBe(
+      Buffer.byteLength('scripts/root.test.ts')
+    );
+    await rm(link);
+    await file(link, 'scripts/root.test.ts');
+    await expect(sealNativeSource(source.root)).rejects.toThrow(
+      'expected filesystem symlink matching Git mode 120000'
+    );
   });
 
   test('inventories all seven default lanes and rejects source producer drift', async () => {
