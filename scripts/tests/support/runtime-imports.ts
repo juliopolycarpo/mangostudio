@@ -140,6 +140,7 @@ export function walkRuntimeImports(
   const resolvedRoot = resolve(rootDir);
   const entry = resolve(resolvedRoot, entryRelativePath);
   const aliases = readWorkspaceAliases(resolvedRoot);
+  const workspaceModules = new Map<string, string | null>();
   const files = new Set<string>();
   const externalSpecifiers = new Map<string, string[]>();
 
@@ -173,7 +174,11 @@ export function walkRuntimeImports(
         walk(resolveRelativeModule(filePath, specifier));
         return;
       }
-      const workspaceModule = resolveWorkspaceModule(resolvedRoot, specifier, aliases);
+      // One manifest read per specifier, not one per importing file.
+      if (!workspaceModules.has(specifier)) {
+        workspaceModules.set(specifier, resolveWorkspaceModule(resolvedRoot, specifier, aliases));
+      }
+      const workspaceModule = workspaceModules.get(specifier);
       if (workspaceModule) {
         walk(workspaceModule);
         return;
