@@ -1,0 +1,3 @@
+# Preserve every fixture byte across platforms.
+*.heic binary
+*.pdf binary

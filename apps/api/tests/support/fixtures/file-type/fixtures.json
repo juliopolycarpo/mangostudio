@@ -1,0 +1,48 @@
+{
+  "source": "https://github.com/sindresorhus/file-type/tree/v22.1.1/fixture",
+  "license": "LICENSE",
+  "cases": [
+    {
+      "file": "fixture.jpg",
+      "mime": "image/jpeg",
+      "ext": "jpg",
+      "sha256": "fe7c7546c00a1aa1943c2623504d282fe40071ff8dee9950b999497b06465d3a"
+    },
+    {
+      "file": "fixture.png",
+      "mime": "image/png",
+      "ext": "png",
+      "sha256": "0fcb56fdef19dde2af4c135514a33ff6325aad4d0a01fd7893d715dc14ae0d50"
+    },
+    {
+      "file": "fixture.gif",
+      "mime": "image/gif",
+      "ext": "gif",
+      "sha256": "7e564a1b350397af0f4af17d5ee2ff992178d13a576484ff1f101540a7980350"
+    },
+    {
+      "file": "fixture.webp",
+      "mime": "image/webp",
+      "ext": "webp",
+      "sha256": "7c724cd0d9dc7edd16ba92d1aa6a70bde43671a71c21ecf1a0896ee111de9299"
+    },
+    {
+      "file": "fixture-yuv420-8bit.avif",
+      "mime": "image/avif",
+      "ext": "avif",
+      "sha256": "b0de892bad2015cfa1fbf300b9c124369f20e3bf2f675a3bdb7fbc86472d5b77"
+    },
+    {
+      "file": "fixture-heic.heic",
+      "mime": "image/heic",
+      "ext": "heic",
+      "sha256": "7f2a5efad14d4caa3fd35ec153ec3dca19e0872cf3d3efdbf9196fb6dc190c7f"
+    },
+    {
+      "file": "fixture-minimal.pdf",
+      "mime": "application/pdf",
+      "ext": "pdf",
+      "sha256": "b7d25591c18da373709d3d88ddf5eeab0b5089359e580f051314fd8935df0b73"
+    }
+  ]
+}
