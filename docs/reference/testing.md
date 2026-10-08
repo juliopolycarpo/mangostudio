@@ -1300,6 +1300,37 @@ ordinary shards instead of skipping.
   owns the paths that make the lane relevant, so a new Rust-backed test needs no workflow
   edit; `scripts/tests/rust-lanes.unit.test.ts` fails if one would be missed.
 
+## Rust Workspace Tests
+
+The Rust workspace tests run under [cargo-nextest](https://nexte.st), locally and in
+`cargo-shim.yml`, one process per test:
+
+```bash
+cargo install cargo-nextest --locked --version 0.9.144
+cargo nextest run --workspace --all-targets --all-features --locked --retries 0
+cargo test --doc --workspace --all-features --locked
+```
+
+The version is the one `cargo-shim.yml` installs through the SHA-pinned
+`taiki-e/install-action`; `scripts/tests/rust-nextest.unit.test.ts` fails when the two
+differ, and when the CI command stops matching the one above. nextest does not run
+doctests, so they stay on `cargo test --doc`, and the ignored fixture generator
+(`generate_rust_fixture`) stays on `cargo test -- --ignored`.
+
+- Same test set. nextest lists the same libtest binaries, and the workspace job's
+  "Check nextest runs the libtest test set" step runs
+  `bun scripts/bench/rust-test-inventory.ts capture`, `capture-nextest` and `compare` on every
+  OS. A case that one runner lists and the other does not, or flags `#[ignore]` differently,
+  fails the job and is printed by its `<package>/<kind>/<binary>::<test>` identity.
+- No retries. `--retries 0` is on every command line, and the workflow tests reject
+  `NEXTEST_*` environment overrides and a `.config/nextest.toml` that retries, filters or
+  overrides, so a flaky test fails the gate instead of passing on a second attempt.
+- Process isolation. A test that passed only because another test in its binary had already
+  initialised process state now runs alone and fails; fix the test, do not retry it.
+- Ubuntu's CI run of this set is the instrumented libtest one in `rust-coverage.yml`
+  (see below); macOS, Windows and the Windows ARM64 runtime lane run nextest. The launcher's
+  1.96 floor lane keeps `cargo test`, because it proves the floor with a handful of tests.
+
 ## Rust Coverage In CI
 
 The Ubuntu run of the Rust workspace tests is instrumented: `rust-coverage.yml`

@@ -61,7 +61,7 @@ repositório já excede a cota. O musl mantém a própria lane de clippy na 1.99
 não é alvo de Rust mínimo.
 
 O Windows ARM64 também tem testes nativos (não são checagem de Rust mínimo; rodam na toolchain de desenvolvimento 1.99.0): o `workspace-windows-arm64` roda
-`cargo test -p mangostudio-runtime --all-targets --all-features --locked` em
+`cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0` em
 `windows-11-arm` sob o mesmo sinal Rust, porque a distribuição apenas compila esse
 alvo de forma cruzada e o smoke apenas inicia o binário gerado. Ele cobre só o
 pacote do runtime (os crates de protocolo e de contrato são neutros quanto à

@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   diffInventories,
@@ -134,5 +137,50 @@ describe('parseTestExecutables', () => {
       artifact({ executable: null }),
     ];
     expect(parseTestExecutables(lines.join('\n'))).toEqual([]);
+  });
+});
+
+// Cargo Shim's nextest parity step is `capture`, `capture-nextest`, then
+// `compare`; its exit code is the gate. These tests run the real CLI so a
+// `compare` that stops failing on a mismatch fails here, not in a silent CI step.
+describe('compare command exit code', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rust-test-inventory-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  const libtest = { 'p/test/a::x': { ignored: false }, 'p/test/a::y': { ignored: true } };
+
+  function compare(name: string, nextest: object) {
+    const before = join(dir, `${name}-libtest.json`);
+    const after = join(dir, `${name}-nextest.json`);
+    writeFileSync(before, JSON.stringify(libtest));
+    writeFileSync(after, JSON.stringify(nextest));
+    const result = Bun.spawnSync(
+      ['bun', 'scripts/bench/rust-test-inventory.ts', 'compare', before, after],
+      { cwd: join(import.meta.dir, '..', '..') }
+    );
+    return { code: result.exitCode, out: result.stdout.toString() };
+  }
+
+  test('exits 0 for the same identities and flags', () => {
+    const { code, out } = compare('same', libtest);
+    expect(code, `expected exit code: 0 | received: ${code}\n${out}`).toBe(0);
+  });
+
+  test.each([
+    ['a case nextest does not list', { 'p/test/a::x': { ignored: false } }, 'missing: p/test/a::y'],
+    [
+      'a case only nextest lists',
+      { ...libtest, 'p/test/a::z': { ignored: false } },
+      'added: p/test/a::z',
+    ],
+    [
+      'a case nextest flags differently',
+      { 'p/test/a::x': { ignored: true }, 'p/test/a::y': { ignored: true } },
+      'ignoredChanged: p/test/a::x',
+    ],
+  ])('exits 1 and names the differing test for %s', (name, nextest, line) => {
+    const { code, out } = compare(name.replaceAll(' ', '-'), nextest);
+    expect(code, `expected exit code: 1 | received: ${code}\n${out}`).toBe(1);
+    expect(out, `expected compare output to contain "${line}" | received: ${out}`).toContain(line);
   });
 });
