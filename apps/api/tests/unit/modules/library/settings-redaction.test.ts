@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseTomlDocument } from '../../../../src/lib/toml';
+import { parseTomlDocument, stringifyTomlDocument } from '../../../../src/lib/toml';
 import { redactSettingsDocument } from '../../../../src/modules/library/domain/settings-redaction';
 
 describe('settings redaction', () => {
@@ -17,18 +17,22 @@ describe('settings redaction', () => {
     ['1979-05-27T00:32:00-07:00', '1979-05-27T00:32:00.000-07:00'],
     ['1979-05-27T07:32:00.1Z', '1979-05-27T07:32:00.100Z'],
     ['1979-05-27T07:32:00.12Z', '1979-05-27T07:32:00.120Z'],
-    ['1979-05-27T07:32:00.123456789Z', '1979-05-27T07:32:00.123456789Z'],
+    ['1979-05-27T07:32:00.123456789Z', '1979-05-27T07:32:00.123Z'],
+    ['1979-05-27T00:32:00.123456789-07:00', '1979-05-27T00:32:00.123-07:00'],
     ['1979-05-27T07:32:00', '1979-05-27T07:32:00.000'],
-    ['1979-05-27T07:32:00.123456789', '1979-05-27T07:32:00.123456789'],
+    ['1979-05-27T07:32:00.123456789', '1979-05-27T07:32:00.123'],
     ['1979-05-27', '1979-05-27'],
     ['07:32:00', '07:32:00.000'],
-    ['07:32:00.123456789', '07:32:00.123456789'],
+    ['07:32:00.123456789', '07:32:00.123'],
   ])('keeps TOML scalar %s visible as %s', (literal, displayed) => {
     const document = parseTomlDocument(`updated_at = ${literal}`);
 
     expect(redactSettingsDocument(document, { homeDir: '/home/ada' })).toEqual([
       { path: 'updated_at', presentation: 'value', value: displayed },
     ]);
+    if (literal.includes('123456789')) {
+      expect(stringifyTomlDocument(document)).toContain(literal);
+    }
   });
 
   it('handles Temporal leaves in tables and arrays while redacting credential ancestors', () => {

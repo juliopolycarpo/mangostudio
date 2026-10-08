@@ -84,7 +84,7 @@ function collectFields(
 }
 
 /**
- * Keep the existing millisecond date display and any available nanoseconds.
+ * Keep exactly the existing millisecond date display without changing stored precision.
  *
  * @example
  * renderScalarValue(new Date('1979-05-27T07:32:00Z')); // '1979-05-27T07:32:00.000Z'
@@ -92,15 +92,13 @@ function collectFields(
 function renderScalarValue(value: unknown): string {
   if (typeof value !== 'object' || value === null) return String(value);
   if (value instanceof Date) return value.toISOString();
-  const retained = tomlOffsetLiteral(value);
-  if (retained !== undefined) return retained;
-  const rendered = String(value);
+  const rendered = tomlOffsetLiteral(value) ?? String(value);
   const tag = Object.prototype.toString.call(value);
   if (!/^\[object Temporal\.(?:Instant|PlainDateTime|PlainTime)\]$/.test(tag)) return rendered;
   return rendered.replace(
-    /(?:\.(\d+))?(Z)?$/,
+    /(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})?$/,
     (_match, fraction: string | undefined, zone: string | undefined) =>
-      `.${(fraction ?? '').padEnd(3, '0')}${zone ?? ''}`
+      `.${(fraction ?? '').padEnd(3, '0').slice(0, 3)}${zone ?? ''}`
   );
 }
 
