@@ -31,7 +31,7 @@ declare global {
  * @example
  * await page.addInitScript(observeMotionNodes, { route: '[data-testid="route-container"]', card: 'section', dialog: '[role="dialog"]' });
  */
-export function observeMotionNodes(selectors: Record<MotionSurface, string>): void {
+export function observeMotionNodes(selectors: Partial<Record<MotionSurface, string>>): void {
   const observations: MotionObservation[] = [];
   const recorded = new WeakSet<Element>();
   window.__motionObservations = observations;
