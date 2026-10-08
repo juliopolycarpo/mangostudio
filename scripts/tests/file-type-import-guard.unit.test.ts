@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, relative } from 'node:path';
 import ts from '@typescript/typescript6';
-import { isRequire, unwrapExpression } from '../lib/import-specifiers';
+import { ROOT_DIR as REPO_ROOT } from '../lib/config';
+import { collectModuleSpecifiers } from '../lib/import-specifiers';
 
-const REPO_ROOT = resolve(import.meta.dir, '../..');
 const API_SRC = join(REPO_ROOT, 'apps/api/src');
 const DETECTOR_PATH = 'apps/api/src/lib/file-type-detector.ts';
 
@@ -15,41 +15,9 @@ interface FileTypeImport {
 }
 
 function findFileTypeImports(source: string, file: string): FileTypeImport[] {
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
-  const imports: FileTypeImport[] = [];
-
-  function recordImport(node: ts.Node | undefined): void {
-    node = unwrapExpression(node);
-    if (!node || !ts.isStringLiteralLike(node)) return;
-    if (node.text !== 'file-type' && !node.text.startsWith('file-type/')) return;
-    imports.push({
-      file,
-      line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
-      specifier: node.text,
-    });
-  }
-
-  function visit(node: ts.Node): void {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-      recordImport(node.moduleSpecifier);
-    }
-    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
-      recordImport(node.moduleReference.expression);
-    }
-    if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
-      recordImport(node.argument.literal);
-    }
-    if (
-      ts.isCallExpression(node) &&
-      (node.expression.kind === ts.SyntaxKind.ImportKeyword || isRequire(node.expression))
-    ) {
-      recordImport(node.arguments[0]);
-    }
-    ts.forEachChild(node, visit);
-  }
-
-  visit(sourceFile);
-  return imports;
+  return collectModuleSpecifiers(source, file)
+    .filter(({ text }) => text === 'file-type' || text.startsWith('file-type/'))
+    .map(({ text, line }) => ({ file, line, specifier: text }));
 }
 
 function assertFileTypeBoundary(imports: readonly FileTypeImport[]): void {

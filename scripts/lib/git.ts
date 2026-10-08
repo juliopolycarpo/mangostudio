@@ -56,6 +56,19 @@ export function getWorkingTreeChanges(baseRef: string, cwd?: string): string[] {
 }
 
 /**
+ * Every file in the checkout that Git does not ignore: tracked files plus new
+ * unignored ones, as repository-relative paths. A tracked file deleted from the
+ * working tree is still listed.
+ *
+ * @example
+ * listCheckoutFiles(); // ['AGENTS.md', 'apps/api/src/app.ts', ...]
+ */
+export function listCheckoutFiles(cwd?: string): string[] {
+  const out = git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd);
+  return [...new Set(out.split('\0').filter(Boolean))];
+}
+
+/**
  * The merge-base of HEAD and `ref`, as a full sha. `bun test --changed=<ref>`
  * diffs against `ref` itself, so a base branch that moved on would pull its own
  * new commits into the selection; passing the merge-base keeps it to this
