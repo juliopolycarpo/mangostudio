@@ -12,6 +12,8 @@ const QUIET_TURBO_ENV = {
 export interface DryRunTask {
   readonly taskId: string;
   readonly task: string;
+  /** The package the task runs in, e.g. `@mangostudio/api`; `//` for a root task. */
+  readonly package: string;
   /** `<NONEXISTENT>` for a task no package script backs, such as `transit`. */
   readonly command: string;
   readonly hash: string;

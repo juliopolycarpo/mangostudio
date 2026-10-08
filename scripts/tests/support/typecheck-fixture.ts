@@ -118,7 +118,12 @@ export function createTypecheckFixture(): TypecheckFixture {
   };
 }
 
-/** A fixture `package.json`: the workspace dependencies and a fake `typecheck`. */
+/**
+ * A fixture `package.json`: the workspace dependencies, and a fake `typecheck`
+ * and, where the real workspace has one, `test:unit`. Both read the workspace's
+ * own sources and those of every workspace it imports, as the real ones do:
+ * `tsc` resolves them through the workspace link and a unit test imports them.
+ */
 function fixtureManifest(
   workspace: WorkspaceManifest,
   byName: ReadonlyMap<string, WorkspaceManifest>
@@ -127,12 +132,14 @@ function fixtureManifest(
   const dependencySources = transitiveDependencies(workspace, byName).map((entry) =>
     posix.relative(workspace.directory, posix.join(entry.directory, 'src'))
   );
+  const check = `bun "${FAKE_TYPECHECK}" src private ${dependencySources.join(' ')}`;
   return {
     name: workspace.packageName,
     version: '0.0.0',
     private: true,
     scripts: {
-      typecheck: `bun "${FAKE_TYPECHECK}" src private ${dependencySources.join(' ')}`,
+      typecheck: check,
+      ...(workspace.hasUnitTestScript ? { 'test:unit': check } : {}),
     },
     dependencies: Object.fromEntries(dependencies.map((name) => [name, 'workspace:*'])),
   };

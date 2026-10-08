@@ -109,6 +109,14 @@ importing it is invisible to `--changed`, so CI keeps running everything.
 Turbo skips packages that do not define a given task, so passing all workspace
 filters is safe — no per-workspace metadata is needed to gate lane participation.
 
+A unit lane runs the sources of the workspaces it imports, not only its own (a
+frontend test drives API code, an API test drives `shared`), so its cache key covers
+them: `test:unit` depends on the script-less `transit` task, which hashes every
+workspace upstream without running anything or making a lane wait. A unit result is
+replayed only while those workspaces are unchanged. An edit in `apps/api` therefore
+re-runs the API and frontend lanes, and an edit in `apps/frontend` re-runs only its
+own. `scripts/tests/unit-cache-graph.unit.test.ts` pins this.
+
 ### Timeouts
 
 Every lane sets a **15s floor** — `--timeout 15000`, passed on the command line

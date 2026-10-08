@@ -4,7 +4,9 @@
  * the sources of the workspaces it imports, so an error in a dependency fails
  * the dependent too. A file containing the error marker is the "type error";
  * one containing the slow marker makes the check take `SLOW_CHECK_MS` first,
- * the way a large workspace outlasts a small one.
+ * the way a large workspace outlasts a small one. The fixture's `test:unit`
+ * scripts run it too: a unit test imports the workspaces it depends on, so an
+ * error in one fails the dependent's tests.
  *
  * @example
  * bun fake-typecheck.ts src private ../shared/src   // exits 1 if any tree has the marker

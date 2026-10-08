@@ -15,6 +15,7 @@ export interface WorkspaceManifest {
   readonly directory: string;
   readonly packageName: string;
   readonly hasTypecheckScript: boolean;
+  readonly hasUnitTestScript: boolean;
   /** Every package named in a dependency section, workspace or not. */
   readonly dependencyNames: readonly string[];
 }
@@ -57,6 +58,7 @@ function readWorkspaceManifest(root: string, directory: string): WorkspaceManife
     directory,
     packageName: manifest.name,
     hasTypecheckScript: manifest.scripts?.typecheck !== undefined,
+    hasUnitTestScript: manifest.scripts?.['test:unit'] !== undefined,
     dependencyNames: [...new Set(dependencyNames)],
   };
 }

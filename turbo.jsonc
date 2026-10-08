@@ -59,8 +59,10 @@
     // and orders nothing. It exists for its hash. Turbo folds the hash of each
     // `dependsOn` task into the dependent's own, so a task that depends on
     // `transit` is rebuilt whenever a workspace it imports changes, yet starts
-    // at once. A task that reads its dependencies' sources and writes nothing
-    // for them to wait on opts in with `"dependsOn": ["transit"]`.
+    // at once. A task that reads its dependencies' sources and has nothing for
+    // them to wait on opts in with `"dependsOn": ["transit"]` (`typecheck` and
+    // `test:unit` do). It must declare no `inputs`: the default set is what
+    // carries an upstream `package.json` or tsconfig edit downstream.
     "transit": {
       "dependsOn": ["^transit"]
     },
@@ -81,7 +83,13 @@
       "dependsOn": ["typecheck", "^typecheck:with-deps"]
     },
     "circular": {},
+    // A unit test runs the sources of the workspaces it imports, not only its
+    // own: a frontend test drives API code, an API test drives `shared`. With
+    // no `dependsOn`, the key covered one workspace and replayed a pass after
+    // the code under test had changed. `transit` adds the upstream sources to
+    // the key without making any lane wait or run another workspace's tests.
     "test:unit": {
+      "dependsOn": ["transit"],
       "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
     },
     "test:integration": {

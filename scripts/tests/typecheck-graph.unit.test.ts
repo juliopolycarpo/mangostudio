@@ -87,6 +87,7 @@ describe('typecheck closure guard', () => {
     directory: 'apps/api',
     packageName: API,
     hasTypecheckScript: true,
+    hasUnitTestScript: false,
     dependencyNames: [],
     ...overrides,
   });
@@ -97,6 +98,7 @@ describe('typecheck closure guard', () => {
       directory: 'packages/cli',
       packageName: 'mangostudio',
       hasTypecheckScript: false,
+      hasUnitTestScript: false,
       dependencyNames: [SHARED],
     });
     const api = manifest({ dependencyNames: ['mangostudio', 'elysia'] });
