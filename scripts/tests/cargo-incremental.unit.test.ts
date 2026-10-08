@@ -9,90 +9,212 @@ import {
 } from './support/workflow-blocks';
 import { compositeActionFiles, workflowFiles } from './support/workflow-files';
 
-// Incremental compilation keeps per-crate state so a rebuild of the same target
-// directory can skip work. A CI job builds once, so the state only costs time and
-// disk: measured on a cold target with the commands the lanes run, turning it off
-// took the local runtime build from 134.5 s to 118.6 s and its target directory
-// from 2.65 GB to 1.65 GB, and the nextest build from 126.7 s to 112.0 s and from
-// 3.88 GB to 2.09 GB. Swatinem/rust-cache exports the same value for jobs that
-// restore a cache, but not for the lanes that deliberately have none, so every
-// job that compiles Rust sets it itself instead of relying on that side effect.
-//
-// The release profile is already non-incremental, and `--release` steps are left
-// alone: setting the variable there changes no rustc argument.
+type Environment = Readonly<Record<string, unknown>>;
 
-// `cargo build`, `cargo +nightly fuzz run`, `cargo-zigbuild clippy` and friends.
-// Subcommands that never compile (`deny`, `fmt`, `metadata`) and the ones that
-// compile in a throwaway directory for a release (`install`, `publish`) are not
-// listed.
-const CARGO_COMPILE =
-  /(?:^|[\s;&|(])cargo(?:-zigbuild)?(?:\s+\+\S+)?\s+(?:build|check|clippy|test|nextest|doc|hack|llvm-cov|zigbuild|semver-checks|fuzz|rustc|bench)\b/;
-
-/** `CARGO_INCREMENTAL: "0"` (or an unquoted 0) on a line of its own. */
-const SETS_ENV = /^\s+CARGO_INCREMENTAL:\s*["']?0["']?\s*$/m;
-
-/** The text before the first `jobs:`, where workflow-level `env:` lives. */
-function workflowHeader(text: string): string {
-  return text.split(/\njobs:\n/)[0] ?? '';
-}
-
-/** Workflow-level `env:` at column 0. */
-function workflowSetsEnv(text: string): boolean {
-  const env = /^env:\n((?: {2}.*\n|\n)+)/m.exec(`${workflowHeader(text)}\n`)?.[1] ?? '';
-  return SETS_ENV.test(env);
-}
-
-/** Job-level `env:` at indent 4, ahead of the job's steps. */
-function jobSetsEnv(jobBlock: string): boolean {
-  const beforeSteps = jobBlock.split(/\n {4}steps:\n/)[0] ?? '';
-  const env = /^ {4}env:\n((?: {6}.*\n)+)/m.exec(`${beforeSteps}\n`)?.[1] ?? '';
-  return SETS_ENV.test(env);
-}
-
-/** True for a step that compiles Rust in the dev or test profile. */
-function compilesDebug(step: string): boolean {
-  const script = runScriptLines(step)
-    .map(({ text }) => text.trim())
-    .filter((line) => !line.startsWith('#'))
-    .join('\n');
-  return CARGO_COMPILE.test(script) && !/--release\b/.test(script);
-}
-
-/** A step block's own `env:` (children one level below the step's keys). */
-function stepSetsEnv(step: string, indent: number): boolean {
-  const children = new RegExp(`^ {${indent}}CARGO_INCREMENTAL:\\s*["']?0["']?\\s*$`, 'm');
-  return children.test(step);
+interface CargoStep {
+  readonly name?: string;
+  readonly run?: string;
+  readonly env?: Environment;
 }
 
 interface CargoJob {
   readonly file: string;
   readonly name: string;
-  readonly workflowSets: boolean;
-  readonly jobSets: boolean;
-  readonly compilingSteps: readonly string[];
+  readonly workflowEnv?: Environment;
+  readonly env?: Environment;
+  readonly compilingSteps: readonly CargoStep[];
 }
 
-/** Every job in every workflow with at least one step that compiles Rust in a debug profile. */
-function cargoJobs(): CargoJob[] {
-  return workflowFiles().flatMap((file) => {
-    const text = readText(file);
-    return extractJobBlocks(text)
-      .map(({ job, block }) => ({
-        file,
-        name: job,
-        workflowSets: workflowSetsEnv(text),
-        jobSets: jobSetsEnv(block),
-        compilingSteps: extractStepBlocks(block).filter(compilesDebug),
-      }))
-      .filter((job) => job.compilingSteps.length > 0);
+// Commands that compile Rust. Release-only package installation/publication and
+// non-compiling commands such as fmt/metadata/deny are outside this policy.
+const CARGO_COMPILE =
+  /(?:^|[\s;&|(])cargo(?:-zigbuild)?(?:\s+\+\S+)?\s+(?:build|check|clippy|test|nextest|doc|hack|llvm-cov|zigbuild|semver-checks|fuzz|rustc|bench)\b/;
+
+/** Check each shell command so a release command cannot exempt a debug sibling. */
+function compilesDebug(step: CargoStep): boolean {
+  const commands = (step.run ?? '').replace(/(?:\\|`)\r?\n/g, ' ').split(/\r?\n|&&|\|\||[;|]/);
+  return commands.some((command) => {
+    const cargoArgs = command.replace(/#.*$/, '').split(/\s+--(?:\s|$)/)[0];
+    return CARGO_COMPILE.test(cargoArgs) && !/--release\b/.test(cargoArgs);
   });
 }
 
+/** Resolve the narrowest declared env mapping; an invalid override fails closed. */
+function incrementalSetting(...environments: readonly (Environment | undefined)[]): unknown {
+  return environments.find((env) => env && Object.hasOwn(env, 'CARGO_INCREMENTAL'))
+    ?.CARGO_INCREMENTAL;
+}
+
+/** Only the literal string or YAML number zero disables incremental compilation. */
+function setsZero(...environments: readonly (Environment | undefined)[]): boolean {
+  const setting = incrementalSetting(...environments);
+  return setting === '0' || setting === 0;
+}
+
+/** Parse only the env mapping at this YAML key depth, excluding run script text. */
+function environmentAt(source: string, indent: number): Environment | undefined {
+  const lines = source.split('\n');
+  const marker = new RegExp(`^ {${indent}}env:`);
+  const start = lines.findIndex((line) => marker.test(line));
+  if (start < 0) return undefined;
+  const remaining = lines.slice(start + 1);
+  const end = remaining.findIndex(
+    (line) => line.trim() !== '' && !line.trimStart().startsWith('#') && line.search(/\S/) <= indent
+  );
+  const block = [lines[start].slice(indent), ...remaining.slice(0, end < 0 ? undefined : end)].join(
+    '\n'
+  );
+  return (Bun.YAML.parse(block) as { env?: Environment }).env;
+}
+
+/** Preserve the existing script extractor and read the step's own env mapping. */
+function stepInfo(block: string): CargoStep {
+  const indent = (block.match(/^ */)?.[0].length ?? 0) + 2;
+  return {
+    name: /name:\s*(.+)/.exec(block)?.[1],
+    run: runScriptLines(block)
+      .map(({ text }) => text.trim())
+      .join('\n'),
+    env: environmentAt(block.replace(/^( *)- /, '$1  '), indent),
+  };
+}
+
+/** Derive compiling jobs and their env mappings without parsing unrelated matrix expressions. */
+function cargoJobs(file: string, text: string): CargoJob[] {
+  const workflowEnv = environmentAt(text.split(/\njobs:/)[0], 0);
+  return extractJobBlocks(`\n${text}`)
+    .map(({ job, block }) => ({
+      file,
+      name: job,
+      workflowEnv,
+      env: environmentAt(block.split(/\n {4}steps:/)[0], 4),
+      compilingSteps: extractStepBlocks(block).map(stepInfo).filter(compilesDebug),
+    }))
+    .filter((job) => job.compilingSteps.length > 0);
+}
+
+describe('Cargo compilation detection', () => {
+  const cases: readonly [string, string | undefined, boolean][] = [
+    ['debug', 'cargo check --locked', true],
+    ['release only', 'cargo build --release --locked', false],
+    ['mixed lines', 'cargo build --locked\ncargo build --release --locked', true],
+    ['mixed shell commands', 'cargo build --release && cargo test --locked', true],
+    ['continued release', 'cargo build \\\n  --release --locked', false],
+    ['continued PowerShell release', 'cargo build `\n  --release --locked', false],
+    ['debug before continued release', 'cargo check\ncargo build \\\n  --release', true],
+    ['commented release flag', 'cargo check # --release', true],
+    ['commented cargo command', '# cargo check\ncargo fmt --all', false],
+    ['test program argument', 'cargo test -- --release', true],
+    ['toolchain override', 'cargo +nightly fuzz run roundtrip', true],
+    ['cargo wrapper', 'cargo-zigbuild clippy --locked', true],
+    ['feature powerset', 'cargo hack clippy --feature-powerset -- -D warnings', true],
+    ['non-compiling command', 'cargo metadata --locked', false],
+    ['uses step', undefined, false],
+  ];
+  for (const [name, run, expected] of cases) {
+    test(name, () => {
+      expect(
+        compilesDebug({ run }),
+        `expected debug compilation ${expected} | received script: ${run}`
+      ).toBe(expected);
+    });
+  }
+});
+
+describe('CARGO_INCREMENTAL environment precedence', () => {
+  const zero = { CARGO_INCREMENTAL: '0' };
+  const one = { CARGO_INCREMENTAL: '1' };
+
+  test('inherits from job and workflow, with step taking precedence', () => {
+    expect(setsZero(undefined, undefined, zero)).toBe(true);
+    expect(setsZero(undefined, zero, one)).toBe(true);
+    expect(setsZero(zero, one, one)).toBe(true);
+    expect(incrementalSetting(undefined, zero, one)).toBe('0');
+  });
+
+  test('rejects a narrower override despite outer zero', () => {
+    expect(setsZero(one, zero, zero), 'expected step override 1 rejected | received accepted').toBe(
+      false
+    );
+    expect(
+      setsZero(undefined, one, zero),
+      'expected job override 1 rejected | received accepted'
+    ).toBe(false);
+  });
+
+  for (const value of [undefined, null, false, 'false', '1', '${{ vars.CARGO_INCREMENTAL }}']) {
+    test(`rejects explicit invalid ${typeof value} value ${String(value)}`, () => {
+      expect(
+        setsZero({ CARGO_INCREMENTAL: value }, zero),
+        `expected literal zero | received: ${String(value)}`
+      ).toBe(false);
+    });
+  }
+
+  test('accepts YAML number zero and rejects an absent setting', () => {
+    expect(setsZero({ CARGO_INCREMENTAL: 0 })).toBe(true);
+    expect(setsZero(undefined, {})).toBe(false);
+  });
+});
+
+describe('YAML env mapping extraction', () => {
+  test('reads block and inline mappings at the intended depth', () => {
+    expect(environmentAt('env:\n  CARGO_INCREMENTAL: "0"\njobs:\n', 0)).toEqual({
+      CARGO_INCREMENTAL: '0',
+    });
+    expect(environmentAt('    env: { CARGO_INCREMENTAL: 0 }\n    steps:\n', 4)).toEqual({
+      CARGO_INCREMENTAL: 0,
+    });
+    expect(
+      environmentAt('      run: |\n        env:\n          CARGO_INCREMENTAL: "0"\n', 6)
+    ).toBeUndefined();
+  });
+
+  test('reads a first-key step env for workflow and composite list indents', () => {
+    expect(
+      stepInfo('      - env:\n          CARGO_INCREMENTAL: "0"\n        run: cargo check\n').env
+    ).toEqual({ CARGO_INCREMENTAL: '0' });
+    expect(
+      stepInfo('    - env:\n        CARGO_INCREMENTAL: 0\n      run: cargo check\n').env
+    ).toEqual({ CARGO_INCREMENTAL: 0 });
+  });
+});
+
 describe('CARGO_INCREMENTAL in CI', () => {
+  test('a job override cannot be satisfied by the workflow environment', () => {
+    const workflow =
+      'env:\n  CARGO_INCREMENTAL: "0"\njobs:\n  compile:\n    env:\n      CARGO_INCREMENTAL: "1"\n    steps:\n      - run: cargo check --locked\n';
+    const [job] = cargoJobs('override.yml', workflow);
+    expect(
+      setsZero(job.compilingSteps[0].env, job.env, job.workflowEnv),
+      'expected effective CARGO_INCREMENTAL=1 rejected | received accepted'
+    ).toBe(false);
+  });
+
+  test('script text cannot impersonate a step environment setting', () => {
+    const workflow =
+      'jobs:\n  compile:\n    steps:\n      - run: |\n          CARGO_INCREMENTAL: "0"\n          cargo check --locked\n';
+    const [job] = cargoJobs('script.yml', workflow);
+    expect(
+      setsZero(job.compilingSteps[0].env, job.env, job.workflowEnv),
+      'expected actual env mapping | received accepted script text'
+    ).toBe(false);
+  });
+
+  test('release-only and non-compiling jobs are excluded', () => {
+    expect(
+      cargoJobs(
+        'release.yml',
+        'jobs:\n  release:\n    steps:\n      - run: cargo build --release\n  format:\n    steps:\n      - run: cargo fmt --all\n'
+      )
+    ).toEqual([]);
+    expect(cargoJobs('empty.yml', 'name: empty\n')).toEqual([]);
+  });
+
   test('the derivation finds the jobs it is meant to guard', () => {
-    // A canary against the pattern rotting: if no job were found the checks
-    // below would pass for the wrong reason.
-    const names = cargoJobs().map(({ file, name }) => `${file.split('/').pop()}:${name}`);
+    const names = workflowFiles()
+      .flatMap((file) => cargoJobs(file, readText(file)))
+      .map(({ file, name }) => `${file.split('/').pop()}:${name}`);
     for (const expected of [
       'cargo-shim.yml:workspace',
       'cargo-shim.yml:workspace-msrv',
@@ -100,47 +222,47 @@ describe('CARGO_INCREMENTAL in CI', () => {
       'protocol-ci.yml:rust',
       'rust-coverage.yml:coverage',
       'rust-fresh-dependencies.yml:fresh',
-    ]) {
-      expect(names, `expected the derivation to find ${expected} | received: ${names}`).toContain(
-        expected
-      );
-    }
+    ])
+      expect(names, `expected compiling job ${expected} | received: ${names}`).toContain(expected);
   });
 
-  test('every job that compiles Rust in a debug profile sets CARGO_INCREMENTAL to 0', () => {
-    const missing = cargoJobs()
-      .filter(
-        (job) =>
-          !job.workflowSets && !job.jobSets && job.compilingSteps.some((s) => !stepSetsEnv(s, 10))
-      )
-      .map(({ file, name }) => `${file} job '${name}'`);
-
+  test('every debug compilation receives CARGO_INCREMENTAL=0', () => {
+    const missing = workflowFiles()
+      .flatMap((file) => cargoJobs(file, readText(file)))
+      .flatMap((job) =>
+        job.compilingSteps
+          .filter((step) => !setsZero(step.env, job.env, job.workflowEnv))
+          .map(
+            (step) =>
+              `${job.file} job '${job.name}' step '${step.name ?? step.run}': ${String(incrementalSetting(step.env, job.env, job.workflowEnv))}`
+          )
+      );
     expect(
       missing,
-      `expected CARGO_INCREMENTAL: "0" in the workflow, job or step env of every job that compiles Rust in a debug profile | received without it: ${missing.join('; ')}`
+      `expected effective CARGO_INCREMENTAL: "0" for every debug compilation | received: ${missing.join('; ')}`
     ).toEqual([]);
   });
 
-  test('every composite action that compiles Rust sets CARGO_INCREMENTAL to 0 on the step', () => {
-    const missing: string[] = [];
-    let compiling = 0;
-    for (const file of compositeActionFiles()) {
-      for (const step of extractStepBlocksAtIndent(readText(file), 4).filter(compilesDebug)) {
-        compiling += 1;
-        if (!stepSetsEnv(step, 8)) {
-          missing.push(`${file} step '${/name:\s*(.+)/.exec(step)?.[1] ?? step.split('\n')[0]}'`);
-        }
-      }
-    }
-
-    // Canary for the composite derivation: the Local runtime build is one.
+  test('every compiling composite step declares CARGO_INCREMENTAL=0', () => {
+    const steps = compositeActionFiles().flatMap((file) => {
+      return extractStepBlocksAtIndent(readText(file), 4)
+        .map(stepInfo)
+        .filter(compilesDebug)
+        .map((step) => ({ file, step }));
+    });
     expect(
-      compiling,
-      'expected at least one compiling composite step | received: none'
+      steps.length,
+      'expected at least one compiling composite step | received none'
     ).toBeGreaterThan(0);
+    const missing = steps
+      .filter(({ step }) => !setsZero(step.env))
+      .map(
+        ({ file, step }) =>
+          `${file} step '${step.name ?? step.run}': ${String(incrementalSetting(step.env))}`
+      );
     expect(
       missing,
-      `expected CARGO_INCREMENTAL: "0" on every composite step that compiles Rust in a debug profile | received without it: ${missing.join('; ')}`
+      `expected CARGO_INCREMENTAL: "0" in every compiling composite step env | received: ${missing.join('; ')}`
     ).toEqual([]);
   });
 });
