@@ -17,6 +17,8 @@ scripts/
 │                     Refresh bundled Node lifecycle and latest-patch data
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
 ├── test.ts           Run unit/integration/e2e/coverage lanes, whole, sharded, or --changed (bun run test)
+├── run-test-workers.ts
+│                     Run one test lane as isolated worker processes, one merged report (API test:unit)
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
@@ -54,6 +56,8 @@ importing the specific module in new code:
 | `bun-cross-runtime.ts` | Per-target Bun runtime for `--compile` when `.bun-version` names a channel (dormant on a released pin)   |
 | `runtime-build.ts`     | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
 | `executable-header.ts` | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
+| `test-workers.ts`      | Test-lane worker plan, strict verdict, JUnit merge (+ test-worker-process.ts)                            |
+| `junit-report.ts`      | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
 
 ### Cancelling a runner
