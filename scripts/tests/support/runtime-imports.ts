@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { ROOT_DIR } from '../../lib/config';
 
@@ -66,14 +66,85 @@ function isTypeOnlyImportClause(clause: string): boolean {
   return bindings.length > 0 && bindings.every((binding) => /^\s*type\s/.test(binding));
 }
 
-/** Walk runtime imports from a repo-relative or absolute entrypoint. */
-export function walkRuntimeImports(entryRelativePath: string): RuntimeImportWalkResult {
-  const entry = resolve(ROOT_DIR, entryRelativePath);
+function readWorkspaceAliases(rootDir: string): Record<string, string[]> {
+  const configPath = join(rootDir, 'scripts', 'tsconfig.json');
+  if (!existsSync(configPath)) return {};
+  const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
+    compilerOptions?: { paths?: Record<string, string[]> };
+  };
+  return config.compilerOptions?.paths ?? {};
+}
+
+function resolveWorkspaceModule(
+  rootDir: string,
+  specifier: string,
+  aliases: Record<string, string[]>
+): string | null {
+  const targets = aliases[specifier];
+  if (!targets || !specifier.startsWith('@mangostudio/')) return null;
+  const [scope, name, ...subpath] = specifier.split('/');
+  const packageName = `${scope}/${name}`;
+  const exportName = subpath.length === 0 ? '.' : `./${subpath.join('/')}`;
+  const expected = `Workspace alias "${specifier}" -> ${JSON.stringify(targets)} | expected one file matching ${packageName} export "${exportName}"`;
+  if (
+    !Array.isArray(targets) ||
+    targets.length !== 1 ||
+    typeof targets[0] !== 'string' ||
+    targets[0].includes('*')
+  ) {
+    throw new Error(`${expected}; wildcard or fallback targets are not allowed`);
+  }
+
+  const target = resolve(rootDir, 'scripts', targets[0]);
+  const relativeTarget = relative(rootDir, target);
+  if (
+    relativeTarget === '..' ||
+    relativeTarget.startsWith(`..${sep}`) ||
+    isAbsolute(relativeTarget)
+  ) {
+    throw new Error(`${expected}; received a path outside the repository: ${target}`);
+  }
+  let packageDir = dirname(target);
+  while (packageDir !== rootDir && !existsSync(join(packageDir, 'package.json'))) {
+    packageDir = dirname(packageDir);
+  }
+  const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as {
+    name?: string;
+    exports?: Record<string, unknown>;
+  };
+  const exportedTarget = manifest.exports?.[exportName];
+  if (manifest.name !== packageName || typeof exportedTarget !== 'string') {
+    throw new Error(
+      `${expected}; received package ${JSON.stringify(manifest.name)} with export target ${JSON.stringify(exportedTarget)}`
+    );
+  }
+  if (resolve(packageDir, exportedTarget) !== target) {
+    throw new Error(`${expected}; received different manifest export target ${exportedTarget}`);
+  }
+  if (!existsSync(target) || !statSync(target).isFile()) {
+    throw new Error(`${expected}; received a missing or non-file target: ${target}`);
+  }
+  return target;
+}
+
+/**
+ * Walk runtime imports, following exact workspace aliases only when their package
+ * exports agree. This keeps no-install smoke checks inspecting the original source.
+ *
+ * @example walkRuntimeImports('scripts/test-build.ts');
+ */
+export function walkRuntimeImports(
+  entryRelativePath: string,
+  rootDir = ROOT_DIR
+): RuntimeImportWalkResult {
+  const resolvedRoot = resolve(rootDir);
+  const entry = resolve(resolvedRoot, entryRelativePath);
+  const aliases = readWorkspaceAliases(resolvedRoot);
   const files = new Set<string>();
   const externalSpecifiers = new Map<string, string[]>();
 
   function recordExternal(specifier: string, fromFile: string): void {
-    const relativeFrom = fromFile.replace(`${ROOT_DIR}/`, '');
+    const relativeFrom = relative(resolvedRoot, fromFile).split(sep).join('/');
     const existing = externalSpecifiers.get(specifier);
     if (existing) {
       if (!existing.includes(relativeFrom)) {
@@ -100,6 +171,11 @@ export function walkRuntimeImports(entryRelativePath: string): RuntimeImportWalk
       }
       if (specifier.startsWith('.')) {
         walk(resolveRelativeModule(filePath, specifier));
+        return;
+      }
+      const workspaceModule = resolveWorkspaceModule(resolvedRoot, specifier, aliases);
+      if (workspaceModule) {
+        walk(workspaceModule);
         return;
       }
       recordExternal(specifier, filePath);
