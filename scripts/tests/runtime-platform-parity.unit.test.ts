@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { RUNTIME_PLATFORM_IDS } from '../../apps/shared/src/runtime-home/platform';
+import { RUNTIME_PLATFORM_IDS } from '@mangostudio/shared/runtime-home';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 
 describe('runtime platform parity', () => {
