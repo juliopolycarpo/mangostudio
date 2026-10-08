@@ -1,6 +1,5 @@
 import type { SettingsField } from '@mangostudio/shared/library';
 import { looksCredentialShaped } from '../../../lib/credential-policy';
-import { tomlOffsetLiteral } from '../../../lib/toml-offsets';
 
 export interface SettingsRedactionOptions {
   readonly homeDir: string;
@@ -92,7 +91,7 @@ function collectFields(
 function renderScalarValue(value: unknown): string {
   if (typeof value !== 'object' || value === null) return String(value);
   if (value instanceof Date) return value.toISOString();
-  const rendered = tomlOffsetLiteral(value) ?? String(value);
+  const rendered = String(value);
   const tag = Object.prototype.toString.call(value);
   if (!/^\[object Temporal\.(?:Instant|PlainDateTime|PlainTime)\]$/.test(tag)) return rendered;
   return rendered.replace(

@@ -3,12 +3,6 @@
  * through this module, so the underlying library can change in one place.
  */
 import { readUtf8FileOrNull } from './safe-file';
-import {
-  markTomlOffsets,
-  prepareTomlOffsets,
-  rememberTomlOffsets,
-  restoreTomlOffsets,
-} from './toml-offsets';
 
 export type TomlStringSections = Record<string, Record<string, string>>;
 
@@ -124,7 +118,7 @@ function safeTomlParserError(error: unknown): Error {
  * Parse a complete TOML document without reading from disk. Throws on
  * malformed TOML. Date/time values stay as Bun's Temporal types, so writing
  * an unrelated setting preserves local date/time forms and fractional precision.
- * Retain offset literals by matching a marked native parse to the original shape.
+ * Offset datetimes normalize to UTC while preserving their exact instant.
  * Diagnostics withhold source values so config logs and API callers cannot expose secrets.
  *
  * @example
@@ -133,10 +127,6 @@ function safeTomlParserError(error: unknown): Error {
 export function parseTomlDocument(content: string): Record<string, unknown> {
   try {
     const parsed = Bun.TOML.parse(content);
-    const marked = markTomlOffsets(content);
-    if (marked.zones.size > 0) {
-      rememberTomlOffsets(parsed, Bun.TOML.parse(marked.content), marked.zones);
-    }
     return isRecord(parsed) ? parsed : {};
   } catch (error) {
     throw safeTomlParserError(error);
@@ -150,14 +140,13 @@ export function parseTomlDocument(content: string): Record<string, unknown> {
  * const toml = stringifyTomlDocument({ auth: { secret: 's' } });
  */
 export function stringifyTomlDocument(doc: Record<string, unknown>): string {
-  const marked = prepareTomlOffsets(doc);
-  const serialized = Bun.TOML.stringify(marked.document);
+  const serialized = Bun.TOML.stringify(doc);
   if (serialized === undefined) {
     throw new TypeError(
       `Cannot stringify TOML document: received ${String(doc)}; expected a TOML table object.`
     );
   }
-  return restoreTomlOffsets(serialized, marked.literals);
+  return serialized;
 }
 
 /**

@@ -5,7 +5,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import {
@@ -17,6 +25,7 @@ import {
   setTomlSectionValue,
   stringifyTomlDocument,
 } from '../../../src/lib/toml';
+import { redactSettingsDocument } from '../../../src/modules/library/domain/settings-redaction';
 
 const API_ROOT = resolve(import.meta.dir, '../../..');
 const ADAPTER = 'src/lib/toml.ts';
@@ -120,15 +129,52 @@ describe('stringifyTomlDocument', () => {
     }
   });
 
-  it('keeps an offset datetime and its instant through a rewrite', () => {
+  it('normalizes an offset datetime to UTC while preserving its instant through a rewrite', () => {
     const doc = parseTomlDocument('value = 1979-05-27T00:32:00.123456789-07:00');
     const serialized = stringifyTomlDocument(doc);
 
-    expect(serialized).toBe('value = 1979-05-27T00:32:00.123456789-07:00\n');
+    expect(serialized).toBe('value = 1979-05-27T07:32:00.123456789Z\n');
     const original = doc.value as { epochNanoseconds: bigint };
     const reparsed = parseTomlDocument(serialized).value as { epochNanoseconds: bigint };
     expect(reparsed.epochNanoseconds).toBe(original.epochNanoseconds);
     expect(stringifyTomlDocument(parseTomlDocument(serialized))).toBe(serialized);
+  });
+
+  it('reads, displays and saves equivalent offset instants as UTC without losing nanoseconds', () => {
+    writeFileSync(
+      configPath,
+      'created = 1979-05-27T00:32:00.123456789-07:00\n' +
+        'equivalent = 1979-05-27T08:32:00.123456789+01:00\n' +
+        'dates = [1979-05-27T07:32:00.123456789Z, 1979-05-27T07:32:00.123456789-00:00]\n' +
+        '[auth]\nsecret = "old"\n'
+    );
+    const document = readTomlDocument(configPath);
+    const instant = document.created as { epochNanoseconds: bigint };
+    const equivalent = document.equivalent as { epochNanoseconds: bigint };
+    expect(String(document.created)).toBe('1979-05-27T07:32:00.123456789Z');
+    expect(instant.epochNanoseconds).toBe(296638320123456789n);
+    expect(equivalent.epochNanoseconds).toBe(instant.epochNanoseconds);
+    expect(redactSettingsDocument(document, { homeDir: '' })).toEqual([
+      { path: 'created', presentation: 'value', value: '1979-05-27T07:32:00.123Z' },
+      { path: 'equivalent', presentation: 'value', value: '1979-05-27T07:32:00.123Z' },
+      { path: 'dates[0]', presentation: 'value', value: '1979-05-27T07:32:00.123Z' },
+      { path: 'dates[1]', presentation: 'value', value: '1979-05-27T07:32:00.123Z' },
+      { path: 'auth.secret', presentation: 'redacted' },
+    ]);
+    setTomlSectionValue(document, 'auth', 'secret', 'new');
+    const written = stringifyTomlDocument(document);
+    expect(written).toContain('created = 1979-05-27T07:32:00.123456789Z');
+    expect(written).toContain('equivalent = 1979-05-27T07:32:00.123456789Z');
+    expect(written).not.toContain('-07:00');
+    expect(written).not.toContain('+01:00');
+    expect(written).not.toContain('-00:00');
+    writeFileSync(configPath, written);
+    const reparsed = readTomlDocument(configPath);
+    expect((reparsed.created as { epochNanoseconds: bigint }).epochNanoseconds).toBe(
+      instant.epochNanoseconds
+    );
+    expect(stringifyTomlDocument(reparsed)).toBe(written);
+    expect(reparsed.auth).toEqual({ secret: 'new' });
   });
 
   it('returns a valid empty document instead of mistaking it for undefined', () => {
@@ -268,6 +314,16 @@ describe('TOML file readers', () => {
 });
 
 describe('TOML library boundary', () => {
+  it('uses one native parse and stringify without a source scanner or offset metadata bridge', () => {
+    const adapter = readFileSync(join(API_ROOT, ADAPTER), 'utf8');
+    expect(adapter.match(/\bBun\.TOML\.parse\(/g)).toHaveLength(1);
+    expect(adapter.match(/\bBun\.TOML\.stringify\(/g)).toHaveLength(1);
+    expect(existsSync(join(API_ROOT, 'src/lib/toml-offsets.ts'))).toBe(false);
+    for (const file of sourceFilesUnder(join(API_ROOT, 'src'))) {
+      expect(readFileSync(file, 'utf8')).not.toMatch(/\bfrom\s*['"][^'"]*toml-offsets['"]/);
+    }
+  });
+
   it('recognizes static imports, dynamic imports, and CommonJS requires', () => {
     for (const library of TOML_LIBRARIES) {
       for (const source of [
