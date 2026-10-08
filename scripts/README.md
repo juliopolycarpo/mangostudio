@@ -42,6 +42,7 @@ importing the specific module in new code:
 | `args.ts`              | CLI argument + workspace-selection parsing                                                               |
 | `git.ts`               | Change detection (`Bun.spawnSync`), workspace mapping                                                    |
 | `exec.ts`              | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
+| `process-tree.ts`      | Child limit and cancellation behind `runCommand`: process groups on POSIX, a job object on Windows       |
 | `summary.ts`           | Pass/fail reporting + exit handling                                                                      |
 | `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                           |
 | `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
@@ -54,6 +55,42 @@ importing the specific module in new code:
 | `runtime-build.ts`     | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
 | `executable-header.ts` | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
 | `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
+
+### Cancelling a runner
+
+`runCommand` is the one place a runner starts children, so it owns what happens to them.
+
+- **Limit.** At most `MANGO_RUNNER_CONCURRENCY` (default 16) children run at once **per runner
+  process**, not per run: every nested `runParallel` / `mapWithConcurrency` call in that process
+  shares the pool, but a runner started as a child holds a pool of its own, so the whole tree can
+  hold more. The widest fan-out today is `bun run protocol:check` with 12 tasks.
+- **POSIX.** Each child leads its own process group, in a new session. On SIGINT, SIGTERM or SIGHUP
+  the runner signals every child group once, waits until every group is empty (a leader that exits
+  while a member keeps running does not end the wait), SIGKILLs what is still running after 5 s, and
+  exits 128 + the signal. A Ctrl-C therefore reaches each process once: the terminal signals only the
+  runner's group.
+  - A child in a new session has no controlling terminal, so it cannot open `/dev/tty`: a command
+    that asks for a credential there fails instead of prompting. Pass `stdin: 'inherit'` for one
+    that must.
+  - A child with `stdin: 'inherit'` stays in the terminal's foreground group so it can read the
+    terminal. A Ctrl-C reaches it from the kernel and is not sent again. A SIGINT sent to the runner
+    by anything else (`kill -INT`) is passed to it at once when stdin is not a terminal; on a
+    terminal the child gets a second to act, then SIGTERM if it is still running, because the two
+    cases cannot be told apart and a second SIGINT often means "force quit".
+  - A runner started by another runner (`MANGO_RUNNER_GROUP` names the parent) leaves its
+    children in the group it was given, but only while it is in a group led by a live child of the
+    named runner; a stale marker is ignored and the process acts as a root runner.
+- **Windows.** There are no process groups to signal. The first `runCommand` puts the runner into
+  a job object that kills every member when the runner ends (Ctrl-C, `taskkill /F` and a crash
+  alike). Bun's own job only holds a runner's direct children and lets theirs break away, so
+  anything started through `cmd.exe` (every `.cmd` shim: `bunx`, `turbo`, `tsc`) outlived a killed
+  runner before. `detached: true` leaves the job, so it is never used here, and the runner
+  installs no signal handler. **This fails open:** if the job cannot be created (a parent job that
+  forbids nesting) the runner prints one line to stderr and carries on without the guarantee,
+  because a build should not fail over a safety net that only matters when the runner is killed.
+- **Not covered.** On POSIX, SIGKILL of the runner cannot be caught; the children it already
+  started keep running. A group whose leader had already exited when the signal arrived is not
+  tracked, so a member it left behind is not stopped.
 
 ## The runtime binary: cargo, not Bun
 
