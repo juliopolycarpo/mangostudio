@@ -832,7 +832,25 @@ describe('release workflow binary gate', () => {
 
     const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
     expect(source, 'release_pattern not found in the changes job').toBeDefined();
-    expect('scripts/tests/install-ps1-layout.unit.test.ts').toMatch(new RegExp(source as string));
+    const relevant = new RegExp(source as string);
+    expect('scripts/tests/install-ps1-layout.unit.test.ts').toMatch(relevant);
+
+    // The layout cases also run whatever test helpers they import (the user
+    // PATH restore among them), so a change to one of those is a change to
+    // what the Windows job runs.
+    const helpers = [...layoutCases.matchAll(/from '\.\/(support\/[^']+)'/g)].map(
+      (match) => `scripts/tests/${match[1]}.ts`
+    );
+    expect(
+      helpers,
+      'expected install-ps1-layout.unit.test.ts to import a support helper'
+    ).not.toHaveLength(0);
+    for (const helper of helpers) {
+      expect(
+        relevant.test(helper),
+        `expected release_pattern to match ${helper} | received: no match in ${source}`
+      ).toBe(true);
+    }
   });
 
   test('release dry run relevance pattern does not over-promise Alpine Docker coverage', () => {
