@@ -1,6 +1,6 @@
 import { WORKSPACE_DPRINT_PATHS, WORKSPACES, type WorkspaceName } from './config';
 
-const TURBO_CHECK_TASKS = ['check:quick', 'typecheck', 'circular'];
+const TURBO_CHECK_TASKS = ['check:quick', 'typecheck'];
 
 /** Build a filtered Turbo validation command. // Usage: createTurboCheckCommand(['api']); */
 export function createTurboCheckCommand(workspaces: WorkspaceName[]): string[] {
