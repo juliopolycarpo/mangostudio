@@ -121,35 +121,61 @@ function connect(
 
 /**
  * Waits for terminal data containing a marker, including text split across frames.
+ * `firstMessage` excludes frames observed before a command's output window.
  *
  * @example
  * await waitForTerminalText(viewer, 'hi');
  */
-function waitForTerminalText(viewer: Connected, marker: string): Promise<TerminalServerMessage> {
+function waitForTerminalText(
+  viewer: Connected,
+  marker: string,
+  firstMessage = 0
+): Promise<TerminalServerMessage> {
   const decoder = new TextDecoder();
   let output = '';
+  const beforeObservation = new Set(viewer.messages.slice(0, firstMessage));
   return viewer.nextMessage((message) => {
-    if (message.type !== 'data') return false;
+    if (message.type !== 'data' || beforeObservation.has(message)) return false;
     output += decoder.decode(message.data, { stream: true });
     return output.includes(marker);
   });
 }
 
 /**
- * Sends a command after the shell has emitted its complete prompt.
+ * Sends a command after the complete prompt and returns its output observation boundary.
  *
  * @example
- * await writeAfterTerminalText(viewer, 'PS C:\\work> ', "Write-Output ('h' + 'i')\r\n");
+ * const probe = terminalOutputProbe('powershell');
+ * const firstMessage = await writeAfterTerminalText(viewer, 'PS C:\\work> ', probe.command);
+ * await waitForTerminalText(viewer, probe.marker, firstMessage);
  */
 async function writeAfterTerminalText(
   viewer: Connected,
   readyMarker: string,
   command: string
-): Promise<void> {
+): Promise<number> {
   await waitForTerminalText(viewer, readyMarker);
+  const firstMessage = viewer.messages.length;
   viewer.socket.send(
     encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode(command) })
   );
+  return firstMessage;
+}
+
+/**
+ * Creates a unique output marker absent from the shell input that constructs it.
+ *
+ * @example
+ * const { marker, command } = terminalOutputProbe('powershell');
+ */
+function terminalOutputProbe(shell: 'bash' | 'powershell'): { marker: string; command: string } {
+  const nonce = crypto.randomUUID();
+  const marker = `mangostudio-pty-relay-${nonce}`;
+  const command =
+    shell === 'powershell'
+      ? `Write-Output ('mangostudio-pty-relay-' + '${nonce}')\r\n`
+      : `printf '%s%s\\n' 'mangostudio-pty-relay-' '${nonce}'\n`;
+  return { marker, command };
 }
 
 async function waitForOpen(socket: WebSocket): Promise<void> {
@@ -331,6 +357,126 @@ describe('terminal socket relay', () => {
 
     await expect(sent).rejects.toThrow('Timed out waiting for a terminal socket message');
     expect(runtime.calls.write).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      label: 'stale startup output',
+      cwd: '/home/tester',
+      before: 'startup hi\r\n',
+      ready: 'PS /home/tester> ',
+      after: 'unrelated',
+    },
+    {
+      label: 'text split across the command boundary',
+      cwd: '/home/tester',
+      before: 'h',
+      ready: 'PS /home/tester> ',
+      after: 'i',
+    },
+    {
+      label: 'a split prompt containing the old marker',
+      cwd: 'C:\\Users\\child',
+      before: 'PS C:\\Users\\child',
+      ready: '> ',
+      after: 'unrelated',
+    },
+  ])(
+    'excludes $label from the command output observation',
+    async ({ cwd, before, ready, after }) => {
+      const user = await insertTestUser();
+      const runtime = new FakeTerminalRuntimeClient({ openResult: { cwd } });
+      const service = relayService(runtime);
+      const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+      const attached = runtime.waitForCall('attach');
+      const viewer = await openViewer(service, user.id, session.id);
+      await attached;
+      runtime.emitOutput(session.id, {
+        kind: 'data',
+        data: Buffer.from(before).toString('base64'),
+      });
+      viewer.socket.send(encodeTerminalClientMessage({ type: 'ping' }));
+      await viewer.nextMessage((message) => message.type === 'pong');
+      const written = runtime.waitForCall('write');
+      const sent = writeAfterTerminalText(
+        viewer,
+        `PS ${session.cwd}> `,
+        "Write-Output ('h' + 'i')\r\n"
+      );
+      runtime.emitOutput(session.id, { kind: 'data', data: Buffer.from(ready).toString('base64') });
+      const firstMessage = await sent;
+      await written;
+      const output = waitForTerminalText(viewer, 'hi', firstMessage);
+      runtime.emitOutput(session.id, { kind: 'data', data: Buffer.from(after).toString('base64') });
+
+      await expect(output).rejects.toThrow('Timed out waiting for a terminal socket message');
+      expect(runtime.calls.write).toHaveLength(1);
+    }
+  );
+
+  it('matches command output already queued after its observation boundary', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient();
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+    const written = runtime.waitForCall('write');
+    const sent = writeAfterTerminalText(
+      viewer,
+      `PS ${session.cwd}> `,
+      "Write-Output ('h' + 'i')\r\n"
+    );
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from(`PS ${session.cwd}> `).toString('base64'),
+    });
+    const firstMessage = await sent;
+    await written;
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from('hi\r\n').toString('base64'),
+    });
+    viewer.socket.send(encodeTerminalClientMessage({ type: 'ping' }));
+    await viewer.nextMessage((message) => message.type === 'pong');
+
+    expect((await waitForTerminalText(viewer, 'hi', firstMessage)).type).toBe('data');
+  });
+
+  it('does not accept a post-write prompt or command echo as the unique output marker', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient({ openResult: { cwd: 'C:\\Users\\child' } });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+    const attached = runtime.waitForCall('attach');
+    const viewer = await openViewer(service, user.id, session.id);
+    await attached;
+    const { marker, command } = terminalOutputProbe('powershell');
+    const written = runtime.waitForCall('write');
+    const sent = writeAfterTerminalText(viewer, `PS ${session.cwd}> `, command);
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from(`PS ${session.cwd}> `).toString('base64'),
+    });
+    const firstMessage = await sent;
+    await written;
+    const output = waitForTerminalText(viewer, marker, firstMessage);
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from(`PS ${session.cwd}> ${command}`).toString('base64'),
+    });
+
+    await expect(output).rejects.toThrow('Timed out waiting for a terminal socket message');
+    expect(runtime.calls.write).toHaveLength(1);
+  });
+
+  it.each(['bash', 'powershell'] as const)('keeps the unique marker out of %s input', (shell) => {
+    const { marker, command } = terminalOutputProbe(shell);
+
+    expect(marker).toStartWith('mangostudio-pty-relay-');
+    expect(command).not.toContain(marker);
+    expect(terminalOutputProbe(shell).marker).not.toBe(marker);
   });
 
   it('does not match terminal control frames as output text', async () => {
@@ -728,20 +874,21 @@ describe('terminal socket over a real Rust runtime', () => {
         const viewer = connect(`${hub.url}/${session.id}`, {}, 5_000);
         await waitForOpen(viewer.socket);
 
-        // Construct the marker so echoed input cannot satisfy the output assertion.
-        const command = shell === 'powershell' ? "Write-Output ('h' + 'i')\r\n" : "printf h''i\n";
+        // A unique constructed marker excludes echoed input and ordinary prompt text.
+        const { marker, command } = terminalOutputProbe(shell);
+        let firstMessage = viewer.messages.length;
         if (shell === 'powershell') {
           // Observe the default PowerShell prompt for the returned cwd before sending input.
           // Profiles stay as configured; custom prompt text is outside this fixture's scope.
-          await writeAfterTerminalText(viewer, `PS ${session.cwd}> `, command);
+          firstMessage = await writeAfterTerminalText(viewer, `PS ${session.cwd}> `, command);
         } else {
           viewer.socket.send(
             encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode(command) })
           );
         }
 
-        const withHi = await waitForTerminalText(viewer, 'hi');
-        expect(withHi).toBeDefined();
+        const output = await waitForTerminalText(viewer, marker, firstMessage);
+        expect(output).toBeDefined();
 
         await service.close(user.id, session.id);
       } finally {
