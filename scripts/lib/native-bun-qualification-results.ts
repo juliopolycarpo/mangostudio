@@ -10,6 +10,8 @@ export interface NativeTestLane {
   readonly manifest: string;
   readonly script: string;
   readonly files: readonly string[];
+  /** Source-owned authoritative report for a worker lane, separate from coverage. */
+  readonly report?: string;
 }
 
 interface NativeCaseRecord {
@@ -61,6 +63,27 @@ const EXPECTED_LANES = [
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
 
+const DIRECT_SCRIPTS: Readonly<Record<string, string>> = {
+  root: 'mkdir -p .mango/artifacts/junit && bun test --timeout 15000 --reporter=junit --reporter-outfile=.mango/artifacts/junit/root.xml $MANGOSTUDIO_BUN_TEST_ARGS scripts',
+  'api-unit':
+    'MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --timeout 15000 --parallel=1 tests/unit',
+  'api-integration':
+    'MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --timeout 15000 tests/integration',
+  'shared-unit': 'bun test --timeout 15000 tests/unit',
+  'frontend-unit':
+    'bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/unit',
+  'frontend-integration':
+    'bun test --tsconfig-override=./tsconfig.test.json --parallel=4 --isolate --timeout 15000 tests/integration',
+  protocol: 'bun test --timeout 15000 packages/protocol',
+};
+const WORKER_SCRIPTS: Readonly<Record<string, string>> = {
+  root: 'bun ./scripts/run-test-workers.ts --lane=root -- bun test --timeout 15000 scripts',
+  'api-unit':
+    'MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/run-test-workers.ts --lane=api-unit -- bun test --timeout 15000 --parallel=1 tests/unit',
+  'api-integration':
+    'MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/run-test-workers.ts --lane=api-integration -- bun test --timeout 15000 tests/integration',
+};
+
 function normalizedPath(path: string): string {
   return posix.normalize(path.replaceAll('\\', '/').replace(/^\.\//, ''));
 }
@@ -86,16 +109,47 @@ export async function nativeTestInventory(
     !config.includes("['frontend', 'api', 'shared']")
   ) {
     throw new Error(
-      'Unknown default test producer; expected full root/protocol/API/shared/frontend lanes'
+      `Unknown default test producer ${JSON.stringify(rootManifest.scripts?.test)}; expected full root/protocol/API/shared/frontend lanes`
     );
+  }
+  const workers = rootManifest.scripts?.['test:scripts:workers'] !== undefined;
+  if (workers) {
+    const helper = await readFile(join(root, 'scripts/lib/test.ts'), 'utf8');
+    if (
+      !producer.includes('createRootScriptsCommand(phase, rootScriptsBase)') ||
+      !producer.includes("rootScriptsTask('unit')") ||
+      !helper.includes("phase === 'unit' ? '//#test:scripts:workers' : '//#test:scripts'")
+    ) {
+      throw new Error(
+        `Unknown default test producer helper ${JSON.stringify(rootManifest.scripts?.['test:scripts:workers'])}; expected the worker root task helper`
+      );
+    }
+    const registry = await readFile(join(root, 'scripts/lib/test-lanes.ts'), 'utf8');
+    const alsoRuns = /id:\s*'root'[\s\S]*?alsoRuns:\s*\[([\s\S]*?)\]/.exec(registry)?.[1];
+    const declared = [...(alsoRuns ?? '').matchAll(/'([^']+)'/g)].map((match) => match[1]);
+    const selected = trackedFiles.filter(
+      (file) => TEST_FILE.test(file) && file.includes('scripts') && !file.startsWith('scripts/')
+    );
+    if (
+      !alsoRuns ||
+      selected.length !== declared.length ||
+      selected.some((file) => !declared.includes(file))
+    ) {
+      throw new Error(
+        `Unknown worker root inventory ${JSON.stringify(declared)}; expected alsoRuns ${JSON.stringify(selected)} to match Bun scripts selection`
+      );
+    }
   }
   const lanes: NativeTestLane[] = [];
   for (const [id, task, cwd, directory, key] of EXPECTED_LANES) {
     const manifest = cwd ? `${cwd}/package.json` : 'package.json';
     const source = cwd ? await Bun.file(join(root, manifest)).json() : rootManifest;
+    const worker = workers && id in WORKER_SCRIPTS;
     const script =
-      id === 'protocol' ? 'bun test --timeout 15000 packages/protocol' : source.scripts?.[key];
-    if (typeof script !== 'string' || (id !== 'protocol' && !script.includes(directory))) {
+      id === 'protocol'
+        ? DIRECT_SCRIPTS.protocol
+        : source.scripts?.[worker && id === 'root' ? 'test:scripts:workers' : key];
+    if (typeof script !== 'string') {
       throw new Error(
         `Invalid ${manifest} ${key}: ${JSON.stringify(script)}; expected ${directory} suite`
       );
@@ -109,11 +163,28 @@ export async function nativeTestInventory(
         `Invalid ${manifest} ${key}: ${JSON.stringify(script)}; expected an unfiltered single-attempt suite`
       );
     }
+    const expected = worker ? WORKER_SCRIPTS[id] : DIRECT_SCRIPTS[id];
+    if (script !== expected) {
+      throw new Error(
+        `Invalid ${manifest} ${key}: ${JSON.stringify(script)}; expected accepted ${worker ? 'worker' : 'direct'} producer ${JSON.stringify(expected)}`
+      );
+    }
     const prefix = cwd ? `${cwd}/${directory}/` : `${directory}/`;
-    const files = trackedFiles.filter((file) => file.startsWith(prefix) && TEST_FILE.test(file));
+    const files = trackedFiles.filter(
+      (file) =>
+        TEST_FILE.test(file) && (id === 'root' ? file.includes('scripts') : file.startsWith(prefix))
+    );
     if (!files.length)
       throw new Error(`Empty ${id} inventory; expected tracked test files below ${prefix}`);
-    lanes.push({ id, task, cwd, manifest, script, files });
+    lanes.push({
+      id,
+      task: worker && id === 'root' ? '//#test:scripts:workers' : task,
+      cwd,
+      manifest,
+      script,
+      files,
+      ...(worker ? { report: `.mango/artifacts/test-workers/${id}.xml` } : {}),
+    });
   }
   return lanes;
 }
@@ -125,16 +196,18 @@ interface MutableLane {
   cases: NativeCaseRecord[];
   recap: boolean;
   recaps: NativeCaseRecord[];
-  summaries: { tests: number; files: number; line: number }[];
-  passFooters: number[];
-  filtered: { count: number; line: number }[];
+  summaries: { tests: number; files: number; line: number; worker: string }[];
+  passFooters: { line: number; worker: string }[];
+  filtered: { count: number; line: number; worker: string }[];
   errors: string[];
 }
 
 function splitTask(line: string): { task: string; body: string } {
   const clean = line.replace(ANSI, '').replace(/\r$/, '');
   const match =
-    /^(\/\/#test:scripts|\/\/:test:scripts|@[\w/-]+:test:(?:unit|integration)):\s*/.exec(clean);
+    /^(\/\/#test:scripts(?::workers)?|\/\/:test:scripts(?::workers)?|@[\w/-]+:test:(?:unit|integration)):\s*/.exec(
+      clean
+    );
   return {
     task: match?.[1].replace('//:test:scripts', '//#test:scripts') ?? '',
     body: (match ? clean.slice(match[0].length) : clean).trim(),
@@ -142,6 +215,9 @@ function splitTask(line: string): { task: string; body: string } {
 }
 
 function recordLine(lane: MutableLane, body: string, line: number, cwd: string): void {
+  const prefix = /^\[(root|api-unit|api-integration) ([1-9]\d*)\/([1-9]\d*)\]\s*/.exec(body);
+  const worker = prefix?.[0].trim() ?? '';
+  if (prefix) body = body.slice(prefix[0].length);
   const file = /^(.+\.(?:test|spec)\.[cm]?[jt]sx?):$/.exec(body);
   if (file) {
     lane.recap = false;
@@ -162,10 +238,11 @@ function recordLine(lane: MutableLane, body: string, line: number, cwd: string):
     else lane.cases.push(record);
   }
   const summary = /^Ran (\d+) tests? across (\d+) files?\./.exec(body);
-  if (summary) lane.summaries.push({ tests: Number(summary[1]), files: Number(summary[2]), line });
-  if (/^\d+ pass$/.test(body)) lane.passFooters.push(line);
+  if (summary)
+    lane.summaries.push({ tests: Number(summary[1]), files: Number(summary[2]), line, worker });
+  if (/^\d+ pass$/.test(body)) lane.passFooters.push({ line, worker });
   const filtered = /^([1-9]\d*) filtered out$/.exec(body);
-  if (filtered) lane.filtered.push({ count: Number(filtered[1]), line });
+  if (filtered) lane.filtered.push({ count: Number(filtered[1]), line, worker });
   if (
     /^# Unhandled error between tests|^[1-9]\d* errors?$|oh no: Bun has crashed|panic\(main thread\)/.test(
       body
@@ -178,12 +255,14 @@ function recordLine(lane: MutableLane, body: string, line: number, cwd: string):
 /**
  * Preserve case/file records and reject a missing, truncated, or narrowed lane.
  * Root counts use its JUnit document because tooling tests print reporter fixtures.
+ * Worker counts use their merged report, retaining lane overlap and case outcomes.
  * @example parseNativeTestLog(await Bun.file('/out/logs/test.log').text(), inventory, rootJunit);
  */
 export function parseNativeTestLog(
   log: string,
   inventory: readonly NativeTestLane[],
-  rootJunit: JunitCounts | null
+  rootJunit: JunitCounts | null,
+  workerJunit: Readonly<Record<string, JunitCounts | undefined>> = {}
 ): NativeLaneResult[] {
   const lanes = inventory.map(
     (lane): MutableLane => ({
@@ -213,15 +292,22 @@ export function parseNativeTestLog(
     const record = lane.summaries.length === 1 ? lane.summaries[0] : null;
     const summary = record ? { tests: record.tests, files: record.files } : null;
     const files = [...lane.files];
-    if (lane.id === 'root') {
-      if (!rootJunit || rootJunit.truncated || rootJunit.tests === 0)
-        errors.push('Missing, empty, or truncated root JUnit');
-      if (rootJunit && rootJunit.failed > 0)
-        errors.push(`${rootJunit.failed} failing root testcases`);
+    if (lane.id === 'root' || spec.report) {
+      const report = spec.report ? workerJunit[spec.id] : rootJunit;
+      const label = spec.report ? `${spec.id} worker JUnit` : 'root JUnit';
+      if (!report || report.truncated || report.tests === 0)
+        errors.push(`Missing, empty, or truncated ${label}`);
+      if (report && report.failed > 0) errors.push(`${report.failed} failing ${spec.id} testcases`);
       // Fixtures printed by root tooling tests are not root suite failures.
-      const cases = (rootJunit?.cases ?? []).map((testCase) => ({
+      const cases = (report?.cases ?? []).map((testCase) => ({
         line: 0,
-        file: testCase.file ? normalizedPath(testCase.file) : null,
+        file: testCase.file
+          ? normalizedPath(
+              spec.cwd && !normalizedPath(testCase.file).startsWith(`${spec.cwd}/`)
+                ? `${spec.cwd}/${testCase.file}`
+                : testCase.file
+            )
+          : null,
         name: testCase.identity,
         outcome: testCase.outcome,
       }));
@@ -229,13 +315,39 @@ export function parseNativeTestLog(
       const missing = spec.files.filter((file) => !junitFiles.has(file));
       if (missing.length)
         errors.push(`Missing ${missing.length} required JUnit files: ${missing.join(', ')}`);
-      const lastSummary = lane.summaries.at(-1);
-      const footerStart = [...lane.passFooters]
-        .reverse()
-        .find((line) => line < (lastSummary?.line ?? 0));
-      if (lastSummary && footerStart !== undefined) {
+      if (spec.report) {
+        const extra = [...junitFiles].filter((file) => !spec.files.includes(file));
+        if (extra.length) errors.push(`Unexpected worker JUnit files: ${extra.join(', ')}`);
+        if (cases.some((testCase) => testCase.file === null))
+          errors.push('Worker JUnit testcase emitted without a file record');
+        const summaries = [...new Set(lane.summaries.map((summary) => summary.worker))].flatMap(
+          (worker) =>
+            [...lane.summaries].reverse().find((summary) => summary.worker === worker) ?? []
+        );
+        const tests = summaries.reduce((total, summary) => total + summary.tests, 0);
+        const files = summaries.reduce((total, summary) => total + summary.files, 0);
+        if (!summaries.length) errors.push('Missing complete worker Bun summaries');
+        if (report && (tests !== report.tests || files !== junitFiles.size))
+          errors.push(
+            `Worker summaries ${tests} tests/${files} files differ from JUnit ${report.tests} tests/${junitFiles.size} files`
+          );
+      }
+      for (const worker of new Set(lane.summaries.map((summary) => summary.worker))) {
+        const lastSummary = [...lane.summaries]
+          .reverse()
+          .find((summary) => summary.worker === worker);
+        const footerStart = [...lane.passFooters]
+          .reverse()
+          .find(
+            (footer) => footer.worker === worker && footer.line < (lastSummary?.line ?? 0)
+          )?.line;
+        if (!lastSummary || footerStart === undefined) continue;
         for (const filtered of lane.filtered) {
-          if (filtered.line > footerStart && filtered.line < lastSummary.line)
+          if (
+            filtered.worker === worker &&
+            filtered.line > footerStart &&
+            filtered.line < lastSummary.line
+          )
             errors.push(`${filtered.count} filtered testcases; expected the full default suite`);
         }
       }
@@ -244,8 +356,8 @@ export function parseNativeTestLog(
         files: [...junitFiles],
         cases,
         recaps: [],
-        summary: rootJunit ? { tests: rootJunit.tests, files: junitFiles.size } : null,
-        errors: errors.filter((error) => !error.startsWith('line ')),
+        summary: report ? { tests: report.tests, files: junitFiles.size } : null,
+        errors: lane.id === 'root' ? errors.filter((error) => !error.startsWith('line ')) : errors,
       };
     }
     const missing = spec.files.filter((file) => !lane.files.has(file));
@@ -306,6 +418,21 @@ export async function collectNativeTestEvidence(
         errors.push(`Cannot retain ${source}: ${String(error)}`);
     }
   }
+  const workerJunit: Record<string, JunitCounts> = {};
+  for (const lane of inventory) {
+    if (!lane.report) continue;
+    try {
+      const destination = `test-workers/${lane.id}.xml`;
+      await mkdir(join(out, 'test-workers'), { recursive: true });
+      await cp(join(root, lane.report), join(out, destination));
+      const counts = parseJunitXml(await readFile(join(out, destination), 'utf8'));
+      workerJunit[lane.id] = counts;
+      junit.push({ path: destination, counts });
+      if (counts.truncated) errors.push(`${lane.report}: ${counts.truncated}`);
+    } catch (error) {
+      errors.push(`Worker JUnit evidence unavailable for ${lane.id}: ${String(error)}`);
+    }
+  }
   let log = '';
   try {
     log = await readFile(join(out, 'logs/test.log'), 'utf8');
@@ -313,7 +440,7 @@ export async function collectNativeTestEvidence(
     errors.push(`Test log unavailable: ${String(error)}`);
   }
   const rootJunit = junit.find((report) => report.path === 'junit/root.xml')?.counts ?? null;
-  const lanes = parseNativeTestLog(log, inventory, rootJunit);
+  const lanes = parseNativeTestLog(log, inventory, rootJunit, workerJunit);
   errors.push(...lanes.flatMap((lane) => lane.errors.map((error) => `${lane.id}: ${error}`)));
   return { inventory, lanes, junit, errors, complete: errors.length === 0 };
 }
