@@ -926,6 +926,11 @@ mod windows_tests {
     use crate::test_support::scratch_dir;
     use std::sync::Mutex;
 
+    // CIM property enumeration can return several leaf IDs. These receipts
+    // are consumed as PowerShell PID lists by the survivor checks below.
+    const RUNNER_TREE_PID_RECEIPT: &str = "(@($shell.ProcessId) + @($leaf.ProcessId)) -join ','";
+    const SLOT_LEAF_PID_RECEIPT: &str = "@($leaf.ProcessId) -join ','";
+
     struct FakeTaskExec {
         calls: Mutex<Vec<String>>,
         timeouts: Mutex<Vec<Duration>>,
@@ -1120,6 +1125,40 @@ mod windows_tests {
         );
     }
 
+    #[test]
+    fn fixture_receipts_preserve_every_pid_from_single_and_multiple_cim_rows() {
+        use super::windows::ProcessExec;
+
+        let fake_single_leaf = "$shell = [pscustomobject]@{ ProcessId = 748 }\n$leaf = [pscustomobject]@{ ProcessId = 756 }";
+        let fake_multiple_leaves = "$shell = [pscustomobject]@{ ProcessId = 748 }\n$leaf = @(756, 860, 4172 | ForEach-Object { [pscustomobject]@{ ProcessId = $_ } })";
+        for (fake_rows, expected_tree, expected_leaf) in [
+            (fake_single_leaf, "748,756", "756"),
+            (fake_multiple_leaves, "748,756,860,4172", "756,860,4172"),
+        ] {
+            for (expression, expected) in [
+                (RUNNER_TREE_PID_RECEIPT, expected_tree),
+                (SLOT_LEAF_PID_RECEIPT, expected_leaf),
+            ] {
+                let script = [fake_rows, expression].join("\n");
+                let (ok, receipt) = ProcessExec
+                    .run(&script, Duration::from_secs(30))
+                    .expect("PowerShell reads the named fake CIM rows");
+                assert!(ok, "expected a fixture PID receipt | received: {receipt}");
+                assert_eq!(
+                    receipt, expected,
+                    "expected every PID separated by commas | received rows: {fake_rows}"
+                );
+                let (ok, parsed) = ProcessExec
+                    .run(&format!("@({receipt}) -join ','"), Duration::from_secs(30))
+                    .expect("PowerShell consumes the receipt as a PID list");
+                assert!(
+                    ok && parsed == expected,
+                    "expected PID list {expected} | received: {parsed}"
+                );
+            }
+        }
+    }
+
     /// What `Stop-ScheduledTask` leaves behind, rebuilt without Task Scheduler: a
     /// `powershell.exe` runner whose `cmd.exe` child runs a long-lived process,
     /// with the runner itself terminated. The verbs' tree walk must end both
@@ -1152,7 +1191,7 @@ mod windows_tests {
             format!("Stop-Process -Id {pid} -Force"),
             "Start-Sleep -Milliseconds 300".to_owned(),
             super::scheduled_task::terminate_runner_tree().to_owned(),
-            "[string]$shell.ProcessId + ',' + [string]$leaf.ProcessId".to_owned(),
+            RUNNER_TREE_PID_RECEIPT.to_owned(),
         ]
         .join("\n");
         let result = ProcessExec.run(&script, Duration::from_secs(60));
@@ -1217,7 +1256,7 @@ mod windows_tests {
             capture_slot_orphans(&slot),
             format!("if (@($orphans | Where-Object {{ $_.ProcessId -eq {pid} }}).Count -ne 1) {{ throw ('expected the shim cmd.exe {pid} among the orphans | received: ' + (($orphans | ForEach-Object {{ $_.ProcessId }}) -join ',')) }}"),
             terminate_runner_tree().to_owned(),
-            "[string]$leaf.ProcessId".to_owned(),
+            SLOT_LEAF_PID_RECEIPT.to_owned(),
         ]
         .join("\n");
         let result = ProcessExec.run(&script, Duration::from_secs(60));
