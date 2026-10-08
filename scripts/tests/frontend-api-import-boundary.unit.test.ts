@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import ts from '@typescript/typescript6';
 import { ROOT_DIR } from '../lib/config';
 import { assertFrontendApiImportBoundary } from '../lib/frontend-api-import-boundary';
 
@@ -143,6 +144,59 @@ describe('frontend API-internal Biome restriction', () => {
 });
 
 describe('frontend API-internal check guard', () => {
+  it.each([
+    `(require)('${TRANSCRIPT}');`,
+    `((require))('${TRANSCRIPT}');`,
+    `require!('${TRANSCRIPT}');`,
+    `(require as typeof require)('${TRANSCRIPT}');`,
+    `(require satisfies typeof require)('${TRANSCRIPT}');`,
+    `(<typeof require>require)('${TRANSCRIPT}');`,
+    `(module.require)('${TRANSCRIPT}');`,
+    `(module.require as typeof require)('${TRANSCRIPT}');`,
+    `(module['require'])('${TRANSCRIPT}');`,
+    `(module as typeof module).require('${TRANSCRIPT}');`,
+    `module!.require('${TRANSCRIPT}');`,
+    `(module satisfies typeof module)['require']('${TRANSCRIPT}');`,
+    `(<typeof module>module).require('${TRANSCRIPT}');`,
+    `module[('require')]('${TRANSCRIPT}');`,
+    `module['require' as const]('${TRANSCRIPT}');`,
+    `module[('require' satisfies string)]('${TRANSCRIPT}');`,
+    `module[(<'require'>'require')]('${TRANSCRIPT}');`,
+    `require(('${TRANSCRIPT}'));`,
+    `require('${TRANSCRIPT}' as const);`,
+    `require(('${TRANSCRIPT}' satisfies string));`,
+    `require((<'${TRANSCRIPT}'>'${TRANSCRIPT}'));`,
+    `require(('${TRANSCRIPT}')!);`,
+    `import(('${TRANSCRIPT}'));`,
+    `import(('${TRANSCRIPT}' as const));`,
+    `import((\`${TRANSCRIPT}\` satisfies string));`,
+    `((require! as typeof require) satisfies typeof require)((('${TRANSCRIPT}' as const)!));`,
+  ])('rejects transparent literal loader syntax: %s', (source) => {
+    expect(ts.transpileModule(source, { reportDiagnostics: true }).diagnostics ?? []).toEqual([]);
+    const root = createSourceTree('apps/frontend/src/forbidden.ts', source);
+    expect(() => assertFrontendApiImportBoundary(root)).toThrow(
+      'apps/frontend/src/forbidden.ts:1:'
+    );
+  });
+
+  it.each(['dist', 'coverage', 'node_modules', '.turbo', '.mango'])(
+    'checks nested frontend source directory %s',
+    (directory) => {
+      const path = `apps/frontend/src/${directory}/forbidden.ts`;
+      const root = createSourceTree(path, `require('${TRANSCRIPT}');`);
+      writeSource(root, 'apps/frontend/src/allowed.ts', 'export {};');
+      expect(() => assertFrontendApiImportBoundary(root)).toThrow(`${path}:1:`);
+    }
+  );
+
+  it('allows transparent bounded imports and unrelated loader methods', () => {
+    const root = createSourceTree(
+      'apps/frontend/src/allowed.ts',
+      `require(('@mangostudio/shared/agents' as const)); (loader.require as typeof require)('${TRANSCRIPT}');`
+    );
+    expect(() => assertFrontendApiImportBoundary(root)).not.toThrow();
+  });
+
   it.each([
     `import { ExternalTurnTranscript } from '${TRANSCRIPT}';`,
     `import transcript from '${TRANSCRIPT}';`,

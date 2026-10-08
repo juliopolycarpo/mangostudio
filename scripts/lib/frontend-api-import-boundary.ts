@@ -15,6 +15,39 @@ interface ImportViolation {
   readonly specifier: string;
 }
 
+function unwrapExpression(node: ts.Node | undefined): ts.Node | undefined {
+  while (
+    node &&
+    (ts.isParenthesizedExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isSatisfiesExpression(node) ||
+      ts.isTypeAssertionExpression(node))
+  ) {
+    node = node.expression;
+  }
+  return node;
+}
+
+function literalText(node: ts.Node | undefined): string | undefined {
+  const literal = unwrapExpression(node);
+  return literal && ts.isStringLiteralLike(literal) ? literal.text : undefined;
+}
+
+function isRequire(expression: ts.Expression): boolean {
+  const unwrapped = unwrapExpression(expression);
+  if (!unwrapped) return false;
+  if (ts.isIdentifier(unwrapped)) return unwrapped.text === 'require';
+  if (!ts.isPropertyAccessExpression(unwrapped) && !ts.isElementAccessExpression(unwrapped)) {
+    return false;
+  }
+  const receiver = unwrapExpression(unwrapped.expression);
+  if (!receiver || !ts.isIdentifier(receiver) || receiver.text !== 'module') return false;
+  return ts.isPropertyAccessExpression(unwrapped)
+    ? unwrapped.name.text === 'require'
+    : literalText(unwrapped.argumentExpression) === 'require';
+}
+
 function isTypeOnlyImport(clause: ts.ImportClause | undefined): boolean {
   if (!clause) return false;
   if (clause.isTypeOnly) return true;
@@ -42,6 +75,7 @@ function findValueImports(source: string, path: string): ImportViolation[] {
   const violations: ImportViolation[] = [];
 
   function record(node: ts.Node | undefined): void {
+    node = unwrapExpression(node);
     if (!node || !ts.isStringLiteralLike(node)) return;
     if (!node.text.startsWith(API_INTERNAL_PREFIX)) return;
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
@@ -63,19 +97,7 @@ function findValueImports(source: string, path: string): ImportViolation[] {
       record(node.moduleReference.expression);
     }
     if (ts.isCallExpression(node)) {
-      const expression = node.expression;
-      const isRequire = ts.isIdentifier(expression) && expression.text === 'require';
-      const isModuleRequire =
-        (ts.isPropertyAccessExpression(expression) &&
-          ts.isIdentifier(expression.expression) &&
-          expression.expression.text === 'module' &&
-          expression.name.text === 'require') ||
-        (ts.isElementAccessExpression(expression) &&
-          ts.isIdentifier(expression.expression) &&
-          expression.expression.text === 'module' &&
-          ts.isStringLiteralLike(expression.argumentExpression) &&
-          expression.argumentExpression.text === 'require');
-      if (expression.kind === ts.SyntaxKind.ImportKeyword || isRequire || isModuleRequire) {
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword || isRequire(node.expression)) {
         record(node.arguments[0]);
       }
     }
@@ -90,15 +112,17 @@ function findValueImports(source: string, path: string): ImportViolation[] {
  * Keep frontend runtime imports out of hub internals, except the test comparing
  * the live reducer with the real hub transcript. Covers deferred imports that
  * Biome's import rule does not recognize and ignores erased type-only imports.
+ * Transparent expression wrappers preserve the same literal dependency edge;
+ * generated directories are excluded only at the frontend workspace root.
  *
  * @example
  * assertFrontendApiImportBoundary(); // Checks the repository's frontend files.
  */
 export function assertFrontendApiImportBoundary(rootDir: string = ROOT_DIR): void {
   const glob = new Bun.Glob('apps/frontend/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}');
-  const paths = [...glob.scanSync({ cwd: rootDir, onlyFiles: true })]
+  const paths = [...glob.scanSync({ cwd: rootDir, onlyFiles: true, dot: true })]
     .map((path) => path.replaceAll('\\', '/'))
-    .filter((path) => !path.split('/').some((segment) => IGNORED_DIRECTORIES.has(segment)));
+    .filter((path) => !IGNORED_DIRECTORIES.has(path.split('/')[2] ?? ''));
   if (paths.length === 0) {
     throw new Error(
       `Expected frontend JavaScript or TypeScript source files in ${rootDir}/apps/frontend.`
