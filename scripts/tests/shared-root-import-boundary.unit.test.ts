@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import ts from '@typescript/typescript6';
 import { ROOT_DIR } from '../lib/config';
 import { assertNoSharedRootImports } from '../lib/shared-root-import-boundary';
 
@@ -135,6 +136,47 @@ describe('shared root Biome boundary', () => {
 });
 
 describe('shared root check guard', () => {
+  it.each([
+    `(require)('${SHARED_ROOT}');`,
+    `((require))('${SHARED_ROOT}');`,
+    `require!('${SHARED_ROOT}');`,
+    `(require as typeof require)('${SHARED_ROOT}');`,
+    `(require satisfies typeof require)('${SHARED_ROOT}');`,
+    `(<typeof require>require)('${SHARED_ROOT}');`,
+    `(module.require)('${SHARED_ROOT}');`,
+    `(module.require as typeof require)('${SHARED_ROOT}');`,
+    `(module['require'])('${SHARED_ROOT}');`,
+    `(module as typeof module).require('${SHARED_ROOT}');`,
+    `module!.require('${SHARED_ROOT}');`,
+    `(module satisfies typeof module)['require']('${SHARED_ROOT}');`,
+    `(<typeof module>module).require('${SHARED_ROOT}');`,
+    `module[('require')]('${SHARED_ROOT}');`,
+    `module['require' as const]('${SHARED_ROOT}');`,
+    `module[('require' satisfies string)]('${SHARED_ROOT}');`,
+    `module[(<'require'>'require')]('${SHARED_ROOT}');`,
+    `require(('${SHARED_ROOT}'));`,
+    `require('${SHARED_ROOT}' as const);`,
+    `require(('${SHARED_ROOT}' satisfies string));`,
+    `require((<'${SHARED_ROOT}'>'${SHARED_ROOT}'));`,
+    `require(('${SHARED_ROOT}')!);`,
+    `import(('${SHARED_ROOT}'));`,
+    `import(('${SHARED_ROOT}' as const));`,
+    `import((\`${SHARED_ROOT}\` satisfies string));`,
+    `((require! as typeof require) satisfies typeof require)((('${SHARED_ROOT}' as const)!));`,
+  ])('rejects transparent literal loader syntax: %s', (source) => {
+    expect(ts.transpileModule(source, { reportDiagnostics: true }).diagnostics ?? []).toEqual([]);
+    const root = createSourceTree('apps/frontend/src/forbidden.ts', source);
+    expect(() => assertNoSharedRootImports(root)).toThrow('apps/frontend/src/forbidden.ts:1:');
+  });
+
+  it('allows transparent bounded imports and unrelated loader methods', () => {
+    const root = createSourceTree(
+      'apps/frontend/src/allowed.ts',
+      `require(('@mangostudio/shared/agents' as const)); (loader.require as typeof require)('${SHARED_ROOT}');`
+    );
+    expect(() => assertNoSharedRootImports(root)).not.toThrow();
+  });
+
   it.each([
     `import { AgentId } from '${SHARED_ROOT}';`,
     `import type { AgentId } from '${SHARED_ROOT}';`,

@@ -8,28 +8,37 @@ const BOUNDARY_MESSAGE =
   'Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath.';
 const SOURCE_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 
+function unwrapExpression(node: ts.Node | undefined): ts.Node | undefined {
+  while (
+    node &&
+    (ts.isParenthesizedExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isSatisfiesExpression(node) ||
+      ts.isTypeAssertionExpression(node))
+  ) {
+    node = node.expression;
+  }
+  return node;
+}
+
 function literalText(node: ts.Node | undefined): string | undefined {
-  if (!node) return undefined;
-  return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
-    ? node.text
-    : undefined;
+  const literal = unwrapExpression(node);
+  return literal && ts.isStringLiteralLike(literal) ? literal.text : undefined;
 }
 
 function isRequire(expression: ts.Expression): boolean {
-  if (ts.isIdentifier(expression)) return expression.text === 'require';
-  if (ts.isPropertyAccessExpression(expression)) {
-    return (
-      ts.isIdentifier(expression.expression) &&
-      expression.expression.text === 'module' &&
-      expression.name.text === 'require'
-    );
+  const unwrapped = unwrapExpression(expression);
+  if (!unwrapped) return false;
+  if (ts.isIdentifier(unwrapped)) return unwrapped.text === 'require';
+  if (!ts.isPropertyAccessExpression(unwrapped) && !ts.isElementAccessExpression(unwrapped)) {
+    return false;
   }
-  if (!ts.isElementAccessExpression(expression)) return false;
-  return (
-    ts.isIdentifier(expression.expression) &&
-    expression.expression.text === 'module' &&
-    literalText(expression.argumentExpression) === 'require'
-  );
+  const receiver = unwrapExpression(unwrapped.expression);
+  if (!receiver || !ts.isIdentifier(receiver) || receiver.text !== 'module') return false;
+  return ts.isPropertyAccessExpression(unwrapped)
+    ? unwrapped.name.text === 'require'
+    : literalText(unwrapped.argumentExpression) === 'require';
 }
 
 function rootImportLocations(source: ts.SourceFile): ts.Node[] {
@@ -85,6 +94,7 @@ function sourcePaths(rootDir: string): string[] {
 /**
  * Reject private shared root imports throughout the checkout, including erased
  * types and root tooling. Git includes tracked files and unignored new files.
+ * Transparent expression wrappers retain the same literal module dependency.
  *
  * @example
  * assertNoSharedRootImports(); // Run before workspace checks.
