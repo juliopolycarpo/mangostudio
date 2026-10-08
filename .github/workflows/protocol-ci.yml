@@ -38,7 +38,14 @@ concurrency:
   group: protocol-ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Incremental compilation keeps state for rebuilding one target directory. A CI
+# job builds once, so that state only costs time and disk (measured and written
+# up under "Cargo incremental compilation" in docs/reference/testing.md).
+# Swatinem/rust-cache exports the same value for jobs that restore a cache but
+# not for lanes without one, so it is set here and pinned by
+# scripts/tests/cargo-incremental.unit.test.ts.
 env:
+  CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
 
 jobs:
