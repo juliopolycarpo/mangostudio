@@ -35,6 +35,12 @@ jobs:
     name: Rust tests with coverage (ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Incremental state only pays off when one target directory is rebuilt; this
+    # job builds once. Job level, not workflow level, because qa-workflows pins
+    # the file's `permissions` block to sit directly above `jobs:`.
+    # scripts/tests/cargo-incremental.unit.test.ts requires the setting.
+    env:
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
