@@ -1396,7 +1396,7 @@ that produces or consumes it.
 | Family              | Producer / consumer           | Path                      | Invalidators                                             | Restore behavior                  |
 | ------------------- | ----------------------------- | ------------------------- | -------------------------------------------------------- | --------------------------------- |
 | Bun install         | every job using `setup-mango` | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
-| Turbo task output   | check, test, build            | `.turbo/cache`            | OS, arch, Bun revision, Turbo version, lane, task config | lane-scoped trusted-`main` prefix |
+| Turbo task output   | check, test, build            | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix |
 | Workflow lint tools | check                         | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only        |
 | Playwright browser  | browser smoke                 | `~/.cache/ms-playwright`  | OS, arch, Playwright version                             | exact trusted restore only        |
 
@@ -1412,6 +1412,54 @@ versions. Only `mode: restore` uses `actions/cache/restore`, which is the sole
 mode that reports a trusted-`main` match; `restore-save` sees a primary-key hit
 only. `cache-restored` is therefore only safe to gate an install step when the
 call site opts into both exact restore and `mode: restore` (today: Playwright).
+
+### Turbo snapshot rotation
+
+`actions/cache` never overwrites a key. A snapshot keyed by validity alone keeps
+the contents of the first run that saved it: a later run that restores it
+exactly computes whatever the snapshot lacked, skips its save because the key
+exists, and throws those outputs away. The Turbo lanes therefore pass
+`rotate: "true"` to a `restore` before the work and a `save` after it
+(`rotate` is rejected for `restore-save` and `restore-exact`, whose entry cannot
+be conditional):
+
+- **Key.** The save key is the write-scope key plus `-<run id>-<attempt>`, so it
+  never collides and never leaves its scope: `pr-<number>` for a pull request,
+  `main` only for a push to `main`, `run-<id>` for anything else. The restore
+  asks for the newest entry under the scope's own prefix (pull requests only),
+  then under `main` with the same validity, then under the lane's loose `main`
+  prefix. A pull request therefore restores its own earlier snapshots and
+  `main`'s, and `main` restores nothing a pull request wrote.
+- **Validity.** Besides the OS, Bun revision and Turbo version, the lane key
+  hashes `bun.lock`, every `package.json` and every workspace `turbo.json`
+  (`apps/*`, `packages/*`) next to `turbo.jsonc`. Turbo's own task hashes already
+  cover each of these, so none of them decides whether a task hits. A change
+  does not isolate the old snapshots: the restore falls through to the lane's
+  loose `main` prefix, takes the newest snapshot of the previous validity and
+  carries its entries forward, so only Turbo's task hash decides what replays.
+- **When it saves.** `restore` records a baseline right after the archive is
+  extracted; `save` runs only if the job succeeded and `.turbo/cache` holds a
+  `*.tar.zst` newer than that baseline, which means Turbo ran a task the snapshot
+  lacked. Only the payload counts: Turbo rewrites an entry's `-manifest.json` on
+  every hit. A run that only hit saves nothing. In `test.yml` only shard 1 saves.
+- **Retention.** Every save carries what it restored plus the new outputs, so
+  the chain would only grow. Each job sets `TURBO_CACHE_MAX_SIZE=16MB`: at the
+  start of the run Turbo deletes the oldest entries (by mtime, which the archive
+  preserves) until the rest fit, so a snapshot is at most 16 MB plus one run's
+  outputs. A lane saves at most one snapshot per run, and only a run that
+  computed something; the newest is the only one anyone restores, and the
+  superseded ones are not accessed again, so GitHub removes each seven days
+  after its last restore (or earlier, least recently used first, at the 10 GB
+  repository limit). Nothing here deletes a cache, so no job needs
+  `actions: write`.
+- **Quota.** The three lanes' complete sets are 3.6 MB (build), 6.5 KB (check)
+  and about 70 KB (test shard 1). A run that recomputed every build task wrote
+  3.6 MB of new entries, so the next snapshot was 7.2 MB, and its save took
+  about a second. With roughly 56 pushes to `main` and 15 pull
+  requests a week, every run saving at today's sizes would hold about 0.4 GB in
+  a rolling week; if every run saved a full 16 MB chain it would be about 2.3 GB.
+  The gate job's cache-usage summary lists the `turbo` family, so growth shows
+  there before it shows as an eviction.
 
 The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
 only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches
@@ -1429,7 +1477,8 @@ to `v1`; only do that for a benign rollback because old `v1` entries may still
 exist.
 
 Main pushes write reusable `main` keys. Pull requests first restore a matching
-trusted `main` key, then write only a `pr-<number>` primary key; fork permissions
+trusted `main` key (and, for a rotated family, their own `pr-<number>` chain),
+then write only a `pr-<number>` primary key; fork permissions
 may make that final save restore-only. Other trusted triggers use run-scoped
 primary keys and can restore only `main` prefixes. Consequently, privileged
 release jobs never restore a PR-produced cache. Cache paths contain dependencies

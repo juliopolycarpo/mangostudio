@@ -33,6 +33,21 @@ inputs:
     description: restore-save (default), restore, restore-exact, or save.
     required: false
     default: restore-save
+  rotate:
+    description: >
+      When 'true', persist what a run computed on top of what it restored
+      instead of freezing the first entry a key ever saved. actions/cache never
+      overwrites a key, so a family whose entry is keyed by validity alone keeps
+      its first contents until the validity changes, and a restore that hits it
+      exactly never saves again. Rotation gives each save a unique suffix
+      (`<run id>-<attempt>`) after the write scope and validity, restores the
+      newest entry under that stable prefix, and saves only when the run wrote
+      files the restored snapshot did not hold. Pair `mode: restore` before the
+      work with `mode: save` after it; the restore records the baseline the
+      save compares against. Not available for restore-save or restore-exact,
+      whose entry cannot be conditional.
+    required: false
+    default: "false"
   exact-key:
     description: >
       Required when `mode: restore-exact`: the literal cache key to restore,
@@ -43,6 +58,15 @@ inputs:
       "most recent" means between them.
     required: false
     default: ""
+  payload-glob:
+    description: >
+      `rotate: true` with `mode: save` only: the `find -name` pattern of the files
+      whose appearance counts as new content, matched on the file name. Defaults
+      to every file. Turbo rewrites an entry's `<hash>-manifest.json` on every
+      hit and writes its `<hash>.tar.zst` once, on a miss, so the Turbo lanes pass
+      `*.tar.zst`; counting the manifests would save after a run that only hit.
+    required: false
+    default: "*"
   lookup-only:
     description: >
       When 'true' with `mode: restore`, check whether a cache exists without
@@ -70,6 +94,16 @@ outputs:
   primary-key:
     description: Primary cache key used by this run.
     value: ${{ steps.keys.outputs.primary-key }}
+  validity:
+    description: >
+      The validity string this call keyed on, so a later `mode: save` step can
+      reuse exactly the value the restore resolved instead of restating it.
+    value: ${{ steps.keys.outputs.validity }}
+  new-files:
+    description: >
+      `mode: save` with `rotate: true` only: how many files under the cache
+      paths the run wrote after the restore. '0' means the save was skipped.
+    value: ${{ steps.delta.outputs.new-files }}
   restored-prefix:
     description: >
       Trusted main-cache key considered during restore: the loose main prefix
@@ -98,6 +132,8 @@ runs:
         MODE: ${{ inputs.mode }}
         PATH_INPUT: ${{ inputs.path }}
         RESTORE_PREFIX: ${{ inputs.restore-prefix }}
+        ROTATE: ${{ inputs.rotate }}
+        ROTATION: ${{ github.run_id }}-${{ github.run_attempt }}
         VALIDITY: ${{ inputs.validity }}
         WRITE_SCOPE: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('run-{0}', github.run_id) }}
       run: |
@@ -130,6 +166,19 @@ runs:
             ;;
         esac
 
+        case "${ROTATE}" in
+          true|false) ;;
+          *)
+            echo "::error::cache-scoped rotate must be 'true' or 'false' (got '${ROTATE}')"
+            exit 1
+            ;;
+        esac
+
+        if [ "${ROTATE}" = "true" ] && [ "${MODE}" != "restore" ] && [ "${MODE}" != "save" ]; then
+          echo "::error::cache-scoped rotate requires mode restore or save (got '${MODE}')"
+          exit 1
+        fi
+
         if [[ "${VALIDITY}" == -* || "${VALIDITY}" == *- || "${VALIDITY}" == *--* ]]; then
           echo "::error::cache-scoped validity must not contain empty segments: '${VALIDITY}'"
           exit 1
@@ -145,6 +194,20 @@ runs:
         restore_key="${prefix}-main-${VALIDITY}"
         loose_prefix="${prefix}-main-${RESTORE_PREFIX}"
 
+        # A rotated save extends the write-scope key with a per-attempt suffix,
+        # so it can never collide with an entry that already exists and never
+        # leaves its own scope. The scope's own chain is restored first: the
+        # newest snapshot this pull request saved holds everything it computed
+        # so far. Main's chain has the same prefix as `restore_key`, which
+        # already matches its rotated entries, so main adds nothing here.
+        own_prefix=""
+        if [ "${ROTATE}" = "true" ]; then
+          if [ "${WRITE_SCOPE}" != "main" ]; then
+            own_prefix="${primary_key}-"
+          fi
+          primary_key="${primary_key}-${ROTATION}"
+        fi
+
         # Report what restore actually considers: exact-restore families never
         # see the loose prefix, so advertising it would misdirect cache-miss
         # debugging.
@@ -158,7 +221,11 @@ runs:
           echo "primary-key=${primary_key}"
           echo "restore-key=${restore_key}"
           echo "restore-prefix=${restore_prefix}"
+          echo "validity=${VALIDITY}"
           echo "restore-keys<<EOF"
+          if [ -n "${own_prefix}" ]; then
+            echo "${own_prefix}"
+          fi
           echo "${restore_key}"
           if [ "${EXACT_RESTORE}" != "true" ]; then
             echo "${loose_prefix}"
@@ -197,8 +264,85 @@ runs:
         path: ${{ inputs.path }}
         key: ${{ inputs.exact-key }}
 
+    # Taken right after the restore and before any work, so every file the
+    # restore wrote is older than this marker and every file the job writes
+    # afterwards is newer. tar keeps the mtimes it archived.
+    - id: baseline
+      name: Record restored cache baseline
+      if: inputs.mode == 'restore' && inputs.rotate == 'true' && inputs.lookup-only != 'true'
+      shell: bash
+      env:
+        FAMILY: ${{ inputs.family }}
+        PATH_INPUT: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+
+        : > "${RUNNER_TEMP}/cache-scoped-${FAMILY}.baseline"
+
+        listing="$(mktemp)"
+        while IFS= read -r path; do
+          path="${path/#\~/${HOME}}"
+          { [ -n "${path}" ] && [ -e "${path}" ]; } || continue
+          find "${path}" -type f -printf '%s %T@\n' >> "${listing}"
+        done <<< "${PATH_INPUT}"
+        read -r files bytes oldest newest < <(awk '
+          { n += 1; b += $1; if (lo == "" || $2 < lo) lo = $2; if ($2 > hi) hi = $2 }
+          END { printf "%d %d %d %d\n", n, b, lo, hi }' "${listing}")
+
+        detail="files=\`${files}\`, bytes=\`${bytes}\`"
+        if [ "${files}" -gt 0 ]; then
+          detail="${detail}, oldest=\`$(date -u -d "@${oldest}" +%Y-%m-%dT%H:%M:%SZ)\`, newest=\`$(date -u -d "@${newest}" +%Y-%m-%dT%H:%M:%SZ)\`"
+        fi
+        echo "- ${FAMILY}: restored baseline ${detail}, taken \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`" | tee -a "$GITHUB_STEP_SUMMARY"
+
+    # Decides whether this run computed anything the restored snapshot lacked.
+    # An unconditional save would re-upload an identical snapshot after every
+    # run that only hit.
+    - id: delta
+      name: Detect cache files written since the restore
+      if: inputs.mode == 'save' && inputs.rotate == 'true'
+      shell: bash
+      env:
+        FAMILY: ${{ inputs.family }}
+        PATH_INPUT: ${{ inputs.path }}
+        PAYLOAD_GLOB: ${{ inputs.payload-glob }}
+        PRIMARY_KEY: ${{ steps.keys.outputs.primary-key }}
+      run: |
+        set -euo pipefail
+
+        marker="${RUNNER_TEMP}/cache-scoped-${FAMILY}.baseline"
+        if [ ! -e "${marker}" ]; then
+          echo "::error::cache-scoped rotate save found no restore baseline for family ${FAMILY} (expected an earlier mode: restore step with rotate: true in this job)"
+          exit 1
+        fi
+
+        newer="$(mktemp)"
+        while IFS= read -r path; do
+          path="${path/#\~/${HOME}}"
+          { [ -n "${path}" ] && [ -e "${path}" ]; } || continue
+          find "${path}" -type f -name "${PAYLOAD_GLOB}" -newer "${marker}" -printf '%s %TY-%Tm-%TdT%TH:%TM:%TS %p\n' >> "${newer}"
+        done <<< "${PATH_INPUT}"
+        read -r files bytes < <(awk '{ n += 1; b += $1 } END { printf "%d %d\n", n, b }' "${newer}")
+
+        {
+          echo "new-files=${files}"
+          echo "new-bytes=${bytes}"
+        } >> "$GITHUB_OUTPUT"
+
+        if [ "${files}" -gt 0 ]; then
+          # Names the files that made the save necessary, newest last, so a
+          # save that should have been skipped can be traced to its cause.
+          echo "::group::${FAMILY}: files newer than the restore baseline ($(date -u -r "${marker}" +%Y-%m-%dT%H:%M:%S))"
+          sort -k2 "${newer}" | tail -n 10
+          echo "::endgroup::"
+          echo "- ${FAMILY}: ${files} new files (${bytes} bytes) since restore, saving \`${PRIMARY_KEY}\`" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+        else
+          echo "- ${FAMILY}: no new files since restore, save skipped" | tee -a "$GITHUB_STEP_SUMMARY"
+        fi
+
     - name: Save scoped cache
-      if: inputs.mode == 'save'
+      if: inputs.mode == 'save' && (inputs.rotate != 'true' || steps.delta.outputs.new-files != '0')
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.path }}
@@ -253,5 +397,8 @@ runs:
 
         summary_key="${PRIMARY_KEY}"
         [ "${MODE}" = "restore-exact" ] && summary_key="${EXACT_KEY}"
-        echo "- ${FAMILY}: hit=\`${hit}\`, key=\`${summary_key}\`, restore-prefix=\`${RESTORE_PREFIX}\`" \
-          >> "$GITHUB_STEP_SUMMARY"
+        line="- ${FAMILY}: hit=\`${hit}\`, key=\`${summary_key}\`, restore-prefix=\`${RESTORE_PREFIX}\`"
+        # A rotated key never hits exactly; the newest entry under the prefix is
+        # what it restored, and `hit=false` alone would read as a cold start.
+        [ "${MODE}" = "restore" ] && [ -n "${matched}" ] && line="${line}, matched=\`${matched}\`"
+        echo "${line}" >> "$GITHUB_STEP_SUMMARY"
