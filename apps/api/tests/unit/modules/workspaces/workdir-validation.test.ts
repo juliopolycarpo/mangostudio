@@ -3,9 +3,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import {
   requireValidWorkdir,
   validateWorkdir,
@@ -28,7 +28,7 @@ describe('validateWorkdir facade', () => {
   it('returns the resolved path for an existing directory', async () => {
     const root = await createTempDir();
 
-    expect(await validateWorkdir(root)).toEqual({ ok: true, resolvedPath: resolve(root) });
+    expect(await validateWorkdir(root)).toEqual({ ok: true, resolvedPath: await realpath(root) });
   });
 
   it('throws a typed error when a caller requires a valid directory', async () => {

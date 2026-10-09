@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -43,11 +43,12 @@ describe('library path containment', () => {
     const linkedRoot = join(tempDir, 'linked-skills');
     mkdirSync(dotfilesRoot, { recursive: true });
     symlinkSync(dotfilesRoot, linkedRoot);
+    const resolvedRoot = realpathSync(dotfilesRoot);
 
     expect(resolveContainedResourcePath(linkedRoot, 'gh')).toMatchObject({
       logicalPath: join(linkedRoot, 'gh'),
-      resolvedRoot: dotfilesRoot,
-      resolvedPath: join(dotfilesRoot, 'gh'),
+      resolvedRoot,
+      resolvedPath: join(resolvedRoot, 'gh'),
     });
   });
 
