@@ -1,6 +1,12 @@
 import { access, mkdir, readdir, readFile, realpath } from 'node:fs/promises';
-import { arch, release, type } from 'node:os';
+import { arch, release, tmpdir, type } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  type NativeMsvcInventory,
+  parseNativeMsvcInventory,
+} from './native-bun-qualification-msvc';
 
 import {
   type NativeCommandOptions,
@@ -26,6 +32,10 @@ import {
   sealNativeArtifact,
   sealNativeSource,
 } from './native-bun-qualification-source';
+import {
+  type NativeWindowsJobContext,
+  runNativeWindowsJob,
+} from './native-bun-qualification-windows';
 
 export interface NativeQualificationOptions {
   readonly root: string;
@@ -34,7 +44,7 @@ export interface NativeQualificationOptions {
 }
 
 export interface NativeQualificationDependencies {
-  readonly runCommand: (options: NativeCommandOptions) => Promise<NativeCommandReceipt>;
+  readonly runCommand?: (options: NativeCommandOptions) => Promise<NativeCommandReceipt>;
   readonly snapshotProcesses?: () => Promise<readonly NativeProcess[]>;
 }
 
@@ -66,6 +76,13 @@ export interface NativeQualificationReceipt {
   toolchain: Record<string, string>;
   sourceBefore: SourceSeal | null;
   sourceAfter: SourceSeal | null;
+  toolingBefore: SourceSeal | null;
+  toolingAfter: SourceSeal | null;
+  windowsJob: {
+    readonly helperPath: string;
+    readonly helperSha256: string;
+    readonly installedTools: NativeMsvcInventory;
+  } | null;
   artifactsBefore: ArtifactSeal[];
   artifactsAfter: ArtifactSeal[];
   buildArtifacts: Record<string, readonly NativeCompilerArtifact[]>;
@@ -286,22 +303,30 @@ async function runSetup(
         await readFile(join(receipt.out, `logs/${label}.stdout.log`), 'utf8')
       );
       receipt.buildArtifacts[target] = compiled;
+      const sdk = compiled.filter((artifact) =>
+        artifact.packageId.includes('mango-external-agents')
+      );
+      const expectedFeatures = target === 'runtime' ? ['stdio'] : ['stdio', 'testing'];
       if (
-        target === 'runtime' &&
-        compiled.some(
+        !sdk.length ||
+        sdk.some(
           (artifact) =>
-            artifact.packageId.includes('mango-external-agents') &&
-            artifact.features.includes('testing')
+            JSON.stringify([...artifact.features].sort()) !== JSON.stringify(expectedFeatures)
         )
       ) {
         throw new Error(
-          'Production runtime compiled the SDK testing feature; expected default production features'
+          `Invalid ${target} SDK features ${JSON.stringify(sdk.map((artifact) => artifact.features))}; expected ${JSON.stringify(expectedFeatures)}`
         );
       }
       const name = target === 'runtime' ? 'mangostudio-runtime' : 'fake_cursor_agent';
-      if (!compiled.some((artifact) => artifact.target === name && artifact.executable))
+      const kind = target === 'runtime' ? 'bin' : 'example';
+      const primary = compiled.filter(
+        (artifact) =>
+          artifact.target === name && artifact.executable && artifact.kind.includes(kind)
+      );
+      if (!primary.length || primary.some((artifact) => artifact.features.length))
         throw new Error(
-          `Missing compiler executable ${name}; expected a complete native build receipt`
+          `Invalid compiler executable ${name} features ${JSON.stringify(primary.map((artifact) => artifact.features))}; expected an actual ${kind} executable with default empty features`
         );
       await Bun.write(
         join(receipt.out, 'build-features.json'),
@@ -325,7 +350,7 @@ async function runSetup(
  */
 export async function runNativeQualification(
   options: NativeQualificationOptions,
-  dependencies: NativeQualificationDependencies = { runCommand: runNativeCommand }
+  dependencies: NativeQualificationDependencies = {}
 ): Promise<NativeQualificationReceipt> {
   const started = Date.now();
   const root = await realpath(options.root).catch(() => resolve(options.root));
@@ -370,6 +395,9 @@ export async function runNativeQualification(
     toolchain: {},
     sourceBefore: null,
     sourceAfter: null,
+    toolingBefore: null,
+    toolingAfter: null,
+    windowsJob: null,
     artifactsBefore: [],
     artifactsAfter: [],
     buildArtifacts: {},
@@ -381,6 +409,15 @@ export async function runNativeQualification(
   let artifacts: readonly string[] = [];
   let inventory: NativeTestLane[] = [];
   let processesBefore: readonly NativeProcess[] = [];
+  let windowsContext: NativeWindowsJobContext | null = null;
+  const toolingRoot = fileURLToPath(new URL('../../', import.meta.url));
+  const nativeRun = (command: NativeCommandOptions): Promise<NativeCommandReceipt> => {
+    if (dependencies.runCommand) return dependencies.runCommand(command);
+    if (process.platform !== 'win32') return runNativeCommand(command);
+    if (!windowsContext)
+      throw new Error('Missing Windows Job context; expected sealed native ownership tooling');
+    return runNativeWindowsJob(command, windowsContext);
+  };
   const run = async (
     label: string,
     command: readonly string[],
@@ -392,7 +429,7 @@ export async function runNativeQualification(
       throw new Error(
         `Qualification exceeded ${TOTAL_TIMEOUT_SECONDS}s; expected completion below the workflow bound`
       );
-    const result = await dependencies.runCommand({
+    const result = await nativeRun({
       label,
       command,
       root,
@@ -421,6 +458,53 @@ export async function runNativeQualification(
     if (options.sha && receipt.sourceBefore.head !== options.sha)
       throw new Error(`Source HEAD ${receipt.sourceBefore.head}; expected ${options.sha}`);
     await requireFreshSource(root);
+    if (process.platform === 'win32' && !dependencies.runCommand) {
+      receipt.toolingBefore = await sealNativeSource(toolingRoot);
+      if (receipt.toolingBefore.status)
+        throw new Error(
+          `Dirty tooling ${JSON.stringify(receipt.toolingBefore.status)}; expected immutable qualification tooling`
+        );
+      const helperPath = join(toolingRoot, 'scripts/lib/native-windows-job.ps1');
+      const helper = await sealNativeArtifact(helperPath);
+      const sealedHelper = receipt.toolingBefore.files.find(
+        (file) => file.path === 'scripts/lib/native-windows-job.ps1'
+      );
+      if (!sealedHelper || sealedHelper.sha256 !== helper.sha256)
+        throw new Error(
+          `Unsealed Windows helper ${helperPath}; expected tracked bytes matching tooling identity`
+        );
+      windowsContext = {
+        helperPath,
+        helperSha256: helper.sha256,
+        sourceSha: receipt.sourceBefore.head,
+        toolingSha: receipt.toolingBefore.head,
+        privateDirectory: await realpath(tmpdir()),
+        expectedVctip: [],
+      };
+      const shell = Bun.which('pwsh.exe') ?? Bun.which('powershell.exe');
+      if (!shell) throw new Error('Missing PowerShell; expected a native Windows Job launcher');
+      const inventoryPath = join(out, 'installed-msvc-tools.json');
+      const attestation = await run(
+        'msvc-inventory',
+        [
+          shell,
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-File',
+          helperPath,
+          '-AttestationPath',
+          inventoryPath,
+        ],
+        60
+      );
+      const failures = commandFailures(attestation);
+      if (failures.length) throw new Error(failures.join('\n'));
+      const installedTools = parseNativeMsvcInventory(await readFile(inventoryPath, 'utf8'));
+      windowsContext = { ...windowsContext, expectedVctip: installedTools.vctip };
+      receipt.windowsJob = { helperPath, helperSha256: helper.sha256, installedTools };
+      await writeReceipt(receipt);
+    }
     inventory = await nativeTestInventory(
       root,
       receipt.sourceBefore.files.map((file) => file.path)
@@ -463,6 +547,14 @@ export async function runNativeQualification(
       receipt.validationErrors.push(
         'Source HEAD, tree, tracked bytes, or clean status changed during qualification'
       );
+    if (receipt.toolingBefore) {
+      receipt.toolingAfter = await sealNativeSource(toolingRoot);
+      if (
+        nativeSourceChanged(receipt.toolingBefore, receipt.toolingAfter) ||
+        receipt.toolingAfter.status
+      )
+        receipt.validationErrors.push('Qualification tooling identity or tracked bytes changed');
+    }
     receipt.artifactsAfter = await Promise.all(artifacts.map(sealNativeArtifact));
     if (JSON.stringify(receipt.artifactsBefore) !== JSON.stringify(receipt.artifactsAfter))
       receipt.validationErrors.push(

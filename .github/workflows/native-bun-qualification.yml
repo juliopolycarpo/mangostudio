@@ -11,6 +11,8 @@ on:
       - scripts/ci/native-bun-qualification.ts
       - scripts/lib/native-bun-qualification*.ts
       - scripts/tests/native-bun-qualification*.unit.test.ts
+      - scripts/tests/native-bun-compiler-helpers.unit.test.ts
+      - scripts/lib/native-windows-job*.ps1
       - scripts/lib/actions-lint/**
       - scripts/lib/zip-archive.ts
       - scripts/tests/actions-lint.unit.test.ts
@@ -105,6 +107,21 @@ jobs:
 
       # Each matrix runner owns its checkout, result cache and two Cargo
       # targets. No native result or writable Cargo target is restored/shared.
+      - name: Install frozen qualification-tooling dependencies
+        working-directory: tooling
+        run: bun install --frozen-lockfile > ../tooling-setup.log 2>&1
+
+      - name: Verify native Windows Job ownership and failure controls
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'tooling\scripts\lib\native-windows-job.probe.ps1'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'job-proof'
+          & $probe -OutDirectory $out -BunPath (Get-Command bun.exe).Source
+          if ($LASTEXITCODE -ne 0) { throw "Native Windows Job probes failed with exit $LASTEXITCODE" }
+
       - name: Run complete native verification and retain its evidence
         env:
           TURBO_TELEMETRY_DISABLED: "1"
@@ -118,6 +135,8 @@ jobs:
           name: native-bun-${{ matrix.source.name }}-${{ matrix.os }}-${{ matrix.source.sha }}
           path: |
             evidence/
+            job-proof/
+            tooling-setup.log
             !evidence/targets/**
           if-no-files-found: error
           retention-days: 14

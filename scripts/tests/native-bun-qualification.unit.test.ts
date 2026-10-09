@@ -128,6 +128,11 @@ class FakeNativeCommands {
   mutateSource = false;
   mutateArtifact = false;
   unobservedLabel: string | null = null;
+  sdkFeatures: Record<'runtime' | 'fake', readonly string[]> = {
+    runtime: ['stdio'],
+    fake: ['stdio', 'testing'],
+  };
+  primaryFeatures: Record<'runtime' | 'fake', readonly string[]> = { runtime: [], fake: [] };
 
   run = async (options: NativeCommandOptions): Promise<NativeCommandReceipt> => {
     this.calls.push(options);
@@ -145,7 +150,30 @@ class FakeNativeCommands {
           ? `debug/mangostudio-runtime${suffix}`
           : `debug/examples/fake_cursor_agent${suffix}`;
       await file(join(target, path), options.label);
-      content = `${JSON.stringify({ reason: 'compiler-artifact', package_id: 'mangostudio-runtime', target: { name: options.label === 'build-runtime' ? 'mangostudio-runtime' : 'fake_cursor_agent', kind: ['bin'] }, features: [], executable: join(target, path), filenames: [join(target, path)] })}\n${JSON.stringify({ reason: 'build-finished', success: true })}\n`;
+      const build = options.label === 'build-runtime' ? 'runtime' : 'fake';
+      const rows = [
+        {
+          reason: 'compiler-artifact',
+          package_id: 'mango-external-agents',
+          target: { name: 'mango_external_agents', kind: ['lib'] },
+          features: this.sdkFeatures[build],
+          executable: null,
+          filenames: [],
+        },
+        {
+          reason: 'compiler-artifact',
+          package_id: 'mangostudio-runtime',
+          target: {
+            name: build === 'runtime' ? 'mangostudio-runtime' : 'fake_cursor_agent',
+            kind: [build === 'runtime' ? 'bin' : 'example'],
+          },
+          features: this.primaryFeatures[build],
+          executable: join(target, path),
+          filenames: [join(target, path)],
+        },
+        { reason: 'build-finished', success: true },
+      ];
+      content = `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`;
     }
     if (options.label === 'check' && this.mutateSource)
       await file(
@@ -358,6 +386,27 @@ describe('qualification inputs and seals', () => {
 });
 
 describe('full qualification receipts', () => {
+  test('rejects altered runtime or fake build feature graphs before validation', async () => {
+    for (const target of ['runtime', 'fake'] as const) {
+      for (const featureType of ['sdk', 'primary'] as const) {
+        const source = await checkout();
+        const fake = new FakeNativeCommands();
+        if (featureType === 'sdk') fake.sdkFeatures[target] = ['different'];
+        else fake.primaryFeatures[target] = ['different'];
+        const receipt = await runNativeQualification(source, {
+          runCommand: fake.run,
+          snapshotProcesses: emptyNativeCensus,
+        });
+        expect(receipt.status).toBe('setup-failed');
+        expect(receipt.setupErrors.join('\n')).toContain('features');
+        expect(receipt.setupErrors.join('\n')).toContain('different');
+        expect(fake.calls.some((call) => call.label === 'check' || call.label === 'test')).toBe(
+          false
+        );
+      }
+    }
+  });
+
   test('passes a complete single-attempt run with immutable source/artifacts and explicit binaries', async () => {
     const source = await checkout();
     const fake = new FakeNativeCommands();

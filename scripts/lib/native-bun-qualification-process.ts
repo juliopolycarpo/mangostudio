@@ -22,7 +22,9 @@ export interface NativeProcessScope {
 }
 
 interface NativeSettlement {
-  readonly scope: 'observed descendants and command process group';
+  readonly scope:
+    | 'observed descendants and command process group'
+    | 'atomic Windows Job membership';
   readonly pollIntervalMs: number;
   readonly rootObserved: boolean;
   readonly observed: readonly NativeProcess[];
@@ -136,7 +138,7 @@ function processStart(row: NativeProcess): { clock: 'ticks' | 'time'; value: big
   if (utc) {
     const milliseconds = Date.parse(`${utc[1]}${utc[3]}`);
     if (!Number.isFinite(milliseconds)) return null;
-    // CIM's UTC creation timestamp carries 100 ns precision. Date.parse alone loses it.
+    // Preserve CIM's reported fractional seconds; Date.parse reduces them to milliseconds.
     const fraction = BigInt((utc[2] ?? '').padEnd(7, '0'));
     return { clock: 'time', value: BigInt(milliseconds) * 10_000n + fraction };
   }

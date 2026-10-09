@@ -168,6 +168,23 @@ fake-vendor builds, binary hashes, setup/check/test results, case outcomes and
 scoped terminal process observations. Each native job owns its source checkout
 and two Cargo targets; it restores no test-result or Cargo-target cache.
 
+Windows commands start atomically inside a private Job. Membership queries and
+retained native handles provide ownership through child exit and captured pipe
+EOF. Ordinary commands must leave the Job naturally empty. The two original
+Cargo setup commands may close a surviving VCTIP process only after successful
+compiler JSON, unchanged runtime or fake-agent features, complete membership
+and independently attested installed MSVC path, versions and hash agree. Each
+cleanup records the retained handle identity and completion. Final Job closure
+is containment and never establishes successful settlement. Full native
+censuses before and after each command reject unattributed compiler helpers.
+
+The producer installs its own frozen dependencies and seals its Windows helper
+checkout separately from the fresh tested source. Requests containing the inherited environment live outside uploaded
+evidence and are deleted after each invocation. Uploaded evidence keeps raw
+stdout/stderr, source and tool identities, membership snapshots, explicit
+cleanup actions and final open-Job proof. A bounded native Windows probe gate
+checks orphan, pipe, PID reuse and crash behavior before full qualification.
+
 Baseline failures remain visible in the receipts and logs. Candidate failures
 fail the job. A check failure still permits the complete test command to run,
 so workflow-tool setup cannot hide test failures. Hosted native results cover
