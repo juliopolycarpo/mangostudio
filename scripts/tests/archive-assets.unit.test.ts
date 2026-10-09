@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
-import { captureCommand } from '../lib/exec';
+import { openTarArchive } from '../lib/archive';
 import { createReleaseAssetPlan, type ReleaseAssetPlan } from '../lib/release-assets';
 import {
   filterBinaryTargets,
@@ -13,6 +14,7 @@ import {
   runtimeBinaryName,
 } from '../lib/release-targets';
 import { archiveReleaseAssets } from '../release/archive-assets';
+import { extractTargetArchive } from '../release/extract-target';
 
 let tempDirs: string[] = [];
 
@@ -145,6 +147,44 @@ const createMuslReleasePlan = (options: {
 };
 
 describe.serial('archiveReleaseAssets', () => {
+  test('writes a flat Windows ZIP with matching binaries and checksum', async () => {
+    const rootDir = makeTempDir();
+    const outDir = join(rootDir, 'out');
+    const sourceDir = join(outDir, 'windows-x64');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(join(sourceDir, 'mangostudio.exe'), 'hub binary');
+    writeFileSync(join(sourceDir, 'mangostudio-runtime.exe'), 'runtime binary');
+    writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
+    stageFrontendDist(rootDir);
+    mkdirSync(join(rootDir, 'scripts', 'install'), { recursive: true });
+    writeFileSync(join(rootDir, 'scripts', 'install', 'install.sh'), '#!/usr/bin/env bash\n');
+    writeFileSync(join(rootDir, 'scripts', 'install', 'install.ps1'), '# fixture\n');
+    const plan = createReleaseAssetPlan({
+      version: '1.2.3',
+      rootDir,
+      outDir,
+      assetsDir: join(rootDir, 'release-assets'),
+      onlyPlatform: 'windows-x64',
+    });
+    await archiveReleaseAssets(plan);
+    const [archive] = plan.platformArchives;
+    if (!archive) throw new Error('expected a Windows platform archive | received: none');
+    const destination = join(rootDir, '.mango', 'out', 'windows-x64');
+    await extractTargetArchive({
+      archivePath: archive.archivePath,
+      archiveFormat: 'zip',
+      destination,
+      expectedMembers: ['mangostudio.exe', 'mangostudio-runtime.exe', 'README.md'],
+      rootDir,
+    });
+    expect(readFileSync(join(destination, 'mangostudio.exe'), 'utf8')).toBe('hub binary');
+    expect(readFileSync(join(destination, 'mangostudio-runtime.exe'), 'utf8')).toBe(
+      'runtime binary'
+    );
+    expect(readFileSync(join(destination, 'README.md'), 'utf8')).toBe('# Standalone build\n');
+    const digest = createHash('sha256').update(readFileSync(archive.archivePath)).digest('hex');
+    expect(readFileSync(plan.checksumPath, 'utf8')).toContain(`${digest}  ${archive.assetName}\n`);
+  });
   // What a platform archive needs is now just the two binaries and the README.
   // Kept as a rejection test rather than deleted: the vendored-SDK layout check
   // that used to live here was the only thing asserting the archive step
@@ -210,9 +250,9 @@ describe.serial('archiveReleaseAssets', () => {
       expect(existsSync(asset.assetPath)).toBe(true);
     }
     expect(existsSync(plan.frontendArchive.archivePath)).toBe(true);
-    const frontendMembers = (
-      await captureCommand(['tar', '-tzf', plan.frontendArchive.archivePath])
-    ).stdout;
+    const frontendMembers = (await openTarArchive(plan.frontendArchive.archivePath)).entries.join(
+      '\n'
+    );
     expect(frontendMembers).toContain('./index.html');
     expect(frontendMembers).not.toContain(BUILD_STATE_FILE);
     expect(existsSync(plan.checksumPath)).toBe(true);

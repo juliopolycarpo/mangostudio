@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
+import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { ROOT_DIR } from '../lib/config';
 import { archiveConcurrency, captureCommand, mapWithConcurrency } from '../lib/exec';
 import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-assert';
@@ -90,6 +91,7 @@ function prepareAssetsDir(assetsDir: string): void {
  * Homebrew formula installs the archive contents without a chmod, and anyone
  * who untars a release by hand expects to run what falls out. It writes tar
  * only in any case, so the zip half could never convert.
+ * Windows creation uses native bsdtar and PowerShell; POSIX uses tar and zip.
  * Reading is native — see `scripts/lib/archive.ts` and `docs/reference/tooling.md`.
  */
 async function archivePlatform(plan: PlatformArchivePlan, assetsDir: string): Promise<void> {
@@ -102,17 +104,11 @@ async function archivePlatform(plan: PlatformArchivePlan, assetsDir: string): Pr
 
   const members = platformArchiveMembers(plan);
 
-  await runCommand([
-    'tar',
-    '-czf',
-    plan.archivePath,
-    '-C',
-    plan.sourceDir,
-    ...members,
-    '-C',
-    dirname(plan.readmePath),
-    'README.md',
+  const { command, cwd } = tarCreationCommand(plan.archivePath, [
+    { directory: plan.sourceDir, members },
+    { directory: dirname(plan.readmePath), members: ['README.md'] },
   ]);
+  await runCommand([...command], cwd);
 }
 
 async function archivePlatformZip(plan: PlatformArchivePlan, assetsDir: string): Promise<void> {
@@ -124,9 +120,8 @@ async function archivePlatformZip(plan: PlatformArchivePlan, assetsDir: string):
   cpSync(plan.runtimeBinaryPath, join(stagingDir, runtimeBinaryName(plan.platform.name)));
   cpSync(plan.readmePath, join(stagingDir, 'README.md'));
 
-  const members = platformArchiveMembers(plan);
-
-  await runCommand(['zip', '-qr', plan.archivePath, ...members, 'README.md'], stagingDir);
+  const { command, cwd } = zipCreationCommand(plan.archivePath, stagingDir);
+  await runCommand([...command], cwd);
   rmSync(stagingDir, { force: true, recursive: true });
 }
 
@@ -146,15 +141,12 @@ async function archivePlatformZip(plan: PlatformArchivePlan, assetsDir: string):
 async function archiveFrontend(plan: FrontendArchivePlan): Promise<void> {
   assertDirectory(join(plan.sourceDir, 'assets'), 'frontend assets directory');
   assertFile(join(plan.sourceDir, 'index.html'), 'frontend index.html');
-  await runCommand([
-    'tar',
-    '-czf',
+  const { command, cwd } = tarCreationCommand(
     plan.archivePath,
-    `--exclude=${BUILD_STATE_FILE}`,
-    '-C',
-    plan.sourceDir,
-    '.',
-  ]);
+    [{ directory: plan.sourceDir, members: ['.'] }],
+    { exclude: [BUILD_STATE_FILE] }
+  );
+  await runCommand([...command], cwd);
 }
 
 /**
