@@ -38,7 +38,61 @@ jobs:
         with:
           bun-version-file: source/.bun-version
 
+      - name: Bootstrap frozen source dependencies in a separate process
+        working-directory: source
+        timeout-minutes: 5
+        env:
+          PROBE_CONTROL: ${{ matrix.control }}
+          PROBE_WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          bun --no-install - <<'BUN'
+          import { appendFile, mkdir } from 'node:fs/promises';
+          import { join, resolve } from 'node:path';
+          const root = resolve('.');
+          const out = resolve('..', 'evidence');
+          await mkdir(out, { recursive: true });
+          const receipt = { sourceSha: '8bf7943eac9b92b815bf67dda1eab48f16f52b4c', workflowSha: process.env.PROBE_WORKFLOW_SHA, control: process.env.PROBE_CONTROL, status: 'running', sourceBefore: null, sourceAfter: null, commands: [], errors: [] };
+          await Bun.write(join(out, 'bootstrap-receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
+          await Bun.write(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
+          try {
+            const { runNativeCommand, snapshotNativeProcesses } = await import(join(root, 'scripts/lib/native-bun-qualification-process.ts'));
+            const { nativeSourceChanged, sealNativeSource } = await import(join(root, 'scripts/lib/native-bun-qualification-source.ts'));
+            if (process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_OS !== 'Windows') throw new Error('Invalid bootstrap host; expected disposable GitHub Actions Windows');
+            const before = await sealNativeSource(root);
+            receipt.sourceBefore = { head: before.head, tree: before.tree, sha256: before.sha256, status: before.status };
+            await Bun.write(join(out, 'source-before-bootstrap.json'), JSON.stringify(before, null, 2) + '\n');
+            if (before.head !== receipt.sourceSha || before.status) throw new Error('Invalid bootstrap source; expected clean immutable checkout');
+            await Bun.write(join(out, 'processes-before-bootstrap.json'), JSON.stringify(await snapshotNativeProcesses(), null, 2) + '\n');
+            for (const [label, command, timeoutSeconds] of [
+              ['install', ['bun', 'install', '--frozen-lockfile'], 240],
+              ['dependency-import', ['bun', '--no-install', '-e', 'console.log(Bun.resolveSync("typebox", process.cwd())); await import("typebox"); console.log("fresh source dependency import passed");'], 30],
+            ]) {
+              const result = await runNativeCommand({ label, command, timeoutSeconds, root, out, env: { ...process.env }, snapshot: async () => {
+                const rows = await snapshotNativeProcesses();
+                await appendFile(join(out, 'raw-census-' + label + '.jsonl'), JSON.stringify({ at: new Date().toISOString(), processes: rows }) + '\n');
+                return rows;
+              } });
+              receipt.commands.push(result);
+              await Bun.write(join(out, 'command-' + label + '.json'), JSON.stringify(result, null, 2) + '\n');
+              if (result.exitCode !== 0 || result.timedOut || result.errors.length || !result.settlement.empty) throw new Error(label + ': frozen dependency bootstrap failed; inspect full command and census logs');
+            }
+            const after = await sealNativeSource(root);
+            receipt.sourceAfter = { head: after.head, tree: after.tree, sha256: after.sha256, status: after.status };
+            await Bun.write(join(out, 'source-after-bootstrap.json'), JSON.stringify(after, null, 2) + '\n');
+            if (nativeSourceChanged(before, after) || after.status) throw new Error('Bootstrap changed tracked source bytes or Git identity');
+          } catch (error) {
+            receipt.errors.push(String(error));
+          } finally {
+            receipt.status = receipt.errors.length ? 'dependency-setup-failed' : 'prepared';
+            await Bun.write(join(out, 'bootstrap-receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
+            await Bun.write(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
+            console.log(JSON.stringify({ status: receipt.status, errors: receipt.errors }));
+          }
+          process.exitCode = receipt.errors.length ? 1 : 0;
+          BUN
+
       - name: Build the default runtime and preserve process evidence
+        working-directory: source
         env:
           PROBE_CONTROL: ${{ matrix.control }}
           PROBE_WORKFLOW_SHA: ${{ github.sha }}
@@ -48,8 +102,8 @@ jobs:
           import { arch, release, type } from 'node:os';
           import { join, resolve } from 'node:path';
 
-          const root = resolve('source');
-          const out = resolve('evidence');
+          const root = resolve('.');
+          const out = resolve('..', 'evidence');
           const expectedSha = '8bf7943eac9b92b815bf67dda1eab48f16f52b4c';
           const control = process.env.PROBE_CONTROL;
           let sealNativeSource;
@@ -75,6 +129,7 @@ jobs:
             runtimeArtifact: null,
             observedTools: [],
             fixedPostCommandObservation: null,
+            bootstrap: null,
             errors: [],
           };
           await Bun.write(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
@@ -91,23 +146,17 @@ jobs:
             ({ sealNativeSource, nativeSourceChanged } = sourceApi);
             const { runNativeCommand, scopeNativeProcesses } = processApi;
             const { nativeCompilerArtifacts, sealNativeArtifact } = sourceApi;
+            receipt.bootstrap = JSON.parse(await readFile(join(out, 'bootstrap-receipt.json'), 'utf8'));
+            receipt.commands.push(...receipt.bootstrap.commands);
+            if (receipt.bootstrap.status !== 'prepared') throw new Error('Invalid dependency bootstrap; expected prepared source');
             receipt.sourceBefore = await sealNativeSource(root);
             await Bun.write(join(out, 'source-before.json'), JSON.stringify(receipt.sourceBefore, null, 2) + '\n');
             if (receipt.sourceBefore.head !== expectedSha || receipt.sourceBefore.status) {
               throw new Error('Invalid source seal; expected clean immutable source ' + expectedSha);
             }
+            if (receipt.sourceBefore.sha256 !== receipt.bootstrap.sourceBefore.sha256 || receipt.sourceBefore.tree !== receipt.bootstrap.sourceBefore.tree) throw new Error('Source bytes or tree changed across bootstrap processes');
             const before = await snapshotNativeProcesses();
             await Bun.write(join(out, 'processes-before.json'), JSON.stringify(before, null, 2) + '\n');
-            const install = await runNativeCommand({ label: 'install', command: ['bun', 'install', '--frozen-lockfile'], timeoutSeconds: 240, root, out, env: { ...process.env }, snapshot: async () => {
-              const rows = await snapshotNativeProcesses();
-              await appendFile(join(out, 'raw-census-install.jsonl'), JSON.stringify({ at: new Date().toISOString(), processes: rows }) + '\n');
-              return rows;
-            } });
-            receipt.commands.push(install);
-            await Bun.write(join(out, 'command-install.json'), JSON.stringify(install, null, 2) + '\n');
-            if (install.exitCode !== 0 || install.timedOut || install.errors.length || !install.settlement.empty) {
-              throw new Error('Frozen source dependency bootstrap failed; inspect command-install.json and complete install logs');
-            }
             const { nativeQualificationEnvironment } = await import(join(root, 'scripts/lib/native-bun-qualification.ts'));
             const shell = Bun.which('pwsh.exe') ?? Bun.which('powershell.exe');
             if (!shell) throw new Error('Missing native PowerShell; expected registry and file-version attestation');
