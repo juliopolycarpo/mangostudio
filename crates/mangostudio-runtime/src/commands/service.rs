@@ -402,7 +402,12 @@ fn execution_error(
     } else {
         "gh_execution"
     };
-    let error = RemoteError::new(codes::INTERNAL, message).with_detail("kind", kind);
+    let code = if method == "shell.run" && aborted {
+        codes::CANCELLED
+    } else {
+        codes::INTERNAL
+    };
+    let error = RemoteError::new(code, message).with_detail("kind", kind);
     if method == "shell.run" {
         return error;
     }
