@@ -11,15 +11,7 @@
  * `settings.json`), and it is opened once.
  */
 
-import {
-  closeSync,
-  type Dirent,
-  constants as fsConstants,
-  fstatSync,
-  openSync,
-  readdirSync,
-  readSync,
-} from 'node:fs';
+import { type Dirent, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
 import { getLibraryLocation, LIBRARY_TARGET_DEFINITIONS, type LocationDefinition } from '../host';
@@ -30,15 +22,11 @@ import type {
   RuntimeSettingsSource,
   RuntimeSettingsSourcesResult,
 } from '../index';
-
-/** Ceiling for one settings source, matching the pre-relocation hub reader. */
-const MAX_SETTINGS_SOURCE_BYTES = 512 * 1024;
-
-// O_NOFOLLOW makes a final-component symlink fail the open instead of silently
-// resolving to its target: a settings path is a fixed, vendor-defined name, so
-// anything it points at elsewhere is not the file the user was asked about.
-const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
-const READ_FLAGS = fsConstants.O_RDONLY | O_NOFOLLOW;
+import {
+  MAX_SETTINGS_SOURCE_BYTES,
+  readBoundedUtf8,
+  SettingsReadError,
+} from './settings-file-reader';
 
 /** Every location any target reads settings or hooks from, in registry order. */
 function settingsSourceLocationIds(): LibraryLocationId[] {
@@ -142,39 +130,6 @@ function readRulesDirectory(path: string): RulesDirectoryRead | null {
     rules.push({ name: entry.name, content: file.content });
   }
   return { rules, sizeBytes };
-}
-
-/**
- * Opens once and validates the descriptor with `fstat`, rather than stat-ing a
- * path another process could swap in between.
- */
-function readBoundedUtf8(path: string): { content: string; sizeBytes: number } {
-  const fd = openSync(path, READ_FLAGS);
-  try {
-    const stats = fstatSync(fd);
-    if (!stats.isFile()) throw new SettingsReadError('not-regular-file');
-    const sizeBytes = stats.size;
-    if (sizeBytes > MAX_SETTINGS_SOURCE_BYTES) throw new SettingsReadError('too-large');
-    if (sizeBytes === 0) return { content: '', sizeBytes };
-
-    const buffer = Buffer.alloc(sizeBytes);
-    let offset = 0;
-    while (offset < sizeBytes) {
-      const bytesRead = readSync(fd, buffer, offset, sizeBytes - offset, offset);
-      if (bytesRead === 0) break;
-      offset += bytesRead;
-    }
-    return { content: buffer.subarray(0, offset).toString('utf8'), sizeBytes };
-  } finally {
-    closeSync(fd);
-  }
-}
-
-class SettingsReadError extends Error {
-  constructor(readonly reason: RuntimeSettingsReadFailure) {
-    super(`Cannot read settings source: ${reason}`);
-    this.name = 'SettingsReadError';
-  }
 }
 
 /** Null means "nothing there" — the one outcome that is not a failure. */
