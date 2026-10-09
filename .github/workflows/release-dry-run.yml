@@ -1,518 +1,73 @@
 name: Release Dry Run
 
-# Triggers on every PR: relevance detection happens in the cheap `changes` job
-# (not a `paths:` filter) so the `Release Dry Run / Gate` check below always
-# reports and is safe to require in branch protection — a path-filtered
-# workflow that never starts leaves a required check pending forever.
-
+# Disposable branch experiment. This workflow is never proposed for main.
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
-  schedule:
-    - cron: "0 7 * * 1"
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-dry-run-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-env:
-  DRY_RUN_VERSION: 0.0.0-dryrun
+  group: macos-descriptor-probe-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
-  changes:
-    name: Detect changed release areas
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      release: ${{ steps.changed.outputs.release }}
-      launcher: ${{ steps.changed.outputs.launcher }}
-      # Reusable-workflow `with:` cannot read `env`, so the runtime job gets
-      # the dry-run version through here.
-      dry_run_version: ${{ env.DRY_RUN_VERSION }}
+  native-descriptors:
+    name: Measure native macOS descriptor closure and original Git routes
+    runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          path: tooling
           persist-credentials: false
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 63dc3d8f9f119f286954e4043d7f14a6f2f8d1da
+          path: source
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
-
-      - name: Qualify trusted and untrusted release tag signatures
-        run: bun test scripts/tests/verify-release-tag.unit.test.ts
-
-      - id: changed
-        name: Check release and launcher paths
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        # The release pattern mirrors the release import graph; prefer
-        # over-triggering. Release-script logic is also unit-tested via the
-        # `test` workflow. `Dockerfile$` is anchored so Dockerfile.alpine does
-        # not match: the dry-run builds only the default Bookworm image from
-        # the staged release assets (see the Docker steps in dry-run-linux).
-        # ci.yml's `smoke` job builds both Dockerfiles from build output on
-        # distribution-relevant PRs, so the Alpine image is already exercised
-        # pre-merge when binaries run; this workflow's unique Docker value is the release-asset
-        # staging path, which the Bookworm build covers.
+          bun-version-file: source/.bun-version
+      - name: Record native platform and immutable sources
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "launcher=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Keep both paths of a rename visible and fail closed if Git cannot
-          # produce a meaningful PR diff. Skipping release lanes must only be
-          # possible after classifying at least one changed path.
-          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-
-          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
-            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip release dry runs" >&2
-            exit 1
-          fi
-
-          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|\.github/workflows/runtime-build\.yml$|scripts/release/|scripts/install/|scripts/tests/install-ps1-layout\.unit\.test\.ts$|scripts/build(-runtime)?\.ts$|scripts/lib/|packages/cli/|crates/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo/config\.toml$|\.github/actions/setup-zigbuild/|Dockerfile$)'
-          if grep -Eq "$release_pattern" "$RUNNER_TEMP/changed-files"; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          if grep -Eq '^(crates/mangostudio-launcher/|Cargo\.(toml|lock)$)' "$RUNNER_TEMP/changed-files"; then
-            echo "launcher=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "launcher=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  runtime:
-    # The cargo runtimes the two dry-run archives ship, built the way the
-    # release builds them (zig-linked linux-x64, MSVC windows-x64).
-    name: Runtime
-    needs: [changes]
-    if: needs.changes.outputs.release == 'true'
-    uses: ./.github/workflows/runtime-build.yml
-    with:
-      version: ${{ needs.changes.outputs.dry_run_version }}
-      source_sha: ${{ github.sha }}
-      platforms: '["linux-x64","windows-x64"]'
-      artifact_prefix: dry-run-runtime
-      # Pull requests restore the per-platform cargo cache CI's distribution
-      # build uses (main writes it, nothing here saves): the dry-run bytes are
-      # never published, and the uncached windows-x64 build was the slowest
-      # job on a release-touching PR. The weekly schedule and manual runs stay
-      # uncached, so a clean release-profile build is still proven each week.
-      cache: ${{ github.event_name == 'pull_request' }}
-
-  dry-run-linux:
-    name: Linux release dry run
-    needs: [changes, runtime]
-    if: needs.changes.outputs.release == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - name: Verify committed versions are in lockstep
-        run: bun run check:versions
-
-      - name: Download cargo runtimes
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: dry-run-runtime-*
-          merge-multiple: true
-          path: .mango/runtime-prebuilt
-
-      - name: Build Linux x64 binary
-        run: bun run build --binary --platform linux-x64 --runtime-dir .mango/runtime-prebuilt
+          mkdir -p evidence
+          uname -a > evidence/host.log
+          sw_vers >> evidence/host.log
+          xcrun --show-sdk-version >> evidence/host.log
+          git -C source rev-parse HEAD > evidence/source-sha.txt
+          git -C source status --porcelain > evidence/source-before-status.txt
+          git -C tooling rev-parse HEAD > evidence/tooling-sha.txt
+          shasum -a 256 tooling/scripts/macos-descriptor-probe.c > evidence/probe-sha256.txt
+          clang -Wall -Wextra -Werror tooling/scripts/macos-descriptor-probe.c -o evidence/macos-descriptor-probe
+      - name: Measure unchanged close loop and post-fork complete census
+        run: evidence/macos-descriptor-probe | tee evidence/descriptor-cost.jsonl
+      - name: Build original default runtime with compiler messages
+        working-directory: source
         env:
-          VERSION: ${{ env.DRY_RUN_VERSION }}
-
-      - name: Assemble npm distribution
-        run: bun ./scripts/release/pack-npm.ts --platform linux-x64
-        env:
-          VERSION: ${{ env.DRY_RUN_VERSION }}
-
-      - name: Validate npm distribution
-        run: bun ./scripts/release/pack-npm.ts --validate dist-npm --platform linux-x64
-
-      - name: Dry-run npm publish
-        run: bun ./scripts/release/publish-npm.ts dist-npm --dry-run
-
-      - name: Archive Linux release assets
-        run: bun ./scripts/release/archive-assets.ts --platform linux-x64
-        env:
-          VERSION: ${{ env.DRY_RUN_VERSION }}
-
-      - name: Verify archive checksum
+          CARGO_TARGET_DIR: ${{ github.workspace }}/targets/default
         run: |
-          archive="release-assets/mangostudio-${DRY_RUN_VERSION}-linux-x64.tar.gz"
-          bun ./scripts/release/verify-checksum.ts release-assets/SHA256SUMS "$archive"
-
-      - name: Install local archive
+          cargo --version > ../evidence/cargo-version.txt
+          rustc --version --verbose > ../evidence/rustc-version.txt
+          cargo build -p mangostudio-runtime --bin mangostudio-runtime --locked --message-format=json > ../evidence/default-cargo.jsonl 2> ../evidence/default-cargo.stderr.log
+          shasum -a 256 ../targets/default/debug/mangostudio-runtime > ../evidence/runtime-sha256.txt
+      - name: Install immutable source dependencies
+        working-directory: source
+        run: bun install --frozen-lockfile > ../evidence/install.log 2>&1
+      - name: Measure unchanged Git route regression
+        working-directory: source
         env:
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
-          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}/mango-dist
+          MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/targets/default/debug/mangostudio-runtime
         run: |
-          archive="release-assets/mangostudio-${DRY_RUN_VERSION}-linux-x64.tar.gz"
-          bash scripts/install/install.sh --local "$archive"
-          actual="$("${MANGOSTUDIO_BIN_DIR}/mangostudio" --version)"
-          if [ "$actual" != "$DRY_RUN_VERSION" ]; then
-            echo "Expected ${DRY_RUN_VERSION}, got ${actual}"
-            exit 1
-          fi
-
-      - name: Verify install layout
-        env:
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
-          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}/mango-dist
-        run: |
-          set -euo pipefail
-          current_target="$(readlink "${MANGOSTUDIO_INSTALL_DIR}/current")"
-          if [ "$current_target" != "$DRY_RUN_VERSION" ]; then
-            echo "Expected current -> ${DRY_RUN_VERSION}, got ${current_target}"
-            exit 1
-          fi
-          bin_target="$(readlink "${MANGOSTUDIO_BIN_DIR}/mangostudio")"
-          if [ "$bin_target" != "${MANGOSTUDIO_INSTALL_DIR}/current/mangostudio" ]; then
-            echo "Expected the bin link to go through current/, got ${bin_target}"
-            exit 1
-          fi
-
-      # The install root here is not the default one, so this is the only
-      # place that exercises origin detection on a root moved with
-      # MANGOSTUDIO_INSTALL_DIR: the binary has to recognise the layout it was
-      # just installed into. `--check` resolves the real latest release and
-      # downloads nothing.
-      - name: Verify the installed binary recognises its own install
-        env:
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
-        run: |
-          set -euo pipefail
-          report="$("${MANGOSTUDIO_BIN_DIR}/mangostudio" upgrade --check --json)"
-          echo "$report"
-          manager="$(printf '%s' "$report" | jq -r '.installedVia.manager')"
-          if [ "$manager" != "self-managed" ]; then
-            echo "Expected installedVia.manager self-managed, got ${manager}"
-            exit 1
-          fi
-
-      - name: Verify local archive serves health
-        run: scripts/release/smoke-binary.sh "${RUNNER_TEMP}/mango-bin/mangostudio" "$DRY_RUN_VERSION" 13003
-
-      # Drift guard: `mangostudio __installer <sh|ps1>` prints the script the
-      # hub binary embeds verbatim, so it must be byte-identical to what is
-      # committed here — the whole point of embedding is that an upgrade and a
-      # fresh install from the same release can never disagree about layout.
-      - name: Verify the embedded installers match the committed scripts
-        env:
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
-        run: |
-          set -euo pipefail
-          "${MANGOSTUDIO_BIN_DIR}/mangostudio" __installer sh | diff - scripts/install/install.sh
-          "${MANGOSTUDIO_BIN_DIR}/mangostudio" __installer ps1 | diff - scripts/install/install.ps1
-
-      - name: Verify install lifecycle (--use, --prune, --uninstall)
-        env:
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
-          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}/mango-dist
-        run: |
-          set -euo pipefail
-          bash scripts/install/install.sh --use "$DRY_RUN_VERSION"
-          if [ "$(readlink "${MANGOSTUDIO_INSTALL_DIR}/current")" != "$DRY_RUN_VERSION" ]; then
-            echo "--use did not leave current pointing at ${DRY_RUN_VERSION}"
-            exit 1
-          fi
-
-          mkdir -p "${MANGOSTUDIO_INSTALL_DIR}/0.0.0-old"
-          bash scripts/install/install.sh --prune
-          if [ -d "${MANGOSTUDIO_INSTALL_DIR}/0.0.0-old" ]; then
-            echo "--prune left a stale version directory behind"
-            exit 1
-          fi
-          if [ ! -d "${MANGOSTUDIO_INSTALL_DIR}/${DRY_RUN_VERSION}" ]; then
-            echo "--prune removed the current version"
-            exit 1
-          fi
-
-          bash scripts/install/install.sh --uninstall
-          if [ -e "$MANGOSTUDIO_INSTALL_DIR" ]; then
-            echo "--uninstall left the install root behind"
-            exit 1
-          fi
-
-      - name: Render distribution manifests
-        run: |
-          sums="$RUNNER_TEMP/SHA256SUMS"
-          cp release-assets/SHA256SUMS "$sums"
-
-          bun ./scripts/release/fill-dry-run-checksums.ts \
-            --version "$DRY_RUN_VERSION" \
-            --sums "$sums"
-
-          bun ./scripts/release/update-homebrew.ts \
-            --version "$DRY_RUN_VERSION" \
-            --sums "$sums" \
-            --out "$RUNNER_TEMP/mangostudio.rb"
-          grep -q "version \"${DRY_RUN_VERSION}\"" "$RUNNER_TEMP/mangostudio.rb"
-          grep -Eq 'sha256 "[0-9a-f]{64}"' "$RUNNER_TEMP/mangostudio.rb"
-
-          bun ./scripts/release/update-scoop.ts \
-            --version "$DRY_RUN_VERSION" \
-            --sums "$sums" \
-            --out "$RUNNER_TEMP/mangostudio.json"
-          bun -e 'JSON.parse(await Bun.file(process.argv.at(-1)).text())' "$RUNNER_TEMP/mangostudio.json"
-
-      # Docker dry run. The release `docker` job stages images from the published
-      # release tarballs (stage-docker-ctx.ts --release-assets), not from the raw
-      # build output. ci.yml's `smoke` job already builds both Dockerfiles from
-      # build output on distribution-relevant PRs, so the unique value here is the
-      # release-asset staging path. Stage the linux-x64 archive produced above
-      # into the Bookworm context, build the default image, and boot it — the same
-      # asset → context → image → health chain the real release runs, under
-      # 0.0.0-dryrun. Native amd64 only (no QEMU): arm64 and Alpine are covered by
-      # ci.yml's smoke matrix.
-      - name: Stage Bookworm Docker context from release assets
-        run: bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets --arch amd64 --variant bookworm
-        env:
-          VERSION: ${{ env.DRY_RUN_VERSION }}
-
-      - name: Build Bookworm Docker image
-        # The Dockerfile uses `COPY --chmod`, a BuildKit-only directive. Force
-        # BuildKit instead of relying on the runner's default builder.
-        env:
-          DOCKER_BUILDKIT: "1"
-        run: |
-          docker build \
-            --platform linux/amd64 \
-            --build-arg VERSION="${DRY_RUN_VERSION}" \
-            -f Dockerfile \
-            -t mangostudio:dryrun-bookworm-amd64 .
-
-      - name: Verify Docker image serves health
-        run: scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002
-
-      # Last, because archive-assets.ts rebuilds release-assets/ from scratch
-      # on every invocation (no --out flag) — running this any earlier would
-      # wipe the Linux archive every step above depends on.
-      - name: Build Windows x64 binary
-        run: bun run build --binary --platform windows-x64 --runtime-dir .mango/runtime-prebuilt
-        env:
-          VERSION: ${{ env.DRY_RUN_VERSION }}
-
-      - name: Archive Windows release assets
-        run: bun ./scripts/release/archive-assets.ts --platform windows-x64
-        env:
-          VERSION: ${{ env.DRY_RUN_VERSION }}
-
-      - name: Upload Windows release archive
+          bun test --preload ./apps/api/tests/support/setup/preload.ts --timeout 15000 --reporter=junit --reporter-outfile=../evidence/git-write.xml apps/api/tests/integration/routes/git-write.integration.test.ts > ../evidence/git-write.log 2>&1
+      - name: Verify source remained unchanged
+        if: always()
+        run: git -C source status --porcelain > evidence/source-after-status.txt
+      - name: Upload every native measurement and failure
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: windows-x64-dry-run
-          path: release-assets/mangostudio-${{ env.DRY_RUN_VERSION }}-windows-x64.zip
-          retention-days: 1
-          compression-level: 0
-
-  dry-run-windows:
-    name: Windows release dry run
-    needs: [changes, dry-run-linux]
-    if: needs.changes.outputs.release == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        # The mandatory compat target: install.ps1 must work on Windows
-        # PowerShell 5.1, not just the runner's newer pwsh default.
-        shell: powershell
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: windows-x64-dry-run
-          path: release-assets
-
-      - name: Install local archive
-        env:
-          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
-        run: |
-          $archive = "release-assets\mangostudio-$env:DRY_RUN_VERSION-windows-x64.zip"
-          & scripts\install\install.ps1 -Local $archive
-          $actual = & "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd" --version
-          if ($actual -ne $env:DRY_RUN_VERSION) {
-            Write-Error "Expected $env:DRY_RUN_VERSION, got $actual"
-            exit 1
-          }
-
-      - name: Verify install layout
-        env:
-          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
-        run: |
-          $expected = [System.IO.Path]::GetFullPath("$env:MANGOSTUDIO_INSTALL_DIR\$env:DRY_RUN_VERSION")
-
-          # The shim names the version directory relative to itself when that
-          # path is ascii ("%~dp0..\<version>"), because cmd.exe decodes a .cmd
-          # in the console code page but resolves %~dp0 itself in Unicode.
-          # Resolve it the way cmd does before comparing, and read it as Oem —
-          # the encoding Write-Shim writes.
-          $cmdPath = "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd"
-          $content = Get-Content -Raw -Encoding Oem $cmdPath
-          $match = [regex]::Match($content, '"([^"]+)\\mangostudio\.exe"\s+%\*')
-          if (-not $match.Success) {
-            Write-Error "mangostudio.cmd does not run a quoted mangostudio.exe: $content"
-            exit 1
-          }
-          $target = $match.Groups[1].Value
-          if ($target.StartsWith('%~dp0')) {
-            $target = Join-Path (Split-Path $cmdPath -Parent) $target.Substring(5)
-          }
-          $target = [System.IO.Path]::GetFullPath($target)
-          if ($target -ne $expected) {
-            Write-Error "mangostudio.cmd points at $target, expected $expected"
-            exit 1
-          }
-
-          # hub-executable.ts resolves a detached restart and a service unit
-          # through this junction, so a missing or stale one silently re-execs
-          # the version an upgrade just replaced.
-          $current = Get-Item "$env:MANGOSTUDIO_INSTALL_DIR\current" -Force
-          if ($current.LinkType -ne 'Junction') {
-            Write-Error "current is $($current.LinkType), expected Junction"
-            exit 1
-          }
-          $currentTarget = [System.IO.Path]::GetFullPath((@($current.Target)[0]))
-          if ($currentTarget -ne $expected) {
-            Write-Error "current points at $currentTarget, expected $expected"
-            exit 1
-          }
-
-      # Same check as the Linux job: the hub's own origin detection on a root
-      # moved with MANGOSTUDIO_INSTALL_DIR, this time through the .cmd shim.
-      - name: Verify the installed binary recognises its own install
-        env:
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
-        run: |
-          $raw = & "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd" upgrade --check --json
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "upgrade --check exited $LASTEXITCODE"
-            exit 1
-          }
-          Write-Host ($raw -join "`n")
-          $report = ($raw -join "`n") | ConvertFrom-Json
-          if ($report.installedVia.manager -ne 'self-managed') {
-            Write-Error "Expected installedVia.manager self-managed, got $($report.installedVia.manager)"
-            exit 1
-          }
-
-      - name: Verify install lifecycle (-Use, -Prune, -Uninstall)
-        env:
-          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}\mango-dist
-          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}\mango-bin
-        run: |
-          # install.ps1 fails via `throw`, which — with $ErrorActionPreference
-          # = 'Stop' inside it — aborts this whole run block on its own;
-          # $LASTEXITCODE only ever reflects native .exe calls, never a
-          # PowerShell script invocation, so it is not a signal to check here.
-          & scripts\install\install.ps1 -Use $env:DRY_RUN_VERSION
-
-          New-Item -ItemType Directory -Force "$env:MANGOSTUDIO_INSTALL_DIR\0.0.0-old" | Out-Null
-          & scripts\install\install.ps1 -Prune
-          if (Test-Path "$env:MANGOSTUDIO_INSTALL_DIR\0.0.0-old") {
-            Write-Error "-Prune left a stale version directory behind"
-            exit 1
-          }
-          if (-not (Test-Path "$env:MANGOSTUDIO_INSTALL_DIR\$env:DRY_RUN_VERSION")) {
-            Write-Error "-Prune removed the current version"
-            exit 1
-          }
-
-          & scripts\install\install.ps1 -Uninstall
-          if (Test-Path $env:MANGOSTUDIO_INSTALL_DIR) {
-            Write-Error "-Uninstall left the install root behind"
-            exit 1
-          }
-
-      # The version-probe failure cases run install.ps1 against a fake
-      # mangostudio.exe that cannot start. Windows PowerShell 5.1 turns the
-      # first stderr line of a native command into a terminating error and a
-      # missing DLL surfaces only as an NTSTATUS exit code, so no Linux run
-      # can stand in for them: this job is the only CI lane that runs them. A
-      # hosted runner is where the compiled and patched fake exes are safe to
-      # run. The npm tarball case runs here too: it needs the Git GNU tar that
-      # the runner puts ahead of System32 on PATH, which no Linux lane has.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Verify the failed version probe diagnostics and the npm tarball extraction
-        shell: bash
-        env:
-          MANGOSTUDIO_TEST_NATIVE_FAKES: "1"
-        run: bun test --timeout 60000 scripts/tests/install-ps1-layout.unit.test.ts -t 'failed version probe|npm tarball extraction'
-
-  dry-run-cargo:
-    name: Cargo publish dry run
-    needs: [changes]
-    if: needs.changes.outputs.launcher == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      # The root rust-toolchain.toml otherwise overrides the action's selected
-      # toolchain while Cargo walks up to the shared workspace manifest.
-      RUSTUP_TOOLCHAIN: 1.96.0
-    defaults:
-      run:
-        working-directory: crates/mangostudio-launcher
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: 1.96.0
-
-      - run: cargo publish --dry-run --locked
-
-  gate:
-    # Always-reporting aggregate ("Release Dry Run / Gate"): each dry-run lane
-    # is accepted as skipped only when the `changes` job proved its relevance
-    # predicate false for this run.
-    name: Gate
-    needs: [changes, runtime, dry-run-linux, dry-run-windows, dry-run-cargo]
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Evaluate mandatory job results
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', needs.changes.outputs.release == 'false' && 'runtime' || '') }}
-        # Dependency-free script; runs without `bun install`.
-        run: bun ./scripts/ci/evaluate-gate.ts
+          name: macos-descriptor-probe-${{ github.sha }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14
