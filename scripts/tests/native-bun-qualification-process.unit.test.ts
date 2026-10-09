@@ -52,7 +52,11 @@ async function waitForFixturePid(path: string): Promise<number> {
   const deadline = Date.now() + 3_000;
   while (Date.now() < deadline) {
     try {
-      return Number(await readFile(path, 'utf8'));
+      const text = await readFile(path, 'utf8');
+      const pid = Number(text);
+      if (/^[1-9]\d*$/.test(text) && Number.isSafeInteger(pid)) return pid;
+      if (text)
+        throw new Error(`Invalid fixture PID ${JSON.stringify(text)}; expected a positive integer`);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       await Bun.sleep(1);
@@ -111,10 +115,27 @@ function exitingFixtureCommand(pidFile: string, exitFile: string): readonly stri
   return [
     process.execPath,
     '-e',
-    'await Bun.write(process.argv[1], String(process.pid)); while (!(await Bun.file(process.argv[2]).exists())) await Bun.sleep(1); process.exit(0);',
+    'const { rename } = await import("node:fs/promises"); await Bun.write(process.argv[1] + ".tmp", String(process.pid)); await rename(process.argv[1] + ".tmp", process.argv[1]); while (!(await Bun.file(process.argv[2]).exists())) await Bun.sleep(1); process.exit(0);',
     pidFile,
     exitFile,
   ];
+}
+
+class FixtureProcessCensus {
+  constructor(private readonly pidFile: string) {}
+
+  read = async (): Promise<NativeProcess[]> => {
+    const pid = await waitForFixturePid(this.pidFile);
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return [];
+      throw error;
+    }
+    return [
+      processRow(pid, process.pid, `${pid}:fixture`, process.platform === 'win32' ? null : pid),
+    ];
+  };
 }
 
 async function temporaryDirectory(): Promise<string> {
@@ -196,6 +217,15 @@ describe('native process identity', () => {
 });
 
 describe('single command receipt', () => {
+  test('waits for a nonempty fixture PID publication before reporting readiness', async () => {
+    const dir = await temporaryDirectory();
+    const path = join(dir, 'pid');
+    await writeFile(path, '');
+    const publication = Bun.sleep(20).then(() => writeFile(path, String(process.pid)));
+    const pid = await waitForFixturePid(path);
+    await publication;
+    expect(pid).toBe(process.pid);
+  });
   test('retains an owned child when the original root exits during the first snapshot', async () => {
     const dir = await temporaryDirectory();
     const pidFile = join(dir, 'pid');
@@ -319,18 +349,28 @@ describe('single command receipt', () => {
 
   test('bounds a hung owned command without retrying', async () => {
     const dir = await temporaryDirectory();
+    const pidFile = join(dir, 'pid');
+    const census = new FixtureProcessCensus(pidFile);
     const result = await runNativeCommand({
       label: 'timeout',
-      command: [process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+      command: [
+        process.execPath,
+        '-e',
+        'const { rename } = await import("node:fs/promises"); await Bun.write(process.argv[1] + ".tmp", String(process.pid)); await rename(process.argv[1] + ".tmp", process.argv[1]); setInterval(() => {}, 1000);',
+        pidFile,
+      ],
       root: dir,
       out: dir,
       env: { ...process.env },
       timeoutSeconds: 0.3,
       pollIntervalMs: 25,
+      snapshot: census.read,
+      guardCompilerHelpers: false,
       stream: new CapturedOutput(),
     });
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).not.toBe(0);
+    expect(result.settlement.rootObserved).toBe(true);
     expect(result.settlement.empty).toBe(true);
     expect(result.durationMs).toBeLessThan(5_000);
   });
