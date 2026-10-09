@@ -202,11 +202,111 @@ function Invoke-FakeNativeBirthWrite([string]$Path, [object]$Value, [object]$Con
     if ($Context.failWrite -and $Context.writes.Count -eq 1) { throw 'expected birth proof write failure' }
 }
 
+<#
+.SYNOPSIS
+Compiles named image-query fakes which exercise the same production retry policy without native effects.
+.EXAMPLE
+Initialize-FakeNativeImageQuery
+$fake = [Mango.NativeImageFakes.FakeImageProcess]::new()
+#>
+function Initialize-FakeNativeImageQuery {
+    if ('Mango.NativeImageFakes.FakeImageProcess' -as [type]) { return }
+    if ('Mango.NativeJobProbe.JobProcess' -as [type]) { throw 'Invalid already compiled helper; expected named fakes and helper compiled together before native fixtures' }
+    $fakeCode = @'
+namespace Mango.NativeImageFakes {
+    using System;
+    using System.Collections.Generic;
+    using System.ComponentModel;
+    using System.Globalization;
+    using Mango.NativeJobProbe;
+    public sealed class FakeClock { public long Now; }
+    public sealed class FakeImageProcess {
+        public readonly FakeClock Clock;
+        public readonly Queue<Member> States=new Queue<Member>();
+        public readonly Queue<ImageResult> Images=new Queue<ImageResult>();
+        public readonly Queue<bool> Waits=new Queue<bool>();
+        public Member Current;
+        public int Reads,Queries,WaitCalls,FailReadAt,FailWaitAt;
+        public bool PersistentFailure,Signaled;
+        public FakeImageProcess() : this(new FakeClock()) {}
+        public FakeImageProcess(FakeClock clock) { Clock=clock; Current=State(42,134359891225276227,true); }
+        public static Member State(uint pid,long created,bool member) {
+            string date=DateTime.FromFileTimeUtc(created).ToString("o",CultureInfo.InvariantCulture);
+            return new Member {Pid=pid,Identity=pid+":"+date,CreationFileTime=created.ToString(CultureInfo.InvariantCulture),Created=date,IsMember=member,Alive=true};
+        }
+        public Member Read() {
+            Reads++; if(Reads==FailReadAt) throw new Win32Exception(6,"named GetProcessTimes failure for " + Current.Identity);
+            if(States.Count>0) Current=States.Dequeue();
+            return State(Current.Pid,Int64.Parse(Current.CreationFileTime),Current.IsMember);
+        }
+        public ImageResult Query() {
+            Queries++; if(Images.Count>0) return Images.Dequeue();
+            if(PersistentFailure) return new ImageResult {Success=false,Error=5,Characters=32768};
+            const string path=@"C:\tools\owned.exe"; return new ImageResult {Success=true,Characters=(uint)path.Length,Path=path};
+        }
+        public bool Wait(int milliseconds) {
+            WaitCalls++; if(WaitCalls==FailWaitAt) throw new Win32Exception(6,"named WaitForSingleObject failure for " + Current.Identity);
+            Clock.Now+=milliseconds; if(Waits.Count>0 && Waits.Dequeue()) Signaled=true; return Signaled;
+        }
+        public Member Resolve(ImageQueryBudget budget,List<ImageAttempt> diagnostics,string identity,string image) {
+            return ImageQueryPolicy.Resolve(Read,Query,Wait,budget,diagnostics,identity,image,true);
+        }
+    }
+}
+'@
+    $queryStart = $script:NativeWindowsJobCode.IndexOf('        public Snapshot Query() {', [StringComparison]::Ordinal)
+    $queryEnd = $script:NativeWindowsJobCode.IndexOf('        /// <summary>Terminate only one retained identity', $queryStart, [StringComparison]::Ordinal)
+    if ($queryStart -lt 0 -or $queryEnd -le $queryStart) { throw 'Invalid query source boundaries; expected exact production Query method for named kernel caller fakes' }
+    $queryMethod = $script:NativeWindowsJobCode.Substring($queryStart, $queryEnd - $queryStart)
+    $callerCode = @'
+namespace Mango.NativeImageCallerFakes {
+    using System;
+    using System.Collections.Generic;
+    using System.ComponentModel;
+    using System.Runtime.InteropServices;
+    using System.Threading;
+    using Mango.NativeJobProbe;
+    using Mango.NativeImageFakes;
+    internal sealed class HeldProcess { internal IntPtr Handle; internal Member Member; }
+    internal static class Win32 {
+        internal const uint QueryProcess=0x1000,Synchronize=0x100000;
+        internal struct Accounting { internal uint Active,Total; }
+        internal static QueryFixture Fixture;
+        internal static IntPtr OpenProcess(uint access,bool inherit,uint pid) { return Fixture.Open(pid); }
+        internal static void Close(ref IntPtr handle) { Fixture.Events.Add("close:"+handle); handle=IntPtr.Zero; }
+    }
+    public sealed class QueryFixture {
+        private IntPtr job=new IntPtr(1);
+        private readonly Dictionary<string,HeldProcess> held=new Dictionary<string,HeldProcess>();
+        public readonly FakeClock Clock=new FakeClock();
+        public readonly Queue<uint[]> Lists=new Queue<uint[]>();
+        public readonly Queue<uint> Counts=new Queue<uint>();
+        public readonly Queue<IntPtr> OpenOrder=new Queue<IntPtr>();
+        public readonly Dictionary<IntPtr,FakeImageProcess> Processes=new Dictionary<IntPtr,FakeImageProcess>();
+        public readonly List<string> Events=new List<string>();
+        public readonly List<ImageAttempt> Diagnostics=new List<ImageAttempt>();
+        public IntPtr Open(uint pid) { IntPtr token=OpenOrder.Count>0?OpenOrder.Dequeue():new IntPtr(1); Events.Add("open:"+pid+":"+token); return token; }
+        private ImageQueryBudget NewImageBudget() { return new ImageQueryBudget(2000,()=>Clock.Now); }
+        private bool Alive(IntPtr token) { return !Processes[token].Wait(0); }
+        private void ReleaseExited() {
+            var remove=new List<string>();
+            foreach(var pair in held) if(!Alive(pair.Value.Handle)) { Win32.Close(ref pair.Value.Handle); remove.Add(pair.Key); }
+            foreach(string identity in remove) held.Remove(identity);
+        }
+        private Win32.Accounting Accounting() { Events.Add("complete-accounting"); return new Win32.Accounting {Active=Counts.Count>0?Counts.Dequeue():1,Total=2}; }
+        private uint[] ProcessList(out int bytes) { Events.Add("complete-list"); uint[] list=Lists.Count>0?Lists.Dequeue():new uint[]{42}; bytes=8+list.Length*IntPtr.Size; return list; }
+        private Member Attest(IntPtr token,uint pid,string expected,ImageQueryBudget budget,string image=null) { return Processes[token].Resolve(budget,Diagnostics,expected,image); }
+        public Snapshot Run() { Win32.Fixture=this; return Query(); }
+'@
+    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $fakeCode + "`n" + $callerCode + $queryMethod + "`n    }`n}")
+}
+
 try {
     if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Invalid probe host; expected disposable GitHub Actions Windows' }
     $helper = Join-Path $PSScriptRoot 'native-windows-job.ps1'
     . $helper
     $receipt.helperSha256 = (Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash.ToLowerInvariant()
+    Initialize-FakeNativeImageQuery
     Initialize-NativeWindowsJob
     $environment = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
     foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) { $environment.Add($entry.Key, [string]$entry.Value) }
@@ -424,6 +524,117 @@ $startedChild.Dispose()
         } finally { $child.Dispose() }
     }
 
+    Invoke-NativeProbe 'bounded image retries preserve same-object identity and fail closed on unknown metadata' {
+        $clock = [Mango.NativeImageFakes.FakeClock]::new()
+        $fake = [Mango.NativeImageFakes.FakeImageProcess]::new($clock)
+        $attempts = [Collections.Generic.List[Mango.NativeJobProbe.ImageAttempt]]::new()
+        $budget = [Mango.NativeJobProbe.ImageQueryBudget]::new(2000, [Func[long]]{ return $clock.Now })
+        $fake.Images.Enqueue([Mango.NativeJobProbe.ImageResult]@{ Success = $false; Error = 5; Characters = 32768 })
+        $resolved = $fake.Resolve($budget, $attempts, $fake.Current.Identity, 'C:\tools\owned.exe')
+        Assert-NativeProbe ($resolved.Identity -eq $fake.Current.Identity -and $fake.Queries -eq 2 -and $clock.Now -eq 10 -and $attempts.Count -eq 2) 'live image error recovers only by querying the same owned object'
+        Assert-NativeProbe ($attempts[0].NativeError -eq 5 -and $attempts[0].Before.CreationFileTime -eq $resolved.CreationFileTime -and $attempts[1].Outcome -eq 'recovered-same-owned-handle') 'recovered metadata errors retain first failure and final full-identity evidence separately from qualification errors'
+        $recovery = @($attempts)
+        foreach ($case in @('persistent-live', 'outside', 'reused-identity', 'lost-membership', 'wait-error', 'identity-error', 'empty-image', 'changed-image', 'short-image')) {
+            $fake = [Mango.NativeImageFakes.FakeImageProcess]::new()
+            $clock = $fake.Clock; $expected = $fake.Current.Identity
+            $attempts = [Collections.Generic.List[Mango.NativeJobProbe.ImageAttempt]]::new()
+            $budget = [Mango.NativeJobProbe.ImageQueryBudget]::new(2000, [Func[long]]{ return $clock.Now })
+            $pattern = ''; $image = 'C:\tools\owned.exe'
+            switch ($case) {
+                'persistent-live' { $fake.PersistentFailure = $true; $pattern = 'QueryFullProcessImageNameW PID=42 FILETIME=134359891225276227.*attempt=10' }
+                'outside' { $fake.Current.IsMember = $false; $pattern = 'expected exact-job membership' }
+                'reused-identity' {
+                    $fake.Images.Enqueue([Mango.NativeJobProbe.ImageResult]@{ Success = $false; Error = 5; Characters = 32768 })
+                    $fake.States.Enqueue($fake.Current); $fake.States.Enqueue($fake.Current)
+                    $fake.States.Enqueue([Mango.NativeImageFakes.FakeImageProcess]::State(42, 134359891225276228, $true))
+                    $pattern = 'expected same retained object'
+                }
+                'lost-membership' {
+                    $fake.States.Enqueue($fake.Current); $fake.States.Enqueue($fake.Current)
+                    $fake.States.Enqueue([Mango.NativeImageFakes.FakeImageProcess]::State(42, 134359891225276227, $false))
+                    $pattern = 'expected exact-job membership'
+                }
+                'wait-error' { $fake.PersistentFailure = $true; $fake.FailWaitAt = 2; $pattern = 'named WaitForSingleObject failure' }
+                'identity-error' { $fake.PersistentFailure = $true; $fake.FailReadAt = 3; $pattern = 'named GetProcessTimes failure' }
+                'empty-image' { $fake.Images.Enqueue([Mango.NativeJobProbe.ImageResult]@{ Success = $true; Characters = 0; Path = '' }); $pattern = 'expected nonempty complete absolute Win32 image' }
+                'changed-image' { $image = 'C:\tools\previous.exe'; $pattern = 'Invalid changed image.*expected C:' }
+                'short-image' { $fake.Images.Enqueue([Mango.NativeJobProbe.ImageResult]@{ Success = $true; Characters = 1; Path = 'C:\tools\owned.exe' }); $pattern = 'expected nonempty complete absolute Win32 image' }
+            }
+            $failure = $null
+            try { $fake.Resolve($budget, $attempts, $expected, $image) | Out-Null } catch { $failure = $_.Exception.ToString() }
+            Assert-NativeProbe ($failure -match $pattern) "$case must reject the intended invalid metadata or authority"
+            if ($case -eq 'persistent-live') { Assert-NativeProbe ($fake.Queries -eq 10 -and $attempts.Count -eq 10 -and $attempts[9].Outcome -eq 'failed-closed') 'sustained live unknown image remains failed with all bounded attempts' }
+            if ($case -in @('wait-error', 'identity-error', 'reused-identity')) { Assert-NativeProbe ($fake.Queries -eq 1 -and $attempts[0].StateError -match $pattern) 'state/native failures never enter a generic metadata retry' }
+            if ($case -in @('wait-error', 'identity-error')) { Assert-NativeProbe ($attempts[0].StateNativeError -eq 6) 'native state error codes remain numeric evidence even when localized exception text omits them' }
+            if ($case -eq 'outside') { Assert-NativeProbe ($fake.Queries -eq 0) 'outside object cannot enter the image retry policy' }
+        }
+        $fake = [Mango.NativeImageFakes.FakeImageProcess]::new(); $fake.Current.IsMember = $false; $clock = $fake.Clock
+        $attempts = [Collections.Generic.List[Mango.NativeJobProbe.ImageAttempt]]::new()
+        $budget = [Mango.NativeJobProbe.ImageQueryBudget]::new(2000, [Func[long]]{ return $clock.Now })
+        $read = [Func[Mango.NativeJobProbe.Member]]{ return $fake.Read() }; $query = [Func[Mango.NativeJobProbe.ImageResult]]{ return $fake.Query() }; $wait = [Func[int,bool]]{ param($milliseconds) return $fake.Wait($milliseconds) }
+        $outside = [Mango.NativeJobProbe.ImageQueryPolicy]::Resolve($read, $query, $wait, $budget, $attempts, [NullString]::Value, [NullString]::Value, $false)
+        Assert-NativeProbe (-not $outside.IsMember -and $outside.Alive -and $fake.Queries -eq 1) 'query-only census mapping reports an outsider without granting membership or retry authority'
+        $fake.PersistentFailure = $true; $failure = $null
+        try { [Mango.NativeJobProbe.ImageQueryPolicy]::Resolve($read, $query, $wait, $budget, $attempts, [NullString]::Value, [NullString]::Value, $false) | Out-Null } catch { $failure = $_.Exception.ToString() }
+        Assert-NativeProbe ($failure -match 'QueryFullProcessImageNameW PID=42' -and $fake.Queries -eq 2 -and $clock.Now -eq 0) 'outside census image failure is immediately fatal without retry sleeps'
+        return @{ liveRecovery = $recovery; rejectedCases = 9; outsideSingleQuery = $outside; nativeAPIInvocations = 0 }
+    }
+    Invoke-NativeProbe 'image exit requires fresh complete membership and one shared retry budget' {
+        $clock = [Mango.NativeImageFakes.FakeClock]::new()
+        $fake = [Mango.NativeImageFakes.FakeImageProcess]::new($clock)
+        $attempts = [Collections.Generic.List[Mango.NativeJobProbe.ImageAttempt]]::new()
+        $budget = [Mango.NativeJobProbe.ImageQueryBudget]::new(2000, [Func[long]]{ return $clock.Now })
+        $fake.PersistentFailure = $true
+        $fake.Waits.Enqueue($false); $fake.Waits.Enqueue($false); $fake.Waits.Enqueue($true)
+        $exited = $false
+        try { $fake.Resolve($budget, $attempts, $fake.Current.Identity, 'C:\tools\owned.exe') | Out-Null } catch { $exited = $_.Exception.ToString() -match 'MemberExitedException.*|Exact member.*signaled exit' }
+        Assert-NativeProbe ($exited -and $attempts.Count -eq 1 -and $attempts[0].SameHandleExited -and $attempts[0].Outcome -eq 'same-handle-exit-requires-complete-refresh') 'failed image plus exact handle exit requests complete refresh instead of yielding empty metadata'
+        $exitEvidence = @($attempts)
+        $clock = [Mango.NativeImageFakes.FakeClock]::new()
+        $budget = [Mango.NativeJobProbe.ImageQueryBudget]::new(25, [Func[long]]{ return $clock.Now })
+        $first = [Mango.NativeImageFakes.FakeImageProcess]::new($clock)
+        1..2 | ForEach-Object { $first.Images.Enqueue([Mango.NativeJobProbe.ImageResult]@{ Success = $false; Error = 5; Characters = 32768 }) }
+        $attempts = [Collections.Generic.List[Mango.NativeJobProbe.ImageAttempt]]::new()
+        $first.Resolve($budget, $attempts, $first.Current.Identity, 'C:\tools\owned.exe') | Out-Null
+        Assert-NativeProbe ($clock.Now -eq 20) 'first member consumes the shared monotonic retry budget'
+        $second = [Mango.NativeImageFakes.FakeImageProcess]::new($clock); $second.PersistentFailure = $true
+        $failure = $null
+        try { $second.Resolve($budget, $attempts, $second.Current.Identity, 'C:\tools\owned.exe') | Out-Null } catch { $failure = $_.Exception.ToString() }
+        Assert-NativeProbe ($failure -match 'Image query budget exhausted' -and $clock.Now -eq 25 -and $second.Queries -eq 1) 'a second member cannot reset or multiply the complete-query deadline'
+        return @{ sameHandleExit = $exitEvidence; sharedBudgetMilliseconds = 25; elapsedMilliseconds = $clock.Now; attempts = @($attempts); nativeAPIInvocations = 0 }
+    }
+    Invoke-NativeProbe 'exact query caller refreshes complete accounting and never drops a still-present member' {
+        $cases = [Collections.Generic.List[object]]::new()
+        foreach ($case in @('complete-empty-refresh', 'new-live-member-after-refresh', 'still-present-exited-member')) {
+            $fixture = [Mango.NativeImageCallerFakes.QueryFixture]::new()
+            $old = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock); $old.PersistentFailure = $true
+            $old.Waits.Enqueue($false); $old.Waits.Enqueue($false); $old.Waits.Enqueue($false); $old.Waits.Enqueue($true)
+            $fixture.Processes.Add([IntPtr]::new(1), $old)
+            $fixture.OpenOrder.Enqueue([IntPtr]::new(1))
+            $fixture.Lists.Enqueue([uint32[]]@(42)); $fixture.Counts.Enqueue(1)
+            switch ($case) {
+                'complete-empty-refresh' { $fixture.Lists.Enqueue([uint32[]]@()); $fixture.Counts.Enqueue(0); $fixture.Counts.Enqueue(0) }
+                'new-live-member-after-refresh' {
+                    $fresh = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock)
+                    $fresh.Current = [Mango.NativeImageFakes.FakeImageProcess]::State(42, 134359891225276228, $true)
+                    $fixture.Processes.Add([IntPtr]::new(2), $fresh); $fixture.OpenOrder.Enqueue([IntPtr]::new(2))
+                    $fixture.Lists.Enqueue([uint32[]]@(42)); $fixture.Counts.Enqueue(1); $fixture.Counts.Enqueue(1)
+                }
+            }
+            $snapshot = $null; $failure = $null
+            try { $snapshot = $fixture.Run() } catch { $failure = $_.Exception.ToString() }
+            if ($case -eq 'complete-empty-refresh') {
+                Assert-NativeProbe (-not $failure -and $snapshot.Empty -and $snapshot.Stable -and $snapshot.Races -eq 1 -and $snapshot.Assigned -eq 0 -and $snapshot.ActiveBefore -eq 0 -and $snapshot.ActiveAfter -eq 0) 'only a new complete PID list and both accounting snapshots can establish empty after same-handle exit'
+                Assert-NativeProbe (@($fixture.Events | Where-Object { $_ -eq 'complete-list' }).Count -eq 2 -and @($fixture.Events | Where-Object { $_ -eq 'complete-accounting' }).Count -eq 3) 'production Query caller performs fresh native list and accounting after the refresh signal'
+            } elseif ($case -eq 'new-live-member-after-refresh') {
+                Assert-NativeProbe (-not $failure -and -not $snapshot.Empty -and $snapshot.Members.Count -eq 1 -and $snapshot.Members[0].Identity -eq $fresh.Current.Identity -and $snapshot.Races -eq 1) 'a fresh still-present process is independently attested and remains visible after refresh, even with reused PID'
+            } else {
+                Assert-NativeProbe ($failure -match 'Unstable member identity after12 refreshes' -and -not $snapshot) 'a kernel list which still contains the exited object cannot be converted into an empty census'
+            }
+            $cases.Add([pscustomobject]@{ name = $case; snapshot = $snapshot; error = $failure; events = @($fixture.Events); diagnostics = @($fixture.Diagnostics) })
+        }
+        return @{ cases = @($cases); exactProductionQueryExtracted = $true; nativeAPIInvocations = 0 }
+    }
     Invoke-NativeProbe 'native query error and short process lists never report empty' {
         $child = [Mango.NativeJobProbe.JobProcess]::new($BunPath, [string[]]@('bun', '-e', 'await Bun.sleep(60000)'), $OutDirectory, $environment, (Join-Path $OutDirectory 'query-error-logs'))
         $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal(32)
