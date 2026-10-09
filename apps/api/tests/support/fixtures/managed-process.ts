@@ -146,7 +146,7 @@ export async function createManagedProcessFixture(options: {
     },
     stop(signal = 'SIGTERM') {
       if (!child) throw new Error('Managed process fixture has not spawned a child.');
-      if (child.exitCode === null) child.kill(signal);
+      if (isRunning(child)) child.kill(signal);
       return fixture.waitForExit();
     },
     diagnostics() {
@@ -155,7 +155,7 @@ export async function createManagedProcessFixture(options: {
     async cleanup() {
       if (cleaned) return;
       cleaned = true;
-      if (child?.exitCode === null) {
+      if (child && isRunning(child)) {
         child.kill('SIGTERM');
         try {
           await fixture.waitForExit();
@@ -169,7 +169,9 @@ export async function createManagedProcessFixture(options: {
       await rm(tempDir, { force: true, recursive: true });
     },
     async assertReleased() {
-      if (child?.exitCode === null) throw new Error(`Child process ${child.pid} is still running.`);
+      if (child && isRunning(child)) {
+        throw new Error(`Child process ${child.pid} is still running.`);
+      }
       if (existsSync(tempDir)) throw new Error(`Fixture temp directory still exists: ${tempDir}`);
       await assertPortAvailable(port);
     },
@@ -186,6 +188,17 @@ export async function waitForProcessExit(pid: number, timeoutMs = DEFAULT_EXIT_T
     await Bun.sleep(25);
   }
   throw new Error(`Process ${pid} did not exit within ${timeoutMs}ms.`);
+}
+
+/**
+ * Whether `child` has not ended yet. A child ended by a signal reports no exit
+ * code, only the signal, which is every forced stop on Windows.
+ *
+ * @example
+ * if (isRunning(child)) child.kill('SIGTERM');
+ */
+function isRunning(child: Bun.Subprocess): boolean {
+  return child.exitCode === null && child.signalCode === null;
 }
 
 function isProcessAlive(pid: number): boolean {
