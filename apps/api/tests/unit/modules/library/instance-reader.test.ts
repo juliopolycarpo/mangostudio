@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +36,9 @@ function nodeFsWithVirtualFile(
   name: string,
   content: string
 ): LibraryInstanceReaderFs {
-  const virtualPath = join(directory, name);
+  // The reader may name the directory by its canonical path (macOS: /private/tmp).
+  const directories = new Set([directory, realpathSync(directory)]);
+  const virtualPaths = new Set([...directories].map((each) => join(each, name)));
   const bytes = new TextEncoder().encode(content);
   const entry = {
     name,
@@ -47,12 +49,12 @@ function nodeFsWithVirtualFile(
   return {
     async readDirectory(path) {
       const entries = await readdir(path, { withFileTypes: true });
-      return path === directory ? [...entries, entry] : entries;
+      return directories.has(path) ? [...entries, entry] : entries;
     },
-    readFile: (path) => (path === virtualPath ? Promise.resolve(bytes) : readFile(path)),
-    realPath: (path) => (path === virtualPath ? Promise.resolve(path) : realpath(path)),
+    readFile: (path) => (virtualPaths.has(path) ? Promise.resolve(bytes) : readFile(path)),
+    realPath: (path) => (virtualPaths.has(path) ? Promise.resolve(path) : realpath(path)),
     async stat(path) {
-      if (path === virtualPath) {
+      if (virtualPaths.has(path)) {
         return { size: bytes.byteLength, mtimeMs: 0, isFile: true, isDirectory: false };
       }
       const value = await stat(path);
