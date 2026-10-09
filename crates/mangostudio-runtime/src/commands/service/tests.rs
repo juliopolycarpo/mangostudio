@@ -148,6 +148,93 @@ async fn cancellation_before_admission_has_no_spawn_effect() {
     assert!(spawner.requests.lock().unwrap().is_empty());
 }
 
+/// A shell refused before preparation is cancellation, with no child to reap.
+#[tokio::test]
+async fn shell_prestart_cancellation_reports_cancelled_without_spawning() {
+    let home = scratch_dir("commands-shell-pre-cancel");
+    let (service, spawner) = service(&home, false);
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let error = service
+        .run(
+            "shell.run",
+            json!({"kind":"bash","command":"true","timeoutMs":5000,"maxOutputBytes":1000}),
+            cancel,
+            4 * 1024 * 1024,
+        )
+        .await
+        .expect_err("a shell cancelled before preparation must refuse");
+    assert_eq!(
+        error.code,
+        codes::CANCELLED,
+        "expected a typed cancellation before launch | received {error:?}"
+    );
+    assert_eq!(error.message, "Command aborted before launch.");
+    assert_eq!(error.details.unwrap()["kind"], "shell_execution");
+    assert!(spawner.requests.lock().unwrap().is_empty());
+}
+
+/// Admission cancellation uses the same wire code and keeps CLI error details.
+#[test]
+fn shell_prestart_admission_cancellation_preserves_cli_failure_shapes() {
+    for (method, kind) in [
+        ("shell.run", "shell_execution"),
+        ("git.exec", "git_execution"),
+        ("gh.exec", "gh_execution"),
+        ("gh.mutate", "gh_execution"),
+    ] {
+        let args = vec!["status".to_string()];
+        let error = start_error(method, &args, ProcessStartError::CancelledBeforeStart);
+        let expected_code = if method == "shell.run" {
+            codes::CANCELLED
+        } else {
+            codes::INTERNAL
+        };
+        assert_eq!(
+            error.code, expected_code,
+            "expected {method} admission cancellation code {expected_code} | received {error:?}"
+        );
+        assert_eq!(error.message, "Command aborted before launch.");
+        let details = error.details.unwrap();
+        assert_eq!(details["kind"], kind);
+        if method == "shell.run" {
+            assert_eq!(Value::Object(details), json!({"kind":"shell_execution"}));
+            continue;
+        }
+        assert_eq!(details["aborted"], true);
+        assert_eq!(details["args"], json!(args));
+        assert_eq!(details["exitCode"], Value::Null);
+        assert_eq!(details["stdout"], "");
+        assert_eq!(details["stderr"], error.message);
+    }
+}
+
+/// Failed launches remain failures even though cancellation has its own code.
+#[test]
+fn shell_prestart_non_cancellation_refusals_remain_ordinary_errors() {
+    let denied = RemoteError::new(codes::DENIED, "revoked").with_detail("capability", "shell");
+    let expected_denied = denied.clone();
+    let result = start_error("shell.run", &[], ProcessStartError::LaunchDenied(denied));
+    assert_eq!(result, expected_denied);
+    for failure in [
+        ProcessStartError::LimitExceeded,
+        ProcessStartError::SupervisorUnavailable,
+        ProcessStartError::TimedOutBeforeStart,
+        ProcessStartError::SpawnFailed(std::io::Error::from(std::io::ErrorKind::NotFound)),
+    ] {
+        let error = start_error("shell.run", &[], failure);
+        assert_eq!(
+            error.code,
+            codes::INTERNAL,
+            "expected an ordinary shell launch failure | received {error:?}"
+        );
+        assert_eq!(
+            Value::Object(error.details.unwrap()),
+            json!({"kind":"shell_execution"})
+        );
+    }
+}
+
 #[test]
 fn invalid_cli_inputs_fail_before_any_launch() {
     let host = PathEnv::default();
