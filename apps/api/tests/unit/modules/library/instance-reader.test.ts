@@ -36,8 +36,9 @@ function nodeFsWithVirtualFile(
   name: string,
   content: string
 ): LibraryInstanceReaderFs {
-  // The reader may name the directory by its canonical path (macOS: /private/tmp).
-  const directories = new Set([directory, realpathSync(directory)]);
+  // The reader may name the directory by its canonical path: /private/tmp on macOS,
+  // the long form of an 8.3 short name on Windows (only `realpathSync.native` expands those).
+  const directories = new Set([directory, realpathSync(directory), realpathSync.native(directory)]);
   const virtualPaths = new Set([...directories].map((each) => join(each, name)));
   const bytes = new TextEncoder().encode(content);
   const entry = {
