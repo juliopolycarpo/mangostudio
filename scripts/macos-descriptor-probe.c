@@ -32,7 +32,8 @@ static void measure(int census, int high, long limit, int trial) {
   if (pipe(pipe_fds) != 0) exit(91);
   int high_fd = -1;
   if (high) {
-    high_fd = fcntl(STDOUT_FILENO, F_DUPFD, 65536);
+    int high_minimum = limit > 65536 ? 65536 : (int)limit - 1;
+    high_fd = fcntl(STDOUT_FILENO, F_DUPFD, high_minimum);
     if (high_fd < 0) {
       perror("create high descriptor");
       exit(92);

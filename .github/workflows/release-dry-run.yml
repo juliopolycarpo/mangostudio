@@ -13,9 +13,12 @@ concurrency:
 
 jobs:
   native-descriptors:
-    name: Measure native macOS descriptor closure and original Git routes
+    name: Measure descriptor closure under shell and Bun inherited limits
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,26 +43,20 @@ jobs:
           git -C tooling rev-parse HEAD > evidence/tooling-sha.txt
           shasum -a 256 tooling/scripts/macos-descriptor-probe.c > evidence/probe-sha256.txt
           clang -Wall -Wextra -Werror tooling/scripts/macos-descriptor-probe.c -o evidence/macos-descriptor-probe
-      - name: Measure unchanged close loop and post-fork complete census
-        run: evidence/macos-descriptor-probe | tee evidence/descriptor-cost.jsonl
-      - name: Build original default runtime with compiler messages
-        working-directory: source
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/targets/default
+      - name: Measure unchanged close loop under the shell inherited limit
+        run: evidence/macos-descriptor-probe > evidence/shell-descriptor-cost.jsonl 2> evidence/shell-descriptor-cost.stderr.log
+      - name: Measure unchanged close loop under Bun inherited limits
         run: |
-          cargo --version > ../evidence/cargo-version.txt
-          rustc --version --verbose > ../evidence/rustc-version.txt
-          cargo build -p mangostudio-runtime --bin mangostudio-runtime --locked --message-format=json > ../evidence/default-cargo.jsonl 2> ../evidence/default-cargo.stderr.log
-          shasum -a 256 ../targets/default/debug/mangostudio-runtime > ../evidence/runtime-sha256.txt
-      - name: Install immutable source dependencies
-        working-directory: source
-        run: bun install --frozen-lockfile > ../evidence/install.log 2>&1
-      - name: Measure unchanged Git route regression
-        working-directory: source
-        env:
-          MANGOSTUDIO_RUNTIME_BINARY: ${{ github.workspace }}/targets/default/debug/mangostudio-runtime
-        run: |
-          bun test --preload ./apps/api/tests/support/setup/preload.ts --timeout 15000 --reporter=junit --reporter-outfile=../evidence/git-write.xml apps/api/tests/integration/routes/git-write.integration.test.ts > ../evidence/git-write.log 2>&1
+          bun --no-install - <<'BUN'
+          const child = Bun.spawn(['./evidence/macos-descriptor-probe'], { stdout: 'pipe', stderr: 'pipe', timeout: 120000 });
+          const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+          await Bun.write('evidence/bun-descriptor-cost.jsonl', stdout);
+          await Bun.write('evidence/bun-descriptor-cost.stderr.log', stderr);
+          const receipt = { bunVersion: Bun.version, bunRevision: Bun.revision, pid: child.pid, exitCode, command: ['./evidence/macos-descriptor-probe'], rows: stdout.trim().split('\n').map((line) => JSON.parse(line)), stderr };
+          await Bun.write('evidence/bun-launch-receipt.json', JSON.stringify(receipt, null, 2) + '\n');
+          if (exitCode !== 0 || receipt.rows.length !== 12 || receipt.rows.some((row) => row.keepPreserved === false || row.highClosed === false)) throw new Error('Incomplete native Bun descriptor measurement; inspect raw output');
+          console.log(JSON.stringify(receipt));
+          BUN
       - name: Verify source remained unchanged
         if: always()
         run: git -C source status --porcelain > evidence/source-after-status.txt
