@@ -52,9 +52,9 @@ jobs:
           const out = resolve('evidence');
           const expectedSha = '8bf7943eac9b92b815bf67dda1eab48f16f52b4c';
           const control = process.env.PROBE_CONTROL;
-          const { nativeQualificationEnvironment } = await import(join(root, 'scripts/lib/native-bun-qualification.ts'));
-          const { runNativeCommand, scopeNativeProcesses, snapshotNativeProcesses } = await import(join(root, 'scripts/lib/native-bun-qualification-process.ts'));
-          const { nativeCompilerArtifacts, nativeSourceChanged, sealNativeArtifact, sealNativeSource } = await import(join(root, 'scripts/lib/native-bun-qualification-source.ts'));
+          let sealNativeSource;
+          let nativeSourceChanged;
+          let snapshotNativeProcesses;
           await mkdir(out, { recursive: true });
           const receipt = {
             schemaVersion: 1,
@@ -65,7 +65,7 @@ jobs:
             workflowSha: process.env.PROBE_WORKFLOW_SHA,
             control,
             host: { platform: process.platform, arch: arch(), release: release(), type: type(), runnerOS: process.env.RUNNER_OS, imageOS: process.env.ImageOS, imageVersion: process.env.ImageVersion, bunVersion: Bun.version, bunRevision: Bun.revision },
-            policy: { attempts: 1, buildTimeoutSeconds: 720, settleMs: 30000, fixedPostCommandObservationMs: 30000, acceptedSurvivorExclusions: [], explicitPostExitProcessKills: false, timeoutCleanup: 'unchanged qualification verified scope' },
+            policy: { attempts: 1, dependencyBootstrapTimeoutSeconds: 240, buildTimeoutSeconds: 720, settleMs: 30000, fixedPostCommandObservationMs: 30000, acceptedSurvivorExclusions: [], explicitPostExitProcessKills: false, timeoutCleanup: 'unchanged qualification verified scope' },
             sourceBefore: null,
             sourceAfter: null,
             controls: null,
@@ -85,6 +85,12 @@ jobs:
             if (!['unchanged', 'devshell-env', 'optional-telemetry-policy'].includes(control)) {
               throw new Error('Invalid control ' + JSON.stringify(control) + '; expected one of the three frozen experiment controls');
             }
+            const processApi = await import(join(root, 'scripts/lib/native-bun-qualification-process.ts'));
+            const sourceApi = await import(join(root, 'scripts/lib/native-bun-qualification-source.ts'));
+            ({ snapshotNativeProcesses } = processApi);
+            ({ sealNativeSource, nativeSourceChanged } = sourceApi);
+            const { runNativeCommand, scopeNativeProcesses } = processApi;
+            const { nativeCompilerArtifacts, sealNativeArtifact } = sourceApi;
             receipt.sourceBefore = await sealNativeSource(root);
             await Bun.write(join(out, 'source-before.json'), JSON.stringify(receipt.sourceBefore, null, 2) + '\n');
             if (receipt.sourceBefore.head !== expectedSha || receipt.sourceBefore.status) {
@@ -92,6 +98,17 @@ jobs:
             }
             const before = await snapshotNativeProcesses();
             await Bun.write(join(out, 'processes-before.json'), JSON.stringify(before, null, 2) + '\n');
+            const install = await runNativeCommand({ label: 'install', command: ['bun', 'install', '--frozen-lockfile'], timeoutSeconds: 240, root, out, env: { ...process.env }, snapshot: async () => {
+              const rows = await snapshotNativeProcesses();
+              await appendFile(join(out, 'raw-census-install.jsonl'), JSON.stringify({ at: new Date().toISOString(), processes: rows }) + '\n');
+              return rows;
+            } });
+            receipt.commands.push(install);
+            await Bun.write(join(out, 'command-install.json'), JSON.stringify(install, null, 2) + '\n');
+            if (install.exitCode !== 0 || install.timedOut || install.errors.length || !install.settlement.empty) {
+              throw new Error('Frozen source dependency bootstrap failed; inspect command-install.json and complete install logs');
+            }
+            const { nativeQualificationEnvironment } = await import(join(root, 'scripts/lib/native-bun-qualification.ts'));
             const shell = Bun.which('pwsh.exe') ?? Bun.which('powershell.exe');
             if (!shell) throw new Error('Missing native PowerShell; expected registry and file-version attestation');
             const policyScript = String.raw`
@@ -220,6 +237,7 @@ jobs:
             receipt.errors.push(String(error));
           } finally {
             try {
+              if (!sealNativeSource || !nativeSourceChanged || !snapshotNativeProcesses) throw new Error('Qualification standard-library imports unavailable; initial receipt retained');
               receipt.sourceAfter = await sealNativeSource(root);
               await Bun.write(join(out, 'source-after.json'), JSON.stringify(receipt.sourceAfter, null, 2) + '\n');
               if (!receipt.sourceBefore || nativeSourceChanged(receipt.sourceBefore, receipt.sourceAfter) || receipt.sourceAfter.status) receipt.errors.push('Source changed or seal unavailable');
