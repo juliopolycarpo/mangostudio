@@ -441,7 +441,7 @@ $startedChild.Dispose()
 
     Invoke-NativeProbe 'argv environment cwd raw pipes and natural exit' {
         $fixture = Join-Path $OutDirectory 'contract.mjs'
-        [IO.File]::WriteAllText($fixture, 'process.stdout.write(JSON.stringify({argv:process.argv.slice(2),cwd:process.cwd(),value:process.env.PROBE_VALUE,missing:process.env.MUST_NOT_LEAK??null})+"\n"); process.stdout.write(Buffer.from([0,255,1,13,10])); process.stderr.write(Buffer.from([255,0,2,13,10]));', [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($fixture, 'process.stdout.write(JSON.stringify({argv:process.argv.slice(2),cwd:process.cwd(),value:process.env.PROBE_VALUE,modulePath:process.env.PSModulePath??null,missing:process.env.MUST_NOT_LEAK??null})+"\n"); process.stdout.write(Buffer.from([0,255,1,13,10])); process.stderr.write(Buffer.from([255,0,2,13,10]));', [Text.UTF8Encoding]::new($false))
         $args = @('a b', 'quote"inside', 'backslash ending\', '', ([string][char]0x6c49 + [char]0x5b57 + [char]::ConvertFromUtf32(0x1f600)))
         $env:MUST_NOT_LEAK = 'should be absent from exact environment'
         try { $request = New-NativeProbeRequest 'contract' $fixture $args; $execution = Invoke-NativeProbeRequestFile $request $helper; $result = $execution.receipt } finally { Remove-Item Env:MUST_NOT_LEAK -ErrorAction SilentlyContinue }
@@ -451,6 +451,7 @@ $startedChild.Dispose()
         $decoded = [Text.Encoding]::UTF8.GetString($bytes, 0, $newline) | ConvertFrom-Json
         Assert-NativeProbe (($decoded.argv -join [char]0) -ceq ($args -join [char]0)) 'Windows quoted/empty/Unicode argv round trip'
         Assert-NativeProbe ($decoded.cwd -ieq $OutDirectory -and $decoded.value -eq $request.environment.PROBE_VALUE -and $null -eq $decoded.missing) 'original cwd and exact copied child environment'
+        Assert-NativeProbe ($decoded.modulePath -ceq $request.environment.PSModulePath) 'engine-bundled wrapper modules must preserve the original child PSModulePath exactly'
         Assert-NativeProbe ([Convert]::ToBase64String($bytes[($newline + 1)..($bytes.Length - 1)]) -eq 'AP8BDQo=') 'stdout bytes including invalid UTF8 unchanged'
         Assert-NativeProbe ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $request.out 'logs/stderr.log'))) -eq '/wACDQo=') 'stderr bytes including invalid UTF8 unchanged'
         Assert-NativeProbe (-not $result.job.inherited -and $result.job.limitFlags -eq 0x2000 -and $result.job.atomicJobList) 'private no-breakaway noninherited job assigned atomically'

@@ -14,6 +14,11 @@ Same-object exit: https://learn.microsoft.com/en-us/windows/win32/api/synchapi/n
 #>
 param([string]$RequestPath, [string]$AttestationPath)
 
+# Load this engine's bundled commands without changing inherited PSModulePath or the exact child request environment.
+foreach ($module in @('Microsoft.PowerShell.Utility', 'CimCmdlets')) {
+    Import-Module -Name (Join-Path $PSHOME "Modules\$module\$module.psd1") -ErrorAction Stop
+}
+
 $script:NativeWindowsJobPath = $PSCommandPath
 $script:NativeWindowsJobCode = @'
 using System;
