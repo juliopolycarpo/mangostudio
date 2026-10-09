@@ -23,19 +23,26 @@ static long long monotonic(void) {
   return (long long)value.tv_sec * 1000000000LL + value.tv_nsec;
 }
 
-static int kept(int fd, int result_pipe) {
-  return fd == result_pipe || fd == STDOUT_FILENO || fd == STDERR_FILENO;
+static int kept(int fd, int result_pipe, int high_keep) {
+  return fd == result_pipe || fd == STDOUT_FILENO || fd == STDERR_FILENO ||
+         (high_keep >= 0 && fd == high_keep);
 }
 
 static void measure(int census, int high, long limit, int trial) {
   int pipe_fds[2];
   if (pipe(pipe_fds) != 0) exit(91);
   int high_fd = -1;
+  int high_keep = -1;
   if (high) {
-    int high_minimum = limit > 65536 ? 65536 : (int)limit - 1;
+    int high_minimum = limit > 8193 ? 8192 : (int)limit - 2;
     high_fd = fcntl(STDOUT_FILENO, F_DUPFD, high_minimum);
     if (high_fd < 0) {
       perror("create high descriptor");
+      exit(92);
+    }
+    high_keep = fcntl(STDOUT_FILENO, F_DUPFD, high_minimum + 1);
+    if (high_keep < 0) {
+      perror("create high kept descriptor");
       exit(92);
     }
   }
@@ -58,14 +65,14 @@ static void measure(int census, int high, long limit, int trial) {
       }
       for (int index = 0; index < count; index++) {
         int fd = descriptors[index].proc_fd;
-        if (!kept(fd, pipe_fds[1])) {
+        if (!kept(fd, pipe_fds[1], high_keep)) {
           if (close(fd) != 0) _exit(96);
           result.closed++;
         }
       }
     } else {
       for (int fd = 0; fd < limit; fd++) {
-        if (!kept(fd, pipe_fds[1])) {
+        if (!kept(fd, pipe_fds[1], high_keep)) {
           close(fd);
           result.closed++;
         }
@@ -74,7 +81,8 @@ static void measure(int census, int high, long limit, int trial) {
     result.nanoseconds = monotonic() - start;
     result.preserved = fcntl(pipe_fds[1], F_GETFD) >= 0 &&
                        fcntl(STDOUT_FILENO, F_GETFD) >= 0 &&
-                       fcntl(STDERR_FILENO, F_GETFD) >= 0;
+                       fcntl(STDERR_FILENO, F_GETFD) >= 0 &&
+                       (high_keep < 0 || fcntl(high_keep, F_GETFD) >= 0);
     result.high_closed = high_fd < 0 ||
                         (fcntl(high_fd, F_GETFD) < 0 && errno == EBADF);
     if (write(pipe_fds[1], &result, sizeof(result)) != (ssize_t)sizeof(result)) _exit(97);
@@ -82,15 +90,16 @@ static void measure(int census, int high, long limit, int trial) {
   }
   close(pipe_fds[1]);
   if (high_fd >= 0) close(high_fd);
+  if (high_keep >= 0) close(high_keep);
   struct measurement result;
   ssize_t received = read(pipe_fds[0], &result, sizeof(result));
   close(pipe_fds[0]);
   int status;
   if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
       WEXITSTATUS(status) != 0 || received != (ssize_t)sizeof(result)) exit(98);
-  printf("{\"mode\":\"%s\",\"trial\":%d,\"openMax\":%ld,\"nanoseconds\":%lld,\"censusBytes\":%d,\"closeCalls\":%d,\"highFd\":%d,\"highClosed\":%s,\"keepPreserved\":%s}\n",
+  printf("{\"mode\":\"%s\",\"trial\":%d,\"openMax\":%ld,\"nanoseconds\":%lld,\"censusBytes\":%d,\"closeCalls\":%d,\"highFd\":%d,\"highKeepFd\":%d,\"highClosed\":%s,\"keepPreserved\":%s}\n",
          census ? "child-census" : "original-range", trial, limit,
-         result.nanoseconds, result.census_bytes, result.closed, high_fd,
+         result.nanoseconds, result.census_bytes, result.closed, high_fd, high_keep,
          result.high_closed ? "true" : "false",
          result.preserved ? "true" : "false");
   if (!result.high_closed || !result.preserved) exit(99);
