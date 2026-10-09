@@ -1,19 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { renderShellCommand } from '@mangostudio/shared/environments';
 import { isShellAvailable } from '@mangostudio/shared/process/host';
 import {
   classifyMcpElicitationCancelReason,
   executeStandardToolCallsWithProgress,
+  type ToolExecutionProgressItem,
 } from '../../../../src/modules/generation/application/standard-tool-execution';
 import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-tool';
 import { TODO_WRITE_TOOL_NAME } from '../../../../src/services/tools/builtin/todo';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';
 import type { RegisteredTool } from '../../../../src/services/tools/types';
+import { waitUntil } from '../../../support/rust-runtime-install-fixture';
 
 const hasBash = isShellAvailable('bash');
+const bunExecutable =
+  process.platform === 'win32' ? process.execPath.replaceAll('\\', '/') : process.execPath;
+
+function nativeChildCommand(pidFilename: string): string {
+  return renderShellCommand([
+    bunExecutable,
+    '-e',
+    `await Bun.write(${JSON.stringify(pidFilename)}, String(process.pid)); await Bun.sleep(10000);`,
+  ]);
+}
 
 /** The shape an MCP failure reaches the hub in: classified by the runtime. */
 function mcpFailure(failure: 'timeout' | 'server_closed', message: string): RemoteError {
@@ -76,6 +89,14 @@ function restoreRegistry(snapshot: RegisteredTool[]): void {
   }
 }
 
+async function collectProgress(
+  run: AsyncIterable<ToolExecutionProgressItem>
+): Promise<ToolExecutionProgressItem[]> {
+  const items: ToolExecutionProgressItem[] = [];
+  for await (const item of run) items.push(item);
+  return items;
+}
+
 describe('executeStandardToolCallsWithProgress timeouts', () => {
   let snapshot: RegisteredTool[];
   let tempDir: string;
@@ -111,29 +132,29 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
         ],
       ]);
 
-      const items = [];
-      for await (const item of executeStandardToolCallsWithProgress(
-        [
+      const items = await collectProgress(
+        executeStandardToolCallsWithProgress(
           [
-            'call-1',
-            {
-              name: 'bash',
-              argsStr: JSON.stringify({
-                command: `echo $$ > ${pidFile}; sleep 10`,
-              }),
-            },
+            [
+              'call-1',
+              {
+                name: 'bash',
+                argsStr: JSON.stringify({
+                  command: nativeChildCommand('pid.txt'),
+                  cwd: tempDir,
+                }),
+              },
+            ],
           ],
-        ],
-        {
-          userId: 'user-1',
-          chatId: 'chat-1',
-          environmentId: 'local',
-          settingsByToolName,
-          allowedToolNames: new Set(['bash']),
-        }
-      )) {
-        items.push(item);
-      }
+          {
+            userId: 'user-1',
+            chatId: 'chat-1',
+            environmentId: 'local',
+            settingsByToolName,
+            allowedToolNames: new Set(['bash']),
+          }
+        )
+      );
 
       const execution = items.find((item) => item.kind === 'execution');
       expect(execution?.kind).toBe('execution');
@@ -143,7 +164,7 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
       expect(execution.execution.resultStr.toLowerCase()).toContain('timed out');
 
       const pid = Number(readFileSync(pidFile, 'utf8').trim());
-      expect(Number.isFinite(pid)).toBe(true);
+      expect(Number.isInteger(pid) && pid > 0).toBe(true);
       expect(() => process.kill(pid, 0)).toThrow();
     },
     15_000
@@ -176,7 +197,8 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
             {
               name: 'bash',
               argsStr: JSON.stringify({
-                command: `echo $$ > ${pidFile}; sleep 10`,
+                command: nativeChildCommand('pid-abort.txt'),
+                cwd: tempDir,
               }),
             },
           ],
@@ -190,23 +212,34 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
           signal: controller.signal,
         }
       );
-      setTimeout(() => controller.abort(), 300);
+      const itemsPromise = collectProgress(run);
+      try {
+        await waitUntil(
+          () => existsSync(pidFile) && /^\d+$/.test(readFileSync(pidFile, 'utf8').trim()),
+          `the native child PID file at "${pidFile}"`,
+          5_000
+        );
+        const pid = Number(readFileSync(pidFile, 'utf8').trim());
+        expect(Number.isInteger(pid) && pid > 0).toBe(true);
+        expect(() => process.kill(pid, 0)).not.toThrow();
+        controller.abort();
 
-      const items = [];
-      for await (const item of run) {
-        items.push(item);
+        const items = await itemsPromise;
+        const execution = items.find((item) => item.kind === 'execution');
+        expect(execution?.kind).toBe('execution');
+        if (execution?.kind !== 'execution') return;
+
+        expect(execution.execution.isError).toBe(true);
+        expect(execution.execution.resultStr.toLowerCase()).not.toContain('timed out');
+        expect(execution.execution.execution).toMatchObject({
+          status: 'cancelled',
+          reasonCode: 'user_cancelled',
+        });
+        expect(() => process.kill(pid, 0)).toThrow();
+      } finally {
+        controller.abort();
+        await itemsPromise;
       }
-
-      const execution = items.find((item) => item.kind === 'execution');
-      expect(execution?.kind).toBe('execution');
-      if (execution?.kind !== 'execution') return;
-
-      expect(execution.execution.isError).toBe(true);
-      expect(execution.execution.resultStr.toLowerCase()).not.toContain('timed out');
-
-      const pid = Number(readFileSync(pidFile, 'utf8').trim());
-      expect(Number.isFinite(pid)).toBe(true);
-      expect(() => process.kill(pid, 0)).toThrow();
     },
     15_000
   );

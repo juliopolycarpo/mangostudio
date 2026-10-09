@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID, renderShellCommand } from '@mangostudio/shared/environments';
 import { isShellAvailable } from '@mangostudio/shared/process/host';
 import type { RuntimeShellKind as ShellKind } from '@mangostudio/shared/runtime-contract';
 import { environmentToolchainRepository } from '../../../../src/modules/environments/infrastructure/environment-toolchain-repository';
@@ -24,8 +24,12 @@ import {
 } from '../../../../src/services/tools/registry';
 import { mergeToolSettings } from '../../../../src/services/tools/settings-policy';
 import type { RegisteredTool, ToolContext } from '../../../../src/services/tools/types';
+import { waitUntil } from '../../../support/rust-runtime-install-fixture';
 
 const hasBash = isShellAvailable('bash');
+const bunExecutable =
+  process.platform === 'win32' ? process.execPath.replaceAll('\\', '/') : process.execPath;
+const cwdCommand = renderShellCommand([bunExecutable, '-e', 'console.log(process.cwd())']);
 const outsideDir = tmpdir();
 const SHELL_KINDS: ShellKind[] = ['bash', 'zsh', 'powershell'];
 
@@ -193,23 +197,23 @@ describe('shell tool registration and execution', () => {
   it.skipIf(!hasBash)('defaults command execution to the chat workdir', async () => {
     const result = (await executeTool(
       'bash',
-      { command: 'pwd' },
+      { command: cwdCommand },
       { ...makeContext(), workdir: tmpdir() },
       { enabled: true, parameters: {} }
     )) as { stdout: string };
 
-    expect(result.stdout.trim()).toBe(tmpdir());
+    expect(result.stdout.trim()).toBe(realpathSync(tmpdir()));
   });
 
   it.skipIf(!hasBash)('reads an explicit null cwd as absent', async () => {
     const result = (await executeTool(
       'bash',
-      { command: 'pwd', cwd: null },
+      { command: cwdCommand, cwd: null },
       { ...makeContext(), workdir: tmpdir() },
       { enabled: true, parameters: {} }
     )) as { stdout: string };
 
-    expect(result.stdout.trim()).toBe(tmpdir());
+    expect(result.stdout.trim()).toBe(realpathSync(tmpdir()));
   });
 
   it('rejects a non-string cwd instead of falling back to the chat workdir', async () => {
@@ -229,12 +233,12 @@ describe('shell tool registration and execution', () => {
       mkdirSync(join(workdir, 'nested'));
       const result = (await executeTool(
         'bash',
-        { command: 'pwd', cwd: 'nested' },
+        { command: cwdCommand, cwd: 'nested' },
         { ...makeContext(), workdir },
         { enabled: true, parameters: {} }
       )) as { stdout: string };
 
-      expect(result.stdout.trim()).toBe(join(workdir, 'nested'));
+      expect(result.stdout.trim()).toBe(realpathSync(join(workdir, 'nested')));
     } finally {
       rmSync(workdir, { recursive: true, force: true });
     }
@@ -317,23 +321,45 @@ describe('shell tool registration and execution', () => {
     'throws an abort error instead of a timeout when cancelled early',
     async () => {
       const controller = new AbortController();
+      const workdir = mkdtempSync(join(tmpdir(), 'shell-abort-'));
+      const pidFile = join(workdir, 'pid.txt');
       const run = executeTool(
         'bash',
-        { command: 'sleep 10' },
-        { ...makeContext({ timeoutSeconds: 30 }), signal: controller.signal },
+        {
+          command: renderShellCommand([
+            bunExecutable,
+            '-e',
+            'await Bun.write("pid.txt", String(process.pid)); await Bun.sleep(10000);',
+          ]),
+        },
+        { ...makeContext({ timeoutSeconds: 30 }), workdir, signal: controller.signal },
         { enabled: true, parameters: { timeoutSeconds: 30 } }
+      ).then(
+        () => undefined,
+        (error: unknown) => error
       );
-      setTimeout(() => controller.abort(), 300);
 
-      let threw = false;
       try {
-        await run;
-      } catch (error) {
-        threw = true;
+        await waitUntil(
+          () => existsSync(pidFile) && /^\d+$/.test(readFileSync(pidFile, 'utf8').trim()),
+          `the native child PID file at "${pidFile}"`,
+          5_000
+        );
+        const pid = Number(readFileSync(pidFile, 'utf8').trim());
+        expect(Number.isInteger(pid) && pid > 0).toBe(true);
+        expect(() => process.kill(pid, 0)).not.toThrow();
+        controller.abort();
+
+        const error = await run;
+        expect(error).toBeInstanceOf(Error);
         expect((error as Error).name).toBe('AbortError');
         expect((error as Error).message.toLowerCase()).not.toContain('timed out');
+        expect(() => process.kill(pid, 0)).toThrow();
+      } finally {
+        controller.abort();
+        await run;
+        rmSync(workdir, { recursive: true, force: true });
       }
-      expect(threw).toBe(true);
     },
     15_000
   );
