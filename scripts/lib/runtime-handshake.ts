@@ -65,6 +65,19 @@ export interface RuntimeHandshakeProbeOptions {
   readonly timeoutMs?: number;
   /** How long a child that closed stdout gets to exit; defaults to 2s. */
   readonly exitGraceMs?: number;
+  /** Native spawn by default; an injectable process for deterministic stream/exit tests. */
+  readonly spawn?: (command: readonly string[]) => RuntimeHandshakeChild;
+}
+
+/** The process operations the probe owns; independent of a host's pipe implementation. */
+export interface RuntimeHandshakeChild {
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  readonly stdin: { end(): unknown };
+  readonly exited: Promise<number>;
+  readonly exitCode: number | null;
+  readonly signalCode: string | null;
+  kill(): unknown;
 }
 
 export interface RuntimeHandshakeProbe {
@@ -119,12 +132,7 @@ export async function probeRuntimeHandshake(
   // Matches how `scripts/lib/exec.ts` and `scripts/lib/summary.ts` time work.
   const startedAt = performance.now();
 
-  const child = Bun.spawn({
-    cmd: [...command],
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  const child = options.spawn ? options.spawn(command) : spawnRuntime(command);
   // Drain stderr from the first tick: an unread pipe fills, and whatever the
   // child wrote on its way to not handshaking is the diagnostic we came for.
   const stderr = pumpStream(child.stderr);
@@ -215,6 +223,10 @@ export async function probeRuntimeHandshake(
     elapsedMs,
     budgetMs: timeoutMs,
   };
+}
+
+function spawnRuntime(command: readonly string[]): RuntimeHandshakeChild {
+  return Bun.spawn({ cmd: [...command], stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
 }
 
 function describeExit(exitCode: number | null, signal: string | null): string {

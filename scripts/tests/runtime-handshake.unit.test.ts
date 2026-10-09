@@ -4,6 +4,7 @@ import { findModuleResolutionFailure } from '../lib/module-resolution';
 import {
   DEFAULT_HANDSHAKE_BUDGET_MS,
   probeRuntimeHandshake,
+  type RuntimeHandshakeChild,
   resolveHandshakeBudgetMs,
   WIN32_HANDSHAKE_BUDGET_MS,
 } from '../lib/runtime-handshake';
@@ -35,6 +36,62 @@ function standIn(source: string): readonly string[] {
 }
 
 const NEVER_RESOLVES = 'await new Promise(() => {});';
+
+/** Controlled stream/exit ordering, including outcomes native Windows Bun cannot emulate. */
+class FakeHandshakeProcess implements RuntimeHandshakeChild {
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  readonly exited: Promise<number>;
+  readonly signalCode = null;
+  readonly stdin = {
+    end: () => {
+      this.stdinEnded = true;
+    },
+  };
+  readonly spawn = (command: readonly string[]) => {
+    this.command = [...command];
+    return this;
+  };
+  command: readonly string[] = [];
+  exitCode: number | null;
+  kills = 0;
+  stdinEnded = false;
+  private stdoutOpen = false;
+  private stdoutController!: ReadableStreamDefaultController<Uint8Array>;
+  private resolveExit!: (code: number) => void;
+
+  constructor(kind: 'closed' | 'held', stderr: string, exitCode: number | null = null) {
+    this.exitCode = exitCode;
+    this.stdout = new ReadableStream({
+      start: (controller) => {
+        this.stdoutController = controller;
+        this.stdoutOpen = kind === 'held';
+        if (!this.stdoutOpen) controller.close();
+      },
+      cancel: () => {
+        this.stdoutOpen = false;
+      },
+    });
+    this.stderr = new ReadableStream({
+      start: (controller) => {
+        controller.enqueue(new TextEncoder().encode(stderr));
+        controller.close();
+      },
+    });
+    this.exited = new Promise((resolve) => {
+      this.resolveExit = resolve;
+      if (exitCode !== null) resolve(exitCode);
+    });
+  }
+
+  kill(): void {
+    this.kills++;
+    this.exitCode ??= 137;
+    this.resolveExit(this.exitCode);
+    if (this.stdoutOpen) this.stdoutController.close();
+    this.stdoutOpen = false;
+  }
+}
 
 describe('scripts/lib/runtime-handshake', () => {
   describe('budget constants', () => {
@@ -96,6 +153,30 @@ describe('scripts/lib/runtime-handshake', () => {
   });
 
   describe('probeRuntimeHandshake', () => {
+    test.each(['closed', 'held'] as const)(
+      'settles injected %s stdout with bounded cleanup',
+      async (kind) => {
+        const child = new FakeHandshakeProcess(kind, 'diagnostic\n', kind === 'held' ? 7 : null);
+        const startedAt = performance.now();
+        const command = ['fixture-runtime', '--stdio'];
+        const probe = await probeRuntimeHandshake({
+          command,
+          spawn: child.spawn,
+          timeoutMs: 100,
+          exitGraceMs: 50,
+        });
+        expect(child.command).toEqual(command);
+        expect(child.stdinEnded).toBe(true);
+        expect(child.kills).toBe(1);
+        expect(probe.hello).toBeNull();
+        expect(probe.stderr).toBe('diagnostic\n');
+        expect(probe.exitCode).toBe(kind === 'held' ? 7 : null);
+        expect(probe.failure).toContain(
+          kind === 'held' ? 'left stdout open' : 'did not exit within 50ms'
+        );
+        expect(performance.now() - startedAt).toBeLessThan(1_000);
+      }
+    );
     test('returns the handshake line and still drains stderr', async () => {
       const probe = await probeRuntimeHandshake({
         command: standIn(
@@ -224,6 +305,7 @@ describe('scripts/lib/runtime-handshake', () => {
     });
 
     test('kills a child that closed stdout but never exits, without claiming its status', async () => {
+      const child = new FakeHandshakeProcess('closed', 'orphaned\n');
       const startedAt = performance.now();
       const probe = await probeRuntimeHandshake({
         command: standIn(
@@ -233,6 +315,7 @@ describe('scripts/lib/runtime-handshake', () => {
         ),
         timeoutMs: ANSWERING_TIMEOUT_MS,
         exitGraceMs: 200,
+        spawn: process.platform === 'win32' ? child.spawn : undefined,
       });
 
       expect(probe.hello).toBeNull();
@@ -248,6 +331,7 @@ describe('scripts/lib/runtime-handshake', () => {
     // times out. The dead child's own status is the diagnostic, so our kill
     // must not overwrite it with nothing.
     test('keeps the exit status of a child that died holding stdout open', async () => {
+      const child = new FakeHandshakeProcess('held', 'dying\n', 7);
       const probe = await probeRuntimeHandshake({
         command: standIn(
           `Bun.spawn({ cmd: [process.execPath, '-e', 'setTimeout(() => process.exit(0), 3000);'],` +
@@ -257,6 +341,7 @@ describe('scripts/lib/runtime-handshake', () => {
         ),
         timeoutMs: HANGING_TIMEOUT_MS,
         exitGraceMs: 200,
+        spawn: process.platform === 'win32' ? child.spawn : undefined,
       });
 
       expect(probe.hello).toBeNull();
