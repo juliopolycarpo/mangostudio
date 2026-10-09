@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';
 import {
@@ -33,6 +33,9 @@ const targetPaths = (pathStyle: 'posix' | 'win32', homeDir: string) =>
 
 const paths = targetPaths('posix', '/home/tester');
 const windowsPaths = targetPaths('win32', 'C:\\Users\\tester');
+// Cases built on `tmpdir()` need a target that shares the test host's path rules:
+// under the POSIX target above, `C:\Users\...` is a relative path.
+const hostPaths = targetPaths(process.platform === 'win32' ? 'win32' : 'posix', homedir());
 
 let tempDir: string;
 
@@ -125,7 +128,7 @@ describe('expandHome', () => {
 describe('resolveAndValidatePath', () => {
   it('resolves and returns a valid path when no restrictions are set', () => {
     const resolved = resolveAndValidatePath(tempDir, {
-      paths,
+      paths: hostPaths,
       settings: { allowedPaths: [], deniedPaths: [] },
     });
     expect(resolved).toBe(tempDir);
@@ -133,7 +136,7 @@ describe('resolveAndValidatePath', () => {
 
   it('resolves a relative path from the chat workdir', () => {
     const resolved = resolveAndValidatePath('src/index.ts', {
-      paths,
+      paths: hostPaths,
       settings: { allowedPaths: [], deniedPaths: [] },
       workdir: tempDir,
     });
@@ -144,7 +147,7 @@ describe('resolveAndValidatePath', () => {
   it('uses the workdir policy root for relative paths when available', () => {
     const policyRoot = join(tempDir, 'policy-root');
     const resolved = resolveAndValidatePath('src/index.ts', {
-      paths,
+      paths: hostPaths,
       settings: { allowedPaths: [], deniedPaths: [] },
       workdir: join(tempDir, 'context-workdir'),
       workdirPolicy: { root: policyRoot, restricted: false },
@@ -181,7 +184,7 @@ describe('resolveAndValidatePath', () => {
   it('rejects a relative path that escapes a restricted workdir', () => {
     expect(() =>
       resolveAndValidatePath('../../etc/passwd', {
-        paths,
+        paths: hostPaths,
         settings: { allowedPaths: [], deniedPaths: [] },
         workdirPolicy: { root: tempDir, restricted: true },
       })
@@ -192,7 +195,7 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'sub');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
-      paths,
+      paths: hostPaths,
       settings: {
         allowedPaths: [{ path: tempDir, enabled: true }],
         deniedPaths: [],
@@ -204,13 +207,13 @@ describe('resolveAndValidatePath', () => {
   it('rejects paths outside the allowed list', () => {
     expect(() =>
       resolveAndValidatePath('/etc', {
-        paths,
+        paths: hostPaths,
         settings: {
           allowedPaths: [{ path: tempDir, enabled: true }],
           deniedPaths: [],
         },
       })
-    ).toThrow(PathAccessError);
+    ).toThrow('is not in the allowed paths');
   });
 
   it('rejects denied paths', () => {
@@ -241,7 +244,7 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'nested');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
-      paths,
+      paths: hostPaths,
       settings: {
         allowedPaths: [{ path: tempDir, enabled: true }],
         deniedPaths: [{ path: '/unrelated', enabled: true }],
@@ -255,13 +258,13 @@ describe('resolveAndValidatePath', () => {
     mkdirSync(deniedSub);
     expect(() =>
       resolveAndValidatePath(deniedSub, {
-        paths,
+        paths: hostPaths,
         settings: {
           allowedPaths: [{ path: tempDir, enabled: true }],
           deniedPaths: [{ path: deniedSub, enabled: true }],
         },
       })
-    ).toThrow(PathAccessError);
+    ).toThrow('is in the denied paths');
   });
 
   it('expands ~ in settings paths against the target home', () => {
@@ -279,7 +282,7 @@ describe('resolveAndValidatePath', () => {
   it('ignores disabled allowed paths', () => {
     expect(() =>
       resolveAndValidatePath('/etc', {
-        paths,
+        paths: hostPaths,
         settings: {
           allowedPaths: [
             { path: tempDir, enabled: true },
@@ -288,14 +291,14 @@ describe('resolveAndValidatePath', () => {
           deniedPaths: [],
         },
       })
-    ).toThrow(PathAccessError);
+    ).toThrow('is not in the allowed paths');
   });
 
   it('ignores disabled denied paths', () => {
     const subDir = join(tempDir, 'allowed');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
-      paths,
+      paths: hostPaths,
       settings: {
         allowedPaths: [],
         deniedPaths: [

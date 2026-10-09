@@ -440,12 +440,16 @@ describe('buildRuntimeLifecycleView', () => {
 
 describe('stagedRuntimeAsset', () => {
   const cacheDir = (version: string) => `/home/u/.mango/runtime-cache/${version}`;
+  // `cacheDir` above is a POSIX hub's. `stagedRuntimeAsset` joins with the
+  // running process's separator unless told the host, so these cases name it.
+  const posixHost = 'linux';
 
   it('names the stable asset and a checksum line that checks the cached path', () => {
     const staged = stagedRuntimeAsset({
       version: '1.2.3',
       platformHint: 'linux-x64',
       cacheDir,
+      hostPlatform: posixHost,
       present: true,
     });
 
@@ -468,6 +472,7 @@ describe('stagedRuntimeAsset', () => {
       version: '1.2.3-canary.gabc1234',
       platformHint: 'linux-x64',
       cacheDir,
+      hostPlatform: posixHost,
       present: false,
     });
 
@@ -496,6 +501,7 @@ describe('stagedRuntimeAsset', () => {
       version: '1.2.3',
       platformHint: 'linux-x64',
       cacheDir,
+      hostPlatform: posixHost,
       present: true,
       fromArchive: true,
     });
@@ -539,6 +545,7 @@ describe('stagedRuntimeAsset', () => {
       version: '1.2.3-canary.gabc1234',
       platformHint: 'linux-x64',
       cacheDir,
+      hostPlatform: posixHost,
       present: true,
       pinnedDigest: 'deadbeef',
     });
