@@ -1338,7 +1338,75 @@ unsafe fn close_except(keep: &[RawFd], descriptor_limit: RawFd) {
             return;
         }
     }
+    #[cfg(target_os = "macos")]
+    {
+        if unsafe { close_except_with_descriptor_census(keep) } {
+            return;
+        }
+    }
     unsafe { close_except_one_by_one(keep, descriptor_limit) };
+}
+
+/// One `PROC_PIDLISTFDS` row. libc declares `proc_pidinfo` but not this layout.
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ProcFdInfo {
+    proc_fd: i32,
+    proc_fdtype: u32,
+}
+
+#[cfg(target_os = "macos")]
+const PROC_PIDLISTFDS: libc::c_int = 1;
+
+/// Closes the descriptors this process actually has open instead of walking the whole range.
+///
+/// macOS has no `close_range`, and `_SC_OPEN_MAX` there can be 1,048,576: walking it costs about
+/// 150 ms, and a guardian does it four times per launch. Returns `false` when the census cannot
+/// vouch for every descriptor, so the caller still falls back to the full walk.
+#[cfg(target_os = "macos")]
+unsafe fn close_except_with_descriptor_census(keep: &[RawFd]) -> bool {
+    const ROWS: usize = 1024;
+    const ROW_BYTES: usize = std::mem::size_of::<ProcFdInfo>();
+    // Stack storage only: this runs between `fork` and `exec`, where the allocator is off limits.
+    let mut rows = [ProcFdInfo {
+        proc_fd: -1,
+        proc_fdtype: 0,
+    }; ROWS];
+    // SAFETY: `getpid` has no arguments and cannot fail.
+    let pid = unsafe { libc::getpid() };
+    loop {
+        // SAFETY: `rows` is valid writable storage of exactly the byte length passed.
+        let bytes = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                PROC_PIDLISTFDS,
+                0,
+                rows.as_mut_ptr().cast(),
+                (ROWS * ROW_BYTES) as libc::c_int,
+            )
+        };
+        if bytes <= 0 || !(bytes as usize).is_multiple_of(ROW_BYTES) {
+            return false;
+        }
+        let count = bytes as usize / ROW_BYTES;
+        let mut closed = 0;
+        for row in &rows[..count] {
+            if row.proc_fd >= 0 && !keep.contains(&row.proc_fd) {
+                // SAFETY: the kernel just listed this descriptor as open in this process.
+                unsafe { libc::close(row.proc_fd) };
+                closed += 1;
+            }
+        }
+        // A full buffer may be a truncated listing. Closing made room, so list again; a full
+        // pass that closed nothing can never finish.
+        if count < ROWS {
+            return true;
+        }
+        if closed == 0 {
+            return false;
+        }
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -1975,6 +2043,46 @@ mod tests {
     use std::ffi::OsString;
 
     use super::collect_inheritable;
+
+    #[test]
+    fn close_except_closes_every_unlisted_descriptor_and_keeps_the_listed_one() {
+        use std::os::fd::AsRawFd;
+
+        let (kept_read, kept_write) = super::pipe_cloexec().expect("kept pipe opens");
+        let (stray_read, stray_write) = super::pipe_cloexec().expect("stray pipe opens");
+        let limit = super::descriptor_limit().expect("descriptor limit is finite");
+        let kept = kept_write.as_raw_fd();
+        let strays = [stray_read.as_raw_fd(), stray_write.as_raw_fd(), 0];
+
+        // SAFETY: the child calls only async-signal-safe functions before `_exit`.
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "expected fork to succeed | received {pid}");
+        if pid == 0 {
+            unsafe { super::close_except(&[kept], limit) };
+            for (index, stray) in strays.iter().enumerate() {
+                if unsafe { libc::fcntl(*stray, libc::F_GETFD) } >= 0 {
+                    unsafe { libc::_exit(10 + index as libc::c_int) };
+                }
+            }
+            if unsafe { libc::write(kept, b"k".as_ptr().cast(), 1) } != 1 {
+                unsafe { libc::_exit(20) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        drop(kept_write);
+
+        let status = super::wait_for_guardian(pid).expect("child is reaped");
+        let mut byte = [0_u8; 1];
+        // SAFETY: `byte` is valid storage for the one byte requested.
+        let read = unsafe { libc::read(kept_read.as_raw_fd(), byte.as_mut_ptr().cast(), 1) };
+        assert_eq!(
+            (status.code(), read, byte[0]),
+            (Some(0), 1, b'k'),
+            "expected child exit 0 with the kept pipe still writable | received exit {:?} \
+             (10-12: stray read end, stray write end or stdin stayed open; 20: kept pipe closed)",
+            status.code()
+        );
+    }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
