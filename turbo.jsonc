@@ -38,6 +38,10 @@
     "PLATFORM",
     // The PowerShell installer probes the actual host architecture in strict test tasks.
     "PROCESSOR_ARCHITECTURE",
+    // Where a Windows host keeps PowerShell's module analysis cache when it is not under
+    // LOCALAPPDATA (GitHub's images). Without it every Windows PowerShell child in a strict
+    // task re-analyses each module: 12-23 s per command instead of under 3 s.
+    "PSModuleAnalysisCachePath",
     "QA_FRONTEND_DIST",
     "RUNNER_OS",
     // Prebuilt cargo runtimes `scripts/build.ts --binary` stages beside each hub.

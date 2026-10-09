@@ -37,7 +37,8 @@ if (process.platform === 'win32') {
   const result = Bun.spawnSync({
     cmd: [shell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', join(import.meta.dir, 'probe.ps1')],
-    timeout: 5000,
+    // Windows PowerShell answers in about 3 s with its analysis cache and 12 s or more without.
+    timeout: 10000,
   });
   powershell = { exitCode: result.exitCode, stdout: result.stdout.toString(),
     stderr: result.stderr.toString() };
@@ -123,7 +124,7 @@ $archive = Get-Command Expand-Archive -ErrorAction Stop
       cwd: this.root,
       stdout: 'pipe',
       stderr: 'pipe',
-      timeout: 10000,
+      timeout: 30000,
     });
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(processHandle.stdout).text(),
@@ -155,7 +156,7 @@ describe('native host metadata in strict Turbo tasks', () => {
     } finally {
       fixture.dispose();
     }
-  });
+  }, 45_000);
 
   it('refuses an unknown platform when strict Turbo removes the architecture', async () => {
     const fixture = new StrictTurboHostFixture(
@@ -173,5 +174,5 @@ describe('native host metadata in strict Turbo tasks', () => {
     } finally {
       fixture.dispose();
     }
-  });
+  }, 45_000);
 });
