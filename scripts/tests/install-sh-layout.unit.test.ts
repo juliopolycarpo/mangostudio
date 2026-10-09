@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -70,7 +71,9 @@ afterEach(() => {
 });
 
 function tempDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  // The long form: under an 8.3 short temp path the Windows shell reads a link back as
+  // /tmp/..., which no longer matches the install root the script was given.
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), prefix)));
   tempDirs.push(dir);
   return dir;
 }
