@@ -26,6 +26,46 @@ function skillLocation(): LocationDefinition {
   return location;
 }
 
+/**
+ * The Node file system plus one file that exists only for the reader: it is
+ * listed in `directory`, and can be stat-ed, resolved and read like any other.
+ * For names the host cannot store on disk.
+ */
+function nodeFsWithVirtualFile(
+  directory: string,
+  name: string,
+  content: string
+): LibraryInstanceReaderFs {
+  const virtualPath = join(directory, name);
+  const bytes = new TextEncoder().encode(content);
+  const entry = {
+    name,
+    isFile: () => true,
+    isDirectory: () => false,
+    isSymbolicLink: () => false,
+  };
+  return {
+    async readDirectory(path) {
+      const entries = await readdir(path, { withFileTypes: true });
+      return path === directory ? [...entries, entry] : entries;
+    },
+    readFile: (path) => (path === virtualPath ? Promise.resolve(bytes) : readFile(path)),
+    realPath: (path) => (path === virtualPath ? Promise.resolve(path) : realpath(path)),
+    async stat(path) {
+      if (path === virtualPath) {
+        return { size: bytes.byteLength, mtimeMs: 0, isFile: true, isDirectory: false };
+      }
+      const value = await stat(path);
+      return {
+        size: value.size,
+        mtimeMs: value.mtimeMs,
+        isFile: value.isFile(),
+        isDirectory: value.isDirectory(),
+      };
+    },
+  };
+}
+
 describe('readLocationInstances', () => {
   it('keeps malformed skills alongside valid siblings', async () => {
     const validDir = join(root, 'valid-skill');
@@ -142,11 +182,13 @@ describe('readLocationInstances', () => {
       join(skillDir, 'SKILL.md'),
       '---\nname: newline-skill\ndescription: Newline\n---\n'
     );
-    writeFileSync(join(skillDir, 'a\nb.md'), 'content');
 
     const result = await readLocationInstances(skillLocation(), root, {
       cache: new LibraryCache(),
       force: false,
+      // NTFS refuses a newline in a file name, so the file cannot be written
+      // to disk on every host; the reader is shown it through its fs seam.
+      fs: nodeFsWithVirtualFile(skillDir, 'a\nb.md', 'content'),
     });
 
     expect(result.instances[0]?.instance).toMatchObject({
