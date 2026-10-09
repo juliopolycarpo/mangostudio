@@ -34,6 +34,11 @@ beforeAll(async () => {
 let restoreAuth: (() => void) | null = null;
 const tempDirs: string[] = [];
 
+// The shell on Windows is Git Bash, whose `pwd` prints the POSIX form of the
+// directory (`/c/Users/...`). `cygpath -w` prints the same directory the way
+// the host names it, which is the form the chat workdir is stored in.
+const PRINT_WORKING_DIRECTORY = process.platform === 'win32' ? 'cygpath -w "$PWD"' : 'pwd';
+
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   for (let attempt = 0; attempt < 500; attempt += 1) {
     if (predicate()) return;
@@ -458,7 +463,7 @@ describe('POST /respond/stream — tools', () => {
           type: 'tool_call_completed',
           callId: 'bash-workdir',
           name: 'bash',
-          arguments: JSON.stringify({ command: 'pwd' }),
+          arguments: JSON.stringify({ command: PRINT_WORKING_DIRECTORY }),
         };
         yield { type: 'turn_completed', providerState: null };
       });
