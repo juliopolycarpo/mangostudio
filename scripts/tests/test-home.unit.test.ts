@@ -10,10 +10,38 @@ import {
   shellExitCode,
   TEST_HOME_KIND,
   TEST_HOME_PREFIX,
+  type TestHomeChild,
+  type TestHomeDependencies,
   testHomeEnv,
 } from '../lib/test-home';
 
 const host: TemporaryHomeHost = { tmpDir: '/tmp', realHome: '/home/dev' };
+
+/** A child status supplied by a host, with the launcher's actual temporary home retained. */
+class FakeSignaledChild implements TestHomeChild, TestHomeDependencies {
+  readonly exited = Promise.resolve(1);
+  readonly spawn = (command: readonly string[], env: NodeJS.ProcessEnv) => {
+    this.command = [...command];
+    this.home = env.HOME ?? '';
+    return this;
+  };
+  command: readonly string[] = [];
+  home = '';
+  signals: number[] = [];
+  constructor(readonly signalCode: string) {}
+  kill(signal: number): void {
+    this.signals.push(signal);
+  }
+}
+
+/** A launch failure after receiving the real temporary home to clean up. */
+class FakeSpawnFailure implements TestHomeDependencies {
+  home = '';
+  readonly spawn = (_command: readonly string[], env: NodeJS.ProcessEnv): never => {
+    this.home = env.HOME ?? '';
+    throw new Error('fixture spawn failed');
+  };
+}
 
 /** Prints what a child sees as its home, as one JSON line. */
 const PROBE = [
@@ -78,10 +106,10 @@ describe('testHomeEnv', () => {
   test('pins the toolchain homes to the real ones', () => {
     const env = testHomeEnv(root, {}, host);
 
-    expect(env.CARGO_HOME).toBe('/home/dev/.cargo');
-    expect(env.RUSTUP_HOME).toBe('/home/dev/.rustup');
-    expect(env.BUN_INSTALL).toBe('/home/dev/.bun');
-    expect(env.BUN_INSTALL_CACHE_DIR).toBe(join('/home/dev/.bun', 'install', 'cache'));
+    expect(env.CARGO_HOME).toBe(join(host.realHome, '.cargo'));
+    expect(env.RUSTUP_HOME).toBe(join(host.realHome, '.rustup'));
+    expect(env.BUN_INSTALL).toBe(join(host.realHome, '.bun'));
+    expect(env.BUN_INSTALL_CACHE_DIR).toBe(join(host.realHome, '.bun', 'install', 'cache'));
   });
 
   test('keeps a toolchain location the developer already exported', () => {
@@ -244,9 +272,11 @@ describe('runWithTestHome', () => {
   });
 
   test('reports 128 plus the signal when the child is killed', async () => {
+    const child = new FakeSignaledChild('SIGTERM');
     const code = await runWithTestHome(
       ['bun', '-e', "process.kill(process.pid, 'SIGTERM'); setTimeout(() => {}, 5000)"],
-      process.env
+      process.env,
+      process.platform === 'win32' ? child : undefined
     );
 
     expect(code, `expected exit code: 143 | received: ${code}`).toBe(143);
@@ -255,18 +285,49 @@ describe('runWithTestHome', () => {
   // SIGKILL cannot be intercepted, so unlike SIGABRT or SIGSEGV (which Bun's
   // crash handler can stall on a CI runner) it ends the child at once.
   test('reports 128 plus SIGKILL, not the forwarded-signal code, for an unforwarded signal', async () => {
+    const child = new FakeSignaledChild('SIGKILL');
     const code = await runWithTestHome(
       ['bun', '-e', "process.kill(process.pid, 'SIGKILL'); setTimeout(() => {}, 5000)"],
-      process.env
+      process.env,
+      process.platform === 'win32' ? child : undefined
     );
 
     expect(code, `expected exit code: 137 (128 + SIGKILL) | received: ${code}`).toBe(137);
   });
 
+  test.each([
+    ['SIGTERM', 143],
+    ['SIGKILL', 137],
+    ['unknown-signal', 1],
+  ] as const)(
+    'maps injected %s status and removes its real temporary home',
+    async (signal, expected) => {
+      const child = new FakeSignaledChild(signal);
+      const code = await runWithTestHome(['bun', 'fixture.ts'], process.env, child);
+      expect(code).toBe(expected);
+      expect(child.command).toEqual([process.execPath, 'fixture.ts']);
+      expect(child.home).toContain(TEST_HOME_PREFIX);
+      expect(existsSync(child.home)).toBe(false);
+    }
+  );
+
   test('refuses an empty command, naming what it received', async () => {
     await expect(runWithTestHome([], process.env)).rejects.toThrow(
       'expected a command to run | received: none'
     );
+  });
+
+  test('removes the temporary home when the child cannot start', async () => {
+    const dependency = new FakeSpawnFailure();
+    await expect(runWithTestHome(['bun', 'fixture.ts'], process.env, dependency)).rejects.toThrow(
+      'fixture spawn failed'
+    );
+    expect(dependency.home).toContain(TEST_HOME_PREFIX);
+    try {
+      expect(existsSync(dependency.home)).toBe(false);
+    } finally {
+      rmSync(dependency.home, { recursive: true, force: true });
+    }
   });
 
   test('refuses an ordinary temp directory as a test home and keeps its contents', () => {
