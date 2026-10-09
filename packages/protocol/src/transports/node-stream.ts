@@ -21,6 +21,14 @@ export interface StreamPortOptions {
    * never closed, dropping a registration, reaping a child.
    */
   readonly onRelease?: () => void;
+  /**
+   * Hands every read event to the port on a later macrotask, in arrival order,
+   * instead of inside the stream's own callback. A frame listener that answers
+   * from inside a child pipe's `data` callback loses the reply on Bun for
+   * Windows when the child writes it back at once, so the launcher asks for
+   * this; a socket does not need it.
+   */
+  readonly deferReads?: boolean;
 }
 
 /**
@@ -53,10 +61,14 @@ export function createStreamPort(
     },
     ...(options.maxFrameBytes !== undefined ? { maxFrameBytes: options.maxFrameBytes } : {}),
   });
-  detach = readFramesFrom(readable, handle);
+  const deliver = options.deferReads ? deliverLaterInOrder() : deliverNow;
+  detach = readFramesFrom(readable, handle, deliver);
   // A duplex reports its write errors on the same object; two separate streams
   // need the writable watched too, or an EPIPE becomes an uncaught exception.
-  if (!isSameStream(readable, writable)) reportStreamErrors(writable, handle);
+  // It goes through the same delivery as the reads: a child that answers and
+  // exits breaks the pipe right behind its last frames, and failing the port
+  // inline would drop them while they wait.
+  if (!isSameStream(readable, writable)) reportStreamErrors(writable, handle, deliver);
   return handle;
 }
 
@@ -71,12 +83,19 @@ function isSameStream(readable: object, writable: object): boolean {
  * stream error fails the port instead of becoming an uncaught exception.
  *
  * @example
- * const detach = readFramesFrom(child.stdout, handle);
+ * const detach = readFramesFrom(child.stdout, handle, deliverNow);
  */
-function readFramesFrom(stream: NodeJS.ReadableStream, handle: NdjsonPortHandle): () => void {
-  const onData = (chunk: unknown): void => handle.feed(toBytes(chunk));
-  const onEnd = (): void => handle.eof();
-  const onError = (cause: unknown): void => handle.failed(asError(cause));
+function readFramesFrom(
+  stream: NodeJS.ReadableStream,
+  handle: NdjsonPortHandle,
+  deliver: ReadDelivery
+): () => void {
+  const onData = (chunk: unknown): void => {
+    const bytes = toBytes(chunk);
+    deliver.run(() => handle.feed(bytes));
+  };
+  const onEnd = (): void => deliver.run(() => handle.eof());
+  const onError = (cause: unknown): void => deliver.run(() => handle.failed(asError(cause)));
   stream.on('data', onData);
   stream.on('end', onEnd);
   // A stream destroyed without an error (a peer that vanished, a socket reset
@@ -84,6 +103,7 @@ function readFramesFrom(stream: NodeJS.ReadableStream, handle: NdjsonPortHandle)
   stream.on('close', onEnd);
   stream.on('error', onError);
   return () => {
+    deliver.stop();
     stream.removeListener('data', onData);
     stream.removeListener('end', onEnd);
     stream.removeListener('close', onEnd);
@@ -96,15 +116,74 @@ function readFramesFrom(stream: NodeJS.ReadableStream, handle: NdjsonPortHandle)
   };
 }
 
+/** How a stream event reaches the port, and how to drop the ones still waiting. */
+interface ReadDelivery {
+  run(event: () => void): void;
+  stop(): void;
+}
+
+const deliverNow: ReadDelivery = {
+  run: (event) => event(),
+  stop: () => undefined,
+};
+
+/**
+ * Runs read events one macrotask later, in the order they arrived, so nothing
+ * the port does in response happens inside the stream's callback. Events still
+ * waiting when the port ends are dropped, like the listeners themselves. An
+ * event that throws leaves the ones behind it queued for the next turn, so a
+ * failing frame listener cannot swallow the end of the stream.
+ *
+ * @example
+ * const deliver = deliverLaterInOrder();
+ * stream.on('data', (chunk) => deliver.run(() => handle.feed(toBytes(chunk))));
+ */
+function deliverLaterInOrder(): ReadDelivery {
+  let waiting: Array<() => void> = [];
+  let scheduled = false;
+  let stopped = false;
+  const schedule = (): void => {
+    if (scheduled) return;
+    scheduled = true;
+    setImmediate(drain);
+  };
+  const drain = (): void => {
+    scheduled = false;
+    // Only what was waiting when this turn began: an event queued by one of
+    // these still gets a turn of its own.
+    let remaining = waiting.length;
+    try {
+      while (remaining-- > 0 && !stopped) waiting.shift()?.();
+    } finally {
+      if (waiting.length > 0) schedule();
+    }
+  };
+  return {
+    run: (event) => {
+      if (stopped) return;
+      waiting.push(event);
+      schedule();
+    },
+    stop: () => {
+      stopped = true;
+      waiting = [];
+    },
+  };
+}
+
 /**
  * Reports a writable stream's errors as a port closure. A pipe whose reader is
  * gone emits `EPIPE`, and an unlistened `error` event would crash the process.
  *
  * @example
- * reportStreamErrors(process.stdout, handle);
+ * reportStreamErrors(process.stdout, handle, deliverNow);
  */
-function reportStreamErrors(stream: NodeJS.EventEmitter, handle: NdjsonPortHandle): void {
-  stream.on('error', (cause: unknown) => handle.failed(asError(cause)));
+function reportStreamErrors(
+  stream: NodeJS.EventEmitter,
+  handle: NdjsonPortHandle,
+  deliver: ReadDelivery
+): void {
+  stream.on('error', (cause: unknown) => deliver.run(() => handle.failed(asError(cause))));
 }
 
 /**
