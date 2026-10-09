@@ -463,9 +463,12 @@ describe('install.sh layout', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('expected version: 0.1.0 | received: 9.9.9');
     expect(readlinkSync(join(root, 'current'))).toBe('0.1.0');
-    const stillGood = shell([shellPath(join(root, '0.1.0', 'mangostudio')), '--version']);
-    expect(stillGood.exitCode, JSON.stringify(stillGood)).toBe(0);
-    expect(stillGood.stdout.trim()).toBe('0.1.0');
+    const survivingBinary = join(root, '0.1.0', 'mangostudio');
+    const stillGood = IS_WINDOWS
+      ? shell([shellPath(survivingBinary), '--version'])
+      : Bun.spawnSync({ cmd: [survivingBinary, '--version'] });
+    expect(stillGood.exitCode, stillGood.stderr.toString()).toBe(0);
+    expect(stillGood.stdout.toString().trim()).toBe('0.1.0');
   });
 
   test('a smoke mismatch with a clean exit and no stderr keeps the original one-line error', () => {
