@@ -244,7 +244,13 @@ is unavailable rather than merely slower.
 
 Every archive this repository *reads* is read in-process by `Bun.Archive`
 (`scripts/lib/archive.ts`). Every archive it *writes* still shells out to `tar`
-or `zip`. The split is not a staged migration: creation cannot convert until
+or `zip`. Release asset creation on Windows uses the system's native bsdtar and
+PowerShell ZIP support rather than MSYS tar or an external zip utility. Tar
+commands write a local filename from the output directory, so Windows drive
+prefixes cannot be interpreted as remote hosts. `scripts/lib/archive-creation.ts`
+owns these commands. Native bsdtar on macOS and Windows omits the gzip creation
+timestamp so identical inputs keep identical compressed bytes; archived file
+mtimes and modes are preserved. The split is not a staged migration: creation cannot convert until
 `Bun.Archive` can store a file mode.
 
 ### The blocker
