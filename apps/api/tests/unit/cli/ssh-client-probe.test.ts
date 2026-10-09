@@ -12,7 +12,7 @@ describe('probeSshClient', () => {
   it('rejects a nonzero ssh -V even when stderr has text', async () => {
     // A wrong binary on PATH can print an error and still leave a line for the
     // old "any stderr is a version" path to misread as success.
-    const path = await writeFakeSsh(['#!/bin/sh', 'echo "ssh: unsupported option" >&2', 'exit 1']);
+    const path = await writeFailingSsh('ssh: unsupported option', 1);
     try {
       const probe = await probeSshClient(path);
       expect(probe.version).toBeNull();
@@ -31,10 +31,24 @@ describe('probeSshClient', () => {
   });
 });
 
-async function writeFakeSsh(lines: readonly string[]): Promise<string> {
+/**
+ * A stand-in `ssh` that prints `stderrText` on stderr and exits with
+ * `exitCode`, whatever it is asked. POSIX gets a `#!/bin/sh` script; Windows
+ * cannot execute a shebang, so it gets an `ssh.cmd` batch file, which
+ * `Bun.spawn` starts through cmd.exe.
+ */
+async function writeFailingSsh(stderrText: string, exitCode: number): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'mango-ssh-probe-'));
+  if (process.platform === 'win32') {
+    const path = join(directory, 'ssh.cmd');
+    await writeFile(
+      path,
+      ['@echo off', `1>&2 echo ${stderrText}`, `exit /b ${exitCode}`, ''].join('\r\n')
+    );
+    return path;
+  }
   const path = join(directory, 'ssh');
-  await writeFile(path, `${lines.join('\n')}\n`);
+  await writeFile(path, `#!/bin/sh\necho "${stderrText}" >&2\nexit ${exitCode}\n`);
   await chmod(path, 0o755);
   return path;
 }
