@@ -268,7 +268,8 @@ export function spawnPort(options: SpawnOptions, spawnChild: SpawnChild = spawn)
   const limit = { maxFrameBytes };
   const handle =
     child?.stdin && child.stdout
-      ? createStreamPort(child.stdout, child.stdin, limit)
+      ? // Every answer is written from a read callback otherwise; see `deferReads`.
+        createStreamPort(child.stdout, child.stdin, { ...limit, deferReads: true })
       : createNdjsonPort({ sink: unspawnedSink(), ...limit });
   wire(child, handle, options, tail, exit, launch);
 

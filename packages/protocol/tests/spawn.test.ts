@@ -124,6 +124,22 @@ describe('spawn launcher', () => {
     expect('startError' in peer).toBe(false);
   });
 
+  it('delivers a child frame after the stdout read callback has returned', async () => {
+    const recording = new RecordingSpawn();
+    const peer = spawnPort({ argv: ['runtime'] }, recording.spawn);
+    const types: string[] = [];
+    peer.port.onFrame((frame) => types.push(frame.type));
+
+    recording.child.stdout.emit('data', Buffer.from('{"type":"ping"}\n'));
+    const insideReadCallback = [...types];
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect({ insideReadCallback, afterwards: types }).toEqual({
+      insideReadCallback: [],
+      afterwards: ['ping'],
+    });
+  });
+
   it('completes the handshake and round-trips a request with a real child', async () => {
     const peer = spawnPort({ argv: [BUN, ECHO_CHILD] });
     try {
