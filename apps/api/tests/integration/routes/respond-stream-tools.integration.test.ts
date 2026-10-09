@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isShellAvailable } from '@mangostudio/shared/process/host';
@@ -421,7 +421,7 @@ describe('POST /respond/stream — tools', () => {
   it.skipIf(!isShellAvailable('bash'))(
     'runs shell calls without cwd from the chat workdir',
     async () => {
-      const workdir = await mkdtemp(join(tmpdir(), 'mango-stream-workdir-'));
+      const workdir = await realpath(await mkdtemp(join(tmpdir(), 'mango-stream-workdir-')));
       tempDirs.push(workdir);
       let iteration = 0;
       let capturedToolResults: AgentTurnRequest['toolResults'];
