@@ -9,6 +9,7 @@ import {
   runNativeCommand,
   scopeNativeProcesses,
   snapshotNativeProcesses,
+  unattributedNativeCompilerHelpers,
 } from './native-bun-qualification-process';
 import {
   collectNativeTestEvidence,
@@ -69,7 +70,12 @@ export interface NativeQualificationReceipt {
   artifactsAfter: ArtifactSeal[];
   buildArtifacts: Record<string, readonly NativeCompilerArtifact[]>;
   tests: NativeTestEvidence | null;
-  terminal: { empty: boolean; errors: readonly string[]; survivors: readonly NativeProcess[] };
+  terminal: {
+    empty: boolean;
+    errors: readonly string[];
+    survivors: readonly NativeProcess[];
+    unattributedCompilerHelpers?: readonly NativeProcess[];
+  };
 }
 
 const TOTAL_TIMEOUT_SECONDS = 55 * 60;
@@ -374,6 +380,7 @@ export async function runNativeQualification(
   const env = nativeQualificationEnvironment(process.env);
   let artifacts: readonly string[] = [];
   let inventory: NativeTestLane[] = [];
+  let processesBefore: readonly NativeProcess[] = [];
   const run = async (
     label: string,
     command: readonly string[],
@@ -399,6 +406,13 @@ export async function runNativeQualification(
     return result;
   };
   try {
+    if (process.platform === 'win32') {
+      processesBefore = await (dependencies.snapshotProcesses ?? snapshotNativeProcesses)();
+      await Bun.write(
+        join(out, 'processes-before-qualification.json'),
+        `${JSON.stringify(processesBefore, null, 2)}\n`
+      );
+    }
     receipt.sourceBefore = await sealNativeSource(root);
     if (receipt.sourceBefore.status)
       throw new Error(
@@ -463,9 +477,25 @@ export async function runNativeQualification(
       : [`${command.label}: terminal census failed`, ...command.settlement.snapshotErrors]
   );
   let survivors: NativeProcess[] = [];
+  let unattributedCompilerHelpers: NativeProcess[] = [];
   try {
     const observed = receipt.commands.flatMap((command) => command.settlement.observed);
     const snapshot = await (dependencies.snapshotProcesses ?? snapshotNativeProcesses)();
+    if (process.platform === 'win32') {
+      await Bun.write(
+        join(out, 'processes-after-qualification.json'),
+        `${JSON.stringify(snapshot, null, 2)}\n`
+      );
+      unattributedCompilerHelpers = unattributedNativeCompilerHelpers(
+        processesBefore,
+        snapshot,
+        observed
+      );
+      if (unattributedCompilerHelpers.length)
+        terminalErrors.push(
+          `Unattributed compiler helpers ${JSON.stringify(unattributedCompilerHelpers)}; expected verified ownership and an empty terminal census`
+        );
+    }
     survivors = scopeNativeProcesses(snapshot, {
       rootPid: -1,
       rootAlive: false,
@@ -481,6 +511,7 @@ export async function runNativeQualification(
     empty: receipt.commands.length > 0 && terminalErrors.length === 0,
     errors: terminalErrors,
     survivors,
+    ...(process.platform === 'win32' ? { unattributedCompilerHelpers } : {}),
   };
   receipt.validationErrors.push(...terminalErrors);
   receipt.finishedAt = new Date().toISOString();

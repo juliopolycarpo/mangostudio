@@ -10,6 +10,8 @@ export interface NativeProcess {
   readonly group: number | null;
   readonly identity: string;
   readonly command: string;
+  readonly name?: string;
+  readonly executablePath?: string | null;
 }
 
 export interface NativeProcessScope {
@@ -26,6 +28,7 @@ interface NativeSettlement {
   readonly observed: readonly NativeProcess[];
   readonly survivors: readonly NativeProcess[];
   readonly snapshotErrors: readonly string[];
+  readonly unattributedCompilerHelpers?: readonly NativeProcess[];
   readonly empty: boolean;
 }
 
@@ -56,6 +59,7 @@ export interface NativeCommandOptions {
   readonly pollIntervalMs?: number;
   readonly settleMs?: number;
   readonly stream?: NodeJS.WritableStream;
+  readonly guardCompilerHelpers?: boolean;
 }
 
 /**
@@ -65,8 +69,8 @@ export interface NativeCommandOptions {
 export function parseNativeProcesses(text: string, platform: NodeJS.Platform): NativeProcess[] {
   if (platform === 'win32') {
     const parsed: unknown = JSON.parse(text.replace(/^\uFEFF/, ''));
-    if (!Array.isArray(parsed))
-      throw new Error(`Invalid CIM snapshot ${text}; expected a JSON array`);
+    if (!Array.isArray(parsed) || parsed.length === 0)
+      throw new Error(`Invalid CIM snapshot ${text}; expected a JSON array containing processes`);
     return parsed.map((value: Record<string, unknown>) => {
       const pid = Number(value.pid);
       const parentPid = Number(value.parentPid);
@@ -76,10 +80,14 @@ export function parseNativeProcesses(text: string, platform: NodeJS.Platform): N
         !Number.isInteger(parentPid) ||
         typeof value.created !== 'string' ||
         !value.created ||
-        !Number.isFinite(Date.parse(value.created))
+        !Number.isFinite(Date.parse(value.created)) ||
+        (value.name !== undefined && typeof value.name !== 'string') ||
+        (value.executablePath !== undefined &&
+          value.executablePath !== null &&
+          typeof value.executablePath !== 'string')
       ) {
         throw new Error(
-          `Invalid CIM process ${JSON.stringify(value)}; expected PID, parent PID, and creation time`
+          `Invalid CIM process ${JSON.stringify(value)}; expected PID, parent PID, and creation time; optional string image metadata`
         );
       }
       return {
@@ -88,6 +96,10 @@ export function parseNativeProcesses(text: string, platform: NodeJS.Platform): N
         group: null,
         identity: `${pid}:${value.created}`,
         command: String(value.command ?? ''),
+        ...(value.name !== undefined ? { name: value.name as string } : {}),
+        ...(value.executablePath !== undefined
+          ? { executablePath: value.executablePath as string | null }
+          : {}),
       };
     });
   }
@@ -172,7 +184,7 @@ export async function snapshotNativeProcesses(): Promise<NativeProcess[]> {
     if (!shell)
       throw new Error('Missing PowerShell; expected native CIM process census on Windows');
     const script =
-      "$ErrorActionPreference = 'Stop'; $rows = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -gt 0 } | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; parentPid = $_.ParentProcessId; created = $_.CreationDate.ToUniversalTime().ToString('o'); command = $_.CommandLine } }); ConvertTo-Json -InputObject $rows -Compress -Depth 3";
+      "$ErrorActionPreference = 'Stop'; $rows = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -gt 0 } | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; parentPid = $_.ParentProcessId; created = $_.CreationDate.ToUniversalTime().ToString('o'); command = $_.CommandLine; name = $_.Name; executablePath = $_.ExecutablePath } }); ConvertTo-Json -InputObject $rows -Compress -Depth 3";
     return parseNativeProcesses(
       await captureSnapshot([
         shell,
@@ -210,6 +222,24 @@ export async function snapshotNativeProcesses(): Promise<NativeProcess[]> {
     })
   );
   return identities.filter((row): row is NativeProcess => row !== null);
+}
+
+/**
+ * Block newly born VCTIP helpers whose ownership the command census cannot establish.
+ * This grants no termination authority; preexisting and already owned identities are excluded.
+ * @example unattributedNativeCompilerHelpers(before, after, settlement.observed);
+ */
+export function unattributedNativeCompilerHelpers(
+  before: readonly NativeProcess[],
+  after: readonly NativeProcess[],
+  owned: readonly NativeProcess[]
+): NativeProcess[] {
+  const known = new Set([...before, ...owned].map((row) => row.identity));
+  return after.filter((row) => {
+    if (known.has(row.identity)) return false;
+    const image = row.executablePath?.replaceAll('\\', '/').split('/').at(-1);
+    return /^vctip\.exe$/i.test(row.name ?? '') || /^vctip\.exe$/i.test(image ?? '');
+  });
 }
 
 /**
@@ -270,8 +300,22 @@ export async function runNativeCommand(
   const pollIntervalMs = options.pollIntervalMs ?? 1_000;
   const errors: string[] = [];
   const snapshotErrors: string[] = [];
-  const log = `logs/${options.label}.log`;
   await mkdir(join(options.out, 'logs'), { recursive: true });
+  const guardCompilerHelpers = options.guardCompilerHelpers ?? process.platform === 'win32';
+  let before: readonly NativeProcess[] = [];
+  if (guardCompilerHelpers) {
+    try {
+      before = await snapshot();
+      await Bun.write(
+        join(options.out, `processes-before-${options.label}.json`),
+        `${JSON.stringify(before, null, 2)}\n`
+      );
+    } catch (error) {
+      snapshotErrors.push(`Compiler-helper baseline census failed: ${String(error)}`);
+    }
+  }
+  let unattributedCompilerHelpers: NativeProcess[] = [];
+  const log = `logs/${options.label}.log`;
   const combined = createWriteStream(join(options.out, log));
   const rawOut = createWriteStream(join(options.out, `logs/${options.label}.stdout.log`));
   const rawError = createWriteStream(join(options.out, `logs/${options.label}.stderr.log`));
@@ -367,9 +411,16 @@ export async function runNativeCommand(
       rootIdentity = scoped.rootIdentity;
       observed = scoped.observed;
       current = scoped.current;
+      if (guardCompilerHelpers) {
+        unattributedCompilerHelpers = unattributedNativeCompilerHelpers(before, rows, observed);
+        await Bun.write(
+          join(options.out, `processes-latest-${options.label}.json`),
+          `${JSON.stringify(rows, null, 2)}\n`
+        );
+      }
       await appendFile(
         join(options.out, `terminal-${options.label}.jsonl`),
-        `${JSON.stringify({ at: new Date().toISOString(), dispatchedAt, rootAlive: rootAliveAtDispatch, rootAliveAtCompletion: !exited, processes: current })}\n`
+        `${JSON.stringify({ at: new Date().toISOString(), dispatchedAt, rootAlive: rootAliveAtDispatch, rootAliveAtCompletion: !exited, processes: current, unattributedCompilerHelpers })}\n`
       );
     } catch (error) {
       snapshotErrors.push(String(error));
@@ -437,8 +488,17 @@ export async function runNativeCommand(
     observed,
     survivors: current,
     snapshotErrors,
-    empty: current.length === 0 && snapshotErrors.length === 0,
+    ...(guardCompilerHelpers ? { unattributedCompilerHelpers } : {}),
+    empty:
+      current.length === 0 &&
+      snapshotErrors.length === 0 &&
+      unattributedCompilerHelpers.length === 0,
   };
+  if (unattributedCompilerHelpers.length) {
+    errors.push(
+      `Unattributed compiler helpers ${JSON.stringify(unattributedCompilerHelpers)}; expected verified command ownership and empty terminal census`
+    );
+  }
   return {
     label: options.label,
     command: options.command,

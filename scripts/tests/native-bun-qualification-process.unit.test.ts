@@ -211,6 +211,7 @@ describe('single command receipt', () => {
       pollIntervalMs: 10,
       settleMs: 0,
       snapshot: observer.read,
+      guardCompilerHelpers: false,
       stream: new CapturedOutput(),
     });
     expect(result.exitCode).toBe(0);
@@ -238,6 +239,7 @@ describe('single command receipt', () => {
       pollIntervalMs: 10,
       settleMs: 0,
       snapshot: observer.read,
+      guardCompilerHelpers: false,
       stream: new CapturedOutput(),
     });
     expect(result.settlement.observed).toEqual([]);
