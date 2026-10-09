@@ -15,7 +15,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 const API_SRC = join(import.meta.dir, '../../../../src');
 
@@ -29,7 +29,12 @@ function listSourceFiles(dir: string): string[] {
 }
 
 const SOURCES = listSourceFiles(API_SRC).map((path) => ({
-  path: path.slice(API_SRC.length + 1),
+  // Forward-slash form, so the `/http/` and `services/providers/` checks below
+  // read the same on every host.
+  path: path
+    .slice(API_SRC.length + 1)
+    .split(sep)
+    .join('/'),
   text: readFileSync(path, 'utf8'),
 }));
 

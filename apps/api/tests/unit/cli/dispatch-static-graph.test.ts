@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
 
 const API_SRC = resolve(import.meta.dir, '../../../src');
 const DISPATCH = resolve(API_SRC, 'cli/dispatch.ts');
@@ -30,8 +30,9 @@ function staticGraph(entry: string): Set<string> {
   return seen;
 }
 
+/** API-relative paths in forward-slash form, whichever separator the host uses. */
 function apiRelative(files: Iterable<string>): string[] {
-  return [...files].map((file) => relative(API_SRC, file)).sort();
+  return [...files].map((file) => relative(API_SRC, file).split(sep).join('/')).sort();
 }
 
 describe('dispatch static import graph', () => {

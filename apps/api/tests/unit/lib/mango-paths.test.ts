@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { getHomeMangoDir } from '../../../src/lib/config';
 import {
   ensureRuntimeDirs,
@@ -37,7 +37,8 @@ describe('mango-paths', () => {
     const path = getUpgradeLogPath(1_700_000_000_000);
 
     expect(path.startsWith(join(getRunDir(), 'upgrade-'))).toBe(true);
-    expect(path).not.toContain(':');
+    // The file name, not the whole path: a Windows drive letter carries a colon.
+    expect(basename(path)).not.toContain(':');
     expect(path).toMatch(/upgrade-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.log$/);
   });
 
