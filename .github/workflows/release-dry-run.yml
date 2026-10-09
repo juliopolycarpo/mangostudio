@@ -8,32 +8,67 @@ permissions:
   contents: read
 
 concurrency:
-  group: msvc-policy-probe-${{ github.sha }}
+  group: msvc-job-probe-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
-  msvc-telemetry:
-    name: MSVC telemetry (${{ matrix.control }})
+  native-job-probes:
+    name: Atomic native Job failure probes
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    steps:
+      - name: Preserve tracked tooling bytes
+        shell: bash
+        run: git config --global core.autocrlf false
+      - name: Check out the immutable prototype tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: tooling
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: tooling/.bun-version
+      - name: Prove native ownership and fail-closed settlement
+        shell: pwsh
+        run: |
+          & ./tooling/scripts/lib/native-windows-job.probe.ps1 -OutDirectory "$env:GITHUB_WORKSPACE/evidence/native-probes" -BunPath (Get-Command bun.exe).Source
+      - name: Upload every native probe receipt
+        if: always()
+        uses: actions/upload-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v6.0.0
+        with:
+          name: native-job-probes-${{ github.sha }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  msvc-job:
+    name: MSVC ownership (${{ matrix.mode }})
+    needs: native-job-probes
+    runs-on: windows-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        control: [unchanged, devshell-env, optional-telemetry-policy]
+        mode: [sampled-control, atomic-job]
     defaults:
       run:
         shell: bash
     steps:
       - name: Preserve tracked source bytes
         run: git config --global core.autocrlf false
-
       - name: Check out the immutable experiment source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: 8bf7943eac9b92b815bf67dda1eab48f16f52b4c
           path: source
           persist-credentials: false
-
+      - name: Check out prototype tooling outside tested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: tooling
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: source/.bun-version
@@ -42,7 +77,7 @@ jobs:
         working-directory: source
         timeout-minutes: 5
         env:
-          PROBE_CONTROL: ${{ matrix.control }}
+          PROBE_CONTROL: ${{ matrix.mode }}
           PROBE_WORKFLOW_SHA: ${{ github.sha }}
         run: |
           bun --no-install - <<'BUN'
@@ -91,224 +126,192 @@ jobs:
           process.exitCode = receipt.errors.length ? 1 : 0;
           BUN
 
-      - name: Build the default runtime and preserve process evidence
+      - name: Build unchanged default runtime with complete ownership evidence
         working-directory: source
         env:
-          PROBE_CONTROL: ${{ matrix.control }}
+          PROBE_MODE: ${{ matrix.mode }}
           PROBE_WORKFLOW_SHA: ${{ github.sha }}
         run: |
           bun --no-install - <<'BUN'
-          import { appendFile, mkdir, readFile } from 'node:fs/promises';
+          import { appendFile, mkdir, readFile, rm } from 'node:fs/promises';
           import { arch, release, type } from 'node:os';
           import { join, resolve } from 'node:path';
-
           const root = resolve('.');
+          const tooling = resolve('..', 'tooling');
           const out = resolve('..', 'evidence');
-          const expectedSha = '8bf7943eac9b92b815bf67dda1eab48f16f52b4c';
-          const control = process.env.PROBE_CONTROL;
-          let sealNativeSource;
-          let nativeSourceChanged;
-          let snapshotNativeProcesses;
+          const sourceSha = '8bf7943eac9b92b815bf67dda1eab48f16f52b4c';
+          const mode = process.env.PROBE_MODE;
           await mkdir(out, { recursive: true });
-          const receipt = {
-            schemaVersion: 1,
-            status: 'running',
-            startedAt: new Date().toISOString(),
-            finishedAt: null,
-            sourceSha: expectedSha,
-            workflowSha: process.env.PROBE_WORKFLOW_SHA,
-            control,
-            host: { platform: process.platform, arch: arch(), release: release(), type: type(), runnerOS: process.env.RUNNER_OS, imageOS: process.env.ImageOS, imageVersion: process.env.ImageVersion, bunVersion: Bun.version, bunRevision: Bun.revision },
-            policy: { attempts: 1, dependencyBootstrapTimeoutSeconds: 240, buildTimeoutSeconds: 720, settleMs: 30000, fixedPostCommandObservationMs: 30000, acceptedSurvivorExclusions: [], explicitPostExitProcessKills: false, timeoutCleanup: 'unchanged qualification verified scope' },
-            sourceBefore: null,
-            sourceAfter: null,
-            controls: null,
-            environment: null,
-            commands: [],
-            compilerArtifacts: [],
-            runtimeArtifact: null,
-            observedTools: [],
-            fixedPostCommandObservation: null,
-            bootstrap: null,
-            errors: [],
-          };
+          const receipt = { schemaVersion: 2, status: 'running', sourceSha, workflowSha: process.env.PROBE_WORKFLOW_SHA, mode, startedAt: new Date().toISOString(), host: { platform: process.platform, arch: arch(), release: release(), type: type(), imageOS: process.env.ImageOS, imageVersion: process.env.ImageVersion, bunVersion: Bun.version, bunRevision: Bun.revision }, sourceBefore: null, sourceAfter: null, tooling: null, installedTools: [], observedTools: [], environment: null, commands: [], compilerArtifacts: [], runtimeArtifact: null, nativeJob: null, fixedControlObservation: null, errors: [] };
           await Bun.write(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
+          let snapshotNativeProcesses, sealNativeSource, nativeSourceChanged, wholeCensus;
+          let initialWholeCensus = null;
           try {
-            if (process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_OS !== 'Windows') {
-              throw new Error('Invalid experiment host; expected a disposable GitHub Actions Windows runner');
-            }
-            if (!['unchanged', 'devshell-env', 'optional-telemetry-policy'].includes(control)) {
-              throw new Error('Invalid control ' + JSON.stringify(control) + '; expected one of the three frozen experiment controls');
-            }
+            if (process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_OS !== 'Windows' || !['sampled-control', 'atomic-job'].includes(mode)) throw new Error('Invalid probe host/mode; expected disposable Windows and a frozen ownership comparison');
             const processApi = await import(join(root, 'scripts/lib/native-bun-qualification-process.ts'));
             const sourceApi = await import(join(root, 'scripts/lib/native-bun-qualification-source.ts'));
             ({ snapshotNativeProcesses } = processApi);
             ({ sealNativeSource, nativeSourceChanged } = sourceApi);
-            const { runNativeCommand, scopeNativeProcesses } = processApi;
+            const { runNativeCommand } = processApi;
             const { nativeCompilerArtifacts, sealNativeArtifact } = sourceApi;
-            receipt.bootstrap = JSON.parse(await readFile(join(out, 'bootstrap-receipt.json'), 'utf8'));
-            receipt.commands.push(...receipt.bootstrap.commands);
-            if (receipt.bootstrap.status !== 'prepared') throw new Error('Invalid dependency bootstrap; expected prepared source');
+            const { nativeQualificationEnvironment } = await import(join(root, 'scripts/lib/native-bun-qualification.ts'));
+            const bootstrap = JSON.parse(await readFile(join(out, 'bootstrap-receipt.json'), 'utf8'));
+            if (bootstrap.status !== 'prepared') throw new Error('Unprepared frozen source dependencies');
             receipt.sourceBefore = await sealNativeSource(root);
             await Bun.write(join(out, 'source-before.json'), JSON.stringify(receipt.sourceBefore, null, 2) + '\n');
-            if (receipt.sourceBefore.head !== expectedSha || receipt.sourceBefore.status) {
-              throw new Error('Invalid source seal; expected clean immutable source ' + expectedSha);
-            }
-            if (receipt.sourceBefore.sha256 !== receipt.bootstrap.sourceBefore.sha256 || receipt.sourceBefore.tree !== receipt.bootstrap.sourceBefore.tree) throw new Error('Source bytes or tree changed across bootstrap processes');
+            if (receipt.sourceBefore.head !== sourceSha || receipt.sourceBefore.status || receipt.sourceBefore.sha256 !== bootstrap.sourceBefore.sha256) throw new Error('Source changed before compiler experiment');
+            receipt.tooling = { seal: await sealNativeSource(tooling), files: [] };
+            if (receipt.tooling.seal.head !== receipt.workflowSha || receipt.tooling.seal.status) throw new Error('Tooling checkout is not the immutable workflow SHA');
+            for (const path of ['.github/workflows/release-dry-run.yml', 'scripts/lib/native-windows-job.ps1', 'scripts/lib/native-windows-job.probe.ps1']) receipt.tooling.files.push({ path, sha256: new Bun.CryptoHasher('sha256').update(await readFile(join(tooling, path))).digest('hex') });
+            await Bun.write(join(out, 'tooling-seal.json'), JSON.stringify(receipt.tooling, null, 2) + '\n');
             const before = await snapshotNativeProcesses();
             await Bun.write(join(out, 'processes-before.json'), JSON.stringify(before, null, 2) + '\n');
-            const { nativeQualificationEnvironment } = await import(join(root, 'scripts/lib/native-bun-qualification.ts'));
             const shell = Bun.which('pwsh.exe') ?? Bun.which('powershell.exe');
-            if (!shell) throw new Error('Missing native PowerShell; expected registry and file-version attestation');
-            const policyScript = String.raw`
-              $ErrorActionPreference = 'Stop'
-              $policyPath = 'HKLM:\Software\Policies\Microsoft\VisualStudio\SQM'
-              $before = $null
-              if (Test-Path -LiteralPath $policyPath) {
-                $beforeKey = Get-Item -LiteralPath $policyPath
-                if ($beforeKey.GetValueNames() -contains 'OptIn') {
-                  $before = [pscustomobject]@{ value = $beforeKey.GetValue('OptIn'); kind = $beforeKey.GetValueKind('OptIn').ToString() }
-                }
-              }
-              if ($env:PROBE_CONTROL -eq 'optional-telemetry-policy') {
-                New-Item -Path $policyPath -Force | Out-Null
-                New-ItemProperty -LiteralPath $policyPath -Name 'OptIn' -PropertyType DWord -Value 0 -Force | Out-Null
-              }
-              $after = $null
-              if (Test-Path -LiteralPath $policyPath) {
-                $afterKey = Get-Item -LiteralPath $policyPath
-                if ($afterKey.GetValueNames() -contains 'OptIn') {
-                  $after = [pscustomobject]@{ value = $afterKey.GetValue('OptIn'); kind = $afterKey.GetValueKind('OptIn').ToString() }
-                }
-              }
-              $vswhere = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio\Installer\vswhere.exe'
-              $installations = @(& $vswhere -all -products '*' -format json -utf8 | ConvertFrom-Json)
-              if ($LASTEXITCODE -ne 0) { throw "vswhere exited $LASTEXITCODE" }
-              $tools = @(foreach ($installation in $installations) {
-                $toolsetRoot = Join-Path $installation.installationPath 'VC\Tools\MSVC'
-                if (-not (Test-Path -LiteralPath $toolsetRoot)) { continue }
-                foreach ($toolset in Get-ChildItem -LiteralPath $toolsetRoot -Directory) {
-                  foreach ($name in @('cl.exe', 'link.exe', 'vctip.exe')) {
-                    $file = Join-Path $toolset.FullName "bin\Hostx64\x64\$name"
-                    if (-not (Test-Path -LiteralPath $file)) { continue }
-                    $item = Get-Item -LiteralPath $file
-                    [pscustomobject]@{ path = $item.FullName; fileVersion = $item.VersionInfo.FileVersion; productVersion = $item.VersionInfo.ProductVersion; sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }
+            if (!shell) throw new Error('Missing native PowerShell');
+            const psQuote = (value) => "'" + value.replace(/'/g, "''") + "'";
+            wholeCensus = async (label) => {
+              const script = "$ErrorActionPreference='Stop'; . " + psQuote(join(tooling, 'scripts/lib/native-windows-job.ps1')) + '; $rows=Get-NativeJobCensus; ConvertTo-Json -InputObject $rows -Depth 10 -Compress';
+              const child = Bun.spawn([shell, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], { cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: 30000 });
+              const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+              await Bun.write(join(out, 'whole-census-' + label + '.stderr.log'), stderr);
+              if (code !== 0) throw new Error('Full ' + label + ' census failed: ' + stderr);
+              const rows = JSON.parse(stdout.replace(/^\uFEFF/, ''));
+              if (!Array.isArray(rows) || !rows.length || rows.some((row) => !Number.isInteger(row.pid) || row.pid <= 0 || typeof row.name !== 'string' || !row.name || !row.created || row.identity !== row.pid + ':' + row.created)) throw new Error('Invalid full ' + label + ' census; expected nonempty native identity/name rows');
+              await Bun.write(join(out, 'whole-census-' + label + '.json'), JSON.stringify(rows, null, 2) + '\n');
+              return rows;
+            };
+            initialWholeCensus = await wholeCensus('before');
+            const inventoryScript = String.raw`
+              $ErrorActionPreference='Stop'
+              $vswhere=Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio\Installer\vswhere.exe'
+              $installations=@(& $vswhere -all -products '*' -format json -utf8 | ConvertFrom-Json)
+              if($LASTEXITCODE -ne 0) { throw "vswhere exited $LASTEXITCODE" }
+              $tools=@(foreach($installation in $installations) {
+                $base=Join-Path $installation.installationPath 'VC\Tools\MSVC'
+                if(-not (Test-Path -LiteralPath $base)) { continue }
+                foreach($toolset in Get-ChildItem -LiteralPath $base -Directory) {
+                  foreach($name in @('cl.exe','link.exe','vctip.exe')) {
+                    $file=Join-Path $toolset.FullName "bin\Hostx64\x64\$name"
+                    if(-not (Test-Path -LiteralPath $file)) { continue }
+                    $item=Get-Item -LiteralPath $file
+                    [pscustomobject]@{path=$item.FullName;fileVersion=$item.VersionInfo.FileVersion;productVersion=$item.VersionInfo.ProductVersion;sha256=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()}
                   }
                 }
               })
-              [pscustomobject]@{
-                control = $env:PROBE_CONTROL
-                os64Bit = [Environment]::Is64BitOperatingSystem
-                process64Bit = [Environment]::Is64BitProcess
-                registryView = if ([Environment]::Is64BitProcess) { 'Registry64' } else { 'Registry32' }
-                policyPath = $policyPath
-                requested = if ($env:PROBE_CONTROL -eq 'optional-telemetry-policy') { [pscustomobject]@{ value = 0; kind = 'DWord' } } else { $null }
-                before = $before
-                effective = $after
-                inheritedVscmdSkipSendtelemetry = $env:VSCMD_SKIP_SENDTELEMETRY
-                installations = $installations
-                installedTools = $tools
-              } | ConvertTo-Json -Depth 10
+              $policy=$null
+              $policyPath='HKLM:\Software\Policies\Microsoft\VisualStudio\SQM'
+              if(Test-Path -LiteralPath $policyPath) {
+                $key=Get-Item -LiteralPath $policyPath
+                if($key.GetValueNames() -contains 'OptIn') { $policy=@{value=$key.GetValue('OptIn');kind=$key.GetValueKind('OptIn').ToString()} }
+              }
+              @{installedTools=$tools;installations=$installations;process64Bit=[Environment]::Is64BitProcess;os64Bit=[Environment]::Is64BitOperatingSystem;policyReadOnly=$policy;inheritedVscmdSkipSendtelemetry=$env:VSCMD_SKIP_SENDTELEMETRY} | ConvertTo-Json -Depth 12
             `;
-            const attest = Bun.spawn([shell, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', policyScript], { cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: 30000 });
+            const attest = Bun.spawn([shell, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', inventoryScript], { cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: 30000 });
             const [attestation, attestationError, attestationExit] = await Promise.all([new Response(attest.stdout).text(), new Response(attest.stderr).text(), attest.exited]);
-            await Bun.write(join(out, 'control-attestation.stdout.log'), attestation);
-            await Bun.write(join(out, 'control-attestation.stderr.log'), attestationError);
-            if (attestationExit !== 0) throw new Error('Control attestation exited ' + attestationExit + ': ' + attestationError);
-            receipt.controls = JSON.parse(attestation.replace(/^\uFEFF/, ''));
-            await Bun.write(join(out, 'control-attestation.json'), JSON.stringify(receipt.controls, null, 2) + '\n');
-            if (control === 'optional-telemetry-policy' && (receipt.controls.effective?.value !== 0 || receipt.controls.effective?.kind !== 'DWord' || !receipt.controls.process64Bit)) {
-              throw new Error('Invalid policy readback; expected OptIn DWORD 0 in the native 64-bit registry view');
-            }
+            await Bun.write(join(out, 'tool-inventory.stdout.log'), attestation);
+            await Bun.write(join(out, 'tool-inventory.stderr.log'), attestationError);
+            if (attestationExit !== 0) throw new Error('Tool inventory failed: ' + attestationError);
+            const inventory = JSON.parse(attestation.replace(/^\uFEFF/, ''));
+            await Bun.write(join(out, 'tool-inventory.json'), JSON.stringify(inventory, null, 2) + '\n');
+            receipt.installedTools = inventory.installedTools;
+            const expectedVctip = inventory.installedTools.find((tool) => /\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14\.51\.36231\\bin\\Hostx64\\x64\\vctip\.exe$/i.test(tool.path));
+            const expectedLink = inventory.installedTools.find((tool) => expectedVctip && tool.path.toLowerCase() === expectedVctip.path.replace(/vctip\.exe$/i, 'link.exe').toLowerCase());
+            if (!inventory.process64Bit || expectedVctip?.sha256 !== '41fe46f8a0b41f6dd94c68c85fba20a10aacb662a9ef04784a632e37f3692371' || expectedLink?.sha256 !== 'a8c42e25c91ca2453e1110540ac08f0fc12d7539454a11b9af8baeecb469837d') throw new Error('MSVC toolset differs from original VS18 compiler trial; no matching-toolset claim possible');
             const env = nativeQualificationEnvironment(process.env);
-            if (control === 'devshell-env') env.VSCMD_SKIP_SENDTELEMETRY = '1';
             env.CARGO_TARGET_DIR = join(out, 'targets', 'runtime');
-            receipt.environment = Object.fromEntries(['CI', 'CARGO_TARGET_DIR', 'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTDOCFLAGS', 'CL', '_CL_', 'LINK', '_LINK_', 'VSCMD_SKIP_SENDTELEMETRY', 'PROCESSOR_ARCHITECTURE', 'PROCESSOR_ARCHITEW6432', 'VSINSTALLDIR', 'VCINSTALLDIR', 'VCToolsVersion', 'VCToolsInstallDir'].map((key) => [key, env[key] ?? null]));
+            receipt.environment = Object.fromEntries(['CI', 'CARGO_TARGET_DIR', 'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTDOCFLAGS', 'CL', '_CL_', 'LINK', '_LINK_', 'VSCMD_SKIP_SENDTELEMETRY', 'VSINSTALLDIR', 'VCINSTALLDIR', 'VCToolsVersion', 'VCToolsInstallDir'].map((key) => [key, env[key] ?? null]));
             await Bun.write(join(out, 'effective-environment.json'), JSON.stringify(receipt.environment, null, 2) + '\n');
-            for (const [label, command, timeoutSeconds] of [
-              ['rustc-version', ['rustc', '-vV'], 180],
-              ['build-runtime', ['cargo', 'build', '-p', 'mangostudio-runtime', '--bin', 'mangostudio-runtime', '--locked', '--message-format=json'], 720],
-            ]) {
-              const result = await runNativeCommand({ label, command, timeoutSeconds, root, out, env, settleMs: 30000, snapshot: async () => {
+            const rustc = await runNativeCommand({ label: 'rustc-version', command: ['rustc', '-vV'], timeoutSeconds: 180, root, out, env });
+            receipt.commands.push(rustc);
+            if (rustc.exitCode !== 0 || rustc.timedOut || rustc.errors.length || !rustc.settlement.empty) throw new Error('Pinned rustc version command failed strict settlement');
+            const command = ['cargo', 'build', '-p', 'mangostudio-runtime', '--bin', 'mangostudio-runtime', '--locked', '--message-format=json'];
+            let stdoutPath;
+            if (mode === 'sampled-control') {
+              const result = await runNativeCommand({ label: 'build-runtime', command, timeoutSeconds: 720, root, out, env, settleMs: 30000, snapshot: async () => {
                 const rows = await snapshotNativeProcesses();
-                await appendFile(join(out, 'raw-census-' + label + '.jsonl'), JSON.stringify({ at: new Date().toISOString(), processes: rows }) + '\n');
+                await appendFile(join(out, 'raw-census-build-runtime.jsonl'), JSON.stringify({ at: new Date().toISOString(), processes: rows }) + '\n');
                 return rows;
               } });
               receipt.commands.push(result);
-              await Bun.write(join(out, 'command-' + label + '.json'), JSON.stringify(result, null, 2) + '\n');
-              receipt.errors.push(...result.errors.map((error) => label + ': ' + error));
-              if (result.exitCode !== 0 || result.timedOut) receipt.errors.push(label + ': command failed with exit ' + result.exitCode + ', signal ' + result.signal + ', timedOut ' + result.timedOut);
-              if (!result.settlement.empty) receipt.errors.push(label + ': terminal census failed with ' + result.settlement.survivors.length + ' survivors and ' + result.settlement.snapshotErrors.length + ' snapshot errors');
-              if (label === 'rustc-version' && receipt.errors.length) break;
-              if (label !== 'build-runtime') continue;
-              if (!result.settlement.rootObserved) receipt.errors.push('build-runtime: command root was not observed');
-              if (result.exitCode === 0) {
-                receipt.compilerArtifacts = nativeCompilerArtifacts(await readFile(join(out, 'logs/build-runtime.stdout.log'), 'utf8'));
-                await Bun.write(join(out, 'build-features.json'), JSON.stringify(receipt.compilerArtifacts, null, 2) + '\n');
-                if (receipt.compilerArtifacts.some((artifact) => artifact.packageId.includes('mango-external-agents') && artifact.features.includes('testing'))) receipt.errors.push('build-runtime: unexpected SDK testing feature');
-                const runtime = receipt.compilerArtifacts.find((artifact) => artifact.target === 'mangostudio-runtime' && artifact.executable);
-                if (!runtime) receipt.errors.push('build-runtime: no runtime executable in compiler receipts');
-                else receipt.runtimeArtifact = await sealNativeArtifact(runtime.executable);
-              }
-              receipt.observedTools = result.settlement.observed.flatMap((row) => {
-                const path = /^"([^"\r\n]+\.exe)"/i.exec(row.command)?.[1] ?? /^([^\s]+\.exe)(?:\s|$)/i.exec(row.command)?.[1];
-                if (!path || !/\\(?:cl|link|vctip)\.exe$/i.test(path)) return [];
-                const installed = receipt.controls.installedTools.find((tool) => tool.path.toLowerCase() === path.toLowerCase());
-                return [{ identity: row.identity, parentPid: row.parentPid, command: row.command, path, installedMetadata: installed ?? null }];
-              });
-              const observationStarted = Date.now();
-              let observed = result.settlement.observed;
-              let current = result.settlement.survivors;
-              const rootIdentity = observed.find((row) => row.parentPid === process.pid && /^"?[^\r\n]*\\cargo\.exe"?\s+build\s/i.test(row.command))?.identity ?? null;
-              const rootPid = rootIdentity ? Number(rootIdentity.split(':', 1)[0]) : -1;
-              const observationErrors = [];
-              const everSurvivors = new Map(current.map((row) => [row.identity, row]));
+              await Bun.write(join(out, 'command-build-runtime.json'), JSON.stringify(result, null, 2) + '\n');
+              receipt.errors.push(...result.errors);
+              if (result.exitCode !== 0 || result.timedOut || !result.settlement.empty || !result.settlement.rootObserved) receipt.errors.push('Original sampled command failed execution or terminal settlement');
+              const initial = new Set(before.map((row) => row.identity));
+              const started = Date.now();
+              let current = [];
               do {
-                try {
-                  const rows = await snapshotNativeProcesses();
-                  const scoped = scopeNativeProcesses(rows, { rootPid, rootAlive: false, rootIdentity, observed });
-                  observed = scoped.observed;
-                  current = scoped.current;
-                  for (const row of current) everSurvivors.set(row.identity, row);
-                  await appendFile(join(out, 'raw-census-post-command.jsonl'), JSON.stringify({ at: new Date().toISOString(), processes: rows, owned: current }) + '\n');
-                } catch (error) {
-                  observationErrors.push(String(error));
-                }
-                const remaining = 30000 - (Date.now() - observationStarted);
-                if (remaining <= 0) break;
-                await Bun.sleep(Math.min(500, remaining));
-              } while (true);
-              receipt.fixedPostCommandObservation = { startedAt: new Date(observationStarted).toISOString(), finishedAt: new Date().toISOString(), durationMs: Date.now() - observationStarted, rootIdentity, observed, everSurvivors: [...everSurvivors.values()], survivors: current, snapshotErrors: observationErrors, empty: current.length === 0 && observationErrors.length === 0 };
-              if (everSurvivors.size || observationErrors.length) receipt.errors.push('fixed post-command observation: ' + everSurvivors.size + ' owned survivor identities and ' + observationErrors.length + ' snapshot errors');
-              await Bun.write(join(out, 'post-command-observation.json'), JSON.stringify(receipt.fixedPostCommandObservation, null, 2) + '\n');
+                const rows = await snapshotNativeProcesses();
+                current = rows.filter((row) => !initial.has(row.identity) && /(?:^|[\\"\s])(?:vctip|cl|link|mspdbsrv)\.exe(?:"|\s|$)/i.test(row.command));
+                await appendFile(join(out, 'raw-census-post-command.jsonl'), JSON.stringify({ at: new Date().toISOString(), processes: rows, newMsvcHelpers: current }) + '\n');
+                if (Date.now() - started < 30000) await Bun.sleep(500);
+              } while (Date.now() - started < 30000);
+              receipt.fixedControlObservation = { durationMs: Date.now() - started, newMsvcHelpers: current };
+              if (current.length) receipt.errors.push('Full census rejects original sampled control: new MSVC helper identities ' + current.map((row) => row.identity).join(', '));
+              receipt.observedTools = result.settlement.observed.filter((row) => /\\(?:cl|link|vctip)\.exe/i.test(row.command));
+              stdoutPath = join(out, 'logs/build-runtime.stdout.log');
+            } else {
+              const request = { label: 'build-runtime', application: Bun.which('cargo'), command, root, out: join(out, 'job'), environment: Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === 'string')), mode: 'msvc-compile', timeoutSeconds: 720, observationMs: 30000, sourceSha, workflowSha: receipt.workflowSha, expectedVctip };
+              if (!request.application) throw new Error('Missing exact Cargo executable');
+              if (!process.env.RUNNER_TEMP) throw new Error('Missing private runner temporary directory');
+              const requestPath = join(process.env.RUNNER_TEMP, 'native-job-request-' + process.pid + '.json');
+              const { environment, ...publicRequest } = request;
+              await Bun.write(join(out, 'job-request-public.json'), JSON.stringify({ ...publicRequest, environment: receipt.environment, environmentKeys: Object.keys(environment).sort() }, null, 2) + '\n');
+              await Bun.write(requestPath, JSON.stringify(request, null, 2) + '\n');
+              let code;
+              try {
+                const child = Bun.spawn([shell, '-NoLogo', '-NoProfile', '-NonInteractive', '-File', join(tooling, 'scripts/lib/native-windows-job.ps1'), '-RequestPath', requestPath], { cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: 810000 });
+                const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+                code = exitCode;
+                await Bun.write(join(out, 'job-wrapper.stdout.log'), stdout);
+                await Bun.write(join(out, 'job-wrapper.stderr.log'), stderr);
+              } finally { await rm(requestPath, { force: true }); }
+              receipt.nativeJob = JSON.parse(await readFile(join(out, 'job/job-receipt.json'), 'utf8'));
+              if (code !== 0 || !['naturally-settled', 'qualified-after-explicit-compiler-cleanup'].includes(receipt.nativeJob.status) || receipt.nativeJob.exitCode !== 0 || !receipt.nativeJob.postCleanup?.Empty) receipt.errors.push('Atomic native job failed: ' + JSON.stringify({ code, status: receipt.nativeJob.status, errors: receipt.nativeJob.errors }));
+              receipt.observedTools = receipt.nativeJob.observed.filter((row) => row.Tool);
+              stdoutPath = join(out, 'job/logs/stdout.log');
             }
-          } catch (error) {
-            receipt.errors.push(String(error));
-          } finally {
-            try {
-              if (!sealNativeSource || !nativeSourceChanged || !snapshotNativeProcesses) throw new Error('Qualification standard-library imports unavailable; initial receipt retained');
-              receipt.sourceAfter = await sealNativeSource(root);
-              await Bun.write(join(out, 'source-after.json'), JSON.stringify(receipt.sourceAfter, null, 2) + '\n');
-              if (!receipt.sourceBefore || nativeSourceChanged(receipt.sourceBefore, receipt.sourceAfter) || receipt.sourceAfter.status) receipt.errors.push('Source changed or seal unavailable');
-              await Bun.write(join(out, 'processes-after.json'), JSON.stringify(await snapshotNativeProcesses(), null, 2) + '\n');
-            } catch (error) {
-              receipt.errors.push('Final attestation: ' + String(error));
+            receipt.compilerArtifacts = nativeCompilerArtifacts(await readFile(stdoutPath, 'utf8'));
+            await Bun.write(join(out, 'build-features.json'), JSON.stringify(receipt.compilerArtifacts, null, 2) + '\n');
+            const sdk = receipt.compilerArtifacts.filter((artifact) => artifact.packageId.includes('mango-external-agents'));
+            if (!sdk.length || sdk.some((artifact) => artifact.features.length !== 1 || artifact.features[0] !== 'stdio')) receipt.errors.push('SDK features differ from original default stdio build');
+            const runtime = receipt.compilerArtifacts.find((artifact) => artifact.target === 'mangostudio-runtime' && artifact.executable);
+            if (!runtime) receipt.errors.push('Missing runtime executable in Cargo compiler receipts');
+            else receipt.runtimeArtifact = await sealNativeArtifact(runtime.executable);
+          } catch (error) { receipt.errors.push(String(error)); }
+          finally {
+            if (sealNativeSource && receipt.sourceBefore) {
+              try { receipt.sourceAfter = await sealNativeSource(root); if (nativeSourceChanged(receipt.sourceBefore, receipt.sourceAfter) || receipt.sourceAfter.status) receipt.errors.push('Frozen source changed during probe'); }
+              catch (error) { receipt.errors.push('Source-after seal: ' + String(error)); }
+            }
+            if (snapshotNativeProcesses) {
+              try {
+                const rows = await snapshotNativeProcesses();
+                if (!rows.length) throw new Error('Empty final process snapshot while observer lives');
+                await Bun.write(join(out, 'processes-after.json'), JSON.stringify(rows, null, 2) + '\n');
+              }
+              catch (error) { receipt.errors.push('Final independent census: ' + String(error)); }
+            }
+            if (wholeCensus && initialWholeCensus) {
+              try {
+                const rows = await wholeCensus('final');
+                const initial = new Set(initialWholeCensus.map((row) => row.identity));
+                const unknown = rows.filter((row) => !initial.has(row.identity) && (/^(?:vctip|cl|link|mspdbsrv|mspdbcmf|mspdbcore|c1|c1xx|c2|ml|ml64|rc|mt)\.exe$/i.test(row.name) || /\\VC\\Tools\\MSVC\\/i.test(row.path ?? row.command ?? '')));
+                if (unknown.length) receipt.errors.push('Final whole census contains new unattributed MSVC helpers: ' + unknown.map((row) => row.identity).join(', '));
+              } catch (error) { receipt.errors.push('Final whole census: ' + String(error)); }
             }
             receipt.finishedAt = new Date().toISOString();
-            receipt.status = receipt.errors.length ? 'setup-failed' : 'qualified';
+            receipt.status = receipt.errors.length ? 'setup-failed' : mode === 'atomic-job' ? receipt.nativeJob.status : 'qualified-control';
             await Bun.write(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
-            console.log(JSON.stringify({ control, status: receipt.status, commands: receipt.commands.map((command) => ({ label: command.label, exitCode: command.exitCode, rootObserved: command.settlement.rootObserved, settlementEmpty: command.settlement.empty, survivors: command.settlement.survivors })), errors: receipt.errors }, null, 2));
+            console.log(JSON.stringify({ status: receipt.status, mode, errors: receipt.errors }));
           }
           process.exitCode = receipt.errors.length ? 1 : 0;
           BUN
 
-      - name: Upload complete receipts after every outcome
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload receipts and full logs on every outcome
+        if: always()
+        uses: actions/upload-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v6.0.0
         with:
-          name: msvc-telemetry-${{ matrix.control }}-${{ github.sha }}
-          path: |
-            evidence/
-            !evidence/targets/
+          name: msvc-job-${{ matrix.mode }}-${{ github.sha }}
+          path: evidence
           if-no-files-found: error
           retention-days: 14
