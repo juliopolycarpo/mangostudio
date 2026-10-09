@@ -36,6 +36,8 @@
     "NPM_PUBLISH_ALLOW_LEGACY_TOKEN",
     "ONLY_PLATFORM",
     "PLATFORM",
+    // The PowerShell installer probes the actual host architecture in strict test tasks.
+    "PROCESSOR_ARCHITECTURE",
     "QA_FRONTEND_DIST",
     "RUNNER_OS",
     // Prebuilt cargo runtimes `scripts/build.ts --binary` stages beside each hub.
