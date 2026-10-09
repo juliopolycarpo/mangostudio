@@ -14,7 +14,7 @@ import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-to
 import { TODO_WRITE_TOOL_NAME } from '../../../../src/services/tools/builtin/todo';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';
 import type { RegisteredTool } from '../../../../src/services/tools/types';
-import { waitUntil } from '../../../support/rust-runtime-install-fixture';
+import { waitUntil } from '../../../support/wait-until';
 
 const hasBash = isShellAvailable('bash');
 const bunExecutable =
@@ -24,7 +24,7 @@ function nativeChildCommand(pidFilename: string): string {
   return renderShellCommand([
     bunExecutable,
     '-e',
-    `await Bun.write(${JSON.stringify(pidFilename)}, String(process.pid)); await Bun.sleep(10000);`,
+    `await Bun.write(${JSON.stringify(pidFilename)}, String(process.pid) + "\\n"); await Bun.sleep(10000);`,
   ]);
 }
 
@@ -163,6 +163,11 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
       expect(execution.execution.isError).toBe(true);
       expect(execution.execution.resultStr.toLowerCase()).toContain('timed out');
 
+      await waitUntil(
+        () => existsSync(pidFile) && /^[1-9]\d*\n$/.test(readFileSync(pidFile, 'utf8')),
+        `the native child PID file at "${pidFile}"`,
+        5_000
+      );
       const pid = Number(readFileSync(pidFile, 'utf8').trim());
       expect(Number.isInteger(pid) && pid > 0).toBe(true);
       expect(() => process.kill(pid, 0)).toThrow();
@@ -215,7 +220,7 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
       const itemsPromise = collectProgress(run);
       try {
         await waitUntil(
-          () => existsSync(pidFile) && /^\d+$/.test(readFileSync(pidFile, 'utf8').trim()),
+          () => existsSync(pidFile) && /^[1-9]\d*\n$/.test(readFileSync(pidFile, 'utf8')),
           `the native child PID file at "${pidFile}"`,
           5_000
         );

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { LOCAL_ENVIRONMENT_ID, renderShellCommand } from '@mangostudio/shared/environments';
 import { isShellAvailable } from '@mangostudio/shared/process/host';
 import type { RuntimeShellKind as ShellKind } from '@mangostudio/shared/runtime-contract';
@@ -24,7 +24,7 @@ import {
 } from '../../../../src/services/tools/registry';
 import { mergeToolSettings } from '../../../../src/services/tools/settings-policy';
 import type { RegisteredTool, ToolContext } from '../../../../src/services/tools/types';
-import { waitUntil } from '../../../support/rust-runtime-install-fixture';
+import { waitUntil } from '../../../support/wait-until';
 
 const hasBash = isShellAvailable('bash');
 const bunExecutable =
@@ -175,21 +175,34 @@ describe('shell tool registration and execution', () => {
     'prepends the environment toolchain node dir the resolver stored',
     async () => {
       const context = makeContext();
-      await environmentToolchainRepository.upsert(
-        context.userId,
-        LOCAL_ENVIRONMENT_ID,
-        { node: '/opt/custom/node/bin/node', bun: 'auto' },
-        Date.now()
-      );
+      const toolchainDir = mkdtempSync(join(tmpdir(), 'shell-toolchain-'));
+      const nodeDir = join(toolchainDir, 'node', 'bin');
+      const inheritedDirectory = (process.env.PATH ?? '').split(delimiter)[0] ?? '';
+      mkdirSync(nodeDir, { recursive: true });
       try {
-        const result = (await executeTool('bash', { command: 'echo "$PATH"' }, context, {
-          enabled: true,
-          parameters: {},
-        })) as { stdout: string };
+        await environmentToolchainRepository.upsert(
+          context.userId,
+          LOCAL_ENVIRONMENT_ID,
+          { node: join(nodeDir, process.platform === 'win32' ? 'node.exe' : 'node'), bun: 'auto' },
+          Date.now()
+        );
+        const result = (await executeTool(
+          'bash',
+          { command: renderShellCommand([bunExecutable, '-e', 'console.log(process.env.PATH)']) },
+          context,
+          { enabled: true, parameters: {} }
+        )) as { stdout: string; stderr: string; exitCode: number };
 
-        expect(result.stdout.trim().startsWith('/opt/custom/node/bin:')).toBe(true);
+        const pathEntries = result.stdout.trim().split(delimiter);
+        expect(result).toMatchObject({ exitCode: 0, stderr: '' });
+        expect(pathEntries).toContain(nodeDir);
+        // Git Bash adds its own directories before the inherited Windows PATH.
+        expect(pathEntries.indexOf(inheritedDirectory)).toBeGreaterThan(
+          pathEntries.indexOf(nodeDir)
+        );
       } finally {
         await environmentToolchainRepository.remove(context.userId, LOCAL_ENVIRONMENT_ID);
+        rmSync(toolchainDir, { recursive: true, force: true });
       }
     }
   );
@@ -329,7 +342,7 @@ describe('shell tool registration and execution', () => {
           command: renderShellCommand([
             bunExecutable,
             '-e',
-            'await Bun.write("pid.txt", String(process.pid)); await Bun.sleep(10000);',
+            'await Bun.write("pid.txt", String(process.pid) + "\\n"); await Bun.sleep(10000);',
           ]),
         },
         { ...makeContext({ timeoutSeconds: 30 }), workdir, signal: controller.signal },
@@ -341,7 +354,7 @@ describe('shell tool registration and execution', () => {
 
       try {
         await waitUntil(
-          () => existsSync(pidFile) && /^\d+$/.test(readFileSync(pidFile, 'utf8').trim()),
+          () => existsSync(pidFile) && /^[1-9]\d*\n$/.test(readFileSync(pidFile, 'utf8')),
           `the native child PID file at "${pidFile}"`,
           5_000
         );
