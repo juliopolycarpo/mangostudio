@@ -49,7 +49,7 @@ function New-NativeProbeRequest([string]$Name, [string]$Fixture, [string[]]$Extr
     foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) {
         if ($entry.Key -ne 'MUST_NOT_LEAK') { $environment[$entry.Key] = [string]$entry.Value }
     }
-    $environment.PROBE_VALUE = "spaces quote`" Unicode汉字"
+    $environment.PROBE_VALUE = "spaces quote`" Unicode$([char]0x6c49)$([char]0x5b57)"
     $application = $BunPath; $command = @('bun', $Fixture) + $Extra
     if ([IO.Path]::GetExtension($Fixture) -eq '.ps1') {
         $application = (Get-Process -Id $PID).Path
@@ -61,6 +61,52 @@ function New-NativeProbeRequest([string]$Name, [string]$Fixture, [string[]]$Extr
         mode = 'strict'; timeoutSeconds = $TimeoutSeconds; observationMs = 1000
         sourceSha = 'synthetic-probe-only'; workflowSha = $env:GITHUB_SHA; expectedVctip = $null
     }
+}
+
+<#
+.SYNOPSIS
+Exercises the actual Windows PowerShell5.1 request-file boundary with private UTF8 JSON and bounded own-wrapper cleanup.
+.EXAMPLE
+$execution = Invoke-NativeProbeRequestFile $request C:\tooling\native-windows-job.ps1
+#>
+function Invoke-NativeProbeRequestFile([object]$Request, [string]$Helper) {
+    $privateDirectory = Join-Path ([IO.Path]::GetTempPath()) "mango-native-job-request-$([Guid]::NewGuid().ToString('N'))"
+    foreach ($directory in @($Request.root, $Request.out)) {
+        $prefix = [IO.Path]::GetFullPath([string]$directory).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        Assert-NativeProbe (-not $privateDirectory.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) "private request directory $privateDirectory must be outside source and evidence $directory"
+    }
+    $requestPath = Join-Path $privateDirectory 'request.json'
+    $shell = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::System)) 'WindowsPowerShell\v1.0\powershell.exe'
+    $process = $null; $stdoutTask = $null; $stderrTask = $null; $result = $null
+    try {
+        [IO.Directory]::CreateDirectory($privateDirectory) | Out-Null
+        [IO.File]::WriteAllText($requestPath, (ConvertTo-Json -InputObject $Request -Depth 40), [Text.UTF8Encoding]::new($false))
+        $argv = @('-Version', '5.1', '-NoLogo', '-NoProfile', '-NonInteractive', '-File', $Helper, '-RequestPath', $requestPath)
+        $start = [Diagnostics.ProcessStartInfo]::new($shell, [Mango.NativeJobProbe.JobProcess]::CommandLine([string[]]$argv))
+        $start.UseShellExecute = $false; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+        $process = [Diagnostics.Process]::Start($start)
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync(); $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timeoutMs = [int]($Request.timeoutSeconds * 1000 + $Request.observationMs + 30000)
+        Assert-NativeProbe ($process.WaitForExit($timeoutMs)) "Windows PowerShell5.1 helper must exit within ${timeoutMs}ms"
+        Assert-NativeProbe ($process.ExitCode -eq 0) "Windows PowerShell5.1 helper exit $($process.ExitCode); expected exit0"
+        $result = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText((Join-Path $Request.out 'job-receipt.json'), [Text.UTF8Encoding]::new($false, $true))) -ErrorAction Stop
+    } finally {
+        try {
+            if ($process -and -not $process.HasExited) { $process.Kill(); Assert-NativeProbe ($process.WaitForExit(5000)) 'retained helper wrapper must exit within5000ms after own-object termination' }
+            if ($stdoutTask -and $stderrTask) {
+                $logsReady = [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), 5000)
+                Assert-NativeProbe $logsReady 'Windows PowerShell5.1 wrapper stdout/stderr must reach EOF within5000ms'
+                [IO.Directory]::CreateDirectory($Request.out) | Out-Null
+                [IO.File]::WriteAllText((Join-Path $Request.out 'wrapper.stdout.log'), $stdoutTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
+                [IO.File]::WriteAllText((Join-Path $Request.out 'wrapper.stderr.log'), $stderrTask.GetAwaiter().GetResult(), [Text.UTF8Encoding]::new($false))
+            }
+        } finally {
+            try { if ($process) { $process.Dispose() } }
+            finally { if ([IO.Directory]::Exists($privateDirectory)) { [IO.Directory]::Delete($privateDirectory, $true) } }
+        }
+    }
+    Assert-NativeProbe (-not [IO.Directory]::Exists($privateDirectory)) 'private full-environment request must be deleted before returning'
+    return [pscustomobject]@{ receipt = $result; wrapperPath = $shell; wrapperVersion = '5.1'; privateRequestDeleted = $true }
 }
 
 <#
@@ -363,12 +409,42 @@ $startedChild.Dispose()
 '@
     [IO.File]::WriteAllText($descendantFixture, $descendantProgram, [Text.UTF8Encoding]::new($false))
 
+    Invoke-NativeProbe 'UTF8 request decoding preserves Unicode with optional BOM and rejects malformed bytes' {
+        $directory = Join-Path $OutDirectory 'request-decoding'; [IO.Directory]::CreateDirectory($directory) | Out-Null
+        $unicode = [string][char]0x6c49 + [char]0x5b57 + [char]::ConvertFromUtf32(0x1f600)
+        $expected = [pscustomobject]@{ command = @('bun', '', $unicode); environment = [pscustomobject]@{ PROBE_VALUE = $unicode } }
+        $bytes = [Text.UTF8Encoding]::new($false, $true).GetBytes((ConvertTo-Json -InputObject $expected -Depth 10))
+        foreach ($bom in @($false, $true)) {
+            $path = Join-Path $directory "valid-bom-$bom.json"
+            $inputBytes = if ($bom) { [byte[]](@(0xef, 0xbb, 0xbf) + $bytes) } else { $bytes }
+            [IO.File]::WriteAllBytes($path, $inputBytes)
+            $decoded = Read-NativeJobRequest $path
+            Assert-NativeProbe (($decoded.command -join [char]0) -ceq ($expected.command -join [char]0) -and $decoded.environment.PROBE_VALUE -ceq $unicode) "UTF8 request with BOM=$bom must preserve exact Unicode argv and environment"
+        }
+        $malformed = @(
+            @{ name = 'bad-continuation'; bytes = [byte[]]@(0xc3, 0x28) },
+            @{ name = 'truncated'; bytes = [byte[]]@(0xf0, 0x9f, 0x98) },
+            @{ name = 'overlong'; bytes = [byte[]]@(0xc0, 0xaf) },
+            @{ name = 'utf16-bom'; bytes = [byte[]]@(0xff, 0xfe, 0x7b, 0x00, 0x7d, 0x00) }
+        )
+        foreach ($sample in $malformed) {
+            $path = Join-Path $directory "$($sample.name).json"; [IO.File]::WriteAllBytes($path, $sample.bytes)
+            $errorText = $null; try { Read-NativeJobRequest $path | Out-Null } catch { $errorText = $_.Exception.Message }
+            Assert-NativeProbe ($errorText -eq "Invalid request encoding at $path; expected valid UTF8 JSON with optional UTF8 BOM") "$($sample.name) must fail at strict UTF8 decoding before any native launch"
+        }
+        $path = Join-Path $directory 'invalid-json.json'; $privateValue = 'private-decoder-marker'
+        [IO.File]::WriteAllText($path, ('{"environment":{"PROBE_VALUE":"' + $privateValue + '"}'), [Text.UTF8Encoding]::new($false))
+        $errorText = $null; try { Read-NativeJobRequest $path | Out-Null } catch { $errorText = $_.Exception.Message }
+        Assert-NativeProbe ($errorText -eq "Invalid request JSON at $path; expected valid UTF8 JSON without exposing private request values" -and -not $errorText.Contains($privateValue)) 'malformed private request JSON must fail without leaking its environment value'
+        return @{ validCases = 2; malformedUtf8Cases = $malformed.Count; privateJsonErrorRedacted = $true; nativeLaunches = 0 }
+    }
+
     Invoke-NativeProbe 'argv environment cwd raw pipes and natural exit' {
         $fixture = Join-Path $OutDirectory 'contract.mjs'
         [IO.File]::WriteAllText($fixture, 'process.stdout.write(JSON.stringify({argv:process.argv.slice(2),cwd:process.cwd(),value:process.env.PROBE_VALUE,missing:process.env.MUST_NOT_LEAK??null})+"\n"); process.stdout.write(Buffer.from([0,255,1,13,10])); process.stderr.write(Buffer.from([255,0,2,13,10]));', [Text.UTF8Encoding]::new($false))
-        $args = @('a b', 'quote"inside', 'backslash ending\', '', '汉字😀')
+        $args = @('a b', 'quote"inside', 'backslash ending\', '', ([string][char]0x6c49 + [char]0x5b57 + [char]::ConvertFromUtf32(0x1f600)))
         $env:MUST_NOT_LEAK = 'should be absent from exact environment'
-        try { $request = New-NativeProbeRequest 'contract' $fixture $args; $result = Invoke-NativeWindowsJob $request } finally { Remove-Item Env:MUST_NOT_LEAK -ErrorAction SilentlyContinue }
+        try { $request = New-NativeProbeRequest 'contract' $fixture $args; $execution = Invoke-NativeProbeRequestFile $request $helper; $result = $execution.receipt } finally { Remove-Item Env:MUST_NOT_LEAK -ErrorAction SilentlyContinue }
         Assert-NativeProbe ($result.status -eq 'naturally-settled' -and $result.exitCode -eq 0 -and $result.stdoutEof -and $result.stderrEof -and $result.postCleanup.Empty) 'root exit0 and both closed raw pipes with empty exact job'
         $bytes = [IO.File]::ReadAllBytes((Join-Path $request.out 'logs/stdout.log'))
         $newline = [Array]::IndexOf($bytes, [byte]10)
@@ -378,7 +454,8 @@ $startedChild.Dispose()
         Assert-NativeProbe ([Convert]::ToBase64String($bytes[($newline + 1)..($bytes.Length - 1)]) -eq 'AP8BDQo=') 'stdout bytes including invalid UTF8 unchanged'
         Assert-NativeProbe ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $request.out 'logs/stderr.log'))) -eq '/wACDQo=') 'stderr bytes including invalid UTF8 unchanged'
         Assert-NativeProbe (-not $result.job.inherited -and $result.job.limitFlags -eq 0x2000 -and $result.job.atomicJobList) 'private no-breakaway noninherited job assigned atomically'
-        return @{ receipt = (Join-Path $request.out 'job-receipt.json'); root = $result.rootIdentity.Identity }
+        Assert-NativeProbe ($execution.privateRequestDeleted -and $result.finalClose.preClose.Empty) 'PowerShell5.1 private request is deleted and final open Job is empty before close'
+        return @{ receipt = (Join-Path $request.out 'job-receipt.json'); root = $result.rootIdentity.Identity; wrapperPath = $execution.wrapperPath; wrapperVersion = $execution.wrapperVersion; privateRequestDeleted = $execution.privateRequestDeleted }
     }
 
     Invoke-NativeProbe 'nonzero root exit remains failed despite empty job' {

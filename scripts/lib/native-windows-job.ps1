@@ -2,7 +2,7 @@
 .SYNOPSIS
 Runs a native command in an atomically associated private Windows Job and preserves settlement evidence.
 .EXAMPLE
-pwsh -NoProfile -File scripts/lib/native-windows-job.ps1 -RequestPath C:\evidence\request.json
+powershell.exe -NoProfile -File scripts/lib/native-windows-job.ps1 -RequestPath C:\private\request.json
 .NOTES
 Qualification tooling. The tested source tree is a separate immutable checkout.
 JOB_LIST/HANDLE_LIST: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute
@@ -595,6 +595,21 @@ function Get-NativeJobToolInventory {
 
 <#
 .SYNOPSIS
+Reads private request JSON as strict UTF8 with an optional UTF8 BOM before any native launch.
+.EXAMPLE
+$request = Read-NativeJobRequest C:\private\request.json
+#>
+function Read-NativeJobRequest([string]$Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $offset = if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xef -and $bytes[1] -eq 0xbb -and $bytes[2] -eq 0xbf) { 3 } else { 0 }
+    try { $json = [Text.UTF8Encoding]::new($false, $true).GetString($bytes, $offset, $bytes.Length - $offset) }
+    catch { throw "Invalid request encoding at $Path; expected valid UTF8 JSON with optional UTF8 BOM" }
+    try { return ConvertFrom-Json -InputObject $json -ErrorAction Stop }
+    catch { throw "Invalid request JSON at $Path; expected valid UTF8 JSON without exposing private request values" }
+}
+
+<#
+.SYNOPSIS
 Writes receipt data as UTF8 without changing any raw command pipe bytes.
 .EXAMPLE
 Write-NativeJobJson C:\evidence\receipt.json $receipt
@@ -758,7 +773,7 @@ function Get-NativeJobCompilerEligibility([object]$Request, [object]$Snapshot, [
 .SYNOPSIS
 Runs one attempt, records natural settlement before any cleanup, and admits only verified compiler VCTIP handle cleanup.
 .EXAMPLE
-$receipt = Invoke-NativeWindowsJob (Get-Content C:\evidence\request.json -Raw | ConvertFrom-Json)
+$receipt = Invoke-NativeWindowsJob (Read-NativeJobRequest C:\private\request.json)
 #>
 function Invoke-NativeWindowsJob([object]$Request) {
     $ErrorActionPreference = 'Stop'
@@ -856,7 +871,7 @@ if ($AttestationPath -and $RequestPath) { throw 'Conflicting helper modes; expec
 if ($AttestationPath) {
     Write-NativeJobJson ([IO.Path]::GetFullPath($AttestationPath)) (Get-NativeJobToolInventory)
 } elseif ($RequestPath) {
-    $request = Get-Content -LiteralPath $RequestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $request = Read-NativeJobRequest $RequestPath
     $result = Invoke-NativeWindowsJob $request
     [Console]::WriteLine((ConvertTo-Json -InputObject @{ status = $result.status; exitCode = $result.exitCode; errors = $result.errors } -Depth 10 -Compress))
     if ($result.status -eq 'failed') { exit 1 }
