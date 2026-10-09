@@ -9,6 +9,8 @@ JOB_LIST/HANDLE_LIST: https://learn.microsoft.com/en-us/windows/win32/api/proces
 Job inheritance/close: https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
 Membership: https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject
 FILETIME identity: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes
+Image metadata: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew
+Same-object exit: https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject
 #>
 param([string]$RequestPath, [string]$AttestationPath)
 
@@ -92,6 +94,107 @@ namespace Mango.NativeJobProbe {
         public bool Stable, Empty;
         public Member[] Members;
     }
+    public sealed class ImageResult {
+        public bool Success;
+        public int Error;
+        public uint Characters;
+        public string Path;
+    }
+    public sealed class ImageAttempt {
+        public string At, QueryStartedAt, Operation, Outcome, StateError;
+        public int Attempt, NativeError;
+        public int? StateNativeError;
+        public long ElapsedMilliseconds;
+        public uint BufferCapacity, Characters;
+        public Member Before, After;
+        public bool? SameHandleExited;
+    }
+    /// <summary>Bound every image retry and list refresh in one complete job query with one monotonic clock.</summary>
+    /// <example>var budget=new ImageQueryBudget(2000, ()=>clock.ElapsedMilliseconds);</example>
+    public sealed class ImageQueryBudget {
+        private readonly Func<long> clock;
+        private readonly long started;
+        public readonly int Milliseconds;
+        public readonly string StartedAt=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture);
+        public ImageQueryBudget(int milliseconds,Func<long> monotonicClock) {
+            if(milliseconds<1 || milliseconds>2000 || monotonicClock==null) throw new ArgumentException("Invalid image query budget " + milliseconds + "; expected1..2000ms and monotonic clock");
+            Milliseconds=milliseconds; clock=monotonicClock; started=clock();
+        }
+        public long ElapsedMilliseconds { get { long elapsed=clock()-started; if(elapsed<0) throw new InvalidOperationException("Invalid negative image query elapsed " + elapsed + "; expected monotonic clock"); return elapsed; } }
+        /// <summary>Reject exhausted shared time instead of multiplying waits by members or list refreshes.</summary>
+        /// <example>budget.Require("QueryFullProcessImageNameW");</example>
+        public void Require(string operation) { if(ElapsedMilliseconds>=Milliseconds) throw new InvalidOperationException("Image query budget exhausted after " + ElapsedMilliseconds + "ms at " + operation + "; expected complete attestation within " + Milliseconds + "ms"); }
+    }
+    /// <summary>Signal a confirmed exit of the same owned object; callers must obtain a new complete kernel snapshot.</summary>
+    /// <example>catch(MemberExitedException) { refreshCompleteList=true; }</example>
+    public sealed class MemberExitedException : InvalidOperationException {
+        public MemberExitedException(string identity) : base("Exact member " + identity + " signaled exit; expected fresh complete job accounting before settlement") {}
+    }
+    /// <summary>Retry only image metadata on one already-owned handle; identity, membership and wait errors remain fatal.</summary>
+    /// <example>var member=ImageQueryPolicy.Resolve(readSameHandle,queryImageSameHandle,waitSameHandle,budget,diagnostics,identity,path,true);</example>
+    public static class ImageQueryPolicy {
+        private static void ValidateState(Member state,Member original,bool requireMember) {
+            long created;
+            if(state==null || state.Pid==0 || !Int64.TryParse(state.CreationFileTime,out created) || created<=0 || created>2650467743999999999 ||
+                state.Created!=DateTime.FromFileTimeUtc(created).ToString("o",CultureInfo.InvariantCulture) || state.Identity!=state.Pid.ToString(CultureInfo.InvariantCulture)+":"+state.Created)
+                throw new InvalidOperationException("Invalid image-query process state " + (state==null?"null":state.Pid+"/"+state.CreationFileTime+"/"+state.Created+"/"+state.Identity) + "; expected positive PID and matching full100ns FILETIME identity");
+            if(original!=null && (state.Pid!=original.Pid || state.Identity!=original.Identity || state.CreationFileTime!=original.CreationFileTime))
+                throw new InvalidOperationException("Invalid image-query identity " + state.Identity + "; expected same retained object " + original.Identity);
+            if(requireMember && !state.IsMember) throw new InvalidOperationException("Invalid recycled/outside-job image-query process " + state.Identity + "; expected exact-job membership");
+        }
+        private static bool AbsoluteImage(string path) {
+            if(String.IsNullOrEmpty(path) || path.IndexOf('\0')>=0) return false;
+            if(path.Length>=3 && Char.IsLetter(path[0]) && path[1]==':' && (path[2]=='\\' || path[2]=='/')) return true;
+            if(!path.StartsWith("\\\\",StringComparison.Ordinal)) return false;
+            string[] parts=path.Substring(2).Split('\\'); return parts.Length>=3 && parts[0].Length>0 && parts[1].Length>0 && parts[2].Length>0;
+        }
+        /// <summary>Resolve a fresh image with exact state checks before/after; only a same-handle signaled exit requests refresh.</summary>
+        /// <example>ImageQueryPolicy.Resolve(read,query,wait,budget,attempts,fullIdentity,originalImage,true);</example>
+        public static Member Resolve(Func<Member> readState,Func<ImageResult> queryImage,Func<int,bool> waitExited,ImageQueryBudget budget,List<ImageAttempt> diagnostics,string expectedIdentity,string expectedImage,bool requireMember) {
+            Member original=readState(); ValidateState(original,null,requireMember);
+            if(expectedIdentity!=null && original.Identity!=expectedIdentity) throw new InvalidOperationException("Invalid process identity " + original.Identity + "; expected " + expectedIdentity);
+            ImageAttempt last=null;
+            for(int attempt=1;attempt<=10;attempt++) {
+                try {
+                    budget.Require("QueryFullProcessImageNameW(" + original.Identity + ")");
+                    Member before=readState(); ValidateState(before,original,requireMember);
+                    bool exited=waitExited(0);
+                    if(exited) throw new MemberExitedException(original.Identity);
+                    if(!before.Alive) throw new InvalidOperationException("Invalid nonsignaled process state " + original.Identity + "; expected live same-handle state");
+                    ImageResult image=queryImage();
+                    if(image==null) throw new InvalidOperationException("Invalid null image result for " + original.Identity + "; expected native success/error evidence");
+                    if(!image.Success) {
+                        last=new ImageAttempt {At=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture),QueryStartedAt=budget.StartedAt,Operation="QueryFullProcessImageNameW",Attempt=attempt,NativeError=image.Error,ElapsedMilliseconds=budget.ElapsedMilliseconds,BufferCapacity=32768,Characters=image.Characters,Before=before,Outcome="failed-image-query"};
+                        diagnostics.Add(last);
+                        Member after=readState(); last.After=after; ValidateState(after,original,requireMember);
+                        last.SameHandleExited=waitExited(0);
+                        if(last.SameHandleExited.Value) throw new MemberExitedException(original.Identity);
+                        if(!after.Alive) throw new InvalidOperationException("Invalid nonsignaled failed-image state " + original.Identity + "; expected live same-handle state");
+                        if(!requireMember || attempt==10) throw new Win32Exception(image.Error,"QueryFullProcessImageNameW PID=" + original.Pid + " FILETIME=" + original.CreationFileTime + " identity=" + original.Identity + " attempt=" + attempt + " Win32Error=" + image.Error + "; expected resolved live image on the same exact-job object");
+                        budget.Require("image retry(" + original.Identity + ")");
+                        int delay=(int)Math.Min(10,budget.Milliseconds-budget.ElapsedMilliseconds);
+                        if(delay<=0) { budget.Require("image retry wait"); }
+                        last.SameHandleExited=waitExited(delay);
+                        if(last.SameHandleExited.Value) throw new MemberExitedException(original.Identity);
+                        last.Outcome="retry-same-owned-handle"; continue;
+                    }
+                    if(!AbsoluteImage(image.Path) || image.Characters!=image.Path.Length || image.Characters>=32768)
+                        throw new InvalidOperationException("Invalid image " + image.Path + "/" + image.Characters + " for " + original.Identity + "; expected nonempty complete absolute Win32 image");
+                    if(expectedImage!=null && !String.Equals(image.Path,expectedImage,StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("Invalid changed image " + image.Path + " for " + original.Identity + "; expected " + expectedImage);
+                    Member final=readState(); ValidateState(final,original,requireMember);
+                    if(waitExited(0)) throw new MemberExitedException(original.Identity);
+                    if(!final.Alive) throw new InvalidOperationException("Invalid nonsignaled resolved-image state " + original.Identity + "; expected live exact object");
+                    budget.Require("resolved image(" + original.Identity + ")");
+                    final.Path=image.Path;
+                    if(last!=null) diagnostics.Add(new ImageAttempt {At=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture),QueryStartedAt=budget.StartedAt,Operation="QueryFullProcessImageNameW",Attempt=attempt,ElapsedMilliseconds=budget.ElapsedMilliseconds,BufferCapacity=32768,Characters=image.Characters,Before=before,After=final,SameHandleExited=false,Outcome="recovered-same-owned-handle"});
+                    return final;
+                } catch(MemberExitedException) { if(last!=null) last.Outcome="same-handle-exit-requires-complete-refresh"; throw; }
+                catch(Exception error) { if(last!=null) { last.Outcome="failed-closed"; last.StateError=error.ToString(); last.StateNativeError=error is Win32Exception?((Win32Exception)error).NativeErrorCode:(int?)null; } throw; }
+            }
+            throw new InvalidOperationException("Image retry exhausted for " + original.Identity + "; expected resolved live image");
+        }
+    }
     internal sealed class HeldProcess {
         internal IntPtr Handle;
         internal Member Member;
@@ -133,6 +236,7 @@ namespace Mango.NativeJobProbe {
         private readonly List<string> pipeErrors = new List<string>();
         private readonly Dictionary<string, HeldProcess> held = new Dictionary<string, HeldProcess>();
         private readonly Dictionary<string, ToolMetadata> tools = new Dictionary<string, ToolMetadata>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<ImageAttempt> imageAttempts = new List<ImageAttempt>();
         private readonly object outputLock = new object();
         private uint rootPid;
         private uint? exitCode;
@@ -144,6 +248,7 @@ namespace Mango.NativeJobProbe {
         public bool StderrEof { get { return stderrEof; } }
         public bool PipesClosed { get { return stdoutEof && stderrEof && stdoutTask.IsCompleted && stderrTask.IsCompleted; } }
         public string[] PipeErrors { get { lock(outputLock) return pipeErrors.ToArray(); } }
+        public ImageAttempt[] ImageQueryDiagnostics { get { return imageAttempts.ToArray(); } }
 
         /// <summary>Create the suspended root with only the intended stdio handles inherited.</summary>
         /// <example>new JobProcess(cargoExe, new[]{"cargo","build"}, cwd, env, logs);</example>
@@ -258,16 +363,33 @@ namespace Mango.NativeJobProbe {
             if(wait==Win32.WaitObject) return false;
             throw new Win32Exception(Marshal.GetLastWin32Error(),"WaitForSingleObject; expected live or exited process");
         }
-        private Member Attest(IntPtr process,uint pid,string expected) {
-            long created,exit,kernel,user; Win32.Check(Win32.GetProcessTimes(process,out created,out exit,out kernel,out user),"GetProcessTimes");
+        private Member ReadState(IntPtr process,uint pid,string knownIdentity) {
+            long created,exit,kernel,user; Win32.Check(Win32.GetProcessTimes(process,out created,out exit,out kernel,out user),"GetProcessTimes PID=" + pid + " retainedIdentity=" + (knownIdentity??"not-yet-attested"));
             string date=DateTime.FromFileTimeUtc(created).ToString("o",CultureInfo.InvariantCulture);
             string identity=pid.ToString(CultureInfo.InvariantCulture)+":"+date;
-            if(expected!=null && identity!=expected) throw new InvalidOperationException("Invalid process identity " + identity + "; expected " + expected);
-            bool member; Win32.Check(Win32.IsProcessInJob(process,job,out member),"IsProcessInJob(exact job)");
-            uint capacity=32768; var path=new StringBuilder((int)capacity);
-            Win32.Check(Win32.QueryFullProcessImageNameW(process,0,path,ref capacity),"QueryFullProcessImageNameW");
+            bool member; Win32.Check(Win32.IsProcessInJob(process,job,out member),"IsProcessInJob(exact job) PID=" + pid + " FILETIME=" + created + " identity=" + identity);
             string censusDate=DateTime.FromFileTimeUtc(created-created%10).ToString("o",CultureInfo.InvariantCulture);
-            return new Member {Pid=pid,Identity=identity,CreationFileTime=created.ToString(CultureInfo.InvariantCulture),Created=date,CensusIdentity=pid.ToString(CultureInfo.InvariantCulture)+":"+censusDate,Path=path.ToString(),IsMember=member,Alive=Alive(process),Tool=Metadata(path.ToString())};
+            return new Member {Pid=pid,Identity=identity,CreationFileTime=created.ToString(CultureInfo.InvariantCulture),Created=date,CensusIdentity=pid.ToString(CultureInfo.InvariantCulture)+":"+censusDate,IsMember=member,Alive=!WaitExited(process,pid,0,identity)};
+        }
+        private static bool WaitExited(IntPtr process,uint pid,int milliseconds,string knownIdentity) {
+            uint result=Win32.WaitForSingleObject(process,checked((uint)milliseconds)); int error=Marshal.GetLastWin32Error();
+            if(result==Win32.WaitObject) return true;
+            if(result==Win32.WaitTimeout) return false;
+            throw new Win32Exception(error,"WaitForSingleObject PID=" + pid + " retainedIdentity=" + (knownIdentity??"not-yet-attested") + " wait=" + milliseconds + " Win32Error=" + error + "; expected same-handle live or signaled exit");
+        }
+        private static ImageQueryBudget NewImageBudget() {
+            var clock=Stopwatch.StartNew(); return new ImageQueryBudget(2000,()=>clock.ElapsedMilliseconds);
+        }
+        private static ImageResult QueryImage(IntPtr process) {
+            uint capacity=32768; var path=new StringBuilder((int)capacity);
+            bool success=Win32.QueryFullProcessImageNameW(process,0,path,ref capacity); int error=Marshal.GetLastWin32Error();
+            return new ImageResult {Success=success,Error=success?0:error,Characters=capacity,Path=success?path.ToString():null};
+        }
+        private Member Attest(IntPtr process,uint pid,string expected,ImageQueryBudget budget=null,string expectedImage=null,bool requireMember=true) {
+            string knownIdentity=expected;
+            Func<Member> read=()=> { Member state=ReadState(process,pid,knownIdentity); if(knownIdentity==null) knownIdentity=state.Identity; return state; };
+            Member member=ImageQueryPolicy.Resolve(read,()=>QueryImage(process),milliseconds=>WaitExited(process,pid,milliseconds,knownIdentity),budget??NewImageBudget(),imageAttempts,expected,expectedImage,requireMember);
+            member.Tool=Metadata(member.Path); return member;
         }
         private ToolMetadata Metadata(string path) {
             string name=System.IO.Path.GetFileName(path);
@@ -284,7 +406,7 @@ namespace Mango.NativeJobProbe {
         /// <example>child.Resume();</example>
         public void Resume() {
             if(thread==IntPtr.Zero) throw new InvalidOperationException("Invalid released primary thread; expected one suspended root");
-            Member rootNow=Attest(root,rootPid,RootIdentity.Identity);
+            Member rootNow=Attest(root,rootPid,RootIdentity.Identity,null,RootIdentity.Path);
             if(!rootNow.IsMember || !rootNow.Alive) throw new InvalidOperationException("Invalid resume origin; expected same live exact-job root");
             uint count=Win32.ResumeThread(thread);
             if(count!=1) throw new Win32Exception(Marshal.GetLastWin32Error(),"ResumeThread returned " + count + "; expected suspend count1");
@@ -347,8 +469,9 @@ namespace Mango.NativeJobProbe {
         /// <example>Snapshot before = child.Query();</example>
         public Snapshot Query() {
             if(job==IntPtr.Zero) throw new InvalidOperationException("Invalid closed job handle; expected retained exact job");
-            int races=0;
+            int races=0; ImageQueryBudget budget=NewImageBudget();
             for(int attempt=0;attempt<12;attempt++) {
+                budget.Require("complete job list refresh" + attempt);
                 ReleaseExited(); Win32.Accounting before=Accounting(); int bytes; uint[] pids=ProcessList(out bytes); var members=new List<Member>(); bool retry=false;
                 foreach(uint pid in pids) {
                     IntPtr handle=Win32.OpenProcess(Win32.QueryProcess|Win32.Synchronize,false,pid);
@@ -359,20 +482,18 @@ namespace Mango.NativeJobProbe {
                     }
                     try {
                         if(!Alive(handle)) { retry=true; races++; break; }
-                        Member member=Attest(handle,pid,null);
+                        Member member=Attest(handle,pid,null,budget);
                         if(!member.IsMember) throw new InvalidOperationException("Invalid recycled/outside-job PID " + pid + "; expected exact-job process object");
                         if(!member.Alive) { retry=true; races++; break; }
                         HeldProcess existing;
-                        if(held.TryGetValue(member.Identity,out existing)) member=Attest(existing.Handle,pid,member.Identity);
+                        if(held.TryGetValue(member.Identity,out existing)) member=Attest(existing.Handle,pid,member.Identity,budget,existing.Member.Path);
                         else { held.Add(member.Identity,new HeldProcess{Handle=handle,Member=member}); handle=IntPtr.Zero; }
                         members.Add(member);
-                    } catch(Win32Exception) {
-                        if(handle!=IntPtr.Zero && !Alive(handle)) { retry=true; races++; break; }
-                        throw;
-                    } finally { Win32.Close(ref handle); }
+                    } catch(MemberExitedException) { retry=true; races++; break; }
+                    finally { Win32.Close(ref handle); }
                 }
                 if(retry) { Thread.Sleep(10); continue; }
-                Win32.Accounting after=Accounting(); bool stable=before.Active==after.Active && after.Active==(uint)members.Count;
+                Win32.Accounting after=Accounting(); budget.Require("complete job accounting result"); bool stable=before.Active==after.Active && after.Active==(uint)members.Count;
                 return new Snapshot {At=DateTime.UtcNow.ToString("o"),Assigned=(uint)pids.Length,Returned=(uint)pids.Length,ActiveBefore=before.Active,ActiveAfter=after.Active,TotalProcesses=after.Total,NativeBytes=bytes,Races=races,Stable=stable,Empty=stable && members.Count==0,Members=members.ToArray()};
             }
             throw new InvalidOperationException("Unstable member identity after12 refreshes; expected complete attested membership");
@@ -382,12 +503,13 @@ namespace Mango.NativeJobProbe {
         public void TerminateVerifiedMember(string identity,int waitMilliseconds) {
             HeldProcess owned;
             if(!held.TryGetValue(identity,out owned)) throw new InvalidOperationException("Invalid cleanup identity " + identity + "; expected retained exact member");
-            Member before=Attest(owned.Handle,owned.Member.Pid,identity);
+            ImageQueryBudget budget=NewImageBudget();
+            Member before=Attest(owned.Handle,owned.Member.Pid,identity,budget,owned.Member.Path);
             if(!before.IsMember || !before.Alive) throw new InvalidOperationException("Invalid cleanup state " + identity + "; expected live exact job member");
             IntPtr terminate=Win32.OpenProcess(Win32.QueryProcess|Win32.Synchronize|Win32.TerminateProcessAccess,false,before.Pid);
             Win32.Check(terminate!=IntPtr.Zero,"OpenProcess(verified termination rights)");
             try {
-                Member fresh=Attest(terminate,before.Pid,identity);
+                Member fresh=Attest(terminate,before.Pid,identity,budget,before.Path);
                 if(!fresh.IsMember || !fresh.Alive) throw new InvalidOperationException("Invalid cleanup membership " + identity + "; expected same live exact-job object");
                 Win32.Check(Win32.TerminateProcess(terminate,1),"TerminateProcess(retained verified member)");
                 uint wait=Win32.WaitForSingleObject(terminate,checked((uint)waitMilliseconds));
@@ -399,7 +521,7 @@ namespace Mango.NativeJobProbe {
         /// <example>child.VerifyIdentity(member.Identity);</example>
         public Member VerifyIdentity(string identity) {
             HeldProcess owned; if(!held.TryGetValue(identity,out owned)) throw new InvalidOperationException("Invalid identity " + identity + "; expected retained creation identity");
-            return Attest(owned.Handle,owned.Member.Pid,identity);
+            return Attest(owned.Handle,owned.Member.Pid,identity,null,owned.Member.Path);
         }
         /// <summary>Map a current CIM row through a fresh process object and exact job membership; this grants no cleanup authority.</summary>
         /// <example>Member native=child.CensusIdentity(cimPid);</example>
@@ -407,7 +529,7 @@ namespace Mango.NativeJobProbe {
             if(job==IntPtr.Zero) throw new InvalidOperationException("Invalid closed census job; expected retained exact job");
             IntPtr process=Win32.OpenProcess(Win32.QueryProcess|Win32.Synchronize,false,pid);
             Win32.Check(process!=IntPtr.Zero,"OpenProcess(CIM identity consistency)");
-            try { return Attest(process,pid,null); } finally { Win32.Close(ref process); }
+            try { return Attest(process,pid,null,null,null,false); } finally { Win32.Close(ref process); }
         }
         /// <summary>Close the exact job as separately recorded final failure containment; this is never settlement proof.</summary>
         /// <example>child.CloseJob();</example>
@@ -565,6 +687,7 @@ function Complete-NativeJobEvidence([object]$Receipt, [object]$Child, [object[]]
         $unknown = @(Find-NativeJobAmbiguity $Before $full $Receipt.finalClose.preClose.Members $Child)
         if ($unknown.Count) { throw "Final open-job census has $($unknown.Count) new unattributed MSVC helpers; expected none" }
     } catch { $Receipt.finalClose.queryError = $_.Exception.ToString(); $Receipt.errors += "Final boundary failed: $($_.Exception.ToString())"; $Receipt.status = 'failed' }
+    if ($Child.PSObject.Properties['ImageQueryDiagnostics']) { $Receipt.imageQueryDiagnostics = @($Child.ImageQueryDiagnostics) }
     $Receipt.finalClose.outcomeBeforeClose = $Receipt.status
     Write-NativeJobJson $receiptPath $Receipt
     try { $Child.CloseJob(); $Child.Dispose() } catch { $Receipt.errors += "Final exact-job close failed: $($_.Exception.ToString())"; $Receipt.status = 'failed' }
@@ -650,7 +773,7 @@ function Invoke-NativeWindowsJob([object]$Request) {
         timeoutSeconds = $Request.timeoutSeconds; observationMs = $Request.observationMs; timedOut = $false
         rootIdentity = $null; rootExitAt = $null; exitCode = $null; stdoutEof = $false; stderrEof = $false
         job = $null; naturalSettlement = $null; eligibility = $null; preCleanup = $null; cleanupActions = @(); postCleanup = $null
-        before = @(); preCleanupCensus = @(); postCleanupCensus = @(); ambiguity = @(); censusMappings = [Collections.Generic.List[object]]::new(); finalClose = $null; postCloseCensus = @(); observed = @(); errors = @()
+        before = @(); preCleanupCensus = @(); postCleanupCensus = @(); ambiguity = @(); censusMappings = [Collections.Generic.List[object]]::new(); finalClose = $null; postCloseCensus = @(); observed = @(); imageQueryDiagnostics = @(); errors = @()
     }
     Write-NativeJobJson $receiptPath $receipt
     $child = $null; $seen = @{}; $before = @(); $snapshot = $null
