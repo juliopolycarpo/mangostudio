@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { type GithubContext, GithubContextSchema } from '@mangostudio/shared/github';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
@@ -13,88 +13,24 @@ import {
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestChat, insertTestUser } from '../../support/factories';
+import { buildFakeGh, installFakeGh } from '../../support/fake-gh/install';
+import { DEFAULT_PR_OUTPUT, type FakeGhScenario } from '../../support/fake-gh/program';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
 
-interface ShimScenario {
-  readonly authenticated?: boolean;
-  readonly repoStdout?: string;
-  readonly repoStderr?: string;
-  readonly prStdout?: string;
-  readonly prStderr?: string;
-}
-
-const repoOutput = JSON.stringify({
-  nameWithOwner: 'mango/mangostudio',
-  defaultBranchRef: { name: 'main' },
-  url: 'https://github.example/mango/mangostudio',
-});
-const prOutput = JSON.stringify({
-  number: 42,
-  title: 'Expose GitHub context',
-  state: 'OPEN',
-  isDraft: true,
-  url: 'https://github.example/mango/mangostudio/pull/42',
-  headRefName: 'feat/github-context',
-  baseRefName: 'main',
-});
-
 const tempDirs: string[] = [];
 let restoreAuth: (() => void) | null = null;
 let originalPath: string | undefined;
+let buildDir: string;
+let built: string;
 
 async function createTempDir(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), 'mango-github-routes-'));
   tempDirs.push(path);
   return path;
 }
-
-function shellResult(stdout: string | undefined, stderr: string | undefined): string {
-  if (stderr !== undefined) return `printf '%s\\n' '${stderr}' >&2\nexit 1`;
-  return `printf '%s\\n' '${stdout ?? ''}'\nexit 0`;
-}
-
-function shimScript(scenario: ShimScenario): string {
-  return `#!/bin/sh
-case "$*" in
-  "--version")
-    printf '%s\\n' 'gh version 2.97.0 (2026-07-31)'
-    printf '%s\\n' 'https://github.com/cli/cli/releases/tag/v2.97.0'
-    exit 0
-    ;;
-  "auth status --json hosts")
-    ${
-      scenario.authenticated === false
-        ? "printf '%s\\n' 'not logged in' >&2\n    printf '%s\\n' '{\"hosts\":{}}'\n    exit 0"
-        : 'printf \'%s\\n\' \'{"hosts":{"github.example":[{"active":true,"state":"success"}]}}\'\n    exit 0'
-    }
-    ;;
-  "repo view --json nameWithOwner,defaultBranchRef,url")
-    ${shellResult(scenario.repoStdout ?? repoOutput, scenario.repoStderr)}
-    ;;
-  "pr view --json number,title,state,isDraft,url,headRefName,baseRefName")
-    ${shellResult(scenario.prStdout ?? prOutput, scenario.prStderr)}
-    ;;
-  *)
-    printf '%s\\n' 'unexpected gh command' >&2
-    exit 64
-    ;;
-esac
-`;
-}
-
-/**
- * A `gh` whose `--version` fails, which is how the runtime's manifest probe
- * reports "no GitHub CLI here".
- *
- * Deleting `gh` from PATH is not an option any more: PATH is now process-wide
- * rather than a per-facade option, and replacing it wholesale would break every
- * other spawn the in-process runtime makes. A shim that cannot answer the probe
- * reaches the same manifest state by the same code path.
- */
-const UNUSABLE_SHIM = `#!/bin/sh\nexit 127\n`;
 
 /**
  * Installs a fake `gh` where the *runtime* will look for it.
@@ -105,23 +41,27 @@ const UNUSABLE_SHIM = `#!/bin/sh\nexit 127\n`;
  * the local runtime connects: `inspectGh()` runs once per connection and the
  * connection manager caches the manifest, so a runtime already connected under
  * the original PATH would answer "no gh" for the rest of the process.
+ *
+ * The fake is an executable, not a script: the runtime resolves `gh` and
+ * `gh.exe` only, so a shebang file or a `gh.cmd` is invisible to it on Windows.
+ * A scenario that is `unusable` fails every call, which is how the runtime's
+ * manifest probe reports "no GitHub CLI here". Deleting `gh` from PATH is not
+ * an option: PATH is process-wide, and replacing it wholesale would break every
+ * other spawn the in-process runtime makes.
  */
-async function installGhShim(script: string): Promise<void> {
-  const binDir = await createTempDir();
-  const shimPath = join(binDir, 'gh');
-  await writeFile(shimPath, script);
-  await chmod(shimPath, 0o755);
+async function installGhShim(scenario: FakeGhScenario): Promise<void> {
+  const binDir = await installFakeGh(built, scenario, await createTempDir());
 
   originalPath ??= process.env.PATH;
   // Prepended, never replaced: the runtime still needs the rest of PATH to find
   // git and a shell while it builds its manifest.
-  process.env.PATH = `${binDir}${':'}${originalPath ?? ''}`;
+  process.env.PATH = `${binDir}${delimiter}${originalPath ?? ''}`;
   await closeAllRuntimeConnections();
   setRuntimeConnectionManagerForTests(undefined);
 }
 
-async function createGithubPlugin(scenario?: ShimScenario) {
-  await installGhShim(scenario ? shimScript(scenario) : UNUSABLE_SHIM);
+async function createGithubPlugin(scenario: FakeGhScenario = { unusable: true }) {
+  await installGhShim(scenario);
   return createGithubRoutes({ resolveContext: createGithubContextService(createGhCli()) });
 }
 
@@ -134,6 +74,16 @@ function getContext(app: ReturnType<typeof createAuthenticatedApiTestApp>['app']
   url.searchParams.set('chatId', chatId);
   return app.handle(new Request(url.toString()));
 }
+
+beforeAll(async () => {
+  buildDir = await mkdtemp(join(tmpdir(), 'mango-github-fake-gh-'));
+  // One build writes an executable the size of Bun, which Windows also scans on first write.
+  built = await buildFakeGh(buildDir);
+}, 60_000);
+
+afterAll(async () => {
+  await rm(buildDir, { recursive: true, force: true });
+});
 
 afterEach(async () => {
   restoreAuth?.();
@@ -169,7 +119,7 @@ describe('GitHub context routes', () => {
         defaultBranch: 'main',
         url: 'https://github.example/mango/mangostudio',
       },
-      pr: JSON.parse(prOutput),
+      pr: JSON.parse(DEFAULT_PR_OUTPUT),
     });
   });
 
@@ -205,7 +155,7 @@ describe('GitHub context routes', () => {
 
   it('maps authentication and remote discovery failures without leaking stderr', async () => {
     const cases: ReadonlyArray<{
-      scenario: ShimScenario;
+      scenario: FakeGhScenario;
       expected: GithubContext['state'];
     }> = [
       { scenario: { authenticated: false }, expected: 'not-authenticated' },
