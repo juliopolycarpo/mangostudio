@@ -468,7 +468,10 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
       // readdir includes dotfiles, so a leftover staging directory cannot hide.
       const leftovers = readdirSync(l.rootLinux).filter((name) => name.startsWith('.install-'));
       expect(leftovers).toEqual([]);
-    }
+    },
+    // The one case here that builds and extracts a real archive: the budget of the
+    // archive cases below, not the default sized for a single PowerShell call.
+    90000
   );
 });
 
