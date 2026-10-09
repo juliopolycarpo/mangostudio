@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { posix } from 'node:path';
 import type { PathEnv } from '../../runtime-env';
 import type { ManagedVersion, VersionManagerStatus } from '../schemas';
 import { type NodeReleaseSchedule, normalizeNodeVersion } from './lts-policy';
@@ -62,26 +62,26 @@ async function resolveNvmRoot(deps: NvmDetectionDeps): Promise<string | undefine
   if (deps.platform === 'win32') return undefined;
 
   const configuredRoot = deps.env.NVM_DIR?.trim();
-  const candidates = [configuredRoot, join(deps.homeDir, '.nvm')].filter(
+  const candidates = [configuredRoot, posix.join(deps.homeDir, '.nvm')].filter(
     (candidate, index, roots): candidate is string =>
       Boolean(candidate) && roots.indexOf(candidate) === index
   );
 
   for (const root of candidates) {
-    if (await deps.fs.pathExists(join(root, 'nvm.sh'))) return root;
+    if (await deps.fs.pathExists(posix.join(root, 'nvm.sh'))) return root;
   }
   return undefined;
 }
 
 async function readNvmAliasCache(root: string, fs: NvmFileSystem): Promise<NvmAliasCache> {
-  const aliasRoot = join(root, 'alias', 'lts');
+  const aliasRoot = posix.join(root, 'alias', 'lts');
   const aliases = new Map<string, string>();
   const pointers = new Map<string, string>();
   const latestByMajor = new Map<number, string>();
 
   for (const aliasName of await listOptionalDirectory(fs, aliasRoot)) {
     if (!SAFE_NVM_ALIAS_PATTERN.test(aliasName)) continue;
-    const value = (await readOptionalFile(fs, join(aliasRoot, aliasName)))?.trim();
+    const value = (await readOptionalFile(fs, posix.join(aliasRoot, aliasName)))?.trim();
     if (!value) continue;
     const version = normalizeNodeVersion(value);
     if (!version) {
@@ -100,9 +100,9 @@ function readInstalledVersions(
   root: string,
   deps: NvmDetectionDeps
 ): Promise<Array<{ version: string; path: string }>> {
-  const versionsRoot = join(root, 'versions', 'node');
+  const versionsRoot = posix.join(root, 'versions', 'node');
   return readManagedVersions(deps.fs, versionsRoot, (entry) =>
-    join(versionsRoot, entry, 'bin', 'node')
+    posix.join(versionsRoot, entry, 'bin', 'node')
   );
 }
 
@@ -175,8 +175,8 @@ export async function detectNvm(
   }
 
   const [nvmScript, defaultAliasFile, aliasCache, installedVersions] = await Promise.all([
-    readOptionalFile(deps.fs, join(root, 'nvm.sh')),
-    readOptionalFile(deps.fs, join(root, 'alias', 'default')),
+    readOptionalFile(deps.fs, posix.join(root, 'nvm.sh')),
+    readOptionalFile(deps.fs, posix.join(root, 'alias', 'default')),
     readNvmAliasCache(root, deps.fs),
     readInstalledVersions(root, deps),
   ]);

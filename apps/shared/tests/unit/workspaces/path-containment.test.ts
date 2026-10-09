@@ -27,9 +27,9 @@ afterEach(() => {
 
 describe('isPathPrefix', () => {
   it('matches the root and descendants with a separator guard', () => {
-    expect(isPathPrefix('/tmp/project', '/tmp/project')).toBe(true);
-    expect(isPathPrefix('/tmp/project', '/tmp/project/src')).toBe(true);
-    expect(isPathPrefix('/tmp/project', '/tmp/project-extra')).toBe(false);
+    expect(isPathPrefix(rootDir, rootDir)).toBe(true);
+    expect(isPathPrefix(rootDir, join(rootDir, 'nested'))).toBe(true);
+    expect(isPathPrefix(rootDir, `${rootDir}-extra`)).toBe(false);
   });
 
   it.skipIf(process.platform !== 'win32')('keeps resolved Windows component case exact', () => {

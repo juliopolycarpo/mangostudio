@@ -15,6 +15,7 @@ import {
   renderScheduledTaskInstallScript,
   renderScheduledTaskRunnerScript,
   renderSystemdUnitFile,
+  systemdUserUnitPath,
   type UserServiceDefinition,
   type UserServiceExecDeps,
   type UserServiceExecResult,
@@ -147,6 +148,14 @@ describe('renderSystemdUnitFile', () => {
     expect(unit).toContain('ExecStart=/usr/bin/example serve');
     expect(unit).not.toContain('WorkingDirectory');
     expect(unit).not.toContain('Environment=');
+  });
+});
+
+describe('systemdUserUnitPath', () => {
+  it('uses the Linux path layout independently of the process platform', () => {
+    expect(systemdUserUnitPath('/home/test', IDENTITY.unitName)).toBe(
+      '/home/test/.config/systemd/user/example.service'
+    );
   });
 });
 
