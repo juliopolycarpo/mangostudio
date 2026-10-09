@@ -619,7 +619,7 @@ $startedChild.Dispose()
             $budget = [Mango.NativeJobProbe.ImageQueryBudget]::new(2000, [Func[long]]{ return $clock.Now })
             $pattern = ''; $image = 'C:\tools\owned.exe'
             switch ($case) {
-                'persistent-live' { $fake.PersistentFailure = $true; $pattern = 'QueryFullProcessImageNameW PID=42 FILETIME=134359891225276227.*attempt=10' }
+                'persistent-live' { $fake.PersistentFailure = $true; $pattern = 'Image query budget exhausted after 2000ms at image retry wait\(42:.*Win32Error=5 attempt=200' }
                 'outside' { $fake.Current.IsMember = $false; $pattern = 'expected exact-job membership' }
                 'reused-identity' {
                     $fake.Images.Enqueue([Mango.NativeJobProbe.ImageResult]@{ Success = $false; Error = 5; Characters = 32768 })
@@ -641,7 +641,7 @@ $startedChild.Dispose()
             $failure = $null
             try { $fake.Resolve($budget, $attempts, $expected, $image) | Out-Null } catch { $failure = $_.Exception.ToString() }
             Assert-NativeProbe ($failure -match $pattern) "$case must reject the intended invalid metadata or authority"
-            if ($case -eq 'persistent-live') { Assert-NativeProbe ($fake.Queries -eq 10 -and $attempts.Count -eq 10 -and $attempts[9].Outcome -eq 'failed-closed') 'sustained live unknown image remains failed with all bounded attempts' }
+            if ($case -eq 'persistent-live') { Assert-NativeProbe ($fake.Queries -eq 200 -and $attempts.Count -eq 200 -and $clock.Now -eq 2000 -and $attempts[199].NativeError -eq 5 -and $attempts[199].Outcome -eq 'failed-closed') 'sustained live unknown image is retried to the end of the shared budget and remains failed' }
             if ($case -in @('wait-error', 'identity-error', 'reused-identity')) { Assert-NativeProbe ($fake.Queries -eq 1 -and $attempts[0].StateError -match $pattern) 'state/native failures never enter a generic metadata retry' }
             if ($case -in @('wait-error', 'identity-error')) { Assert-NativeProbe ($attempts[0].StateNativeError -eq 6) 'native state error codes remain numeric evidence even when localized exception text omits them' }
             if ($case -eq 'outside') { Assert-NativeProbe ($fake.Queries -eq 0) 'outside object cannot enter the image retry policy' }

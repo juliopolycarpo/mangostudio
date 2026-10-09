@@ -115,14 +115,16 @@ namespace Mango.NativeJobProbe {
         public bool? SameHandleExited;
     }
     /// <summary>Bound every image retry and list refresh in one complete job query with one monotonic clock.</summary>
-    /// <example>var budget=new ImageQueryBudget(2000, ()=>clock.ElapsedMilliseconds);</example>
+    /// <example>var budget=new ImageQueryBudget(ImageQueryBudget.MaximumMilliseconds, ()=>clock.ElapsedMilliseconds);</example>
     public sealed class ImageQueryBudget {
         private readonly Func<long> clock;
         private readonly long started;
+        /// <summary>Largest complete-query budget. A loaded host took 2248ms for one list refresh, and a member that is shutting down can refuse its image for longer than 300ms.</summary>
+        public const int MaximumMilliseconds=10000;
         public readonly int Milliseconds;
         public readonly string StartedAt=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture);
         public ImageQueryBudget(int milliseconds,Func<long> monotonicClock) {
-            if(milliseconds<1 || milliseconds>2000 || monotonicClock==null) throw new ArgumentException("Invalid image query budget " + milliseconds + "; expected1..2000ms and monotonic clock");
+            if(milliseconds<1 || milliseconds>MaximumMilliseconds || monotonicClock==null) throw new ArgumentException("Invalid image query budget " + milliseconds + "; expected1.." + MaximumMilliseconds + "ms and monotonic clock");
             Milliseconds=milliseconds; clock=monotonicClock; started=clock();
         }
         public long ElapsedMilliseconds { get { long elapsed=clock()-started; if(elapsed<0) throw new InvalidOperationException("Invalid negative image query elapsed " + elapsed + "; expected monotonic clock"); return elapsed; } }
@@ -135,7 +137,7 @@ namespace Mango.NativeJobProbe {
     public sealed class MemberExitedException : InvalidOperationException {
         public MemberExitedException(string identity) : base("Exact member " + identity + " signaled exit; expected fresh complete job accounting before settlement") {}
     }
-    /// <summary>Retry only image metadata on one already-owned handle; identity, membership and wait errors remain fatal.</summary>
+    /// <summary>Retry only image metadata on one already-owned handle until the shared budget ends; identity, membership and wait errors remain fatal.</summary>
     /// <example>var member=ImageQueryPolicy.Resolve(readSameHandle,queryImageSameHandle,waitSameHandle,budget,diagnostics,identity,path,true);</example>
     public static class ImageQueryPolicy {
         private static void ValidateState(Member state,Member original,bool requireMember) {
@@ -159,7 +161,7 @@ namespace Mango.NativeJobProbe {
             Member original=readState(); ValidateState(original,null,requireMember);
             if(expectedIdentity!=null && original.Identity!=expectedIdentity) throw new InvalidOperationException("Invalid process identity " + original.Identity + "; expected " + expectedIdentity);
             ImageAttempt last=null;
-            for(int attempt=1;attempt<=10;attempt++) {
+            for(int attempt=1;;attempt++) {
                 try {
                     budget.Require("QueryFullProcessImageNameW(" + original.Identity + ")");
                     Member before=readState(); ValidateState(before,original,requireMember);
@@ -175,12 +177,13 @@ namespace Mango.NativeJobProbe {
                         last.SameHandleExited=waitExited(0);
                         if(last.SameHandleExited.Value) throw new MemberExitedException(original.Identity);
                         if(!after.Alive) throw new InvalidOperationException("Invalid nonsignaled failed-image state " + original.Identity + "; expected live same-handle state");
-                        if(!requireMember || attempt==10) throw new Win32Exception(image.Error,"QueryFullProcessImageNameW PID=" + original.Pid + " FILETIME=" + original.CreationFileTime + " identity=" + original.Identity + " attempt=" + attempt + " Win32Error=" + image.Error + "; expected resolved live image on the same exact-job object");
-                        budget.Require("image retry(" + original.Identity + ")");
+                        if(!requireMember) throw new Win32Exception(image.Error,"QueryFullProcessImageNameW PID=" + original.Pid + " FILETIME=" + original.CreationFileTime + " identity=" + original.Identity + " attempt=" + attempt + " Win32Error=" + image.Error + "; expected resolved live image on the same exact-job object");
+                        string retry="(" + original.Identity + ") Win32Error=" + image.Error + " attempt=" + attempt;
+                        budget.Require("image retry" + retry);
                         int delay=(int)Math.Min(10,budget.Milliseconds-budget.ElapsedMilliseconds);
-                        if(delay<=0) { budget.Require("image retry wait"); }
                         last.SameHandleExited=waitExited(delay);
                         if(last.SameHandleExited.Value) throw new MemberExitedException(original.Identity);
+                        budget.Require("image retry wait" + retry);
                         last.Outcome="retry-same-owned-handle"; continue;
                     }
                     if(!AbsoluteImage(image.Path) || image.Characters!=image.Path.Length || image.Characters>=32768)
@@ -197,7 +200,6 @@ namespace Mango.NativeJobProbe {
                 } catch(MemberExitedException) { if(last!=null) last.Outcome="same-handle-exit-requires-complete-refresh"; throw; }
                 catch(Exception error) { if(last!=null) { last.Outcome="failed-closed"; last.StateError=error.ToString(); last.StateNativeError=error is Win32Exception?((Win32Exception)error).NativeErrorCode:(int?)null; } throw; }
             }
-            throw new InvalidOperationException("Image retry exhausted for " + original.Identity + "; expected resolved live image");
         }
     }
     internal sealed class HeldProcess {
@@ -383,7 +385,7 @@ namespace Mango.NativeJobProbe {
             throw new Win32Exception(error,"WaitForSingleObject PID=" + pid + " retainedIdentity=" + (knownIdentity??"not-yet-attested") + " wait=" + milliseconds + " Win32Error=" + error + "; expected same-handle live or signaled exit");
         }
         private static ImageQueryBudget NewImageBudget() {
-            var clock=Stopwatch.StartNew(); return new ImageQueryBudget(2000,()=>clock.ElapsedMilliseconds);
+            var clock=Stopwatch.StartNew(); return new ImageQueryBudget(ImageQueryBudget.MaximumMilliseconds,()=>clock.ElapsedMilliseconds);
         }
         private static ImageResult QueryImage(IntPtr process) {
             uint capacity=32768; var path=new StringBuilder((int)capacity);
