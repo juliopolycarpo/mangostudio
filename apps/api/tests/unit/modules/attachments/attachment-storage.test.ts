@@ -30,7 +30,8 @@ describe('attachment storage paths', () => {
       'Design-Review_chat-path123/1710000000000/attachment-storage-1-Reference-Image.png'
     );
     expect(result.url).toBe(`/uploads/${result.relativePath}`);
-    expect(result.absolutePath).toBe(`${getConfig().uploads.dir}/${result.relativePath}`);
+    // `relativePath` is the URL form (always `/`); the absolute path is native.
+    expect(result.absolutePath).toBe(join(getConfig().uploads.dir, result.relativePath));
   });
 });
 

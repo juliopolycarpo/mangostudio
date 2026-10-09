@@ -262,7 +262,7 @@ describe('the runtime cache when the release cannot be reached', () => {
   const CACHE_DIR = join(FAKE_RUNTIME_CACHE_ROOT, '1.2.3');
   const BYTES = new TextEncoder().encode('a runtime this hub verified last week');
   const DIGEST = createHash('sha256').update(BYTES).digest('hex');
-  const CACHE_PATH = `${CACHE_DIR}/${ASSET}`;
+  const CACHE_PATH = join(CACHE_DIR, ASSET);
 
   /** Every hop rejects the way a host with no route out does. */
   const offline = (() => {
@@ -316,7 +316,7 @@ describe('the runtime cache when the release cannot be reached', () => {
     const { loaded } = load(
       {
         [CACHE_PATH]: BYTES,
-        [`${CACHE_DIR}/${CHECKSUMS_CACHE_NAME}`]: new TextEncoder().encode(
+        [join(CACHE_DIR, CHECKSUMS_CACHE_NAME)]: new TextEncoder().encode(
           `${'0'.repeat(64)}  some-other-asset\n${DIGEST}  ${ASSET}\n`
         ),
       },
@@ -385,7 +385,7 @@ describe('the runtime cache when the release cannot be reached', () => {
   });
 
   it('launches from a cached archive when the raw asset was never stored', async () => {
-    const archivePath = `${CACHE_DIR}/mangostudio-1.2.3-linux-x64.tar.gz`;
+    const archivePath = join(CACHE_DIR, 'mangostudio-1.2.3-linux-x64.tar.gz');
     const { loaded } = load(
       { [archivePath]: BYTES, [runtimeDigestSidecarPath(archivePath)]: sidecar(DIGEST) },
       offline
@@ -409,7 +409,7 @@ describe('the runtime cache while the release is reachable', () => {
   it('re-downloads a cache entry that disagrees with the published checksum', async () => {
     const fresh = new TextEncoder().encode('the bytes this release publishes');
     const hash = createHash('sha256').update(fresh).digest('hex');
-    const assetPath = `${CACHE_DIR}/${ASSET}`;
+    const assetPath = join(CACHE_DIR, ASSET);
     const cache: Record<string, Uint8Array> = {
       [assetPath]: new TextEncoder().encode('a stale or tampered entry'),
       [runtimeDigestSidecarPath(assetPath)]: new TextEncoder().encode('0'.repeat(64)),
@@ -458,7 +458,7 @@ describe('the runtime cache while the release is reachable', () => {
       },
     });
 
-    expect(written).toContain(`${CACHE_DIR}/${CHECKSUMS_CACHE_NAME}`);
+    expect(written).toContain(join(CACHE_DIR, CHECKSUMS_CACHE_NAME));
   });
 
   // Canary keeps them too, now that a canary release is immutable: the copy

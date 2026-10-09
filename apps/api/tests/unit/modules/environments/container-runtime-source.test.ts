@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 import {
   type ContainerRuntimeSourceDeps,
   ContainerRuntimeSourceError,
   resolveContainerRuntimeBinary,
 } from '../../../../src/modules/environments/domain/container-runtime-source';
 
+// Host paths: the hub mounts them, so they take the host's separators.
 const MANGO_HOME = '/home/j/.mango';
 const BASE_DIR = '/repo';
 const BYTES = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
@@ -36,7 +38,7 @@ describe('resolveContainerRuntimeBinary in a source checkout', () => {
     const result = await resolveContainerRuntimeBinary('linux-x64-musl', deps({ version: 'dev' }));
 
     expect(result).toEqual({
-      path: '/repo/.mango/out/linux-x64-musl/mangostudio-runtime',
+      path: join(BASE_DIR, '.mango', 'out', 'linux-x64-musl', 'mangostudio-runtime'),
       offlineCache: false,
     });
   });
@@ -103,7 +105,7 @@ describe('resolveContainerRuntimeBinary from a release', () => {
     );
 
     expect(result).toEqual({
-      path: '/home/j/.mango/runtime-cache/0.1.1/mangostudio-runtime-0.1.1-linux-x64',
+      path: join(MANGO_HOME, 'runtime-cache', '0.1.1', 'mangostudio-runtime-0.1.1-linux-x64'),
       offlineCache: false,
     });
     expect(written.path).toBe(result.path);
@@ -160,7 +162,7 @@ describe('resolveContainerRuntimeBinary from a release', () => {
     );
 
     expect(result).toEqual({
-      path: '/home/j/.mango/runtime-cache/0.1.1/mangostudio-runtime-0.1.1-linux-x64',
+      path: join(MANGO_HOME, 'runtime-cache', '0.1.1', 'mangostudio-runtime-0.1.1-linux-x64'),
       offlineCache: true,
     });
   });
@@ -174,7 +176,12 @@ describe('resolveContainerRuntimeBinary from a release', () => {
     // Cache directory and asset name are both the hub's own version: canary
     // publishes one release per green commit, so that is what it can download.
     expect(result).toEqual({
-      path: '/home/j/.mango/runtime-cache/0.1.1-canary.gabc1234/mangostudio-runtime-0.1.1-canary.gabc1234-linux-x64',
+      path: join(
+        MANGO_HOME,
+        'runtime-cache',
+        '0.1.1-canary.gabc1234',
+        'mangostudio-runtime-0.1.1-canary.gabc1234-linux-x64'
+      ),
       offlineCache: false,
     });
   });
