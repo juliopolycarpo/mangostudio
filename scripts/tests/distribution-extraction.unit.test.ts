@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 
+import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { captureCommand } from '../lib/exec';
 import { extractTargetArchive, zipArchiveCommands } from '../release/extract-target';
 
@@ -49,8 +50,8 @@ function fileSnapshot(rootDir: string): Record<string, string> {
   return snapshot;
 }
 
-async function runOrThrow(command: string[], cwd?: string): Promise<void> {
-  const result = await captureCommand(command, cwd ? { cwd } : undefined);
+async function runOrThrow(command: readonly string[], cwd?: string): Promise<void> {
+  const result = await captureCommand([...command], cwd ? { cwd } : undefined);
   if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout);
 }
 
@@ -63,8 +64,10 @@ describe('distribution extraction', () => {
 
     const tarArchive = join(rootDir, 'target.tar.gz');
     const zipArchive = join(rootDir, 'target.zip');
-    await runOrThrow(['tar', '-czf', tarArchive, '-C', sourceDir, '.']);
-    await runOrThrow(['zip', '-qr', zipArchive, '.'], sourceDir);
+    const tar = tarCreationCommand(tarArchive, [{ directory: sourceDir, members: ['.'] }]);
+    const zip = zipCreationCommand(zipArchive, sourceDir);
+    await runOrThrow(tar.command, tar.cwd);
+    await runOrThrow(zip.command, zip.cwd);
 
     const tarDestination = join(rootDir, '.mango', 'out', 'linux-x64');
     const zipDestination = join(rootDir, '.mango', 'out', 'windows-x64');
@@ -100,7 +103,8 @@ describe('distribution extraction', () => {
       symlinkSync('mangostudio', join(sourceDir, 'mangostudio-link'));
 
       const archivePath = join(rootDir, 'target.tar.gz');
-      await runOrThrow(['tar', '-czf', archivePath, '-C', sourceDir, '.']);
+      const tar = tarCreationCommand(archivePath, [{ directory: sourceDir, members: ['.'] }]);
+      await runOrThrow(tar.command, tar.cwd);
 
       const destination = join(rootDir, '.mango', 'out', 'linux-x64');
       await extractTargetArchive({
