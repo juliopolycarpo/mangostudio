@@ -386,6 +386,7 @@ function wire(
     // a signal that could not be delivered — on a child that did start.
     if (child.pid === undefined) launch.refused(error);
     tail.appendText(`\n${error.message}\n`);
+    // Behind any stdout frames still waiting for their turn; see `deferReads`.
     handle.failed(error);
     exit.settle({ code: null, signal: null });
   });

@@ -141,6 +141,25 @@ describe('createStreamPort read delivery', () => {
     expect(port.closures).toEqual([{ kind: 'closed', reason: 'write EPIPE' }]);
   });
 
+  it('delivers frames that arrived before a failure the transport reports ahead of the closure', async () => {
+    const port = openPort(true);
+
+    port.emitData(PING);
+    port.handle.failed(new Error('kill EPERM'));
+    await nextTurn();
+
+    expect(port.order).toEqual(['ping', 'closure:closed']);
+    expect(port.closures).toEqual([{ kind: 'closed', reason: 'kill EPERM' }]);
+  });
+
+  it('reports a failure from the transport at once on an inline port', () => {
+    const port = openPort(false);
+
+    port.handle.failed(new Error('kill EPERM'));
+
+    expect(port.closures).toEqual([{ kind: 'closed', reason: 'kill EPERM' }]);
+  });
+
   it('still delivers the end of the stream after a frame listener throws', () => {
     const immediates = new ManualImmediates();
     try {

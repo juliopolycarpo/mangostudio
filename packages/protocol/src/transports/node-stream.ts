@@ -34,7 +34,8 @@ export interface StreamPortOptions {
 /**
  * Builds the port for one pair of streams and returns the handle, so a
  * transport that observes more than the streams (a launcher watching the
- * child's exit) can still report a closure.
+ * child's exit) can still report a closure. With `deferReads`, the handle's
+ * `failed` waits behind any reads still queued and is immediate otherwise.
  *
  * Ending the port ends the writable half, detaches every listener from the
  * readable half and pauses it, which is what lets the process exit and the
@@ -69,7 +70,9 @@ export function createStreamPort(
   // exits breaks the pipe right behind its last frames, and failing the port
   // inline would drop them while they wait.
   if (!isSameStream(readable, writable)) reportStreamErrors(writable, handle, deliver);
-  return handle;
+  // A failure the transport reports itself (a launcher's child `error`) waits
+  // behind those reads too, and lands at once when there are none.
+  return { ...handle, failed: (error) => deliver.after(() => handle.failed(error)) };
 }
 
 /** True when both halves are one duplex object, as a socket's are. */
@@ -119,11 +122,14 @@ function readFramesFrom(
 /** How a stream event reaches the port, and how to drop the ones still waiting. */
 interface ReadDelivery {
   run(event: () => void): void;
+  /** Runs behind whatever is waiting, and at once when nothing is. */
+  after(event: () => void): void;
   stop(): void;
 }
 
 const deliverNow: ReadDelivery = {
   run: (event) => event(),
+  after: (event) => event(),
   stop: () => undefined,
 };
 
@@ -158,12 +164,14 @@ function deliverLaterInOrder(): ReadDelivery {
       if (waiting.length > 0) schedule();
     }
   };
+  const run = (event: () => void): void => {
+    if (stopped) return;
+    waiting.push(event);
+    schedule();
+  };
   return {
-    run: (event) => {
-      if (stopped) return;
-      waiting.push(event);
-      schedule();
-    },
+    run,
+    after: (event) => (waiting.length > 0 ? run(event) : event()),
     stop: () => {
       stopped = true;
       waiting = [];

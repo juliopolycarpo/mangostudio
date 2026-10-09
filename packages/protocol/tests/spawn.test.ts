@@ -140,6 +140,20 @@ describe('spawn launcher', () => {
     });
   });
 
+  it('delivers a child frame that arrived before a child error ahead of the closure', async () => {
+    const recording = new RecordingSpawn();
+    const peer = spawnPort({ argv: ['runtime'] }, recording.spawn);
+    const order: string[] = [];
+    peer.port.onFrame((frame) => order.push(frame.type));
+    peer.port.onClosed((closure) => order.push(`closure:${closure.kind}`));
+
+    recording.child.stdout.emit('data', Buffer.from('{"type":"ping"}\n'));
+    recording.child.emit('error', new Error('kill EPERM'));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(order).toEqual(['ping', 'closure:closed']);
+  });
+
   it('completes the handshake and round-trips a request with a real child', async () => {
     const peer = spawnPort({ argv: [BUN, ECHO_CHILD] });
     try {
