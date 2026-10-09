@@ -69,6 +69,10 @@ async function createTempRepo(): Promise<string> {
   await runFixtureGit(path, ['config', 'user.email', 'git-write@mangostudio.test']);
   await runFixtureGit(path, ['config', 'user.name', 'Git Write Test']);
   await runFixtureGit(path, ['config', 'commit.gpgSign', 'false']);
+  // Git for Windows ships `core.autocrlf=true` at system scope, which the route's
+  // own Git also reads, so a restore from the index or a stash would write CRLF.
+  // The restore tests assert the bytes they wrote; pin them to LF.
+  await runFixtureGit(path, ['config', 'core.autocrlf', 'false']);
   // Developer machines may set core.hooksPath globally (e.g. to force
   // Signed-off-by). Pointing at this repo's own hooks directory outranks
   // the global path while still running fixtures that install local hooks.
