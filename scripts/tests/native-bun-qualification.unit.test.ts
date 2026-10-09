@@ -386,9 +386,11 @@ describe('qualification inputs and seals', () => {
 });
 
 describe('full qualification receipts', () => {
-  test('rejects altered runtime or fake build feature graphs before validation', async () => {
-    for (const target of ['runtime', 'fake'] as const) {
-      for (const featureType of ['sdk', 'primary'] as const) {
+  // One case per graph: a full fake run takes 3-5 s on Windows, so four in one test
+  // outlast the lane's 15 s budget there.
+  for (const target of ['runtime', 'fake'] as const) {
+    for (const featureType of ['sdk', 'primary'] as const) {
+      test(`rejects an altered ${target} ${featureType} feature graph before validation`, async () => {
         const source = await checkout();
         const fake = new FakeNativeCommands();
         if (featureType === 'sdk') fake.sdkFeatures[target] = ['different'];
@@ -403,9 +405,9 @@ describe('full qualification receipts', () => {
         expect(fake.calls.some((call) => call.label === 'check' || call.label === 'test')).toBe(
           false
         );
-      }
+      });
     }
-  });
+  }
 
   test('passes a complete single-attempt run with immutable source/artifacts and explicit binaries', async () => {
     const source = await checkout();
