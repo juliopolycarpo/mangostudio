@@ -76,7 +76,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.sources.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # The producer bounds itself at 55 minutes. Around it sit the Windows probe (10 at most),
+    # two checkouts, the tooling install and the evidence upload: a job that ends first cancels
+    # the producer before its final seals and census, leaving a receipt that still says running.
+    timeout-minutes: 80
     # A failing untouched baseline is retained as evidence. Candidate failures
     # remain blocking; no baseline failure is represented as a passing suite.
     continue-on-error: ${{ matrix.source.baseline }}

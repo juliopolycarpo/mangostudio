@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 import {
+  NATIVE_QUALIFICATION_TIMEOUT_SECONDS,
   nativeQualificationEnvironment,
   parseNativeQualificationArgs,
   runNativeQualification,
@@ -28,6 +29,8 @@ import {
   sealNativeArtifact,
   sealNativeSource,
 } from '../lib/native-bun-qualification-source';
+import { readText } from './support/read-text';
+import { extractJobBlock } from './support/workflow-blocks';
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -466,6 +469,31 @@ describe('qualification inputs and seals', () => {
         )
       ).rejects.toThrow('expected an unfiltered single-attempt suite');
     }
+  });
+});
+
+describe('qualification workflow budget', () => {
+  // Checkouts, the tooling install and the evidence upload carry no step bound of their own.
+  const UNBOUNDED_STEP_MINUTES = 10;
+
+  test('gives the job its bounded pre-steps and unbounded steps beyond the producer budget', () => {
+    const job = extractJobBlock(
+      readText('.github/workflows/native-bun-qualification.yml'),
+      'qualify'
+    );
+    const jobMinutes = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job)?.[1]);
+    const boundedStepMinutes = [...job.matchAll(/^ {8}timeout-minutes: (\d+)$/gm)].reduce(
+      (total, step) => total + Number(step[1]),
+      0
+    );
+    const required =
+      NATIVE_QUALIFICATION_TIMEOUT_SECONDS / 60 + boundedStepMinutes + UNBOUNDED_STEP_MINUTES;
+
+    expect(boundedStepMinutes, 'expected the Windows probe step to declare its own bound').toBe(10);
+    expect(
+      jobMinutes >= required,
+      `expected qualify timeout-minutes: at least ${required} (producer ${NATIVE_QUALIFICATION_TIMEOUT_SECONDS / 60} + bounded steps ${boundedStepMinutes} + other steps ${UNBOUNDED_STEP_MINUTES}) | received: ${jobMinutes}`
+    ).toBe(true);
   });
 });
 

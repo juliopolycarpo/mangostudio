@@ -97,7 +97,14 @@ export interface NativeQualificationReceipt {
   };
 }
 
-const TOTAL_TIMEOUT_SECONDS = 55 * 60;
+/**
+ * Everything the producer runs, from the first seal to the last census. The workflow job that
+ * calls it also checks out twice, installs and probes first, and uploads evidence afterwards, so
+ * its own `timeout-minutes` must exceed this; `native-bun-qualification.unit.test.ts` holds the two
+ * together.
+ * @example const jobMinutes = NATIVE_QUALIFICATION_TIMEOUT_SECONDS / 60 + preStepMinutes;
+ */
+export const NATIVE_QUALIFICATION_TIMEOUT_SECONDS = 55 * 60;
 
 /** Parse a source checkout and a separate receipt directory. @example parseNativeQualificationArgs(['--root', '../source', '--out', '../receipts', '--sha', sha]); */
 export function parseNativeQualificationArgs(args: readonly string[]): NativeQualificationOptions {
@@ -341,7 +348,7 @@ export async function runNativeQualification(
     commandPolicy: {
       attempts: 1,
       fullCommands: ['bun run check', 'bun run test'],
-      totalTimeoutSeconds: TOTAL_TIMEOUT_SECONDS,
+      totalTimeoutSeconds: NATIVE_QUALIFICATION_TIMEOUT_SECONDS,
       inheritedSelectorsCleared: true,
     },
     status: 'running',
@@ -381,10 +388,10 @@ export async function runNativeQualification(
     timeout: number,
     overrides: Record<string, string> = {}
   ): Promise<NativeCommandReceipt> => {
-    const remaining = TOTAL_TIMEOUT_SECONDS - (Date.now() - started) / 1_000;
+    const remaining = NATIVE_QUALIFICATION_TIMEOUT_SECONDS - (Date.now() - started) / 1_000;
     if (remaining <= 0)
       throw new Error(
-        `Qualification exceeded ${TOTAL_TIMEOUT_SECONDS}s; expected completion below the workflow bound`
+        `Qualification exceeded ${NATIVE_QUALIFICATION_TIMEOUT_SECONDS}s; expected completion below the workflow bound`
       );
     let result: NativeCommandReceipt;
     try {
