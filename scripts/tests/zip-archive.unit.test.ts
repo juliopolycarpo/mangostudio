@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { CaptureResult } from '../lib/exec';
-import { openZipArchive, zipArchiveCommands } from '../lib/zip-archive';
+import { extractZipArchive, openZipArchive, zipArchiveCommands } from '../lib/zip-archive';
 
 class FakeArchiveCommands {
   readonly commands: string[][] = [];
@@ -57,6 +57,32 @@ describe('ZIP archive reader', () => {
     expect(extraction).toContain("$ErrorActionPreference = 'Stop'");
     expect(extraction).toContain("-LiteralPath 'D:\\tools\\tool''s.zip'");
     expect(extraction).toContain("-DestinationPath 'D:\\cache\\tool''s directory'");
+  });
+
+  test('extracts an already judged archive without listing it again', async () => {
+    const commands = new FakeArchiveCommands();
+
+    await extractZipArchive('/tmp/tool.zip', '/tmp/cache', {
+      platform: 'linux',
+      unzipCommand: '/usr/bin/unzip',
+      runCommand: commands.run.bind(commands),
+    });
+
+    expect(commands.commands).toEqual([
+      ['/usr/bin/unzip', '-q', '/tmp/tool.zip', '-d', '/tmp/cache'],
+    ]);
+  });
+
+  test('names the archive when a direct extraction fails', async () => {
+    const commands = new FakeArchiveCommands();
+    commands.extraction = { stdout: '', stderr: 'disk full', exitCode: 1 };
+
+    await expect(
+      extractZipArchive('tools.zip', 'cache', {
+        unzipCommand: 'unzip',
+        runCommand: commands.run.bind(commands),
+      })
+    ).rejects.toThrow('Failed to extract ZIP archive tools.zip: disk full');
   });
 
   test('keeps POSIX unzip paths unchanged', () => {

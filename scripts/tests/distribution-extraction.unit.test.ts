@@ -16,7 +16,8 @@ import { join, relative } from 'node:path';
 
 import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { captureCommand } from '../lib/exec';
-import { extractTargetArchive, zipArchiveCommands } from '../release/extract-target';
+import { zipArchiveCommands } from '../lib/zip-archive';
+import { extractTargetArchive } from '../release/extract-target';
 
 let tempDirs: string[] = [];
 

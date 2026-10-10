@@ -66,24 +66,49 @@ export async function openZipArchive(
   archivePath: string,
   dependencies: ZipArchiveDependencies = {}
 ): Promise<ArchiveReader> {
-  const unzipCommand =
-    dependencies.unzipCommand === undefined ? Bun.which('unzip') : dependencies.unzipCommand;
-  const runCommand = dependencies.runCommand ?? captureCommand;
-  const commands = zipArchiveCommands(archivePath, '', unzipCommand, dependencies.platform);
-  const listing = await runArchiveCommand('list', archivePath, commands.list, runCommand);
+  // Resolved once, so the listing and the extraction run the same tool.
+  const resolved = { ...dependencies, unzipCommand: resolveUnzipCommand(dependencies) };
+  const commands = zipArchiveCommands(archivePath, '', resolved.unzipCommand, resolved.platform);
+  const listing = await runArchiveCommand(
+    'list',
+    archivePath,
+    commands.list,
+    resolved.runCommand ?? captureCommand
+  );
 
   return {
     entries: listing.split(/\r?\n/).filter(Boolean),
-    extract: async (destination: string): Promise<void> => {
-      const { extract } = zipArchiveCommands(
-        archivePath,
-        destination,
-        unzipCommand,
-        dependencies.platform
-      );
-      await runArchiveCommand('extract', archivePath, extract, runCommand);
-    },
+    extract: (destination: string): Promise<void> =>
+      extractZipArchive(archivePath, destination, resolved),
   };
+}
+
+/**
+ * Extract a ZIP whose entries the caller has already judged, without listing it again.
+ * // Usage: await extractZipArchive('tools.zip', 'tools')
+ */
+export async function extractZipArchive(
+  archivePath: string,
+  destination: string,
+  dependencies: ZipArchiveDependencies = {}
+): Promise<void> {
+  const { extract } = zipArchiveCommands(
+    archivePath,
+    destination,
+    resolveUnzipCommand(dependencies),
+    dependencies.platform
+  );
+  await runArchiveCommand(
+    'extract',
+    archivePath,
+    extract,
+    dependencies.runCommand ?? captureCommand
+  );
+}
+
+/** An injected `null` means "no unzip here"; only an absent choice probes PATH. */
+function resolveUnzipCommand(dependencies: ZipArchiveDependencies): string | null {
+  return dependencies.unzipCommand === undefined ? Bun.which('unzip') : dependencies.unzipCommand;
 }
 
 async function runArchiveCommand(

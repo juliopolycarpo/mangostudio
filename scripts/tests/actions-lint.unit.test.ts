@@ -177,7 +177,13 @@ describe('actions-lint bootstrap', () => {
     expect(download.downloads).toEqual([
       'https://example.invalid/releases/v1.0.0/fake-tool-1.0.0.zip',
     ]);
-    expect(commands.commands).toHaveLength(3);
+    // One listing to judge the entries, one extraction: the archive is not listed twice.
+    expect(
+      commands.commands.map((command) =>
+        (command[3] ?? '').includes('OpenRead') ? 'list' : 'extract'
+      ),
+      `expected ZIP commands: list, extract | received ${commands.commands.length} commands`
+    ).toEqual(['list', 'extract']);
     expect(commands.commands.at(-1)?.[3]).toContain('Expand-Archive');
   });
 

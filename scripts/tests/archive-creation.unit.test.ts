@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openTarArchive } from '../lib/archive';
 import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { captureCommand } from '../lib/exec';
-import { zipArchiveCommands } from '../release/extract-target';
+import { zipArchiveCommands } from '../lib/zip-archive';
 
 const roots: string[] = [];
 afterEach(() => {

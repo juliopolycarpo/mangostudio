@@ -3,22 +3,17 @@
 import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-import { type ArchiveReader, openTarArchive } from '../lib/archive';
+import { openTarArchive } from '../lib/archive';
 import { ROOT_DIR } from '../lib/config';
 import {
   assertSafeDistributionArchiveEntries,
   DISTRIBUTION_MANIFEST_FILE,
   readDistributionManifest,
 } from '../lib/distribution-manifest';
-import { type CaptureResult, captureCommand } from '../lib/exec';
 import { assertSafeToDelete } from '../lib/fs-assert';
 import { ALL_BINARY_TARGETS, releaseArchiveFileName } from '../lib/release-targets';
 import { assertNoUnexpectedArguments, error, parseArgs, success } from '../lib/runner';
-import { zipArchiveCommands } from '../lib/zip-archive';
-
-export { zipArchiveCommands } from '../lib/zip-archive';
-
-type CommandRunner = (command: string[]) => Promise<CaptureResult>;
+import { openZipArchive, type ZipArchiveDependencies } from '../lib/zip-archive';
 
 interface ExtractTargetArchiveOptions {
   readonly archivePath: string;
@@ -28,20 +23,14 @@ interface ExtractTargetArchiveOptions {
   readonly rootDir: string;
 }
 
-interface ExtractTargetArchiveDependencies {
-  /** Zip only; the tar.gz half reads the archive in-process. */
-  readonly runCommand?: CommandRunner;
-  readonly unzipCommand?: string | null;
-  readonly platform?: NodeJS.Platform;
-}
-
 export async function extractTargetArchive(
   options: ExtractTargetArchiveOptions,
-  dependencies: ExtractTargetArchiveDependencies = {}
+  // Zip only; the tar.gz half reads the archive in-process and never probes for unzip.
+  dependencies: ZipArchiveDependencies = {}
 ): Promise<void> {
   const archive =
     options.archiveFormat === 'zip'
-      ? await openZipArchive(options, dependencies)
+      ? await openZipArchive(options.archivePath, dependencies)
       : await openTarArchive(options.archivePath);
 
   // Judged before anything is written; extraction below targets a staging
@@ -72,54 +61,6 @@ export async function extractTargetArchive(
   } finally {
     rmSync(stagingDir, { force: true, recursive: true });
   }
-}
-
-/** Present the subprocess-backed zip path as the same reader as the native one. */
-async function openZipArchive(
-  options: ExtractTargetArchiveOptions,
-  dependencies: ExtractTargetArchiveDependencies
-): Promise<ArchiveReader> {
-  const runCommand = dependencies.runCommand ?? ((command) => captureCommand(command));
-  const unzipCommand = resolveUnzipCommand(dependencies.unzipCommand);
-  const platform = dependencies.platform;
-  const listing = await runArchiveCommand(
-    'list',
-    zipArchiveCommands(options.archivePath, options.destination, unzipCommand, platform).list,
-    runCommand
-  );
-
-  return {
-    entries: listing.split(/\r?\n/).filter(Boolean),
-    extract: async (destination: string): Promise<void> => {
-      const { extract } = zipArchiveCommands(
-        options.archivePath,
-        destination,
-        unzipCommand,
-        platform
-      );
-      await runArchiveCommand('extract', extract, runCommand);
-    },
-  };
-}
-
-async function runArchiveCommand(
-  operation: 'list' | 'extract',
-  command: readonly string[],
-  runCommand: CommandRunner
-): Promise<string> {
-  const result = await runCommand([...command]);
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `Failed to ${operation} target archive: ${result.stderr || result.stdout || `exit ${result.exitCode}`}`
-    );
-  }
-  return result.stdout;
-}
-
-function resolveUnzipCommand(injected: string | null | undefined): string | null {
-  // Reached only from the zip path, so the tar.gz majority never probes for a
-  // tool it will not run.
-  return injected === undefined ? Bun.which('unzip') : injected;
 }
 
 function assertMaterializedMembers(destination: string, expectedMembers: readonly string[]): void {

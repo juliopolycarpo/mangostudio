@@ -10,7 +10,7 @@ import { dirname, isAbsolute, join, win32 } from 'node:path';
 
 import { extractTarArchive, openTarArchive } from '../archive';
 import { ROOT_DIR } from '../config';
-import { openZipArchive, type ZipArchiveDependencies } from '../zip-archive';
+import { extractZipArchive, openZipArchive, type ZipArchiveDependencies } from '../zip-archive';
 import {
   type PlatformKey,
   resolvePlatformKey,
@@ -53,7 +53,8 @@ export function createBootstrapIo(zipDependencies: ZipArchiveDependencies = {}):
     },
     async extractArchive(archivePath, destDir) {
       if (archivePath.endsWith('.zip')) {
-        await (await openZipArchive(archivePath, zipDependencies)).extract(destDir);
+        // `installTool` already listed and judged the entries; listing again is a second process.
+        await extractZipArchive(archivePath, destDir, zipDependencies);
         return;
       }
       await extractTarArchive(archivePath, destDir);
