@@ -36,13 +36,44 @@ jobs:
     name: Collect
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      TURBO_CACHE_MAX_SIZE: 16MB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - id: setup
+        uses: ./.github/actions/setup-mango
         with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - id: toolchain
+        name: Resolve check cache toolchains
+        run: |
+          set -euo pipefail
+          turbo="$(bun run turbo:version | tail -n 1)"
+          typescript="$(bunx --bun tsc --version | awk '{print $2}')"
+          if [ -z "${turbo}" ] || [ -z "${typescript}" ]; then
+            echo "::error::empty toolchain version (turbo='${turbo}', typescript='${typescript}')"
+            exit 1
+          fi
+          {
+            echo "turbo=${turbo}"
+            echo "typescript=${typescript}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Reuse a prior Check snapshot without waiting for or saving this run's
+      # cache. A miss leaves the collector's normal check execution intact.
+      - name: Restore check cache
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: turbo
+          path: .turbo/cache
+          validity: check-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'bun.lock', 'package.json', 'apps/*/package.json', 'apps/*/turbo.json', 'packages/*/package.json', 'packages/*/turbo.json') }}
+          restore-prefix: check-
+          mode: restore
+          rotate: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Download test metrics fragment

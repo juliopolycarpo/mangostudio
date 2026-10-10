@@ -174,11 +174,14 @@ describe('CI cache policy', () => {
     // one Bun build's extracted packages with a different one.
     expect(readText('.github/actions/setup-mango/action.yml')).toContain('bun --revision');
 
-    // One restore and one save per lane; the rotation describe below pins how
-    // each is keyed and wired.
+    // One restore and one save per producer lane. QA consumes Check's cache
+    // read-only; the rotation describe below pins the producer wiring.
     const turbo = byFamily('turbo');
     expect(turbo.map((site) => `${site.file}:${site.inputs.mode}`).sort()).toEqual(
-      TURBO_LANES.flatMap(({ file }) => [`${file}:restore`, `${file}:save`]).sort()
+      [
+        ...TURBO_LANES.flatMap(({ file }) => [`${file}:restore`, `${file}:save`]),
+        '.github/workflows/qa-metrics.yml:restore',
+      ].sort()
     );
     for (const site of turbo.filter((candidate) => candidate.inputs.mode === 'restore')) {
       expect(site.inputs['restore-prefix']).toMatch(/^(check|test|build)-$/);
@@ -385,6 +388,38 @@ function withTempDir<T>(body: (dir: string) => Promise<T> | T): Promise<T> | T {
     throw error;
   }
 }
+
+describe('QA check cache restore', () => {
+  test('uses exactly the Check cache contract and bound', () => {
+    const file = '.github/workflows/qa-metrics.yml';
+    const sites = turboSites(file);
+    expect(sites, 'expected one QA Turbo restore | received cache calls').toHaveLength(1);
+    const restore = sites[0];
+    const checkRestore = turboSites('.github/workflows/lint.yml').find(
+      (site) => site.inputs.mode === 'restore'
+    );
+    expect(checkRestore, 'expected Check Turbo restore | received none').toBeDefined();
+    expect(restore.inputs).toEqual(checkRestore?.inputs ?? {});
+    expect(restore.inputs.mode).toBe('restore');
+    expect(restore.inputs.path).toBe('.turbo/cache');
+    expect(restore.inputs['restore-prefix']).toBe('check-');
+    expect(restore.inputs.rotate).toBe('true');
+    expect(hashedGlobs(restore.inputs.validity)).toEqual([...TURBO_KEY_GLOBS]);
+    expect(jobEnv(file, 'collect').TURBO_CACHE_MAX_SIZE).toBe('16MB');
+    expect(jobEnv(file, 'collect').TURBO_CACHE_MAX_SIZE).toBe(
+      jobEnv('.github/workflows/lint.yml', 'check').TURBO_CACHE_MAX_SIZE
+    );
+
+    const collect = extractJobBlock(readText(file), 'collect');
+    expect(collect).toMatch(/- id: setup\n\s+uses: \.\/\.github\/actions\/setup-mango/);
+    expect(collect).toMatch(/- id: toolchain\n\s+name: Resolve check cache toolchains/);
+    expect(collect).toContain('bun run turbo:version');
+    expect(collect).toContain('bunx --bun tsc --version');
+    expect(collect).toContain(`echo "turbo=\${turbo}"`);
+    expect(collect).toContain(`echo "typescript=\${typescript}"`);
+    expect(collect).toContain(`if [ -z "\${turbo}" ] || [ -z "\${typescript}" ]; then`);
+  });
+});
 
 describe('Turbo snapshot key', () => {
   for (const { file } of TURBO_LANES) {

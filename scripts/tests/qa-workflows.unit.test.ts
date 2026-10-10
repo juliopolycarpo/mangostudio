@@ -9,7 +9,7 @@ import {
   QA_METRICS_MAX_BYTES,
 } from '../qa-gate/metrics-envelope';
 import { readText } from './support/read-text';
-import { extractJobBlock } from './support/workflow-blocks';
+import { extractJobBlock, extractStepBlocks, parseNeedsList } from './support/workflow-blocks';
 
 // Trust-boundary policy for the PR QA pipeline: workflows that execute
 // pull-request code must stay read-only, and the write-capable publisher must
@@ -41,6 +41,27 @@ describe('unprivileged collection side', () => {
     const workflow = readText('.github/workflows/qa-metrics.yml');
 
     expect(workflow).toContain('permissions:\n  contents: read\n\njobs:');
+    expect(extractJobBlock(workflow, 'collect')).not.toMatch(/^\s+permissions:/m);
+  });
+
+  test('qa-metrics restores the check cache before collecting, without saving or waiting for Check', () => {
+    const workflow = readText('.github/workflows/qa-metrics.yml');
+    const collect = extractJobBlock(workflow, 'collect');
+    const cacheSteps = extractStepBlocks(collect).filter((step) =>
+      step.includes('uses: ./.github/actions/cache-scoped')
+    );
+
+    expect(cacheSteps, 'expected one QA cache restore | received cache steps').toHaveLength(1);
+    expect(cacheSteps[0], 'expected QA cache mode: restore | received cache step').toMatch(
+      /^\s+mode: restore$/m
+    );
+    expect(collect.indexOf(cacheSteps[0])).toBeLessThan(
+      collect.indexOf('name: Collect QA metrics envelope')
+    );
+    expect(collect).not.toMatch(/^\s+needs:/m);
+    expect(
+      parseNeedsList(extractJobBlock(readText('.github/workflows/ci.yml'), 'qa-metrics'))
+    ).not.toContain('check');
   });
 
   test('test.yml hands the fragment off with 1-day retention and failure-only coverage', () => {
@@ -96,7 +117,7 @@ describe('unprivileged collection side', () => {
     expect(build).toContain('name: frontend-dist');
     expect(qaMetrics).toContain('name: frontend-dist');
     expect(qaMetrics).toContain('QA_FRONTEND_DIST: ./frontend-dist');
-    expect(qaMetrics).not.toContain('cache-scoped');
+    expect(qaMetrics).not.toContain('bun run build');
     expect(ci).toContain('needs: [test, build, changes, rust-coverage]');
   });
 
