@@ -268,7 +268,8 @@ export function spawnPort(options: SpawnOptions, spawnChild: SpawnChild = spawn)
   const limit = { maxFrameBytes };
   const handle =
     child?.stdin && child.stdout
-      ? createStreamPort(child.stdout, child.stdin, limit)
+      ? // Every answer is written from a read callback otherwise; see `deferReads`.
+        createStreamPort(child.stdout, child.stdin, { ...limit, deferReads: true })
       : createNdjsonPort({ sink: unspawnedSink(), ...limit });
   wire(child, handle, options, tail, exit, launch);
 
@@ -385,6 +386,7 @@ function wire(
     // a signal that could not be delivered — on a child that did start.
     if (child.pid === undefined) launch.refused(error);
     tail.appendText(`\n${error.message}\n`);
+    // Behind any stdout frames still waiting for their turn; see `deferReads`.
     handle.failed(error);
     exit.settle({ code: null, signal: null });
   });
