@@ -155,6 +155,33 @@ class FixtureProcessCensus {
   };
 }
 
+/** A census that fails exactly once, on the first call its trigger accepts. */
+class FailingOnceCensus {
+  private calls = 0;
+  private failed = false;
+  constructor(
+    private readonly inner: FixtureProcessCensus,
+    private readonly trigger: (call: number, rows: readonly NativeProcess[]) => boolean
+  ) {}
+
+  read = async (): Promise<NativeProcess[]> => {
+    const rows = await this.inner.read();
+    this.calls += 1;
+    if (this.failed || !this.trigger(this.calls, rows)) return rows;
+    this.failed = true;
+    throw new Error('named fake census timeout');
+  };
+}
+
+function briefFixtureCommand(pidFile: string): readonly string[] {
+  return [
+    process.execPath,
+    '-e',
+    'const { rename } = await import("node:fs/promises"); await Bun.write(process.argv[1] + ".tmp", String(process.pid)); await rename(process.argv[1] + ".tmp", process.argv[1]); await Bun.sleep(300);',
+    pidFile,
+  ];
+}
+
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -414,12 +441,47 @@ describe('single command receipt', () => {
       env: { ...process.env },
       timeoutSeconds: 5,
       pollIntervalMs: 10,
+      settleMs: 100,
       snapshot: unavailableSnapshot,
       stream: new CapturedOutput(),
     });
     expect(result.exitCode).toBe(0);
     expect(result.settlement.empty).toBe(false);
     expect(result.settlement.snapshotErrors[0]).toContain('named fake census permission failure');
+  });
+
+  test.each([
+    ['a poll while the command runs', (call: number) => call === 2],
+    [
+      'the first census after the command exits',
+      (_call: number, rows: readonly NativeProcess[]) => rows.length === 0,
+    ],
+  ])('one failed census does not fail a settled command: %s', async (_name, trigger) => {
+    const dir = await temporaryDirectory();
+    const pidFile = join(dir, 'pid');
+    const census = new FailingOnceCensus(new FixtureProcessCensus(pidFile), trigger);
+    const result = await runNativeCommand({
+      label: 'flaky-census',
+      command: briefFixtureCommand(pidFile),
+      root: dir,
+      out: dir,
+      env: { ...process.env },
+      timeoutSeconds: 5,
+      pollIntervalMs: 10,
+      settleMs: 500,
+      snapshot: census.read,
+      guardCompilerHelpers: false,
+      stream: new CapturedOutput(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.settlement.rootObserved).toBe(true);
+    expect(
+      result.settlement.empty,
+      `expected settlement after one failed census: empty | received snapshot errors: ${JSON.stringify(result.settlement.snapshotErrors)}`
+    ).toBe(true);
+    expect(result.settlement.snapshotErrors).toEqual([]);
+    expect(result.settlement.pollErrors).toEqual(['Error: named fake census timeout']);
   });
 
   test('bounds a hung owned command without retrying', async () => {

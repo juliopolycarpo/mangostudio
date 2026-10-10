@@ -29,7 +29,10 @@ interface NativeSettlement {
   readonly rootObserved: boolean;
   readonly observed: readonly NativeProcess[];
   readonly survivors: readonly NativeProcess[];
+  /** Failures that leave the terminal census unproven; any entry keeps `empty` false. */
   readonly snapshotErrors: readonly string[];
+  /** Every failed census, including the ones a later successful census superseded. */
+  readonly pollErrors?: readonly string[];
   readonly unattributedCompilerHelpers?: readonly NativeProcess[];
   readonly empty: boolean;
 }
@@ -340,6 +343,9 @@ export async function runNativeCommand(
   const pollIntervalMs = options.pollIntervalMs ?? 1_000;
   const errors: string[] = [];
   const snapshotErrors: string[] = [];
+  const pollErrors: string[] = [];
+  // `current` is only as fresh as the last census that succeeded, so the last outcome is kept.
+  let lastCensusError: string | null = null;
   await mkdir(join(options.out, 'logs'), { recursive: true });
   const guardCompilerHelpers = options.guardCompilerHelpers ?? process.platform === 'win32';
   let before: readonly NativeProcess[] = [];
@@ -464,8 +470,10 @@ export async function runNativeCommand(
         join(options.out, `terminal-${options.label}.jsonl`),
         `${JSON.stringify({ at: new Date().toISOString(), dispatchedAt, rootAlive: rootAliveAtDispatch, rootAliveAtCompletion: !exited, processes: current, unattributedCompilerHelpers })}\n`
       );
+      lastCensusError = null;
     } catch (error) {
-      snapshotErrors.push(String(error));
+      lastCensusError = String(error);
+      pollErrors.push(lastCensusError);
     }
   };
   // The command leads its own process group, which the settlement scope already owns, so one
@@ -531,17 +539,19 @@ export async function runNativeCommand(
   const settleUntil = Date.now() + (options.settleMs ?? 5_000);
   do {
     await census();
-    if (!current.length || Date.now() >= settleUntil) break;
+    if ((!current.length && lastCensusError === null) || Date.now() >= settleUntil) break;
     // A worker that forked after the timeout census is still owned, so it is killed here.
     if (timedOut)
       await killOwned().catch((error) => errors.push(`Timeout cleanup failed: ${String(error)}`));
     await pause(pollIntervalMs);
-  } while (current.length > 0 && Date.now() < settleUntil);
+  } while (Date.now() < settleUntil);
   await Promise.all(
     [combined, rawOut, rawError].map(
       (writer) => new Promise<void>((resolve) => writer.end(resolve))
     )
   );
+  // A failed poll is superseded by the next census; only an unproven terminal census is fatal.
+  if (lastCensusError !== null) snapshotErrors.push(lastCensusError);
   const settlement: NativeSettlement = {
     scope: 'observed descendants and command process group',
     pollIntervalMs,
@@ -549,6 +559,7 @@ export async function runNativeCommand(
     observed,
     survivors: current,
     snapshotErrors,
+    pollErrors,
     ...(guardCompilerHelpers ? { unattributedCompilerHelpers } : {}),
     empty:
       current.length === 0 &&
