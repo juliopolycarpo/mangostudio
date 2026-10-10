@@ -447,7 +447,10 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     const binarySupport = readText('apps/api/tests/support/rust-runtime-binary.ts');
     const runtimePaths = readText('apps/api/src/lib/runtime-paths.ts');
 
-    expect(qualificationBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
+    expect(qualificationBlock).toContain('os: [macos-latest, windows-latest]');
+    expect(qualificationBlock).not.toContain('- os: ubuntu-latest');
+    expect(qualificationBlock).toContain('- os: macos-latest');
+    expect(qualificationBlock).toContain('- os: windows-latest');
     expect(qualificationBlock).toContain(`runs-on: ${EXPR} matrix.os }}`);
     expect(qualificationBlock).toContain('cargo build -p mangostudio-runtime --locked');
     expect(qualificationBlock).toContain(

@@ -1541,10 +1541,15 @@ ordinary shards instead of skipping.
 - `randomized-order-nightly.yml` builds it in its api lanes.
 - `cargo-shim.yml`'s `real-binary-qualification` builds its own and runs every api test file
   that imports `tests/support/rust-runtime-binary.ts`, directly or through another support
-  module, on Linux, macOS and Windows, except the opt-in live smoke named in `OPT_IN_TESTS`.
+  module, on macOS and Windows, except the opt-in live smoke named in `OPT_IN_TESTS`.
   `scripts/lib/rust-lanes.ts` discovers those files and
   owns the paths that make the lane relevant, so a new Rust-backed test needs no workflow
   edit; `scripts/tests/rust-lanes.unit.test.ts` fails if one would be missed.
+  Ubuntu runs these files in the ordinary CI shards against the same debug runtime and
+  fake agent. `scripts/tests/qualification-shards.unit.test.ts` checks that every discovered
+  qualification file belongs to a sharded coverage lane, and that every shard receives
+  both binaries from `local-runtime.yml` before its tests. A missing file or artifact
+  handoff fails the guard by name.
 
 ### API serve shutdown fixture
 
