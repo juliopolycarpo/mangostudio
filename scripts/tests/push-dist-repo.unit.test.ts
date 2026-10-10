@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +11,10 @@ import {
 } from '../release/push-dist-repo';
 
 const tempDirs: string[] = [];
+const hostGitConfig = {
+  global: process.env.GIT_CONFIG_GLOBAL,
+  system: process.env.GIT_CONFIG_SYSTEM,
+};
 
 const makeTempDir = (): string => {
   const dir = mkdtempSync(join(tmpdir(), 'mangostudio-dist-repo-test-'));
@@ -18,7 +22,19 @@ const makeTempDir = (): string => {
   return dir;
 };
 
+beforeEach(() => {
+  const configDir = makeTempDir();
+  // Both setup Git and the real publisher use these absent fixture-local configs.
+  // Host core.autocrlf must not rewrite the clone before the byte comparison.
+  process.env.GIT_CONFIG_GLOBAL = join(configDir, 'global.gitconfig');
+  process.env.GIT_CONFIG_SYSTEM = join(configDir, 'system.gitconfig');
+});
+
 afterEach(() => {
+  if (hostGitConfig.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+  else process.env.GIT_CONFIG_GLOBAL = hostGitConfig.global;
+  if (hostGitConfig.system === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+  else process.env.GIT_CONFIG_SYSTEM = hostGitConfig.system;
   for (const dir of tempDirs) rmSync(dir, { force: true, recursive: true });
   tempDirs.length = 0;
 });
@@ -29,7 +45,7 @@ const git = (cwd: string, ...args: string[]): string => {
   const result = Bun.spawnSync({
     cmd: ['git', ...args],
     cwd,
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    env: { ...process.env },
   });
   if (result.exitCode !== 0) {
     throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`);
