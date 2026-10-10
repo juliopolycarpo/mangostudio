@@ -178,15 +178,17 @@ describe('Docker release wiring', () => {
     const workflow = readText('.github/workflows/smoke-binary.yml');
     const smokeHelper = readText('scripts/release/smoke-docker-image.sh');
     const dockerArchExpression = '$' + '{{ matrix.docker_arch }}';
-    const binaryPlatformExpression = '$' + '{{ matrix.binary_platform }}';
+    const binaryPlatformExpression = '$' + '{{ matrix.platform }}';
+    const muslPlatformExpression = '$' + '{{ matrix.musl_platform }}';
 
-    expect(workflow).toContain('binary_platform: linux-x64');
-    expect(workflow).toContain('binary_platform: linux-x64-musl');
-    expect(workflow).toContain('binary_platform: linux-arm64');
-    expect(workflow).toContain('binary_platform: linux-arm64-musl');
+    expect(workflow).toContain('platform: linux-x64');
+    expect(workflow).toContain('musl_platform: linux-x64-musl');
+    expect(workflow).toContain('platform: linux-arm64');
+    expect(workflow).toContain('musl_platform: linux-arm64-musl');
     // Matrix values reach run blocks through env indirection so no template
     // expands inside shell code (zizmor template-injection).
     expect(workflow).toContain(`BINARY_PLATFORM: ${binaryPlatformExpression}`);
+    expect(workflow).toContain(`BINARY_PLATFORM: ${muslPlatformExpression}`);
     expect(workflow).toContain('build:binary --platform "$BINARY_PLATFORM"');
     const dockerArchVar = '$' + '{DOCKER_ARCH}';
     expect(workflow).toContain(`DOCKER_ARCH: ${dockerArchExpression}`);

@@ -346,7 +346,6 @@ describe('release workflow binary gate', () => {
   test('pre-merge binary smoke covers native host platforms and Docker variants', () => {
     const workflow = readText('.github/workflows/smoke-binary.yml');
     const platformExpression = '$' + '{{ matrix.platform }}';
-    const variantExpression = '$' + '{{ matrix.variant }}';
     const dockerArchExpression = '$' + '{{ matrix.docker_arch }}';
 
     expect(workflow).toContain('  binary:');
@@ -362,12 +361,11 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('runner: windows-11-arm');
     expect(workflow).toContain(`PLATFORM: ${platformExpression}`);
 
-    expect(workflow).toContain('  docker:');
-    expect(workflow).toContain(`name: Docker ${variantExpression} ${dockerArchExpression}`);
-    expect(workflow).toContain('binary_platform: linux-x64');
-    expect(workflow).toContain('binary_platform: linux-arm64');
-    expect(workflow).toContain('binary_platform: linux-x64-musl');
-    expect(workflow).toContain('binary_platform: linux-arm64-musl');
+    expect(workflow).not.toContain('  docker:');
+    expect(workflow).toContain('name: Run Bookworm Docker smoke test');
+    expect(workflow).toContain('name: Run Alpine Docker smoke test');
+    expect(workflow).toContain('musl_platform: linux-x64-musl');
+    expect(workflow).toContain('musl_platform: linux-arm64-musl');
     const dockerArchVar = '$' + '{DOCKER_ARCH}';
     expect(workflow).toContain(`DOCKER_ARCH: ${dockerArchExpression}`);
     expect(workflow).toContain(`--platform "linux/${dockerArchVar}"`);
@@ -505,7 +503,7 @@ describe('release workflow binary gate', () => {
     const skipBuildExpression = '$' + "{{ inputs.rebuild && '0' || '1' }}";
 
     expect(workflow.match(/uses: \.\/\.github\/actions\/download-distribution/g)).toHaveLength(2);
-    for (const job of ['binary', 'docker']) {
+    for (const job of ['binary']) {
       const jobBlock = extractJobBlock(workflow, job);
       const setupBunIndex = jobBlock.indexOf('uses: oven-sh/setup-bun@');
       // A missing step yields -1, which would satisfy the ordering check alone.
@@ -515,10 +513,15 @@ describe('release workflow binary gate', () => {
       );
     }
     expect(workflow).toContain(`SKIP_BUILD: ${skipBuildExpression}`);
-    expect(workflow).toContain('name: Build Docker binary (manual fallback)');
-    expect(workflow).toMatch(
-      /name: Build Docker binary \(manual fallback\)\n\s+if: \$\{\{ inputs\.rebuild \}\}/
+    const dockerAssertions = extractStepBlocks(extractJobBlock(workflow, 'binary')).filter((step) =>
+      step.includes('scripts/release/smoke-docker-image.sh')
     );
+    expect(dockerAssertions).toHaveLength(2);
+    for (const step of dockerAssertions) {
+      expect(step).toContain('REBUILD: $' + '{{ inputs.rebuild }}');
+      expect(step).toContain('if [ "$REBUILD" = "true" ]; then');
+      expect(step).toContain('bun run build:binary --platform "$BINARY_PLATFORM"');
+    }
   });
 
   test('the manual rebuild stages release-built cargo runtimes into every leg, never skipping one', () => {
@@ -530,7 +533,7 @@ describe('release workflow binary gate', () => {
 
     expect(runtime).toContain('uses: ./.github/workflows/runtime-build.yml');
     expect(runtime).toContain('if: $' + '{{ inputs.rebuild }}');
-    for (const job of ['binary', 'docker']) {
+    for (const job of ['binary']) {
       const block = extractJobBlock(workflow, job);
       expect(parseNeeds(block), job).toEqual(['runtime']);
       // A failed runtime build fails the legs' dependency instead of letting
@@ -539,8 +542,21 @@ describe('release workflow binary gate', () => {
       expect(block, job).toContain('name: smoke-rebuild-runtime-$' + '{{ matrix.');
     }
     expect(extractJobBlock(workflow, 'binary')).toContain('RUNTIME_DIR: .mango/runtime-prebuilt');
-    expect(extractJobBlock(workflow, 'docker')).toContain(
+    expect(extractJobBlock(workflow, 'binary')).toContain(
       'bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt'
+    );
+    const runtimeDownloads = extractStepBlocks(extractJobBlock(workflow, 'binary')).filter((step) =>
+      step.includes('name: smoke-rebuild-runtime-')
+    );
+    expect(runtimeDownloads).toHaveLength(2);
+    expect(runtimeDownloads[0]).toContain(
+      'name: smoke-rebuild-runtime-$' + '{{ matrix.platform }}'
+    );
+    expect(runtimeDownloads[1]).toContain(
+      'name: smoke-rebuild-runtime-$' + '{{ matrix.musl_platform }}'
+    );
+    expect(runtimeDownloads[1]).toContain(
+      'if: $' + '{{ !cancelled() && matrix.docker_arch && inputs.rebuild }}'
     );
   });
 

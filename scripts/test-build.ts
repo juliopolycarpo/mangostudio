@@ -97,8 +97,9 @@ function pass(msg: string): void {
 }
 
 function fail(msg: string): never {
-  console.error(`  ❌ ${msg}`);
-  process.exit(1);
+  // Unwind foreground smoke cleanup before the CLI boundary exits. Calling
+  // process.exit here bypasses finally and can leave the hub listening.
+  throw new Error(msg);
 }
 
 function resolvePlatform(platform: string | undefined): BinaryTarget {
@@ -898,24 +899,29 @@ async function smokeTest(): Promise<void> {
 console.log(`\n🧪 Binary smoke test — platform: ${PLATFORM.arch}`);
 console.log(`   Can execute on this host: ${CAN_EXECUTE}`);
 
-if (!SKIP_BUILD) {
-  await buildBinary();
-  await archiveAssets();
-} else {
-  validatePrebuiltDistribution();
-}
-
-validateLayout();
-await validateReleaseArchive();
-await smokeLocalInstaller();
-
-if (CAN_EXECUTE) {
-  await smokeRuntimeBinary();
-  if (PLATFORM.arch === 'linux-x64' && existsSync(RAW_RUNTIME_ASSET_PATH)) {
-    await smokeRuntimeBinary(RAW_RUNTIME_ASSET_PATH);
+try {
+  if (!SKIP_BUILD) {
+    await buildBinary();
+    await archiveAssets();
+  } else {
+    validatePrebuiltDistribution();
   }
-  await smokeTest();
-  console.log('\n✅ All runtime assertions passed.');
-} else {
-  console.log('\n✅ Packaging validation passed (runtime test skipped — cross-platform).');
+
+  validateLayout();
+  await validateReleaseArchive();
+  await smokeLocalInstaller();
+
+  if (CAN_EXECUTE) {
+    await smokeRuntimeBinary();
+    if (PLATFORM.arch === 'linux-x64' && existsSync(RAW_RUNTIME_ASSET_PATH)) {
+      await smokeRuntimeBinary(RAW_RUNTIME_ASSET_PATH);
+    }
+    await smokeTest();
+    console.log('\n✅ All runtime assertions passed.');
+  } else {
+    console.log('\n✅ Packaging validation passed (runtime test skipped — cross-platform).');
+  }
+} catch (caught) {
+  console.error(`  ❌ ${caught instanceof Error ? caught.message : String(caught)}`);
+  process.exitCode = 1;
 }

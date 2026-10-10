@@ -69,9 +69,15 @@ jobs:
         include:
           - platform: linux-x64
             runner: ubuntu-latest
+            docker_arch: amd64
+            musl_platform: linux-x64-musl
+            musl_artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-x64-musl'] }}
             artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-x64'] }}
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
+            docker_arch: arm64
+            musl_platform: linux-arm64-musl
+            musl_artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-arm64-musl'] }}
             artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-arm64'] }}
           - platform: darwin-arm64
             runner: macos-latest
@@ -118,7 +124,9 @@ jobs:
           channel: ${{ inputs.channel }}
           target: ${{ matrix.platform }}
 
+      # Linux also proves both Docker variants on its native runner below.
       - name: Run binary smoke test
+        if: ${{ !cancelled() }}
         run: bun --no-install run scripts/test-build.ts
         env:
           # Read by the rebuild's `build:binary`; inert when SKIP_BUILD=1.
@@ -130,104 +138,134 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           VERSION: ${{ inputs.version }}
 
-  docker:
-    name: Docker ${{ matrix.variant }} ${{ matrix.docker_arch }}
-    needs: [runtime]
-    if: ${{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            variant: bookworm
-            docker_arch: amd64
-            binary_platform: linux-x64
-            artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-x64'] }}
-            dockerfile: Dockerfile
-          - runner: ubuntu-24.04-arm
-            variant: bookworm
-            docker_arch: arm64
-            binary_platform: linux-arm64
-            artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-arm64'] }}
-            dockerfile: Dockerfile
-          - runner: ubuntu-latest
-            variant: alpine
-            docker_arch: amd64
-            binary_platform: linux-x64-musl
-            artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-x64-musl'] }}
-            dockerfile: Dockerfile.alpine
-          - runner: ubuntu-24.04-arm
-            variant: alpine
-            docker_arch: arm64
-            binary_platform: linux-arm64-musl
-            artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-arm64-musl'] }}
-            dockerfile: Dockerfile.alpine
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Install toolchain (manual rebuild)
-        if: ${{ inputs.rebuild }}
-        uses: ./.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - name: Download cargo runtime (manual rebuild)
-        if: ${{ inputs.rebuild }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: smoke-rebuild-runtime-${{ matrix.binary_platform }}
-          path: .mango/runtime-prebuilt
-
-      - name: Download prebuilt Docker target
-        if: ${{ !inputs.rebuild }}
-        uses: ./.github/actions/download-distribution
-        with:
-          artifact-name: ${{ matrix.artifact_name }}
-          source-sha: ${{ inputs.source_sha }}
-          version: ${{ inputs.version }}
-          channel: ${{ inputs.channel }}
-          target: ${{ matrix.binary_platform }}
-
-      - name: Build Docker binary (manual fallback)
-        if: ${{ inputs.rebuild }}
-        env:
-          BINARY_PLATFORM: ${{ matrix.binary_platform }}
-        run: bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
-
-      - name: Stage Docker context
-        env:
-          DOCKER_ARCH: ${{ matrix.docker_arch }}
-          VARIANT: ${{ matrix.variant }}
-        run: bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
-
-      - name: Build Docker image
-        # The Dockerfiles use `COPY --chmod`, a BuildKit-only directive. Force
-        # BuildKit instead of relying on the runner's default builder.
-        env:
-          DOCKER_BUILDKIT: "1"
-          DOCKER_ARCH: ${{ matrix.docker_arch }}
-          VARIANT: ${{ matrix.variant }}
-          DOCKERFILE: ${{ matrix.dockerfile }}
+      - name: Assert native binary teardown
+        if: ${{ !cancelled() && matrix.docker_arch }}
         run: |
+          set -euo pipefail
+          if [ -n "$(ss -H -ltn '( sport = :13001 )')" ]; then
+            echo "::error::binary smoke left port 13001 listening"
+            exit 1
+          fi
+
+      - name: Run Bookworm Docker smoke test
+        if: ${{ !cancelled() && matrix.docker_arch }}
+        timeout-minutes: 10
+        env:
+          REBUILD: ${{ inputs.rebuild }}
+          BINARY_PLATFORM: ${{ matrix.platform }}
+          DOCKER_ARCH: ${{ matrix.docker_arch }}
+          VARIANT: bookworm
+          DOCKERFILE: Dockerfile
+          DOCKER_BUILDKIT: "1"
+          BETTER_AUTH_SECRET: smoke-test-secret-at-least-32-characters-long
+          GEMINI_API_KEY: dummy
+        run: |
+          set -euo pipefail
+          listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+          if [ -n "$listeners" ]; then
+            echo "::error::expected smoke ports 13001 and 13002 released; listeners [$listeners]"
+            exit 1
+          fi
+          if [ "$REBUILD" = "true" ]; then
+            bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+          fi
+          bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
           docker build \
             --platform "linux/${DOCKER_ARCH}" \
             --build-arg VERSION=smoke \
             -f "$DOCKERFILE" \
             -t "mangostudio:smoke-${VARIANT}-${DOCKER_ARCH}" .
+          scripts/release/smoke-docker-image.sh "mangostudio:smoke-${VARIANT}-${DOCKER_ARCH}" "linux/${DOCKER_ARCH}" 13002
 
-      - name: Run Docker smoke test
+      - name: Assert Bookworm Docker teardown
+        if: ${{ !cancelled() && matrix.docker_arch }}
         env:
+          DOCKER_ARCH: ${{ matrix.docker_arch }}
+        run: |
+          set -euo pipefail
+          leftover=""
+          listeners=""
+          for _ in $(seq 1 20); do
+            leftover="$(docker ps -a --format '{{.Names}}' --filter "name=mangostudio-smoke-linux-${DOCKER_ARCH}-13002")"
+            listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+            if [ -z "$leftover$listeners" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ -n "$leftover$listeners" ]; then
+            echo "::error::smoke teardown incomplete: containers [$leftover], listeners [$listeners]"
+            exit 1
+          fi
+
+      - name: Download musl cargo runtime (manual rebuild)
+        if: ${{ !cancelled() && matrix.docker_arch && inputs.rebuild }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: smoke-rebuild-runtime-${{ matrix.musl_platform }}
+          path: .mango/runtime-prebuilt
+
+      - name: Clear previous distribution download
+        if: ${{ !cancelled() && matrix.docker_arch && !inputs.rebuild }}
+        run: rm -rf "$RUNNER_TEMP/mango-distribution"
+
+      - name: Download prebuilt musl Docker target
+        if: ${{ !cancelled() && matrix.docker_arch && !inputs.rebuild }}
+        uses: ./.github/actions/download-distribution
+        with:
+          artifact-name: ${{ matrix.musl_artifact_name }}
+          source-sha: ${{ inputs.source_sha }}
+          version: ${{ inputs.version }}
+          channel: ${{ inputs.channel }}
+          target: ${{ matrix.musl_platform }}
+
+      - name: Run Alpine Docker smoke test
+        if: ${{ !cancelled() && matrix.docker_arch }}
+        timeout-minutes: 10
+        env:
+          REBUILD: ${{ inputs.rebuild }}
+          BINARY_PLATFORM: ${{ matrix.musl_platform }}
+          DOCKER_ARCH: ${{ matrix.docker_arch }}
+          VARIANT: alpine
+          DOCKERFILE: Dockerfile.alpine
+          DOCKER_BUILDKIT: "1"
           BETTER_AUTH_SECRET: smoke-test-secret-at-least-32-characters-long
           GEMINI_API_KEY: dummy
+        run: |
+          set -euo pipefail
+          listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+          if [ -n "$listeners" ]; then
+            echo "::error::expected smoke ports 13001 and 13002 released; listeners [$listeners]"
+            exit 1
+          fi
+          if [ "$REBUILD" = "true" ]; then
+            bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+          fi
+          bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
+          docker build \
+            --platform "linux/${DOCKER_ARCH}" \
+            --build-arg VERSION=smoke \
+            -f "$DOCKERFILE" \
+            -t "mangostudio:smoke-${VARIANT}-${DOCKER_ARCH}" .
+          scripts/release/smoke-docker-image.sh "mangostudio:smoke-${VARIANT}-${DOCKER_ARCH}" "linux/${DOCKER_ARCH}" 13002
+
+      - name: Assert Alpine Docker teardown
+        if: ${{ !cancelled() && matrix.docker_arch }}
+        env:
           DOCKER_ARCH: ${{ matrix.docker_arch }}
-          VARIANT: ${{ matrix.variant }}
-        run: scripts/release/smoke-docker-image.sh "mangostudio:smoke-${VARIANT}-${DOCKER_ARCH}" "linux/${DOCKER_ARCH}" 13002
+        run: |
+          set -euo pipefail
+          leftover=""
+          listeners=""
+          for _ in $(seq 1 20); do
+            leftover="$(docker ps -a --format '{{.Names}}' --filter "name=mangostudio-smoke-linux-${DOCKER_ARCH}-13002")"
+            listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+            if [ -z "$leftover$listeners" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ -n "$leftover$listeners" ]; then
+            echo "::error::smoke teardown incomplete: containers [$leftover], listeners [$listeners]"
+            exit 1
+          fi
