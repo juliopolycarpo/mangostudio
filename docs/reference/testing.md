@@ -1721,8 +1721,7 @@ be conditional):
   computed something; the newest is the only one anyone restores, and the
   superseded ones are not accessed again, so GitHub removes each seven days
   after its last restore (or earlier, least recently used first, at the 10 GB
-  repository limit). Nothing here deletes a cache, so no job needs
-  `actions: write`.
+  repository limit). Turbo does not delete caches or need `actions: write`.
 - **Quota.** The three lanes' complete sets are 3.6 MB (build), 6.5 KB (check)
   and about 70 KB (test shard 1). A run that recomputed every build task wrote
   3.6 MB of new entries, so the next snapshot was 7.2 MB, and its save took
@@ -1731,6 +1730,26 @@ be conditional):
   a rolling week; if every run saved a full 16 MB chain it would be about 2.3 GB.
   The gate job's cache-usage summary lists the `turbo` family, so growth shows
   there before it shows as an eviction.
+
+### Rust cache generations
+
+Rust build caches share the repository's 10 GiB Actions cache budget with the
+shorter lanes. `rust-cache-cleanup.yml` runs trusted `main` tooling after a main
+cache writer completes, after rust-cache's post-job save, and grants
+`actions: write` only to its cleanup job. `scripts/ci/rust-cache-cleanup.ts`
+deletes older committed generations by exact ID only when a newer replacement
+is listed under `refs/heads/main`. The explicit family registry preserves the
+runner OS and architecture, target, compiler/environment hash and cache archive
+version, including distinct shipping and light-profile environment hashes.
+Only the root-manifest prefix and dependency hash rotate. Sole entries, unknown
+families, fuzz and other cache kinds remain untouched. Before each deletion the
+script audits active main writers and fetches the complete listing again; a
+concurrent save or lost replacement defers cleanup until a later writer's
+completion. It verifies the retained replacement after each deletion and fails
+on malformed or incomplete API responses. Preview a captured listing without
+network or deletion with `bun ./scripts/ci/rust-cache-cleanup.ts --fixture
+<listing.json>`. Verify the total and older-base fallback after the first
+post-merge lockfile change before adding more Rust cache consumers.
 
 ### Cargo incremental compilation
 

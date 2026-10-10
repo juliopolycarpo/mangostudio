@@ -11,14 +11,16 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
+import { RUST_CACHE_FAMILIES, RUST_CACHE_WRITERS } from '../ci/rust-cache/families';
 import { ROOT_DIR } from '../lib/config';
 import { evaluateWriteScope, runCompositeStep } from './support/cache-scoped-steps';
 import { readText } from './support/read-text';
 import {
   extractJobBlock,
   extractJobBlocks,
+  extractOnBlock,
   extractStepBlocksAtIndent,
+  sectionKeys,
 } from './support/workflow-blocks';
 import {
   type CacheScopedCallSite,
@@ -70,6 +72,18 @@ interface RustCacheStep {
   readonly block: string;
 }
 
+// Parse the permission mapping independently of unrelated GitHub expression
+// scalars and multiline flow lists Bun's YAML parser cannot read.
+function permissions(source: string, indent: number): Record<string, string> | string | undefined {
+  const block = new RegExp(
+    `^ {${indent}}permissions:[^\\n]*(?:\\n {${indent + 2}}[^\\n]+)*`,
+    'm'
+  ).exec(source)?.[0];
+  return block
+    ? (Bun.YAML.parse(block) as { permissions: Record<string, string> | string }).permissions
+    : undefined;
+}
+
 /**
  * Every Swatinem/rust-cache step across workflows (steps at indent 6) and
  * composite actions (steps at indent 4).
@@ -91,6 +105,110 @@ function rustCacheSteps(): RustCacheStep[] {
 }
 
 describe('CI cache policy', () => {
+  test('grants cache deletion only to the dedicated main cleanup job', () => {
+    const holders: string[] = [];
+    for (const file of workflowFiles()) {
+      const text = readText(file);
+      const top = permissions(text, 0);
+      expect(top, file).not.toBe('write-all');
+      expect(typeof top === 'object' ? top?.actions : undefined, file).not.toBe('write');
+      for (const { job, block } of extractJobBlocks(text)) {
+        const value = permissions(block, 4);
+        expect(value, `${file}:${job}`).not.toBe('write-all');
+        if (typeof value === 'object' && value?.actions === 'write') holders.push(`${file}:${job}`);
+      }
+    }
+    expect(holders).toEqual(['.github/workflows/rust-cache-cleanup.yml:cleanup']);
+    const workflow = readText('.github/workflows/rust-cache-cleanup.yml');
+    const job = extractJobBlock(workflow, 'cleanup');
+    expect(workflow).toContain('permissions: {}');
+    expect(workflow).toContain('types: [completed]');
+    expect(workflow).toContain('branches: [main]');
+    expect(workflow).not.toMatch(/^ {2}pull_request:/m);
+    expect(job).toContain("github.ref == 'refs/heads/main'");
+    expect(job).toContain("github.event.workflow_run.head_branch == 'main'");
+    expect(job).toContain(
+      'github.event.workflow_run.head_repository.full_name == github.repository'
+    );
+    expect(job).toContain('["push","schedule","workflow_dispatch"]');
+    expect(job).toContain('ref: main');
+    expect(job).not.toMatch(/ref:.*workflow_run/);
+    expect(job).toContain('persist-credentials: false');
+    expect(job).toContain('bun ./scripts/ci/rust-cache-cleanup.ts --delete');
+    expect(workflow).toContain('group: rust-cache-cleanup-main');
+    expect(workflow).toContain('cancel-in-progress: false');
+  });
+
+  test('registers every entrypoint that can save a known Rust family', () => {
+    const reachesRustCache = (file: string, visited = new Set<string>()): boolean => {
+      if (visited.has(file)) return false;
+      visited.add(file);
+      const text = readText(file);
+      if (text.includes('uses: Swatinem/rust-cache@')) return true;
+      const calls = [
+        ...text.matchAll(/uses: (\.\/\.github\/(?:workflows\/[^\s]+\.yml|actions\/[^\s]+))/g),
+      ];
+      return calls.some(([, target]) =>
+        reachesRustCache(
+          target.endsWith('.yml') ? target.slice(2) : `${target.slice(2)}/action.yml`,
+          visited
+        )
+      );
+    };
+    const entrypoints = workflowFiles().filter((file) => {
+      if (file === '.github/workflows/protocol-fuzz.yml') return false;
+      return (
+        sectionKeys(extractOnBlock(readText(file))).some((event) =>
+          ['push', 'schedule', 'workflow_dispatch'].includes(event)
+        ) && reachesRustCache(file)
+      );
+    });
+    expect(entrypoints.sort()).toEqual(RUST_CACHE_WRITERS.map((writer) => writer.path).sort());
+    const cleanup = Bun.YAML.parse(readText('.github/workflows/rust-cache-cleanup.yml')) as {
+      on: { workflow_run: { workflows: string[] } };
+    };
+    expect(cleanup.on.workflow_run.workflows.sort()).toEqual(
+      RUST_CACHE_WRITERS.map((writer) => writer.name).sort()
+    );
+    for (const writer of RUST_CACHE_WRITERS) {
+      expect(/^name: (.+)$/m.exec(readText(writer.path))?.[1]).toBe(writer.name);
+    }
+  });
+
+  test('registers exact Rust family identities and keeps the pinned key grammar', () => {
+    const families = new Set<string>(RUST_CACHE_FAMILIES);
+    for (const step of rustCacheSteps()) {
+      if (RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file)) continue;
+      expect(step.block, step.file).toContain(
+        'Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+      );
+      expect(step.block, step.file).not.toMatch(/add-(?:job-id|rust-environment-hash)-key:.*false/);
+      const shared = /^\s+shared-key: (.+)$/m.exec(step.block)?.[1];
+      const inputKey = /^\s+key: (.+)$/m.exec(step.block)?.[1];
+      const job = extractJobBlocks(readText(step.file)).find(({ block }) =>
+        block.includes(step.block)
+      )?.job;
+      const family = shared ?? [inputKey, job].filter(Boolean).join('-');
+      if (step.file === '.github/actions/local-runtime/action.yml') {
+        expect(families.has('local-runtime')).toBe(true);
+        continue;
+      }
+      if (shared?.includes('matrix.platform')) {
+        const platforms = JSON.parse(
+          (
+            Bun.YAML.parse(readText(step.file)) as {
+              on: { workflow_call: { inputs: { platforms: { default: string } } } };
+            }
+          ).on.workflow_call.inputs.platforms.default
+        ) as string[];
+        for (const platform of platforms)
+          expect(families.has(`runtime-build-${platform}`), platform).toBe(true);
+        continue;
+      }
+      expect(families.has(family), `${step.file}:${family}`).toBe(true);
+    }
+  });
+
   test('keeps every cache family behind one composite and one immutable pin', () => {
     for (const file of [...workflowFiles(), ...compositeActionFiles()]) {
       if (file.includes('/cache-scoped/')) continue;
