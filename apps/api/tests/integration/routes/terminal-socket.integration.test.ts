@@ -122,6 +122,7 @@ function connect(
 /**
  * Waits for terminal data containing a marker, including text split across frames.
  * `firstMessage` excludes frames observed before a command's output window.
+ * Failures retain the cause, named phase, bounded output tail and terminal events.
  *
  * @example
  * await waitForTerminalText(viewer, 'hi');
@@ -129,16 +130,36 @@ function connect(
 function waitForTerminalText(
   viewer: Connected,
   marker: string,
-  firstMessage = 0
+  firstMessage = 0,
+  phase: 'terminal-text' | 'prompt' | 'constructed-output' = 'terminal-text'
 ): Promise<TerminalServerMessage> {
   const decoder = new TextDecoder();
   let output = '';
   const beforeObservation = new Set(viewer.messages.slice(0, firstMessage));
-  return viewer.nextMessage((message) => {
-    if (message.type !== 'data' || beforeObservation.has(message)) return false;
-    output += decoder.decode(message.data, { stream: true });
-    return output.includes(marker);
-  });
+  return viewer
+    .nextMessage((message) => {
+      if (message.type !== 'data' || beforeObservation.has(message)) return false;
+      output += decoder.decode(message.data, { stream: true });
+      return output.includes(marker);
+    })
+    .catch((cause: unknown) => {
+      const terminalEvents = viewer.messages
+        .slice(firstMessage)
+        .filter((message) => message.type !== 'data')
+        .slice(-8);
+      throw new Error(
+        [
+          cause instanceof Error ? cause.message : String(cause),
+          `phase=${phase}`,
+          `expected=${JSON.stringify(marker)}`,
+          `outputTail=${JSON.stringify(output.slice(-4_096))}`,
+          `terminalEvents=${JSON.stringify(terminalEvents)}`,
+          `observedFrames=${viewer.messages.length - firstMessage}`,
+          `socketReadyState=${viewer.socket.readyState}`,
+        ].join('; '),
+        { cause }
+      );
+    });
 }
 
 /**
@@ -154,7 +175,7 @@ async function writeAfterTerminalText(
   readyMarker: string,
   command: string
 ): Promise<number> {
-  await waitForTerminalText(viewer, readyMarker);
+  await waitForTerminalText(viewer, readyMarker, 0, 'prompt');
   const firstMessage = viewer.messages.length;
   viewer.socket.send(
     encodeTerminalClientMessage({ type: 'data', data: new TextEncoder().encode(command) })
@@ -358,6 +379,48 @@ describe('terminal socket relay', () => {
     await expect(sent).rejects.toThrow('Timed out waiting for a terminal socket message');
     expect(runtime.calls.write).toHaveLength(0);
   });
+
+  it.each(['prompt', 'constructed-output'] as const)(
+    'reports bounded %s observation context and a terminal exit on timeout',
+    async (phase) => {
+      const user = await insertTestUser();
+      const runtime = new FakeTerminalRuntimeClient();
+      const service = relayService(runtime);
+      const session = await service.open(user.id, { environmentId: ENVIRONMENT_ID });
+      const attached = runtime.waitForCall('attach');
+      const viewer = await openViewer(service, user.id, session.id);
+      await attached;
+      const marker = `missing-${phase}-marker`;
+      const output = `discarded-output-prefix:${'x'.repeat(8_192)}observed-${phase}-tail`;
+      const observation = waitForTerminalText(viewer, marker, 0, phase).catch(
+        (cause: unknown) => cause
+      );
+
+      runtime.emitOutput(session.id, {
+        kind: 'data',
+        data: Buffer.from(output).toString('base64'),
+      });
+      runtime.emitOutput(session.id, { kind: 'exit', exitCode: 42, signal: null });
+      expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+
+      const failure = await observation;
+      expect(failure).toBeInstanceOf(Error);
+      const error = failure as Error;
+      expect(error.message).toContain(`phase=${phase}`);
+      expect(error.message).toContain(`expected=${JSON.stringify(marker)}`);
+      expect(error.message).toContain(`outputTail=${JSON.stringify(output.slice(-4_096))}`);
+      expect(error.message).not.toContain('discarded-output-prefix:');
+      expect(error.message).toContain('"type":"exit"');
+      expect(error.message).toContain('"exitCode":42');
+      expect(error.message).toContain('observedFrames=2');
+      expect(error.message).toContain(`socketReadyState=${WebSocket.CLOSED}`);
+      expect(error.cause).toBeInstanceOf(Error);
+      expect((error.cause as Error).message).toBe(
+        'Timed out waiting for a terminal socket message'
+      );
+      expect(runtime.calls.write).toHaveLength(0);
+    }
+  );
 
   it.each([
     {
@@ -887,7 +950,12 @@ describe('terminal socket over a real Rust runtime', () => {
           );
         }
 
-        const output = await waitForTerminalText(viewer, marker, firstMessage);
+        const output = await waitForTerminalText(
+          viewer,
+          marker,
+          firstMessage,
+          'constructed-output'
+        );
         expect(output).toBeDefined();
 
         await service.close(user.id, session.id);
