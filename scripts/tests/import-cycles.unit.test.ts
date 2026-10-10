@@ -1,5 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -7,6 +15,7 @@ import { ROOT_DIR } from '../lib/config';
 import { protocolCheckTasks } from '../protocol/tasks';
 import { countCircularDeps } from '../qa-gate/collect/circular';
 import { runCapture } from '../qa-gate/collect/support';
+import { canonicalPath } from './support/canonical-path';
 import { readText } from './support/read-text';
 
 const WORKSPACES = ['apps/api', 'apps/frontend', 'apps/shared', 'packages/protocol'];
@@ -58,7 +67,7 @@ const fixtures: string[] = [];
  * file. Nothing runs inside it; `createFixture` hands out copies.
  */
 function buildBaseFixture(): string {
-  const root = mkdtempSync(join(tmpdir(), 'mango-import-cycles-base-'));
+  const root = canonicalPath(mkdtempSync(join(tmpdir(), 'mango-import-cycles-base-')));
   cpSync(join(ROOT_DIR, 'scripts/lib'), join(root, 'scripts/lib'), { recursive: true });
   writeFileSync(join(root, 'scripts/check.ts'), readText('scripts/check.ts'));
   writeFileSync(
@@ -105,7 +114,11 @@ function buildBaseFixture(): string {
 function linkDependencies(root: string): void {
   mkdirSync(join(root, 'node_modules'), { recursive: true });
   // Windows .bin wrappers resolve package paths relative to node_modules.
-  for (const dependency of DEPENDENCY_LINKS) {
+  // Scoped package links in Bun's isolated layout also need their sibling store.
+  const dependencies = existsSync(join(ROOT_DIR, 'node_modules/.bun'))
+    ? [...DEPENDENCY_LINKS, '.bun']
+    : DEPENDENCY_LINKS;
+  for (const dependency of dependencies) {
     symlinkSync(
       join(ROOT_DIR, `node_modules/${dependency}`),
       join(root, `node_modules/${dependency}`),
@@ -122,13 +135,13 @@ function linkDependencies(root: string): void {
  * @example
  * const root = createFixture();
  */
-function createFixture(): string {
+function createFixture(parent: string = tmpdir()): string {
   if (!baseFixture) {
     throw new Error(
       `createFixture() ran before the base fixture existed | received baseFixture ${JSON.stringify(baseFixture)}, expected the directory built by this file's beforeAll`
     );
   }
-  const root = mkdtempSync(join(tmpdir(), 'mango-import-cycles-'));
+  const root = canonicalPath(mkdtempSync(join(parent, 'mango-import-cycles-')));
   fixtures.push(root);
   cpSync(baseFixture, root, { recursive: true });
   linkDependencies(root);
@@ -621,30 +634,40 @@ describe('Biome import cycle checks', () => {
     expectCycleCount(await countCycles(root, ['apps/api']), 12, 'apps/api cycle-0..cycle-11');
   });
 
-  test('counts a cycle through package exports across workspace boundaries once', async () => {
-    const root = createFixture();
-    const api = JSON.parse(readText('apps/api/package.json'));
-    api.exports = { '.': './a.ts' };
-    writeFileSync(join(root, 'apps/api/package.json'), JSON.stringify(api));
-    mkdirSync(join(root, 'apps/shared/src/library'));
-    mkdirSync(join(root, 'node_modules/@mangostudio'));
-    for (const name of ['api', 'shared']) {
-      symlinkSync(
-        join(root, `apps/${name}`),
-        join(root, `node_modules/@mangostudio/${name}`),
-        'junction'
+  test.each(['canonical', 'alias'])(
+    'counts a cycle through package exports once from a %s parent',
+    async (spelling) => {
+      const parent = mkdtempSync(join(tmpdir(), 'mango-import-cycles-parent-'));
+      fixtures.push(parent);
+      const alias = `${parent}-alias`;
+      if (spelling === 'alias') {
+        symlinkSync(parent, alias, 'junction');
+        fixtures.push(alias);
+      }
+      const root = createFixture(spelling === 'alias' ? alias : parent);
+      const api = JSON.parse(readText('apps/api/package.json'));
+      api.exports = { '.': './a.ts' };
+      writeFileSync(join(root, 'apps/api/package.json'), JSON.stringify(api));
+      mkdirSync(join(root, 'apps/shared/src/library'));
+      mkdirSync(join(root, 'node_modules/@mangostudio'));
+      for (const name of ['api', 'shared']) {
+        symlinkSync(
+          join(root, `apps/${name}`),
+          join(root, `node_modules/@mangostudio/${name}`),
+          'junction'
+        );
+      }
+      injectCycle(root, 'apps/api', {
+        'a.ts': "import { b } from '@mangostudio/shared/library'; export const a = () => b();\n",
+      });
+      injectCycle(root, 'apps/shared/src/library', {
+        'index.ts': "import { a } from '@mangostudio/api'; export const b = () => a();\n",
+      });
+      expectCycleCount(
+        await countCycles(root, ['apps/api', 'apps/shared']),
+        1,
+        'api <-> shared package exports'
       );
     }
-    injectCycle(root, 'apps/api', {
-      'a.ts': "import { b } from '@mangostudio/shared/library'; export const a = () => b();\n",
-    });
-    injectCycle(root, 'apps/shared/src/library', {
-      'index.ts': "import { a } from '@mangostudio/api'; export const b = () => a();\n",
-    });
-    expectCycleCount(
-      await countCycles(root, ['apps/api', 'apps/shared']),
-      1,
-      'api <-> shared package exports'
-    );
-  });
+  );
 });
