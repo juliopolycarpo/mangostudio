@@ -468,9 +468,19 @@ export async function runNativeCommand(
       snapshotErrors.push(String(error));
     }
   };
-  const terminate = async (): Promise<void> => {
-    await census();
-    if (!exited) child.kill('SIGKILL');
+  // The command leads its own process group, which the settlement scope already owns, so one
+  // signal reaches every member without a census. Only safe while the root still holds the PGID.
+  const killGroup = (): void => {
+    if (process.platform === 'win32' || child.pid === undefined || exited) return;
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
+        errors.push(`Process group timeout cleanup failed: ${String(error)}`);
+    }
+  };
+  // Descendants that left the group are killed by PID, and only with a verified live identity.
+  const killOwned = async (): Promise<void> => {
     // One fresh native snapshot bounds cleanup even when a command has many children.
     const latest = await snapshot();
     const identities = new Set(latest.map((row) => row.identity));
@@ -482,6 +492,12 @@ export async function runNativeCommand(
           errors.push(`Owned timeout cleanup failed: ${String(error)}`);
       }
     }
+  };
+  const terminate = async (): Promise<void> => {
+    killGroup();
+    if (!exited) child.kill('SIGKILL');
+    await census();
+    await killOwned();
   };
   let timeoutCleanup: Promise<void> | null = null;
   const timeout = setTimeout(() => {
@@ -516,6 +532,9 @@ export async function runNativeCommand(
   do {
     await census();
     if (!current.length || Date.now() >= settleUntil) break;
+    // A worker that forked after the timeout census is still owned, so it is killed here.
+    if (timedOut)
+      await killOwned().catch((error) => errors.push(`Timeout cleanup failed: ${String(error)}`));
     await pause(pollIntervalMs);
   } while (current.length > 0 && Date.now() < settleUntil);
   await Promise.all(

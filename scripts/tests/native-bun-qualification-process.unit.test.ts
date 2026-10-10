@@ -155,6 +155,33 @@ class FixtureProcessCensus {
   };
 }
 
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function aliveAfterGrace(pid: number): Promise<boolean> {
+  const deadline = Date.now() + 2_000;
+  while (isAlive(pid) && Date.now() < deadline) await Bun.sleep(10);
+  return isAlive(pid);
+}
+
+/** A root that starts one worker in its own process group, publishes both PIDs, then hangs. */
+function hangingFamilyCommand(pidFile: string, workerFile: string): readonly string[] {
+  return [
+    process.execPath,
+    '-e',
+    'const { rename } = await import("node:fs/promises"); const publish = async (path, pid) => { await Bun.write(path + ".tmp", String(pid)); await rename(path + ".tmp", path); }; const worker = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "ignore", "ignore"] }); await publish(process.argv[2], worker.pid); await publish(process.argv[1], process.pid); setInterval(() => {}, 1000);',
+    pidFile,
+    workerFile,
+  ];
+}
+
 async function temporaryDirectory(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'native-process-receipt-'));
   temporary.push(dir);
@@ -422,4 +449,44 @@ describe('single command receipt', () => {
     expect(result.settlement.empty).toBe(true);
     expect(result.durationMs).toBeLessThan(5_000);
   });
+
+  test.skipIf(process.platform === 'win32').each([
+    ['a census that never saw the worker', false],
+    ['an unavailable census', true],
+  ])(
+    'a timeout terminates the whole command process group despite %s',
+    async (_name, unavailable) => {
+      const dir = await temporaryDirectory();
+      const pidFile = join(dir, 'pid');
+      const workerFile = join(dir, 'worker');
+      const census = new FixtureProcessCensus(pidFile);
+      let worker: number | undefined;
+      try {
+        const run = runNativeCommand({
+          label: 'timeout-family',
+          command: hangingFamilyCommand(pidFile, workerFile),
+          root: dir,
+          out: dir,
+          env: { ...process.env },
+          timeoutSeconds: 1,
+          pollIntervalMs: 25,
+          settleMs: 100,
+          snapshot: unavailable ? unavailableSnapshot : census.read,
+          guardCompilerHelpers: false,
+          stream: new CapturedOutput(),
+        });
+        worker = await waitForFixturePid(workerFile);
+        const result = await run;
+        const survived = await aliveAfterGrace(worker);
+
+        expect(result.timedOut).toBe(true);
+        expect(
+          survived,
+          `expected worker ${worker} state: terminated | received: ${survived ? 'alive' : 'terminated'}`
+        ).toBe(false);
+      } finally {
+        if (worker !== undefined && isAlive(worker)) process.kill(worker, 'SIGKILL');
+      }
+    }
+  );
 });
