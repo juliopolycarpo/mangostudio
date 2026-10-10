@@ -277,7 +277,7 @@ async function runSetup(
     const remainingBuildSeconds = 900 - (Date.now() - (buildStarted ?? Date.now())) / 1_000;
     if (target && remainingBuildSeconds <= 0)
       throw new Error(
-        'Native builds exceeded 900 seconds; expected runtime and fake-agent setup within 15 minutes'
+        `Native builds took ${Math.round(900 - remainingBuildSeconds)}s before ${label}; expected runtime and fake-agent setup within 900s`
       );
     const commandTimeout = target ? Math.min(timeout, remainingBuildSeconds) : timeout;
     receipt.setupErrors.push(
