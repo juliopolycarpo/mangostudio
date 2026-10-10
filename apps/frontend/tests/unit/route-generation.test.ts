@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -89,7 +90,12 @@ async function prepareManualFixture(root: string): Promise<void> {
   await mkdir(join(root, 'scripts'));
   await cp(join(FRONTEND_ROOT, 'scripts/routes.ts'), join(root, 'scripts/routes.ts'));
   await cp(join(FRONTEND_ROOT, 'package.json'), join(root, 'package.json'));
-  await symlink(join(FRONTEND_ROOT, 'node_modules'), join(root, 'node_modules'), 'junction');
+  await mkdir(join(root, 'node_modules/@tanstack'), { recursive: true });
+  await symlink(
+    await realpath(join(FRONTEND_ROOT, 'node_modules/@tanstack/router-generator')),
+    join(root, 'node_modules/@tanstack/router-generator'),
+    'junction'
+  );
 }
 
 describe('route generation', () => {
