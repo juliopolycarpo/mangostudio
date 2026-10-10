@@ -1,4 +1,4 @@
-import type { McpMediaPart } from '@mangostudio/shared';
+import type { McpMediaPart } from '@mangostudio/shared/types';
 import { Download, FileText, ImageOff, Plug } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';

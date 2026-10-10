@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
+import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared/connectors';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
 import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../../../lib/safe-file';

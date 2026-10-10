@@ -1,5 +1,6 @@
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { Sparkles } from 'lucide-react';
 import { useMemo } from 'react';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';

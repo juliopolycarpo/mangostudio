@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { getDb } from '../../src/db/database';
 import { getConfig } from '../../src/lib/config';
 import {

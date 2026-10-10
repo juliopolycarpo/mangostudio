@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import type { MessagePart } from '@mangostudio/shared';
 import {
   isTurnCheckpointPart,
   type TurnCheckpointPart,
   TurnCheckpointPartSchema,
 } from '@mangostudio/shared/turn-recovery';
+import type { MessagePart } from '@mangostudio/shared/types';
 import Value from 'typebox/value';
 import { getDb } from '../../../../src/db/database';
 import {

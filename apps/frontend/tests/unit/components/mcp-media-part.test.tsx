@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { McpMediaPart } from '@mangostudio/shared';
+import type { McpMediaPart } from '@mangostudio/shared/types';
 import { McpMediaPartBlock } from '../../../src/features/chat/components/McpMediaPartBlock';
 import { render, screen } from '../../support/harness/render';
 

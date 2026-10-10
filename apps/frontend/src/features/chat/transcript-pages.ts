@@ -1,5 +1,4 @@
-import type { Message } from '@mangostudio/shared';
-import type { MessagesPage } from '@mangostudio/shared/chat';
+import type { Message, MessagesPage } from '@mangostudio/shared/chat';
 import type { InfiniteData } from '@tanstack/react-query';
 
 /**

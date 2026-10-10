@@ -1,4 +1,4 @@
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import type { GitSummary } from '@mangostudio/shared/git';
 import {
   CHAT_SIDEBAR_WIDTH_DEFAULT,

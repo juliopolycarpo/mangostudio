@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type * as ApiClient from '../../../src/lib/api-client';

@@ -1,4 +1,4 @@
-import type { GeneratedImageArtifact } from '@mangostudio/shared';
+import type { GeneratedImageArtifact } from '@mangostudio/shared/chat';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';

@@ -531,7 +531,7 @@ describe('baseline resolution', () => {
   });
 
   it('falls through a partial newest run to an older complete run', async () => {
-    const partial = makeMetrics(BASE_SHA, { circularDeps: unavailable('madge crashed') });
+    const partial = makeMetrics(BASE_SHA, { circularDeps: unavailable('Biome crashed') });
     const github = baselineFixture({
       baselineRuns: [mainRun(91, { conclusion: 'failure' }), mainRun(90)],
       artifactsByRun: { 42: [artifact(1)], 91: [artifact(3)], 90: [artifact(2)] },
@@ -586,7 +586,7 @@ describe('baseline resolution', () => {
   });
 
   it('keeps the partial reason, not incomparable, when a partial v4 run sits beside a v3 run', async () => {
-    const partial = makeMetrics(BASE_SHA, { circularDeps: unavailable('madge crashed') });
+    const partial = makeMetrics(BASE_SHA, { circularDeps: unavailable('Biome crashed') });
     const github = baselineFixture({
       baselineRuns: [mainRun(91), mainRun(90)],
       artifactsByRun: { 42: [artifact(1)], 91: [artifact(3)], 90: [artifact(2)] },

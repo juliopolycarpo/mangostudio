@@ -152,10 +152,23 @@ Six things in that build are load-bearing:
   `external` entry the CSS bundler tries to resolve that absolute URL against the filesystem
   at build time and the build fails.
 
+Route generation runs in-process through `@tanstack/router-generator`, pinned to the same
+version previously used by the CLI. `build.ts` and the manual
+`bun run --filter @mangostudio/frontend routes` command share `scripts/routes.ts`. The helper
+resolves `tsr.config.json`, route paths and temporary files from the frontend root. Production
+builds always regenerate. Dev builds skip when the generated tree is newer than the route
+files, their directories, the config and `scripts/routes.ts`. The API's dev startup also
+includes that helper when deciding whether to reuse `dist/`; a missing helper invalidates
+both checks. Other scripts and their directory mtime are ignored, so test and artifact churn
+keeps a clean build current. After an unchanged dev generation, the helper updates the
+output's mtime so the next build can skip. Directory mtimes also catch route deletions and
+renames. The route-generation test compares a temporary generated tree byte for byte with the
+checked-in file and reports the first differing line.
+
 Chunking is Bun's automatic splitting; there is no `manualChunks` equivalent and none is
 reintroduced. What decides eager versus lazy is the import graph, and the route files are
 where that decision is made: every leaf route keeps its `component` in a `.lazy.tsx` sibling —
-`tsr generate` turns the sibling into a dynamic import the splitter breaks out, while `loader`,
+the route generator turns the sibling into a dynamic import the splitter breaks out, while `loader`,
 `beforeLoad` and `validateSearch` stay in the route file so prefetching and redirects run
 before the chunk loads. Two kinds of route file have no `.lazy.tsx` sibling, for two different
 reasons. Eager on purpose: `__root.tsx` and `_authenticated.tsx` are the shells every page
@@ -182,11 +195,11 @@ bundled into more than one chunk.
 
 `apps/api/src/server/frontend-static.ts` picks one of three modes at boot:
 
-| Mode      | When                                       | Behaviour                                                                               |
-| --------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |
-| Embedded  | the binary registered an embedded manifest | one explicit `GET` per embedded asset, negotiating precompressed copies                 |
-| Directory | `dist/index.html` exists on disk           | `@elysia/static` on `/assets`, everything else resolved per request in the SPA fallback |
-| API-only  | neither                                    | a plain 404 for non-`/api` paths                                                        |
+| Mode      | When                                       | Behaviour                                                               |
+| --------- | ------------------------------------------ | ----------------------------------------------------------------------- |
+| Embedded  | the binary registered an embedded manifest | one explicit `GET` per embedded asset, negotiating precompressed copies |
+| Directory | `dist/index.html` exists on disk           | all disk assets resolved per request in the SPA fallback                |
+| API-only  | neither                                    | a plain 404 for non-`/api` paths                                        |
 
 Two shapes there are deliberate and must survive any change:
 
@@ -196,15 +209,14 @@ Two shapes there are deliberate and must survive any change:
   which is why `/images/*` and `/uploads/*` kept working and Better Auth (mounted as
   `.all('/*')` in `routes/auth.ts`) did not: sign-in, sign-up and get-session answered 404
   while `/api/auth/ok` worked. So the embedded mode registers assets one route at a time, and
-  the directory mode scopes `@elysia/static` to `prefix: '/assets'` rather than `'/'` (the
-  plugin mounts `${prefix}/*` unless `alwaysStatic` is on, and that keys off
-  `NODE_ENV === 'production'`, which nothing here sets). `/assets` stays dynamic because a dev
-  rebuild renames every bundle file.
+  directory mode registers only the literal shell route and resolves assets in the
+  NotFound fallback. `/assets` stays dynamic because a dev rebuild renames every bundle file;
+  no static plugin or wildcard owns the root.
 - **The SPA fallback returns a `Response`**, built from `Bun.file(indexPath)`, never an
   imported `HTMLBundle`. An `HTMLBundle` returned from an error handler gets JSON-serialized.
 
-The directory mode resolves unhashed files (favicon, icons, manifest, build-info) inside that
-same fallback, per request. Enumerating them into routes at boot looked safe — the names are
+The directory mode resolves hashed assets and unhashed files (favicon, icons, manifest,
+build-info) inside that same fallback, per request. Enumerating them into routes at boot looked safe — the names are
 fixed — but the *set* is not: a dev rebuild lands while the server runs, so a file added to
 `public/` afterwards had no route, fell through to the fallback and came back as `index.html`
 at 200 `text/html`. `isSpaRoute()` therefore stops claiming root-level paths that carry a file
@@ -212,6 +224,19 @@ extension, so a missing one is a 404 instead of an HTML document handed to an `<
 rule is anchored to a single segment: `/library/my-skill.md` is a real SPA deep link. Ownership
 checks decode the pathname first, so encoded API roots and file extensions cannot fall through
 to the shell; malformed escapes and decoded traversal forms also fail with a 404.
+
+Disk resolution checks the current canonical frontend directory on every request, so an
+atomic rebuild or deployment-link switch can add filenames and directories without
+restarting the server. Files that escape that directory or alias private build state through
+symbolic links or hardlinks return 404. The shell uses the same eligibility checks for `/`,
+`/index.html` and deep links. File identity retains bigint device and inode values, since NTFS
+IDs can exceed JavaScript's safe integer range; cache validators retain their numeric size
+and millisecond contract.
+
+Hashed assets use `public, max-age=31536000, immutable`. Unhashed root files use
+`public, max-age=86400` with ETag revalidation; `/config.js` and the shell use `no-cache`.
+Conditional requests return 304. Directory mode serves identity bytes; precompressed
+representation negotiation below belongs to embedded mode.
 
 `app.handle()` resolves both correctly, so an in-process test cannot see either failure. The
 `over a listening server` suite in `apps/api/tests/unit/server/frontend-static.test.ts` binds

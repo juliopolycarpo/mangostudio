@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { filterChats } from '@/features/sidebar/lib/filter-chats';
 
 function fixture(id: string, title: string, workdir: string | null, runner: Chat['runner']): Chat {

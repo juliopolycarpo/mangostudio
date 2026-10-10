@@ -1,14 +1,9 @@
-import type {
-  McpElicitationPart,
-  McpMediaPart,
-  MessagePart,
-  QuestionPart,
-  TodoPart,
-} from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
+import type { McpElicitationPart } from '@mangostudio/shared/mcp';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
+import type { McpMediaPart, MessagePart, QuestionPart, TodoPart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { classifyMcpCallFailure } from '../../../services/mcp/call-failure';

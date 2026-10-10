@@ -1,4 +1,4 @@
-import type { Connector } from '@mangostudio/shared';
+import type { Connector } from '@mangostudio/shared/connectors';
 import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';

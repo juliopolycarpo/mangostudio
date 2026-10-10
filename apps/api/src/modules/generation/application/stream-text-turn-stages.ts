@@ -1,12 +1,12 @@
+import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
+import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
+import { mergeMessageParts } from '@mangostudio/shared/generation';
 import type {
   ContinuationReasonCode,
   MessagePart,
   ProviderType,
   ReasoningEffort,
-} from '@mangostudio/shared';
-import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
-import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
-import { mergeMessageParts } from '@mangostudio/shared/generation';
+} from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getErrorCode } from '../../../lib/error-code';

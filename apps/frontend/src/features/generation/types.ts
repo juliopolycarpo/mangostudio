@@ -1,4 +1,4 @@
-import type { SSEContextEvent, SSEFallbackEvent } from '@mangostudio/shared';
+import type { SSEContextEvent, SSEFallbackEvent } from '@mangostudio/shared/streaming';
 
 export type ContextInfo = Pick<
   SSEContextEvent,

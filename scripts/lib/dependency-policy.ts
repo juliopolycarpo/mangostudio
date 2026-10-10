@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { ROOT_DIR } from './config';
 
-const MANIFEST_SECTIONS = [
+export const MANIFEST_SECTIONS = [
   'dependencies',
   'devDependencies',
   'peerDependencies',
@@ -123,7 +123,7 @@ export interface CohortVersionConflict {
   readonly declarations: ReadonlyArray<readonly [string, readonly string[]]>;
 }
 
-const manifestLabel = (workspacePath: string): string =>
+export const manifestLabel = (workspacePath: string): string =>
   workspacePath === '' ? 'package.json' : `${workspacePath}/package.json`;
 
 /**

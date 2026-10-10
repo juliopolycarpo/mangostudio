@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { InteractionMode } from '@mangostudio/shared';
+import type { InteractionMode } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
 import {
   loadHistory,

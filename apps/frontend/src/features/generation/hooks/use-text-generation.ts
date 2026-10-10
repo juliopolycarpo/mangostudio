@@ -1,8 +1,8 @@
 /* global console */
 
-import type { Message, MessagePart, ReasoningEffort } from '@mangostudio/shared';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
+import type { Message } from '@mangostudio/shared/chat';
 import {
   type ContextCompactionResponse,
   type ContextSettings,
@@ -25,6 +25,7 @@ import type {
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
+import type { MessagePart, ReasoningEffort } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-file-checkpoints';

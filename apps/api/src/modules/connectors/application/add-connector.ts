@@ -3,7 +3,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AddConnectorBody, Connector } from '@mangostudio/shared';
+import type { AddConnectorBody, Connector } from '@mangostudio/shared/connectors';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';

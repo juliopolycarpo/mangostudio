@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
-import type { ModelCatalogResponse } from '@mangostudio/shared';
+import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
 import { ToolParameterField } from '../../../src/features/settings/tools/components/ToolParameterField';
 import { render, screen } from '../../support/harness/render';

@@ -1,4 +1,3 @@
-import type { ReasoningEffort } from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
@@ -7,6 +6,7 @@ import type {
   ExternalThreadUsage,
 } from '@mangostudio/shared/external-agents';
 import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
+import type { ReasoningEffort } from '@mangostudio/shared/types';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { type ComponentProps, useCallback, useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';

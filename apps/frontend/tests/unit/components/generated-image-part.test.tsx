@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared';
+import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared/types';
 import { GeneratedImagePart } from '../../../src/features/chat/components/GeneratedImagePart';
 import { render, screen } from '../../support/harness/render';
 

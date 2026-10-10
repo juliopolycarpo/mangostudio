@@ -102,15 +102,15 @@ const CARGO_CLIPPY = [
 function typescriptCheckTasks(tsOnly: boolean, cargo: boolean): ProtocolTask[] {
   return [
     {
-      // Through Turbo rather than a bare `tsc`, so both tasks are cached the
-      // same way the application workspaces' are. Biome and dprint are absent
-      // on purpose: the repository root already lints this package's sources.
+      // check:quick keeps normal lint exclusions separate from the full TS/TSX
+      // cycle scan, including generated files and top-level build helpers.
+      // Standalone/scoped protocol checks enforce the repository's same rules.
       label: 'protocol:workspace',
       cmd: [
         'turbo',
         'run',
+        'check:quick',
         TYPECHECK_TASK,
-        'circular',
         '--ui=stream',
         '--filter=@mangostudio/protocol',
       ],

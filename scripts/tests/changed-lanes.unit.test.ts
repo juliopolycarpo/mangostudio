@@ -40,12 +40,24 @@ describe('planChangedLanes', () => {
     ]);
   });
 
-  it('runs the frontend whole when the api changes, since it imports api modules', () => {
+  it('runs root and frontend whole when their API workspace dependency changes', () => {
     expect(modes(['apps/api/src/app.ts'])).toEqual([
-      'root: changed',
+      'root: full',
       'frontend: full',
       'api: changed',
       'shared: changed',
+    ]);
+  });
+
+  it('runs root whole when its exported build-smoke fake server changes', () => {
+    const file = 'apps/api/tests/support/chatgpt/fake-server.ts';
+
+    expect(planChangedLanes([file], ['root'])).toEqual([
+      {
+        lane: 'root',
+        mode: 'full',
+        reason: `${file} is in api, which root imports by package name`,
+      },
     ]);
   });
 

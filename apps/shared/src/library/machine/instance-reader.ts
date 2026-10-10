@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, relative, sep } from 'node:path';
-import { parse as parseToml } from 'smol-toml';
 import { parseMarkdownFrontmatter } from '../../markdown';
 import { throwIfAborted } from '../../runtime-contract/cancellation';
 import type { LocationDefinition } from '../host';
@@ -25,7 +24,7 @@ const textDecoder = new TextDecoder();
 export const SKILL_ENTRYPOINT = 'SKILL.md';
 
 /**
- * This module only ever runs on Node, so it is the one place in the library
+ * This module only runs on the host, so it is the one place in the library
  * stack allowed to read `process.platform` — the hasher itself stays
  * framework-agnostic and takes the answer as a parameter instead.
  */
@@ -490,7 +489,10 @@ function describeInstance(
       return isObject(value) ? { title: slug } : { title: slug, invalidReason: 'invalid-metadata' };
     }
     if (location.format === 'toml-agent' || location.format === 'toml-settings') {
-      const value = parseToml(text);
+      const value = Bun.TOML.parse(text);
+      if (!isObject(value) || !tomlNestingWithinLimit(value)) {
+        return { title: slug, invalidReason: 'invalid-metadata' };
+      }
       const title =
         location.format === 'toml-agent' && typeof value.name === 'string'
           ? value.name.trim() || slug
@@ -499,9 +501,7 @@ function describeInstance(
         location.format === 'toml-agent' && typeof value.description === 'string'
           ? value.description.trim()
           : undefined;
-      return isObject(value) && tomlNestingWithinLimit(value)
-        ? { title, ...(description && { description }) }
-        : { title: slug, invalidReason: 'invalid-metadata' };
+      return { title, ...(description && { description }) };
     }
     return { title: slug };
   } catch {

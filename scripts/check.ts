@@ -13,6 +13,7 @@ import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
 } from './lib/dependency-policy';
+import { assertFrontendApiImportBoundary } from './lib/frontend-api-import-boundary';
 import { assertNoProductionNodeEnvBranches } from './lib/no-node-env-branches';
 import { touchesProtocolSurface } from './lib/protocol';
 import { assertVersionsInLockstep } from './lib/release-version';
@@ -31,15 +32,17 @@ import {
   runParallel,
   runTask,
 } from './lib/runner';
+import { assertNoSharedRootImports } from './lib/shared-root-import-boundary';
 
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Biome, dprint, madge circular checks, tsc typechecks, Knip code health,
+Runs Biome lint/format and import-cycle checks, dprint, tsc typechecks, Knip code health,
 generated contract-artifact freshness, lockfile dedupe, the Mango Protocol
 lanes (spec, schema equality, fixtures, Cargo) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.
 Default workspace selection: --all
+Workspace cycle scans include generated and gitignored TS/TSX files.
 
 Workspace flags:
   --frontend
@@ -224,10 +227,14 @@ if (includeCodeHealth) {
   );
 }
 
-if (tasks.length === 0) {
-  info('No affected workspaces — nothing to check.');
-  process.exit(0);
+// The source scans below parse synchronously on this thread, so they go last:
+// every subprocess task above is already spawned and runs alongside them.
+if (effectiveWorkspaces.includes('frontend')) {
+  tasks.push(() =>
+    runTask('frontend:api-import-boundary', () => assertFrontendApiImportBoundary())
+  );
 }
+tasks.push(() => runTask('root:shared-import-boundary', () => assertNoSharedRootImports()));
 
 const results = await runParallel(tasks);
 

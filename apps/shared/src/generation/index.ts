@@ -1,3 +1,8 @@
+export {
+  DELEGATION_BACKOFF_BASE_MS,
+  DELEGATION_BACKOFF_MAX_MS,
+  DELEGATION_MAX_RETRIES,
+} from '../agentic-limits';
 export type { GeneratedMessage, GenerateImageResponse, GenerateTextResponse } from './contracts';
 export { mergeMessageParts } from './merge-message-parts';
 export {

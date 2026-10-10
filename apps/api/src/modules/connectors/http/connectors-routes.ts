@@ -3,7 +3,7 @@
  * Parse → call use case → respond. No business logic here.
  */
 
-import type { Connector, ConnectorStatus } from '@mangostudio/shared';
+import type { Connector, ConnectorStatus } from '@mangostudio/shared/connectors';
 import {
   AddConnectorBodySchema,
   UpdateConnectorModelsBodySchema,

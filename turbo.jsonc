@@ -64,6 +64,9 @@
       "outputs": ["dist/**"]
     },
     "check:quick": {
+      // Cycles include generated and gitignored TS/TSX files, which are absent
+      // from Turbo's VCS inputs. Always scan them instead of replaying a cache.
+      "cache": false,
       "inputs": ["$TURBO_ROOT$/biome.json", "$TURBO_DEFAULT$"]
     },
     // Script-less: no workspace defines a `transit` script, so it runs nothing
@@ -93,7 +96,6 @@
     "typecheck:with-deps": {
       "dependsOn": ["typecheck", "^typecheck:with-deps"]
     },
-    "circular": {},
     // A unit test runs the sources of the workspaces it imports, not only its
     // own: a frontend test drives API code, an API test drives `shared`. With
     // no `dependsOn`, the key covered one workspace and replayed a pass after
