@@ -204,26 +204,36 @@ export async function snapshotNativeProcesses(): Promise<NativeProcess[]> {
     process.platform
   );
   if (process.platform !== 'linux') return processes;
-  const identities = await Promise.all(
-    processes.map(async (row): Promise<NativeProcess | null> => {
-      try {
-        const stat = await readFile(`/proc/${row.pid}/stat`, 'utf8');
-        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-        if (!/^\d+$/.test(fields[19] ?? ''))
-          throw new Error(`Invalid /proc/${row.pid}/stat; expected start ticks`);
-        return {
-          ...row,
-          parentPid: Number(fields[1]),
-          group: Number(fields[2]),
-          identity: `${row.pid}:${fields[19]}`,
-        };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-        throw error;
-      }
-    })
-  );
+  const identities = await Promise.all(processes.map((row) => readLinuxProcessIdentity(row)));
   return identities.filter((row): row is NativeProcess => row !== null);
+}
+
+/**
+ * Read a Linux process's current parent, group and start ticks, omitting an exited process.
+ * @example const current = await readLinuxProcessIdentity(processRow);
+ */
+export async function readLinuxProcessIdentity(
+  row: NativeProcess,
+  readStat: (path: string, encoding: 'utf8') => Promise<string> = readFile
+): Promise<NativeProcess | null> {
+  try {
+    const stat = await readStat(`/proc/${row.pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    if (!/^\d+$/.test(fields[19] ?? ''))
+      throw new Error(
+        `Invalid /proc/${row.pid}/stat start ticks ${JSON.stringify(fields[19])}; expected decimal digits`
+      );
+    return {
+      ...row,
+      parentPid: Number(fields[1]),
+      group: Number(fields[2]),
+      identity: `${row.pid}:${fields[19]}`,
+    };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ESRCH') return null;
+    throw error;
+  }
 }
 
 /**

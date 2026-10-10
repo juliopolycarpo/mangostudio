@@ -7,6 +7,7 @@ import { Writable } from 'node:stream';
 import {
   type NativeProcess,
   parseNativeProcesses,
+  readLinuxProcessIdentity,
   runNativeCommand,
   scopeNativeProcesses,
   snapshotNativeProcesses,
@@ -36,6 +37,22 @@ function processRow(
   group: number | null = 10
 ): NativeProcess {
   return { pid, parentPid, identity, group, command: `process-${pid}` };
+}
+
+class LinuxStatFile {
+  readonly reads: Array<{ path: string; encoding: string }> = [];
+  constructor(private readonly result: string | Error) {}
+
+  read = (path: string, encoding: 'utf8'): Promise<string> => {
+    this.reads.push({ path, encoding });
+    if (this.result instanceof Error) return Promise.reject(this.result);
+    return Promise.resolve(this.result);
+  };
+}
+
+function linuxStat(start = '321'): string {
+  const fields = ['S', '7', '9', ...Array<string>(16).fill('0'), start];
+  return `10 (worker (fixture)) ${fields.join(' ')}`;
 }
 
 async function unavailableSnapshot(): Promise<NativeProcess[]> {
@@ -145,6 +162,37 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 describe('native process identity', () => {
+  test('reads exact Linux start ticks and current ancestry from the stat file', async () => {
+    const file = new LinuxStatFile(linuxStat());
+    expect(await readLinuxProcessIdentity(processRow(10, 1), file.read)).toEqual({
+      ...processRow(10, 7),
+      group: 9,
+      identity: '10:321',
+    });
+    expect(file.reads).toEqual([{ path: '/proc/10/stat', encoding: 'utf8' }]);
+  });
+
+  test.each(['ENOENT', 'ESRCH'])(
+    'omits a Linux process that exits before stat is read with %s',
+    async (code) => {
+      const file = new LinuxStatFile(Object.assign(new Error('process exited'), { code }));
+      expect(await readLinuxProcessIdentity(processRow(10, 1), file.read)).toBeNull();
+    }
+  );
+
+  test.each(['EACCES', 'EIO'])('rejects an unavailable Linux identity with %s', async (code) => {
+    const error = Object.assign(new Error('identity read unavailable'), { code });
+    const file = new LinuxStatFile(error);
+    await expect(readLinuxProcessIdentity(processRow(10, 1), file.read)).rejects.toBe(error);
+  });
+
+  test('rejects malformed Linux start ticks without certifying an exited process', async () => {
+    const file = new LinuxStatFile(linuxStat('invalid'));
+    await expect(readLinuxProcessIdentity(processRow(10, 1), file.read)).rejects.toThrow(
+      'Invalid /proc/10/stat start ticks "invalid"; expected decimal digits'
+    );
+  });
+
   test('refuses stale Windows parent edges when an older orphan points at a reused parent PID', () => {
     const root = processRow(10, 1, '10:2026-10-08T12:00:00.0000002Z', null);
     const older = processRow(20, 10, '20:2026-10-08T12:00:00.0000001Z', null);
