@@ -44,6 +44,7 @@ on:
       - ".github/workflows/cargo-shim.yml"
       - ".github/workflows/rust-coverage.yml"
       - ".github/actions/setup-zigbuild/**"
+      - "scripts/bench/rust-test-inventory.ts"
       - "apps/api/**"
       - "apps/shared/**"
       - "package.json"
@@ -57,6 +58,15 @@ on:
 
 permissions:
   contents: read
+
+# Incremental compilation keeps state for rebuilding one target directory. A CI
+# job builds once, so that state only costs time and disk (measured and written
+# up under "Cargo incremental compilation" in docs/reference/testing.md).
+# Swatinem/rust-cache exports the same value for jobs that restore a cache but
+# not for lanes without one, so it is set here and pinned by
+# scripts/tests/cargo-incremental.unit.test.ts.
+env:
+  CARGO_INCREMENTAL: "0"
 
 concurrency:
   group: cargo-shim-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
@@ -136,14 +146,36 @@ jobs:
         with:
           bun-version-file: .bun-version
 
+      # Version-pinned here and hash-pinned through the action, which verifies
+      # the release checksum from its own manifest. nextest runs each test in
+      # its own process and does not run doctests, which stay on `cargo test
+      # --doc` below.
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-nextest@0.9.144
+
       # Ubuntu's copy of this run is `cargo llvm-cov` in rust-coverage.yml,
       # called from ci.yml: same flags, same libtest runner, same test set,
       # instrumented so the QA report can show per-crate coverage. It lives in
       # the CI run because that is where the QA collector reads artifacts, and
-      # CI / Gate requires it there. macOS and Windows keep the plain run here.
+      # CI / Gate requires it there. macOS and Windows run the plain set here,
+      # under nextest: same targets and features as `cargo test --workspace
+      # --all-targets --all-features --locked`. `--retries 0` keeps a flaky
+      # test a failure instead of a second attempt that passes.
       - name: Run tests
         if: matrix.os != 'ubuntu-latest'
-        run: cargo test --workspace --all-targets --all-features --locked
+        run: cargo nextest run --workspace --all-targets --all-features --locked --retries 0
+
+      # What the runner swap must preserve is the test set, not the timing: the
+      # same cases and the same `#[ignore]` flags as libtest lists. It runs on
+      # every OS, Ubuntu included, whose own run is the instrumented libtest
+      # one above. A mismatch prints each differing case and fails the job.
+      - name: Check nextest runs the libtest test set
+        shell: bash
+        run: |
+          bun scripts/bench/rust-test-inventory.ts capture "$RUNNER_TEMP/libtest.json"
+          bun scripts/bench/rust-test-inventory.ts capture-nextest "$RUNNER_TEMP/nextest.json"
+          bun scripts/bench/rust-test-inventory.ts compare "$RUNNER_TEMP/libtest.json" "$RUNNER_TEMP/nextest.json"
 
       # `--all-targets` above excludes doctests by definition, and the doc
       # comments across this workspace (`mangostudio-runtime`,
@@ -193,7 +225,13 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - run: cargo test -p mangostudio-runtime --all-targets --all-features --locked
+      # Pinned like the workspace job's install: the exact version through the
+      # SHA-pinned action, which verifies the release checksum.
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-nextest@0.9.144
+
+      - run: cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0
 
   workspace-msrv:
     # The workspace floor is `rust-version` in the root Cargo.toml (stable minus

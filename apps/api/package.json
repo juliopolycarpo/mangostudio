@@ -19,8 +19,8 @@
     "fix": "biome check --write src tests",
     "migrate": "bun run src/db/migrate.ts",
     "test": "bun run test:unit && bun run test:integration",
-    "test:unit": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --timeout 15000 --parallel=1 tests/unit",
-    "test:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --timeout 15000 tests/integration",
+    "test:unit": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/run-test-workers.ts --lane=api-unit -- bun test --timeout 15000 --parallel=1 tests/unit",
+    "test:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/run-test-workers.ts --lane=api-integration -- bun test --timeout 15000 tests/integration",
     "test:coverage": "bun ../../scripts/ci/run-workspace-coverage.ts --workspace=api",
     "test:coverage:unit": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --timings=../../.mango/artifacts/timings/api-unit.json --update-timings --coverage --coverage-dir=../../.mango/artifacts/coverage/api-unit --timeout 15000 --parallel=1 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/api-unit.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/unit",
     "test:coverage:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --coverage --coverage-dir=../../.mango/artifacts/coverage/api-integration --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/api-integration.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/integration"

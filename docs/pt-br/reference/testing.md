@@ -179,6 +179,26 @@ bun run --filter @mangostudio/api test:integration
 > (`tests/support/fixtures/local-runtime-user.ts`); as suítes de checkpoint são o exemplo.
 > Fechar a conexão aguarda o processo filho encerrar.
 
+> **A lane unit com cache usa o conteúdo do binário na chave.** `test:unit` é uma task do
+> Turbo com cache. O Turbo calcula o hash do *caminho* que `MANGOSTUDIO_RUNTIME_BINARY`
+> informa (a task permite `MANGOSTUDIO_*`), nunca do arquivo, e um build padrão em
+> `target/debug` nem entra na chave; por isso um runtime recompilado ou substituído
+> reaproveitava o resultado gravado com o binário antigo. O `bun run test` agora calcula
+> uma vez, antes de o Turbo iniciar, o SHA-256 do binário que os testes iniciam e o exporta
+> como `MANGOSTUDIO_RUNTIME_BINARY_SHA256`: substituir os bytes é um cache miss, um binário
+> inalterado é um hit, e nem o caminho nem o mtime contam. O binário é o que
+> `MANGOSTUDIO_RUNTIME_BINARY` informa (caminho relativo a partir de `apps/api`, onde os
+> testes rodam) ou, sem ele, o mais recente entre `target/debug` e `target/release` em
+> `CARGO_TARGET_DIR`, com `debug` vencendo o empate — a mesma resolução de
+> `resolveRustRuntimeBinary` e do hub, fixada por
+> `scripts/tests/runtime-binary-digest.unit.test.ts`. Sem binário, a variável é omitida e
+> os testes são ignorados ou falham com a própria mensagem. O hub nunca lê a variável, então
+> `apps/api/src/lib/config.ts` não muda. A lista permitida é compartilhada por toda task
+> `test:unit` da mesma execução do Turbo, então um novo build do runtime também reexecuta os
+> testes unitários do frontend e do shared. O `bun run test` é a entrada suportada: um
+> `turbo run test:unit` direto pula o `scripts/test.ts` e não recebe o digest, sem ficar
+> pior do que antes.
+
 #### Home descartável
 
 As lanes unit e integration da API rodam em um home descartável. O código sob teste deriva

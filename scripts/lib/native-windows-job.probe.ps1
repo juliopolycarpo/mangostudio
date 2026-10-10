@@ -272,7 +272,7 @@ namespace Mango.NativeImageFakes {
         public readonly Queue<ImageResult> Images=new Queue<ImageResult>();
         public readonly Queue<bool> Waits=new Queue<bool>();
         public Member Current;
-        public int Reads,Queries,WaitCalls,FailReadAt,FailWaitAt;
+        public int Reads,Queries,WaitCalls,FailReadAt,FailWaitAt,QueryMilliseconds;
         public bool PersistentFailure,Signaled;
         public FakeImageProcess() : this(new FakeClock()) {}
         public FakeImageProcess(FakeClock clock) { Clock=clock; Current=State(42,134359891225276227,true); }
@@ -286,7 +286,7 @@ namespace Mango.NativeImageFakes {
             return State(Current.Pid,Int64.Parse(Current.CreationFileTime),Current.IsMember);
         }
         public ImageResult Query() {
-            Queries++; if(Images.Count>0) return Images.Dequeue();
+            Queries++; Clock.Now+=QueryMilliseconds; if(Images.Count>0) return Images.Dequeue();
             if(PersistentFailure) return new ImageResult {Success=false,Error=5,Characters=32768};
             const string path=@"C:\tools\owned.exe"; return new ImageResult {Success=true,Characters=(uint)path.Length,Path=path};
         }
@@ -331,8 +331,9 @@ namespace Mango.NativeImageCallerFakes {
         public readonly Dictionary<IntPtr,FakeImageProcess> Processes=new Dictionary<IntPtr,FakeImageProcess>();
         public readonly List<string> Events=new List<string>();
         public readonly List<ImageAttempt> Diagnostics=new List<ImageAttempt>();
+        public int QueryBudgetMilliseconds=2000;
         public IntPtr Open(uint pid) { IntPtr token=OpenOrder.Count>0?OpenOrder.Dequeue():new IntPtr(1); Events.Add("open:"+pid+":"+token); return token; }
-        private ImageQueryBudget NewImageBudget() { return new ImageQueryBudget(2000,()=>Clock.Now); }
+        private ImageQueryBudget NewImageBudget() { return new ImageQueryBudget(QueryBudgetMilliseconds,()=>Clock.Now); }
         private bool Alive(IntPtr token) { return !Processes[token].Wait(0); }
         private void ReleaseExited() {
             var remove=new List<string>();
@@ -680,6 +681,29 @@ $startedChild.Dispose()
         try { $second.Resolve($budget, $attempts, $second.Current.Identity, 'C:\tools\owned.exe') | Out-Null } catch { $failure = $_.Exception.ToString() }
         Assert-NativeProbe ($failure -match 'Image query budget exhausted' -and $clock.Now -eq 25 -and $second.Queries -eq 1) 'a second member cannot reset or multiply the complete-query deadline'
         return @{ sameHandleExit = $exitEvidence; sharedBudgetMilliseconds = 25; elapsedMilliseconds = $clock.Now; attempts = @($attempts); nativeAPIInvocations = 0 }
+    }
+    Invoke-NativeProbe 'complete image query shares a bounded budget across healthy members' {
+        $cases = [Collections.Generic.List[object]]::new()
+        foreach ($cost in @(6000, 10000)) {
+            $fixture = [Mango.NativeImageCallerFakes.QueryFixture]::new()
+            $fixture.QueryBudgetMilliseconds = [Mango.NativeJobProbe.ImageQueryBudget]::MaximumMilliseconds
+            $first = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock)
+            $second = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock)
+            $second.Current = [Mango.NativeImageFakes.FakeImageProcess]::State(43, 134359891225276228, $true)
+            $first.QueryMilliseconds = $cost; $second.QueryMilliseconds = $cost
+            $fixture.Processes.Add([IntPtr]::new(1), $first); $fixture.Processes.Add([IntPtr]::new(2), $second)
+            $fixture.OpenOrder.Enqueue([IntPtr]::new(1)); $fixture.OpenOrder.Enqueue([IntPtr]::new(2))
+            $fixture.Lists.Enqueue([uint32[]]@(42, 43)); $fixture.Counts.Enqueue(2); $fixture.Counts.Enqueue(2)
+            $snapshot = $null; $failure = $null
+            try { $snapshot = $fixture.Run() } catch { $failure = $_.Exception.ToString() }
+            if ($cost -eq 6000) {
+                Assert-NativeProbe (-not $failure -and $snapshot.Stable -and -not $snapshot.Empty -and $snapshot.Members.Count -eq 2 -and $snapshot.Members[0].Identity -eq $first.Current.Identity -and $snapshot.Members[1].Identity -eq $second.Current.Identity -and $fixture.Clock.Now -eq 12000) "Invalid two-member attestation after $($fixture.Clock.Now)ms with error=$failure; expected complete stable snapshot of both exact identities within the shared budget"
+            } else {
+                Assert-NativeProbe ($failure -match 'Image query budget exhausted after 20000ms at resolved image.*expected complete attestation within 20000ms' -and -not $snapshot -and $fixture.Clock.Now -eq 20000 -and $first.Queries -eq 1 -and $second.Queries -eq 1) 'two healthy members cannot reset the20000ms complete-query deadline or yield a partial snapshot'
+            }
+            $cases.Add([pscustomobject]@{ queryCostMilliseconds = $cost; elapsedMilliseconds = $fixture.Clock.Now; snapshot = $snapshot; error = $failure; events = @($fixture.Events) })
+        }
+        return @{ sharedBudgetMilliseconds = [Mango.NativeJobProbe.ImageQueryBudget]::MaximumMilliseconds; cases = @($cases); exactProductionQueryExtracted = $true; nativeAPIInvocations = 0 }
     }
     Invoke-NativeProbe 'exact query caller refreshes complete accounting and never drops a still-present member' {
         $cases = [Collections.Generic.List[object]]::new()

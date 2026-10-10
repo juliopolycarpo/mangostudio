@@ -144,6 +144,28 @@ describe('the real protocol manifest', () => {
     expect(installs(release, 'cargo-hack'), 'protocol-release.yml verifies without it').toBe(true);
   });
 
+  test('cargo-hack is installed at one exact version in both workflows', () => {
+    // Unpinned, `install-action` takes whatever cargo-hack is newest: the
+    // feature powerset the pull request lane cleared and the one a release
+    // re-runs can then differ.
+    const pin = /tool: cargo-hack@(\d+\.\d+\.\d+)\s*$/m;
+    const versions = [
+      '.github/workflows/protocol-ci.yml',
+      '.github/workflows/protocol-release.yml',
+    ].map((path) => ({ path, version: pin.exec(readText(path))?.[1] }));
+
+    for (const { path, version } of versions) {
+      expect(
+        version,
+        `expected ${path} to install cargo-hack@<major>.<minor>.<patch> | received an unpinned or missing install`
+      ).toBeDefined();
+    }
+    expect(
+      versions[1].version,
+      `expected protocol-release.yml to install cargo-hack@${versions[0].version}, as protocol-ci.yml does | received: ${versions[1].version}`
+    ).toBe(versions[0].version);
+  });
+
   test('the release workflow publishes from the staging directory, not the package', () => {
     const workflow = readText('.github/workflows/protocol-release.yml');
     expect(workflow).toContain('bun ./scripts/protocol/pack.ts --out .mango/out/protocol');

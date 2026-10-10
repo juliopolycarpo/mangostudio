@@ -5,6 +5,9 @@
   // whenever it detects an AI coding agent. AGENTS.md is hand-maintained here
   // and an agent session must not leave it modified, so the block stays off.
   "agentGuidance": false,
+  // Bun records a patch's path in the lockfile, not its bytes. A patch-only edit
+  // changes installed dependency code and must invalidate cached tasks too.
+  "globalDependencies": ["patches/**"],
   // Env vars read by the root build/release/CI scripts (scripts/build.ts,
   // scripts/test-build.ts, scripts/release/*, scripts/lib/release-version.ts,
   // scripts/ci/*), which run via `bun run` outside turbo tasks. Declared as pass-through so
@@ -63,17 +66,41 @@
     "check:quick": {
       "inputs": ["$TURBO_ROOT$/biome.json", "$TURBO_DEFAULT$"]
     },
+    // Script-less: no workspace defines a `transit` script, so it runs nothing
+    // and orders nothing. It exists for its hash. Turbo folds the hash of each
+    // `dependsOn` task into the dependent's own, so a task that depends on
+    // `transit` is rebuilt whenever a workspace it imports changes, yet starts
+    // at once. A task that reads its dependencies' sources and has nothing for
+    // them to wait on opts in with `"dependsOn": ["transit"]` (`typecheck` and
+    // `test:unit` do). It must declare no `inputs`: the default set is what
+    // carries an upstream `package.json` or tsconfig edit downstream.
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
-      // tsbuildinfo is per-workspace gitignored incremental state that all
-      // workspaces write into one shared root dir. Declaring it as an output
-      // here makes every workspace's typecheck task claim the same glob, which
-      // overlaps across tasks and cross-contaminates the restored cache. tsc
-      // re-validates buildinfo on disk, so it is left out of the Turbo cache.
+      "dependsOn": ["transit"],
+      // No outputs: `incremental` is off, so tsc leaves no build info to cache
+      // (scripts/tests/typescript-incremental.unit.test.ts pins that).
       "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"]
     },
+    // Script-less, and the task `bun run check` requests. `transit` selects
+    // nothing, so `typecheck` alone would drop the upstream workspaces from a
+    // filtered run. This task depends on its own `typecheck` and on those of
+    // the workspaces it imports (`^`), which orders only these markers: every
+    // `typecheck` still starts at once. Do not select upstream with `with`
+    // instead: Turbo stops a `with` task when the task that lists it exits, so a
+    // slower workspace's type error is lost and its cache entry never written.
+    "typecheck:with-deps": {
+      "dependsOn": ["typecheck", "^typecheck:with-deps"]
+    },
     "circular": {},
+    // A unit test runs the sources of the workspaces it imports, not only its
+    // own: a frontend test drives API code, an API test drives `shared`. With
+    // no `dependsOn`, the key covered one workspace and replayed a pass after
+    // the code under test had changed. `transit` adds the upstream sources to
+    // the key without making any lane wait or run another workspace's tests.
     "test:unit": {
+      "dependsOn": ["transit"],
       "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
     },
     "test:integration": {
@@ -82,9 +109,9 @@
     },
     // The JUnit reports these lanes write are deliberately not declared as
     // outputs. The task is uncached, so there is nothing to restore, and every
-    // workspace writes into one shared directory — the same overlapping-glob
-    // shape the typecheck comment above warns about, which would cross-
-    // contaminate if anyone ever turned caching on here.
+    // workspace writes into one shared directory. Declared, it would give every
+    // workspace's task the same glob, and overlapping globs cross-contaminate a
+    // restored cache if anyone ever turned caching on here.
     "test:coverage": {
       "cache": false,
       "outputs": ["$TURBO_ROOT$/.mango/artifacts/coverage/**"],
@@ -103,6 +130,27 @@
       "inputs": ["$TURBO_DEFAULT$", "scripts/**"],
       "outputs": ["$TURBO_ROOT$/.mango/artifacts/junit/root.xml"],
       "env": ["CI", "MANGOSTUDIO_*"]
+    },
+    // The same tests as `//#test:scripts`, split across worker processes by
+    // scripts/run-test-workers.ts (the `bun run test` unit phase; the coverage
+    // phase and CI's shards keep the task above, which is the one that writes
+    // the coverage evidence `root.xml`). Cached, so the runner and everything
+    // it loads are inputs: `scripts/**` covers them, `$TURBO_DEFAULT$` the
+    // files the tests read from outside `scripts/`. The merged report is
+    // nobody's evidence, so there is no output to restore. The worker count is
+    // a pass-through and not an `env` entry: the result is the same at any
+    // width, so it stays out of the key. The toolchain homes are pass-through
+    // for the launcher that pins them (scripts/lib/test-home.ts).
+    "//#test:scripts:workers": {
+      "inputs": ["$TURBO_DEFAULT$", "scripts/**"],
+      "env": ["CI", "MANGOSTUDIO_*"],
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "BUN_INSTALL",
+        "BUN_INSTALL_CACHE_DIR",
+        "MANGO_TEST_WORKERS"
+      ]
     }
   }
 }

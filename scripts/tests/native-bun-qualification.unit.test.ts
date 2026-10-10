@@ -1,8 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
+import { ROOT_DIR } from '../lib/config';
 import {
   NATIVE_QUALIFICATION_TIMEOUT_SECONDS,
   nativeQualificationEnvironment,
@@ -386,16 +396,18 @@ describe('qualification inputs and seals', () => {
       MANGOSTUDIO_RUNTIME_BINARY: '/old/runtime',
       TURBO_TOKEN: 'private',
       TURBO_FORCE: 'false',
+      TURBO_CACHE_DIR: '/old/cache',
       RUSTFLAGS: '--cfg old',
       CARGO_TARGET_DIR: '/old/target',
       DATABASE_PATH: '/old/database',
     });
     expect(env.PATH).toBe('/fixture/path');
-    expect(env.TURBO_FORCE).toBe('true');
+    expect(env.TURBO_FORCE).toBeUndefined();
     expect(env.MANGOSTUDIO_BUN_TEST_ARGS).toBe('');
     for (const key of [
       'MANGOSTUDIO_RUNTIME_BINARY',
       'TURBO_TOKEN',
+      'TURBO_CACHE_DIR',
       'RUSTFLAGS',
       'CARGO_TARGET_DIR',
       'DATABASE_PATH',
@@ -616,6 +628,71 @@ describe('full qualification receipts', () => {
       (await collectNativeTestEvidence(source.root, source.out, receipt.tests?.inventory ?? []))
         .complete
     ).toBe(true);
+  });
+
+  test('owns a fresh outer cache while allowing nested Turbo fixtures to hit their caches', async () => {
+    const source = await checkout();
+    const fake = new FakeNativeCommands();
+    const receipt = await runNativeQualification(source, {
+      runCommand: fake.run,
+      snapshotProcesses: emptyNativeCensus,
+    });
+    expect(receipt.status).toBe('qualified');
+    const env = fake.calls.find((call) => call.label === 'test')?.env;
+    expect(env).toBeDefined();
+    const fixture = join(source.out, 'nested-cache-probe');
+    await file(
+      join(fixture, 'package.json'),
+      JSON.stringify({
+        name: 'native-cache-probe',
+        private: true,
+        packageManager: 'bun@1.4.2',
+        workspaces: ['packages/*'],
+      })
+    );
+    await file(
+      join(fixture, 'turbo.json'),
+      JSON.stringify({ tasks: { probe: { inputs: ['input.txt'], outputs: [] } } })
+    );
+    await file(
+      join(fixture, 'packages/probe/package.json'),
+      JSON.stringify({ name: 'native-cache-probe-task', scripts: { probe: 'bun --revision' } })
+    );
+    await file(join(fixture, 'packages/probe/input.txt'), 'unchanged probe input');
+    const outputs: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const child = Bun.spawn({
+        cmd: [
+          join(ROOT_DIR, 'node_modules', '.bin', 'turbo'),
+          'run',
+          'probe',
+          '--cache-dir',
+          join(fixture, '.turbo-cache'),
+          '--ui=stream',
+          '--log-order=stream',
+        ],
+        cwd: fixture,
+        env,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      expect(exitCode, `expected nested Turbo exit 0 | received: ${exitCode}: ${stderr}`).toBe(0);
+      outputs.push(stdout);
+    }
+    expect(
+      outputs[1],
+      `expected a warm nested Turbo cache hit | received: ${outputs[1]}`
+    ).toContain(':probe: cache hit');
+    expect(outputs[0]).toContain(':probe: cache miss');
+    const cache = join(await realpath(source.out), 'targets', 'turbo');
+    expect(fake.calls.every((call) => call.env.TURBO_CACHE_DIR === cache)).toBe(true);
+    expect(fake.calls.every((call) => call.env.TURBO_FORCE === undefined)).toBe(true);
+    expect(await readdir(cache)).toEqual([]);
   });
 
   test('runs test once after a failing check and retains the failing check receipt', async () => {

@@ -83,6 +83,7 @@ import { setRuntimeTokenStoreForTests } from '../../../src/services/runtime-clie
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { insertTestUser } from '../../support/factories';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
+import { expectRuntimeChildAlive } from '../../support/runtime-child-liveness';
 import {
   assertRustRuntimeCommandMethods,
   assertRustRuntimeFeatureCeiling,
@@ -1024,13 +1025,24 @@ describe('Real Rust runtime qualification', () => {
         const scratch = await realpath(await scratchMangoHome('serve-install-signal-dir'));
         try {
           const installer = await writeFakeInstaller(scratch, 'grandchild', 'serve-signal');
-          const run = startRelayedInstall(client, installer, { runId: 'rust-serve-signal' });
+          // The installer never finishes, so the runtime's graceful shutdown ends at this deadline.
+          // It stays above the 5 s checkpoint with margin for a slow start; a shorter one would
+          // end the shutdown before the checkpoint and fail it.
+          const run = startRelayedInstall(client, installer, {
+            runId: 'rust-serve-signal',
+            timeoutMs: 10_000,
+          });
           await run.waitForLine('stdout', 'waiting');
           await waitUntil(() => Bun.file(installer.pidFile).size > 0, 'the grandchild pid');
           const pid = Number((await readFile(installer.pidFile, 'utf8')).trim());
 
-          child?.kill('SIGTERM');
-          await child?.exited;
+          if (!child) throw new Error('expected serve child: spawned | received: undefined');
+          // Observed from before the signal: the shutdown must still be waiting on the active
+          // install past the former four-second stop window.
+          const aliveThroughWindow = expectRuntimeChildAlive(child, 5_000);
+          child.kill('SIGTERM');
+          await aliveThroughWindow;
+          await child.exited;
           child = undefined;
           await run.result;
 

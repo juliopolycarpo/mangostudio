@@ -55,6 +55,31 @@ export interface TestLane {
    * directly from its own coverage dir, with nothing to merge.
    */
   readonly lcovPath?: string;
+  /**
+   * Set on a lane whose plain (non-coverage) run `scripts/run-test-workers.ts`
+   * splits across worker processes. The coverage script of the same lane is not
+   * affected: Bun's LCOV is not union-mergeable across processes (see below).
+   */
+  readonly workers?: {
+    /** Workspace-relative directory of the lane's files, the last argument of its test script. */
+    readonly testDir: string;
+    /**
+     * Each worker must prove it left no process behind: it leads a process group
+     * of its own, runs without `--no-orphans` (which would kill the evidence), and
+     * the lane fails, naming the process, when one outlives it. For lanes whose
+     * tests spawn the runtime, servers and shells.
+     */
+    readonly settle?: boolean;
+    /** The lane's own default width, when it is not the runner's (six). */
+    readonly defaultWidth?: number;
+    /**
+     * Test files outside `testDir` that the lane's command also runs, as the
+     * `file` attribute of their JUnit cases spells them. For a lane whose last
+     * argument is a path *filter* and not a directory, which `bun test`
+     * matches as a substring of every test file's path.
+     */
+    readonly alsoRuns?: readonly string[];
+  };
   /** Repo-relative manifest declaring the lane's coverage script. */
   readonly manifest: string;
   /** Script key inside that manifest. */
@@ -64,6 +89,18 @@ export interface TestLane {
 }
 
 export const JUNIT_DIR = '.mango/artifacts/junit';
+
+/**
+ * Where the worker runner puts a lane's merged report. Deliberately not
+ * `JUNIT_DIR`: a lane's `junitPath` is its coverage run's evidence (the QA gate
+ * and the shard merge read it), and a plain run that wrote there could leave a
+ * green report behind for a coverage lane that died before writing its own.
+ *
+ * @example
+ * workerReportPath(laneById('api-unit')); // => '.mango/artifacts/test-workers/api-unit.xml'
+ */
+export const workerReportPath = (lane: Pick<TestLane, 'id'>): string =>
+  `.mango/artifacts/test-workers/${lane.id}.xml`;
 
 /**
  * Where each lane's `--timings` file lives.
@@ -96,13 +133,34 @@ export const TEST_LANES: readonly TestLane[] = [
     // cache key — shard i would restore a `root.xml` produced when the split
     // put different files on shard i. Balancing this lane is worth 0.5s of its
     // own and 0.6s overall (measured), which does not pay for that hazard.
+    // The plain run (`test:scripts:workers`, the unit phase of `bun run test`)
+    // is split across worker processes; `test:scripts` stays one `bun test`
+    // because it is the coverage phase's and CI's, and writes `junitPath`.
+    //
+    // `scripts` is a substring filter, not a directory: `bun test scripts` also
+    // runs the two api files below, whose names end in `-scripts`. They are in
+    // both lanes today and stay in both, so the lanes run the same tests;
+    // `root-lane-workers.unit.test.ts` fails when this list and the filter's
+    // matches disagree.
+    workers: {
+      testDir: 'scripts',
+      defaultWidth: 4,
+      alsoRuns: [
+        'apps/api/tests/integration/modules/environments/wsl-runtime-scripts.integration.test.ts',
+        'apps/api/tests/unit/modules/environments/runtime-slot-scripts.test.ts',
+      ],
+    },
     manifest: 'package.json',
     coverageScript: 'test:scripts',
   },
   // The api workspace is two lanes, not one, because its two suites need
   // opposite isolation settings. Unit keeps `--parallel=1` (= one worker,
   // `--isolate`): dropping isolation there costs 172 failures (measured; see
-  // docs/reference/testing.md). Integration runs with no `--parallel` at all —
+  // docs/reference/testing.md). Its plain `test:unit` run is the one place that
+  // goes wider, as several processes that each keep `--parallel=1` (`workers`
+  // below); `test:coverage:unit` stays a single process, because a union of
+  // per-process LCOV carried 3,501 extra zero-hit line keys on two strict
+  // comparisons and nobody has explained why. Integration runs with no `--parallel` at all —
   // it passes without isolation by design, and Bun's isolate machinery is what
   // intermittently wedges the whole invocation in CI (oven-sh/bun#39709 — the
   // runner never exits, or `spawnSync` stalls inside isolate workers), so the
@@ -124,6 +182,7 @@ export const TEST_LANES: readonly TestLane[] = [
     junitPath: `${JUNIT_DIR}/api-unit.xml`,
     timingsPath: `${TIMINGS_DIR}/api-unit.json`,
     lcovPath: '.mango/artifacts/coverage/api-unit/lcov.info',
+    workers: { testDir: 'tests/unit' },
     manifest: 'apps/api/package.json',
     coverageScript: 'test:coverage:unit',
   },
@@ -155,7 +214,16 @@ export const TEST_LANES: readonly TestLane[] = [
     // set, not across them. Adding or deleting an integration file shifts the
     // whole stride. Detection of the leak class itself is the randomized-order
     // nightly's job (`.github/workflows/randomized-order-nightly.yml`).
+    //
+    // The plain `test:integration` run is the one place the lane goes wider: as
+    // several processes, each an unisolated `bun test` over the round-robin
+    // slice `--shard=i/N` gives it, so a worker's companions are the same ones a
+    // CI shard of that width has. `settle` makes each worker prove it left no
+    // process behind (these tests spawn the runtime, servers and shells).
+    // `test:coverage:integration` stays one process, for the reason the api-unit
+    // entry gives.
     lcovPath: '.mango/artifacts/coverage/api-integration/lcov.info',
+    workers: { testDir: 'tests/integration', defaultWidth: 4, settle: true },
     manifest: 'apps/api/package.json',
     coverageScript: 'test:coverage:integration',
   },

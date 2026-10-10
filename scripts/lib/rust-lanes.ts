@@ -46,6 +46,8 @@ export const RUST_WORKSPACE_PATHS = [
   '.github/workflows/cargo-shim.yml',
   '.github/workflows/rust-coverage.yml',
   '.github/actions/setup-zigbuild/**',
+  // The nextest parity step in the workspace job runs this script.
+  'scripts/bench/rust-test-inventory.ts',
 ] as const;
 
 /**

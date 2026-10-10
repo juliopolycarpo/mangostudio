@@ -119,8 +119,8 @@ namespace Mango.NativeJobProbe {
     public sealed class ImageQueryBudget {
         private readonly Func<long> clock;
         private readonly long started;
-        /// <summary>Largest complete-query budget. A loaded host took 2248ms for one list refresh, and a member that is shutting down can refuse its image for longer than 300ms.</summary>
-        public const int MaximumMilliseconds=10000;
+        /// <summary>Largest complete-query budget. Hosted queries with53/54 live members exhausted10s; allow20s total without scaling the cap with membership.</summary>
+        public const int MaximumMilliseconds=20000;
         public readonly int Milliseconds;
         public readonly string StartedAt=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture);
         public ImageQueryBudget(int milliseconds,Func<long> monotonicClock) {

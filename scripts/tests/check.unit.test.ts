@@ -8,7 +8,7 @@ describe('check script', () => {
       'turbo',
       'run',
       'check:quick',
-      'typecheck',
+      'typecheck:with-deps',
       'circular',
       '--ui=stream',
       '--filter=@mangostudio/api',
@@ -61,7 +61,11 @@ describe('check script', () => {
   test('configures typecheck ordering and root config cache inputs', () => {
     const turboConfig = readText('turbo.jsonc');
 
-    expect(turboConfig).toContain('"dependsOn": ["^typecheck"]');
+    // `typecheck` hashes its upstream workspaces through `transit` without
+    // waiting for them; `typecheck:with-deps` is what selects them.
+    expect(turboConfig).toContain('"dependsOn": ["transit"]');
+    expect(turboConfig).toContain('"dependsOn": ["typecheck", "^typecheck:with-deps"]');
+    expect(turboConfig).not.toContain('"dependsOn": ["^typecheck"]');
     expect(turboConfig).toContain('"$TURBO_ROOT$/tsconfig.json"');
     expect(turboConfig).toContain('"$TURBO_ROOT$/biome.json"');
     expect(turboConfig).toContain('"$TURBO_DEFAULT$"');

@@ -15,9 +15,9 @@
 //!   events, which act on process-wide console state.
 //! - `generate_rust_fixture.rs`: `#[ignore]`d fixture generator that the fixture-freshness CI lane
 //!   runs by target name; it should not build the suites below.
-//! - `config_boundary.rs`, `spawn_boundary.rs`: read the crate's `src/` tree and touch no process
-//!   state, so they could join, but they link nothing beyond `std` and a fast standalone target
-//!   costs less than it saves.
+//! - `config_boundary.rs`, `spawn_boundary.rs`, `release_stamp_boundary.rs`: read the crate's
+//!   `src/` tree and touch no process state, so they could join, but they link nothing beyond
+//!   `std` and a fast standalone target costs less than it saves.
 //!
 //! A new test file joins here unless it needs one of those properties; the module list below is
 //! the whole registry, so a file added under `it/` without a `mod` line is never compiled, and the
@@ -33,6 +33,7 @@ mod cli;
 mod consent;
 mod consent_ts_compat;
 mod dispatch;
+mod injected_version;
 mod layout;
 mod library_stdio;
 mod mcp_stdio_ownership;

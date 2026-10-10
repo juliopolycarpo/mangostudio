@@ -751,7 +751,7 @@ export const NATIVE_WINDOWS_HELPER_PHASES = {
    * `ImageQueryBudget.MaximumMilliseconds`, allowed once per ambiguity pass. The helper grants
    * it per queried row, so this is an allowance for one slow row per pass, not a bound.
    */
-  imageQueryBudgetMs: 10_000,
+  imageQueryBudgetMs: 20_000,
   /** One `TerminateVerifiedMember` wait. The helper waits per eligible member, normally one. */
   terminationWaitMs: 5_000,
   /** The wait for an empty Job after cleanup. */

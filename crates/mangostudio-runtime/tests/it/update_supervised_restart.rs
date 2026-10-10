@@ -28,14 +28,14 @@ use sha2::{Digest as _, Sha256};
 
 use crate::support::scratch::{ScratchDir, scratch_path};
 
-const TOKEN: &str = "update-restart-serve-token";
+pub(super) const TOKEN: &str = "update-restart-serve-token";
 const NEXT_VERSION: &str = "9.9.9-restart-test";
 
 fn binary_path() -> &'static str {
     env!("CARGO_BIN_EXE_mangostudio-runtime")
 }
 
-/// The release the binary reports, the same expression as `src/cli.rs`.
+/// The release the binary reports, the same expression as `src/main.rs`.
 fn installed_version() -> &'static str {
     option_env!("MANGOSTUDIO_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
@@ -90,7 +90,7 @@ fn provision_remote_slot(home: &Path) -> PathBuf {
     binary
 }
 
-fn free_port() -> u16 {
+pub(super) fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .and_then(|listener| listener.local_addr())
         .expect("an ephemeral loopback port is available")
@@ -98,18 +98,26 @@ fn free_port() -> u16 {
 }
 
 /// A running `serve` or `connect` process plus every stderr line it has printed.
-struct RuntimeProcess {
+pub(super) struct RuntimeProcess {
     child: Child,
     stderr: mpsc::Receiver<String>,
 }
 
 impl RuntimeProcess {
-    /// Starts `binary` with `args`, reading its token from `token_variable`.
-    fn spawn(binary: &Path, home: &Path, args: &[&str], token_variable: &str) -> Self {
+    /// Starts `binary` with `args`, reading its token from `token_variable`, with `extra_env`
+    /// added to its environment.
+    pub(super) fn spawn(
+        binary: &Path,
+        home: &Path,
+        args: &[&str],
+        token_variable: &str,
+        extra_env: &[(&str, &str)],
+    ) -> Self {
         let mut child = Command::new(binary)
             .args(args)
             .env("MANGO_HOME", home)
             .env(token_variable, TOKEN)
+            .envs(extra_env.iter().copied())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -130,7 +138,7 @@ impl RuntimeProcess {
         }
     }
 
-    fn stderr_so_far(&self) -> Vec<String> {
+    pub(super) fn stderr_so_far(&self) -> Vec<String> {
         self.stderr.try_iter().collect()
     }
 
@@ -154,7 +162,7 @@ impl Drop for RuntimeProcess {
 }
 
 /// Dials the runtime until it accepts, as the hub's `connectHttpRuntime` does.
-async fn dial(port: u16, serve: &RuntimeProcess) -> Session {
+pub(super) async fn dial(port: u16, serve: &RuntimeProcess) -> Session {
     let url = format!("ws://127.0.0.1:{port}/");
     let options = WebSocketConnectOptions::default().with_bearer(TOKEN);
     let started = Instant::now();
@@ -177,6 +185,66 @@ async fn dial(port: u16, serve: &RuntimeProcess) -> Session {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// What the runtime on the far side of `session`, reached over `transport`, reports as its
+/// release, labelled by site: its hello peer version and `runtime.health`'s `runtimeVersion`, the
+/// two places a hub reads it from.
+pub(super) async fn reported_versions(transport: &str, session: &Session) -> Vec<(String, String)> {
+    let remote = session
+        .ready()
+        .await
+        .expect("the runtime completes its handshake");
+    let health = session
+        .request("runtime.health", json!({}))
+        .await
+        .unwrap_or_else(|error| panic!("expected runtime.health: ok | received: {error:?}"));
+    vec![
+        (format!("{transport} hello peer"), remote.peer.version),
+        (
+            format!("{transport} runtime.health runtimeVersion"),
+            super::cli::runtime_version_of(&health),
+        ),
+    ]
+}
+
+/// Checks that the runtime on the far side of `session` reports this build's release.
+async fn assert_session_reports_installed_version(transport: &str, session: &Session) {
+    let reports = reported_versions(transport, session).await;
+    super::cli::assert_all_report_stamp(&super::cli::borrowed(&reports));
+}
+
+/// Accepts the dial of a `connect` process at the fake `hub` (listening at `hub_url`) as the hub
+/// would, and returns the session once the runtime has completed the WebSocket upgrade.
+pub(super) async fn accept_runtime_dial(
+    hub: &tokio::net::TcpListener,
+    hub_url: &str,
+    connect: &RuntimeProcess,
+) -> Session {
+    let (stream, _peer) = tokio::time::timeout(Duration::from_secs(20), hub.accept())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "expected connect to dial {hub_url} | received: no dial after 20s, stderr {:?}",
+                connect.stderr_so_far()
+            )
+        })
+        .expect("the fake hub accepts");
+    let port = accept_websocket(
+        stream,
+        AcceptOptions::from(WebSocketOptions::default()),
+        |upgrade| {
+            if upgrade.bearer() == Some(TOKEN) {
+                Ok(())
+            } else {
+                Err(close_codes::UNAUTHORIZED)
+            }
+        },
+    )
+    .await
+    .expect("the runtime completes the WebSocket upgrade");
+    // Dropping the driver's handle detaches it: the session keeps running.
+    Session::spawn(port, SessionOptions::new(crate::support::peer("hub"))).0
 }
 
 /// Streams `bytes` as `NEXT_VERSION` and returns the commit's answer.
@@ -268,9 +336,11 @@ async fn a_committed_update_over_serve_exits_for_the_supervisor_to_restart() {
         &home,
         &["serve", "--listen", &listen, "--token", "env"],
         "MANGOSTUDIO_RUNTIME_SERVE_TOKEN",
+        &[],
     );
 
     let session = dial(port, &serve).await;
+    assert_session_reports_installed_version("serve", &session).await;
     assert_update_restarts(&session, &mut serve, &home).await;
 }
 
@@ -288,34 +358,10 @@ async fn a_committed_update_over_connect_exits_for_the_supervisor_to_restart() {
         &home,
         &["connect", "--hub", &hub_url, "--token", "env"],
         "MANGOSTUDIO_RUNTIME_TOKEN",
+        &[],
     );
 
-    let (stream, _peer) = tokio::time::timeout(Duration::from_secs(20), hub.accept())
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "expected connect to dial {hub_url} | received: no dial after 20s, stderr {:?}",
-                connect.stderr_so_far()
-            )
-        })
-        .expect("the fake hub accepts");
-    let port = accept_websocket(
-        stream,
-        AcceptOptions::from(WebSocketOptions::default()),
-        |upgrade| {
-            if upgrade.bearer() == Some(TOKEN) {
-                Ok(())
-            } else {
-                Err(close_codes::UNAUTHORIZED)
-            }
-        },
-    )
-    .await
-    .expect("the runtime completes the WebSocket upgrade");
-    let (session, _driver) = Session::spawn(port, SessionOptions::new(crate::support::peer("hub")));
-    session
-        .ready()
-        .await
-        .expect("the runtime completes its handshake");
+    let session = accept_runtime_dial(&hub, &hub_url, &connect).await;
+    assert_session_reports_installed_version("connect", &session).await;
     assert_update_restarts(&session, &mut connect, &home).await;
 }

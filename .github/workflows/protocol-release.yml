@@ -144,10 +144,12 @@ jobs:
       # `protocol:check` adds the feature-powerset lane only when cargo-hack is
       # already on PATH, and skips it with a warning otherwise — a runner
       # without it verifies a release with less than protocol-ci.yml runs on the
-      # pull request that produced it.
+      # pull request that produced it. The version is protocol-ci.yml's, so both
+      # run the same powerset; scripts/tests/protocol-package.unit.test.ts holds
+      # the two pins together.
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
-          tool: cargo-hack
+          tool: cargo-hack@0.6.45
       - run: bun install --frozen-lockfile
       - name: Manifests match the tag
         env:

@@ -1,10 +1,23 @@
 // Process execution primitives: spawn a command, run a workspace script, and
 // fan tasks out in parallel. All commands inherit stdio so output streams live.
+// Every `runCommand` child counts against one per-process limit, and on POSIX
+// leads its own process group, so cancelling a runner stops the whole tree; see
+// ./process-tree for both and for what Windows does instead.
 
 import { availableParallelism } from 'node:os';
 
 import { ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
 import { dim, error } from './log';
+import {
+  bindDescendantsToRunner,
+  ChildSupervisor,
+  childLimit,
+  isNestedRunner,
+  processHost,
+  RUNNER_GROUP_ENV,
+  SlotPool,
+  supervisionMode,
+} from './process-tree';
 
 export interface RunResult {
   label: string;
@@ -45,10 +58,26 @@ export async function captureCommand(
   return { stdout, stderr, exitCode };
 }
 
+/** Built on first use, so a bad MANGO_RUNNER_CONCURRENCY fails the command that hits it. */
+let childSlots: SlotPool | undefined;
+const supervisor = new ChildSupervisor(processHost());
+
+/** Whether the runner above owns this process's group; read once, as it cannot change. */
+let nestedRunner: boolean | undefined;
+function runsNested(): boolean {
+  nestedRunner ??= process.platform !== 'win32' && isNestedRunner();
+  return nestedRunner;
+}
+
 /**
  * Spawn a command and resolve once it exits, capturing label/exit code/duration.
  * Pass `stdin: 'inherit'` for interactive children (e.g. Turbo's TUI); it stays
  * 'ignore' by default so parallel fan-out never fights over the terminal.
+ *
+ * At most `MANGO_RUNNER_CONCURRENCY` (default 16) children run at once per
+ * process, however many `runParallel` calls are nested; the rest wait for a
+ * slot. When the runner receives SIGINT, SIGTERM or SIGHUP, every child and
+ * everything it started is stopped, and the runner exits 128 + the signal.
  * // Usage: await runCommand('build', ['bun', 'run', 'build']);
  */
 export async function runCommand(
@@ -56,19 +85,70 @@ export async function runCommand(
   cmd: string[],
   opts?: { cwd?: string; env?: Record<string, string>; stdin?: 'inherit' | 'ignore' }
 ): Promise<RunResult> {
+  childSlots ??= new SlotPool(childLimit());
+  const releaseSlot = await childSlots.acquire();
+  let result: RunResult;
+  try {
+    result = await spawnAndWait(label, cmd, opts);
+  } finally {
+    releaseSlot();
+  }
+
+  if (supervisor.cancelling) await exitIsComing();
+  return result;
+}
+
+/**
+ * Never settles. Once a cancelling signal arrived the supervisor owns the exit
+ * and ends the process with the signal's status; letting a caller resume would
+ * race it with a summary and `process.exit(1)`.
+ */
+function exitIsComing(): Promise<never> {
+  return new Promise<never>(() => undefined);
+}
+
+async function spawnAndWait(
+  label: string,
+  cmd: string[],
+  opts?: { cwd?: string; env?: Record<string, string>; stdin?: 'inherit' | 'ignore' }
+): Promise<RunResult> {
+  if (supervisor.cancelling) await exitIsComing();
+  await bindDescendantsToRunner();
+
   const start = performance.now();
   dim(`  $ ${cmd.join(' ')}`);
 
+  const mode = supervisionMode(opts?.stdin, process.platform, runsNested());
   const proc = Bun.spawn({
     cmd,
     cwd: opts?.cwd ?? ROOT_DIR,
     stdin: opts?.stdin ?? 'ignore',
     stdout: 'inherit',
     stderr: 'inherit',
-    env: { ...process.env, ...opts?.env },
+    env: {
+      ...process.env,
+      ...opts?.env,
+      ...(mode === 'group' ? { [RUNNER_GROUP_ENV]: String(process.pid) } : {}),
+    },
+    detached: mode === 'group',
   });
 
-  const exitCode = await proc.exited;
+  const release =
+    mode === 'none'
+      ? undefined
+      : supervisor.adopt({
+          label,
+          pid: proc.pid,
+          ownsGroup: mode === 'group',
+          exited: proc.exited,
+          signal: (signal) => proc.kill(signal),
+        });
+  let exitCode: number;
+  try {
+    exitCode = await proc.exited;
+  } finally {
+    release?.();
+  }
   const duration = Math.round(performance.now() - start);
 
   return { label, exitCode, duration };

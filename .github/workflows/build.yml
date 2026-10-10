@@ -11,6 +11,14 @@ jobs:
     name: Build (frontend + API)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # Bounds the snapshot this job restores and saves back. Each save carries
+      # everything restored plus the new outputs, so without a bound the chain
+      # of snapshots only grows. At the start of the run Turbo deletes the
+      # oldest entries (by mtime, which the cache archive preserves) until the
+      # rest fit. The value is the same in every lane; see "CI Cache Policy" in
+      # docs/reference/testing.md.
+      TURBO_CACHE_MAX_SIZE: 16MB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,16 +42,35 @@ jobs:
           fi
           echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
 
-      - uses: ./.github/actions/cache-scoped
+      # Restore here, save after the build: a combined restore-save would skip
+      # its save on an exact hit and lose every output the build then computed.
+      - id: turbo-cache
+        uses: ./.github/actions/cache-scoped
         with:
           family: turbo
           path: .turbo/cache
-          validity: build-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'package.json', 'apps/*/package.json', 'packages/*/package.json') }}
+          validity: build-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'bun.lock', 'package.json', 'apps/*/package.json', 'apps/*/turbo.json', 'packages/*/package.json', 'packages/*/turbo.json') }}
           restore-prefix: build-
+          mode: restore
+          rotate: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Build frontend and API
         run: bun run build --all
+
+      # Saves only when the build wrote cache entries the restored snapshot did
+      # not hold, under a key that extends the stable restore prefix.
+      - name: Save new Turbo outputs
+        if: success()
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: turbo
+          path: .turbo/cache
+          validity: ${{ steps.turbo-cache.outputs.validity }}
+          mode: save
+          rotate: "true"
+          payload-glob: "*.tar.zst"
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       # Handoff to the qa-metrics job in the same run; nothing consumes it
       # afterwards, so the shortest retention GitHub allows is enough.

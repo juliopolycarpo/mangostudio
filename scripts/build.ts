@@ -8,6 +8,7 @@ import {
   binaryCompileFlags,
   createTurboBuildCommand,
   discardStandaloneReadme,
+  frontendDistAsidePath,
   selectBuildWorkspaces,
 } from './lib/build';
 import {
@@ -128,7 +129,7 @@ function withFrontendDistAside(
     const noop = (): void => undefined;
     return { restore: noop, discard: noop };
   }
-  const aside = `${frontendDist}.aside-${process.pid}`;
+  const aside = frontendDistAsidePath(frontendDist, process.pid);
   rmSync(aside, { recursive: true, force: true });
   renameSync(frontendDist, aside);
   let settled = false;

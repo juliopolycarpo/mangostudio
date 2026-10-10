@@ -174,7 +174,6 @@ export function nativeQualificationEnvironment(
     CI: 'true',
     FORCE_COLOR: '0',
     NO_COLOR: '1',
-    TURBO_FORCE: 'true',
     TURBO_TELEMETRY_DISABLED: '1',
     MANGOSTUDIO_BUN_TEST_ARGS: '',
   };
@@ -368,6 +367,9 @@ export async function runNativeQualification(
   };
   await writeReceipt(receipt);
   const env = nativeQualificationEnvironment(process.env);
+  // A private cold cache executes the outer tasks without forcing nested cache fixtures to rerun.
+  env.TURBO_CACHE_DIR = join(out, 'targets', 'turbo');
+  await mkdir(env.TURBO_CACHE_DIR, { recursive: true });
   let artifacts: readonly string[] = [];
   let inventory: NativeTestLane[] = [];
   let processesBefore: readonly NativeProcess[] = [];

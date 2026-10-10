@@ -153,10 +153,12 @@ describe('rust-coverage.yml (instrumented ubuntu Rust tests, PR code)', () => {
     expect(workflow).toContain('rustup component add llvm-tools-preview');
   });
 
-  test('runs exactly the test set the plain Ubuntu step ran, with the libtest runner', () => {
-    const plain = shim.match(/cargo test (--workspace --all-targets --all-features --locked)/)?.[1];
+  test('runs exactly the test set the plain macOS and Windows step runs, with the libtest runner', () => {
+    const plain = shim.match(
+      /cargo nextest run (--workspace --all-targets --all-features --locked) --retries 0/
+    )?.[1];
 
-    expect(plain, 'the plain cargo test step in cargo-shim.yml').toBeDefined();
+    expect(plain, 'the plain cargo nextest step in cargo-shim.yml').toBeDefined();
     expect(workflow).toContain(`cargo llvm-cov --no-report ${plain}`);
     expect(workflow).not.toContain('nextest');
   });
@@ -171,9 +173,10 @@ describe('rust-coverage.yml (instrumented ubuntu Rust tests, PR code)', () => {
 
   test('cargo-shim keeps the plain run on macOS and Windows only', () => {
     expect(shim).toMatch(
-      /- name: Run tests\n\s+if: matrix\.os != 'ubuntu-latest'\n\s+run: cargo test --workspace --all-targets --all-features --locked/
+      /- name: Run tests\n\s+if: matrix\.os != 'ubuntu-latest'\n\s+run: cargo nextest run --workspace --all-targets --all-features --locked --retries 0/
     );
-    expect(shim.match(/cargo test --workspace --all-targets/g)).toHaveLength(1);
+    expect(shim.match(/cargo nextest run --workspace --all-targets/g)).toHaveLength(1);
+    expect(shim.match(/cargo test --workspace --all-targets/g)).toBeNull();
   });
 });
 

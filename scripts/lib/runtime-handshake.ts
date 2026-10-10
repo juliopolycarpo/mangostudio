@@ -61,6 +61,8 @@ export function resolveHandshakeBudgetMs(): number {
 export interface RuntimeHandshakeProbeOptions {
   /** Full argv, e.g. `[runtimeBinaryPath, '--stdio']`. */
   readonly command: readonly string[];
+  /** Child environment; omitted callers keep Bun's inherited environment. */
+  readonly env?: NodeJS.ProcessEnv;
   /** Budget for the first stdout record. Overrides the platform default. */
   readonly timeoutMs?: number;
   /** How long a child that closed stdout gets to exit; defaults to 2s. */
@@ -132,7 +134,7 @@ export async function probeRuntimeHandshake(
   // Matches how `scripts/lib/exec.ts` and `scripts/lib/summary.ts` time work.
   const startedAt = performance.now();
 
-  const child = options.spawn ? options.spawn(command) : spawnRuntime(command);
+  const child = options.spawn ? options.spawn(command) : spawnRuntime(command, options.env);
   // Drain stderr from the first tick: an unread pipe fills, and whatever the
   // child wrote on its way to not handshaking is the diagnostic we came for.
   const stderr = pumpStream(child.stderr);
@@ -225,8 +227,8 @@ export async function probeRuntimeHandshake(
   };
 }
 
-function spawnRuntime(command: readonly string[]): RuntimeHandshakeChild {
-  return Bun.spawn({ cmd: [...command], stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+function spawnRuntime(command: readonly string[], env?: NodeJS.ProcessEnv): RuntimeHandshakeChild {
+  return Bun.spawn({ cmd: [...command], env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
 }
 
 function describeExit(exitCode: number | null, signal: string | null): string {

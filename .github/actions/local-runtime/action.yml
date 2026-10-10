@@ -42,9 +42,14 @@ runs:
         save-if: ${{ github.ref == 'refs/heads/main' }}
         shared-key: local-runtime
 
+    # Incremental state is dead weight in a single cold build, and this
+    # composite also runs in jobs whose rust-cache step is skipped (see
+    # docs/reference/testing.md, "Cargo incremental compilation").
     - name: Build the Local runtime
       if: inputs.artifact == ''
       shell: bash
+      env:
+        CARGO_INCREMENTAL: "0"
       run: |
         set -euo pipefail
         cargo build -p mangostudio-runtime --locked

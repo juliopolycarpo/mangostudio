@@ -86,6 +86,18 @@ function isBuildWorkspace(workspace: WorkspaceName): boolean {
 }
 
 /**
+ * Where the standalone build parks the previous frontend bundle while the
+ * sidecar rebuilds: a sibling of `dist/` keyed by the build's pid, so two
+ * builds never share one. Turbo hashes every file Git does not ignore, so the
+ * root `.gitignore` must carry a rule matching this name; the build-script test
+ * takes the name from here and fails when no rule matches it.
+ * // Usage: frontendDistAsidePath('/repo/apps/frontend/dist', 4242) // → '/repo/apps/frontend/dist.aside-4242'
+ */
+export function frontendDistAsidePath(frontendDist: string, pid: number): string {
+  return `${frontendDist}.aside-${pid}`;
+}
+
+/**
  * Delete the standalone `README.md` left by an earlier build, before a binary build starts.
  *
  * The README is the completion marker `archive-assets.ts` looks for, written only after every
