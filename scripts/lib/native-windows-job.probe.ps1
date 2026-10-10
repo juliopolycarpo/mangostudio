@@ -898,3 +898,6 @@ finally {
     Write-NativeJobJson $receiptPath $receipt
 }
 if ($receipt.status -ne 'passed') { exit 1 }
+# The caller gates on $LASTEXITCODE, which a script that only falls off its end leaves at
+# whatever the last native command inside a probe returned (or unset when none ran).
+exit 0
