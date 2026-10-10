@@ -459,6 +459,14 @@ describe('full qualification receipts', () => {
     expect(targets.every((target) => target?.startsWith(physicalTargets))).toBe(true);
     const testCall = fake.calls.find((call) => call.label === 'test');
     expect(fake.calls.find((call) => call.label === 'rustc-version')?.timeoutSeconds).toBe(180);
+    // Both builds draw on one 900 s budget: the runtime's own cap, then whatever is left.
+    const fakeBuildTimeout =
+      fake.calls.find((call) => call.label === 'build-fake-agent')?.timeoutSeconds ?? 0;
+    expect(fake.calls.find((call) => call.label === 'build-runtime')?.timeoutSeconds).toBe(720);
+    expect(
+      fakeBuildTimeout > 870 && fakeBuildTimeout <= 900,
+      `expected fake-agent build timeout: the rest of the 900 s build budget | received: ${fakeBuildTimeout}`
+    ).toBe(true);
     expect(testCall?.env.MANGOSTUDIO_RUNTIME_BINARY).toBe(receipt.artifactsBefore[0].path);
     expect(testCall?.env.MANGOSTUDIO_FAKE_CURSOR_AGENT).toBe(receipt.artifactsBefore[1].path);
     expect(JSON.parse(await readFile(join(source.out, 'receipt.json'), 'utf8')).status).toBe(

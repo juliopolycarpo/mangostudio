@@ -285,7 +285,8 @@ async function runSetup(
         '--locked',
         '--message-format=json',
       ],
-      180,
+      // Its own target recompiles the dependency graph; only the shared build budget bounds it.
+      900,
       'fake',
     ],
   ] as const) {
@@ -298,7 +299,7 @@ async function runSetup(
       throw new Error(
         'Native builds exceeded 900 seconds; expected runtime and fake-agent setup within 15 minutes'
       );
-    const commandTimeout = target === 'fake' ? remainingBuildSeconds : timeout;
+    const commandTimeout = target ? Math.min(timeout, remainingBuildSeconds) : timeout;
     receipt.setupErrors.push(
       ...commandFailures(await run(label, command, commandTimeout, overrides))
     );
