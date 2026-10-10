@@ -162,8 +162,6 @@ export function nativeQualificationEnvironment(
         'MANGO_INTEROP',
         'MANGO_TEST_WORKERS',
         'BUN_OPTIONS',
-        'CARGO_TARGET_DIR',
-        'CARGO_BUILD_TARGET',
         'RUSTFLAGS',
         'RUSTDOCFLAGS',
         'CARGO_ENCODED_RUSTFLAGS',
