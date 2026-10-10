@@ -12,8 +12,9 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { removeSmokeHome, SMOKE_HOME_ENV } from '../../tests/browser-smoke/support/smoke-home';
+import { canonicalPath as canonical } from './support/canonical-path';
 
 /** Env keys that place hub state; each must resolve inside the temporary home. */
 const HOME_KEYS = [
@@ -48,18 +49,6 @@ function effectiveEnv(server: WebServer, key: string): string {
 function isInside(parent: string, child: string): boolean {
   const rel = relative(resolve(parent), resolve(child));
   return rel === '' || !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel));
-}
-
-function canonical(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    const resolved = resolve(path);
-    const parent = dirname(resolved);
-    if (parent === resolved) throw error;
-    return join(canonical(parent), basename(resolved));
-  }
 }
 
 describe('browser smoke lane hermeticity', () => {

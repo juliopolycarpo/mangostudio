@@ -23,6 +23,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { REAL_HOME_ENV, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
+import { canonicalPath as canonical } from './support/canonical-path';
 
 const ROOT = join(import.meta.dir, '..', '..');
 const API_DIR = join(ROOT, 'apps', 'api');
@@ -45,18 +46,6 @@ const scripts = JSON.parse(readFileSync(join(API_DIR, 'package.json'), 'utf8')).
 
 /** The developer's real home: the one an outer launcher recorded, else this process's own. */
 const realHome = process.env[REAL_HOME_ENV]?.trim() || homedir();
-
-function canonical(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    const resolved = resolve(path);
-    const parent = dirname(resolved);
-    if (parent === resolved) throw error;
-    return join(canonical(parent), basename(resolved));
-  }
-}
 
 function isInside(parent: string, child: string): boolean {
   const rel = relative(resolve(parent), resolve(child));
