@@ -25,9 +25,11 @@ import {
 } from './native-bun-qualification-results';
 import {
   type ArtifactSeal,
+  NATIVE_BUILDS,
   type NativeCompilerArtifact,
   nativeCompilerArtifacts,
   nativeSourceChanged,
+  requireNativeBuildFeatures,
   type SourceSeal,
   sealNativeArtifact,
   sealNativeSource,
@@ -258,37 +260,9 @@ async function runSetup(
   let buildStarted: number | null = null;
   for (const [label, command, timeout, target] of [
     ['install', ['bun', 'install', '--frozen-lockfile'], 600, null],
-    [
-      'build-runtime',
-      [
-        'cargo',
-        'build',
-        '-p',
-        'mangostudio-runtime',
-        '--bin',
-        'mangostudio-runtime',
-        '--locked',
-        '--message-format=json',
-      ],
-      720,
-      'runtime',
-    ],
-    [
-      'build-fake-agent',
-      [
-        'cargo',
-        'build',
-        '-p',
-        'mangostudio-runtime',
-        '--example',
-        'fake_cursor_agent',
-        '--locked',
-        '--message-format=json',
-      ],
-      // Its own target recompiles the dependency graph; only the shared build budget bounds it.
-      900,
-      'fake',
-    ],
+    ['build-runtime', NATIVE_BUILDS.runtime.command, 720, 'runtime'],
+    // Its own target recompiles the dependency graph; only the shared build budget bounds it.
+    ['build-fake-agent', NATIVE_BUILDS.fake.command, 900, 'fake'],
   ] as const) {
     const overrides: Record<string, string> = target
       ? { CARGO_TARGET_DIR: join(receipt.out, 'targets', target) }
@@ -309,31 +283,7 @@ async function runSetup(
         await readFile(join(receipt.out, `logs/${label}.stdout.log`), 'utf8')
       );
       receipt.buildArtifacts[target] = compiled;
-      const sdk = compiled.filter((artifact) =>
-        artifact.packageId.includes('mango-external-agents')
-      );
-      const expectedFeatures = target === 'runtime' ? ['stdio'] : ['stdio', 'testing'];
-      if (
-        !sdk.length ||
-        sdk.some(
-          (artifact) =>
-            JSON.stringify([...artifact.features].sort()) !== JSON.stringify(expectedFeatures)
-        )
-      ) {
-        throw new Error(
-          `Invalid ${target} SDK features ${JSON.stringify(sdk.map((artifact) => artifact.features))}; expected ${JSON.stringify(expectedFeatures)}`
-        );
-      }
-      const name = target === 'runtime' ? 'mangostudio-runtime' : 'fake_cursor_agent';
-      const kind = target === 'runtime' ? 'bin' : 'example';
-      const primary = compiled.filter(
-        (artifact) =>
-          artifact.target === name && artifact.executable && artifact.kind.includes(kind)
-      );
-      if (!primary.length || primary.some((artifact) => artifact.features.length))
-        throw new Error(
-          `Invalid compiler executable ${name} features ${JSON.stringify(primary.map((artifact) => artifact.features))}; expected an actual ${kind} executable with default empty features`
-        );
+      requireNativeBuildFeatures(compiled, target);
       await Bun.write(
         join(receipt.out, 'build-features.json'),
         `${JSON.stringify(receipt.buildArtifacts, null, 2)}\n`

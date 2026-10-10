@@ -72,6 +72,87 @@ export function nativeCompilerArtifacts(log: string): NativeCompilerArtifact[] {
   return artifacts;
 }
 
+export type NativeBuildTarget = 'runtime' | 'fake';
+
+interface NativeBuild {
+  /** The exact Cargo argv; the Windows runner grants compiler cleanup to nothing else. */
+  readonly command: readonly string[];
+  /** The SDK features this build must compile, sorted. */
+  readonly sdkFeatures: readonly string[];
+  readonly executable: string;
+  readonly kind: 'bin' | 'example';
+}
+
+const CARGO_BUILD = ['cargo', 'build', '-p', 'mangostudio-runtime'] as const;
+const CARGO_RECEIPT = ['--locked', '--message-format=json'] as const;
+
+/**
+ * The two setup builds, each in its own Cargo target: what runs, and the default feature graph
+ * its compiler receipt must show. `scripts/lib/native-windows-job.ps1` carries its own copy of
+ * the argv and features, held to this table by `native-bun-qualification-powershell.unit.test.ts`.
+ * @example await run('build-runtime', NATIVE_BUILDS.runtime.command, 720);
+ */
+export const NATIVE_BUILDS: Readonly<Record<NativeBuildTarget, NativeBuild>> = {
+  runtime: {
+    command: [...CARGO_BUILD, '--bin', 'mangostudio-runtime', ...CARGO_RECEIPT],
+    sdkFeatures: ['stdio'],
+    executable: 'mangostudio-runtime',
+    kind: 'bin',
+  },
+  fake: {
+    command: [...CARGO_BUILD, '--example', 'fake_cursor_agent', ...CARGO_RECEIPT],
+    sdkFeatures: ['stdio', 'testing'],
+    executable: 'fake_cursor_agent',
+    kind: 'example',
+  },
+};
+
+/**
+ * Name the setup build whose arguments `command` carries, or null for any other command.
+ * argv0 is the caller's to judge: it may be `cargo` or a resolved path to it.
+ * @example nativeBuildTarget(['C:\\cargo.exe', ...NATIVE_BUILDS.fake.command.slice(1)]); // 'fake'
+ */
+export function nativeBuildTarget(command: readonly string[]): NativeBuildTarget | null {
+  const tail = JSON.stringify(command.slice(1));
+  for (const target of ['runtime', 'fake'] as const) {
+    if (JSON.stringify(NATIVE_BUILDS[target].command.slice(1)) === tail) return target;
+  }
+  return null;
+}
+
+/**
+ * Require the feature graph a setup build must have compiled, and return the artifacts that
+ * prove it: every SDK artifact with exactly the expected features, and a primary executable
+ * built with none.
+ * @example const { primary } = requireNativeBuildFeatures(nativeCompilerArtifacts(log), 'runtime');
+ */
+export function requireNativeBuildFeatures(
+  artifacts: readonly NativeCompilerArtifact[],
+  target: NativeBuildTarget
+): { sdk: NativeCompilerArtifact[]; primary: NativeCompilerArtifact[] } {
+  const build = NATIVE_BUILDS[target];
+  const expected = JSON.stringify(build.sdkFeatures);
+  const sdk = artifacts.filter((artifact) => artifact.packageId.includes('mango-external-agents'));
+  if (
+    !sdk.length ||
+    sdk.some((artifact) => JSON.stringify([...artifact.features].sort()) !== expected)
+  )
+    throw new Error(
+      `Invalid ${target} SDK features ${JSON.stringify(sdk.map((artifact) => artifact.features))}; expected ${expected}`
+    );
+  const primary = artifacts.filter(
+    (artifact) =>
+      artifact.target === build.executable &&
+      Boolean(artifact.executable) &&
+      artifact.kind.includes(build.kind)
+  );
+  if (!primary.length || primary.some((artifact) => artifact.features.length))
+    throw new Error(
+      `Invalid compiler executable ${build.executable} features ${JSON.stringify(primary.map((artifact) => artifact.features))}; expected an actual ${build.kind} executable with default empty features`
+    );
+  return { sdk, primary };
+}
+
 async function git(root: string, args: readonly string[]): Promise<string> {
   const proc = Bun.spawn(['git', '--no-optional-locks', ...args], {
     cwd: root,

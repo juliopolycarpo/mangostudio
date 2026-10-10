@@ -50,6 +50,20 @@ export interface NativeCommandReceipt {
   readonly settlement: NativeSettlement;
 }
 
+/** The selector and build inputs every runner copies into its command receipt; never secrets. */
+export const NATIVE_RECEIPT_ENVIRONMENT_KEYS = [
+  'CI',
+  'TURBO_FORCE',
+  'MANGOSTUDIO_BUN_TEST_ARGS',
+  'MANGOSTUDIO_RUNTIME_BINARY',
+  'MANGOSTUDIO_FAKE_CURSOR_AGENT',
+  'CARGO_TARGET_DIR',
+  'CARGO_BUILD_TARGET',
+  'RUSTFLAGS',
+  'RUSTDOCFLAGS',
+  'CARGO_ENCODED_RUSTFLAGS',
+] as const;
+
 export interface NativeCommandOptions {
   readonly label: string;
   readonly command: readonly string[];
@@ -515,18 +529,7 @@ export async function runNativeCommand(
     label: options.label,
     command: options.command,
     environment: Object.fromEntries(
-      [
-        'CI',
-        'TURBO_FORCE',
-        'MANGOSTUDIO_BUN_TEST_ARGS',
-        'MANGOSTUDIO_RUNTIME_BINARY',
-        'MANGOSTUDIO_FAKE_CURSOR_AGENT',
-        'CARGO_TARGET_DIR',
-        'CARGO_BUILD_TARGET',
-        'RUSTFLAGS',
-        'RUSTDOCFLAGS',
-        'CARGO_ENCODED_RUSTFLAGS',
-      ].map((key) => [key, options.env[key] ?? null])
+      NATIVE_RECEIPT_ENVIRONMENT_KEYS.map((key) => [key, options.env[key] ?? null])
     ),
     startedAt: new Date(started).toISOString(),
     finishedAt: new Date().toISOString(),

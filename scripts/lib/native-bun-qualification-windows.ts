@@ -13,12 +13,19 @@ import {
 import { win32 } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
-import type {
-  NativeCommandOptions,
-  NativeCommandReceipt,
-  NativeProcess,
+import {
+  NATIVE_RECEIPT_ENVIRONMENT_KEYS,
+  type NativeCommandOptions,
+  type NativeCommandReceipt,
+  type NativeProcess,
 } from './native-bun-qualification-process';
-import { nativeCompilerArtifacts } from './native-bun-qualification-source';
+import {
+  NATIVE_BUILDS,
+  type NativeBuildTarget,
+  nativeBuildTarget,
+  nativeCompilerArtifacts,
+  requireNativeBuildFeatures,
+} from './native-bun-qualification-source';
 
 export interface NativeWindowsTool {
   readonly path: string;
@@ -92,20 +99,6 @@ export interface NativeWindowsJobIO {
 }
 
 type Row = Record<string, unknown>;
-const COMPILER_ARGS = ['build', '-p', 'mangostudio-runtime'] as const;
-const COMPILER_END = ['--locked', '--message-format=json'] as const;
-const SAFE_ENV = [
-  'CI',
-  'TURBO_FORCE',
-  'MANGOSTUDIO_BUN_TEST_ARGS',
-  'MANGOSTUDIO_RUNTIME_BINARY',
-  'MANGOSTUDIO_FAKE_CURSOR_AGENT',
-  'CARGO_TARGET_DIR',
-  'CARGO_BUILD_TARGET',
-  'RUSTFLAGS',
-  'RUSTDOCFLAGS',
-  'CARGO_ENCODED_RUSTFLAGS',
-];
 
 function requireValue(condition: unknown, value: unknown, expected: string): asserts condition {
   if (!condition)
@@ -305,25 +298,13 @@ function noNewHelpers(before: Row[], current: Row[]): void {
   );
 }
 
-function compilerTarget(
-  command: readonly string[],
-  application: string
-): 'runtime' | 'fake' | null {
+function compilerTarget(command: readonly string[], application: string): NativeBuildTarget | null {
   if (
     win32.basename(application).toLowerCase() !== 'cargo.exe' ||
     (command[0] !== 'cargo' && win32.basename(command[0]) !== 'cargo.exe')
   )
     return null;
-  const tail = command.slice(1);
-  if (
-    JSON.stringify(tail) ===
-    JSON.stringify([...COMPILER_ARGS, '--bin', 'mangostudio-runtime', ...COMPILER_END])
-  )
-    return 'runtime';
-  return JSON.stringify(tail) ===
-    JSON.stringify([...COMPILER_ARGS, '--example', 'fake_cursor_agent', ...COMPILER_END])
-    ? 'fake'
-    : null;
+  return nativeBuildTarget(command);
 }
 
 function compilerProof(
@@ -354,28 +335,10 @@ function compilerProof(
   );
   const artifacts = nativeCompilerArtifacts(log);
   const target = compilerTarget(request.command, request.application);
-  const features = target === 'runtime' ? ['stdio'] : ['stdio', 'testing'];
-  const sdk = artifacts.filter((artifact) => artifact.packageId.includes('mango-external-agents'));
-  requireValue(
-    sdk.length > 0 &&
-      sdk.every(
-        (artifact) => JSON.stringify([...artifact.features].sort()) === JSON.stringify(features)
-      ),
-    sdk,
-    `original SDK features ${JSON.stringify(features)}`
-  );
-  const executable = artifacts.filter(
-    (artifact) =>
-      artifact.target === (target === 'runtime' ? 'mangostudio-runtime' : 'fake_cursor_agent') &&
-      artifact.kind.includes(target === 'runtime' ? 'bin' : 'example') &&
-      artifact.executable
-  );
-  requireValue(
-    executable.length > 0 && executable.every((artifact) => artifact.features.length === 0),
-    executable,
-    'the separate default-feature compiler executable receipt'
-  );
-  for (const artifact of executable) absolute(artifact.executable);
+  requireValue(target, request.command, 'one of the two exact separate compiler argv');
+  const features = JSON.stringify(NATIVE_BUILDS[target].sdkFeatures);
+  const { sdk, primary } = requireNativeBuildFeatures(artifacts, target);
+  for (const artifact of primary) absolute(artifact.executable);
   requireValue(
     eligibility.eligible === true &&
       eligibility.buildTarget === target &&
@@ -389,9 +352,7 @@ function compilerProof(
   requireValue(
     declared.length === sdk.length &&
       declared.every(
-        (value) =>
-          JSON.stringify(list(value, 'SDK feature array').slice().sort()) ===
-          JSON.stringify(features)
+        (value) => JSON.stringify(list(value, 'SDK feature array').slice().sort()) === features
       ),
     declared,
     'eligibility features matching the original Cargo receipt'
@@ -988,7 +949,9 @@ export async function runNativeWindowsJob(
       ...result,
       label: options.label,
       log,
-      environment: Object.fromEntries(SAFE_ENV.map((key) => [key, environment[key] ?? null])),
+      environment: Object.fromEntries(
+        NATIVE_RECEIPT_ENVIRONMENT_KEYS.map((key) => [key, environment[key] ?? null])
+      ),
     };
   } catch (error) {
     throw new Error(

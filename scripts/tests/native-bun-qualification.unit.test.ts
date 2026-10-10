@@ -19,8 +19,12 @@ import {
   nativeTestInventory,
 } from '../lib/native-bun-qualification-results';
 import {
+  NATIVE_BUILDS,
+  type NativeCompilerArtifact,
+  nativeBuildTarget,
   nativeCompilerArtifacts,
   nativeSourceChanged,
+  requireNativeBuildFeatures,
   sealNativeArtifact,
   sealNativeSource,
 } from '../lib/native-bun-qualification-source';
@@ -261,6 +265,64 @@ describe('qualification inputs and seals', () => {
       'expected package, target, features'
     );
   });
+
+  test('names a setup build by its exact arguments, whatever spells argv0', () => {
+    const { runtime, fake } = NATIVE_BUILDS;
+    expect(nativeBuildTarget(runtime.command)).toBe('runtime');
+    expect(nativeBuildTarget(['C:\\cargo\\bin\\cargo.exe', ...fake.command.slice(1)])).toBe('fake');
+    for (const other of [
+      [...runtime.command, '--release'],
+      runtime.command.slice(0, -1),
+      ['cargo', 'test'],
+      ['cargo'],
+    ])
+      expect(
+        nativeBuildTarget(other),
+        `expected no setup build for: ${other.join(' ')} | received: ${nativeBuildTarget(other)}`
+      ).toBeNull();
+  });
+
+  test('returns the artifacts that prove a default feature graph and rejects any other', () => {
+    const artifact = (
+      overrides: Partial<NativeCompilerArtifact>,
+      packageId = 'path+file:///repo/crates/mangostudio-runtime#0.1.1'
+    ): NativeCompilerArtifact => ({
+      packageId,
+      target: 'unrelated',
+      kind: ['lib'],
+      features: [],
+      executable: null,
+      filenames: [],
+      ...overrides,
+    });
+    const sdk = artifact(
+      { features: ['testing', 'stdio'] },
+      'registry#mango-external-agents@0.3.2'
+    );
+    const example = artifact({
+      target: 'fake_cursor_agent',
+      kind: ['example'],
+      executable: '/out/fake_cursor_agent',
+    });
+
+    expect(requireNativeBuildFeatures([sdk, artifact({}), example], 'fake')).toEqual({
+      sdk: [sdk],
+      primary: [example],
+    });
+    expect(() => requireNativeBuildFeatures([sdk, example], 'runtime')).toThrow(
+      'Invalid runtime SDK features [["testing","stdio"]]; expected ["stdio"]'
+    );
+    expect(() => requireNativeBuildFeatures([example], 'fake')).toThrow(
+      'Invalid fake SDK features []; expected ["stdio","testing"]'
+    );
+    expect(() =>
+      requireNativeBuildFeatures([sdk, { ...example, features: ['testing'] }], 'fake')
+    ).toThrow('Invalid compiler executable fake_cursor_agent features [["testing"]]');
+    expect(() =>
+      requireNativeBuildFeatures([sdk, { ...example, executable: null }], 'fake')
+    ).toThrow('expected an actual example executable with default empty features');
+  });
+
   test('requires full SHA and distinct flag values', () => {
     expect(
       parseNativeQualificationArgs(['--root=source', '--out=receipts', '--sha', 'a'.repeat(40)]).sha
