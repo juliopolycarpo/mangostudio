@@ -585,42 +585,46 @@ async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
   const tmpHome = makeTempDir();
-  const dbPath = join(tmpHome, 'smoke.sqlite');
-  const authBaseUrl = `http://127.0.0.1:${PORT}`;
-  const chatGptSmokeEnabled = canBindChatGptCallbackPort();
-  const fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
-
-  // The binary is a CLI; bare invocation prints help, so start the server
-  // explicitly in the foreground (API_PORT is honored by `serve`).
-  const proc = Bun.spawn({
-    cmd: [BINARY_PATH, 'serve'],
-    cwd: PLATFORM_DIR,
-    env: {
-      ...process.env,
-      NODE_ENV: 'production',
-      HOME: tmpHome,
-      DATABASE_PATH: dbPath,
-      API_HOST: '127.0.0.1',
-      API_PORT: String(PORT),
-      BETTER_AUTH_URL: authBaseUrl,
-      ...(fakeChatGpt
-        ? {
-            MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
-            MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
-            MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
-          }
-        : {}),
-      // Required since the auth-secret startup guard landed; a 32+ char
-      // random value satisfies the runtime check without exposing a real key.
-      BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
-    },
-    stdout: 'ignore',
-    stderr: 'pipe',
-  });
-
-  const serverStderr = pumpStream(proc.stderr);
+  let fakeChatGpt: ReturnType<typeof startFakeChatGptServer> | null = null;
+  let proc: Bun.Subprocess<'ignore', 'ignore', 'pipe'> | null = null;
+  let serverStderr: ReturnType<typeof pumpStream> | null = null;
 
   try {
+    const dbPath = join(tmpHome, 'smoke.sqlite');
+    const authBaseUrl = `http://127.0.0.1:${PORT}`;
+    const chatGptSmokeEnabled = canBindChatGptCallbackPort();
+    fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
+
+    // The binary is a CLI; bare invocation prints help, so start the server
+    // explicitly in the foreground (API_PORT is honored by `serve`).
+    proc = Bun.spawn({
+      cmd: [BINARY_PATH, 'serve'],
+      cwd: PLATFORM_DIR,
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        HOME: tmpHome,
+        DATABASE_PATH: dbPath,
+        API_HOST: '127.0.0.1',
+        API_PORT: String(PORT),
+        BETTER_AUTH_URL: authBaseUrl,
+        ...(fakeChatGpt
+          ? {
+              MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
+              MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
+              MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
+            }
+          : {}),
+        // Required since the auth-secret startup guard landed; a 32+ char
+        // random value satisfies the runtime check without exposing a real key.
+        BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
+      },
+      stdout: 'ignore',
+      stderr: 'pipe',
+    });
+
+    serverStderr = pumpStream(proc.stderr);
+
     console.log('   Waiting for server to be ready...');
     try {
       await waitForServerReady(`http://127.0.0.1:${PORT}/api/health`);
@@ -884,9 +888,9 @@ async function smokeTest(): Promise<void> {
       }
     }
   } finally {
-    proc.kill();
-    await proc.exited.catch(() => undefined as undefined);
-    await serverStderr.done.catch(() => undefined as undefined);
+    proc?.kill();
+    await proc?.exited.catch(() => undefined as undefined);
+    await serverStderr?.done.catch(() => undefined as undefined);
     fakeChatGpt?.stop();
     removeTempDir(tmpHome);
   }
